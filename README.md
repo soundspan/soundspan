@@ -63,7 +63,12 @@ soundspan is built for people who want to listen without limits while keeping ow
 - Progressive loading/hydration hardening across Home, Discover, Podcasts, and artist/album pages
 
 ![Placeholder: Library view screenshot](assets/screenshots/desktop-library.png)
-![Placeholder: Player overlay with lyrics and quality badges screenshot](assets/screenshots/desktop-player.png)
+
+![Placeholder: Player overlay with queue screenshot](assets/screenshots/desktop-player-upnext.png)
+
+![Placeholder: Player overlay with lyrics and quality badges screenshot](assets/screenshots/desktop-player-lyrics.png)
+
+![Placeholder: Player overlay with related info screenshot](assets/screenshots/desktop-player-related.png)
 
 ### Streaming, Downloads, and Discovery
 
@@ -76,9 +81,9 @@ soundspan is built for people who want to listen without limits while keeping ow
 - Library radio stations, interactive release search/selection, and artist recommendation/alias resolution
 - Deezer previews plus Spotify/Deezer playlist import flows
 
-<!-- ![Placeholder: Streaming gap-fill and source-priority screenshot](assets/screenshots/placeholders/streaming-gap-fill-priority.png) -->
-<!-- ![Placeholder: Deezer browse screenshot](assets/screenshots/placeholders/deezer-browse.png) -->
-<!-- ![Placeholder: Spotify import preview screenshot](assets/screenshots/placeholders/spotify-import-preview.png) -->
+![Placeholder: Deezer browse screenshot](assets/screenshots/desktop-browse.png)
+
+![Placeholder: Spotify import preview screenshot](assets/screenshots/desktop-deezer-playlist.png)
 
 ### Vibe Intelligence
 
@@ -87,8 +92,7 @@ soundspan is built for people who want to listen without limits while keeping ow
 - Mood mixer presets and custom slider-driven mixes
 - Keep-the-vibe-going queue behavior
 
-<!-- ![Placeholder: Vibe overlay screenshot](assets/screenshots/placeholders/vibe-overlay.png) -->
-<!-- ![Placeholder: Mood mixer screenshot](assets/screenshots/placeholders/mood-mixer.png) -->
+![Placeholder: Mood mixer screenshot](assets/screenshots/desktop-mood-mixer.png)
 
 ### Social, Sync, and Multi-User
 
@@ -100,11 +104,14 @@ soundspan is built for people who want to listen without limits while keeping ow
 - Queue-style personal `My History` for playback-first history workflows
 
 ![Placeholder: Listen Together and Social tab screenshot](assets/screenshots/desktop-listen-together.png)
+
+![Placeholder: Listen Together and Social tab screenshot](assets/screenshots/desktop-listen-together-inprogress.png)
+
 ![Placeholder: Mobile home screenshot](assets/screenshots/mobile-home.png)
-![Placeholder: Mobile player screenshot](assets/screenshots/placeholders/mobile-player.png)
-![Placeholder: Mobile library artist screenshot](assets/screenshots/placeholders/mobile-library-artist.png)
-![Placeholder: Mobile queue screenshot](assets/screenshots/placeholders/mobile-queue.png)
-![Placeholder: Mobile lyrics screenshot](assets/screenshots/placeholders/mobile-lyrics.png)
+![Placeholder: Mobile library artist screenshot](assets/screenshots/mobile-artist.png)
+![Placeholder: Mobile player screenshot](assets/screenshots/mobile-player.png)
+![Placeholder: Mobile queue screenshot](assets/screenshots/mobile-queue.png)
+![Placeholder: Mobile lyrics screenshot](assets/screenshots/mobile-lyrics.png)
 
 ### Podcasts and Audiobooks
 
@@ -112,16 +119,17 @@ soundspan is built for people who want to listen without limits while keeping ow
 - Mobile podcast skip controls
 - Audiobookshelf integration with unified browsing/playback and progress sync
 
-![Placeholder: Podcast experience screenshot](assets/screenshots/placeholders/podcasts-experience.png)
-![Placeholder: Audiobooks experience screenshot](assets/screenshots/placeholders/audiobooks-experience.png)
+![Placeholder: Podcast experience screenshot](assets/screenshots/desktop-podcasts.png)
+
+![Placeholder: Podcast experience screenshot](assets/screenshots/desktop-podcasts-inprogress.png)
+
+![Placeholder: Audiobooks experience screenshot](assets/screenshots/desktop-audiobooks.png)
 
 ### Compatibility, Safety, and Operations
 
 - OpenSubsonic-compatible `/rest` API surface with an explicit compatibility contract
 - Admin-controlled library deletion safety model
 - Contributor workflow hardening with policy-as-code queue lifecycle checks and strict repository indexing drift/freshness verification
-
-![Placeholder: OpenSubsonic compatibility and admin safety settings screenshot](assets/screenshots/placeholders/ops-compatibility-safety.png)
 
 For feature and release notes, see [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -267,26 +275,29 @@ Technical admin configuration and security notes are in [`docs/CONFIGURATION_AND
 soundspan consists of several cooperating services:
 
 ```
-                                    ┌─────────────────┐
-                                    │   Your Browser  │
-                                    └────────┬────────┘
-                                             │
-                                             ▼
-┌─────────────────┐              ┌─────────────────────┐
-│  Music Library  │◄────────────►│     Frontend        │
-│   (Your Files)  │              │   (Next.js :3030)   │
-└─────────────────┘              └──────────┬──────────┘
+                                   ┌─────────────────┐
+                                   │   Your Browser  │
+                                   └────────┬────────┘
+                                            │
+                                            ▼
+                                 ┌─────────────────────┐
+                                 │     Frontend        │
+                                 │   (Next.js :3030)   │
+                                 └──────────┬──────────┘
                                             │
                                             ▼
 ┌─────────────────┐              ┌─────────────────────┐              ┌─────────────────┐
-│    Lidarr       │◄────────────►│                     │◄────────────►│  YT Music       │
-│   (Optional)    │              │      Backend        │              │ :8586 (Optional)│
-└─────────────────┘              │  (Express.js :3006) │              └─────────────────┘
-                                 │                     │
-┌─────────────────┐              │                     │              ┌─────────────────┐
-│ Audiobookshelf  │◄────────────►│                     │◄────────────►│  TIDAL Sidecar  │
-│   (Optional)    │              └──────────┬──────────┘              │ :8585 (Optional)│
-└─────────────────┘                          │                        └─────────────────┘
+│  Music Library  │◄────────────►│      Backend        │◄────────────►│  YT Music       │
+│   (Your Files)  │              │  (Express.js :3006) │              │ :8586 (Opt.)    │
+└─────────────────┘              └──────────┬──────────┘              └─────────────────┘
+┌─────────────────┐                         │                         ┌─────────────────┐
+│    Lidarr       │◄────────────────────────┤                         │  TIDAL Sidecar  │
+│   (Optional)    │                         ├────────────────────────►│ :8585 (Opt.)    │
+└─────────────────┘                         │                         └─────────────────┘
+┌─────────────────┐                         │
+│ Audiobookshelf  │◄────────────────────────┘
+│   (Optional)    │                         |
+└─────────────────┘                         |
                                  ┌──────────┴──────────┐
                                  │  ┌───────────────┐  │
                                  │  │  PostgreSQL   │  │
