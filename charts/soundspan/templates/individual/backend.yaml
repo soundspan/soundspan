@@ -1,0 +1,388 @@
+{{- if eq .Values.deploymentMode "individual" }}
+{{- $haEnabled := eq (include "soundspan.haEnabled" .) "true" }}
+{{- $backendReplicas := include "soundspan.backendReplicas" . | int }}
+{{- $backendWorkerEnabled := eq (include "soundspan.backendWorkerEnabled" .) "true" }}
+{{- $backendPdbEnabled := and (gt $backendReplicas 1) (ternary .Values.haMode.pdb.enabled .Values.backend.pdb.enabled $haEnabled) }}
+{{- $ltRedisAdapterEnabled := ternary .Values.haMode.runtime.listenTogetherRedisAdapterEnabled .Values.config.listenTogetherRedisAdapterEnabled $haEnabled }}
+{{- $ltStateSyncEnabled := ternary .Values.haMode.runtime.listenTogetherStateSyncEnabled .Values.config.listenTogetherStateSyncEnabled $haEnabled }}
+{{- $ltStateStoreEnabled := ternary .Values.haMode.runtime.listenTogetherStateStoreEnabled .Values.config.listenTogetherStateStoreEnabled $haEnabled }}
+{{- $ltMutationLockEnabled := ternary .Values.haMode.runtime.listenTogetherMutationLockEnabled .Values.config.listenTogetherMutationLockEnabled $haEnabled }}
+{{- $ltAllowPolling := ternary .Values.haMode.runtime.listenTogetherAllowPolling .Values.config.listenTogetherAllowPolling $haEnabled }}
+{{- $readinessRequireDependencies := ternary .Values.haMode.runtime.readinessRequireDependencies .Values.config.readinessRequireDependencies $haEnabled }}
+{{- $backendCacheType := default "pvc" .Values.backend.persistence.cache.type }}
+{{- $backendLogsType := default "pvc" .Values.backend.persistence.logs.type }}
+{{- if and $haEnabled (gt $backendReplicas 1) .Values.backend.persistence.cache.enabled (eq $backendCacheType "pvc") (not .Values.backend.persistence.cache.existingClaim) (ne .Values.backend.persistence.cache.accessMode "ReadWriteMany") }}
+{{- $backendCacheType = "emptyDir" }}
+{{- end }}
+{{- if and $haEnabled (gt $backendReplicas 1) .Values.backend.persistence.logs.enabled (eq $backendLogsType "pvc") (not .Values.backend.persistence.logs.existingClaim) (ne .Values.backend.persistence.logs.accessMode "ReadWriteMany") }}
+{{- $backendLogsType = "emptyDir" }}
+{{- end }}
+{{- if and .Values.backend.persistence.cache.enabled (not (or (eq $backendCacheType "pvc") (eq $backendCacheType "emptyDir"))) }}
+{{- fail "backend.persistence.cache.type must be one of: pvc, emptyDir" }}
+{{- end }}
+{{- if and .Values.backend.persistence.logs.enabled (not (or (eq $backendLogsType "pvc") (eq $backendLogsType "emptyDir"))) }}
+{{- fail "backend.persistence.logs.type must be one of: pvc, emptyDir" }}
+{{- end }}
+{{- if and (gt $backendReplicas 1) .Values.backend.persistence.cache.enabled (eq $backendCacheType "pvc") (not .Values.backend.persistence.cache.existingClaim) (ne .Values.backend.persistence.cache.accessMode "ReadWriteMany") }}
+{{- fail "backend.persistence.cache: backend.replicas > 1 with type=pvc requires ReadWriteMany access mode, an explicit existingClaim, setting type=emptyDir, or disabling backend.persistence.cache.enabled" }}
+{{- end }}
+{{- if and (gt $backendReplicas 1) .Values.backend.persistence.logs.enabled (eq $backendLogsType "pvc") (not .Values.backend.persistence.logs.existingClaim) (ne .Values.backend.persistence.logs.accessMode "ReadWriteMany") }}
+{{- fail "backend.persistence.logs: backend.replicas > 1 with type=pvc requires ReadWriteMany access mode, an explicit existingClaim, setting type=emptyDir, or disabling backend.persistence.logs.enabled" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend") | nindent 4 }}
+spec:
+  replicas: {{ $backendReplicas }}
+  strategy:
+    {{- toYaml .Values.backend.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend") | nindent 8 }}
+        {{- with .Values.global.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.global.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.port }}
+              protocol: TCP
+          {{- $backendEnv := .Values.backend.env | default (dict) }}
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.config.nodeEnv | quote }}
+            - name: PORT
+              value: {{ .Values.backend.port | quote }}
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+            - name: BACKEND_PROCESS_ROLE
+              value: {{ (default (ternary "api" "all" $backendWorkerEnabled) .Values.backend.processRole) | quote }}
+            - name: LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED
+              value: {{ $ltRedisAdapterEnabled | quote }}
+            - name: LISTEN_TOGETHER_STATE_SYNC_ENABLED
+              value: {{ $ltStateSyncEnabled | quote }}
+            - name: LISTEN_TOGETHER_STATE_STORE_ENABLED
+              value: {{ $ltStateStoreEnabled | quote }}
+            - name: LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS
+              value: {{ .Values.config.listenTogetherStateStoreTtlSeconds | quote }}
+            - name: LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX
+              value: {{ .Values.config.listenTogetherStateStoreKeyPrefix | quote }}
+            - name: LISTEN_TOGETHER_MUTATION_LOCK_ENABLED
+              value: {{ $ltMutationLockEnabled | quote }}
+            - name: LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS
+              value: {{ .Values.config.listenTogetherMutationLockTtlMs | quote }}
+            - name: LISTEN_TOGETHER_MUTATION_LOCK_PREFIX
+              value: {{ .Values.config.listenTogetherMutationLockPrefix | quote }}
+            - name: LISTEN_TOGETHER_RECONNECT_SLO_MS
+              value: {{ .Values.config.listenTogetherReconnectSloMs | quote }}
+            - name: LISTEN_TOGETHER_ALLOW_POLLING
+              value: {{ $ltAllowPolling | quote }}
+            - name: SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD
+              value: {{ .Values.config.schedulerClaimSkipWarnThreshold | quote }}
+            - name: READINESS_REQUIRE_DEPENDENCIES
+              value: {{ $readinessRequireDependencies | quote }}
+            - name: READINESS_DEPENDENCY_CHECK_INTERVAL_MS
+              value: {{ .Values.config.readinessDependencyCheckIntervalMs | quote }}
+            - name: READINESS_DEPENDENCY_CHECK_TIMEOUT_MS
+              value: {{ .Values.config.readinessDependencyCheckTimeoutMs | quote }}
+            - name: MUSIC_PATH
+              value: /music
+            {{- if not (hasKey $backendEnv "TRANSCODE_CACHE_PATH") }}
+            - name: TRANSCODE_CACHE_PATH
+              value: /music/.soundspan/transcodes
+            {{- end }}
+            # Secret-backed env vars
+            {{- if or .Values.postgresql.enabled (not .Values.postgresql.external.url) }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_DB
+            {{- end }}
+            - name: DATABASE_URL
+              value: {{ include "soundspan.databaseUrl" . | quote }}
+            - name: REDIS_URL
+              value: {{ include "soundspan.redisUrl" . | quote }}
+            - name: REDIS_FLUSH_ON_STARTUP
+              value: {{ .Values.config.redisFlushOnStartup | quote }}
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: SESSION_SECRET
+            - name: SETTINGS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: SETTINGS_ENCRYPTION_KEY
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: INTERNAL_API_SECRET
+            - name: TIDAL_SIDECAR_URL
+              value: {{ include "soundspan.tidalSidecarUrl" . | quote }}
+            - name: YTMUSIC_STREAMER_URL
+              value: {{ include "soundspan.ytmusicStreamerUrl" . | quote }}
+            {{- if .Values.config.allowedOrigins }}
+            - name: ALLOWED_ORIGINS
+              value: {{ .Values.config.allowedOrigins | quote }}
+            {{- end }}
+            {{- if .Values.config.logLevel }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            {{- end }}
+            {{- if .Values.config.docsPublic }}
+            - name: DOCS_PUBLIC
+              value: "true"
+            {{- end }}
+            {{- if .Values.config.lidarrEnabled }}
+            - name: LIDARR_ENABLED
+              value: "true"
+            - name: LIDARR_URL
+              value: {{ .Values.config.lidarrUrl | quote }}
+            - name: LIDARR_API_KEY
+              value: {{ .Values.config.lidarrApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.audiobookshelfUrl }}
+            - name: AUDIOBOOKSHELF_URL
+              value: {{ .Values.config.audiobookshelfUrl | quote }}
+            - name: AUDIOBOOKSHELF_TOKEN
+              value: {{ .Values.config.audiobookshelfToken | quote }}
+            {{- end }}
+            {{- if .Values.config.lastfmApiKey }}
+            - name: LASTFM_API_KEY
+              value: {{ .Values.config.lastfmApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.fanartApiKey }}
+            - name: FANART_API_KEY
+              value: {{ .Values.config.fanartApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.openaiApiKey }}
+            - name: OPENAI_API_KEY
+              value: {{ .Values.config.openaiApiKey | quote }}
+            {{- end }}
+            {{- range $key, $val := $backendEnv }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          {{- $globalEnv := .Values.global.env | default (dict) }}
+          {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
+          {{- $backendEnvFrom := .Values.backend.envFrom | default (list) }}
+          {{- if or (gt (len $globalEnv) 0) (gt (len $globalEnvFrom) 0) (gt (len $backendEnvFrom) 0) }}
+          envFrom:
+            {{- if gt (len $globalEnv) 0 }}
+            - configMapRef:
+                name: {{ include "soundspan.fullname" . }}-global-env
+            {{- end }}
+            {{- with $globalEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $backendEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: music
+              mountPath: /music
+            {{- if .Values.backend.persistence.cache.enabled }}
+            - name: cache
+              mountPath: /app/cache
+            {{- end }}
+            {{- if .Values.backend.persistence.logs.enabled }}
+            - name: logs
+              mountPath: /app/logs
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+      volumes:
+        - name: music
+          {{- if .Values.music.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.music.persistence.existingClaim }}
+          {{- else if .Values.music.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-music
+          {{- else if .Values.music.hostPath }}
+          hostPath:
+            path: {{ .Values.music.hostPath }}
+            type: Directory
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.backend.persistence.cache.enabled }}
+        - name: cache
+          {{- if eq $backendCacheType "emptyDir" }}
+          emptyDir: {}
+          {{- else if .Values.backend.persistence.cache.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.backend.persistence.cache.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-backend-cache
+          {{- end }}
+        {{- end }}
+        {{- if .Values.backend.persistence.logs.enabled }}
+        - name: logs
+          {{- if eq $backendLogsType "emptyDir" }}
+          emptyDir: {}
+          {{- else if .Values.backend.persistence.logs.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.backend.persistence.logs.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-backend-logs
+          {{- end }}
+        {{- end }}
+      {{- with .Values.backend.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.backend.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend") | nindent 4 }}
+{{- if $backendPdbEnabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend") | nindent 6 }}
+  {{- if hasKey .Values.backend.pdb "maxUnavailable" }}
+  maxUnavailable: {{ .Values.backend.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.backend.pdb.minAvailable | default 1 }}
+  {{- end }}
+{{- end }}
+---
+{{- if and .Values.backend.persistence.cache.enabled (eq $backendCacheType "pvc") (not .Values.backend.persistence.cache.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend-cache
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend") | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.backend.persistence.cache.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.persistence.cache.size }}
+  {{- if .Values.backend.persistence.cache.storageClass }}
+  storageClassName: {{ .Values.backend.persistence.cache.storageClass | quote }}
+  {{- end }}
+{{- end }}
+---
+{{- if and .Values.backend.persistence.logs.enabled (eq $backendLogsType "pvc") (not .Values.backend.persistence.logs.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend-logs
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend") | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.backend.persistence.logs.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.persistence.logs.size }}
+  {{- if .Values.backend.persistence.logs.storageClass }}
+  storageClassName: {{ .Values.backend.persistence.logs.storageClass | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,183 @@
+{{- if eq .Values.deploymentMode "aio" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "soundspan.fullname" . }}
+  labels:
+    {{- include "soundspan.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "soundspan.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "soundspan.selectorLabels" . | nindent 8 }}
+        {{- with .Values.global.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.global.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      # AIO container runs its own postgres/redis internally — needs writable FS
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: soundspan
+          image: "{{ .Values.aio.image.repository }}:{{ .Values.aio.image.tag }}"
+          imagePullPolicy: {{ .Values.aio.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3030
+              protocol: TCP
+          env:
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: SESSION_SECRET
+            - name: SETTINGS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: SETTINGS_ENCRYPTION_KEY
+            {{- if .Values.config.allowedOrigins }}
+            - name: ALLOWED_ORIGINS
+              value: {{ .Values.config.allowedOrigins | quote }}
+            {{- end }}
+            {{- if .Values.config.logLevel }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            {{- end }}
+            {{- if .Values.config.docsPublic }}
+            - name: DOCS_PUBLIC
+              value: "true"
+            {{- end }}
+            # Audio analysis
+            {{- range $key, $val := .Values.aio.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+            # Streaming sidecar URLs
+            - name: TIDAL_SIDECAR_URL
+              value: {{ include "soundspan.tidalSidecarUrl" . | quote }}
+            - name: YTMUSIC_STREAMER_URL
+              value: {{ include "soundspan.ytmusicStreamerUrl" . | quote }}
+            {{- if .Values.config.lidarrEnabled }}
+            - name: LIDARR_ENABLED
+              value: "true"
+            - name: LIDARR_URL
+              value: {{ .Values.config.lidarrUrl | quote }}
+            - name: LIDARR_API_KEY
+              value: {{ .Values.config.lidarrApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.audiobookshelfUrl }}
+            - name: AUDIOBOOKSHELF_URL
+              value: {{ .Values.config.audiobookshelfUrl | quote }}
+            - name: AUDIOBOOKSHELF_TOKEN
+              value: {{ .Values.config.audiobookshelfToken | quote }}
+            {{- end }}
+            {{- if .Values.config.lastfmApiKey }}
+            - name: LASTFM_API_KEY
+              value: {{ .Values.config.lastfmApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.fanartApiKey }}
+            - name: FANART_API_KEY
+              value: {{ .Values.config.fanartApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.openaiApiKey }}
+            - name: OPENAI_API_KEY
+              value: {{ .Values.config.openaiApiKey | quote }}
+            {{- end }}
+          {{- $globalEnv := .Values.global.env | default (dict) }}
+          {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
+          {{- $aioEnvFrom := .Values.aio.envFrom | default (list) }}
+          {{- if or (gt (len $globalEnv) 0) (gt (len $globalEnvFrom) 0) (gt (len $aioEnvFrom) 0) }}
+          envFrom:
+            {{- if gt (len $globalEnv) 0 }}
+            - configMapRef:
+                name: {{ include "soundspan.fullname" . }}-global-env
+            {{- end }}
+            {{- with $globalEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $aioEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: music
+              mountPath: /music
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.aio.resources | nindent 12 }}
+          {{- if .Values.aio.gpu.enabled }}
+          # GPU acceleration for audio analysis
+          {{- end }}
+      volumes:
+        - name: music
+          {{- if .Values.music.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.music.persistence.existingClaim }}
+          {{- else if .Values.music.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-music
+          {{- else if .Values.music.hostPath }}
+          hostPath:
+            path: {{ .Values.music.hostPath }}
+            type: Directory
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: data
+          {{- if .Values.aio.persistence.data.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.aio.persistence.data.existingClaim }}
+          {{- else if .Values.aio.persistence.data.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

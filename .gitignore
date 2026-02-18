@@ -1,0 +1,183 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.local
+.roomodes
+
+# Dependencies
+**/node_modules/
+**/node_modules
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+**/.venv/
+
+# Build Outputs
+frontend/.next/
+frontend/out/
+backend/dist/
+**/dist/
+**/build/
+**/out/
+.next
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+backend/logs/
+frontend/logs/
+
+# Testing & Coverage
+coverage/
+*.lcov
+.nyc_output
+**/playwright-report/
+**/test-results/
+**/coverage-subagent*/
+**/coverage-subsonic*/
+**/coverage-verify*/
+
+# Temporary & Backup Files
+*.tmp
+*.temp
+*.bak
+*.old
+
+# Cache
+.cache
+.eslintcache
+.stylelintcache
+.rpt2_cache_*/
+.ruff_cache/
+
+# Docker
+docker-compose.override.yml
+**/volumes/
+**/data/
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.iml
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+*.code-workspace
+
+# OS Files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Runtime & Process
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+**/prisma/dev.db
+**/prisma/dev.db-journal
+
+# TypeScript
+*.tsbuildinfo
+
+# Package Manager
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+pnpm-lock.yaml
+
+# Secrets & Keys
+*.keystore
+*.jks
+keystore.b64
+**/key.txt
+*.conf
+
+# Backend
+backend/cache/
+**/cache/covers/
+**/cache/transcodes/
+**/mullvad/
+
+# Frontend
+frontend/android/
+frontend/test-*.tsx
+
+# AI Tools & Assistants
+.claude/
+**/.claude/
+!.claude/commands/
+.cursor/
+**/.cursor/
+.roo/
+**/.roo/
+.aider*
+.serena/
+**/.serena/
+.opencode/
+**/.opencode/
+.vibe/
+**/.vibe/
+.agent/
+.agent/**
+.agents/
+.agents/**
+.claudeignore
+CLAUDE.md
+
+# Internal Documentation (public docs are in project root)
+docs/
+**/docs/
+!docs/
+!docs/FORK_DIFF.md
+!docs/FORK_DIFF_COMMITS.md
+archived/
+**/archived/
+context_portal/
+issues/
+.agents/plans/
+systems/
+
+# Development
+.worktrees/
+reset-and-setup.sh
+organize-singles.sh
+COMMIT_MESSAGE.txt
+ISSUE_REVIEW.md
+backend/backend/
+postman/
+soularr/
+
+# Legacy (removed from repo)
+/App.tsx
+/app.json
+/src/
+
+# Allow README files
+!README.md
+!readme.md
+
+# Block local AI tool documentation files (covered by .agents/plans/ + archived/)
+**/LLM_SESSION_HANDOFF.md
+**/PROMPT_HISTORY.md

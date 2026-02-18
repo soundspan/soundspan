@@ -1,0 +1,130 @@
+{{- if and (eq .Values.deploymentMode "individual") .Values.audioAnalyzer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "soundspan.fullname" . }}-audio-analyzer
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "audio-analyzer") | nindent 4 }}
+spec:
+  replicas: {{ .Values.audioAnalyzer.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "audio-analyzer") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "audio-analyzer") | nindent 8 }}
+        {{- with .Values.global.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.global.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: audio-analyzer
+          image: "{{ .Values.audioAnalyzer.image.repository }}:{{ .Values.audioAnalyzer.image.tag }}"
+          imagePullPolicy: {{ .Values.audioAnalyzer.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_DB
+            - name: DATABASE_URL
+              value: {{ include "soundspan.databaseUrl" . | quote }}
+            - name: REDIS_URL
+              value: {{ include "soundspan.redisUrl" . | quote }}
+            - name: MUSIC_PATH
+              value: /music
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+            {{- range $key, $val := .Values.audioAnalyzer.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          {{- $globalEnv := .Values.global.env | default (dict) }}
+          {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
+          {{- $audioAnalyzerEnvFrom := .Values.audioAnalyzer.envFrom | default (list) }}
+          {{- if or (gt (len $globalEnv) 0) (gt (len $globalEnvFrom) 0) (gt (len $audioAnalyzerEnvFrom) 0) }}
+          envFrom:
+            {{- if gt (len $globalEnv) 0 }}
+            - configMapRef:
+                name: {{ include "soundspan.fullname" . }}-global-env
+            {{- end }}
+            {{- with $globalEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $audioAnalyzerEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: music
+              mountPath: /music
+              readOnly: true
+          resources:
+            {{- toYaml .Values.audioAnalyzer.resources | nindent 12 }}
+      volumes:
+        - name: music
+          {{- if .Values.music.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.music.persistence.existingClaim }}
+          {{- else if .Values.music.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-music
+          {{- else if .Values.music.hostPath }}
+          hostPath:
+            path: {{ .Values.music.hostPath }}
+            type: Directory
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.audioAnalyzer.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.audioAnalyzer.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.audioAnalyzer.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+{{- end }}

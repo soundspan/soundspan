@@ -1,0 +1,30 @@
+# HA-focused override for split-stack compose deployments.
+#
+# Use with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.override.ha.yml --profile worker up -d
+#
+# Scale API/worker replicas:
+#   BACKEND_PORT=0 docker compose -f docker-compose.yml -f docker-compose.override.ha.yml \
+#     --profile worker up -d --scale backend=2 --scale backend-worker=2
+#
+# Notes:
+# - BACKEND_PORT=0 avoids host-port collisions when scaling backend API replicas.
+# - Put a reverse proxy/load balancer in front of frontend replicas for >1 scale.
+services:
+    backend:
+        environment:
+            # HA default: API-only role (workers run in backend-worker service)
+            BACKEND_PROCESS_ROLE: ${BACKEND_PROCESS_ROLE:-api}
+            LISTEN_TOGETHER_ALLOW_POLLING: ${LISTEN_TOGETHER_ALLOW_POLLING:-false}
+            READINESS_REQUIRE_DEPENDENCIES: ${READINESS_REQUIRE_DEPENDENCIES:-true}
+        ports:
+            - "${BACKEND_PORT:-0}:3006"
+
+    backend-worker:
+        profiles: ["worker"]
+        environment:
+            BACKEND_PROCESS_ROLE: worker
+
+    frontend:
+        environment:
+            NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING: ${NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING:-false}

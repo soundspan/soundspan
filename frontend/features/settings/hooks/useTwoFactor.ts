@@ -1,0 +1,137 @@
+import { useState, useCallback, useRef } from "react";
+import { api } from "@/lib/api";
+
+export function useTwoFactor() {
+    const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+    const [loadingTwoFactor, setLoadingTwoFactor] = useState(false);
+    const [settingUpTwoFactor, setSettingUpTwoFactor] = useState(false);
+    const [twoFactorSecret, setTwoFactorSecret] = useState("");
+    const [twoFactorQR, setTwoFactorQR] = useState("");
+    const [twoFactorToken, setTwoFactorToken] = useState("");
+    const [disablingTwoFactor, setDisablingTwoFactor] = useState(false);
+    const [disableTwoFactorPassword, setDisableTwoFactorPassword] = useState("");
+    const [disableTwoFactorToken, setDisableTwoFactorToken] = useState("");
+    const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+    const [showRecoveryCodes, setShowRecoveryCodes] = useState(false);
+    
+    // Retry tracking to prevent infinite loops on failure
+    const retryCountRef = useRef(0);
+    const maxRetries = 3;
+    const hasFailedRef = useRef(false);
+
+    const load2FAStatus = useCallback(async () => {
+        // Don't retry if we've already failed too many times
+        if (hasFailedRef.current) {
+            return;
+        }
+        
+        try {
+            setLoadingTwoFactor(true);
+            const status = await api.get<{ enabled: boolean }>("/auth/2fa/status");
+            setTwoFactorEnabled(status.enabled);
+            // Reset retry count on success
+            retryCountRef.current = 0;
+        } catch (error) {
+            console.error("Failed to load 2FA status:", error);
+            retryCountRef.current++;
+            
+            // Stop retrying after max attempts
+            if (retryCountRef.current >= maxRetries) {
+                hasFailedRef.current = true;
+                console.warn(`2FA status load failed after ${maxRetries} attempts, giving up`);
+            }
+        } finally {
+            setLoadingTwoFactor(false);
+        }
+    }, []);
+
+    const setup2FA = async () => {
+        try {
+            setLoadingTwoFactor(true);
+            const response = await api.post<{ secret: string; qrCode: string }>("/auth/2fa/setup", {});
+            setTwoFactorSecret(response.secret);
+            setTwoFactorQR(response.qrCode);
+            setSettingUpTwoFactor(true);
+        } catch (error: unknown) {
+            console.error("Failed to setup 2FA:", error);
+            throw error;
+        } finally {
+            setLoadingTwoFactor(false);
+        }
+    };
+
+    const enable2FA = async (token: string) => {
+        try {
+            setLoadingTwoFactor(true);
+            const response = await api.post<{ recoveryCodes: string[] }>("/auth/2fa/enable", {
+                secret: twoFactorSecret,
+                token,
+            });
+
+            setRecoveryCodes(response.recoveryCodes);
+            setShowRecoveryCodes(true);
+            setTwoFactorEnabled(true);
+            setSettingUpTwoFactor(false);
+            setTwoFactorToken("");
+        } catch (error: unknown) {
+            console.error("Failed to enable 2FA:", error);
+            throw error;
+        } finally {
+            setLoadingTwoFactor(false);
+        }
+    };
+
+    const disable2FA = async (password: string, token: string) => {
+        try {
+            setDisablingTwoFactor(true);
+            await api.post("/auth/2fa/disable", {
+                password,
+                token,
+            });
+
+            setTwoFactorEnabled(false);
+            setDisableTwoFactorPassword("");
+            setDisableTwoFactorToken("");
+        } catch (error: unknown) {
+            console.error("Failed to disable 2FA:", error);
+            throw error;
+        } finally {
+            setDisablingTwoFactor(false);
+        }
+    };
+
+    const cancel2FASetup = () => {
+        setSettingUpTwoFactor(false);
+        setTwoFactorToken("");
+        setTwoFactorSecret("");
+        setTwoFactorQR("");
+    };
+
+    const closeRecoveryCodes = () => {
+        setShowRecoveryCodes(false);
+        setRecoveryCodes([]);
+    };
+
+    return {
+        twoFactorEnabled,
+        loadingTwoFactor,
+        settingUpTwoFactor,
+        twoFactorSecret,
+        twoFactorQR,
+        twoFactorToken,
+        disablingTwoFactor,
+        disableTwoFactorPassword,
+        disableTwoFactorToken,
+        recoveryCodes,
+        showRecoveryCodes,
+        setTwoFactorToken,
+        setDisableTwoFactorPassword,
+        setDisableTwoFactorToken,
+        load2FAStatus,
+        setup2FA,
+        enable2FA,
+        disable2FA,
+        cancel2FASetup,
+        closeRecoveryCodes,
+    };
+}

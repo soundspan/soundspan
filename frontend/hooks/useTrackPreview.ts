@@ -1,0 +1,177 @@
+import { useState, useRef, useEffect } from "react";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { howlerEngine } from "@/lib/howler-engine";
+
+interface PreviewableTrack {
+    id: string;
+    title: string;
+}
+
+export function useTrackPreview<T extends PreviewableTrack>() {
+    const [previewTrack, setPreviewTrack] = useState<string | null>(null);
+    const [previewPlaying, setPreviewPlaying] = useState(false);
+    const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+    const mainPlayerWasPausedRef = useRef(false);
+    const previewRequestIdRef = useRef(0);
+    const noPreviewTrackIdsRef = useRef<Set<string>>(new Set());
+    const toastShownForNoPreviewRef = useRef<Set<string>>(new Set());
+    const inFlightTrackIdRef = useRef<string | null>(null);
+
+    const isAbortError = (err: unknown) => {
+        if (!err || typeof err !== "object") return false;
+        const e = err as Record<string, unknown>;
+        const name = typeof e.name === "string" ? e.name : "";
+        const code = typeof e.code === "number" ? e.code : undefined;
+        const message = typeof e.message === "string" ? e.message : "";
+        return (
+            name === "AbortError" ||
+            code === 20 ||
+            message.includes("interrupted by a call to pause")
+        );
+    };
+
+    const showNoPreviewToast = (trackId: string) => {
+        if (toastShownForNoPreviewRef.current.has(trackId)) return;
+        toastShownForNoPreviewRef.current.add(trackId);
+        toast("No Deezer preview available", { duration: 1500 });
+    };
+
+    const handlePreview = async (
+        track: T,
+        artistName: string,
+        e: React.MouseEvent
+    ) => {
+        e.stopPropagation();
+
+        // If the same track is playing, pause it
+        if (previewTrack === track.id && previewPlaying) {
+            previewAudioRef.current?.pause();
+            setPreviewPlaying(false);
+            return;
+        }
+
+        // If the same track is paused, resume it
+        if (previewTrack === track.id && !previewPlaying && previewAudioRef.current) {
+            try {
+                await previewAudioRef.current.play();
+            } catch (err: unknown) {
+                if (isAbortError(err)) return;
+                console.error("Preview error:", err);
+            }
+            setPreviewPlaying(true);
+            return;
+        }
+
+        // Different track -- stop current and play new
+        if (previewAudioRef.current) {
+            previewAudioRef.current.pause();
+            previewAudioRef.current = null;
+        }
+
+        try {
+            if (inFlightTrackIdRef.current === track.id) return;
+            if (noPreviewTrackIdsRef.current.has(track.id)) {
+                showNoPreviewToast(track.id);
+                return;
+            }
+
+            const requestId = ++previewRequestIdRef.current;
+            inFlightTrackIdRef.current = track.id;
+
+            const response = await api.getTrackPreview(artistName, track.title);
+            if (requestId !== previewRequestIdRef.current) return;
+
+            if (!response.previewUrl) {
+                noPreviewTrackIdsRef.current.add(track.id);
+                showNoPreviewToast(track.id);
+                return;
+            }
+
+            if (howlerEngine.isPlaying()) {
+                howlerEngine.pause();
+                mainPlayerWasPausedRef.current = true;
+            }
+
+            const audio = new Audio(response.previewUrl);
+            previewAudioRef.current = audio;
+
+            audio.onended = () => {
+                setPreviewPlaying(false);
+                setPreviewTrack(null);
+                mainPlayerWasPausedRef.current = false;
+            };
+
+            audio.onerror = () => {
+                toast.error("Failed to play preview");
+                setPreviewPlaying(false);
+                setPreviewTrack(null);
+            };
+
+            try {
+                await audio.play();
+            } catch (err: unknown) {
+                if (isAbortError(err)) return;
+                throw err;
+            }
+            setPreviewTrack(track.id);
+            setPreviewPlaying(true);
+        } catch (error: unknown) {
+            if (isAbortError(error)) return;
+            if (
+                typeof error === "object" &&
+                error !== null &&
+                (((error as Record<string, unknown>).error as unknown) ===
+                    "Preview not found" ||
+                    /preview not found/i.test(
+                        String((error as Record<string, unknown>).message || "")
+                    ))
+            ) {
+                noPreviewTrackIdsRef.current.add(track.id);
+                showNoPreviewToast(track.id);
+                return;
+            }
+            console.error("Failed to play preview:", error);
+            toast.error("Failed to play preview");
+            setPreviewPlaying(false);
+            setPreviewTrack(null);
+        } finally {
+            if (inFlightTrackIdRef.current === track.id) {
+                inFlightTrackIdRef.current = null;
+            }
+        }
+    };
+
+    useEffect(() => {
+        const stopPreview = () => {
+            if (previewAudioRef.current) {
+                previewAudioRef.current.pause();
+                previewAudioRef.current = null;
+                setPreviewPlaying(false);
+                setPreviewTrack(null);
+                mainPlayerWasPausedRef.current = false;
+            }
+        };
+
+        howlerEngine.on("play", stopPreview);
+        return () => {
+            howlerEngine.off("play", stopPreview);
+        };
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (previewAudioRef.current) {
+                previewAudioRef.current.pause();
+                previewAudioRef.current = null;
+            }
+            mainPlayerWasPausedRef.current = false;
+        };
+    }, []);
+
+    return {
+        previewTrack,
+        previewPlaying,
+        handlePreview,
+    };
+}

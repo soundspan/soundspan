@@ -1,0 +1,10 @@
+# Audio Analyzer Requirements
+# Note: TensorFlow + essentia-tensorflow are installed directly in Dockerfile.
+# This file only tracks the queue/database/runtime support dependencies.
+
+# Queue and database
+redis>=4.5.0
+psycopg2-binary>=2.9.0
+
+# Numeric operations (compatible with older TensorFlow)
+numpy>=1.19.0,<1.24.0

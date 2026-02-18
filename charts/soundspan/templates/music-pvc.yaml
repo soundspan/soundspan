@@ -1,0 +1,17 @@
+{{- if and .Values.music.persistence.enabled (not .Values.music.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "soundspan.fullname" . }}-music
+  labels:
+    {{- include "soundspan.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.music.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.music.persistence.size }}
+  {{- if .Values.music.persistence.storageClass }}
+  storageClassName: {{ .Values.music.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}

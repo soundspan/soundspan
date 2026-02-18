@@ -1,0 +1,136 @@
+name: Docker Build - Audio Analyzer
+
+on:
+    push:
+        branches: [main, "feature/**"]
+    release:
+        types: [published]
+    workflow_dispatch:
+
+env:
+    IMAGE_NAME: audio-analyzer
+            
+jobs:
+    build-docker-audio-analyzer:
+        name: Build & Push Audio Analyzer Image
+        runs-on: ubuntu-latest
+        permissions:
+          contents: read
+          packages: write
+        steps:
+            # Convert repository name to lowercase for Docker compatibility
+            - id: lower-repo
+              name: Repository to lowercase
+              run: |
+                echo "GHCR_REPO=ghcr.io/${GITHUB_REPOSITORY@L}" >> $GITHUB_ENV
+          
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Self-hosted pre-build cache trim (safe)
+              if: ${{ contains(runner.labels, 'self-hosted') }}
+              run: |
+                  set -euo pipefail
+                  # Prune old BuildKit cache; keeps recent cache for faster rebuilds.
+                  docker buildx prune --all --force --filter "until=168h" || true
+
+                  # Prune old classic builder cache (safe; no volumes).
+                  docker builder prune --all --force --filter "until=168h" || true
+
+                  # Remove stale dangling images older than a week (untagged only).
+                  docker image prune --force --filter "until=168h" || true
+
+                  # Remove exited buildx/buildkit containers left from interrupted runs.
+                  docker ps -a --filter "name=buildx_buildkit" --filter "status=exited" -q | xargs -r docker rm -v || true
+
+            - name: Set up Docker Buildx
+              id: buildx
+              uses: docker/setup-buildx-action@v3
+              with:
+                  cleanup: true
+
+            - name: Login to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN}}
+
+            - name: Get short SHA
+              id: sha
+              run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+            - name: Determine image tags
+              id: tag-config
+              run: |
+                if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+                  RELEASE_TAG="${{ github.event.release.tag_name }}"
+                  if [ -z "${RELEASE_TAG}" ]; then
+                    echo "Release tag is missing." >&2
+                    exit 1
+                  fi
+                  echo "version_label=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+                  {
+                    echo "tags<<EOF"
+                    echo "${GHCR_REPO}-${IMAGE_NAME}:latest"
+                    echo "${GHCR_REPO}-${IMAGE_NAME}:${RELEASE_TAG}"
+                    echo "EOF"
+                  } >> $GITHUB_OUTPUT
+                else
+                  if [ "${GITHUB_REF_NAME}" = "main" ]; then
+                    CHANNEL="main"
+                  else
+                    CHANNEL="develop"
+                  fi
+                  echo "version_label=${CHANNEL}-${{ steps.sha.outputs.short }}" >> $GITHUB_OUTPUT
+                  {
+                    echo "tags<<EOF"
+                    echo "${GHCR_REPO}-${IMAGE_NAME}:${CHANNEL}"
+                    echo "${GHCR_REPO}-${IMAGE_NAME}:${CHANNEL}-${{ steps.sha.outputs.short }}"
+                    echo "EOF"
+                  } >> $GITHUB_OUTPUT
+                fi
+
+            - name: Build and push image
+              uses: docker/build-push-action@v5
+              with:
+                  context: ./services/audio-analyzer
+                  push: true
+                  secrets: |
+                    "hf_token=${{ secrets.HF_TOKEN }}"
+                  tags: ${{ steps.tag-config.outputs.tags }}
+                  labels: |
+                      org.opencontainers.image.revision=${{ github.sha }}
+                      org.opencontainers.image.version=${{ steps.tag-config.outputs.version_label }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  # ARM64 disabled due to QEMU emulation issues with npm packages
+                  platforms: linux/amd64
+
+            - name: Self-hosted post-build cleanup (safe)
+              if: ${{ always() && contains(runner.labels, 'self-hosted') }}
+              run: |
+                  set -euo pipefail
+                  BUILDER_NAME="${{ steps.buildx.outputs.name }}"
+                  echo "Docker disk usage before cleanup:"
+                  docker system df || true
+
+                  # Remove this workflow's ephemeral Buildx builder if it still exists.
+                  if [ -n "${BUILDER_NAME}" ]; then
+                      docker buildx rm "${BUILDER_NAME}" >/dev/null 2>&1 || true
+                  fi
+
+                  # Prune old BuildKit cache; keeps recent cache for faster rebuilds.
+                  docker buildx prune --all --force --filter "until=168h" || true
+
+                  # Prune old classic builder cache (safe; no volumes).
+                  docker builder prune --all --force --filter "until=168h" || true
+
+                  # Remove stale dangling images older than a week (untagged only).
+                  docker image prune --force --filter "until=168h" || true
+
+                  # Remove exited buildx/buildkit containers left from interrupted runs.
+                  docker ps -a --filter "name=buildx_buildkit" --filter "status=exited" -q | xargs -r docker rm -v || true
+
+                  echo "Docker disk usage after cleanup:"
+                  docker system df || true

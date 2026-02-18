@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.env
+.env.*
+.DS_Store
+logs/
+*.log
+
+# Runtime caches (safe to delete; regenerated)
+cache/
+
+# VPN configs for local testing (do not commit)
+mullvad/
+
+# Stray media artifacts (should never be committed)
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.ogg
+*.opus

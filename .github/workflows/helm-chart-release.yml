@@ -1,0 +1,182 @@
+name: Helm Chart Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag (for example 1.6.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+concurrency:
+  group: helm-chart-release-${{ github.event.release.tag_name || inputs.release_tag || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish-helm-chart:
+    name: Package and Publish Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+          else
+            RELEASE_TAG="${{ inputs.release_tag }}"
+          fi
+
+          RELEASE_TAG="$(echo "${RELEASE_TAG}" | xargs)"
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "Release tag is required." >&2
+            exit 1
+          fi
+          if [[ "${RELEASE_TAG}" == v* ]]; then
+            echo "Release tags must be plain semantic versions without a 'v' prefix (example: 1.6.0)." >&2
+            exit 1
+          fi
+          if ! [[ "${RELEASE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be a semantic version (example: 1.6.0 or 1.6.0-rc.1)." >&2
+            exit 1
+          fi
+
+          REPO_OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          HELM_REPO_URL="https://${REPO_OWNER_LOWER}.github.io/${REPO_NAME}"
+
+          echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "repo_owner_lower=${REPO_OWNER_LOWER}" >> "${GITHUB_OUTPUT}"
+          echo "helm_repo_url=${HELM_REPO_URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Wait for release images in GHCR
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          REPO_OWNER_LOWER: ${{ steps.meta.outputs.repo_owner_lower }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          images=(
+            soundspan
+            soundspan-backend
+            soundspan-backend-worker
+            soundspan-frontend
+            soundspan-tidal-downloader
+            soundspan-ytmusic-streamer
+            soundspan-audio-analyzer
+            soundspan-audio-analyzer-clap
+          )
+
+          max_wait_seconds=1800
+          poll_interval_seconds=20
+          deadline=$(( $(date +%s) + max_wait_seconds ))
+
+          for image in "${images[@]}"; do
+            manifest_url="https://ghcr.io/v2/${REPO_OWNER_LOWER}/${image}/manifests/${RELEASE_TAG}"
+            echo "Waiting for ${image}:${RELEASE_TAG}..."
+
+            while true; do
+              status_code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+                "${manifest_url}" || true)"
+
+              if [ "${status_code}" = "200" ]; then
+                echo "Found ${image}:${RELEASE_TAG}"
+                break
+              fi
+
+              now="$(date +%s)"
+              if [ "${now}" -ge "${deadline}" ]; then
+                echo "Timed out waiting for ${image}:${RELEASE_TAG}. Last status: ${status_code}" >&2
+                exit 1
+              fi
+
+              sleep "${poll_interval_seconds}"
+            done
+          done
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Prepare chart release workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf .chart-build
+          mkdir -p .chart-build
+          cp -R charts/soundspan .chart-build/soundspan
+
+          node .github/scripts/prepare-helm-chart-release.mjs \
+            --chart-dir .chart-build/soundspan \
+            --release-tag "${{ steps.meta.outputs.release_tag }}"
+
+      - name: Lint release chart
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm lint .chart-build/soundspan
+
+      - name: Prepare existing gh-pages chart artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf .chart-repo
+          mkdir -p .chart-repo
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --depth=1 origin gh-pages
+            git --work-tree=.chart-repo checkout origin/gh-pages -- .
+          fi
+
+          # Keep only chart repository artifacts on gh-pages.
+          find .chart-repo -mindepth 1 -maxdepth 1 \
+            ! -name '.git' \
+            ! -name '*.tgz' \
+            ! -name 'index.yaml' \
+            ! -name '.nojekyll' \
+            -exec rm -rf {} +
+
+      - name: Package chart and rebuild Helm index
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm package .chart-build/soundspan --destination .chart-repo
+
+          if [ -f .chart-repo/index.yaml ]; then
+            helm repo index .chart-repo \
+              --url "${{ steps.meta.outputs.helm_repo_url }}" \
+              --merge .chart-repo/index.yaml
+          else
+            helm repo index .chart-repo --url "${{ steps.meta.outputs.helm_repo_url }}"
+          fi
+
+          touch .chart-repo/.nojekyll
+
+      - name: Publish chart artifacts to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: .chart-repo
+          keep_files: false
+          enable_jekyll: false
+          commit_message: "chore(helm): publish chart for ${{ steps.meta.outputs.release_tag }}"

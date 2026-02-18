@@ -1,0 +1,641 @@
+{
+  "metadata": {
+    "id": "soundspan-agent-governance",
+    "version": "2026-02-18.01",
+    "description": "Executable governance checks for AGENTS policy and local-context hygiene."
+  },
+  "contracts": {
+    "documentationModel": {
+      "bootstrapFile": "AGENTS.md",
+      "humanRulesFile": "docs/AGENT_RULES.md",
+      "humanContextFile": "docs/AGENT_CONTEXT.md",
+      "contextIndexFile": "docs/CONTEXT_INDEX.json",
+      "machinePolicyFile": ".github/policies/agent-governance.json",
+      "enforcementScript": ".github/scripts/enforce-agent-policies.mjs",
+      "sessionPreflightScript": ".github/scripts/agent-session-preflight.mjs",
+      "sessionPreflightCommand": "npm run agent:preflight",
+      "startupReadOrder": [
+        "AGENTS.md",
+        "docs/AGENT_RULES.md",
+        "docs/CONTEXT_INDEX.json",
+        "docs/AGENT_CONTEXT.md",
+        ".agents/EXECUTION_QUEUE.json",
+        ".agents/CONTINUITY.md"
+      ],
+      "precedenceOrder": [
+        "user_instruction",
+        "machine_policy",
+        "human_rules",
+        "human_context"
+      ]
+    },
+    "contextIndex": {
+      "indexFile": "docs/CONTEXT_INDEX.json",
+      "requiredTopLevelKeys": [
+        "metadata",
+        "startupReadOrder",
+        "primaryContracts",
+        "sessionArtifacts",
+        "ruleCatalog",
+        "rulesSections",
+        "contextSections",
+        "commands"
+      ],
+      "requiredStartupReadOrder": [
+        "AGENTS.md",
+        "docs/AGENT_RULES.md",
+        "docs/CONTEXT_INDEX.json",
+        "docs/AGENT_CONTEXT.md",
+        ".agents/EXECUTION_QUEUE.json",
+        ".agents/CONTINUITY.md"
+      ],
+      "requiredCommandKeys": [
+        "policyCheck",
+        "sessionPreflight",
+        "queueLifecycle",
+        "indexBuild",
+        "indexVerify",
+        "indexQueryStrictFresh"
+      ]
+    },
+    "sessionArtifacts": {
+      "executionQueueFile": ".agents/EXECUTION_QUEUE.json",
+      "sessionBriefJsonFile": ".agents/SESSION_BRIEF.json",
+      "continuityFile": ".agents/CONTINUITY.md",
+      "archiveRoot": ".agents/archives",
+      "archiveIndexFile": ".agents/EXECUTION_ARCHIVE_INDEX.json",
+      "archiveShardBy": "feature_id",
+      "archiveFormat": "jsonl",
+      "archiveReadPolicy": "cold_lookup_only",
+      "retiredArtifacts": [
+        ".agents/ACTIVE_SCOPE.json",
+        ".agents/UNRESOLVED_QUEUE.json"
+      ],
+      "plansRoot": ".agents/plans",
+      "planRoots": [
+        ".agents/plans/current",
+        ".agents/plans/deferred",
+        ".agents/plans/archived"
+      ],
+      "planQueueSyncEnabled": true,
+      "planQueueSyncPlanFileName": "PLAN.md",
+      "planQueueSyncRoots": [
+        ".agents/plans/current",
+        ".agents/plans/deferred"
+      ],
+      "planQueueSyncStateByRoot": {
+        ".agents/plans/current": "pending",
+        ".agents/plans/deferred": "deferred"
+      },
+      "planQueueSyncDefaultOwner": "orchestrator",
+      "planQueueSyncDefaultItemType": "task",
+      "planQueueSyncDefaultSubscope": "plan-track",
+      "archivedPlanSyncEnabled": true,
+      "archivedPlanRoot": ".agents/plans/archived",
+      "archivedPlanFileName": "PLAN.md",
+      "archivedPlanCanonicalHandoffFileName": "HANDOFF.md",
+      "archivedPlanLegacyHandoffFileNames": [
+        "LLM_SESSION_HANDOFF.md"
+      ],
+      "archivedPlanArchiveKeyPrefix": "feature-plan:",
+      "archivedPlanIndexKind": "feature",
+      "stalePlanReferenceCheckEnabled": true,
+      "stalePlanReferenceFailureMode": "fail",
+      "stalePlanReferenceScanRoots": [
+        ".agents/plans"
+      ],
+      "repositoryIndexPreflight": {
+        "enabled": true,
+        "buildIfMissing": true,
+        "verifyStrict": true,
+        "failureMode": "fail",
+        "closeoutVerifyIfPossible": true
+      },
+      "sessionBriefRequiredFields": [
+        "generated_at",
+        "policy",
+        "scope",
+        "queue_file",
+        "archive_index_file",
+        "index_readiness",
+        "queue_read_contract",
+        "queue_overview",
+        "next_actions"
+      ],
+      "sessionBriefFreshnessHoursWarning": 24,
+      "scopeReadRequiredTopLevelFields": [
+        "state",
+        "feature_id",
+        "task_id",
+        "objective",
+        "last_updated",
+        "updated_at",
+        "in_scope",
+        "out_of_scope",
+        "open_questions"
+      ],
+      "scopeReadItemSelectorFields": [
+        "id",
+        "plan_ref",
+        "owner",
+        "depends_on"
+      ],
+      "maxScopedItemsPerRead": 25,
+      "requiredExecutionQueueFields": [
+        "version",
+        "created_at",
+        "last_updated",
+        "updated_at",
+        "state",
+        "feature_id",
+        "task_id",
+        "objective",
+        "in_scope",
+        "out_of_scope",
+        "acceptance_criteria",
+        "constraints",
+        "references",
+        "open_questions",
+        "deferred_reason",
+        "cancel_reason",
+        "items"
+      ],
+      "requiredQueueItemFields": [
+        "id",
+        "idempotency_key",
+        "feature_id",
+        "subscope",
+        "title",
+        "type",
+        "state",
+        "created_at",
+        "updated_at",
+        "planned_at",
+        "owner",
+        "acceptance_criteria",
+        "constraints",
+        "references",
+        "depends_on",
+        "plan_ref",
+        "execution_started_at",
+        "completed_at",
+        "claimed_by",
+        "claimed_at",
+        "lease_expires_at",
+        "attempt_count",
+        "last_attempt_at",
+        "last_error",
+        "retry_after",
+        "outputs",
+        "evidence",
+        "resolution_summary",
+        "deferred_reason",
+        "cancel_reason"
+      ],
+      "allowedQueueItemTypes": [
+        "task",
+        "question",
+        "decision"
+      ],
+      "allowedQueueStates": [
+        "active",
+        "deferred",
+        "pending",
+        "complete"
+      ],
+      "statesRequiringExecutionStart": [
+        "active",
+        "complete"
+      ],
+      "statesRequiringCompletionTime": [
+        "complete"
+      ],
+      "queueScopeRequiredWhenObjectiveSet": [
+        "in_scope",
+        "acceptance_criteria"
+      ],
+      "statesRequiringClaimLease": [
+        "active"
+      ],
+      "claimLeaseRequiredFields": [
+        "claimed_by",
+        "claimed_at",
+        "lease_expires_at"
+      ],
+      "statesRequiringCompletionEvidence": [
+        "complete"
+      ],
+      "completionEvidenceRequiredFields": [
+        "outputs",
+        "evidence",
+        "resolution_summary"
+      ],
+      "archiveOnItemStates": [
+        "complete"
+      ],
+      "archiveQueueStatesTriggeringFeatureArchive": [
+        "complete"
+      ],
+      "forbidArchivedStatesInHotQueue": true,
+      "archiveIndexRequiredFields": [
+        "version",
+        "last_updated",
+        "items"
+      ],
+      "archiveIndexRequiredItemFields": [
+        "archive_key",
+        "kind",
+        "feature_id",
+        "archived_at",
+        "archive_ref"
+      ],
+      "sessionBriefFreshnessFailureMode": "fail"
+    },
+    "workspaceLayout": {
+      "canonicalRepoRoot": "/home/joshd/git/soundspan",
+      "canonicalAgentsRoot": "/home/joshd/git/soundspan/.agents",
+      "worktreesRoot": "/home/joshd/git/soundspan/.worktrees",
+      "enforceWorktreeRoot": true,
+      "requireSemanticMergeForAgents": true,
+      "requireWorktreeAgentsSymlink": true
+    },
+    "ruleCatalog": {
+      "file": "docs/AGENT_RULES.md",
+      "requiredIds": [
+        "rule_startup_read_order",
+        "rule_context_index_usage",
+        "rule_execution_queue_required",
+        "rule_queue_plan_before_execution",
+        "rule_queue_single_source_of_truth",
+        "rule_queue_scoped_context_read",
+        "rule_queue_archive_on_complete",
+        "rule_scope_tight_no_overbroad_refactor",
+        "rule_hybrid_machine_human_contract",
+        "rule_policy_sync_required",
+        "rule_continuity_required",
+        "rule_post_compaction_rebootstrap",
+        "rule_repo_index_preflight_gate",
+        "rule_context_index_drift_guard",
+        "rule_canonical_agents_root",
+        "rule_worktree_root_required",
+        "rule_tdd_default",
+        "rule_coverage_default_100",
+        "rule_scope_completeness_gate",
+        "orch_hybrid_instruction_contract",
+        "orch_scope_tightness",
+        "orch_machine_payload_authoritative",
+        "orch_delegate_substantive_work",
+        "orch_human_nuance_addendum",
+        "orch_atomic_task_delegation",
+        "orch_dual_channel_result_envelope",
+        "orch_orchestrator_coordination_only",
+        "orch_default_cli_routing",
+        "orch_unconfirmed_unknowns",
+        "orch_atomic_single_objective_scope",
+        "orch_codex_model_default"
+      ]
+    },
+    "orchestratorSubagent": {
+      "machinePayloadRequiredFields": [
+        "task_id",
+        "objective",
+        "inputs",
+        "constraints",
+        "acceptance_criteria",
+        "deliverables",
+        "verification",
+        "atomic_scope"
+      ],
+      "resultEnvelopeRequiredFields": [
+        "status",
+        "outputs",
+        "evidence",
+        "unresolved_questions"
+      ],
+      "defaultCliRouting": {
+        "codex": "codex",
+        "claude": "claude"
+      },
+      "rules": [
+        {
+          "id": "orch_hybrid_instruction_contract",
+          "statement": "Use a hybrid instruction contract: machine-readable payload plus concise human-readable intent/nuance."
+        },
+        {
+          "id": "orch_scope_tightness",
+          "statement": "Keep delegated work and resulting diffs tightly scoped to the user request; no overbroad refactors unless explicitly requested."
+        },
+        {
+          "id": "orch_machine_payload_authoritative",
+          "statement": "Treat the machine-readable payload as authoritative for execution; resolve conflicts with prose before proceeding."
+        },
+        {
+          "id": "orch_delegate_substantive_work",
+          "statement": "Preserve orchestrator context by delegating substantive implementation/investigation tasks whenever delegation is available."
+        },
+        {
+          "id": "orch_human_nuance_addendum",
+          "statement": "When nuances are not fully captured by machine-readable fields, include concise human-language addenda."
+        },
+        {
+          "id": "orch_atomic_task_delegation",
+          "statement": "Delegate work in atomic task slices so each subagent context remains narrow and auditable."
+        },
+        {
+          "id": "orch_dual_channel_result_envelope",
+          "statement": "Require subagent output in two channels: machine-readable result envelope plus concise human-readable summary."
+        },
+        {
+          "id": "orch_orchestrator_coordination_only",
+          "statement": "Limit orchestrator direct execution to coordination/meta tasks; if delegation is infeasible, record explicit rationale first."
+        },
+        {
+          "id": "orch_default_cli_routing",
+          "statement": "Default subagent orchestration mapping is Codex agents via `codex` CLI and Claude agents via `claude` CLI unless user-overridden."
+        },
+        {
+          "id": "orch_unconfirmed_unknowns",
+          "statement": "Mark unknowns explicitly as `UNCONFIRMED` and fail fast on missing required fields."
+        },
+        {
+          "id": "orch_atomic_single_objective_scope",
+          "statement": "Each delegated subagent task must target exactly one concrete objective with explicit atomic_scope boundaries; split multi-objective requests into separate tasks."
+        },
+        {
+          "id": "orch_codex_model_default",
+          "statement": "Default Codex subagent model is `gpt-5.3-codex-spark` unless the user explicitly overrides model selection."
+        }
+      ],
+      "defaultModelRouting": {
+        "codex": "gpt-5.3-codex-spark"
+      }
+    }
+  },
+  "checks": {
+    "requiredTextSnippets": [
+      {
+        "file": "AGENTS.md",
+        "snippets": [
+          "## Required Startup Order",
+          "docs/AGENT_RULES.md",
+          "docs/CONTEXT_INDEX.json",
+          "docs/AGENT_CONTEXT.md",
+          ".agents/EXECUTION_QUEUE.json",
+          "npm run agent:preflight",
+          "## Canonical Sources and Precedence",
+          "Machine-readable canonical policy: `.github/policies/agent-governance.json`",
+          "Session preflight generator: `.github/scripts/agent-session-preflight.mjs`",
+          "## Session Context Artifacts",
+          "Shared queue authority for orchestrator and subagents: `.agents/EXECUTION_QUEUE.json` (single source of truth)",
+          "Feature-sharded cold archive: `.agents/archives/<feature_id>.jsonl`",
+          "Canonical shared `.agents` root is `/home/joshd/git/soundspan/.agents` (git-ignored local context).",
+          "Treat `.agents/**` as shared multi-writer state and apply semantic merges (preserve concurrent entries; never clobber with blind overwrite).",
+          "All additional Git worktrees must be created under `/home/joshd/git/soundspan/.worktrees`.",
+          "In non-primary worktrees, `.agents` must be a symlink to the canonical shared root.",
+          "Queue-first execution rule:",
+          "all planned work must exist as atomic entries in `.agents/EXECUTION_QUEUE.json`",
+          "When a task or feature becomes `complete`, move it from hot queue into feature shard archive.",
+          "Do not read archive shards during normal startup; read archive on-demand for historical lookup only.",
+          "read only queue fields/items relevant to the current feature/item scope",
+          "Preflight includes repository index readiness gating: build namespaced index if missing and strict-verify existing index before implementation work starts.",
+          "Simplified plan architecture:",
+          "required per active feature: `PLAN.md`",
+          "## Orchestrator/Subagent Contract Pointer",
+          "## Policy-as-Code Enforcement",
+          "node .github/scripts/enforce-agent-policies.mjs",
+          "`orch_atomic_single_objective_scope`",
+          "`orch_codex_model_default`",
+          "gpt-5.3-codex-spark"
+        ]
+      },
+      {
+        "file": "docs/AGENT_RULES.md",
+        "snippets": [
+          "## Rule ID Catalog (Machine Cross-Reference)",
+          "`rule_scope_tight_no_overbroad_refactor`",
+          "`rule_hybrid_machine_human_contract`",
+          "`rule_execution_queue_required`",
+          "`rule_queue_plan_before_execution`",
+          "`rule_queue_single_source_of_truth`",
+          "`rule_queue_scoped_context_read`",
+          "`rule_queue_archive_on_complete`",
+          "`rule_repo_index_preflight_gate`",
+          "`rule_context_index_drift_guard`",
+          "`rule_canonical_agents_root`",
+          "`rule_worktree_root_required`",
+          "### Accuracy, Recency, and Sourcing (Required)",
+          "### Context7 MCP and Web Search Policy",
+          "### Container-First Policy (Required)",
+          "### Secrets and Sensitive Data",
+          "### Baseline Workflow (Required)",
+          "### CLI Worktree Parallelism (Required)",
+          "Default to read-only exploration first; edit only when required by the task.",
+          "When operating in Codex CLI, prefer Git worktrees for non-trivial parallelizable tasks instead of stacking unrelated edits in one working tree.",
+          "Prefer parallel agents/subagents for independent task slices when available.",
+          "Canonical shared `.agents` root is `/home/joshd/git/soundspan/.agents` (git-ignored local context).",
+          "Treat `.agents/**` as shared multi-writer state; reconcile concurrent edits using semantic merges instead of blind overwrite.",
+          "All non-primary Git worktrees must live under `/home/joshd/git/soundspan/.worktrees`.",
+          "If running from a worktree, `.agents` in that worktree must be a symlink to the canonical root.",
+          "For worktree execution, copy required local `.gitignore`d context files into the worktree",
+          "keep them untracked, and never commit/push them.",
+          "### Orchestrator/Subagent Instruction Contract (Required)",
+          "Canonical enforceable source for orchestrator/subagent behavior: `.github/policies/agent-governance.json` at `contracts.orchestratorSubagent`.",
+          "Contract IDs (policy-canonical):",
+          "`orch_hybrid_instruction_contract`",
+          "`orch_scope_tightness`",
+          "`orch_machine_payload_authoritative`",
+          "`orch_delegate_substantive_work`",
+          "`orch_human_nuance_addendum`",
+          "`orch_atomic_task_delegation`",
+          "`orch_dual_channel_result_envelope`",
+          "`orch_orchestrator_coordination_only`",
+          "`orch_default_cli_routing`",
+          "`orch_unconfirmed_unknowns`",
+          "Never run destructive operations against remote APIs or production data sources unless the user explicitly requests and confirms them.",
+          "Never install system packages on the host unless explicitly instructed by the user.",
+          "Never print secrets/tokens/credentials/private keys in terminal output.",
+          "## Policy-as-Code Enforcement",
+          "node .github/scripts/enforce-agent-policies.mjs",
+          "Session preflight command: `npm run agent:preflight`",
+          "When policy expectations change, update all relevant governance artifacts in the same change set:",
+          "Always read full files before editing them.",
+          "Legacy-test trust boundary: for code and tests authored before 2026-02-16 (inclusive), treat existing tests as potentially incomplete or incorrect until validated against current behavior/contracts; line-referential tests in that time range are advisory only until proven.",
+          "Regression prevention tests and contract tests are mandatory for behavior-changing work unless the user explicitly bypasses this requirement.",
+          "Treat 100% actual code coverage as the default bar (lines, branches, functions, statements); only deviate when the user explicitly approves an exception and capture it in the completion summary.",
+          "Scope-completeness check is reported against the user request, with no in-scope requested item left unaccounted for.",
+          "Read `.agents/CONTINUITY.md` at the start of every assistant turn before acting.",
+          "Do not execute non-trivial implementation work until planning detail is sufficient and user approval to proceed is explicit.",
+          "For non-trivial phase transitions, pause and confirm direction with the user before proceeding.",
+          "If the user adds or changes a process rule, update `AGENTS.md` and `docs/AGENT_RULES.md` in the same change set and enforce it via policy-as-code (`.github/policies/agent-governance.json` and `.github/scripts/enforce-agent-policies.mjs`).",
+          "Work exhaustively with zero guesswork: if a required fact is unknown, explicitly look it up/verify it before proceeding.",
+          "Do not trim or skip relevant context; preserve complete context for correctness-critical work unless the user explicitly asks to narrow scope.",
+          "Avoid full local test suite runs in constrained dev environments (for example WSL instability/OOM risk); default to targeted impacted-suite runs unless the user explicitly requests full local suite execution.",
+          "Scope-completeness gate (machine-friendly): before finalizing, explicitly map completed work against every user-requested in-scope item; unresolved items must remain open and be reported. If the user asks \"did we miss something?\" and in-scope work was missed, treat it as a process failure and tighten AGENTS/policy in the same change set.",
+          "### Session Artifact Contracts (Required)",
+          ".agents/EXECUTION_QUEUE.json",
+          "Single queue authority:",
+          "Scoped queue read discipline:",
+          "Archive-on-complete gate:",
+          "Repository index readiness gate:",
+          "`npm run agent:preflight` must check branch/worktree index readiness.",
+          "CONTEXT_INDEX drift guard:",
+          "Prefer selectors `id`, `plan_ref`, `owner`, and dependency closure via `depends_on`; avoid loading the full `items` array when not required.",
+          "Queue execution-state gate:",
+          "### Post-Compaction Startup Checklist (Required)",
+          "Treat every context-compaction recovery as a fresh startup sequence before doing new implementation work.",
+          "Do not proceed with non-trivial edits until the checklist is complete.",
+          "`orch_atomic_single_objective_scope`",
+          "`orch_codex_model_default`",
+          "gpt-5.3-codex-spark",
+          "Run an automated stale reference scan for `.agents/plans/**` paths; unresolved references must fail preflight/policy checks by default.",
+          "Validate `.agents/SESSION_BRIEF.json` schema when present; stale brief age beyond policy threshold is a CI/local failure until refreshed via preflight."
+        ]
+      },
+      {
+        "file": "docs/AGENT_CONTEXT.md",
+        "snippets": [
+          "Canonical machine-readable context map: `docs/CONTEXT_INDEX.json`",
+          "## Project Overview",
+          "## Architecture",
+          "## Tech Stack",
+          "## Project Structure",
+          "## Key Conventions",
+          "## Reuse and Consolidation Atlas",
+          "## Fork Documentation Maintenance",
+          "## Full-Stack Delivery Gates",
+          "## Database",
+          "## Streaming Integration",
+          "## Testing",
+          "## Local Testing Bootstrap",
+          "## Common Tasks",
+          "`.agents/EXECUTION_QUEUE.json` (canonical execution queue + atomic state)",
+          "Multi-agent queue usage:",
+          "single scope/queue authority for orchestrator and subagents.",
+          "feature-sharded archive files under `.agents/archives/`",
+          "Canonical shared local agent context root is `/home/joshd/git/soundspan/.agents` (git-ignored).",
+          "All additional Git worktrees for this repo must be created under `/home/joshd/git/soundspan/.worktrees`.",
+          "In non-primary worktrees, `.agents` must be a symlink to the canonical shared root.",
+          "selectors: `id`, `plan_ref`, `owner`, `depends_on`",
+          "required: `PLAN.md`"
+        ]
+      },
+      {
+        "file": "docs/AGENT_CONTEXT.md",
+        "snippets": [
+          "For compatibility/client bugs discovered in logs or production traces, convert the observed failure into a deterministic automated regression test before closing the issue."
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-checks.yml",
+        "snippets": [
+          "Policy as Code",
+          "node .github/scripts/enforce-agent-policies.mjs"
+        ]
+      },
+      {
+        "file": "package.json",
+        "snippets": [
+          "\"agent:queue:open\"",
+          "\"agent:queue:start\"",
+          "\"agent:queue:complete\"",
+          "\"agent:queue:close-feature\""
+        ]
+      }
+    ],
+    "requiredMarkdownSections": [
+      {
+        "file": "AGENTS.md",
+        "sections": [
+          "## Required Startup Order",
+          "## Canonical Sources and Precedence",
+          "## Session Context Artifacts",
+          "## Orchestrator/Subagent Contract Pointer",
+          "## Policy-as-Code Enforcement"
+        ]
+      },
+      {
+        "file": "docs/AGENT_RULES.md",
+        "sections": [
+          "## Rule ID Catalog (Machine Cross-Reference)",
+          "## Global Operating Agreements (All LLMs)",
+          "## Policy-as-Code Enforcement",
+          "## LLM Continuity and Execution Discipline",
+          "### CLI Worktree Parallelism (Required)",
+          "### Orchestrator/Subagent Instruction Contract (Required)",
+          "### Session Artifact Contracts (Required)",
+          "### CONTINUITY.md Contract (Required)",
+          "### Post-Compaction Startup Checklist (Required)",
+          "### Definition of Done"
+        ]
+      },
+      {
+        "file": "docs/AGENT_CONTEXT.md",
+        "sections": [
+          "## Project Overview",
+          "## Architecture",
+          "## Tech Stack",
+          "## Project Structure",
+          "## Key Conventions",
+          "## Reuse and Consolidation Atlas",
+          "## Fork Documentation Maintenance",
+          "## Full-Stack Delivery Gates",
+          "## Database",
+          "## Streaming Integration",
+          "## Testing",
+          "## Local Testing Bootstrap",
+          "## Common Tasks"
+        ]
+      },
+      {
+        "file": ".agents/CONTINUITY.md",
+        "optional": false,
+        "sections": [
+          "## [PLANS]",
+          "## [DECISIONS]",
+          "## [PROGRESS]",
+          "## [DISCOVERIES]",
+          "## [OUTCOMES]"
+        ]
+      }
+    ],
+    "requiredSequenceSnippets": [
+      {
+        "file": "docs/AGENT_RULES.md",
+        "sequence": [
+          "1. Re-read `AGENTS.md`, `docs/AGENT_RULES.md`, `docs/CONTEXT_INDEX.json`, and `docs/AGENT_CONTEXT.md`.",
+          "2. Confirm branch + workspace state (`git rev-parse --abbrev-ref HEAD`, `git status --short`).",
+          "3. Load `.agents/EXECUTION_QUEUE.json` and `.agents/CONTINUITY.md`; both are required startup artifacts.",
+          "4. Run `npm run agent:preflight` to regenerate `.agents/SESSION_BRIEF.json`.",
+          "5. Re-confirm active user scope, exclusions, and acceptance criteria from the latest user instruction.",
+          "6. Publish a short resume plan naming the exact next atomic task before editing code."
+        ]
+      }
+    ],
+    "continuityEntryFormat": {
+      "file": ".agents/CONTINUITY.md",
+      "optional": false,
+      "sectionHeaders": [
+        "## [PLANS]",
+        "## [DECISIONS]",
+        "## [PROGRESS]",
+        "## [DISCOVERIES]",
+        "## [OUTCOMES]"
+      ],
+      "entryRegex": "^- \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?Z \\[(USER|CODE|TOOL|ASSUMPTION|MILESTONE)\\] .+"
+    },
+    "disallowedTrackedPathPrefixes": [
+      {
+        "prefix": ".agents/plans/",
+        "message": ".agents/plans/** is local-only context and must not be committed."
+      },
+      {
+        "prefix": ".agents/",
+        "message": ".agents/** is local-only context and must not be committed."
+      },
+      {
+        "prefix": ".worktrees/",
+        "message": ".worktrees/** is local-only execution workspace and must not be committed."
+      }
+    ]
+  }
+}

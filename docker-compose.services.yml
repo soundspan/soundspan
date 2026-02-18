@@ -1,0 +1,39 @@
+# Optional external Lidarr service for soundspan.
+#
+# This file is intentionally an add-on layer:
+# - It does not run soundspan itself.
+# - It should be combined with either docker-compose.yml (split stack)
+#   or docker-compose.aio.yml (AIO image).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml up -d
+#   docker compose -f docker-compose.aio.yml -f docker-compose.services.yml up -d
+#
+# Defaults use canonical service ports for deployment parity:
+#   Lidarr 8686
+# For local development collision-avoidance, use docker-compose.local.yml workflows.
+#
+# Note:
+# - soundspan integrates directly with Lidarr only.
+# - If you run indexers/download clients (Prowlarr/qBittorrent/SABnzbd/etc),
+#   deploy and manage those outside this repository.
+
+services:
+    # Lidarr - Music collection manager
+    lidarr:
+        image: lscr.io/linuxserver/lidarr:latest
+        container_name: ${SOUNDSPAN_LIDARR_CONTAINER_NAME:-soundspan_lidarr}
+        environment:
+            - PUID=${PUID:-1000}
+            - PGID=${PGID:-1000}
+            - TZ=${TZ:-UTC}
+        volumes:
+            - lidarr_config:/config
+            - ${MUSIC_PATH:-./music}:/music
+            - ${DOWNLOAD_PATH:-./downloads}:/downloads
+        ports:
+            - "${LIDARR_PORT:-8686}:8686"
+        restart: unless-stopped
+
+volumes:
+    lidarr_config:

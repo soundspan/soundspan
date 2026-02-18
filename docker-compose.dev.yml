@@ -1,0 +1,34 @@
+# Compatibility shim (temporary).
+#
+# Deprecated:
+# - Use `docker-compose.local.yml` for local host-run testing.
+# - This file exists only so existing `docker compose -f docker-compose.dev.yml ...`
+#   commands continue to work during the transition period.
+#
+# Planned removal:
+# - Remove this shim after local scripts/docs/users have fully moved to
+#   `docker-compose.local.yml`.
+
+services:
+    postgres-local:
+        extends:
+            file: docker-compose.local.yml
+            service: postgres
+
+    redis-local:
+        extends:
+            file: docker-compose.local.yml
+            service: redis
+
+    audio-analyzer-local:
+        extends:
+            file: docker-compose.local.yml
+            service: audio-analyzer
+
+    audio-analyzer-clap:
+        extends:
+            file: docker-compose.local.yml
+            service: audio-analyzer-clap
+
+volumes:
+    postgres_local_data:

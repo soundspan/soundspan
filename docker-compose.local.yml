@@ -1,0 +1,103 @@
+# Local host-run testing dependencies for npm/tsx workflows.
+#
+# Purpose:
+# - Start only infra needed for running backend/frontend directly on host.
+# - Do NOT run frontend/backend containers from this file.
+# - Avoid common local port collisions via +1 host mappings.
+#
+# Typical usage:
+#   docker compose -f docker-compose.local.yml up -d postgres redis
+#   cd backend && npm run dev
+#   cd frontend && PORT=3031 BACKEND_URL=http://127.0.0.1:3007 npm run dev
+#
+# Optional analyzers (heavier):
+#   (starts both MusicCNN + CLAP analyzers)
+#   docker compose -f docker-compose.local.yml --profile audio-analysis up -d
+#
+# Host port map:
+#   postgres 5433 -> 5432
+#   redis    6380 -> 6379
+
+services:
+    postgres-local:
+        image: pgvector/pgvector:pg16
+        environment:
+            POSTGRES_USER: soundspan
+            POSTGRES_PASSWORD: soundspan
+            POSTGRES_DB: soundspan
+        volumes:
+            - postgres_local_data:/var/lib/postgresql/data
+        ports:
+            - "5433:5432"
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U soundspan -d soundspan"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    redis-local:
+        image: redis:7-alpine
+        ports:
+            - "6380:6379"
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    # Audio Analyzer - Essentia with ML models for Enhanced vibe matching
+    audio-analyzer-local:
+        profiles: ["audio-analysis"]
+        build:
+            context: ./services/audio-analyzer
+        environment:
+            # Connect to host machine's services (or Docker services)
+            REDIS_URL: redis://redis:6379
+            DATABASE_URL: postgresql://soundspan:soundspan@postgres:5432/soundspan
+            # Music path inside container (mounted from host)
+            MUSIC_PATH: /music
+            BATCH_SIZE: 10
+            SLEEP_INTERVAL: 5
+            BRPOP_TIMEOUT: 10
+            MODEL_IDLE_TIMEOUT: 60
+        volumes:
+            # Host music path; override MUSIC_PATH in your shell/.env as needed.
+            - "${MUSIC_PATH:-./music}:/music:ro"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+
+    # CLAP Audio Analyzer - embedding generation for similarity search
+    audio-analyzer-clap-local:
+        profiles: ["audio-analysis"]
+        build:
+            context: ./services/audio-analyzer-clap
+        environment:
+            REDIS_URL: redis://redis:6379
+            DATABASE_URL: postgresql://soundspan:soundspan@postgres:5432/soundspan
+            # Host-run backend URL (frontend/backend run outside compose in local dev)
+            BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:3007}
+            MUSIC_PATH: /music
+            SLEEP_INTERVAL: ${CLAP_SLEEP_INTERVAL:-5}
+            NUM_WORKERS: ${CLAP_WORKERS:-2}
+            THREADS_PER_WORKER: ${CLAP_THREADS_PER_WORKER:-1}
+            MODEL_IDLE_TIMEOUT: ${CLAP_MODEL_IDLE_TIMEOUT:-300}
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+        volumes:
+            - "${MUSIC_PATH:-./music}:/music:ro"
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+
+volumes:
+    postgres_local_data:

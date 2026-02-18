@@ -1,0 +1,19 @@
+{
+  "scripts": {
+    "policy:check": "node .github/scripts/enforce-agent-policies.mjs",
+    "agent:preflight": "node .github/scripts/agent-session-preflight.mjs",
+    "agent:queue:open": "node .github/scripts/agent-queue-lifecycle.mjs open-item",
+    "agent:queue:start": "node .github/scripts/agent-queue-lifecycle.mjs start-item",
+    "agent:queue:complete": "node .github/scripts/agent-queue-lifecycle.mjs complete-item",
+    "agent:queue:close-feature": "node .github/scripts/agent-queue-lifecycle.mjs close-feature",
+    "index:build": "node tools/index/indexer.mjs build",
+    "index:rebuild": "node tools/index/indexer.mjs build --full",
+    "index:query": "node tools/index/indexer.mjs query",
+    "index:verify": "node tools/index/indexer.mjs verify --strict",
+    "release:prepare": "node .github/scripts/release-version-sync.mjs --write",
+    "release:verify": "node .github/scripts/release-version-sync.mjs --check"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

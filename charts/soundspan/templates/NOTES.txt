@@ -1,0 +1,74 @@
+{{- $fullName := include "soundspan.fullname" . -}}
+
+🎵 soundspan has been deployed!
+
+Deployment mode: {{ .Values.deploymentMode }}
+
+{{- if eq .Values.deploymentMode "aio" }}
+
+All-in-One mode — backend, frontend, PostgreSQL, Redis, and audio analyzer
+are running inside a single container.
+{{- else }}
+
+Individual mode — each service runs in its own pod:
+  • Backend:    {{ $fullName }}-backend
+  • Frontend:   {{ $fullName }}-frontend
+{{- if .Values.postgresql.enabled }}
+  • PostgreSQL: {{ $fullName }}-postgresql
+{{- else }}
+  • PostgreSQL: External
+{{- end }}
+{{- if .Values.redis.enabled }}
+  • Redis:      {{ $fullName }}-redis
+{{- else }}
+  • Redis:      External
+{{- end }}
+{{- if .Values.tidalSidecar.enabled }}
+  • TIDAL:      {{ $fullName }}-tidal
+{{- end }}
+{{- if .Values.ytmusicStreamer.enabled }}
+  • YT Music:   {{ $fullName }}-ytmusic
+{{- end }}
+{{- if .Values.audioAnalyzer.enabled }}
+  • Analyzer:   {{ $fullName }}-audio-analyzer
+{{- end }}
+{{- if .Values.audioAnalyzerClap.enabled }}
+  • CLAP:       {{ $fullName }}-audio-analyzer-clap
+{{- end }}
+{{- end }}
+
+{{- if or .Values.ingress.enabled .Values.gateway.enabled }}
+
+Access soundspan at:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  {{- if .tls }}
+  https://{{ .host }}
+  {{- else }}
+  http://{{ .host }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.gateway.enabled }}
+{{- range .Values.gateway.hostnames }}
+  https://{{ . }}
+{{- end }}
+{{- if not .Values.gateway.hostnames }}
+  (hostname determined by your Gateway listener)
+{{- end }}
+{{- end }}
+{{- else }}
+
+Get the application URL by running:
+{{- if eq .Values.deploymentMode "aio" }}
+  kubectl port-forward svc/{{ $fullName }} {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+{{- else }}
+  kubectl port-forward svc/{{ $fullName }}-frontend {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+{{- end }}
+
+  Then open: http://localhost:{{ .Values.service.port }}
+{{- end }}
+
+First time? Create an admin account at the setup page.
+
+📖 Documentation: https://github.com/soundspan/soundspan

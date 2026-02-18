@@ -1,0 +1,431 @@
+# soundspan split-stack base compose (deployment-ready defaults).
+#
+# Use this file when you want frontend+backend+db+redis and optional sidecars/analyzers.
+# Deployment defaults use canonical ports:
+#   frontend 3030, backend 3006, postgres 5432, redis 6379
+#
+# Add optional Lidarr service with:
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml up -d
+#
+# Local-development +1 port behavior is intentionally handled by docker-compose.local.yml.
+services:
+    # ==============================================================================
+    # SOUNDSPAN CORE APPLICATION
+    # ==============================================================================
+
+    # Backend API - Your soundspan Express.js server
+    backend:
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+        environment:
+            # Database
+            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            POSTGRES_USER: ${POSTGRES_USER:-soundspan}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+            POSTGRES_DB: ${POSTGRES_DB:-soundspan}
+            REDIS_URL: redis://redis:6379
+            # Preserve Redis streams/groups across restarts unless explicitly overridden
+            REDIS_FLUSH_ON_STARTUP: ${REDIS_FLUSH_ON_STARTUP:-false}
+
+            # Server config
+            PORT: 3006
+            NODE_ENV: ${NODE_ENV:-production}
+            # Runtime role: all (combined API + workers), api, or worker
+            BACKEND_PROCESS_ROLE: ${BACKEND_PROCESS_ROLE:-all}
+            SESSION_SECRET: ${SESSION_SECRET:-changeme-generate-secure-key}
+            SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+            # To reset admin password, uncomment and set, then restart:
+            # ADMIN_RESET_PASSWORD: your-new-password
+
+            # Music library (required)
+            # IMPORTANT: Inside Docker, music is always at /music (mounted from host MUSIC_PATH)
+            # Don't use ${MUSIC_PATH} here as it contains the host path, not container path
+            MUSIC_PATH: /music
+            TRANSCODE_CACHE_PATH: /app/cache/transcodes
+            TRANSCODE_CACHE_MAX_GB: ${TRANSCODE_CACHE_MAX_GB:-10}
+
+            # CORS
+            ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3030}
+
+            # Internal API secret for service-to-service auth
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            # Keep these enabled for cross-replica Listen Together behavior
+            LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: ${LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED:-true}
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: ${LISTEN_TOGETHER_STATE_SYNC_ENABLED:-true}
+            LISTEN_TOGETHER_STATE_STORE_ENABLED: ${LISTEN_TOGETHER_STATE_STORE_ENABLED:-true}
+            LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS: ${LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS:-21600}
+            LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX: ${LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX:-listen-together:state}
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: ${LISTEN_TOGETHER_MUTATION_LOCK_ENABLED:-true}
+            LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: ${LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS:-3000}
+            LISTEN_TOGETHER_MUTATION_LOCK_PREFIX: ${LISTEN_TOGETHER_MUTATION_LOCK_PREFIX:-listen-together:mutation-lock}
+            LISTEN_TOGETHER_RECONNECT_SLO_MS: ${LISTEN_TOGETHER_RECONNECT_SLO_MS:-5000}
+            LISTEN_TOGETHER_ALLOW_POLLING: ${LISTEN_TOGETHER_ALLOW_POLLING:-false}
+            SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD: ${SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD:-3}
+            READINESS_REQUIRE_DEPENDENCIES: ${READINESS_REQUIRE_DEPENDENCIES:-true}
+            READINESS_DEPENDENCY_CHECK_INTERVAL_MS: ${READINESS_DEPENDENCY_CHECK_INTERVAL_MS:-5000}
+            READINESS_DEPENDENCY_CHECK_TIMEOUT_MS: ${READINESS_DEPENDENCY_CHECK_TIMEOUT_MS:-2000}
+
+            # Lidarr webhook callback URL - how Lidarr can reach soundspan
+            # Use backend:3006 for same-network communication, or external IP:3030 for external Lidarr
+            SOUNDSPAN_CALLBACK_URL: ${SOUNDSPAN_CALLBACK_URL:-http://backend:3006}
+            # Debug: enable extra podcast stream/cache logging
+            PODCAST_DEBUG: ${PODCAST_DEBUG:-0}
+
+            # Streaming sidecars (both optional — features hidden when unavailable)
+            # Backend code defaults to 127.0.0.1; docker-compose overrides with
+            # service names so containers resolve each other on the Docker network.
+            TIDAL_SIDECAR_URL: ${TIDAL_SIDECAR_URL:-http://tidal-downloader:8585}
+            YTMUSIC_STREAMER_URL: ${YTMUSIC_STREAMER_URL:-http://ytmusic-streamer:8586}
+        volumes:
+            - ${MUSIC_PATH:-./music}:/music
+            - backend_cache:/app/cache
+            - backend_logs:/app/logs
+        ports:
+            # For backend scale-out in compose on a single host, set BACKEND_PORT=0
+            # to avoid fixed host-port conflicts.
+            - "${BACKEND_PORT:-3006}:3006"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "node", "healthcheck.js"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+        networks:
+            default:
+                aliases:
+                    - backend
+                    - soundspan_backend
+
+    # Frontend Web UI - Your soundspan Next.js app
+    frontend:
+        build:
+            context: ./frontend
+            dockerfile: Dockerfile
+            args:
+                # Prefer relative /api requests (Next.js rewrites will proxy to backend).
+                # If you need a custom API URL, set NEXT_PUBLIC_API_URL explicitly.
+                NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+                # Build type: "nightly" for dev builds, unset/empty for tagged releases
+                NEXT_PUBLIC_BUILD_TYPE: ${NEXT_PUBLIC_BUILD_TYPE:-nightly}
+        environment:
+            NODE_ENV: ${NODE_ENV:-production}
+            # Used by next.config.ts rewrites() inside the container.
+            # IMPORTANT: "localhost" inside a container refers to itself, not the host.
+            BACKEND_URL: ${BACKEND_URL:-http://backend:3006}
+            # Exposed to the browser; leave empty by default so the app uses /api via rewrites.
+            NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+            NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING: ${NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING:-false}
+        ports:
+            # For frontend scale-out in compose on a single host, run behind a reverse proxy
+            # and avoid fixed host-port bindings on each replica.
+            - "${FRONTEND_PORT:-3030}:3030"
+        depends_on:
+            - backend
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "node", "healthcheck.js"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+
+    # Backend Worker - Runs background queues/cron without serving API traffic
+    # Enable with: docker compose --profile worker up -d
+    backend-worker:
+        profiles: ["worker"]
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+            target: worker-runtime
+        environment:
+            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            POSTGRES_USER: ${POSTGRES_USER:-soundspan}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+            POSTGRES_DB: ${POSTGRES_DB:-soundspan}
+            REDIS_URL: redis://redis:6379
+            # Preserve Redis streams/groups across restarts unless explicitly overridden
+            REDIS_FLUSH_ON_STARTUP: ${REDIS_FLUSH_ON_STARTUP:-false}
+            NODE_ENV: ${NODE_ENV:-production}
+            LOG_LEVEL: ${LOG_LEVEL:-warn}
+            MUSIC_PATH: /music
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            BACKEND_PROCESS_ROLE: worker
+            WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-3010}
+            SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD: ${SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD:-3}
+            READINESS_REQUIRE_DEPENDENCIES: ${READINESS_REQUIRE_DEPENDENCIES:-true}
+            READINESS_DEPENDENCY_CHECK_INTERVAL_MS: ${READINESS_DEPENDENCY_CHECK_INTERVAL_MS:-5000}
+            READINESS_DEPENDENCY_CHECK_TIMEOUT_MS: ${READINESS_DEPENDENCY_CHECK_TIMEOUT_MS:-2000}
+        volumes:
+            - ${MUSIC_PATH:-./music}:/music
+            - backend_cache:/app/cache
+            - backend_logs:/app/logs
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "node",
+                    "-e",
+                    "const http=require('http');const port=Number(process.env.WORKER_HEALTH_PORT||3010);const req=http.request({host:'127.0.0.1',port,path:'/health/live',method:'GET',timeout:5000},res=>process.exit(res.statusCode>=200&&res.statusCode<400?0:1));req.on('error',()=>process.exit(1));req.on('timeout',()=>{req.destroy();process.exit(1)});req.end();",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+
+    # ==============================================================================
+    # INFRASTRUCTURE (Database & Cache)
+    # ==============================================================================
+
+    postgres:
+        image: pgvector/pgvector:pg16
+        container_name: ${SOUNDSPAN_DB_CONTAINER_NAME:-soundspan_db}
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-soundspan}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+            POSTGRES_DB: ${POSTGRES_DB:-soundspan}
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        ports:
+            - "${POSTGRES_PORT:-5432}:5432"
+        restart: unless-stopped
+        healthcheck:
+            # IMPORTANT:
+            # pg_isready defaults to connecting to a database with the same name as the user.
+            # Our default user is "soundspan" and default database is "soundspan";
+            # without -d, some custom combinations can spam readiness logs.
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U ${POSTGRES_USER:-soundspan} -d ${POSTGRES_DB:-soundspan}",
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    redis:
+        image: redis:7-alpine
+        container_name: ${SOUNDSPAN_REDIS_CONTAINER_NAME:-soundspan_redis}
+        ports:
+            - "${REDIS_PORT:-6379}:6379"
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    # ==============================================================================
+    # STREAMING SIDECARS (TIDAL & YouTube Music)
+    # ==============================================================================
+
+    # TIDAL Sidecar - Python FastAPI service using tiddl for TIDAL downloads + streaming
+    #
+    # This single container handles two functions:
+    #   1. Downloads: Admin authenticates, downloads go to /music (Soulseek/Lidarr alternative)
+    #   2. Streaming: Each user links their own TIDAL account for gap-fill streaming
+    #
+    # Authentication:
+    #   - Download auth: Admin device-code flow via Settings > TIDAL
+    #   - Streaming auth: Per-user device-code flow via Settings > TIDAL Streaming
+    #
+    # K8s note: /music should be RWX (ReadWriteMany) if multiple pods share it;
+    # tidal_data can be RWO (ReadWriteOnce).
+    tidal-downloader:
+        build:
+            context: ./services/tidal-downloader
+        container_name: ${SOUNDSPAN_TIDAL_CONTAINER_NAME:-soundspan_tidal_downloader}
+        environment:
+            - TIDDL_PATH=/data/.tiddl
+            - MUSIC_PATH=/music
+            # Seconds to wait between each track download to avoid TIDAL rate limits (default: 3)
+            - TIDAL_TRACK_DELAY=${TIDAL_TRACK_DELAY:-3}
+        volumes:
+            - ${MUSIC_PATH:-./music}:/music
+            - tidal_data:/data
+        depends_on:
+            backend:
+                condition: service_healthy
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8585/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 15s
+        deploy:
+            resources:
+                limits:
+                    memory: 512M
+                    cpus: "2"
+                reservations:
+                    memory: 128M
+
+    # YouTube Music Streamer - Python FastAPI sidecar for YouTube Music streaming
+    #
+    # Proxies audio streams from YouTube Music for gap-fill playback of unowned tracks.
+    # Uses ytmusicapi for search/matching and yt-dlp for stream URL extraction.
+    # No files are saved to disk — audio is proxied in real-time from YouTube's CDN.
+    #
+    # Authentication:
+    #   - Admin: Configures Google OAuth Client ID/Secret in Settings > YouTube Music
+    #   - Users: Each user links their own YouTube Music account via device-code OAuth
+    #
+    # Requirements:
+    #   - A Google OAuth Client ID (type: "TVs and Limited Input devices")
+    #   - Users need YouTube Music Premium for full track playback
+    ytmusic-streamer:
+        build:
+            context: ./services/ytmusic-streamer
+        container_name: ${SOUNDSPAN_YTMUSIC_CONTAINER_NAME:-soundspan_ytmusic_streamer}
+        environment:
+            DATA_PATH: /data
+            DEBUG: ${YTMUSIC_DEBUG:-}
+            # ── Rate-pacing & request safety ─────────────────────
+            # Max concurrent InnerTube search requests in a batch
+            YTMUSIC_BATCH_CONCURRENCY: ${YTMUSIC_BATCH_CONCURRENCY:-3}
+            # Random delay range (seconds) between batch search requests
+            YTMUSIC_BATCH_DELAY_MIN: ${YTMUSIC_BATCH_DELAY_MIN:-0.3}
+            YTMUSIC_BATCH_DELAY_MAX: ${YTMUSIC_BATCH_DELAY_MAX:-1.0}
+            # Random delay range (seconds) between yt-dlp extractions
+            YTMUSIC_EXTRACT_DELAY_MIN: ${YTMUSIC_EXTRACT_DELAY_MIN:-0.5}
+            YTMUSIC_EXTRACT_DELAY_MAX: ${YTMUSIC_EXTRACT_DELAY_MAX:-2.0}
+            # Search result cache TTL in seconds (0 to disable)
+            YTMUSIC_SEARCH_CACHE_TTL: ${YTMUSIC_SEARCH_CACHE_TTL:-300}
+        volumes:
+            - ytmusic_data:/data
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8586/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
+        deploy:
+            resources:
+                limits:
+                    memory: 512M
+                    cpus: "1"
+
+    # ==============================================================================
+    # AUDIO ANALYSIS SERVICE (Essentia)
+    # ==============================================================================
+
+    # Audio Analyzer - Extracts BPM, key, mood, and other audio features
+    audio-analyzer:
+        build:
+            context: ./services/audio-analyzer
+        container_name: ${SOUNDSPAN_AUDIO_ANALYZER_CONTAINER_NAME:-soundspan_audio_analyzer}
+        environment:
+            REDIS_URL: redis://redis:6379
+            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            MUSIC_PATH: /music
+            BATCH_SIZE: ${AUDIO_ANALYSIS_BATCH_SIZE:-10}
+            SLEEP_INTERVAL: ${AUDIO_ANALYSIS_INTERVAL:-5}
+            # BRPOP timeout for blocking wait (seconds). Also controls DB reconciliation interval.
+            BRPOP_TIMEOUT: ${AUDIO_BRPOP_TIMEOUT:-30}
+            # Idle timeout before unloading ML models to free memory (seconds)
+            MODEL_IDLE_TIMEOUT: ${AUDIO_MODEL_IDLE_TIMEOUT:-300}
+            # Default workers reduced from 8 to 2 for stability (Issue #26 fix)
+            # Each worker requires 1-1.5GB RAM normally, up to 2-3GB peak
+            NUM_WORKERS: ${AUDIO_ANALYSIS_WORKERS:-2}
+            # CPU thread limiting per worker (default 1 for conservative CPU usage)
+            THREADS_PER_WORKER: ${AUDIO_ANALYSIS_THREADS_PER_WORKER:-1}
+        volumes:
+            # Music library (read-only)
+            - ${MUSIC_PATH:-./music}:/music:ro
+            # NOTE: Models are baked into the Docker image at /app/models
+            # No volume mount needed - previously this caused models to be hidden by empty volume
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+        # Memory limits prevent OOM kills (Issue #26 fix)
+        # 6G limit = safe for 2 workers at 2-3GB peak each
+        # 2G reservation = minimum guaranteed memory
+        deploy:
+            resources:
+                limits:
+                    memory: 6G
+                    cpus: "4"
+                reservations:
+                    memory: 2G
+                    # GPU acceleration (optional) - uncomment to enable
+                    # Requires NVIDIA Container Toolkit on the host:
+                    #   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+                    # devices:
+                    #     - driver: nvidia
+                    #       count: 1
+                    #       capabilities: [gpu]
+        healthcheck:
+            test: ["CMD", "pgrep", "-f", "python.*analyzer"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
+
+    # CLAP Audio Analyzer - Generates embeddings for similarity search
+    audio-analyzer-clap:
+        build:
+            context: ./services/audio-analyzer-clap
+        container_name: ${SOUNDSPAN_CLAP_CONTAINER_NAME:-soundspan_audio_analyzer_clap}
+        environment:
+            REDIS_URL: redis://redis:6379
+            DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
+            BACKEND_URL: http://backend:3006
+            MUSIC_PATH: /music
+            SLEEP_INTERVAL: ${CLAP_SLEEP_INTERVAL:-5}
+            NUM_WORKERS: ${CLAP_WORKERS:-2}
+            THREADS_PER_WORKER: ${CLAP_THREADS_PER_WORKER:-1}
+            MODEL_IDLE_TIMEOUT: ${CLAP_MODEL_IDLE_TIMEOUT:-300}
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+        volumes:
+            - ${MUSIC_PATH:-./music}:/music:ro
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+            backend:
+                condition: service_healthy
+            audio-analyzer:
+                condition: service_healthy
+                required: false  # Allow CLAP to start even if MusicCNN is disabled
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    # 3GB is sufficient - we only process 60s chunks
+                    memory: 3G
+                    cpus: "4"
+                reservations:
+                    memory: 1G
+                    # GPU acceleration (optional) - uncomment to enable
+                    # devices:
+                    #     - driver: nvidia
+                    #       count: 1
+                    #       capabilities: [gpu]
+
+volumes:
+    # soundspan core
+    postgres_data:
+    backend_cache:
+    backend_logs:
+    # Streaming sidecars
+    tidal_data:
+    ytmusic_data:
+
+networks:
+    default:
+        name: ${SOUNDSPAN_NETWORK_NAME:-soundspan_network}

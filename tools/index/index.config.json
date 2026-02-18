@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "1.0.0",
+  "indexFormatVersion": "1.0.0",
+  "engine": {
+    "name": "deterministic-hash-tf",
+    "version": "1.0.0",
+    "dimension": 384
+  },
+  "outputDir": ".agents/index/soundspan-v1",
+  "isolation": {
+    "mode": "branch-worktree",
+    "worktreeHashLength": 10
+  },
+  "includeRoots": [
+    "AGENTS.md",
+    "README.md",
+    "docs",
+    "backend/src",
+    "backend/prisma",
+    "frontend/app",
+    "frontend/components",
+    "frontend/features",
+    "frontend/hooks",
+    "frontend/lib",
+    ".github/policies",
+    ".github/scripts"
+  ],
+  "extensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".json",
+    ".md",
+    ".yml",
+    ".yaml",
+    ".sql",
+    ".prisma",
+    ".sh",
+    ".txt"
+  ],
+  "excludeGlobs": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/playwright-report/**",
+    "**/test-results/**",
+    "assets/**",
+    ".git/**",
+    ".agents/archives/**",
+    "frontend/.next/**"
+  ],
+  "pruneDirectories": [
+    ".git",
+    "node_modules",
+    "dist",
+    "coverage",
+    "playwright-report",
+    "test-results",
+    ".next"
+  ],
+  "chunking": {
+    "maxFileBytes": 900000,
+    "codeMaxLines": 110,
+    "codeOverlapLines": 14,
+    "docMaxLines": 140,
+    "docOverlapLines": 20,
+    "textMaxLines": 120,
+    "textOverlapLines": 16
+  },
+  "query": {
+    "defaultTopK": 8,
+    "maxTopK": 30,
+    "weights": {
+      "vector": 0.62,
+      "lexical": 0.24,
+      "symbol": 0.08,
+      "path": 0.04,
+      "recency": 0.02
+    }
+  },
+  "areaWeights": {
+    "backend/src/": 1,
+    "backend/prisma/": 0.92,
+    "frontend/app/": 0.98,
+    "frontend/components/": 0.95,
+    "frontend/features/": 0.97,
+    "frontend/hooks/": 0.94,
+    "frontend/lib/": 0.96,
+    ".github/scripts/": 0.89,
+    ".github/policies/": 0.9,
+    "docs/": 0.86,
+    "README.md": 0.75,
+    "AGENTS.md": 0.84
+  }
+}

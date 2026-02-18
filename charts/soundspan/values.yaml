@@ -1,0 +1,662 @@
+# =============================================================================
+# soundspan Helm Chart — values.yaml
+# =============================================================================
+# Two deployment modes:
+#   1. All-in-One (default): Single container with backend, frontend, postgres,
+#      redis, and audio analyzer baked in. Just mount /music and /data.
+#   2. Individual: Separate deployments for each service. Enable by setting
+#      deploymentMode: individual
+# =============================================================================
+
+# -- Deployment mode: "aio" (all-in-one) or "individual" (microservices)
+deploymentMode: aio
+
+# -- Global environment sources shared by all containers managed by this chart.
+#    `global.env` is materialized as a ConfigMap and injected via envFrom.
+#    `global.envFrom` lets you attach existing Secrets/ConfigMaps cluster-wide.
+global:
+  # Labels added to chart-managed resource metadata.
+  labels: {}
+  # Annotations added to all Pod templates.
+  podAnnotations: {}
+  # Image pull secrets used by all chart-managed pods.
+  imagePullSecrets: []
+  # Service account used by chart-managed workloads.
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  # Pod-level security context used by chart-managed workloads.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  # Container-level security context used by chart-managed workloads.
+  securityContext:
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+  # Global scheduling defaults (service-specific values still take precedence).
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Example:
+  # env:
+  #   HTTP_PROXY: http://proxy.internal:3128
+  #   HTTPS_PROXY: http://proxy.internal:3128
+  env: {}
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-global-env
+  envFrom: []
+
+# -- High-availability convenience mode for individual deployments.
+#    When enabled, the chart applies sane HA defaults so operators do not
+#    need to set many individual switches manually.
+#    This mode only affects deploymentMode=individual.
+haMode:
+  enabled: false
+  backendReplicas: 2
+  frontendReplicas: 2
+  backendWorker:
+    enabled: true
+    replicas: 2
+  pdb:
+    enabled: true
+  runtime:
+    # Keep cross-pod realtime state/fanout enabled.
+    listenTogetherRedisAdapterEnabled: true
+    listenTogetherStateSyncEnabled: true
+    listenTogetherStateStoreEnabled: true
+    listenTogetherMutationLockEnabled: true
+    # Websocket-only by default for HA unless sticky sessions are guaranteed.
+    listenTogetherAllowPolling: false
+    # Readiness should fail when Redis/PostgreSQL are unhealthy.
+    readinessRequireDependencies: true
+
+# =============================================================================
+# ALL-IN-ONE MODE
+# =============================================================================
+aio:
+  image:
+    repository: ghcr.io/soundspan/soundspan
+    tag: 1.0.0
+    pullPolicy: IfNotPresent
+
+  # -- Resource limits for the AIO container
+  resources:
+    requests:
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+
+  # -- Persistence for /data (postgres, redis, cache, secrets)
+  persistence:
+    data:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      existingClaim: ""
+
+  # -- Environment variables specific to AIO
+  env:
+    # Audio analysis workers
+    AUDIO_ANALYSIS_WORKERS: "2"
+    AUDIO_ANALYSIS_THREADS_PER_WORKER: "1"
+    AUDIO_ANALYSIS_BATCH_SIZE: "10"
+    AUDIO_BRPOP_TIMEOUT: "30"
+    AUDIO_MODEL_IDLE_TIMEOUT: "300"
+  # -- Additional environment variable sources for AIO container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-extra-env
+  envFrom: []
+
+  # -- GPU acceleration for audio analysis (NVIDIA)
+  gpu:
+    enabled: false
+    # count: 1
+
+# =============================================================================
+# INDIVIDUAL MODE — Service-specific configuration
+# =============================================================================
+
+backend:
+  image:
+    repository: ghcr.io/soundspan/soundspan-backend
+    tag: 1.0.0
+    pullPolicy: Always
+  # -- Backend process role. Leave empty for auto:
+  #    - "all" when backendWorker is disabled
+  #    - "api" when backendWorker is enabled
+  # Valid values: "all", "api", "worker"
+  processRole: ""
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  pdb:
+    enabled: false
+    # Use one of minAvailable or maxUnavailable
+    minAvailable: 1
+    # maxUnavailable: 1
+  # Optional topology spread constraints for safer multi-node placement
+  topologySpreadConstraints: []
+  port: 3006
+  resources:
+    requests:
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  persistence:
+    cache:
+      enabled: true
+      # -- Storage type for backend cache volume: "pvc" or "emptyDir"
+      type: pvc
+      size: 5Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      existingClaim: ""
+    logs:
+      enabled: true
+      # -- Storage type for backend logs volume: "pvc" or "emptyDir"
+      type: pvc
+      size: 1Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      existingClaim: ""
+  # Defaults to persistent music volume so native covers/transcodes survive
+  # pod restarts even when backend cache PVC is disabled.
+  # Override with:
+  # env:
+  #   TRANSCODE_CACHE_PATH: /music/.soundspan/transcodes
+  env: {}
+  # -- Additional environment variable sources for backend container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-backend-extra-env
+  envFrom: []
+  # Optional service-specific scheduling overrides (fallback to global values when empty)
+  nodeSelector: {}
+  tolerations: []
+  # Supports full Kubernetes affinity schema, including:
+  # - nodeAffinity
+  # - podAffinity
+  # - podAntiAffinity
+  affinity: {}
+
+backendWorker:
+  # -- Enable dedicated backend worker deployment in individual mode.
+  # When enabled, backend API pods auto-run with BACKEND_PROCESS_ROLE=api
+  # unless backend.processRole is explicitly set.
+  enabled: false
+  image:
+    repository: ghcr.io/soundspan/soundspan-backend-worker
+    tag: 1.0.0
+    pullPolicy: Always
+  # -- Worker process role override. Defaults to "worker".
+  processRole: ""
+  # -- Optional command override. Leave empty to use image defaults.
+  command: []
+  # -- Optional args override. Leave empty to use image defaults.
+  args: []
+  health:
+    # -- Internal worker health server port used for liveness/readiness probes.
+    port: 3010
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  pdb:
+    enabled: false
+    # Use one of minAvailable or maxUnavailable
+    minAvailable: 1
+    # maxUnavailable: 1
+  # Optional topology spread constraints for safer multi-node placement
+  topologySpreadConstraints: []
+  resources:
+    requests:
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  # Worker defaults to the same transcode cache root used by backend API
+  # (on the music volume) unless explicitly overridden.
+  # Override with:
+  # env:
+  #   TRANSCODE_CACHE_PATH: /music/.soundspan/transcodes
+  env: {}
+  # -- Additional environment variable sources for backend worker container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-worker-extra-env
+  envFrom: []
+  # Optional service-specific scheduling overrides (fallback to global values when empty)
+  nodeSelector: {}
+  tolerations: []
+  # Supports full Kubernetes affinity schema, including:
+  # - nodeAffinity
+  # - podAffinity
+  # - podAntiAffinity
+  affinity: {}
+
+frontend:
+  image:
+    repository: ghcr.io/soundspan/soundspan-frontend
+    tag: 1.0.0
+    pullPolicy: Always
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  pdb:
+    enabled: false
+    # Use one of minAvailable or maxUnavailable
+    minAvailable: 1
+    # maxUnavailable: 1
+  # Optional topology spread constraints for safer multi-node placement
+  topologySpreadConstraints: []
+  port: 3030
+  resources:
+    requests:
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  env: {}
+  # -- Additional environment variable sources for frontend container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-frontend-extra-env
+  envFrom: []
+  # Optional service-specific scheduling overrides (fallback to global values when empty)
+  nodeSelector: {}
+  tolerations: []
+  # Supports full Kubernetes affinity schema, including:
+  # - nodeAffinity
+  # - podAffinity
+  # - podAntiAffinity
+  affinity: {}
+
+postgresql:
+  # -- Set enabled: false to use an external PostgreSQL instance
+  enabled: true
+  image:
+    repository: pgvector/pgvector
+    tag: pg16
+    pullPolicy: IfNotPresent
+  port: 5432
+  resources:
+    requests:
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  # -- External PostgreSQL connection (used when enabled: false).
+  # If `external.url` is set, it takes precedence and can include SSL/query params.
+  external:
+    host: postgres.example.com
+    port: 5432
+    url: ""
+  # -- Additional environment variable sources for PostgreSQL container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-postgresql-extra-env
+  envFrom: []
+
+redis:
+  # -- Set enabled: false to use an external Redis instance
+  enabled: true
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  port: 6379
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # -- External Redis connection (used when enabled: false).
+  # If `external.url` is set, it takes precedence and can include auth/TLS params.
+  external:
+    host: valkey
+    port: 6379
+    url: ""
+  # -- Additional environment variable sources for Redis container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-redis-extra-env
+  envFrom: []
+
+# =============================================================================
+# STREAMING SIDECARS (optional, both modes)
+# =============================================================================
+
+tidalSidecar:
+  enabled: false
+  image:
+    repository: ghcr.io/soundspan/soundspan-tidal-downloader
+    tag: 1.0.0
+    pullPolicy: Always
+  port: 8585
+  resources:
+    requests:
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  env:
+    TIDAL_TRACK_DELAY: "3"
+  # -- Additional environment variable sources for TIDAL sidecar container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-tidal-extra-env
+  envFrom: []
+
+ytmusicStreamer:
+  enabled: false
+  image:
+    repository: ghcr.io/soundspan/soundspan-ytmusic-streamer
+    tag: 1.0.0
+    pullPolicy: Always
+  port: 8586
+  resources:
+    requests:
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  env:
+    DEBUG: ""
+    # ── Rate-pacing & request safety ─────────────────────────────────
+    # These settings control how the sidecar paces requests to YouTube
+    # APIs.  Higher values = slower but more respectful of rate limits.
+    #
+    # Max concurrent InnerTube search requests within a batch call.
+    # Default 3 balances speed vs. safety.  Set to 1 for maximum caution.
+    YTMUSIC_BATCH_CONCURRENCY: "3"
+    # Random delay range (seconds) between batch search requests.
+    YTMUSIC_BATCH_DELAY_MIN: "0.3"
+    YTMUSIC_BATCH_DELAY_MAX: "1.0"
+    # Random delay range (seconds) between yt-dlp stream extractions.
+    YTMUSIC_EXTRACT_DELAY_MIN: "0.5"
+    YTMUSIC_EXTRACT_DELAY_MAX: "2.0"
+    # Search result cache TTL in seconds (0 to disable).
+    # Prevents identical searches from hitting InnerTube repeatedly.
+    YTMUSIC_SEARCH_CACHE_TTL: "300"
+  # -- Additional environment variable sources for YT Music streamer container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-ytmusic-extra-env
+  envFrom: []
+
+# =============================================================================
+# AUDIO ANALYZERS (optional, individual mode only)
+# =============================================================================
+
+audioAnalyzer:
+  enabled: false
+  replicas: 1
+  image:
+    repository: ghcr.io/soundspan/soundspan-audio-analyzer
+    tag: 1.0.0
+    pullPolicy: Always
+  resources:
+    requests:
+      memory: 256Mi
+    limits:
+      memory: 1536Mi
+  env:
+    BATCH_SIZE: "10"
+    SLEEP_INTERVAL: "5"
+    BRPOP_TIMEOUT: "30"
+    MODEL_IDLE_TIMEOUT: "300"
+    NUM_WORKERS: "2"
+    THREADS_PER_WORKER: "1"
+  # -- Additional environment variable sources for audio analyzer container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-audio-analyzer-extra-env
+  envFrom: []
+  # Optional service-specific scheduling overrides (fallback to global values when empty)
+  nodeSelector: {}
+  tolerations: []
+  # Supports full Kubernetes affinity schema, including:
+  # - nodeAffinity
+  # - podAffinity
+  # - podAntiAffinity
+  affinity: {}
+  gpu:
+    enabled: false
+
+audioAnalyzerClap:
+  enabled: false
+  replicas: 1
+  image:
+    repository: ghcr.io/soundspan/soundspan-audio-analyzer-clap
+    tag: 1.0.0
+    pullPolicy: Always
+  resources:
+    requests:
+      memory: 1Gi
+    limits:
+      memory: 5Gi
+  env:
+    SLEEP_INTERVAL: "5"
+    NUM_WORKERS: "2"
+    THREADS_PER_WORKER: "1"
+    MODEL_IDLE_TIMEOUT: "300"
+  # -- Additional environment variable sources for CLAP analyzer container.
+  # Example:
+  # envFrom:
+  #   - secretRef:
+  #       name: soundspan-audio-analyzer-clap-extra-env
+  envFrom: []
+  # Optional service-specific scheduling overrides (fallback to global values when empty)
+  nodeSelector: {}
+  tolerations: []
+  # Supports full Kubernetes affinity schema, including:
+  # - nodeAffinity
+  # - podAffinity
+  # - podAntiAffinity
+  affinity: {}
+  gpu:
+    enabled: false
+
+# =============================================================================
+# SHARED CONFIGURATION
+# =============================================================================
+
+# -- Music library volume (required, both modes)
+#
+# Three options (pick one):
+#   1. existingClaim — mount a PVC you already created (recommended)
+#        music.persistence.existingClaim: my-nfs-music
+#
+#   2. Create a new PVC — set enabled: true and configure size/storageClass
+#        music.persistence.enabled: true
+#        music.persistence.size: 500Gi
+#        music.persistence.storageClass: nfs-client
+#
+#   3. hostPath — bind-mount a directory from the node (single-node only)
+#        music.persistence.enabled: false
+#        music.hostPath: /mnt/media/music
+#
+music:
+  persistence:
+    # -- Set to true to create a new PVC. Ignored if existingClaim is set.
+    enabled: true
+    size: 100Gi
+    storageClass: ""
+    # -- RWX required if multiple pods need read/write access (individual mode
+    #    with tidal-downloader). Use RWO if only one pod accesses it.
+    accessMode: ReadWriteMany
+    # -- Name of a pre-existing PVC to mount. When set, no new PVC is created.
+    existingClaim: ""
+  # -- Bind-mount a host directory instead of using a PVC (only when
+  #    persistence.enabled=false AND existingClaim is empty).
+  #    Not recommended for multi-node clusters.
+  hostPath: ""
+
+# -- Secrets
+#
+# Two options (pick one):
+#   1. existingSecret — reference a Secret you manage externally (recommended)
+#        secrets.existingSecret: my-soundspan-secrets
+#      Expected keys in that Secret:
+#        SESSION_SECRET, SETTINGS_ENCRYPTION_KEY, INTERNAL_API_SECRET
+#      Add these when using chart-managed PostgreSQL or host/port external PostgreSQL:
+#        POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+#
+#   2. Auto-generate — leave existingSecret empty and the chart creates a
+#      Secret for you. Any field left blank is auto-generated on first install.
+#      ⚠️  Do NOT put real secrets in a values file that you commit to git.
+#      Use --set on the CLI or a SOPS/sealed-secrets workflow instead.
+#
+secrets:
+  # -- Name of a pre-existing Kubernetes Secret. When set, the chart does NOT
+  #    create its own Secret — all secretKeyRef lookups point here instead.
+  existingSecret: ""
+  # -- The fields below are only used when existingSecret is empty.
+  #    Leave blank to auto-generate secure random values on first install.
+  sessionSecret: "" # Session encryption key (auto: 64 char random)
+  settingsEncryptionKey: "" # Credential encryption key (auto: 64 char random)
+  internalApiSecret: "" # Service-to-service auth (auto: 64 char random)
+  postgresUser: soundspan
+  postgresPassword: "" # (auto: 32 char random)
+  postgresDatabase: soundspan
+
+# -- Common environment variables applied to backend (both modes)
+config:
+  nodeEnv: production
+  logLevel: warn
+  allowedOrigins: ""
+  timezone: UTC
+  # -- Flush Redis with FLUSHALL on backend startup.
+  #    Default false to preserve Redis Streams/group metadata used by
+  #    multi-replica analyzer services (for example CLAP text embedding).
+  #    Set true only for fully disposable local/dev Redis instances.
+  redisFlushOnStartup: false
+  # -- Lidarr integration
+  lidarrEnabled: false
+  lidarrUrl: ""
+  lidarrApiKey: ""
+  # -- Audiobookshelf integration
+  audiobookshelfUrl: ""
+  audiobookshelfToken: ""
+  # -- Optional API keys
+  lastfmApiKey: ""
+  fanartApiKey: ""
+  openaiApiKey: ""
+  deezerApiKey: ""
+  # -- Set to true to expose API docs publicly
+  docsPublic: false
+  # -- Enables Socket.IO Redis adapter for Listen Together cross-pod fanout.
+  #    Keep true for multi-replica backend API deployments.
+  listenTogetherRedisAdapterEnabled: true
+  # -- Enables cross-pod Listen Together in-memory state synchronization via Redis pub/sub.
+  #    Keep true for multi-replica backend API deployments.
+  listenTogetherStateSyncEnabled: true
+  # -- Enables Redis-backed authoritative Listen Together snapshot storage.
+  #    Keep true for multi-replica backend API deployments.
+  listenTogetherStateStoreEnabled: true
+  # -- TTL (seconds) for authoritative Listen Together snapshots in Redis.
+  listenTogetherStateStoreTtlSeconds: 21600
+  # -- Redis key prefix for authoritative Listen Together snapshots.
+  listenTogetherStateStoreKeyPrefix: "listen-together:state"
+  # -- Enables Redis-backed per-group lock for Listen Together hot-path mutations.
+  #    Keep true for multi-replica backend API deployments.
+  listenTogetherMutationLockEnabled: true
+  # -- Lock TTL (ms) for Listen Together hot-path mutation critical section.
+  listenTogetherMutationLockTtlMs: 3000
+  # -- Redis key prefix for Listen Together mutation locks.
+  listenTogetherMutationLockPrefix: "listen-together:mutation-lock"
+  # -- Reconnect SLO threshold (ms) for Listen Together socket reconnect warnings.
+  listenTogetherReconnectSloMs: 5000
+  # -- Allow Socket.IO polling fallback for Listen Together.
+  #    Keep false for multi-replica/backed-by-LB deployments unless sticky sessions are guaranteed.
+  listenTogetherAllowPolling: false
+  # -- Consecutive scheduler claim skips before emitting SLO warning logs.
+  schedulerClaimSkipWarnThreshold: 3
+  # -- Readiness probes fail when Redis/PostgreSQL checks fail (recommended for HA rollouts).
+  readinessRequireDependencies: true
+  # -- Minimum interval between readiness dependency probes (ms).
+  readinessDependencyCheckIntervalMs: 5000
+  # -- Timeout per dependency probe operation (ms).
+  readinessDependencyCheckTimeoutMs: 2000
+
+# -- Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: soundspan.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: soundspan-tls
+    #   hosts:
+    #     - soundspan.local
+
+# -- Gateway API configuration (alternative to Ingress)
+#    Uses the newer gateway.networking.k8s.io/v1 HTTPRoute resource.
+#    Requires a Gateway API implementation (e.g., Envoy Gateway, Istio,
+#    Cilium, Traefik, nginx-gateway-fabric) and a Gateway resource to exist.
+#    Only one of ingress or gateway should be enabled.
+gateway:
+  enabled: false
+  annotations: {}
+  # -- Parent Gateway references. The Gateway must already exist.
+  parentRefs:
+    - name: default-gateway
+    #   namespace: gateway-system
+    #   sectionName: https
+    #   port: 443
+  # -- Hostnames to match (optional; omit to match all hostnames on the Gateway)
+  hostnames: []
+    # - soundspan.example.com
+  # -- Optional weight for the backend (for traffic splitting)
+  # backendWeight: 100
+  # -- Optional HTTPRoute filters (e.g., RequestRedirect, RequestHeaderModifier)
+  # filters: []
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  port: 3030
+

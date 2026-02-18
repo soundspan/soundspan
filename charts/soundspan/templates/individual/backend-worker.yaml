@@ -1,0 +1,269 @@
+{{- $haEnabled := eq (include "soundspan.haEnabled" .) "true" }}
+{{- $backendWorkerEnabled := eq (include "soundspan.backendWorkerEnabled" .) "true" }}
+{{- $backendWorkerReplicas := include "soundspan.backendWorkerReplicas" . | int }}
+{{- $backendWorkerPdbEnabled := and (gt $backendWorkerReplicas 1) (ternary .Values.haMode.pdb.enabled .Values.backendWorker.pdb.enabled $haEnabled) }}
+{{- $readinessRequireDependencies := ternary .Values.haMode.runtime.readinessRequireDependencies .Values.config.readinessRequireDependencies $haEnabled }}
+{{- if and (eq .Values.deploymentMode "individual") $backendWorkerEnabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend-worker
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend-worker") | nindent 4 }}
+spec:
+  replicas: {{ $backendWorkerReplicas }}
+  strategy:
+    {{- toYaml .Values.backendWorker.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend-worker") | nindent 8 }}
+        {{- with .Values.global.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.global.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: backend-worker
+          image: "{{ .Values.backendWorker.image.repository }}:{{ .Values.backendWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.backendWorker.image.pullPolicy }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.backendWorker.health.port }}
+              protocol: TCP
+          {{- with .Values.backendWorker.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backendWorker.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          {{- $backendWorkerEnv := .Values.backendWorker.env | default (dict) }}
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.config.nodeEnv | quote }}
+            - name: PORT
+              value: {{ .Values.backend.port | quote }}
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+            - name: BACKEND_PROCESS_ROLE
+              value: {{ (default "worker" .Values.backendWorker.processRole) | quote }}
+            - name: WORKER_HEALTH_PORT
+              value: {{ .Values.backendWorker.health.port | quote }}
+            - name: SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD
+              value: {{ .Values.config.schedulerClaimSkipWarnThreshold | quote }}
+            - name: READINESS_REQUIRE_DEPENDENCIES
+              value: {{ $readinessRequireDependencies | quote }}
+            - name: READINESS_DEPENDENCY_CHECK_INTERVAL_MS
+              value: {{ .Values.config.readinessDependencyCheckIntervalMs | quote }}
+            - name: READINESS_DEPENDENCY_CHECK_TIMEOUT_MS
+              value: {{ .Values.config.readinessDependencyCheckTimeoutMs | quote }}
+            - name: MUSIC_PATH
+              value: /music
+            {{- if not (hasKey $backendWorkerEnv "TRANSCODE_CACHE_PATH") }}
+            - name: TRANSCODE_CACHE_PATH
+              value: /music/.soundspan/transcodes
+            {{- end }}
+            # Secret-backed env vars
+            {{- if or .Values.postgresql.enabled (not .Values.postgresql.external.url) }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: POSTGRES_DB
+            {{- end }}
+            - name: DATABASE_URL
+              value: {{ include "soundspan.databaseUrl" . | quote }}
+            - name: REDIS_URL
+              value: {{ include "soundspan.redisUrl" . | quote }}
+            - name: REDIS_FLUSH_ON_STARTUP
+              value: {{ .Values.config.redisFlushOnStartup | quote }}
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: SESSION_SECRET
+            - name: SETTINGS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: SETTINGS_ENCRYPTION_KEY
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: INTERNAL_API_SECRET
+            - name: TIDAL_SIDECAR_URL
+              value: {{ include "soundspan.tidalSidecarUrl" . | quote }}
+            - name: YTMUSIC_STREAMER_URL
+              value: {{ include "soundspan.ytmusicStreamerUrl" . | quote }}
+            {{- if .Values.config.allowedOrigins }}
+            - name: ALLOWED_ORIGINS
+              value: {{ .Values.config.allowedOrigins | quote }}
+            {{- end }}
+            {{- if .Values.config.logLevel }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            {{- end }}
+            {{- if .Values.config.docsPublic }}
+            - name: DOCS_PUBLIC
+              value: "true"
+            {{- end }}
+            {{- if .Values.config.lidarrEnabled }}
+            - name: LIDARR_ENABLED
+              value: "true"
+            - name: LIDARR_URL
+              value: {{ .Values.config.lidarrUrl | quote }}
+            - name: LIDARR_API_KEY
+              value: {{ .Values.config.lidarrApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.audiobookshelfUrl }}
+            - name: AUDIOBOOKSHELF_URL
+              value: {{ .Values.config.audiobookshelfUrl | quote }}
+            - name: AUDIOBOOKSHELF_TOKEN
+              value: {{ .Values.config.audiobookshelfToken | quote }}
+            {{- end }}
+            {{- if .Values.config.lastfmApiKey }}
+            - name: LASTFM_API_KEY
+              value: {{ .Values.config.lastfmApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.fanartApiKey }}
+            - name: FANART_API_KEY
+              value: {{ .Values.config.fanartApiKey | quote }}
+            {{- end }}
+            {{- if .Values.config.openaiApiKey }}
+            - name: OPENAI_API_KEY
+              value: {{ .Values.config.openaiApiKey | quote }}
+            {{- end }}
+            {{- range $key, $val := $backendWorkerEnv }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          {{- $globalEnv := .Values.global.env | default (dict) }}
+          {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
+          {{- $backendWorkerEnvFrom := .Values.backendWorker.envFrom | default (list) }}
+          {{- if or (gt (len $globalEnv) 0) (gt (len $globalEnvFrom) 0) (gt (len $backendWorkerEnvFrom) 0) }}
+          envFrom:
+            {{- if gt (len $globalEnv) 0 }}
+            - configMapRef:
+                name: {{ include "soundspan.fullname" . }}-global-env
+            {{- end }}
+            {{- with $globalEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $backendWorkerEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: music
+              mountPath: /music
+          resources:
+            {{- toYaml .Values.backendWorker.resources | nindent 12 }}
+      volumes:
+        - name: music
+          {{- if .Values.music.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.music.persistence.existingClaim }}
+          {{- else if .Values.music.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-music
+          {{- else if .Values.music.hostPath }}
+          hostPath:
+            path: {{ .Values.music.hostPath }}
+            type: Directory
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.backendWorker.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backendWorker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.backendWorker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.backendWorker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+{{- if $backendWorkerPdbEnabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "soundspan.fullname" . }}-backend-worker
+  labels:
+    {{- include "soundspan.componentLabels" (dict "context" . "component" "backend-worker") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "soundspan.componentSelectorLabels" (dict "context" . "component" "backend-worker") | nindent 6 }}
+  {{- if hasKey .Values.backendWorker.pdb "maxUnavailable" }}
+  maxUnavailable: {{ .Values.backendWorker.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.backendWorker.pdb.minAvailable | default 1 }}
+  {{- end }}
+{{- end }}
+{{- end }}

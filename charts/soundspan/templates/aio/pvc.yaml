@@ -1,0 +1,19 @@
+{{- if eq .Values.deploymentMode "aio" }}
+{{- if and .Values.aio.persistence.data.enabled (not .Values.aio.persistence.data.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "soundspan.fullname" . }}-data
+  labels:
+    {{- include "soundspan.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.aio.persistence.data.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.aio.persistence.data.size }}
+  {{- if .Values.aio.persistence.data.storageClass }}
+  storageClassName: {{ .Values.aio.persistence.data.storageClass | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}
