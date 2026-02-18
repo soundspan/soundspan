@@ -4,7 +4,7 @@ import { createClient } from "redis";
 import { randomUUID } from "crypto";
 import { writeFileSync } from "fs";
 import { join } from "path";
-import { VOCAB_DEFINITIONS, VOCABULARY_TERMS } from "../src/data/featureProfiles";
+import { VOCAB_DEFINITIONS, VOCABULARY_TERMS } from "../src/config/featureProfiles";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 
@@ -101,7 +101,7 @@ async function main() {
         terms
     };
 
-    const outputPath = join(__dirname, "../src/data/vibe-vocabulary.json");
+    const outputPath = join(__dirname, "../src/config/vibe-vocabulary.json");
     writeFileSync(outputPath, JSON.stringify(vocabulary, null, 2));
 
     console.log(`\nDone! ${success} terms generated, ${failed} failed.`);

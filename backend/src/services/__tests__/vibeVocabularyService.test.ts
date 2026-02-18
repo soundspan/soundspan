@@ -196,6 +196,22 @@ describe("vibe vocabulary service behavior", () => {
         expect(mod.calculateFeatureMatch({}, {})).toBe(0.5);
     });
 
+    it("ignores non-numeric target profile values when scoring", () => {
+        const { mod } = loadModule();
+
+        const malformedTarget = {
+            energy: 0.8,
+            valence: null,
+        } as any;
+
+        expect(
+            mod.calculateFeatureMatch(
+                { energy: 0.8, valence: 0.1 },
+                malformedTarget
+            )
+        ).toBe(1);
+    });
+
     it("re-ranks candidates by blending clap and feature scores", () => {
         const { mod, logger } = loadModule();
 

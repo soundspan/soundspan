@@ -3,7 +3,7 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { logger } from "../utils/logger";
-import { VOCAB_DEFINITIONS, FeatureProfile, TermType } from "../data/featureProfiles";
+import { VOCAB_DEFINITIONS, FeatureProfile, TermType } from "../config/featureProfiles";
 
 export interface VocabTerm {
     name: string;
@@ -32,10 +32,10 @@ let vocabulary: Vocabulary | null = null;
  * Load vocabulary from JSON file. Call at startup.
  */
 export function loadVocabulary(): Vocabulary | null {
-    // Try multiple paths: dist/data (compiled), src/data (dev/source), relative to __dirname
+    // Try multiple paths for dev (tsx), compiled dist, and legacy layouts.
     const possiblePaths = [
-        join(__dirname, "../data/vibe-vocabulary.json"),        // Works in dev (tsx)
-        join(__dirname, "../../src/data/vibe-vocabulary.json"), // Works in prod (dist -> src)
+        join(__dirname, "../config/vibe-vocabulary.json"),
+        join(__dirname, "../../src/config/vibe-vocabulary.json"),
     ];
 
     const vocabPath = possiblePaths.find(p => existsSync(p));
@@ -221,9 +221,10 @@ export function calculateFeatureMatch(
     let count = 0;
 
     for (const [feature, targetValue] of Object.entries(targetProfile)) {
-        if (targetValue === undefined) continue;
+        if (typeof targetValue !== "number") continue;
 
-        const trackValue = trackFeatures[feature] ?? 0.5;
+        const rawTrackValue = trackFeatures[feature];
+        const trackValue = typeof rawTrackValue === "number" ? rawTrackValue : 0.5;
         const match = 1 - Math.abs(trackValue - targetValue);
         score += match;
         count++;

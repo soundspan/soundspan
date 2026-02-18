@@ -161,6 +161,7 @@ systems/
 
 # Development
 .worktrees/
+/mcp.json
 reset-and-setup.sh
 organize-singles.sh
 COMMIT_MESSAGE.txt

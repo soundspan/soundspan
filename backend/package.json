@@ -9,6 +9,7 @@
     },
     "scripts": {
         "dev": "tsx watch src/index.ts",
+        "prebuild": "tsx src/scripts/verifyNoIgnoredDataPaths.ts",
         "build": "tsc",
         "start": "node dist/index.js",
         "db:migrate": "prisma migrate deploy",
