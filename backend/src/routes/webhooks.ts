@@ -15,6 +15,7 @@ import { logger } from "../utils/logger";
 import { BRAND_SLUG } from "../config/brand";
 
 const router = Router();
+const LEGACY_SERVICE_ALIASES = [BRAND_SLUG];
 
 // GET /webhooks/lidarr/verify - Webhook verification endpoint
 router.get("/lidarr/verify", (req, res) => {
@@ -23,6 +24,7 @@ router.get("/lidarr/verify", (req, res) => {
         status: "ok",
         timestamp: new Date().toISOString(),
         service: BRAND_SLUG,
+        legacyServiceAliases: LEGACY_SERVICE_ALIASES,
         version: process.env.npm_package_version || "unknown",
     });
 });

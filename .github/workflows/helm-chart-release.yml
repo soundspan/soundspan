@@ -28,6 +28,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Resolve release metadata
         id: meta
         shell: bash
@@ -62,12 +67,18 @@ jobs:
           echo "repo_owner_lower=${REPO_OWNER_LOWER}" >> "${GITHUB_OUTPUT}"
           echo "helm_repo_url=${HELM_REPO_URL}" >> "${GITHUB_OUTPUT}"
 
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Wait for release images in GHCR
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
           REPO_OWNER_LOWER: ${{ steps.meta.outputs.repo_owner_lower }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -84,29 +95,26 @@ jobs:
 
           max_wait_seconds=1800
           poll_interval_seconds=20
-          deadline=$(( $(date +%s) + max_wait_seconds ))
 
           for image in "${images[@]}"; do
-            manifest_url="https://ghcr.io/v2/${REPO_OWNER_LOWER}/${image}/manifests/${RELEASE_TAG}"
-            echo "Waiting for ${image}:${RELEASE_TAG}..."
+            image_ref="ghcr.io/${REPO_OWNER_LOWER}/${image}:${RELEASE_TAG}"
+            image_deadline=$(( $(date +%s) + max_wait_seconds ))
+            echo "Waiting for ${image_ref}..."
 
             while true; do
-              status_code="$(curl -sS -o /dev/null -w '%{http_code}' \
-                -H "Authorization: Bearer ${GH_TOKEN}" \
-                -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
-                "${manifest_url}" || true)"
-
-              if [ "${status_code}" = "200" ]; then
-                echo "Found ${image}:${RELEASE_TAG}"
+              if docker manifest inspect "${image_ref}" >/dev/null 2>&1; then
+                echo "Found ${image_ref}"
                 break
               fi
 
               now="$(date +%s)"
-              if [ "${now}" -ge "${deadline}" ]; then
-                echo "Timed out waiting for ${image}:${RELEASE_TAG}. Last status: ${status_code}" >&2
+              if [ "${now}" -ge "${image_deadline}" ]; then
+                echo "Timed out waiting for ${image_ref} after ${max_wait_seconds}s." >&2
                 exit 1
               fi
 
+              remaining="$(( image_deadline - now ))"
+              echo "Still waiting for ${image_ref} (${remaining}s remaining)..."
               sleep "${poll_interval_seconds}"
             done
           done
