@@ -10,7 +10,7 @@ soundspan is built for people who want streaming convenience without giving up o
 
 > Gratitude: soundspan began from the foundation created by [`Chevron7Locked/kima-hub`](https://github.com/Chevron7Locked/kima-hub). Thank you for the original project and momentum!
 
-![Placeholder: Hero dashboard screenshot](assets/screenshots/desktop-home.png)
+<img src="assets/screenshots/desktop-home.png" width="750"/>
 
 ---
 
