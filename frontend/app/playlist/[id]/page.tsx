@@ -32,6 +32,7 @@ import {
     AlertCircle,
     X,
     Loader2,
+    Radio,
 } from "lucide-react";
 
 interface Track {
@@ -355,6 +356,28 @@ export default function PlaylistDetailPage() {
         playTracks(tracks, index);
     };
 
+    const handleStartRadio = async () => {
+        try {
+            toast.info("Starting playlist radio...");
+            const response = await api.getRadioTracks("playlist", playlistId);
+            if (response.tracks && response.tracks.length > 0) {
+                const tracks = response.tracks.map((t: Record<string, unknown>) => ({
+                    id: t.id as string,
+                    title: t.title as string,
+                    artist: t.artist as { name: string; id?: string },
+                    album: t.album as { title: string; coverArt?: string; id?: string },
+                    duration: t.duration as number,
+                }));
+                playTracks(tracks, 0);
+                toast.success(`Playing ${tracks.length} radio tracks`);
+            } else {
+                toast.error("No radio tracks found for this playlist");
+            }
+        } catch (error) {
+            console.error("Failed to start playlist radio:", error);
+            toast.error("Failed to start playlist radio");
+        }
+    };
 
     if (isLoading) {
         return (
@@ -462,15 +485,16 @@ export default function PlaylistDetailPage() {
                     {playlist.items && playlist.items.length > 0 && (
                         <button
                             onClick={handlePlayPlaylist}
-                            className="h-12 w-12 rounded-full bg-[#60a5fa] hover:bg-[#3b82f6] hover:scale-105 flex items-center justify-center shadow-lg transition-all"
+                            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#60a5fa] hover:bg-[#3b82f6] hover:scale-105 shadow-lg transition-all font-semibold text-sm text-black"
                         >
                             {showPlaySpinner ? (
-                                <Loader2 className="w-5 h-5 animate-spin text-black" />
+                                <Loader2 className="w-5 h-5 animate-spin" />
                             ) : isThisPlaylistPlaying && isPlaying ? (
-                                <Pause className="w-5 h-5 fill-current text-black" />
+                                <Pause className="w-5 h-5 fill-current" />
                             ) : (
-                                <Play className="w-5 h-5 fill-current text-black ml-0.5" />
+                                <Play className="w-5 h-5 fill-current ml-0.5" />
                             )}
+                            <span>{isThisPlaylistPlaying && isPlaying ? "Pause" : "Play All"}</span>
                         </button>
                     )}
 
@@ -507,6 +531,17 @@ export default function PlaylistDetailPage() {
                             title="Shuffle play"
                         >
                             <Shuffle className="w-5 h-5" />
+                        </button>
+                    )}
+
+                    {/* Radio Button */}
+                    {playlist.items && playlist.items.length > 0 && (
+                        <button
+                            onClick={handleStartRadio}
+                            className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                            title="Start playlist radio"
+                        >
+                            <Radio className="w-5 h-5" />
                         </button>
                     )}
 
@@ -568,7 +603,7 @@ export default function PlaylistDetailPage() {
                 playlist.pendingTracks?.length > 0 ? (
                     <div className="w-full">
                         {/* Table Header */}
-                        <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
+                        <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_auto] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
                             <span className="text-center">#</span>
                             <span>Title</span>
                             <span>Album</span>
@@ -716,7 +751,7 @@ export default function PlaylistDetailPage() {
                                                 handlePlayTrack(trackIndex)
                                             }
                                             className={cn(
-                                                "grid grid-cols-[28px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-2 px-1 md:gap-4 md:px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
+                                                "grid grid-cols-[28px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_auto] gap-2 px-1 md:gap-4 md:px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                                                 isCurrentlyPlaying &&
                                                     "bg-white/10",
                                                 isInQueue &&
@@ -846,7 +881,7 @@ export default function PlaylistDetailPage() {
                                                 />
                                                 <TrackPreferenceButtons
                                                     trackId={playlistItem.track.id}
-                                                    mode="up-only"
+                                                    mode="both"
                                                     buttonSizeClassName="h-8 w-8"
                                                     iconSizeClassName="h-4 w-4"
                                                 />
