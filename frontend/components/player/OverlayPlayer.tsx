@@ -43,6 +43,7 @@ import {
     readMigratingStorageItem,
     writeMigratingStorageItem,
 } from "@/lib/storage-migration";
+import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
 
 const OVERLAY_ACTIVE_TAB_KEY = OVERLAY_ACTIVE_TAB_STORAGE_KEY;
 
@@ -156,6 +157,7 @@ export function OverlayPlayer() {
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
     const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(500);
     const canSkip = playbackType === "track";
+    const preferenceTrackId = canSkip ? currentTrack?.id : undefined;
     const isDesktopOverlayLayout = canSkip && !isMobileOrTablet;
     const isTabPanelVisible = canSkip && (isDesktopOverlayLayout || isDrawerOpen);
     const lyricsTrackId =
@@ -1159,102 +1161,120 @@ export function OverlayPlayer() {
                             </div>
 
                             {canSkip ? (
-                                <div className="mb-3 flex items-center justify-between px-2">
-                                    <button
-                                        onClick={toggleShuffle}
+                                <>
+                                    <div className="mb-3 flex items-center justify-center">
+                                        <div className="flex w-full max-w-xs items-center justify-center gap-8 rounded-full border border-white/10 bg-white/[0.03] px-4 py-2">
+                                            <TrackPreferenceButtons
+                                                trackId={preferenceTrackId}
+                                                className="gap-8"
+                                                buttonSizeClassName="h-10 w-10"
+                                                iconSizeClassName="h-5 w-5"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div
                                         className={cn(
-                                            "transition-colors",
-                                            isShuffle
-                                                ? "text-[#60a5fa]"
-                                                : "text-gray-500 hover:text-white"
+                                            "mb-3 flex items-center justify-center px-2",
+                                            isMobileOrTablet ? "gap-5" : "gap-7"
                                         )}
-                                        title="Shuffle"
-                                        aria-label="Shuffle"
                                     >
-                                        <Shuffle className="h-5 w-5" />
-                                    </button>
+                                        <button
+                                            onClick={toggleShuffle}
+                                            className={cn(
+                                                "transition-colors",
+                                                isShuffle
+                                                    ? "text-[#60a5fa]"
+                                                    : "text-gray-500 hover:text-white"
+                                            )}
+                                            title="Shuffle"
+                                            aria-label="Shuffle"
+                                        >
+                                            <Shuffle className="h-5 w-5" />
+                                        </button>
 
-                                    <button
-                                        onClick={previous}
-                                        className="text-white/85 transition-colors hover:text-white"
-                                        title="Previous"
-                                        aria-label="Previous"
-                                    >
-                                        <SkipBack className="h-8 w-8" />
-                                    </button>
+                                        <button
+                                            onClick={previous}
+                                            className="text-white/85 transition-colors hover:text-white"
+                                            title="Previous"
+                                            aria-label="Previous"
+                                        >
+                                            <SkipBack className="h-8 w-8" />
+                                        </button>
 
-                                    <button
-                                        onClick={handlePlayPause}
-                                        className={cn(
-                                            "flex h-16 w-16 items-center justify-center rounded-full shadow-xl transition-all",
-                                            audioError
-                                                ? "bg-red-500 text-white hover:bg-red-400"
-                                                : isBuffering
-                                                  ? "bg-white/80 text-black"
-                                                  : "bg-white text-black hover:scale-105"
-                                        )}
-                                        disabled={isBuffering}
-                                        title={
-                                            audioError
-                                                ? "Retry playback"
-                                                : isBuffering
-                                                  ? "Buffering..."
-                                                  : isPlaying
-                                                    ? "Pause"
-                                                    : "Play"
-                                        }
-                                        aria-label={
-                                            audioError
-                                                ? "Retry playback"
-                                                : isPlaying
-                                                  ? "Pause"
-                                                  : "Play"
-                                        }
-                                    >
-                                        {audioError ? (
-                                            <RefreshCw className="h-7 w-7" />
-                                        ) : isBuffering ? (
-                                            <Loader2 className="h-7 w-7 animate-spin" />
-                                        ) : isPlaying ? (
-                                            <Pause className="h-7 w-7" />
-                                        ) : (
-                                            <Play className="ml-1 h-7 w-7" />
-                                        )}
-                                    </button>
+                                        <button
+                                            onClick={handlePlayPause}
+                                            className={cn(
+                                                "flex h-16 w-16 items-center justify-center rounded-full shadow-xl transition-all",
+                                                audioError
+                                                    ? "bg-red-500 text-white hover:bg-red-400"
+                                                    : isBuffering
+                                                      ? "bg-white/80 text-black"
+                                                      : "bg-white text-black hover:scale-105"
+                                            )}
+                                            disabled={isBuffering}
+                                            title={
+                                                audioError
+                                                    ? "Retry playback"
+                                                    : isBuffering
+                                                      ? "Buffering..."
+                                                      : isPlaying
+                                                        ? "Pause"
+                                                        : "Play"
+                                            }
+                                            aria-label={
+                                                audioError
+                                                    ? "Retry playback"
+                                                    : isPlaying
+                                                      ? "Pause"
+                                                      : "Play"
+                                            }
+                                        >
+                                            {audioError ? (
+                                                <RefreshCw className="h-7 w-7" />
+                                            ) : isBuffering ? (
+                                                <Loader2 className="h-7 w-7 animate-spin" />
+                                            ) : isPlaying ? (
+                                                <Pause className="h-7 w-7" />
+                                            ) : (
+                                                <Play className="ml-1 h-7 w-7" />
+                                            )}
+                                        </button>
 
-                                    <button
-                                        onClick={next}
-                                        className="text-white/85 transition-colors hover:text-white"
-                                        title="Next"
-                                        aria-label="Next"
-                                    >
-                                        <SkipForward className="h-8 w-8" />
-                                    </button>
+                                        <button
+                                            onClick={next}
+                                            className="text-white/85 transition-colors hover:text-white"
+                                            title="Next"
+                                            aria-label="Next"
+                                        >
+                                            <SkipForward className="h-8 w-8" />
+                                        </button>
 
-                                    <button
-                                        onClick={toggleRepeat}
-                                        className={cn(
-                                            "transition-colors",
-                                            repeatMode !== "off"
-                                                ? "text-[#60a5fa]"
-                                                : "text-gray-500 hover:text-white"
-                                        )}
-                                        title={
-                                            repeatMode === "one"
-                                                ? "Repeat One"
-                                                : repeatMode === "all"
-                                                  ? "Repeat All"
-                                                  : "Repeat Off"
-                                        }
-                                        aria-label="Repeat"
-                                    >
-                                        {repeatMode === "one" ? (
-                                            <Repeat1 className="h-5 w-5" />
-                                        ) : (
-                                            <Repeat className="h-5 w-5" />
-                                        )}
-                                    </button>
-                                </div>
+                                        <button
+                                            onClick={toggleRepeat}
+                                            className={cn(
+                                                "transition-colors",
+                                                repeatMode !== "off"
+                                                    ? "text-[#60a5fa]"
+                                                    : "text-gray-500 hover:text-white"
+                                            )}
+                                            title={
+                                                repeatMode === "one"
+                                                    ? "Repeat One"
+                                                    : repeatMode === "all"
+                                                      ? "Repeat All"
+                                                      : "Repeat Off"
+                                            }
+                                            aria-label="Repeat"
+                                        >
+                                            {repeatMode === "one" ? (
+                                                <Repeat1 className="h-5 w-5" />
+                                            ) : (
+                                                <Repeat className="h-5 w-5" />
+                                            )}
+                                        </button>
+                                    </div>
+                                </>
                             ) : (
                                 <div className="mb-3 flex items-center justify-center">
                                     <button
@@ -1724,18 +1744,26 @@ export function OverlayPlayer() {
                                                                     >
                                                                         {formatTime(track.duration || 0)}
                                                                     </span>
-                                                                    {!isCurrentTrack && (
-                                                                        <button
-                                                                            onClick={() =>
-                                                                                handleRemoveFromQueue(queueIndex)
-                                                                            }
-                                                                            className="p-1 text-gray-500 transition-colors hover:text-red-300"
-                                                                            title="Remove from queue"
-                                                                            aria-label="Remove from queue"
-                                                                        >
-                                                                            <X className="h-4 w-4" />
-                                                                        </button>
-                                                                    )}
+                                                                    <div className="ml-1 flex items-center gap-1">
+                                                                        <TrackPreferenceButtons
+                                                                            trackId={track.id}
+                                                                            mode="up-only"
+                                                                            buttonSizeClassName="h-7 w-7"
+                                                                            iconSizeClassName="h-3.5 w-3.5"
+                                                                        />
+                                                                        {!isCurrentTrack && (
+                                                                            <button
+                                                                                onClick={() =>
+                                                                                    handleRemoveFromQueue(queueIndex)
+                                                                                }
+                                                                                className="p-1 text-gray-500 transition-colors hover:text-red-300"
+                                                                                title="Remove from queue"
+                                                                                aria-label="Remove from queue"
+                                                                            >
+                                                                                <X className="h-4 w-4" />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
                                                             );
                                                         })}

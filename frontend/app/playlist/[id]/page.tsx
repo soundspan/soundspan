@@ -11,6 +11,7 @@ import { shuffleArray } from "@/utils/shuffle";
 import { formatTime } from "@/utils/formatTime";
 import { usePlaylistQuery } from "@/hooks/useQueries";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/lib/toast-context";
 import { useDownloadContext } from "@/lib/download-context";
@@ -859,6 +860,12 @@ export default function PlaylistDetailPage() {
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
+                                                <TrackPreferenceButtons
+                                                    trackId={playlistItem.track.id}
+                                                    mode="up-only"
+                                                    buttonSizeClassName="h-7 w-7"
+                                                    iconSizeClassName="h-3.5 w-3.5"
+                                                />
                                             </div>
                                         </div>
                                     );

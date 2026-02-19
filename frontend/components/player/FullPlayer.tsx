@@ -34,6 +34,7 @@ import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { SeekSlider } from "./SeekSlider";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { SyncBadge } from "@/components/player/SyncBadge";
+import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
 
 /**
  * FullPlayer - UI-only component for desktop bottom player
@@ -79,7 +80,8 @@ export function FullPlayer() {
         toggleShuffle,
         toggleRepeat,
     } = useAudioControls();
-
+    const preferenceTrackId =
+        playbackType === "track" ? currentTrack?.id : undefined;
 
     // Get current track's audio features for vibe comparison
     const currentTrackFeatures = queue[currentIndex]?.audioFeatures || null;
@@ -484,36 +486,45 @@ export function FullPlayer() {
 
                     {/* Right Controls */}
                     <div className="flex w-72 items-center justify-end gap-3">
-                        <div className="flex w-52 items-center gap-2.5">
-                            <button
-                                onClick={toggleMute}
-                                className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110"
-                                aria-label={volume === 0 ? "Unmute" : "Mute"}
-                            >
-                                {isMuted || volume === 0 ? (
-                                    <VolumeX className="w-5 h-5" />
-                                ) : (
-                                    <Volume2 className="w-5 h-5" />
-                                )}
-                            </button>
+                        <div className="flex w-52 flex-col items-center">
+                            <TrackPreferenceButtons
+                                trackId={preferenceTrackId}
+                                className="justify-center"
+                                buttonSizeClassName="h-7 w-7"
+                                iconSizeClassName="h-3.5 w-3.5"
+                            />
 
-                            <div className="relative flex-1">
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="100"
-                                    value={volume * 100}
-                                    onChange={handleVolumeChange}
-                                    aria-label="Volume"
-                                    aria-valuemin={0}
-                                    aria-valuemax={100}
-                                    aria-valuenow={Math.round(volume * 100)}
-                                    aria-valuetext={`${Math.round(volume * 100)} percent`}
-                                    style={{
-                                        background: `linear-gradient(to right, #fff ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
-                                    }}
-                                    className="w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30 [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
-                                />
+                            <div className="mt-1.5 flex w-full items-center gap-2.5">
+                                <button
+                                    onClick={toggleMute}
+                                    className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110"
+                                    aria-label={volume === 0 ? "Unmute" : "Mute"}
+                                >
+                                    {isMuted || volume === 0 ? (
+                                        <VolumeX className="w-5 h-5" />
+                                    ) : (
+                                        <Volume2 className="w-5 h-5" />
+                                    )}
+                                </button>
+
+                                <div className="relative flex-1">
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={volume * 100}
+                                        onChange={handleVolumeChange}
+                                        aria-label="Volume"
+                                        aria-valuemin={0}
+                                        aria-valuemax={100}
+                                        aria-valuenow={Math.round(volume * 100)}
+                                        aria-valuetext={`${Math.round(volume * 100)} percent`}
+                                        style={{
+                                            background: `linear-gradient(to right, #fff ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
+                                        }}
+                                        className="w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30 [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
+                                    />
+                                </div>
                             </div>
                         </div>
 
