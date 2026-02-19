@@ -75,7 +75,7 @@ export function DiscoverActionBar({
                             "h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all border",
                             isGenerating
                                 ? "bg-white/5 border-transparent text-white/50 cursor-not-allowed"
-                                : "bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/30 text-white hover:scale-105"
+                                : "bg-[#1a1acc]/20 hover:bg-[#1a1acc]/30 border-[#2323FF]/30 text-white hover:scale-105"
                         )}
                     >
                         {showSpinner ? (
@@ -96,7 +96,7 @@ export function DiscoverActionBar({
                         "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all",
                         isGenerating || !config?.enabled
                             ? "bg-white/5 text-white/50 cursor-not-allowed"
-                            : "bg-purple-600/20 hover:bg-purple-600/30 text-white border border-purple-500/30"
+                            : "bg-[#1a1acc]/20 hover:bg-[#1a1acc]/30 text-white border border-[#2323FF]/30"
                     )}
                 >
                     {isGenerating ? (

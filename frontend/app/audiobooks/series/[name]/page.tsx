@@ -84,7 +84,7 @@ export default function SeriesDetailPage() {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+                <Loader2 className="w-8 h-8 text-[#2323FF] animate-spin" />
             </div>
         );
     }
@@ -105,7 +105,7 @@ export default function SeriesDetailPage() {
     return (
         <div className="min-h-screen bg-black">
             {/* Hero Section */}
-            <div className="relative bg-gradient-to-b from-purple-900/30 to-transparent pb-8">
+            <div className="relative bg-gradient-to-b from-blue-900/30 to-transparent pb-8">
                 <div className="max-w-7xl mx-auto px-8 py-12">
                     <div className="flex flex-col md:flex-row gap-8 items-start">
                         {/* Series Cover */}
@@ -195,8 +195,8 @@ export default function SeriesDetailPage() {
                                             <div className="flex items-center justify-center">
                                                 <div className="w-4 h-4 flex items-center justify-center">
                                                     <div className="grid grid-cols-2 gap-0.5">
-                                                        <div className="w-1 h-3 bg-purple-500 animate-pulse" />
-                                                        <div className="w-1 h-3 bg-purple-500 animate-pulse delay-75" />
+                                                        <div className="w-1 h-3 bg-[#2323FF] animate-pulse" />
+                                                        <div className="w-1 h-3 bg-[#2323FF] animate-pulse delay-75" />
                                                     </div>
                                                 </div>
                                             </div>
@@ -250,7 +250,7 @@ export default function SeriesDetailPage() {
                                         <div className="flex items-center gap-2 flex-shrink-0">
                                             <div className="w-24 h-1 bg-[#181818] rounded-full overflow-hidden">
                                                 <div
-                                                    className="h-full bg-purple-500"
+                                                    className="h-full bg-[#2323FF]"
                                                     style={{
                                                         width: `${book.progress.progress}%`,
                                                     }}

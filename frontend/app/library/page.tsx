@@ -433,7 +433,7 @@ export default function LibraryPage() {
                                     onClick={() => setFilter("discovery")}
                                     className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
                                         filter === "discovery" ?
-                                            "bg-purple-500 text-white"
+                                            "bg-[#2323FF] text-white"
                                         :   "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
                                     }`}
                                 >

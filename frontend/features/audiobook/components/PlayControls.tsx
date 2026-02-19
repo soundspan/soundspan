@@ -58,7 +58,7 @@ export function PlayControls({
             </div>
             <div className="w-48 h-1 bg-[#181818] rounded-full mt-2">
               <div
-                className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                className="h-full bg-[#2323FF] rounded-full transition-all duration-300"
                 style={{
                   width: `${
                     isThisBookPlaying

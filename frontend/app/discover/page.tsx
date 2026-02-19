@@ -120,8 +120,8 @@ export default function DiscoverWeeklyPage() {
                         </div>
                     ) : (
                         <div className="flex flex-col items-center justify-center py-24 text-center">
-                            <div className="w-20 h-20 bg-gradient-to-br from-purple-600/20 to-yellow-600/20 rounded-full flex items-center justify-center mb-4 shadow-xl border border-white/10">
-                                <Music2 className="w-10 h-10 text-purple-400" />
+                            <div className="w-20 h-20 bg-gradient-to-br from-[#1a1acc]/20 to-yellow-600/20 rounded-full flex items-center justify-center mb-4 shadow-xl border border-white/10">
+                                <Music2 className="w-10 h-10 text-[#5b5bff]" />
                             </div>
                             <h3 className="text-lg font-medium text-white mb-1">
                                 No Discover Weekly Yet
@@ -137,7 +137,7 @@ export default function DiscoverWeeklyPage() {
                                     "flex items-center gap-2 px-6 py-3 rounded-full text-white font-semibold transition-all",
                                     isGenerating
                                         ? "bg-white/5 cursor-not-allowed opacity-50"
-                                        : "bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 hover:scale-105"
+                                        : "bg-[#1a1acc]/20 hover:bg-[#1a1acc]/30 border border-[#2323FF]/30 hover:scale-105"
                                 )}
                             >
                                 {isGenerating ? (

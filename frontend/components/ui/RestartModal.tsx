@@ -59,7 +59,7 @@ export function RestartModal({
                     <div className="p-6 space-y-4">
                         <p className="text-gray-300">
                             Your settings have been saved successfully and the
-                            <code className="text-purple-400 bg-[#0a0a0a] px-1.5 py-0.5 rounded mx-1">
+                            <code className="text-[#5b5bff] bg-[#0a0a0a] px-1.5 py-0.5 rounded mx-1">
                                 .env
                             </code>
                             file has been updated.

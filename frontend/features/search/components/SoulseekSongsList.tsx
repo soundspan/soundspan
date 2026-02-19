@@ -19,7 +19,7 @@ export const formatFileSize = (bytes: number): string => {
 export const getQualityBadge = (result: SoulseekResult) => {
     if (result.format === "flac") {
         return (
-            <span className="px-2 py-1 text-xs font-semibold bg-purple-600/20 text-purple-400 rounded">
+            <span className="px-2 py-1 text-xs font-semibold bg-[#1a1acc]/20 text-[#5b5bff] rounded">
                 FLAC
             </span>
         );

@@ -187,7 +187,7 @@ function SimilarityBadge({ similarity, size = "md" }: { similarity: number; size
         <div className={cn(
             "relative flex items-center justify-center rounded-full font-semibold",
             sizeClasses[size],
-            percent >= 80 ? "text-[#22c55e]" : percent >= 60 ? "text-[#a855f7]" : "text-[#737373]"
+            percent >= 80 ? "text-[#22c55e]" : percent >= 60 ? "text-[#2323FF]" : "text-[#737373]"
         )}>
             {/* Outer ring */}
             <svg className="absolute inset-0 w-full h-full -rotate-90">
@@ -255,7 +255,7 @@ function FeatureComparison({
                                 initial={{ left: 0 }}
                                 animate={{ left: `calc(${mVal * 100}% - 4px)` }}
                                 transition={{ duration: 0.5, ease: "easeOut" }}
-                                className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[#a855f7] shadow-[0_0_8px_rgba(168,85,247,0.5)]"
+                                className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[#2323FF] shadow-[0_0_8px_rgba(35,35,255,0.5)]"
                             />
                         </div>
                     </div>
@@ -361,7 +361,7 @@ function ComparisonPanel({
         >
             {/* Header with gradient accent */}
             <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-[#3b82f6]/10 via-transparent to-[#a855f7]/10" />
+                <div className="absolute inset-0 bg-gradient-to-r from-[#3b82f6]/10 via-transparent to-[#2323FF]/10" />
                 <div className="relative flex items-center justify-between px-4 py-3">
                     <span className="text-xs font-medium text-[#737373] uppercase tracking-wider">Vibe Match</span>
                     <button
@@ -387,7 +387,7 @@ function ComparisonPanel({
                         coverUrl={match.coverUrl}
                         title={match.title}
                         size={56}
-                        className="rounded-md ring-2 ring-[#a855f7]/30"
+                        className="rounded-md ring-2 ring-[#2323FF]/30"
                     />
                 </div>
             </div>
@@ -416,7 +416,7 @@ function ComparisonPanel({
                 </div>
                 <div className="p-4">
                     <div className="flex items-center gap-2 mb-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#a855f7]" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#2323FF]" />
                         <span className="text-[10px] text-[#737373] uppercase tracking-wider">Match</span>
                     </div>
                     <p className="font-medium text-white text-sm truncate">{match.title}</p>
@@ -480,7 +480,7 @@ function TrackRow({
             className={cn(
                 "group grid grid-cols-[auto_1fr_auto_auto] gap-4 px-4 py-2.5 rounded-lg cursor-pointer transition-all items-center",
                 isSelected
-                    ? "bg-gradient-to-r from-[#3b82f6]/5 to-[#a855f7]/5 ring-1 ring-[#a855f7]/20"
+                    ? "bg-gradient-to-r from-[#3b82f6]/5 to-[#2323FF]/5 ring-1 ring-[#2323FF]/20"
                     : "hover:bg-[#141414]"
             )}
         >
@@ -507,13 +507,13 @@ function TrackRow({
                         className="rounded flex-shrink-0"
                     />
                     {isSelected && (
-                        <div className="absolute inset-0 rounded ring-2 ring-[#a855f7]/50" />
+                        <div className="absolute inset-0 rounded ring-2 ring-[#2323FF]/50" />
                     )}
                 </div>
                 <div className="min-w-0">
                     <p className={cn(
                         "text-sm font-medium truncate transition-colors",
-                        isSelected ? "text-[#a855f7]" : "text-white"
+                        isSelected ? "text-[#2323FF]" : "text-white"
                     )}>
                         {track.title}
                     </p>
@@ -895,7 +895,7 @@ function VibePageContent() {
                         opacity: selectedMatch ? 0.6 : 0.3,
                     }}
                     transition={{ duration: 1 }}
-                    className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full bg-[#a855f7]/5 blur-[100px]"
+                    className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full bg-[#2323FF]/5 blur-[100px]"
                 />
                 <motion.div
                     animate={{
@@ -1007,7 +1007,7 @@ function VibePageContent() {
                 {(isLoading || isSearching) && !error && (
                     <div className="flex items-center justify-center py-24">
                         <div className="relative">
-                            <div className="w-12 h-12 rounded-full border-2 border-[#1c1c1c] border-t-[#a855f7] animate-spin" />
+                            <div className="w-12 h-12 rounded-full border-2 border-[#1c1c1c] border-t-[#2323FF] animate-spin" />
                         </div>
                     </div>
                 )}
@@ -1108,7 +1108,7 @@ function VibePageContent() {
                                             animate={{ opacity: 1 }}
                                             className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-xl p-8 text-center"
                                         >
-                                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-[#a855f7]/10 flex items-center justify-center">
+                                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-[#2323FF]/10 flex items-center justify-center">
                                                 <Disc3 className="w-8 h-8 text-[#333]" />
                                             </div>
                                             <p className="text-sm text-[#525252]">
@@ -1125,7 +1125,7 @@ function VibePageContent() {
                 {/* Empty state - prompt user to start */}
                 {!isLoading && !isSearching && !error && !sourceTrack && similarTracks.length === 0 && viewMode === "comparison" && (
                     <div className="max-w-md mx-auto text-center py-16">
-                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-[#a855f7]/10 flex items-center justify-center">
+                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-[#2323FF]/10 flex items-center justify-center">
                             <AudioWaveform className="w-12 h-12 text-[#525252]" />
                         </div>
                         <h2 className="text-xl font-medium text-white mb-2">Explore by Vibe</h2>
@@ -1159,7 +1159,7 @@ function VibePageContent() {
                                 className="w-full flex items-center gap-4 px-4 py-3 bg-[#0f0f0f] border border-[#1c1c1c] hover:border-[#333] rounded-lg transition-all text-left group disabled:opacity-50"
                             >
                                 <div className="w-12 h-12 rounded bg-[#1a1a1a] flex items-center justify-center flex-shrink-0">
-                                    <Shuffle className="w-5 h-5 text-[#a855f7]" />
+                                    <Shuffle className="w-5 h-5 text-[#2323FF]" />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <p className="text-sm font-medium text-white">Surprise me</p>

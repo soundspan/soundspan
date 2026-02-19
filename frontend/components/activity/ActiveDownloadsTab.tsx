@@ -138,7 +138,7 @@ export function ActiveDownloadsTab() {
                                                     download.metadata
                                                         .currentSource ===
                                                         "lidarr"
-                                                        ? "text-purple-400"
+                                                        ? "text-[#5b5bff]"
                                                         : download.metadata
                                                               .currentSource ===
                                                           "tidal"

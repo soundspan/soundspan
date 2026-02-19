@@ -1053,8 +1053,8 @@ export function OverlayPlayer() {
                                 className={cn(
                                     "absolute inset-0 rounded-2xl blur-2xl opacity-50",
                                     vibeMode
-                                        ? "bg-gradient-to-br from-brand/30 via-transparent to-purple-500/30"
-                                        : "bg-gradient-to-br from-[#60a5fa]/20 via-transparent to-[#a855f7]/20"
+                                        ? "bg-gradient-to-br from-brand/30 via-transparent to-[#2323FF]/30"
+                                        : "bg-gradient-to-br from-[#60a5fa]/20 via-transparent to-[#2323FF]/20"
                                 )}
                             />
                             <motion.div

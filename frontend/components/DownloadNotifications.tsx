@@ -374,7 +374,7 @@ function DownloadJobItem({
         if (!job.metadata?.currentSource) return "text-white/60";
         switch (job.metadata.currentSource) {
             case "lidarr":
-                return "text-purple-400";
+                return "text-[#5b5bff]";
             case "soulseek":
                 return "text-teal-400";
             case "tidal":
@@ -498,7 +498,7 @@ function DownloadJobItemCompact({
         if (!job.metadata?.currentSource) return "text-white/60";
         switch (job.metadata.currentSource) {
             case "lidarr":
-                return "text-purple-400";
+                return "text-[#5b5bff]";
             case "soulseek":
                 return "text-teal-400";
             case "tidal":

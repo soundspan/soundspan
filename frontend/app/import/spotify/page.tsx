@@ -353,7 +353,7 @@ function SpotifyImportPageContent() {
             {/* Quick gradient fade - yellow to purple like home page */}
             <div className="absolute inset-0 pointer-events-none">
                 <div
-                    className="absolute inset-0 bg-linear-to-b from-[#3b82f6]/15 via-purple-900/10 to-transparent"
+                    className="absolute inset-0 bg-linear-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
                     style={{ height: "35vh" }}
                 />
                 <div

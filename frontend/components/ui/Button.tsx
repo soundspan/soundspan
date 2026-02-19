@@ -20,7 +20,7 @@ const Button = memo(forwardRef<HTMLButtonElement, ButtonProps>(
         ref
     ) => {
         const baseStyles =
-            "inline-flex items-center justify-center rounded-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a0a] disabled:opacity-50 disabled:cursor-not-allowed";
+            "inline-flex items-center justify-center rounded-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2323FF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a0a] disabled:opacity-50 disabled:cursor-not-allowed";
 
         // soundspan brand color: #3b82f6
         const variantStyles = {

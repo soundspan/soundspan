@@ -30,7 +30,7 @@ const SyncBadge = memo(function SyncBadge({ compact = false }: SyncBadgeProps) {
             className={cn(
                 "inline-flex items-center gap-1 font-bold rounded transition-colors",
                 isConnected
-                    ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                    ? "bg-[#2323FF]/20 text-[#5b5bff] hover:bg-[#2323FF]/30"
                     : "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30",
                 compact
                     ? "text-[9px] px-1 py-0.5 leading-none"

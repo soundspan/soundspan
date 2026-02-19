@@ -44,7 +44,7 @@ export default function RegisterPage() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-[#0a0a0a] via-[#1a0a1a] to-[#0a0a0a]">
       <Card className="max-w-md w-full" hover={false}>
         <div className="flex flex-col items-center mb-6">
-          <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-full flex items-center justify-center mb-4">
+          <div className="w-16 h-16 bg-gradient-to-br from-[#2323FF] to-[#1a1acc] rounded-full flex items-center justify-center mb-4">
             <Music className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-white mb-1">Create Account</h1>
@@ -122,7 +122,7 @@ export default function RegisterPage() {
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-500">
             Already have an account?{" "}
-            <Link href="/login" className="text-[#1db954] hover:text-purple-300 transition-colors">
+            <Link href="/login" className="text-[#1db954] hover:text-[#5b5bff] transition-colors">
               Sign in
             </Link>
           </p>

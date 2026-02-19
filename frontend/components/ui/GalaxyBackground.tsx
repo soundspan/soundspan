@@ -51,7 +51,7 @@ export function GalaxyBackground({ primaryColor }: GalaxyBackgroundProps = {}) {
                 </>
             ) : (
                 <>
-                    <div className="absolute inset-0 bg-gradient-to-t from-purple-950/15 via-purple-950/5 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-blue-950/15 via-blue-950/5 to-transparent" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent" />
                 </>
             )}

@@ -176,7 +176,7 @@ export default function DeviceLinkPage() {
         <div className="min-h-screen relative pb-24">
             {/* Header gradient */}
             <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute inset-0 bg-gradient-to-b from-purple-500/10 via-transparent to-transparent" style={{ height: "50vh" }} />
+                <div className="absolute inset-0 bg-gradient-to-b from-[#2323FF]/10 via-transparent to-transparent" style={{ height: "50vh" }} />
             </div>
 
             <div className="relative max-w-4xl mx-auto px-6 md:px-8 py-8">
@@ -354,8 +354,8 @@ export default function DeviceLinkPage() {
                                         className="flex items-center justify-between p-3 bg-white/5 rounded-lg"
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
-                                                <Smartphone className="w-5 h-5 text-purple-400" />
+                                            <div className="w-10 h-10 rounded-full bg-[#2323FF]/20 flex items-center justify-center">
+                                                <Smartphone className="w-5 h-5 text-[#5b5bff]" />
                                             </div>
                                             <div>
                                                 <p className="text-white font-medium">

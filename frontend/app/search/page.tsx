@@ -192,7 +192,7 @@ export default function SearchPage() {
                                             <stop
                                                 offset="75%"
                                                 style={{
-                                                    stopColor: "#a855f7",
+                                                    stopColor: "#2323FF",
                                                     stopOpacity: 1,
                                                 }}
                                             />

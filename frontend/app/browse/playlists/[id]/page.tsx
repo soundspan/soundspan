@@ -212,7 +212,7 @@ export default function DeezerPlaylistDetailPage() {
             <div className="min-h-screen relative">
                 <div className="absolute inset-0 pointer-events-none">
                     <div
-                        className="absolute inset-0 bg-gradient-to-b from-[#AD47FF]/15 via-purple-900/10 to-transparent"
+                        className="absolute inset-0 bg-gradient-to-b from-[#2323FF]/15 via-blue-900/10 to-transparent"
                         style={{ height: "35vh" }}
                     />
                 </div>

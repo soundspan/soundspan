@@ -67,7 +67,7 @@ export function AudiobookCard({
                         {progress && !progress.isFinished && (
                             <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/60">
                                 <div
-                                    className="h-full bg-purple-500"
+                                    className="h-full bg-[#2323FF]"
                                     style={{ width: `${progress.progress}%` }}
                                 />
                             </div>
@@ -82,7 +82,7 @@ export function AudiobookCard({
 
                         {/* Series Badge (for series cards only) */}
                         {seriesBadge && (
-                            <div className="absolute top-2 right-2 bg-purple-500 rounded px-2 py-1 text-xs font-bold shadow-lg">
+                            <div className="absolute top-2 right-2 bg-[#2323FF] rounded px-2 py-1 text-xs font-bold shadow-lg">
                                 {seriesBadge}
                             </div>
                         )}

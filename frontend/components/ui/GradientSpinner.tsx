@@ -32,7 +32,7 @@ const GradientSpinner = memo(function GradientSpinner({ size = "md", className =
                     <stop offset="0%" style={{ stopColor: '#facc15', stopOpacity: 1 }} />
                     <stop offset="25%" style={{ stopColor: '#f59e0b', stopOpacity: 1 }} />
                     <stop offset="50%" style={{ stopColor: '#c026d3', stopOpacity: 1 }} />
-                    <stop offset="75%" style={{ stopColor: '#a855f7', stopOpacity: 1 }} />
+                    <stop offset="75%" style={{ stopColor: '#2323FF', stopOpacity: 1 }} />
                     <stop offset="100%" style={{ stopColor: '#facc15', stopOpacity: 1 }} />
                 </linearGradient>
             </defs>

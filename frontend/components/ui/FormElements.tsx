@@ -16,7 +16,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           "focus:outline-none focus:ring-1",
           error
             ? "border-red-500/50 focus:border-red-500 focus:ring-red-500/20"
-            : "border-[#262626] focus:border-[#1db954]/50 focus:ring-purple-500/20",
+            : "border-[#262626] focus:border-[#1db954]/50 focus:ring-[#2323FF]/20",
           className
         )}
         {...props}
@@ -42,7 +42,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           "focus:outline-none focus:ring-1",
           error
             ? "border-red-500/50 focus:border-red-500 focus:ring-red-500/20"
-            : "border-[#262626] focus:border-[#1db954]/50 focus:ring-purple-500/20",
+            : "border-[#262626] focus:border-[#1db954]/50 focus:ring-[#2323FF]/20",
           className
         )}
         {...props}

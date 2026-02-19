@@ -216,7 +216,7 @@ export default function PodcastsPage() {
             {/* Quick gradient fade - yellow to purple */}
             <div className="absolute inset-0 pointer-events-none">
                 <div
-                    className="absolute inset-0 bg-gradient-to-b from-[#3b82f6]/15 via-purple-900/10 to-transparent"
+                    className="absolute inset-0 bg-gradient-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
                     style={{ height: "35vh" }}
                 />
                 <div
@@ -246,7 +246,7 @@ export default function PodcastsPage() {
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Quick add..."
-                            className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:bg-white/10 transition-all text-sm"
+                            className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-[#2323FF] focus:bg-white/10 transition-all text-sm"
                         />
                         {isSearching && (
                             <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
@@ -300,7 +300,7 @@ export default function PodcastsPage() {
 
                                             {/* Add Button */}
                                             <div className="flex-shrink-0">
-                                                <div className="w-8 h-8 rounded-full bg-purple-500 hover:bg-purple-400 flex items-center justify-center transition-colors">
+                                                <div className="w-8 h-8 rounded-full bg-[#2323FF] hover:bg-[#5b5bff] flex items-center justify-center transition-colors">
                                                     <Plus className="w-4 h-4 text-white" />
                                                 </div>
                                             </div>
@@ -339,7 +339,7 @@ export default function PodcastsPage() {
                                         }
                                     }}
                                     placeholder="Add by RSS URL..."
-                                    className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:bg-white/10 transition-all text-sm"
+                                    className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-[#2323FF] focus:bg-white/10 transition-all text-sm"
                                 />
                             </div>
                             <button
@@ -373,7 +373,7 @@ export default function PodcastsPage() {
                                 <select
                                     value={sortBy}
                                     onChange={(e) => setSortBy(e.target.value as SortOption)}
-                                    className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-purple-500 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                                    className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-[#2323FF] [&>option]:bg-[#1a1a1a] [&>option]:text-white"
                                     disabled={showMyPodcastsSkeleton}
                                 >
                                     <option value="title">Title (A-Z)</option>
@@ -388,7 +388,7 @@ export default function PodcastsPage() {
                                         setItemsPerPage(Number(e.target.value));
                                         setCurrentPage(1);
                                     }}
-                                    className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-purple-500 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                                    className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-[#2323FF] [&>option]:bg-[#1a1a1a] [&>option]:text-white"
                                     disabled={showMyPodcastsSkeleton}
                                 >
                                     <option value={25}>25 per page</option>

@@ -26,7 +26,7 @@ export function Input({
                     className={cn(
                         "w-full bg-[#1a1a1a] border border-[#1c1c1c] rounded-md px-4 py-2 text-white",
                         "placeholder:text-gray-500",
-                        "focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500",
+                        "focus:outline-none focus:ring-2 focus:ring-[#2323FF]/50 focus:border-[#2323FF]",
                         "transition-all duration-200",
                         error &&
                             "border-red-500/50 focus:ring-red-500/50 focus:border-red-500",

@@ -304,7 +304,7 @@ export function PodcastPlayer({
                             />
                             {/* Current position */}
                             <div
-                                className="absolute top-0 left-0 h-full bg-purple-500 rounded-full transition-all group-hover:bg-purple-400"
+                                className="absolute top-0 left-0 h-full bg-[#2323FF] rounded-full transition-all group-hover:bg-[#5b5bff]"
                                 style={{ width: `${progress}%` }}
                             />
                             {/* Playhead */}
@@ -331,7 +331,7 @@ export function PodcastPlayer({
                                 {/* Play/Pause */}
                                 <button
                                     onClick={handlePlayPause}
-                                    className="bg-purple-500 hover:bg-purple-600 text-white rounded-full p-2.5 transition-colors"
+                                    className="bg-[#2323FF] hover:bg-[#1a1acc] text-white rounded-full p-2.5 transition-colors"
                                 >
                                     {isPlaying ? (
                                         <Pause className="w-5 h-5" />
@@ -363,7 +363,7 @@ export function PodcastPlayer({
                                             className={cn(
                                                 "px-2 py-1 text-xs rounded transition-colors",
                                                 playbackSpeed === speed
-                                                    ? "bg-purple-500 text-white"
+                                                    ? "bg-[#2323FF] text-white"
                                                     : "text-gray-400 hover:text-white"
                                             )}
                                         >

@@ -24,8 +24,8 @@
 
     /* Actions */
     --color-primary: #3b82f6; /* PRIMARY CTA ONLY - Blue */
-    --color-ai: #a855f7; /* AI features - Purple */
-    --color-ai-dark: #9333ea; /* AI selected */
+    --color-ai: #2323FF; /* AI features - Electric Blue */
+    --color-ai-dark: #1a1acc; /* AI selected */
 
     /* Status */
     --color-success: #22c55e;

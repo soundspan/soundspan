@@ -12,7 +12,7 @@ const Badge = memo(forwardRef<HTMLSpanElement, BadgeProps>(
       warning: "bg-brand/10 text-brand ring-brand/20",
       error: "bg-red-500/10 text-red-500 ring-red-500/20",
       info: "bg-blue-500/10 text-blue-500 ring-blue-500/20",
-      ai: "bg-purple-500/10 text-purple-500 ring-purple-500/20",
+      ai: "bg-[#2323FF]/10 text-[#2323FF] ring-[#2323FF]/20",
       default: "bg-[#1a1a1a] text-gray-400 ring-[#262626]",
     };
 

@@ -117,7 +117,7 @@ function EnrichmentStage({
                             isComplete
                                 ? "bg-green-500"
                                 : isBackground
-                                ? "bg-purple-500"
+                                ? "bg-[#2323FF]"
                                 : "bg-[#3b82f6]"
                         }
                     />
@@ -608,7 +608,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             </h3>
                             {enrichmentProgress.coreComplete &&
                                 !enrichmentProgress.isFullyComplete && (
-                                    <span className="text-xs text-purple-400 flex items-center gap-1">
+                                    <span className="text-xs text-[#5b5bff] flex items-center gap-1">
                                         <Loader2 className="w-3 h-3 animate-spin" />
                                         Audio analysis running
                                     </span>

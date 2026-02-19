@@ -7,14 +7,15 @@ import { api } from "@/lib/api";
 import { formatTime } from "@/utils/formatTime";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 
 const tierColors: Record<string, string> = {
     high: "text-green-400",
     medium: "text-yellow-400",
     explore: "text-orange-400",
-    wildcard: "text-purple-400",
+    wildcard: "text-[#5b5bff]",
     low: "text-orange-400",
-    wild: "text-purple-400",
+    wild: "text-[#5b5bff]",
 };
 
 const tierLabels: Record<string, string> = {
@@ -199,6 +200,12 @@ export function TrackList({
                             </div>
 
                             <div className="flex items-center justify-end gap-2">
+                                <TrackPreferenceButtons
+                                    trackId={track.id}
+                                    mode="up-only"
+                                    buttonSizeClassName="h-8 w-8"
+                                    iconSizeClassName="h-4 w-4"
+                                />
                                 <span className="text-sm text-gray-400 w-10 text-right">
                                     {formatTime(track.duration)}
                                 </span>

@@ -35,7 +35,7 @@ export function ChapterList({
                   <span className="text-sm text-gray-500 mr-2">
                     {index + 1}.
                   </span>
-                  <span className="text-sm text-white group-hover:text-purple-400">
+                  <span className="text-sm text-white group-hover:text-[#5b5bff]">
                     {chapter.title}
                   </span>
                 </div>

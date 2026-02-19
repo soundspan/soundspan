@@ -306,15 +306,15 @@ export function Sidebar() {
                         prefetch={false}
                         className="relative group/link"
                     >
-                        <span className="text-[10px] font-black text-gray-500 group-hover/link:text-transparent group-hover/link:bg-clip-text group-hover/link:bg-gradient-to-r group-hover/link:from-purple-400 group-hover/link:to-pink-400 transition-all duration-300 uppercase tracking-[0.15em]">
+                        <span className="text-[10px] font-black text-gray-500 group-hover/link:text-transparent group-hover/link:bg-clip-text group-hover/link:bg-gradient-to-r group-hover/link:from-[#5b5bff] group-hover/link:to-[#00c8ff] transition-all duration-300 uppercase tracking-[0.15em]">
                             Your playlists
                         </span>
-                        <div className="absolute -bottom-0.5 left-0 right-0 h-px bg-gradient-to-r from-purple-500/0 via-purple-500/50 to-purple-500/0 opacity-0 group-hover/link:opacity-100 transition-opacity duration-300" />
+                        <div className="absolute -bottom-0.5 left-0 right-0 h-px bg-gradient-to-r from-[#2323FF]/0 via-[#2323FF]/50 to-[#2323FF]/0 opacity-0 group-hover/link:opacity-100 transition-opacity duration-300" />
                     </Link>
                     <Link
                         href="/playlists"
                         prefetch={false}
-                        className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-purple-500 hover:to-pink-500 hover:scale-110 transition-all duration-300 shadow-lg shadow-transparent hover:shadow-purple-500/30 border border-white/5 hover:border-transparent"
+                        className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-[#2323FF] hover:to-[#00c8ff] hover:scale-110 transition-all duration-300 shadow-lg shadow-transparent hover:shadow-[#2323FF]/30 border border-white/5 hover:border-transparent"
                         aria-label="Create playlist"
                         title="Create Playlist"
                     >
@@ -336,7 +336,7 @@ export function Sidebar() {
                                     className="px-3 py-2.5 rounded-lg relative overflow-hidden bg-white/[0.02] border-l-2 border-transparent"
                                 >
                                     <div
-                                        className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/10 to-transparent"
+                                        className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2323FF]/10 to-transparent"
                                         style={{
                                             animation: "shimmer 2s infinite",
                                         }}
@@ -361,13 +361,13 @@ export function Sidebar() {
                                         className={cn(
                                             "block px-3 py-2.5 rounded-lg transition-all duration-300 group relative overflow-hidden",
                                             isActive ?
-                                                "bg-gradient-to-r from-purple-500/10 to-transparent text-white border-l-2 border-purple-500 shadow-md shadow-purple-500/5"
-                                            :   "text-gray-400 hover:text-white hover:bg-white/[0.05] border-l-2 border-transparent hover:border-l-2 hover:border-purple-500/30",
+                                                "bg-gradient-to-r from-[#2323FF]/10 to-transparent text-white border-l-2 border-[#2323FF] shadow-md shadow-[#2323FF]/5"
+                                            :   "text-gray-400 hover:text-white hover:bg-white/[0.05] border-l-2 border-transparent hover:border-l-2 hover:border-[#2323FF]/30",
                                         )}
                                     >
                                         {/* Hover shimmer effect */}
                                         {!isActive && (
-                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2323FF]/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                                         )}
 
                                         <div className="flex items-center gap-1.5">
@@ -382,7 +382,7 @@ export function Sidebar() {
                                             </div>
                                             {isShared && (
                                                 <span
-                                                    className="shrink-0 w-1.5 h-1.5 rounded-full bg-purple-500"
+                                                    className="shrink-0 w-1.5 h-1.5 rounded-full bg-[#2323FF]"
                                                     title={`Shared by ${
                                                         playlist.user
                                                             ?.username ||

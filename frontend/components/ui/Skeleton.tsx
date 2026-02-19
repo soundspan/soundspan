@@ -69,7 +69,7 @@ export function TrackListSkeleton({ count = 10 }: { count?: number }) {
 
 export function HeroSkeleton() {
     return (
-        <div className="relative bg-gradient-to-b from-purple-900/20 to-transparent">
+        <div className="relative bg-gradient-to-b from-blue-900/20 to-transparent">
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-12">
                 <div className="flex flex-col md:flex-row items-end gap-6">
                     <Skeleton className="w-48 h-48 flex-shrink-0" />

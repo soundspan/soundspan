@@ -131,7 +131,7 @@ const TrackRow = memo(
                 )}
                 style={
                     isPlaying
-                        ? { borderLeftColor: colors?.vibrant || "#a855f7" }
+                        ? { borderLeftColor: colors?.vibrant || "#2323FF" }
                         : undefined
                 }
                 onClick={handleRowClick}
@@ -155,7 +155,7 @@ const TrackRow = memo(
                         className={cn(
                             "group-hover:hidden text-sm",
                             isPlaying
-                                ? "text-purple-400 font-bold"
+                                ? "text-[#5b5bff] font-bold"
                                 : "text-gray-500"
                         )}
                     >
@@ -171,7 +171,7 @@ const TrackRow = memo(
                     <div
                         className={cn(
                             "font-medium truncate text-sm md:text-base flex items-center gap-2",
-                            isPlaying ? "text-purple-400" : "text-white"
+                            isPlaying ? "text-[#5b5bff]" : "text-white"
                         )}
                     >
                         <span className="truncate">
