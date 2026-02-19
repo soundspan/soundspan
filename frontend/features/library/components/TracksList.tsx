@@ -14,6 +14,7 @@ import { getArtistHref } from "@/utils/artistRoute";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 
 interface TracksListProps {
     tracks: Track[];
@@ -145,6 +146,12 @@ const TrackRow = memo(
                     <span className="text-xs text-gray-500 w-10 text-right">
                         {formatTime(track.duration)}
                     </span>
+                    <TrackPreferenceButtons
+                        trackId={track.id}
+                        mode="both"
+                        buttonSizeClassName="h-10 w-10"
+                        iconSizeClassName="h-5 w-5"
+                    />
                     <TrackOverflowMenu
                         track={overflowTrack}
                         extraItemsAfter={canDelete ? (
@@ -209,7 +216,7 @@ export function TracksList({
                 <div className="w-8 text-center">#</div>
                 <div>Title</div>
                 <div className="hidden md:block">Album</div>
-                <div className="w-[140px] text-right pr-2">Duration</div>
+                <div className="w-[230px] text-right pr-2">Duration</div>
             </div>
 
             <div data-tv-section="library-tracks">
