@@ -13,6 +13,7 @@ import { motion } from "framer-motion";
 import {
     Play,
     Pause,
+    SkipForward,
     Music as MusicIcon,
     Loader2,
     RefreshCw,
@@ -21,6 +22,7 @@ import { cn } from "@/utils/cn";
 import { clampTime } from "@/utils/formatTime";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { SyncBadge } from "@/components/player/SyncBadge";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 
 export function MiniPlayer() {
     const {
@@ -36,6 +38,7 @@ export function MiniPlayer() {
         clearAudioError,
         pause,
         resume,
+        next,
         setPlayerMode,
     } = useAudio();
     const isMobile = useIsMobile();
@@ -179,6 +182,20 @@ export function MiniPlayer() {
                         )}
                     </div>
 
+                    {playbackType === "track" && currentTrack?.id && (
+                        <div
+                            className="flex flex-shrink-0 items-center"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <TrackPreferenceButtons
+                                trackId={currentTrack.id}
+                                mode="up-only"
+                                buttonSizeClassName="h-8 w-8"
+                                iconSizeClassName="h-4 w-4"
+                            />
+                        </div>
+                    )}
+
                     <div
                         className="flex flex-shrink-0 items-center gap-1"
                         onClick={(e) => e.stopPropagation()}
@@ -234,6 +251,14 @@ export function MiniPlayer() {
                             ) : (
                                 <Play className="ml-0.5 h-5 w-5" />
                             )}
+                        </button>
+                        <button
+                            onClick={() => next()}
+                            className="h-8 w-8 rounded-full flex items-center justify-center text-white/70 hover:text-white transition-colors"
+                            aria-label="Next track"
+                            title="Next track"
+                        >
+                            <SkipForward className="h-4 w-4" />
                         </button>
                     </div>
                 </div>
