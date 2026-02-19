@@ -9,6 +9,7 @@ import {
     User,
     Disc3,
     AudioWaveform,
+    Radio,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useAudioControls } from "@/lib/audio-controls-context";
@@ -28,6 +29,7 @@ interface TrackOverflowMenuProps {
     showGoToArtist?: boolean;
     showGoToAlbum?: boolean;
     showMatchVibe?: boolean;
+    showStartRadio?: boolean;
     /** Extra menu items injected before/after the standard items */
     extraItemsBefore?: React.ReactNode;
     extraItemsAfter?: React.ReactNode;
@@ -46,6 +48,7 @@ export function TrackOverflowMenu({
     showGoToArtist = true,
     showGoToAlbum = true,
     showMatchVibe = true,
+    showStartRadio = true,
     extraItemsBefore,
     extraItemsAfter,
     className,
@@ -187,6 +190,28 @@ export function TrackOverflowMenu({
         [track, controls, closeMenu]
     );
 
+    const handleStartRadio = useCallback(
+        async (e: React.MouseEvent) => {
+            e.stopPropagation();
+            closeMenu();
+            if (!track.artist?.id) return;
+            try {
+                const response = await api.getRadioTracks("artist", track.artist.id);
+                if (response.tracks && response.tracks.length > 0) {
+                    controls.playTracks(response.tracks, 0);
+                    toast.success(
+                        `Playing ${track.artist.name} Radio (${response.tracks.length} tracks)`
+                    );
+                } else {
+                    toast.error("Not enough similar music in your library for artist radio");
+                }
+            } catch {
+                toast.error("Failed to start artist radio");
+            }
+        },
+        [track, controls, closeMenu]
+    );
+
     return (
         <>
             <div
@@ -269,6 +294,14 @@ export function TrackOverflowMenu({
                                 onClick={handleMatchVibe}
                                 icon={<AudioWaveform className="h-4 w-4" />}
                                 label="Match Vibe"
+                            />
+                        )}
+
+                        {showStartRadio && track.artist?.id && (
+                            <MenuButton
+                                onClick={handleStartRadio}
+                                icon={<Radio className="h-4 w-4" />}
+                                label="Start Radio"
                             />
                         )}
 

@@ -20,6 +20,7 @@ import {
     Repeat,
     Repeat1,
     AudioWaveform,
+    Radio,
     Loader2,
     RefreshCw,
     Trash2,
@@ -153,6 +154,7 @@ export function OverlayPlayer() {
     const [drawerDragOffset, setDrawerDragOffset] = useState(0);
     const [isDrawerDragActive, setIsDrawerDragActive] = useState(false);
     const [isVibeLoading, setIsVibeLoading] = useState(false);
+    const [isRadioLoading, setIsRadioLoading] = useState(false);
     const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
     const [openQueueMenuIndex, setOpenQueueMenuIndex] = useState<number | null>(null);
     const [showQueuePlaylistSelector, setShowQueuePlaylistSelector] = useState(false);
@@ -972,6 +974,26 @@ export function OverlayPlayer() {
         }
     };
 
+    const handleStartRadio = async () => {
+        if (!currentTrack?.artist?.id) return;
+        setIsRadioLoading(true);
+        try {
+            const response = await api.getRadioTracks("artist", currentTrack.artist.id);
+            if (response.tracks && response.tracks.length > 0) {
+                playTracks(response.tracks, 0);
+                toast.success(
+                    `Playing ${currentTrack.artist.name} Radio (${response.tracks.length} tracks)`
+                );
+            } else {
+                toast.error("Not enough similar music in your library for artist radio");
+            }
+        } catch {
+            toast.error("Failed to start artist radio");
+        } finally {
+            setIsRadioLoading(false);
+        }
+    };
+
     const handleAddToPlaylist = useCallback(
         async (playlistId: string) => {
             if (!currentTrack?.id) return;
@@ -1239,6 +1261,21 @@ export function OverlayPlayer() {
                                         >
                                             <Plus className="h-6 w-6" />
                                         </button>
+                                        {currentTrack?.artist?.id && playbackType === "track" && (
+                                            <button
+                                                onClick={handleStartRadio}
+                                                disabled={isRadioLoading}
+                                                className="flex h-11 w-11 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                                title="Start artist radio"
+                                                aria-label="Start Radio"
+                                            >
+                                                {isRadioLoading ? (
+                                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                                ) : (
+                                                    <Radio className="h-6 w-6" />
+                                                )}
+                                            </button>
+                                        )}
                                         {!featuresLoading && vibeEmbeddings && (
                                             <button
                                                 onClick={handleVibeToggle}
