@@ -25,7 +25,6 @@ import {
     Trash2,
     X,
     Plus,
-    Link as LinkIcon,
 } from "lucide-react";
 import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { cn } from "@/utils/cn";
@@ -932,24 +931,6 @@ export function OverlayPlayer() {
         [currentTrack]
     );
 
-    const handleCopyLink = useCallback(() => {
-        const albumId = currentTrack?.album?.id;
-        const artistHref = currentTrack?.artist
-            ? getArtistHref({ id: currentTrack.artist.id, name: currentTrack.artist.name, mbid: currentTrack.artist.mbid })
-            : null;
-        const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-        const link = albumId
-            ? `${baseUrl}/album/${albumId}`
-            : artistHref
-                ? `${baseUrl}${artistHref}`
-                : null;
-        if (link) {
-            navigator.clipboard.writeText(link).then(() => {
-                toast.success("Link copied to clipboard");
-            });
-        }
-    }, [currentTrack]);
-
     const handleDrawerTabToggle = (tab: "queue" | "lyrics" | "related") => {
         if (!isMobileOrTablet) {
             setActiveTab(tab);
@@ -1227,16 +1208,6 @@ export function OverlayPlayer() {
                                                 ) : (
                                                     <AudioWaveform className="h-6 w-6" />
                                                 )}
-                                            </button>
-                                        )}
-                                        {(currentTrack?.album?.id || currentTrack?.artist) && (
-                                            <button
-                                                onClick={handleCopyLink}
-                                                className="flex h-11 w-11 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                                                title="Copy link"
-                                                aria-label="Copy link"
-                                            >
-                                                <LinkIcon className="h-6 w-6" />
                                             </button>
                                         )}
                                     </div>

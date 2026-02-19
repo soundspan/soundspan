@@ -9,7 +9,6 @@ import {
     User,
     Disc3,
     AudioWaveform,
-    Link,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useAudioControls } from "@/lib/audio-controls-context";
@@ -29,7 +28,6 @@ interface TrackOverflowMenuProps {
     showGoToArtist?: boolean;
     showGoToAlbum?: boolean;
     showMatchVibe?: boolean;
-    showCopyLink?: boolean;
     /** Extra menu items injected before/after the standard items */
     extraItemsBefore?: React.ReactNode;
     extraItemsAfter?: React.ReactNode;
@@ -48,7 +46,6 @@ export function TrackOverflowMenu({
     showGoToArtist = true,
     showGoToAlbum = true,
     showMatchVibe = true,
-    showCopyLink = true,
     extraItemsBefore,
     extraItemsAfter,
     className,
@@ -190,25 +187,6 @@ export function TrackOverflowMenu({
         [track, controls, closeMenu]
     );
 
-    const handleCopyLink = useCallback(
-        (e: React.MouseEvent) => {
-            e.stopPropagation();
-            const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-            const link = albumHref
-                ? `${baseUrl}${albumHref}`
-                : artistHref
-                    ? `${baseUrl}${artistHref}`
-                    : null;
-            if (link) {
-                navigator.clipboard.writeText(link).then(() => {
-                    toast.success("Link copied to clipboard");
-                });
-            }
-            closeMenu();
-        },
-        [albumHref, artistHref, closeMenu]
-    );
-
     return (
         <>
             <div
@@ -291,14 +269,6 @@ export function TrackOverflowMenu({
                                 onClick={handleMatchVibe}
                                 icon={<AudioWaveform className="h-4 w-4" />}
                                 label="Match Vibe"
-                            />
-                        )}
-
-                        {showCopyLink && (albumHref || artistHref) && (
-                            <MenuButton
-                                onClick={handleCopyLink}
-                                icon={<Link className="h-4 w-4" />}
-                                label="Copy link"
                             />
                         )}
 
