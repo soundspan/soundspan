@@ -1163,14 +1163,12 @@ export function OverlayPlayer() {
                             {canSkip ? (
                                 <>
                                     <div className="mb-3 flex items-center justify-center">
-                                        <div className="flex w-full max-w-xs items-center justify-center gap-8 rounded-full border border-white/10 bg-white/[0.03] px-4 py-2">
-                                            <TrackPreferenceButtons
-                                                trackId={preferenceTrackId}
-                                                className="gap-8"
-                                                buttonSizeClassName="h-10 w-10"
-                                                iconSizeClassName="h-5 w-5"
-                                            />
-                                        </div>
+                                        <TrackPreferenceButtons
+                                            trackId={preferenceTrackId}
+                                            className="gap-8"
+                                            buttonSizeClassName="h-10 w-10"
+                                            iconSizeClassName="h-5 w-5"
+                                        />
                                     </div>
 
                                     <div
