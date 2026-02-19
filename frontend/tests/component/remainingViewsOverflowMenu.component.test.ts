@@ -132,6 +132,33 @@ mock.module("@/components/ui/PlaylistSelector", {
     },
 });
 
+mock.module("@tanstack/react-query", {
+    namedExports: {
+        useQueryClient: () => ({
+            invalidateQueries: async () => undefined,
+            setQueryData: () => undefined,
+        }),
+    },
+});
+
+mock.module("@/hooks/useTrackPreference", {
+    namedExports: {
+        useTrackPreference: () => ({
+            signal: null,
+            isSaving: false,
+            toggleThumbsUp: async () => undefined,
+            toggleThumbsDown: async () => undefined,
+        }),
+    },
+});
+
+mock.module("@/components/player/TrackPreferenceButtons", {
+    namedExports: {
+        TrackPreferenceButtons: (props: { trackId?: string }) =>
+            React.createElement("div", { "data-testid": "track-preference-buttons", "data-track-id": props.trackId }),
+    },
+});
+
 mock.module("@/utils/artistRoute", {
     namedExports: {
         getArtistHref: (artist: { id?: string; name?: string }) =>

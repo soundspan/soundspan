@@ -12,6 +12,7 @@ import { TidalBadge } from "@/components/ui/TidalBadge";
 import { toast } from "sonner";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 
 interface PopularTracksProps {
     tracks: Track[];
@@ -234,6 +235,12 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                         {formatTime(track.duration)}
                                     </span>
                                 )}
+                                <TrackPreferenceButtons
+                                    trackId={track.id}
+                                    mode="both"
+                                    buttonSizeClassName="h-10 w-10"
+                                    iconSizeClassName="h-5 w-5"
+                                />
                                 <TrackOverflowMenu
                                     track={{
                                         id: track.id,
