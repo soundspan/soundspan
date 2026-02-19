@@ -269,11 +269,11 @@ const TrackRow = memo(
                     {track.duration ? formatTime(track.duration) : ""}
                 </div>
 
-                <div className="ml-1 flex w-[70px] flex-shrink-0 items-center justify-end md:w-[78px]">
+                <div className="ml-1 flex w-[96px] flex-shrink-0 items-center justify-end md:w-[104px]">
                     <TrackPreferenceButtons
                         trackId={track.id}
-                        buttonSizeClassName="h-7 w-7"
-                        iconSizeClassName="h-3.5 w-3.5"
+                        buttonSizeClassName="h-10 w-10"
+                        iconSizeClassName="h-5 w-5"
                     />
                 </div>
             </div>

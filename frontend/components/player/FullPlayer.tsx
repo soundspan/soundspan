@@ -490,8 +490,8 @@ export function FullPlayer() {
                             <TrackPreferenceButtons
                                 trackId={preferenceTrackId}
                                 className="justify-center"
-                                buttonSizeClassName="h-7 w-7"
-                                iconSizeClassName="h-3.5 w-3.5"
+                                buttonSizeClassName="h-10 w-10"
+                                iconSizeClassName="h-5 w-5"
                             />
 
                             <div className="mt-1.5 flex w-full items-center gap-2.5">

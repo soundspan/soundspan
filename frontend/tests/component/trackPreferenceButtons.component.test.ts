@@ -64,6 +64,8 @@ test("renders thumbs-only controls without circular chrome", async () => {
 
     assert.match(html, /data-icon="thumbs-up-outline"/);
     assert.match(html, /data-icon="thumbs-down-outline"/);
+    assert.match(html, /class="h-11 w-11/);
+    assert.match(html, /class="h-6 w-6/);
     assert.doesNotMatch(html, /rounded-full/);
     assert.doesNotMatch(html, /\bborder\b/);
 });

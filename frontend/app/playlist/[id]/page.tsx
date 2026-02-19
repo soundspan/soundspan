@@ -863,8 +863,8 @@ export default function PlaylistDetailPage() {
                                                 <TrackPreferenceButtons
                                                     trackId={playlistItem.track.id}
                                                     mode="up-only"
-                                                    buttonSizeClassName="h-7 w-7"
-                                                    iconSizeClassName="h-3.5 w-3.5"
+                                                    buttonSizeClassName="h-10 w-10"
+                                                    iconSizeClassName="h-5 w-5"
                                                 />
                                             </div>
                                         </div>

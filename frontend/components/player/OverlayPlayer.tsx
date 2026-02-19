@@ -1166,8 +1166,8 @@ export function OverlayPlayer() {
                                         <TrackPreferenceButtons
                                             trackId={preferenceTrackId}
                                             className="gap-8"
-                                            buttonSizeClassName="h-10 w-10"
-                                            iconSizeClassName="h-5 w-5"
+                                            buttonSizeClassName="h-14 w-14"
+                                            iconSizeClassName="h-7 w-7"
                                         />
                                     </div>
 
@@ -1746,8 +1746,8 @@ export function OverlayPlayer() {
                                                                         <TrackPreferenceButtons
                                                                             trackId={track.id}
                                                                             mode="up-only"
-                                                                            buttonSizeClassName="h-7 w-7"
-                                                                            iconSizeClassName="h-3.5 w-3.5"
+                                                                            buttonSizeClassName="h-10 w-10"
+                                                                            iconSizeClassName="h-5 w-5"
                                                                         />
                                                                         {!isCurrentTrack && (
                                                                             <button

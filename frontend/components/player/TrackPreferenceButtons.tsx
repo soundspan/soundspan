@@ -51,8 +51,8 @@ function ThumbsDownFilledIcon({
 export function TrackPreferenceButtons({
     trackId,
     className,
-    buttonSizeClassName = "h-8 w-8",
-    iconSizeClassName = "h-4 w-4",
+    buttonSizeClassName = "h-11 w-11",
+    iconSizeClassName = "h-6 w-6",
     mode = "both",
 }: TrackPreferenceButtonsProps) {
     const {
