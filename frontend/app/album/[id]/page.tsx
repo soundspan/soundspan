@@ -226,7 +226,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     }}
                 />
 
-                <div className="relative px-4 md:px-8 py-6 space-y-8">
+                <div className="relative px-2 md:px-8 py-6 space-y-8">
                     {hasTracks && (
                         <TrackList
                             tracks={album.tracks}

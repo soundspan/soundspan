@@ -369,7 +369,7 @@ export default function LibraryPage() {
         <div className="min-h-screen relative">
             <LibraryHeader />
 
-            <div className="relative px-4 md:px-8 pb-24">
+            <div className="relative px-2 md:px-8 pb-24">
                 {/* Tabs and Controls Row */}
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
                     <LibraryTabs

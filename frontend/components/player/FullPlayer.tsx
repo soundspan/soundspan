@@ -200,7 +200,7 @@ export function FullPlayer() {
                 <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                 <div className="flex items-center h-full px-6 gap-4">
                     {/* Artwork & Info */}
-                    <div className="flex items-center gap-4 w-72">
+                    <div className="flex items-center gap-3 w-72">
                         {mediaLink ? (
                             <Link
                                 href={mediaLink}
@@ -317,6 +317,11 @@ export function FullPlayer() {
                             <SyncBadge />
                             </div>
                         </div>
+                        <TrackPreferenceButtons
+                            trackId={preferenceTrackId}
+                            buttonSizeClassName="h-8 w-8"
+                            iconSizeClassName="h-4 w-4"
+                        />
                     </div>
 
                     {/* Controls */}
@@ -486,45 +491,36 @@ export function FullPlayer() {
 
                     {/* Right Controls */}
                     <div className="flex w-72 items-center justify-end gap-3">
-                        <div className="flex w-52 flex-col items-center">
-                            <TrackPreferenceButtons
-                                trackId={preferenceTrackId}
-                                className="justify-center"
-                                buttonSizeClassName="h-10 w-10"
-                                iconSizeClassName="h-5 w-5"
-                            />
+                        <div className="flex w-44 items-center gap-2.5">
+                            <button
+                                onClick={toggleMute}
+                                className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110"
+                                aria-label={volume === 0 ? "Unmute" : "Mute"}
+                            >
+                                {isMuted || volume === 0 ? (
+                                    <VolumeX className="w-5 h-5" />
+                                ) : (
+                                    <Volume2 className="w-5 h-5" />
+                                )}
+                            </button>
 
-                            <div className="mt-1.5 flex w-full items-center gap-2.5">
-                                <button
-                                    onClick={toggleMute}
-                                    className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110"
-                                    aria-label={volume === 0 ? "Unmute" : "Mute"}
-                                >
-                                    {isMuted || volume === 0 ? (
-                                        <VolumeX className="w-5 h-5" />
-                                    ) : (
-                                        <Volume2 className="w-5 h-5" />
-                                    )}
-                                </button>
-
-                                <div className="relative flex-1">
-                                    <input
-                                        type="range"
-                                        min="0"
-                                        max="100"
-                                        value={volume * 100}
-                                        onChange={handleVolumeChange}
-                                        aria-label="Volume"
-                                        aria-valuemin={0}
-                                        aria-valuemax={100}
-                                        aria-valuenow={Math.round(volume * 100)}
-                                        aria-valuetext={`${Math.round(volume * 100)} percent`}
-                                        style={{
-                                            background: `linear-gradient(to right, #fff ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
-                                        }}
-                                        className="w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30 [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
-                                    />
-                                </div>
+                            <div className="relative flex-1">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={volume * 100}
+                                    onChange={handleVolumeChange}
+                                    aria-label="Volume"
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-valuenow={Math.round(volume * 100)}
+                                    aria-valuetext={`${Math.round(volume * 100)} percent`}
+                                    style={{
+                                        background: `linear-gradient(to right, #fff ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
+                                    }}
+                                    className="w-full h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30 [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
+                                />
                             </div>
                         </div>
 

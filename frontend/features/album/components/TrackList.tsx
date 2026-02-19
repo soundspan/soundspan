@@ -120,7 +120,7 @@ const TrackRow = memo(
                 data-tv-card-index={index}
                 tabIndex={0}
                 className={cn(
-                    "group relative flex items-center gap-2 md:gap-4 px-2 md:px-4 py-3 hover:bg-[#141414] transition-colors cursor-pointer",
+                    "group relative flex items-center gap-2 md:gap-4 px-1 md:px-4 py-3 hover:bg-[#141414] transition-colors cursor-pointer",
                     isPlaying && "bg-[#1a1a1a] border-l-2",
                     isInQueue &&
                         !isPlaying &&

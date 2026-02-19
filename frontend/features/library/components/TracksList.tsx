@@ -60,7 +60,7 @@ const TrackRow = memo(
                 data-tv-card-index={index}
                 tabIndex={0}
                 className={cn(
-                    "grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-2 px-2 md:gap-3 md:px-3 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
+                    "grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-2 px-1 md:gap-3 md:px-3 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                     isCurrentlyPlaying && "bg-white/5",
                     isInQueue && !isCurrentlyPlaying && "bg-[#3b82f6]/[0.06]"
                 )}
