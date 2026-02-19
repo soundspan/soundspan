@@ -20,3 +20,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Activity Social tab no longer flickers to "Social status unavailable" during transient refresh failures when cached online users are already available.
+- Route navigation no longer gets queued behind heavy cover-art fetch bursts; sidebar primary links prefetch again and the service worker now bypasses Next.js route-transition requests.

@@ -258,7 +258,6 @@ export function Sidebar() {
                         <Link
                             key={item.name}
                             href={item.href}
-                            prefetch={false}
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
                                 "block rounded-lg transition-all duration-200 group relative overflow-hidden",

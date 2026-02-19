@@ -3,7 +3,7 @@ const CACHE_NAME = 'soundspan-v1';
 const IMAGE_CACHE_NAME = 'soundspan-images-v2';
 const IMAGE_METADATA_CACHE_NAME = 'soundspan-images-metadata-v1';
 const MAX_IMAGE_CACHE_ENTRIES = 2000;
-const MAX_CONCURRENT_IMAGE_REQUESTS = 8;
+const MAX_CONCURRENT_IMAGE_REQUESTS = 4;
 const REQUEST_DELAY_MS = 10;
 const IMAGE_CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 
@@ -174,6 +174,20 @@ self.addEventListener('fetch', (event) => {
 
   // Skip streaming endpoints
   if (url.pathname.includes('/stream')) return;
+
+  // Avoid intercepting Next.js route transitions and navigation documents.
+  // Let the browser/Next runtime fetch these directly so route changes are never
+  // queued behind image cache activity.
+  const isNextRouteRequest =
+    request.mode === 'navigate' ||
+    request.headers.get('RSC') === '1' ||
+    request.headers.has('Next-Router-State-Tree') ||
+    request.headers.has('Next-Url') ||
+    request.headers.has('Next-Router-Prefetch');
+  if (isNextRouteRequest) return;
+
+  // Skip Next.js runtime/static asset requests.
+  if (url.pathname.startsWith('/_next/')) return;
 
   // Skip Next.js image optimization endpoint
   if (url.pathname.startsWith('/_next/image')) return;

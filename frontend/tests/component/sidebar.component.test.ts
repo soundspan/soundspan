@@ -146,3 +146,31 @@ test("shows listen-together equalizer marker when active sessions exist", async 
 
     assert.match(html, /eq-bars/);
 });
+
+test("keeps prefetch enabled for primary sidebar navigation links", async () => {
+    const { Sidebar } = await import("../../components/layout/Sidebar.tsx");
+    const html = renderToStaticMarkup(React.createElement(Sidebar));
+
+    const navHrefs = [
+        "/library",
+        "/radio",
+        "/discover",
+        "/listen-together",
+        "/audiobooks",
+        "/podcasts",
+        "/browse/playlists",
+    ];
+
+    for (const href of navHrefs) {
+        const escapedHref = href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const linkMatch = html.match(
+            new RegExp(`<a[^>]*href="${escapedHref}"[^>]*>`)
+        );
+        assert.ok(linkMatch, `Expected link for ${href}`);
+        assert.doesNotMatch(
+            linkMatch[0],
+            /\sprefetch=/,
+            `Primary nav link ${href} should not force prefetch off`
+        );
+    }
+});
