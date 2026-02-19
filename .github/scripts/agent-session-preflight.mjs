@@ -111,6 +111,7 @@ function runRepositoryIndexReadiness({
   enabled,
   verifyStrict,
   buildIfMissing,
+  reindexBeforeVerify,
   closeoutVerifyIfPossible,
   failureMode,
 }) {
@@ -124,6 +125,7 @@ function runRepositoryIndexReadiness({
     enabled,
     verify_strict: verifyStrict,
     build_if_missing: buildIfMissing,
+    reindex_before_verify: reindexBeforeVerify,
     closeout_verify_if_possible: closeoutVerifyIfPossible,
     failure_mode: failureMode,
     preflight_state: enabled ? "pending" : "disabled",
@@ -157,6 +159,65 @@ function runRepositoryIndexReadiness({
   };
 
   if (!enabled) {
+    return summary;
+  }
+
+  if (reindexBeforeVerify) {
+    const buildResult = runCommandSafe("node", [
+      "tools/index/indexer.mjs",
+      "build",
+      "--json",
+    ]);
+    const buildPayload = parseJsonSafe(buildResult.stdout);
+
+    summary.build.state = buildResult.ok ? "pass" : "fail";
+    summary.build.exit_status = buildResult.status;
+    summary.build.status = toNonEmptyString(buildPayload?.status) ?? (buildResult.ok ? "ok" : "error");
+    summary.build.warnings = normalizeStringList(buildPayload?.warnings);
+    summary.build.errors = normalizeStringList(buildPayload?.errors);
+    summary.output_dir = toNonEmptyString(buildPayload?.output_dir);
+
+    if (!buildResult.ok) {
+      const buildFailureSummary =
+        summary.build.errors[0] ??
+        summarizeErrorText(buildResult.stderr) ??
+        summarizeErrorText(buildResult.stdout);
+      summary.preflight_state = "fail";
+      summary.check_error = buildFailureSummary ?? "Repository index build failed.";
+      return summary;
+    }
+
+    const verifyAfterBuildResult = runCommandSafe("node", verifyArgs);
+    const verifyAfterBuildPayload = parseJsonSafe(verifyAfterBuildResult.stdout);
+    summary.verify_after_build.state = verifyAfterBuildResult.ok ? "pass" : "fail";
+    summary.verify_after_build.exit_status = verifyAfterBuildResult.status;
+    summary.verify_after_build.status =
+      toNonEmptyString(verifyAfterBuildPayload?.status) ??
+      (verifyAfterBuildResult.ok ? "ok" : "error");
+    summary.verify_after_build.warnings = normalizeStringList(
+      verifyAfterBuildPayload?.warnings,
+    );
+    summary.verify_after_build.errors = normalizeStringList(
+      verifyAfterBuildPayload?.errors,
+    );
+    if (!summary.output_dir) {
+      summary.output_dir = toNonEmptyString(verifyAfterBuildPayload?.output_dir);
+    }
+
+    if (!verifyAfterBuildResult.ok) {
+      const verifyAfterBuildFailureSummary =
+        summary.verify_after_build.errors[0] ??
+        summarizeErrorText(verifyAfterBuildResult.stderr) ??
+        summarizeErrorText(verifyAfterBuildResult.stdout);
+      summary.preflight_state = "fail";
+      summary.check_error =
+        verifyAfterBuildFailureSummary ??
+        "Repository index verify failed after build.";
+      return summary;
+    }
+
+    summary.index_present = true;
+    summary.preflight_state = "built_and_verified";
     return summary;
   }
 
@@ -809,6 +870,8 @@ function main() {
     repositoryIndexPreflightConfig.enabled !== false;
   const repositoryIndexBuildIfMissing =
     repositoryIndexPreflightConfig.buildIfMissing !== false;
+  const repositoryIndexReindexBeforeVerify =
+    repositoryIndexPreflightConfig.reindexBeforeVerify !== false;
   const repositoryIndexVerifyStrict =
     repositoryIndexPreflightConfig.verifyStrict !== false;
   const repositoryIndexFailureModeCandidate =
@@ -877,6 +940,7 @@ function main() {
     enabled: repositoryIndexPreflightEnabled,
     verifyStrict: repositoryIndexVerifyStrict,
     buildIfMissing: repositoryIndexBuildIfMissing,
+    reindexBeforeVerify: repositoryIndexReindexBeforeVerify,
     closeoutVerifyIfPossible: repositoryIndexCloseoutVerifyIfPossible,
     failureMode: repositoryIndexFailureMode,
   });
@@ -2016,9 +2080,15 @@ function main() {
     repositoryIndexReadiness.enabled &&
     repositoryIndexReadiness.preflight_state === "built_and_verified"
   ) {
-    nextActions.push(
-      "Repository index was missing for current branch/worktree namespace and was built + strict-verified by preflight",
-    );
+    if (repositoryIndexReadiness.reindex_before_verify) {
+      nextActions.push(
+        "Repository index was re-indexed and strict-verified by preflight",
+      );
+    } else {
+      nextActions.push(
+        "Repository index was missing for current branch/worktree namespace and was built + strict-verified by preflight",
+      );
+    }
   }
   if (
     repositoryIndexReadiness.enabled &&

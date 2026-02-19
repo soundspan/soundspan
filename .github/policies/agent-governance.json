@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-governance",
-    "version": "2026-02-18.01",
+    "version": "2026-02-19.01",
     "description": "Executable governance checks for AGENTS policy and local-context hygiene."
   },
   "contracts": {
@@ -107,6 +107,7 @@
       "repositoryIndexPreflight": {
         "enabled": true,
         "buildIfMissing": true,
+        "reindexBeforeVerify": true,
         "verifyStrict": true,
         "failureMode": "fail",
         "closeoutVerifyIfPossible": true
@@ -397,7 +398,7 @@
           "When a task or feature becomes `complete`, move it from hot queue into feature shard archive.",
           "Do not read archive shards during normal startup; read archive on-demand for historical lookup only.",
           "read only queue fields/items relevant to the current feature/item scope",
-          "Preflight includes repository index readiness gating: build namespaced index if missing and strict-verify existing index before implementation work starts.",
+          "Preflight includes repository index readiness gating: always re-index namespaced index and strict-verify before implementation work starts.",
           "Simplified plan architecture:",
           "required per active feature: `PLAN.md`",
           "## Orchestrator/Subagent Contract Pointer",

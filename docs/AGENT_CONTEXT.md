@@ -231,7 +231,7 @@ For this repository, documentation updates are part of the definition of done fo
   - `.agents/EXECUTION_QUEUE.json` (canonical execution queue + atomic state)
   - `.agents/SESSION_BRIEF.json` (generated from preflight)
 - Keep `docs/CONTEXT_INDEX.json` synchronized with policy/documentation contracts; treat it as machine-readable authority, not optional prose.
-- Repository index operations contract lives in `docs/REPO_INDEXING.md`; `npm run agent:preflight` now performs index readiness gating (build if missing, strict verify if present) before implementation starts.
+- Repository index operations contract lives in `docs/REPO_INDEXING.md`; `npm run agent:preflight` now performs index readiness gating (always re-index, then strict verify) before implementation starts.
 - Keep queue/continuity/plan boundaries clear:
   - queue: execution plan + state authority
   - continuity: historical decisions/findings/outcomes

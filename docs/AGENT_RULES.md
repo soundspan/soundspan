@@ -20,7 +20,7 @@ These IDs are stable cross-references for enforceable behavior and map to policy
 - `rule_policy_sync_required`: When process expectations change, update policy + enforcement + human docs together.
 - `rule_continuity_required`: Read and maintain `.agents/CONTINUITY.md` as canonical continuity context.
 - `rule_post_compaction_rebootstrap`: Treat compaction recovery as full startup and run preflight.
-- `rule_repo_index_preflight_gate`: Require preflight index readiness checks (build if missing, strict verify if present) before implementation starts.
+- `rule_repo_index_preflight_gate`: Require preflight index readiness checks (always re-index, then strict verify) before implementation starts.
 - `rule_context_index_drift_guard`: Keep `docs/CONTEXT_INDEX.json` synchronized with policy/documentation contracts and fail checks on drift.
 - `rule_canonical_agents_root`: Treat `/home/joshd/git/soundspan/.agents` as the single canonical local agent-context root.
 - `rule_worktree_root_required`: Keep all non-primary Git worktrees under `/home/joshd/git/soundspan/.worktrees`.
@@ -272,9 +272,9 @@ When policy expectations change, update all relevant governance artifacts in the
   - do not read archive shards during normal startup; load archive files only for explicit historical/regression lookup.
 - Repository index readiness gate:
   - `npm run agent:preflight` must check branch/worktree index readiness.
-  - If the active namespaced index is missing, preflight builds it before continuing.
-  - If the active namespaced index exists, preflight runs strict verify before implementation starts.
-  - If strict verify fails, treat it as a blocking failure unless policy explicitly sets warn mode.
+  - `npm run agent:preflight` must re-index the active namespaced index before readiness verification.
+  - After re-indexing, preflight runs strict verify before implementation starts.
+  - If re-index or strict verify fails, treat it as a blocking failure unless policy explicitly sets warn mode.
 - End-of-task index verification:
   - When feasible, run `npm run index:verify` before final handoff.
   - If verify reports drift, run `npm run index:build` and re-run verify in the same session.

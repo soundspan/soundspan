@@ -39,8 +39,8 @@ node tools/index/indexer.mjs query "openrouter config" --strict-fresh
 ## Agent Preflight Integration
 
 - `npm run agent:preflight` includes an index-readiness gate for the active branch/worktree namespace.
-- If the namespaced index is missing, preflight builds it before continuing.
-- If the namespaced index exists, preflight runs strict verify before implementation work begins.
+- Preflight always re-indexes the active namespaced index before running readiness checks.
+- After re-indexing, preflight runs strict verify before implementation work begins.
 - At task closeout (when feasible), run `npm run index:verify`; if drift is reported, run `npm run index:build` and verify again.
 
 ## Files and Locations

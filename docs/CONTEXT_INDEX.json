@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-context-index",
-    "version": "2026-02-18.01",
+    "version": "2026-02-19.01",
     "description": "Machine-readable index for startup context retrieval and split-doc drift checks."
   },
   "startupReadOrder": [
@@ -97,6 +97,7 @@
     "repositoryIndexPreflight": {
       "enabled": true,
       "buildIfMissing": true,
+      "reindexBeforeVerify": true,
       "verifyStrict": true,
       "failureMode": "fail",
       "closeoutVerifyIfPossible": true

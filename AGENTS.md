@@ -59,7 +59,7 @@ Queue-first execution rule:
 - In multi-agent sessions, read only queue fields/items relevant to the current feature/item scope (selector examples: `id`, `plan_ref`, `owner`, `depends_on`) instead of loading the entire queue.
 - Preflight performs a stale `.agents/plans/**` reference scan and fails when unresolved links are detected.
 - Session brief contract is machine-validated when `.agents/SESSION_BRIEF.json` is present; stale freshness beyond policy threshold fails policy checks until refreshed.
-- Preflight includes repository index readiness gating: build namespaced index if missing and strict-verify existing index before implementation work starts.
+- Preflight includes repository index readiness gating: always re-index namespaced index and strict-verify before implementation work starts.
 
 Simplified plan architecture:
 

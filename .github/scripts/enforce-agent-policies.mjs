@@ -1160,6 +1160,7 @@ function checkContextIndexContract(config) {
       for (const fieldName of [
         "enabled",
         "buildIfMissing",
+        "reindexBeforeVerify",
         "verifyStrict",
         "failureMode",
         "closeoutVerifyIfPossible",
@@ -1179,6 +1180,11 @@ function checkContextIndexContract(config) {
       if (typeof repositoryIndexPreflight.buildIfMissing !== "boolean") {
         addFailure(
           `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.buildIfMissing must be a boolean.`,
+        );
+      }
+      if (typeof repositoryIndexPreflight.reindexBeforeVerify !== "boolean") {
+        addFailure(
+          `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.reindexBeforeVerify must be a boolean.`,
         );
       }
       if (typeof repositoryIndexPreflight.verifyStrict !== "boolean") {
@@ -1217,6 +1223,7 @@ function checkContextIndexContract(config) {
         for (const fieldName of [
           "enabled",
           "buildIfMissing",
+          "reindexBeforeVerify",
           "verifyStrict",
           "failureMode",
           "closeoutVerifyIfPossible",
@@ -1378,6 +1385,7 @@ function checkSessionArtifactsContract(config) {
     for (const fieldName of [
       "enabled",
       "buildIfMissing",
+      "reindexBeforeVerify",
       "verifyStrict",
       "failureMode",
       "closeoutVerifyIfPossible",
@@ -1395,6 +1403,15 @@ function checkSessionArtifactsContract(config) {
     if (typeof repositoryIndexPreflight.buildIfMissing !== "boolean") {
       addFailure(
         `${contractPath}.repositoryIndexPreflight.buildIfMissing must be a boolean.`,
+      );
+    }
+    if (typeof repositoryIndexPreflight.reindexBeforeVerify !== "boolean") {
+      addFailure(
+        `${contractPath}.repositoryIndexPreflight.reindexBeforeVerify must be a boolean.`,
+      );
+    } else if (repositoryIndexPreflight.reindexBeforeVerify !== true) {
+      addFailure(
+        `${contractPath}.repositoryIndexPreflight.reindexBeforeVerify must equal true.`,
       );
     }
     if (typeof repositoryIndexPreflight.verifyStrict !== "boolean") {
