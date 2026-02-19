@@ -145,6 +145,46 @@ const getGenreColor = (genre: string): string => {
     return GENRE_COLORS[lower] || GENRE_COLORS.default;
 };
 
+function diversifyTracksByArtist(tracks: Track[]): Track[] {
+    if (tracks.length === 0) {
+        return [];
+    }
+
+    const maxPerArtist = 2;
+    const selected: Track[] = [];
+    const overflow: Track[] = [];
+    const artistCounts = new Map<string, number>();
+
+    for (const track of tracks) {
+        const artistKey =
+            track.artist?.id ||
+            track.artist?.name?.trim().toLowerCase() ||
+            `unknown:${track.id}`;
+        const count = artistCounts.get(artistKey) ?? 0;
+
+        if (count < maxPerArtist) {
+            artistCounts.set(artistKey, count + 1);
+            selected.push(track);
+            continue;
+        }
+
+        overflow.push(track);
+    }
+
+    if (selected.length >= tracks.length) {
+        return selected;
+    }
+
+    for (const track of overflow) {
+        selected.push(track);
+        if (selected.length >= tracks.length) {
+            break;
+        }
+    }
+
+    return selected;
+}
+
 export function LibraryRadioStations() {
     const { playTracks } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
@@ -212,7 +252,8 @@ export function LibraryRadioStations() {
                 return;
             }
 
-            const shuffled = shuffleArray(response.tracks);
+            const diversifiedTracks = diversifyTracksByArtist(response.tracks);
+            const shuffled = shuffleArray(diversifiedTracks);
             playTracks(shuffled, 0);
             toast.success(`${station.name} Radio`, {
                 description: `Shuffling ${shuffled.length} tracks`,

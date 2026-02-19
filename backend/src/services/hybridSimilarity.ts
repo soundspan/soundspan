@@ -38,6 +38,56 @@ const FEATURES_ONLY_WEIGHTS = {
     key: 0.044,
 };
 
+const CANDIDATE_MULTIPLIER = 5;
+
+function getArtistCapForLimit(limit: number): number {
+    if (!Number.isFinite(limit) || limit <= 0) return 2;
+    return Math.max(2, Math.floor(limit / 12));
+}
+
+function applyArtistDiversityCap(
+    tracks: SimilarTrack[],
+    limit: number
+): SimilarTrack[] {
+    if (!Array.isArray(tracks) || tracks.length === 0 || limit <= 0) {
+        return [];
+    }
+
+    const maxPerArtist = getArtistCapForLimit(limit);
+    const selected: SimilarTrack[] = [];
+    const overflow: SimilarTrack[] = [];
+    const artistCounts = new Map<string, number>();
+
+    for (const track of tracks) {
+        const artistKey =
+            typeof track.artistId === "string" && track.artistId.length > 0 ?
+                track.artistId
+            :   `unknown:${track.id}`;
+        const count = artistCounts.get(artistKey) ?? 0;
+
+        if (count < maxPerArtist) {
+            artistCounts.set(artistKey, count + 1);
+            selected.push(track);
+            continue;
+        }
+
+        overflow.push(track);
+    }
+
+    if (selected.length >= limit) {
+        return selected.slice(0, limit);
+    }
+
+    for (const track of overflow) {
+        selected.push(track);
+        if (selected.length >= limit) {
+            break;
+        }
+    }
+
+    return selected.slice(0, limit);
+}
+
 export async function findSimilarTracks(
     trackId: string,
     limit: number = 20
@@ -68,7 +118,7 @@ async function findSimilarHybrid(
     limit: number
 ): Promise<SimilarTrack[]> {
     // Fetch 5x candidates from CLAP to ensure good coverage after re-ranking
-    const candidateMultiplier = 5;
+    const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
 
     const results = await prisma.$queryRaw<SimilarTrack[]>`
         WITH source AS (
@@ -87,7 +137,7 @@ async function findSimilarHybrid(
             FROM track_embeddings te
             WHERE te.track_id != ${trackId}
             ORDER BY te.embedding <=> (SELECT embedding FROM source)
-            LIMIT ${limit * candidateMultiplier}
+            LIMIT ${candidateLimit}
         )
         SELECT
             t.id,
@@ -114,16 +164,17 @@ async function findSimilarHybrid(
         JOIN "Artist" ar ON a."artistId" = ar.id
         CROSS JOIN source s
         ORDER BY similarity DESC
-        LIMIT ${limit}
+        LIMIT ${candidateLimit}
     `;
 
-    return results;
+    return applyArtistDiversityCap(results, limit);
 }
 
 async function findSimilarClapOnly(
     trackId: string,
     limit: number
 ): Promise<SimilarTrack[]> {
+    const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
     const results = await prisma.$queryRaw<SimilarTrack[]>`
         WITH source AS (
             SELECT embedding FROM track_embeddings WHERE track_id = ${trackId}
@@ -144,16 +195,17 @@ async function findSimilarClapOnly(
         JOIN "Artist" ar ON a."artistId" = ar.id
         WHERE te.track_id != ${trackId}
         ORDER BY distance
-        LIMIT ${limit}
+        LIMIT ${candidateLimit}
     `;
 
-    return results;
+    return applyArtistDiversityCap(results, limit);
 }
 
 async function findSimilarFeaturesOnly(
     trackId: string,
     limit: number
 ): Promise<SimilarTrack[]> {
+    const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
     const results = await prisma.$queryRaw<SimilarTrack[]>`
         WITH source AS (
             SELECT energy, valence, bpm, danceability, acousticness, instrumentalness, key, "keyScale"
@@ -185,8 +237,8 @@ async function findSimilarFeaturesOnly(
         WHERE t.id != ${trackId}
             AND t.energy IS NOT NULL
         ORDER BY similarity DESC
-        LIMIT ${limit}
+        LIMIT ${candidateLimit}
     `;
 
-    return results;
+    return applyArtistDiversityCap(results, limit);
 }

@@ -70,8 +70,7 @@ describe("hybridSimilarity service", () => {
 
         const queryArgs = mockQueryRaw.mock.calls[0] ?? [];
         expect(queryArgs).toContain(sourceTrackId);
-        expect(queryArgs).toContain(limit);
-        expect(queryArgs).toContain(limit * 5);
+        expect(queryArgs.filter((value: unknown) => value === limit * 5).length).toBeGreaterThanOrEqual(2);
         expect(mockLoggerWarn).not.toHaveBeenCalled();
     });
 
@@ -100,7 +99,7 @@ describe("hybridSimilarity service", () => {
 
         const queryArgs = mockQueryRaw.mock.calls[0] ?? [];
         expect(queryArgs).toContain(sourceTrackId);
-        expect(queryArgs.filter((value: unknown) => value === 20)).toHaveLength(1);
+        expect(queryArgs.filter((value: unknown) => value === 100)).toHaveLength(1);
     });
 
     it("uses features-only mode when CLAP embeddings are unavailable", async () => {
@@ -129,7 +128,7 @@ describe("hybridSimilarity service", () => {
 
         const queryArgs = mockQueryRaw.mock.calls[0] ?? [];
         expect(queryArgs).toContain(sourceTrackId);
-        expect(queryArgs).toContain(limit);
+        expect(queryArgs).toContain(limit * 5);
     });
 
     it("returns an empty list and warns when no feature systems are available", async () => {
@@ -212,5 +211,35 @@ describe("hybridSimilarity service", () => {
             `[HYBRID-SIMILARITY] Using features-only mode for track ${sourceTrackId}`
         );
         expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it("caps over-represented artists while still filling the requested limit", async () => {
+        const sourceTrackId = "source-track-diversity";
+        const limit = 6;
+        mockGetFeatures.mockResolvedValueOnce({
+            vibeEmbeddings: true,
+            musicCNN: true,
+        });
+        mockQueryRaw.mockResolvedValueOnce([
+            buildSimilarTrack({ id: "a-1", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "a-2", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "a-3", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "a-4", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "a-5", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "b-1", artistId: "artist-b", artistName: "Artist B" }),
+            buildSimilarTrack({ id: "b-2", artistId: "artist-b", artistName: "Artist B" }),
+            buildSimilarTrack({ id: "c-1", artistId: "artist-c", artistName: "Artist C" }),
+            buildSimilarTrack({ id: "d-1", artistId: "artist-d", artistName: "Artist D" }),
+        ]);
+
+        const result = await findSimilarTracks(sourceTrackId, limit);
+        const artistCounts = result.reduce<Record<string, number>>((acc, track) => {
+            acc[track.artistId] = (acc[track.artistId] || 0) + 1;
+            return acc;
+        }, {});
+
+        expect(result).toHaveLength(limit);
+        expect(Math.max(...Object.values(artistCounts))).toBeLessThanOrEqual(2);
+        expect(artistCounts["artist-a"]).toBe(2);
     });
 });

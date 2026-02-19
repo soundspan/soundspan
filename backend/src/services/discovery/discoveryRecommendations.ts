@@ -69,6 +69,16 @@ function randomJitter(max = 0.12): number {
     return Math.random() * max;
 }
 
+function getArtistCapForTarget(targetCount: number): number {
+    if (!Number.isFinite(targetCount) || targetCount <= 0) return 2;
+    return Math.max(2, Math.floor(targetCount / 10));
+}
+
+function getRelaxedArtistCapForTarget(targetCount: number): number {
+    const strictCap = getArtistCapForTarget(targetCount);
+    return Math.max(strictCap + 1, Math.ceil(targetCount / 6));
+}
+
 export class DiscoveryRecommendationsService {
     private async getOrCreateUserConfig(userId: string) {
         const existing = await prisma.userDiscoverConfig.findUnique({
@@ -219,6 +229,8 @@ export class DiscoveryRecommendationsService {
         userId: string,
         targetCount: number
     ): Promise<SelectedTrack[]> {
+        const strictArtistCap = getArtistCapForTarget(targetCount);
+        const relaxedArtistCap = getRelaxedArtistCapForTarget(targetCount);
         const artistScores = await this.buildArtistScoreMap(userId);
         const prioritizedArtistIds = Array.from(artistScores.keys());
 
@@ -289,14 +301,29 @@ export class DiscoveryRecommendationsService {
         const selected: SelectedTrack[] = [];
         const selectedAlbumIds = new Set<string>();
         const selectedTrackIds = new Set<string>();
+        const selectedArtistCounts = new Map<string, number>();
+
+        const canSelectArtist = (artistId: string, cap: number): boolean =>
+            (selectedArtistCounts.get(artistId) ?? 0) < cap;
+
+        const recordSelectedArtist = (artistId: string): void => {
+            selectedArtistCounts.set(artistId, (selectedArtistCounts.get(artistId) ?? 0) + 1);
+        };
+
+        const deferredPrimaryCandidates: typeof scoredCandidates = [];
 
         for (const candidate of scoredCandidates) {
             if (selected.length >= targetCount) break;
             if (selectedTrackIds.has(candidate.track.id)) continue;
             if (selectedAlbumIds.has(candidate.track.albumId)) continue;
+            if (!canSelectArtist(candidate.track.album.artist.id, strictArtistCap)) {
+                deferredPrimaryCandidates.push(candidate);
+                continue;
+            }
 
             selectedTrackIds.add(candidate.track.id);
             selectedAlbumIds.add(candidate.track.albumId);
+            recordSelectedArtist(candidate.track.album.artist.id);
 
             selected.push({
                 trackId: candidate.track.id,
@@ -313,6 +340,42 @@ export class DiscoveryRecommendationsService {
                 similarity: candidate.score,
                 tier: candidate.tier,
             });
+        }
+
+        if (selected.length < targetCount) {
+            for (const candidate of deferredPrimaryCandidates) {
+                if (selected.length >= targetCount) break;
+                if (selectedTrackIds.has(candidate.track.id)) continue;
+                if (selectedAlbumIds.has(candidate.track.albumId)) continue;
+                if (
+                    !canSelectArtist(
+                        candidate.track.album.artist.id,
+                        relaxedArtistCap
+                    )
+                ) {
+                    continue;
+                }
+
+                selectedTrackIds.add(candidate.track.id);
+                selectedAlbumIds.add(candidate.track.albumId);
+                recordSelectedArtist(candidate.track.album.artist.id);
+
+                selected.push({
+                    trackId: candidate.track.id,
+                    title: candidate.track.title,
+                    duration: candidate.track.duration,
+                    filePath: candidate.track.filePath,
+                    albumId: candidate.track.albumId,
+                    albumTitle: candidate.track.album.title,
+                    albumMbid: candidate.track.album.rgMbid,
+                    artistId: candidate.track.album.artist.id,
+                    artistName: candidate.track.album.artist.name,
+                    artistMbid: candidate.track.album.artist.mbid,
+                    coverUrl: candidate.track.album.coverUrl,
+                    similarity: candidate.score,
+                    tier: candidate.tier,
+                });
+            }
         }
 
         if (selected.length < targetCount) {
@@ -344,13 +407,20 @@ export class DiscoveryRecommendationsService {
                 orderBy: [{ updatedAt: "desc" }],
             });
 
+            const deferredFallbackTracks: typeof fallbackTracks = [];
+
             for (const track of fallbackTracks) {
                 if (selected.length >= targetCount) break;
                 if (selectedTrackIds.has(track.id)) continue;
                 if (selectedAlbumIds.has(track.albumId)) continue;
+                if (!canSelectArtist(track.album.artist.id, strictArtistCap)) {
+                    deferredFallbackTracks.push(track);
+                    continue;
+                }
 
                 selectedTrackIds.add(track.id);
                 selectedAlbumIds.add(track.albumId);
+                recordSelectedArtist(track.album.artist.id);
 
                 const fallbackSimilarity = clampSimilarity(0.34 + randomJitter(0.15));
                 selected.push({
@@ -368,6 +438,40 @@ export class DiscoveryRecommendationsService {
                     similarity: fallbackSimilarity,
                     tier: similarityToTier(fallbackSimilarity),
                 });
+            }
+
+            if (selected.length < targetCount) {
+                for (const track of deferredFallbackTracks) {
+                    if (selected.length >= targetCount) break;
+                    if (selectedTrackIds.has(track.id)) continue;
+                    if (selectedAlbumIds.has(track.albumId)) continue;
+                    if (!canSelectArtist(track.album.artist.id, relaxedArtistCap)) {
+                        continue;
+                    }
+
+                    selectedTrackIds.add(track.id);
+                    selectedAlbumIds.add(track.albumId);
+                    recordSelectedArtist(track.album.artist.id);
+
+                    const fallbackSimilarity = clampSimilarity(
+                        0.34 + randomJitter(0.15)
+                    );
+                    selected.push({
+                        trackId: track.id,
+                        title: track.title,
+                        duration: track.duration,
+                        filePath: track.filePath,
+                        albumId: track.albumId,
+                        albumTitle: track.album.title,
+                        albumMbid: track.album.rgMbid,
+                        artistId: track.album.artist.id,
+                        artistName: track.album.artist.name,
+                        artistMbid: track.album.artist.mbid,
+                        coverUrl: track.album.coverUrl,
+                        similarity: fallbackSimilarity,
+                        tier: similarityToTier(fallbackSimilarity),
+                    });
+                }
             }
         }
 

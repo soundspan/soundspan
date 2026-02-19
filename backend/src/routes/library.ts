@@ -113,6 +113,72 @@ const parseBooleanQueryParam = (
     return defaultValue;
 };
 
+const getRadioArtistCapForLimit = (limit: number): number => {
+    if (!Number.isFinite(limit) || limit <= 0) return 2;
+    return Math.max(2, Math.floor(limit / 12));
+};
+
+const getRelaxedRadioArtistCapForLimit = (limit: number): number => {
+    const strictCap = getRadioArtistCapForLimit(limit);
+    return Math.max(strictCap + 1, Math.ceil(limit / 6));
+};
+
+const selectTracksWithArtistDiversity = <
+    T extends { id: string; artistId: string },
+>(
+    tracks: T[],
+    targetCount: number,
+    strictCap: number,
+    relaxedCap: number
+): T[] => {
+    if (!Array.isArray(tracks) || targetCount <= 0) {
+        return [];
+    }
+
+    const selected: T[] = [];
+    const deferred: T[] = [];
+    const artistCounts = new Map<string, number>();
+
+    const trySelect = (track: T, cap: number): boolean => {
+        const artistKey =
+            typeof track.artistId === "string" && track.artistId.length > 0 ?
+                track.artistId
+            :   `unknown:${track.id}`;
+        const count = artistCounts.get(artistKey) ?? 0;
+
+        if (count >= cap) {
+            return false;
+        }
+
+        artistCounts.set(artistKey, count + 1);
+        selected.push(track);
+        return true;
+    };
+
+    for (const track of tracks) {
+        if (selected.length >= targetCount) break;
+        if (!trySelect(track, strictCap)) {
+            deferred.push(track);
+        }
+    }
+
+    if (selected.length < targetCount) {
+        for (const track of deferred) {
+            if (selected.length >= targetCount) break;
+            trySelect(track, relaxedCap);
+        }
+    }
+
+    if (selected.length < targetCount) {
+        for (const track of deferred) {
+            if (selected.length >= targetCount) break;
+            selected.push(track);
+        }
+    }
+
+    return selected.slice(0, targetCount);
+};
+
 const applyCoverArtCorsHeaders = (res: ExpressResponse, origin?: string) => {
     if (origin) {
         res.setHeader("Access-Control-Allow-Origin", origin);
@@ -3661,13 +3727,15 @@ router.get("/radio", async (req, res) => {
                 // 5. Get tracks from similar library artists
                 let similarTracks: {
                     id: string;
+                    artistId: string;
                     bpm: number | null;
                     energy: number | null;
                     valence: number | null;
                     danceability: number | null;
+                    vibeScore?: number;
                 }[] = [];
                 if (similarArtistIds.length > 0) {
-                    similarTracks = await prisma.track.findMany({
+                    const similarTrackRows = await prisma.track.findMany({
                         where: {
                             album: { artistId: { in: similarArtistIds } },
                         },
@@ -3677,8 +3745,21 @@ router.get("/radio", async (req, res) => {
                             energy: true,
                             valence: true,
                             danceability: true,
+                            album: {
+                                select: {
+                                    artistId: true,
+                                },
+                            },
                         },
                     });
+                    similarTracks = similarTrackRows.map((track) => ({
+                        id: track.id,
+                        artistId: track.album.artistId,
+                        bpm: track.bpm,
+                        energy: track.energy,
+                        valence: track.valence,
+                        danceability: track.danceability,
+                    }));
                     logger.debug(
                         `[Radio:artist] Found ${similarTracks.length} tracks from similar artists`
                     );
@@ -3754,15 +3835,34 @@ router.get("/radio", async (req, res) => {
                     limitNum - originalCount,
                     similarTracks.length
                 );
+                const strictSimilarArtistCap =
+                    getRadioArtistCapForLimit(limitNum);
+                const relaxedSimilarArtistCap =
+                    getRelaxedRadioArtistCapForLimit(limitNum);
 
                 const selectedOriginal = shuffleArray(artistTracks).slice(
                     0,
                     originalCount
                 );
-                // Take top vibe-matched tracks (already sorted by vibe score), then shuffle slightly
-                const selectedSimilar = shuffleArray(
-                    similarTracks.slice(0, similarCount * 2)
-                ).slice(0, similarCount);
+                // Prioritize top vibe matches, but cap per-similar-artist to avoid overrepresentation.
+                const prioritizedSimilarPool = shuffleArray(
+                    similarTracks.slice(0, Math.max(similarCount * 3, similarCount))
+                );
+                const remainingSimilarPool = similarTracks.slice(
+                    Math.max(similarCount * 3, similarCount)
+                );
+                const selectedSimilar = selectTracksWithArtistDiversity(
+                    [...prioritizedSimilarPool, ...remainingSimilarPool],
+                    similarCount,
+                    strictSimilarArtistCap,
+                    relaxedSimilarArtistCap
+                );
+                const uniqueSimilarArtists = new Set(
+                    selectedSimilar.map((track) => track.artistId)
+                ).size;
+                logger.debug(
+                    `[Radio:artist] Similar artist diversity cap strict=${strictSimilarArtistCap}, relaxed=${relaxedSimilarArtistCap}, unique artists=${uniqueSimilarArtists}`
+                );
 
                 trackIds = [...selectedOriginal, ...selectedSimilar].map(
                     (t) => t.id

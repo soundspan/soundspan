@@ -503,6 +503,164 @@ describe("DiscoveryRecommendationsService", () => {
                 }),
             ]);
         });
+
+        it("limits repeated artists and uses relaxed caps only when needed to hit target size", async () => {
+            jest
+                .spyOn(service as any, "buildArtistScoreMap")
+                .mockResolvedValue(
+                    new Map([
+                        ["artist-a", 0.82],
+                        ["artist-b", 0.77],
+                        ["artist-c", 0.73],
+                    ])
+                );
+            (mockPrisma.play.findMany as jest.Mock).mockResolvedValue([]);
+            (mockPrisma.discoverExclusion.findMany as jest.Mock).mockResolvedValue([]);
+            (mockPrisma.track.findMany as jest.Mock).mockResolvedValue([
+                {
+                    id: "a-1",
+                    title: "A One",
+                    duration: 200,
+                    filePath: "/music/a-1.flac",
+                    albumId: "album-a-1",
+                    album: {
+                        title: "Album A1",
+                        rgMbid: "rg-a-1",
+                        coverUrl: null,
+                        artistId: "artist-a",
+                        artist: {
+                            id: "artist-a",
+                            name: "Artist A",
+                            mbid: "mbid-a",
+                        },
+                    },
+                },
+                {
+                    id: "a-2",
+                    title: "A Two",
+                    duration: 201,
+                    filePath: "/music/a-2.flac",
+                    albumId: "album-a-2",
+                    album: {
+                        title: "Album A2",
+                        rgMbid: "rg-a-2",
+                        coverUrl: null,
+                        artistId: "artist-a",
+                        artist: {
+                            id: "artist-a",
+                            name: "Artist A",
+                            mbid: "mbid-a",
+                        },
+                    },
+                },
+                {
+                    id: "a-3",
+                    title: "A Three",
+                    duration: 202,
+                    filePath: "/music/a-3.flac",
+                    albumId: "album-a-3",
+                    album: {
+                        title: "Album A3",
+                        rgMbid: "rg-a-3",
+                        coverUrl: null,
+                        artistId: "artist-a",
+                        artist: {
+                            id: "artist-a",
+                            name: "Artist A",
+                            mbid: "mbid-a",
+                        },
+                    },
+                },
+                {
+                    id: "a-4",
+                    title: "A Four",
+                    duration: 203,
+                    filePath: "/music/a-4.flac",
+                    albumId: "album-a-4",
+                    album: {
+                        title: "Album A4",
+                        rgMbid: "rg-a-4",
+                        coverUrl: null,
+                        artistId: "artist-a",
+                        artist: {
+                            id: "artist-a",
+                            name: "Artist A",
+                            mbid: "mbid-a",
+                        },
+                    },
+                },
+                {
+                    id: "b-1",
+                    title: "B One",
+                    duration: 210,
+                    filePath: "/music/b-1.flac",
+                    albumId: "album-b-1",
+                    album: {
+                        title: "Album B1",
+                        rgMbid: "rg-b-1",
+                        coverUrl: null,
+                        artistId: "artist-b",
+                        artist: {
+                            id: "artist-b",
+                            name: "Artist B",
+                            mbid: "mbid-b",
+                        },
+                    },
+                },
+                {
+                    id: "b-2",
+                    title: "B Two",
+                    duration: 211,
+                    filePath: "/music/b-2.flac",
+                    albumId: "album-b-2",
+                    album: {
+                        title: "Album B2",
+                        rgMbid: "rg-b-2",
+                        coverUrl: null,
+                        artistId: "artist-b",
+                        artist: {
+                            id: "artist-b",
+                            name: "Artist B",
+                            mbid: "mbid-b",
+                        },
+                    },
+                },
+                {
+                    id: "c-1",
+                    title: "C One",
+                    duration: 220,
+                    filePath: "/music/c-1.flac",
+                    albumId: "album-c-1",
+                    album: {
+                        title: "Album C1",
+                        rgMbid: "rg-c-1",
+                        coverUrl: null,
+                        artistId: "artist-c",
+                        artist: {
+                            id: "artist-c",
+                            name: "Artist C",
+                            mbid: "mbid-c",
+                        },
+                    },
+                },
+            ]);
+
+            const result = (await (service as any).selectTracks("user-1", 6)) as Array<{
+                artistId: string;
+            }>;
+            const artistCounts: Record<string, number> = {};
+            for (const item of result) {
+                artistCounts[item.artistId] = (artistCounts[item.artistId] || 0) + 1;
+            }
+            const maxCount = Math.max(...(Object.values(artistCounts) as number[]));
+
+            expect(mockPrisma.track.findMany).toHaveBeenCalledTimes(1);
+            expect(result).toHaveLength(6);
+            expect(artistCounts["artist-a"]).toBe(3);
+            expect(artistCounts["artist-b"]).toBe(2);
+            expect(artistCounts["artist-c"]).toBe(1);
+            expect(maxCount).toBeLessThanOrEqual(3);
+        });
     });
 
     describe("generatePlaylist (generateForUser equivalent)", () => {

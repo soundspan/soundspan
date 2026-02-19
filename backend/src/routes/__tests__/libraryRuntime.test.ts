@@ -3823,17 +3823,21 @@ describe("library catalog list runtime coverage", () => {
             .mockResolvedValueOnce([
                 {
                     id: "s1",
+                    artistId: "artist-sim-1",
                     bpm: 122,
                     energy: 0.78,
                     valence: 0.59,
                     danceability: 0.71,
+                    album: { artistId: "artist-sim-1" },
                 },
                 {
                     id: "s2",
+                    artistId: "artist-sim-1",
                     bpm: null,
                     energy: null,
                     valence: null,
                     danceability: null,
+                    album: { artistId: "artist-sim-1" },
                 },
             ])
             .mockResolvedValueOnce([
@@ -3897,6 +3901,227 @@ describe("library catalog list runtime coverage", () => {
             "s1",
             "s2",
         ]);
+    });
+
+    it("caps overrepresented similar artists in artist radio results", async () => {
+        const similarArtistByTrackId: Record<string, string> = {
+            "sim-dom-1": "artist-sim-dominant",
+            "sim-dom-2": "artist-sim-dominant",
+            "sim-dom-3": "artist-sim-dominant",
+            "sim-dom-4": "artist-sim-dominant",
+            "sim-dom-5": "artist-sim-dominant",
+            "sim-dom-6": "artist-sim-dominant",
+            "sim-b-1": "artist-sim-b",
+            "sim-b-2": "artist-sim-b",
+            "sim-c-1": "artist-sim-c",
+            "sim-c-2": "artist-sim-c",
+            "sim-d-1": "artist-sim-d",
+            "sim-d-2": "artist-sim-d",
+        };
+
+        mockTrackFindMany.mockImplementation(async (args: any) => {
+            if (
+                args.where?.album?.artistId === "artist-main" &&
+                !args.where?.album?.artistId?.in
+            ) {
+                return [
+                    {
+                        id: "main-1",
+                        bpm: 120,
+                        energy: 0.8,
+                        valence: 0.62,
+                        danceability: 0.7,
+                    },
+                    {
+                        id: "main-2",
+                        bpm: 121,
+                        energy: 0.82,
+                        valence: 0.6,
+                        danceability: 0.72,
+                    },
+                    {
+                        id: "main-3",
+                        bpm: 119,
+                        energy: 0.78,
+                        valence: 0.58,
+                        danceability: 0.69,
+                    },
+                    {
+                        id: "main-4",
+                        bpm: 122,
+                        energy: 0.79,
+                        valence: 0.61,
+                        danceability: 0.71,
+                    },
+                ];
+            }
+
+            if (
+                Array.isArray(args.where?.album?.artistId?.in) &&
+                args.select?.album?.select?.artistId
+            ) {
+                return [
+                    {
+                        id: "sim-dom-1",
+                        bpm: 120,
+                        energy: 0.81,
+                        valence: 0.61,
+                        danceability: 0.7,
+                        album: { artistId: "artist-sim-dominant" },
+                    },
+                    {
+                        id: "sim-dom-2",
+                        bpm: 121,
+                        energy: 0.8,
+                        valence: 0.6,
+                        danceability: 0.69,
+                        album: { artistId: "artist-sim-dominant" },
+                    },
+                    {
+                        id: "sim-dom-3",
+                        bpm: 119,
+                        energy: 0.79,
+                        valence: 0.58,
+                        danceability: 0.68,
+                        album: { artistId: "artist-sim-dominant" },
+                    },
+                    {
+                        id: "sim-dom-4",
+                        bpm: 122,
+                        energy: 0.78,
+                        valence: 0.57,
+                        danceability: 0.67,
+                        album: { artistId: "artist-sim-dominant" },
+                    },
+                    {
+                        id: "sim-dom-5",
+                        bpm: 123,
+                        energy: 0.77,
+                        valence: 0.56,
+                        danceability: 0.66,
+                        album: { artistId: "artist-sim-dominant" },
+                    },
+                    {
+                        id: "sim-dom-6",
+                        bpm: 118,
+                        energy: 0.76,
+                        valence: 0.55,
+                        danceability: 0.65,
+                        album: { artistId: "artist-sim-dominant" },
+                    },
+                    {
+                        id: "sim-b-1",
+                        bpm: 119,
+                        energy: 0.68,
+                        valence: 0.54,
+                        danceability: 0.63,
+                        album: { artistId: "artist-sim-b" },
+                    },
+                    {
+                        id: "sim-b-2",
+                        bpm: 117,
+                        energy: 0.67,
+                        valence: 0.52,
+                        danceability: 0.62,
+                        album: { artistId: "artist-sim-b" },
+                    },
+                    {
+                        id: "sim-c-1",
+                        bpm: 116,
+                        energy: 0.66,
+                        valence: 0.51,
+                        danceability: 0.61,
+                        album: { artistId: "artist-sim-c" },
+                    },
+                    {
+                        id: "sim-c-2",
+                        bpm: 124,
+                        energy: 0.65,
+                        valence: 0.5,
+                        danceability: 0.6,
+                        album: { artistId: "artist-sim-c" },
+                    },
+                    {
+                        id: "sim-d-1",
+                        bpm: 115,
+                        energy: 0.64,
+                        valence: 0.49,
+                        danceability: 0.59,
+                        album: { artistId: "artist-sim-d" },
+                    },
+                    {
+                        id: "sim-d-2",
+                        bpm: 125,
+                        energy: 0.63,
+                        valence: 0.48,
+                        danceability: 0.58,
+                        album: { artistId: "artist-sim-d" },
+                    },
+                ];
+            }
+
+            if (Array.isArray(args.where?.id?.in) && args.include?.album) {
+                return (args.where.id.in as string[]).map((id: string) => {
+                    if (id.startsWith("main-")) {
+                        return createRadioTrack(id, {
+                            album: {
+                                id: `album-${id}`,
+                                title: `Main Album ${id}`,
+                                coverUrl: `${id}.jpg`,
+                                artist: { id: "artist-main", name: "Main Artist" },
+                            },
+                        });
+                    }
+
+                    const similarArtistId = similarArtistByTrackId[id];
+                    return createRadioTrack(id, {
+                        album: {
+                            id: `album-${id}`,
+                            title: `Similar Album ${id}`,
+                            coverUrl: `${id}.jpg`,
+                            artist: {
+                                id: similarArtistId,
+                                name: `Similar ${similarArtistId}`,
+                            },
+                        },
+                    });
+                });
+            }
+
+            return [];
+        });
+
+        mockOwnedAlbumFindMany.mockResolvedValueOnce([
+            { artistId: "artist-main" },
+            { artistId: "artist-sim-dominant" },
+            { artistId: "artist-sim-b" },
+            { artistId: "artist-sim-c" },
+            { artistId: "artist-sim-d" },
+        ]);
+        mockSimilarArtistFindMany.mockResolvedValueOnce([
+            { toArtistId: "artist-sim-dominant", weight: 0.98 },
+            { toArtistId: "artist-sim-b", weight: 0.72 },
+            { toArtistId: "artist-sim-c", weight: 0.7 },
+            { toArtistId: "artist-sim-d", weight: 0.68 },
+        ]);
+
+        const req = {
+            query: { type: "artist", value: "artist-main", limit: "10" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+        await radioHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.tracks).toHaveLength(10);
+
+        const similarTracks = res.body.tracks.filter(
+            (track: any) => track.artist.id !== "artist-main"
+        );
+        const dominantArtistTracks = similarTracks.filter(
+            (track: any) => track.artist.id === "artist-sim-dominant"
+        );
+        expect(dominantArtistTracks.length).toBeLessThanOrEqual(2);
     });
 
     it("builds vibe radio queues with similarity scoring and layered fallbacks", async () => {
@@ -4194,17 +4419,21 @@ describe("library catalog list runtime coverage", () => {
                 return [
                     {
                         id: "genre-sim-1",
+                        artistId: "artist-genre-1",
                         bpm: 122,
                         energy: 0.74,
                         valence: 0.59,
                         danceability: 0.68,
+                        album: { artistId: "artist-genre-1" },
                     },
                     {
                         id: "genre-sim-2",
+                        artistId: "artist-genre-2",
                         bpm: 118,
                         energy: 0.65,
                         valence: 0.55,
                         danceability: 0.6,
+                        album: { artistId: "artist-genre-2" },
                     },
                 ];
             }
