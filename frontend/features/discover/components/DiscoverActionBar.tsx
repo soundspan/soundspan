@@ -72,18 +72,18 @@ export function DiscoverActionBar({
                         onClick={handlePlayToggle}
                         disabled={isGenerating}
                         className={cn(
-                            "h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all",
+                            "h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all border",
                             isGenerating
-                                ? "bg-[#60a5fa]/50 cursor-not-allowed"
-                                : "bg-[#60a5fa] hover:bg-[#93c5fd] hover:scale-105"
+                                ? "bg-white/5 border-transparent text-white/50 cursor-not-allowed"
+                                : "bg-purple-600/20 hover:bg-purple-600/30 border-purple-500/30 text-white hover:scale-105"
                         )}
                     >
                         {showSpinner ? (
-                            <Loader2 className="w-5 h-5 animate-spin text-black" />
+                            <Loader2 className="w-5 h-5 animate-spin" />
                         ) : isPlaylistPlaying && isPlaying ? (
-                            <Pause className="w-5 h-5 fill-current text-black" />
+                            <Pause className="w-5 h-5 fill-current" />
                         ) : (
-                            <Play className="w-5 h-5 fill-current text-black ml-0.5" />
+                            <Play className="w-5 h-5 fill-current text-white ml-0.5" />
                         )}
                     </button>
                 )}
