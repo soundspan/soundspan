@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { RefreshCw, Music2 } from "lucide-react";
+import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
@@ -21,6 +24,8 @@ export default function DiscoverWeeklyPage() {
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
     const [showSettings, setShowSettings] = useState(false);
+    const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
+    const [isAddingToPlaylist, setIsAddingToPlaylist] = useState(false);
 
     // Custom hooks - single source of truth for batch status from useDiscoverData
     const {
@@ -57,6 +62,27 @@ export default function DiscoverWeeklyPage() {
         (t) => t.id === currentTrack?.id
     );
 
+    const handleAddAllToPlaylist = () => {
+        setShowPlaylistSelector(true);
+    };
+
+    const handlePlaylistSelected = async (playlistId: string) => {
+        if (!displayPlaylist?.tracks.length) return;
+        setIsAddingToPlaylist(true);
+        try {
+            for (const track of displayPlaylist.tracks) {
+                await api.addTrackToPlaylist(playlistId, track.id);
+            }
+            toast.success(`Added ${displayPlaylist.tracks.length} tracks to playlist`);
+            setShowPlaylistSelector(false);
+        } catch (error) {
+            console.error("Failed to add tracks to playlist:", error);
+            toast.error("Failed to add some tracks to playlist");
+        } finally {
+            setIsAddingToPlaylist(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
@@ -77,6 +103,7 @@ export default function DiscoverWeeklyPage() {
                 onPlayToggle={isPlaylistPlaying && isPlaying ? handleTogglePlay : handlePlayPlaylist}
                 onGenerate={handleGenerate}
                 onToggleSettings={() => setShowSettings(!showSettings)}
+                onAddToPlaylist={handleAddAllToPlaylist}
                 isGenerating={isGenerating}
                 batchStatus={batchStatus}
             />
@@ -160,6 +187,14 @@ export default function DiscoverWeeklyPage() {
                         </div>
                     )}
             </div>
+
+            <PlaylistSelector
+                isOpen={showPlaylistSelector}
+                onClose={() => setShowPlaylistSelector(false)}
+                onSelectPlaylist={handlePlaylistSelected}
+                isLoading={isAddingToPlaylist}
+                loadingMessage="Adding tracks..."
+            />
         </div>
     );
 }

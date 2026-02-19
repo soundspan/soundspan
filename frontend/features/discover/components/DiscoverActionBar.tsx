@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, Pause, RefreshCw, Settings, Loader2 } from "lucide-react";
+import { Play, Pause, RefreshCw, Settings, Loader2, Plus } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
@@ -23,6 +23,7 @@ interface DiscoverActionBarProps {
     onPlayToggle: () => void;
     onGenerate: () => void;
     onToggleSettings: () => void;
+    onAddToPlaylist?: () => void;
     isGenerating: boolean;
     batchStatus?: BatchStatus | null;
 }
@@ -35,6 +36,7 @@ export function DiscoverActionBar({
     onPlayToggle,
     onGenerate,
     onToggleSettings,
+    onAddToPlaylist,
     isGenerating,
     batchStatus,
 }: DiscoverActionBarProps) {
@@ -72,7 +74,7 @@ export function DiscoverActionBar({
                         onClick={handlePlayToggle}
                         disabled={isGenerating}
                         className={cn(
-                            "h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all border",
+                            "flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg transition-all border font-semibold text-sm",
                             isGenerating
                                 ? "bg-white/5 border-transparent text-white/50 cursor-not-allowed"
                                 : "bg-[#1a1acc]/20 hover:bg-[#1a1acc]/30 border-[#2323FF]/30 text-white hover:scale-105"
@@ -83,8 +85,9 @@ export function DiscoverActionBar({
                         ) : isPlaylistPlaying && isPlaying ? (
                             <Pause className="w-5 h-5 fill-current" />
                         ) : (
-                            <Play className="w-5 h-5 fill-current text-white ml-0.5" />
+                            <Play className="w-5 h-5 fill-current ml-0.5" />
                         )}
+                        <span>{isPlaylistPlaying && isPlaying ? "Pause" : "Play All"}</span>
                     </button>
                 )}
 
@@ -131,6 +134,17 @@ export function DiscoverActionBar({
                 >
                     <Settings className="w-5 h-5" />
                 </button>
+
+                {/* Add to Playlist Button */}
+                {playlist && playlist.tracks.length > 0 && onAddToPlaylist && (
+                    <button
+                        onClick={onAddToPlaylist}
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                        title="Add all to playlist"
+                    >
+                        <Plus className="w-5 h-5" />
+                    </button>
+                )}
             </div>
         </div>
     );
