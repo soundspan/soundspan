@@ -12,6 +12,10 @@ interface BatchStatus {
   total?: number;
 }
 
+interface LoadDataOptions {
+  preservePlaylistOnError?: boolean;
+}
+
 export function useDiscoverData() {
   const [playlist, setPlaylist] = useState<DiscoverPlaylist | null>(null);
   const [config, setConfig] = useState<DiscoverConfig | null>(null);
@@ -27,15 +31,23 @@ export function useDiscoverData() {
     pendingRef.current = pendingGeneration;
   }, [pendingGeneration]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options: LoadDataOptions = {}) => {
     try {
       const [playlistData, configData] = await Promise.all([
         api.getCurrentDiscoverWeekly().catch(() => null),
         api.getDiscoverConfig().catch(() => null),
       ]);
 
-      setPlaylist(playlistData);
-      setConfig(configData);
+      setPlaylist((prev) => {
+        if (playlistData === null && options.preservePlaylistOnError) {
+          return prev;
+        }
+        return playlistData;
+      });
+
+      if (configData !== null) {
+        setConfig(configData);
+      }
     } catch (error) {
       console.error('Failed to load discover data:', error);
     }
@@ -55,7 +67,7 @@ export function useDiscoverData() {
       if (wasActiveRef.current && !status.active) {
         wasActiveRef.current = false;
         setPendingGeneration(false);
-        await loadData();
+        await loadData({ preservePlaylistOnError: true });
       }
       
       // Track if batch is currently active
