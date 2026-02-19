@@ -3,7 +3,7 @@
 import { useAudio } from "@/lib/audio-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useLyrics } from "@/hooks/useLyrics";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
@@ -25,6 +25,7 @@ import {
     Trash2,
     X,
     Plus,
+    EllipsisVertical,
 } from "lucide-react";
 import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { cn } from "@/utils/cn";
@@ -153,6 +154,10 @@ export function OverlayPlayer() {
     const [isDrawerDragActive, setIsDrawerDragActive] = useState(false);
     const [isVibeLoading, setIsVibeLoading] = useState(false);
     const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
+    const [openQueueMenuIndex, setOpenQueueMenuIndex] = useState<number | null>(null);
+    const [showQueuePlaylistSelector, setShowQueuePlaylistSelector] = useState(false);
+    const [queuePlaylistTrackId, setQueuePlaylistTrackId] = useState<string | null>(null);
+    const queueMenuRef = useRef<HTMLDivElement | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<"queue" | "lyrics" | "related">("queue");
     const [relatedStreamMatches, setRelatedStreamMatches] = useState<Record<string, RelatedStreamMatch>>({});
@@ -231,9 +236,12 @@ export function OverlayPlayer() {
     const queueTracks = canSkip ? queue : [];
     const isQueueTabVisible = isTabPanelVisible && activeTab === "queue";
 
+    const queryClient = useQueryClient();
+
     const {
         data: relatedTrackData,
         isLoading: isRelatedTracksLoading,
+        isError: isRelatedTracksError,
     } = useQuery({
         queryKey: ["player-related-tracks", currentTrack?.id],
         queryFn: async () => {
@@ -247,11 +255,13 @@ export function OverlayPlayer() {
             playbackType === "track" &&
             !!currentTrack?.id,
         staleTime: 5 * 60 * 1000,
+        retry: 1,
     });
 
     const {
         data: relatedArtistsData,
         isLoading: isRelatedArtistsLoading,
+        isError: isRelatedArtistsError,
     } = useQuery({
         queryKey: ["player-related-artists", currentTrack?.artist?.name, currentTrack?.artist?.mbid],
         queryFn: async () => {
@@ -269,11 +279,13 @@ export function OverlayPlayer() {
             playbackType === "track" &&
             !!currentTrack?.artist?.name,
         staleTime: 30 * 60 * 1000,
+        retry: 1,
     });
 
     const {
         data: moreFromArtistData,
         isLoading: isMoreFromArtistLoading,
+        isError: isMoreFromArtistError,
     } = useQuery({
         queryKey: ["player-related-albums", currentTrack?.artist?.id],
         queryFn: async () => {
@@ -291,6 +303,7 @@ export function OverlayPlayer() {
             playbackType === "track" &&
             !!currentTrack?.artist?.id,
         staleTime: 10 * 60 * 1000,
+        retry: 1,
     });
     const relatedTracks = useMemo<RelatedTrack[]>(
         () =>
@@ -639,6 +652,43 @@ export function OverlayPlayer() {
         clearQueue();
         toast.success("Queue cleared");
     };
+
+    // Close queue overflow menu on click-outside or ESC
+    useEffect(() => {
+        if (openQueueMenuIndex === null) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (queueMenuRef.current && !queueMenuRef.current.contains(e.target as Node)) {
+                setOpenQueueMenuIndex(null);
+            }
+        };
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setOpenQueueMenuIndex(null);
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        document.addEventListener("keydown", handleEsc);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("keydown", handleEsc);
+        };
+    }, [openQueueMenuIndex]);
+
+    const handleQueueTrackAddToPlaylist = (trackId: string) => {
+        setQueuePlaylistTrackId(trackId);
+        setShowQueuePlaylistSelector(true);
+        setOpenQueueMenuIndex(null);
+    };
+
+    const handleQueuePlaylistSelected = useCallback(
+        async (playlistId: string) => {
+            if (!queuePlaylistTrackId) return;
+            await api.addTrackToPlaylist(playlistId, queuePlaylistTrackId);
+            const track = queue.find((t) => t.id === queuePlaylistTrackId);
+            toast.success(`Added "${track?.displayTitle || track?.title || "track"}" to playlist`);
+            setShowQueuePlaylistSelector(false);
+            setQueuePlaylistTrackId(null);
+        },
+        [queuePlaylistTrackId, queue]
+    );
 
     const playRelatedTrack = useCallback(
         async (track: RelatedTrack) => {
@@ -1766,6 +1816,33 @@ export function OverlayPlayer() {
                                                                             buttonSizeClassName="h-10 w-10"
                                                                             iconSizeClassName="h-5 w-5"
                                                                         />
+                                                                        <div className="relative" ref={openQueueMenuIndex === queueIndex ? queueMenuRef : undefined}>
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setOpenQueueMenuIndex(openQueueMenuIndex === queueIndex ? null : queueIndex);
+                                                                                }}
+                                                                                className="p-1 text-gray-500 transition-colors hover:text-white"
+                                                                                title="More options"
+                                                                                aria-label="More options"
+                                                                            >
+                                                                                <EllipsisVertical className="h-4 w-4" />
+                                                                            </button>
+                                                                            {openQueueMenuIndex === queueIndex && (
+                                                                                <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] rounded-lg border border-white/10 bg-[#1a1a1a] py-1 shadow-xl">
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleQueueTrackAddToPlaylist(track.id);
+                                                                                        }}
+                                                                                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-200 hover:bg-white/10 transition-colors"
+                                                                                    >
+                                                                                        <Plus className="h-4 w-4" />
+                                                                                        Add to playlist
+                                                                                    </button>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                         {!isCurrentTrack && (
                                                                             <button
                                                                                 onClick={() =>
@@ -1828,7 +1905,21 @@ export function OverlayPlayer() {
                                                         Similar Songs
                                                     </h3>
                                                     {isRelatedTracksLoading ? (
-                                                        <p className="text-sm text-gray-500">Loading...</p>
+                                                        <div className="flex items-center gap-2 text-gray-500">
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            <span className="text-sm">Loading...</span>
+                                                        </div>
+                                                    ) : isRelatedTracksError ? (
+                                                        <div className="flex items-center gap-3">
+                                                            <p className="text-sm text-gray-500">Failed to load similar songs.</p>
+                                                            <button
+                                                                onClick={() => queryClient.invalidateQueries({ queryKey: ["player-related-tracks", currentTrack?.id] })}
+                                                                className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-300 hover:bg-white/10 transition-colors"
+                                                            >
+                                                                <RefreshCw className="h-3 w-3" />
+                                                                Retry
+                                                            </button>
+                                                        </div>
                                                     ) : sortedRelatedTracks.length > 0 ? (
                                                         <div className="space-y-1.5">
                                                             {visibleRelatedTracks.map((track, idx) => {
@@ -1923,7 +2014,21 @@ export function OverlayPlayer() {
                                                         Similar Artists
                                                     </h3>
                                                     {isRelatedArtistsLoading ? (
-                                                        <p className="text-sm text-gray-500">Loading...</p>
+                                                        <div className="flex items-center gap-2 text-gray-500">
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            <span className="text-sm">Loading...</span>
+                                                        </div>
+                                                    ) : isRelatedArtistsError ? (
+                                                        <div className="flex items-center gap-3">
+                                                            <p className="text-sm text-gray-500">Failed to load similar artists.</p>
+                                                            <button
+                                                                onClick={() => queryClient.invalidateQueries({ queryKey: ["player-related-artists", currentTrack?.artist?.name, currentTrack?.artist?.mbid] })}
+                                                                className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-300 hover:bg-white/10 transition-colors"
+                                                            >
+                                                                <RefreshCw className="h-3 w-3" />
+                                                                Retry
+                                                            </button>
+                                                        </div>
                                                     ) : relatedArtists.length > 0 ? (
                                                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                                                             {relatedArtists.slice(0, 9).map((artist, idx) => {
@@ -1985,7 +2090,21 @@ export function OverlayPlayer() {
                                                         More From This Artist
                                                     </h3>
                                                     {isMoreFromArtistLoading ? (
-                                                        <p className="text-sm text-gray-500">Loading...</p>
+                                                        <div className="flex items-center gap-2 text-gray-500">
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            <span className="text-sm">Loading...</span>
+                                                        </div>
+                                                    ) : isMoreFromArtistError ? (
+                                                        <div className="flex items-center gap-3">
+                                                            <p className="text-sm text-gray-500">Failed to load albums.</p>
+                                                            <button
+                                                                onClick={() => queryClient.invalidateQueries({ queryKey: ["player-related-albums", currentTrack?.artist?.id] })}
+                                                                className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-300 hover:bg-white/10 transition-colors"
+                                                            >
+                                                                <RefreshCw className="h-3 w-3" />
+                                                                Retry
+                                                            </button>
+                                                        </div>
                                                     ) : moreFromArtist.length > 0 ? (
                                                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                                                             {moreFromArtist.slice(0, 6).map((album) => (
@@ -2046,6 +2165,14 @@ export function OverlayPlayer() {
                 isOpen={isPlaylistSelectorOpen}
                 onClose={() => setIsPlaylistSelectorOpen(false)}
                 onSelectPlaylist={handleAddToPlaylist}
+            />
+            <PlaylistSelector
+                isOpen={showQueuePlaylistSelector}
+                onClose={() => {
+                    setShowQueuePlaylistSelector(false);
+                    setQueuePlaylistTrackId(null);
+                }}
+                onSelectPlaylist={handleQueuePlaylistSelected}
             />
         </motion.div>
     );
