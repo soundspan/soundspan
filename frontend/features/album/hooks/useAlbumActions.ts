@@ -11,6 +11,7 @@ export function useAlbumActions() {
     const {
         playTracks,
         playTrack: playTrackAudio,
+        playNow: playNowAudio,
         addToQueue: addToQueueAudio,
         addTracksToQueue: addTracksToQueueAudio,
     } = useAudioControls();
@@ -82,6 +83,16 @@ export function useAlbumActions() {
         const formattedTrack = toPlaybackTrack(track, album);
 
         playTrackAudio(formattedTrack);
+    };
+
+    const playTrackNow = (track: Track, album: Album | null) => {
+        if (!album) {
+            toast.error("Album data not available");
+            return;
+        }
+
+        const formattedTrack = toPlaybackTrack(track, album);
+        playNowAudio(formattedTrack);
     };
 
     const addToQueue = (track: Track, album: Album | null) => {
@@ -174,6 +185,7 @@ export function useAlbumActions() {
         playAlbum,
         shufflePlay,
         playTrack,
+        playTrackNow,
         addToQueue,
         addAllToQueue,
         downloadAlbum,

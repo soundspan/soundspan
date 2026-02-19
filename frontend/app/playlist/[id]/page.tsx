@@ -78,7 +78,7 @@ export default function PlaylistDetailPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, pause, resume } = useAudioControls();
+    const { playTracks, playNow, pause, resume } = useAudioControls();
     const queuedTrackIds = useQueuedTrackIds();
     const playlistId = params.id as string;
 
@@ -338,8 +338,10 @@ export default function PlaylistDetailPage() {
 
     const handlePlayTrack = (index: number) => {
         if (!playlist?.items || playlist.items.length === 0) return;
+        if (index < 0 || index >= playlist.items.length) return;
 
-        const tracks = playlist.items.map((item: PlaylistItem) => ({
+        const item = playlist.items[index];
+        const track = {
             id: item.track.id,
             title: item.track.title,
             artist: {
@@ -352,8 +354,8 @@ export default function PlaylistDetailPage() {
                 id: item.track.album.id,
             },
             duration: item.track.duration,
-        }));
-        playTracks(tracks, index);
+        };
+        playNow(track);
     };
 
     const handleStartRadio = async () => {

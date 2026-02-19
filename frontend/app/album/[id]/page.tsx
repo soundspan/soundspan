@@ -73,7 +73,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const { enrichedTracks: tidalEnrichedTracks } = useTidalGapFill(rawAlbum, source);
     const tidalAlbum = rawAlbum ? { ...rawAlbum, tracks: tidalEnrichedTracks || rawAlbum.tracks } : rawAlbum;
     const { enrichedTracks } = useYtMusicGapFill(tidalAlbum, source);
-    const { playAlbum, shufflePlay, addToQueue, addAllToQueue, downloadAlbum } =
+    const { playAlbum, shufflePlay, playTrackNow, addToQueue, addAllToQueue, downloadAlbum } =
         useAlbumActions();
     const { isPendingByMbid, downloadsEnabled } = useDownloadContext();
     const { previewTrack, previewPlaying, handlePreview } = useTrackPreview();
@@ -125,12 +125,8 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     }
 
     // Event handlers
-    const handlePlayTrack = (track: AlbumTrack, index: number) => {
-        if (isInGroup) {
-            addToQueue(track, album);
-            return;
-        }
-        playAlbum(album, index);
+    const handlePlayTrack = (track: AlbumTrack, _index: number) => {
+        playTrackNow(track, album);
     };
 
     const openPlaylistSelector = (trackIds: string[], bulk = false) => {

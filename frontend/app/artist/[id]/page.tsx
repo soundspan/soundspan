@@ -76,7 +76,7 @@ export default function ArtistPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, playTrack, pause } = useAudioControls();
+    const { playTracks, playNow, pause } = useAudioControls();
     const { isPendingByMbid, downloadsEnabled } = useDownloadContext();
     const { isInGroup } = useListenTogether();
 
@@ -184,26 +184,7 @@ export default function ArtistPage() {
 
     // Play track handler (for popular tracks)
     function handlePlayTrack(track: Track) {
-        const topTracks = (enrichedTopTracks || artist?.topTracks) || [];
-        if (!topTracks.length) return;
-
-        if (isInGroup) {
-            // In Listen Together, clicking a popular track should queue only that track.
-            playTrack(formatTrackForPlayback(track));
-            return;
-        }
-
-        // Include owned tracks AND TIDAL/YouTube Music-enriched tracks
-        const playableTracks = topTracks.filter(
-            (t: Track) =>
-                t.album?.id ||
-                t.streamSource === "tidal" ||
-                t.streamSource === "youtube"
-        );
-        const formattedTracks = playableTracks.map(formatTrackForPlayback);
-
-        const startIndex = formattedTracks.findIndex((t) => t.id === track.id);
-        playTracks(formattedTracks, Math.max(0, startIndex));
+        playNow(formatTrackForPlayback(track));
     }
 
     function handleAddAllPopularToQueue() {

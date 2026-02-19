@@ -22,6 +22,7 @@ import { audioSeekEmitter } from "./audio-seek-emitter";
 import { listenTogetherSocket } from "./listen-together-socket";
 import { getListenTogetherSessionSnapshot } from "./listen-together-session";
 import { toast } from "sonner";
+import { computePlayNowInsertion } from "./queue-utils";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -76,6 +77,7 @@ interface AudioControlsContextType {
     previous: () => void;
 
     // Queue controls
+    playNow: (track: Track) => void;
     playNext: (track: Track) => void;
     addToQueue: (track: Track, options?: { silent?: boolean }) => void;
     addTracksToQueue: (tracks: Track[], options?: { silent?: boolean }) => void;
@@ -823,6 +825,83 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         [state, generateShuffleIndices, getActiveListenTogetherSession]
     );
 
+    const playNow = useCallback(
+        (track: Track) => {
+            if (!track?.id) return;
+
+            const playbackState = playbackRef.current;
+            const ltSession = getActiveListenTogetherSession();
+
+            // Listen Together: add only this single track to the shared queue
+            if (ltSession) {
+                if (!isListenTogetherLocalTrack(track)) {
+                    toast.error("Listen Together only supports local library tracks");
+                    return;
+                }
+                void listenTogetherSocket
+                    .addToQueue([track.id])
+                    .then(() => toast.success(`Added "${track.title}" to group queue`))
+                    .catch((err) => {
+                        toast.error(err?.message || "Failed to add track to Listen Together queue");
+                    });
+                return;
+            }
+
+            // If vibe mode is on and this track isn't in the vibe queue, disable vibe mode
+            if (state.vibeMode && !state.vibeQueueIds.includes(track.id)) {
+                state.setVibeMode(false);
+                state.setVibeSourceFeatures(null);
+                state.setVibeQueueIds([]);
+            }
+
+            // Empty queue or non-track playback: start fresh with just this track
+            if (state.queue.length === 0 || state.playbackType !== "track") {
+                state.setPlaybackType("track");
+                state.setCurrentTrack(track);
+                state.setCurrentAudiobook(null);
+                state.setCurrentPodcast(null);
+                state.setPodcastEpisodeQueue(null);
+                state.setQueue([track]);
+                state.setCurrentIndex(0);
+                playbackState.setIsPlaying(true);
+                playbackState.setCurrentTime(0);
+                state.setShuffleIndices([0]);
+                state.setRepeatOneCount(0);
+                return;
+            }
+
+            // Active queue: insert after current position and jump to it
+            const { insertAt, newShuffleIndices: computedShuffleIndices } =
+                computePlayNowInsertion({
+                    queue: state.queue,
+                    currentIndex: state.currentIndex,
+                    isShuffle: state.isShuffle,
+                    shuffleIndices: state.shuffleIndices,
+                });
+
+            const newQueue = [...state.queue];
+            newQueue.splice(insertAt, 0, track);
+
+            const newShuffleIndices =
+                state.isShuffle && computedShuffleIndices.length > 0
+                    ? computedShuffleIndices
+                    : generateShuffleIndices(newQueue.length, insertAt);
+
+            // Bump upNextInsertRef to account for the inserted track
+            upNextInsertRef.current = Math.max(upNextInsertRef.current, insertAt) + 1;
+
+            // Atomically commit all state together so React batches the update
+            state.setQueue(newQueue);
+            state.setShuffleIndices(newShuffleIndices);
+            state.setCurrentIndex(insertAt);
+            state.setCurrentTrack(track);
+            state.setRepeatOneCount(0);
+            playbackState.setCurrentTime(0);
+            playbackState.setIsPlaying(true);
+        },
+        [state, generateShuffleIndices, getActiveListenTogetherSession]
+    );
+
     const removeFromQueue = useCallback(
         (index: number) => {
             const ltSession = getActiveListenTogetherSession();
@@ -1239,6 +1318,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             play,
             next,
             previous,
+            playNow,
             playNext,
             addToQueue,
             addTracksToQueue,
@@ -1269,6 +1349,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             play,
             next,
             previous,
+            playNow,
             playNext,
             addToQueue,
             addTracksToQueue,

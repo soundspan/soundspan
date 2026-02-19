@@ -53,6 +53,7 @@ export function useAudio() {
         // Controls
         playTrack: controls.playTrack,
         playTracks: controls.playTracks,
+        playNow: controls.playNow,
         playAudiobook: controls.playAudiobook,
         playPodcast: controls.playPodcast,
         pause: controls.pause,

@@ -27,7 +27,7 @@ import { useAuth } from "@/lib/auth-context";
 export default function LibraryPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { playTracks } = useAudioControls();
+    const { playTracks, playNow } = useAudioControls();
     const { isInGroup } = useListenTogether();
     const { user } = useAuth();
     const isAdmin = user?.role === "admin";
@@ -270,12 +270,18 @@ export default function LibraryPage() {
     }, []);
 
     // Wrapper for playTracks that converts track format
+    // When startIndex is provided, it's a single track click — use playNow
     const handlePlayTracks = useCallback(
         (libraryTracks: typeof tracks, startIndex?: number) => {
+            if (startIndex !== undefined && startIndex >= 0 && startIndex < libraryTracks.length) {
+                const formattedTrack = formatTracksForAudio([libraryTracks[startIndex]])[0];
+                playNow(formattedTrack);
+                return;
+            }
             const formattedTracks = formatTracksForAudio(libraryTracks);
-            playTracks(formattedTracks, startIndex);
+            playTracks(formattedTracks);
         },
-        [formatTracksForAudio, playTracks],
+        [formatTracksForAudio, playTracks, playNow],
     );
 
     // Shuffle entire library - uses server-side shuffle for large libraries

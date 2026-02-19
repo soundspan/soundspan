@@ -51,7 +51,7 @@ export function useDiscoverActions(
     refreshBatchStatus?: () => Promise<unknown>,
     setPendingGeneration?: (pending: boolean) => void
 ) {
-    const { playTracks, isPlaying, pause, resume } = useAudio();
+    const { playTracks, playNow, isPlaying, pause, resume } = useAudio();
 
     const handleGenerate = useCallback(async () => {
         if (isGenerating) {
@@ -103,14 +103,15 @@ export function useDiscoverActions(
     const handlePlayTrack = useCallback(
         (index: number) => {
             if (!playlist || playlist.tracks.length === 0) return;
+            if (index < 0 || index >= playlist.tracks.length) return;
 
-            const formattedTracks = playlist.tracks.map(
-                mapDiscoverTrackToPlaybackTrack
+            const formattedTrack = mapDiscoverTrackToPlaybackTrack(
+                playlist.tracks[index]
             );
 
-            playTracks(formattedTracks, index);
+            playNow(formattedTrack);
         },
-        [playlist, playTracks]
+        [playlist, playNow]
     );
 
     const handleTogglePlay = useCallback(() => {
