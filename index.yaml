@@ -2,8 +2,33 @@ apiVersion: v1
 entries:
   soundspan:
   - apiVersion: v2
+    appVersion: 1.0.1
+    created: "2026-02-19T00:57:07.330414229Z"
+    description: A self-hosted music server with TIDAL and YouTube Music streaming
+      integration
+    digest: 11c759cc75214be2ae3f14551baf6c1f6f22eedb0428fcd2f98aaedc950e39c6
+    home: https://github.com/soundspan/soundspan
+    icon: https://raw.githubusercontent.com/soundspan/soundspan/main/frontend/public/logo.png
+    keywords:
+    - music
+    - streaming
+    - self-hosted
+    - tidal
+    - youtube-music
+    - media
+    maintainers:
+    - name: soundspan
+      url: https://github.com/soundspan
+    name: soundspan
+    sources:
+    - https://github.com/soundspan/soundspan
+    type: application
+    urls:
+    - https://soundspan.github.io/soundspan/soundspan-1.0.1.tgz
+    version: 1.0.1
+  - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-02-18T20:12:06.277089434Z"
+    created: "2026-02-19T00:57:07.328824376Z"
     description: A self-hosted music server with TIDAL and YouTube Music streaming
       integration
     digest: 7c203c6b66852dc32d7f1013e6d4d97be453514a6bf617e9b43cd8e23d9ed4c1
@@ -26,4 +51,4 @@ entries:
     urls:
     - https://soundspan.github.io/soundspan/soundspan-1.0.0.tgz
     version: 1.0.0
-generated: "2026-02-18T20:12:06.275276151Z"
+generated: "2026-02-19T00:57:07.326972231Z"
