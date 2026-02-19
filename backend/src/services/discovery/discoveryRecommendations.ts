@@ -2,6 +2,11 @@ import { addMonths, endOfWeek, startOfWeek, subDays } from "date-fns";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { discoverySeeding } from "./discoverySeeding";
+import {
+    applyTrackPreferenceSimilarityBias,
+    resolveTrackPreference,
+    TRACK_DISLIKE_ENTITY_TYPE,
+} from "../trackPreference";
 
 type RecommendationTier = "high" | "medium" | "explore" | "wildcard";
 
@@ -225,6 +230,64 @@ export class DiscoveryRecommendationsService {
         return scoreMap;
     }
 
+    private async getTrackPreferenceScoreMap(
+        userId: string,
+        trackIds: string[]
+    ): Promise<Map<string, number>> {
+        if (trackIds.length === 0) {
+            return new Map<string, number>();
+        }
+
+        const uniqueTrackIds = Array.from(new Set(trackIds));
+
+        const [likedEntries, dislikedEntries] = await Promise.all([
+            prisma.likedTrack.findMany({
+                where: {
+                    userId,
+                    trackId: { in: uniqueTrackIds },
+                },
+                select: {
+                    trackId: true,
+                    likedAt: true,
+                },
+            }),
+            prisma.dislikedEntity.findMany({
+                where: {
+                    userId,
+                    entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                    entityId: { in: uniqueTrackIds },
+                },
+                select: {
+                    entityId: true,
+                    dislikedAt: true,
+                },
+            }),
+        ]);
+
+        const likedByTrackId = new Map<string, Date>();
+        for (const entry of likedEntries) {
+            likedByTrackId.set(entry.trackId, entry.likedAt);
+        }
+
+        const dislikedByTrackId = new Map<string, Date>();
+        for (const entry of dislikedEntries) {
+            dislikedByTrackId.set(entry.entityId, entry.dislikedAt);
+        }
+
+        const scoreMap = new Map<string, number>();
+        for (const trackId of uniqueTrackIds) {
+            const resolved = resolveTrackPreference({
+                likedAt: likedByTrackId.get(trackId) ?? null,
+                dislikedAt: dislikedByTrackId.get(trackId) ?? null,
+            });
+            if (resolved.score !== 0) {
+                scoreMap.set(trackId, resolved.score);
+            }
+        }
+
+        return scoreMap;
+    }
+
     private async selectTracks(
         userId: string,
         targetCount: number
@@ -285,11 +348,21 @@ export class DiscoveryRecommendationsService {
             take: Math.max(targetCount * 20, 220),
             orderBy: [{ updatedAt: "desc" }],
         });
+        const candidatePreferenceScores = await this.getTrackPreferenceScoreMap(
+            userId,
+            candidateTracks.map((track) => track.id)
+        );
 
         const scoredCandidates = candidateTracks
             .map((track) => {
                 const artistScore = artistScores.get(track.album.artistId) ?? 0.35;
-                const score = clampSimilarity(artistScore + randomJitter(0.14));
+                const baseScore = clampSimilarity(artistScore + randomJitter(0.14));
+                const score = clampSimilarity(
+                    applyTrackPreferenceSimilarityBias(
+                        baseScore,
+                        candidatePreferenceScores.get(track.id) ?? 0
+                    )
+                );
                 return {
                     track,
                     score,
@@ -406,6 +479,10 @@ export class DiscoveryRecommendationsService {
                 take: Math.max(targetCount * 10, 180),
                 orderBy: [{ updatedAt: "desc" }],
             });
+            const fallbackPreferenceScores = await this.getTrackPreferenceScoreMap(
+                userId,
+                fallbackTracks.map((track) => track.id)
+            );
 
             const deferredFallbackTracks: typeof fallbackTracks = [];
 
@@ -422,7 +499,12 @@ export class DiscoveryRecommendationsService {
                 selectedAlbumIds.add(track.albumId);
                 recordSelectedArtist(track.album.artist.id);
 
-                const fallbackSimilarity = clampSimilarity(0.34 + randomJitter(0.15));
+                const fallbackSimilarity = clampSimilarity(
+                    applyTrackPreferenceSimilarityBias(
+                        0.34 + randomJitter(0.15),
+                        fallbackPreferenceScores.get(track.id) ?? 0
+                    )
+                );
                 selected.push({
                     trackId: track.id,
                     title: track.title,
@@ -454,7 +536,10 @@ export class DiscoveryRecommendationsService {
                     recordSelectedArtist(track.album.artist.id);
 
                     const fallbackSimilarity = clampSimilarity(
-                        0.34 + randomJitter(0.15)
+                        applyTrackPreferenceSimilarityBias(
+                            0.34 + randomJitter(0.15),
+                            fallbackPreferenceScores.get(track.id) ?? 0
+                        )
                     );
                     selected.push({
                         trackId: track.id,

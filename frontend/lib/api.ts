@@ -124,6 +124,18 @@ export interface VibeStatusResponse {
     isComplete: boolean;
 }
 
+export type TrackPreferenceSignal = "thumbs_up" | "thumbs_down" | "clear";
+
+export interface TrackPreferenceResponse {
+    trackId: string;
+    signal: TrackPreferenceSignal;
+    state: "liked" | "disliked" | "neutral";
+    score: number;
+    likedAt: string | null;
+    dislikedAt: string | null;
+    updatedAt: string | null;
+}
+
 interface ApiError extends Error {
     status?: number;
     data?: Record<string, unknown>;
@@ -788,6 +800,22 @@ class ApiClient {
 
     async getTrack(id: string) {
         return this.request<ApiData>(`/library/tracks/${id}`);
+    }
+
+    async getTrackPreference(trackId: string) {
+        return this.request<TrackPreferenceResponse>(
+            `/library/tracks/${encodeURIComponent(trackId)}/preference`
+        );
+    }
+
+    async setTrackPreference(trackId: string, signal: TrackPreferenceSignal) {
+        return this.request<TrackPreferenceResponse>(
+            `/library/tracks/${encodeURIComponent(trackId)}/preference`,
+            {
+                method: "POST",
+                body: JSON.stringify({ signal }),
+            }
+        );
     }
 
     // Lyrics

@@ -47,6 +47,14 @@ import {
     getDecadeFromYear,
 } from "../utils/dateFilters";
 import { shuffleArray } from "../utils/shuffle";
+import {
+    applyTrackPreferenceOrderBias,
+    applyTrackPreferenceSimilarityBias,
+    normalizeTrackPreferenceSignal,
+    resolveTrackPreference,
+    TRACK_DISLIKE_ENTITY_TYPE,
+    type ResolvedTrackPreference,
+} from "../services/trackPreference";
 
 const router = Router();
 
@@ -111,6 +119,87 @@ const parseBooleanQueryParam = (
     }
 
     return defaultValue;
+};
+
+const formatTrackPreferenceResponse = (
+    trackId: string,
+    preference: ResolvedTrackPreference
+) => ({
+    trackId,
+    signal: preference.signal,
+    state: preference.state,
+    score: preference.score,
+    likedAt: preference.likedAt ? preference.likedAt.toISOString() : null,
+    dislikedAt: preference.dislikedAt ? preference.dislikedAt.toISOString() : null,
+    updatedAt: preference.updatedAt ? preference.updatedAt.toISOString() : null,
+});
+
+const buildTrackPreferenceScoreMapForUser = async (
+    userId: string | undefined,
+    trackIds: string[]
+): Promise<Map<string, number>> => {
+    if (!userId || trackIds.length === 0) {
+        return new Map<string, number>();
+    }
+
+    const uniqueTrackIds = Array.from(
+        new Set(
+            trackIds.filter(
+                (trackId): trackId is string =>
+                    typeof trackId === "string" && trackId.length > 0
+            )
+        )
+    );
+    if (uniqueTrackIds.length === 0) {
+        return new Map<string, number>();
+    }
+
+    const [likedEntries, dislikedEntries] = await Promise.all([
+        prisma.likedTrack.findMany({
+            where: {
+                userId,
+                trackId: { in: uniqueTrackIds },
+            },
+            select: {
+                trackId: true,
+                likedAt: true,
+            },
+        }),
+        prisma.dislikedEntity.findMany({
+            where: {
+                userId,
+                entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                entityId: { in: uniqueTrackIds },
+            },
+            select: {
+                entityId: true,
+                dislikedAt: true,
+            },
+        }),
+    ]);
+
+    const likedByTrackId = new Map<string, Date>();
+    for (const entry of likedEntries) {
+        likedByTrackId.set(entry.trackId, entry.likedAt);
+    }
+
+    const dislikedByTrackId = new Map<string, Date>();
+    for (const entry of dislikedEntries) {
+        dislikedByTrackId.set(entry.entityId, entry.dislikedAt);
+    }
+
+    const scoreMap = new Map<string, number>();
+    for (const trackId of uniqueTrackIds) {
+        const preference = resolveTrackPreference({
+            likedAt: likedByTrackId.get(trackId) ?? null,
+            dislikedAt: dislikedByTrackId.get(trackId) ?? null,
+        });
+        if (preference.score !== 0) {
+            scoreMap.set(trackId, preference.score);
+        }
+    }
+
+    return scoreMap;
 };
 
 const getRadioArtistCapForLimit = (limit: number): number => {
@@ -2703,6 +2792,167 @@ router.get("/tracks/:id/stream", async (req, res) => {
     }
 });
 
+// GET /library/tracks/:id/preference
+router.get("/tracks/:id/preference", async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+
+        const trackId = req.params.id;
+        const track = await prisma.track.findUnique({
+            where: { id: trackId },
+            select: { id: true },
+        });
+        if (!track) {
+            return res.status(404).json({ error: "Track not found" });
+        }
+
+        const [likedEntry, dislikedEntry] = await Promise.all([
+            prisma.likedTrack.findUnique({
+                where: {
+                    userId_trackId: {
+                        userId,
+                        trackId,
+                    },
+                },
+                select: {
+                    likedAt: true,
+                },
+            }),
+            prisma.dislikedEntity.findUnique({
+                where: {
+                    userId_entityType_entityId: {
+                        userId,
+                        entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                        entityId: trackId,
+                    },
+                },
+                select: {
+                    dislikedAt: true,
+                },
+            }),
+        ]);
+
+        const preference = resolveTrackPreference({
+            likedAt: likedEntry?.likedAt ?? null,
+            dislikedAt: dislikedEntry?.dislikedAt ?? null,
+        });
+
+        res.json(formatTrackPreferenceResponse(trackId, preference));
+    } catch (error) {
+        logger.error("Get track preference error:", error);
+        res.status(500).json({ error: "Failed to fetch track preference" });
+    }
+});
+
+// POST /library/tracks/:id/preference
+router.post("/tracks/:id/preference", async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+
+        const trackId = req.params.id;
+        const signal = normalizeTrackPreferenceSignal(
+            req.body?.signal ?? req.body?.score ?? req.body?.action
+        );
+
+        if (!signal) {
+            return res.status(400).json({
+                error: "Invalid preference signal. Use thumbs_up, thumbs_down, or clear.",
+            });
+        }
+
+        const track = await prisma.track.findUnique({
+            where: { id: trackId },
+            select: { id: true },
+        });
+        if (!track) {
+            return res.status(404).json({ error: "Track not found" });
+        }
+
+        const now = new Date();
+
+        if (signal === "thumbs_up") {
+            await prisma.likedTrack.upsert({
+                where: {
+                    userId_trackId: {
+                        userId,
+                        trackId,
+                    },
+                },
+                create: {
+                    userId,
+                    trackId,
+                    likedAt: now,
+                },
+                update: {
+                    likedAt: now,
+                },
+            });
+            await prisma.dislikedEntity.deleteMany({
+                where: {
+                    userId,
+                    entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                    entityId: trackId,
+                },
+            });
+        } else if (signal === "thumbs_down") {
+            await prisma.dislikedEntity.upsert({
+                where: {
+                    userId_entityType_entityId: {
+                        userId,
+                        entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                        entityId: trackId,
+                    },
+                },
+                create: {
+                    userId,
+                    entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                    entityId: trackId,
+                    dislikedAt: now,
+                },
+                update: {
+                    dislikedAt: now,
+                },
+            });
+            await prisma.likedTrack.deleteMany({
+                where: {
+                    userId,
+                    trackId,
+                },
+            });
+        } else {
+            await prisma.likedTrack.deleteMany({
+                where: {
+                    userId,
+                    trackId,
+                },
+            });
+            await prisma.dislikedEntity.deleteMany({
+                where: {
+                    userId,
+                    entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                    entityId: trackId,
+                },
+            });
+        }
+
+        const preference = resolveTrackPreference({
+            likedAt: signal === "thumbs_up" ? now : null,
+            dislikedAt: signal === "thumbs_down" ? now : null,
+        });
+
+        res.json(formatTrackPreferenceResponse(trackId, preference));
+    } catch (error) {
+        logger.error("Set track preference error:", error);
+        res.status(500).json({ error: "Failed to set track preference" });
+    }
+});
+
 // GET /library/tracks/:id
 router.get("/tracks/:id", async (req, res) => {
     try {
@@ -3270,26 +3520,32 @@ router.get("/decades", async (req, res) => {
  * Get tracks for a library-based radio station
  *
  * Query params:
- * - type: "discovery" | "favorites" | "decade" | "genre" | "mood"
+ * - type: "all" | "liked" | "discovery" | "favorites" | "decade" | "genre" | "mood" | "workout" | "artist" | "vibe"
  * - value: Optional value for decade (e.g., "1990") or genre name
  * - limit: Number of tracks to return (default 50)
  */
 router.get("/radio", async (req, res) => {
     try {
         const { type, value, limit = "50" } = req.query;
-        const limitNum = Math.min(parseInt(limit as string) || 50, 100);
+        const radioType = typeof type === "string" ? type : "";
+        const radioValue = typeof value === "string" ? value : undefined;
+        const parsedLimit = Number.parseInt(String(limit), 10);
+        const normalizedRequestedLimit =
+            Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50;
+        const limitNum =
+            radioType === "liked"
+                ? Math.min(normalizedRequestedLimit, MAX_LIMIT)
+                : Math.min(normalizedRequestedLimit, 100);
         const userId = req.user?.id;
 
-        if (!type) {
+        if (!radioType) {
             return res.status(400).json({ error: "Radio type is required" });
         }
 
-        let whereClause: any = {};
-        let orderBy: any = {};
         let trackIds: string[] = [];
         let vibeSourceFeatures: any = null; // For vibe mode - store source track features
 
-        switch (type) {
+        switch (radioType) {
             case "discovery":
                 // Lesser-played tracks - get tracks the user hasn't played or played least
                 // First, get tracks with NO plays at all (truly undiscovered)
@@ -3317,6 +3573,25 @@ router.get("/radio", async (req, res) => {
                     `;
                     trackIds = leastPlayedTracks.map((t) => t.id);
                 }
+                break;
+
+            case "liked":
+                if (!userId) {
+                    return res.status(401).json({
+                        error: "Authentication required for liked radio",
+                    });
+                }
+
+                const likedTracks = await prisma.likedTrack.findMany({
+                    where: { userId },
+                    select: { trackId: true },
+                    orderBy: { likedAt: "desc" },
+                    take: limitNum,
+                });
+                trackIds = likedTracks.map((entry) => entry.trackId);
+                logger.debug(
+                    `[Radio:liked] Loaded ${trackIds.length} liked tracks for user ${userId}`
+                );
                 break;
 
             case "favorites":
@@ -3350,7 +3625,7 @@ router.get("/radio", async (req, res) => {
 
             case "decade":
                 // Filter by decade (e.g., value = "1990" for 90s)
-                const decadeStart = parseInt(value as string) || 2000;
+                const decadeStart = parseInt(radioValue || "2000", 10) || 2000;
 
                 const decadeTracks = await prisma.track.findMany({
                     where: {
@@ -3364,7 +3639,7 @@ router.get("/radio", async (req, res) => {
 
             case "genre":
                 // Filter by genre (uses Artist.genres and Artist.userGenres)
-                const genreValue = ((value as string) || "").toLowerCase();
+                const genreValue = (radioValue || "").toLowerCase();
 
                 // Query Artist.genres and userGenres fields with raw SQL
                 // Join Artist → Album → Track and filter by genre using LIKE for partial matching
@@ -3396,7 +3671,7 @@ router.get("/radio", async (req, res) => {
 
             case "mood":
                 // Mood-based filtering using audio analysis features
-                const moodValue = ((value as string) || "").toLowerCase();
+                const moodValue = (radioValue || "").toLowerCase();
                 let moodWhere: any = { analysisStatus: "completed" };
 
                 switch (moodValue) {
@@ -3579,7 +3854,7 @@ router.get("/radio", async (req, res) => {
             case "artist":
                 // Artist Radio - plays tracks from the artist + similar artists in library
                 // Uses hybrid approach: Last.fm similarity (filtered to library) + genre matching + vibe boost
-                const artistId = value as string;
+                const artistId = radioValue;
                 if (!artistId) {
                     return res
                         .status(400)
@@ -3826,6 +4101,34 @@ router.get("/radio", async (req, res) => {
                     );
                 }
 
+                const similarTrackPreferenceScores =
+                    await buildTrackPreferenceScoreMapForUser(
+                        userId,
+                        similarTracks.map((track) => track.id)
+                    );
+                if (similarTrackPreferenceScores.size > 0) {
+                    similarTracks = similarTracks
+                        .map((track) => {
+                            const adjustedScore =
+                                applyTrackPreferenceSimilarityBias(
+                                    track.vibeScore ?? 0.5,
+                                    similarTrackPreferenceScores.get(track.id) ??
+                                        0
+                                );
+                            return {
+                                ...track,
+                                vibeScore: adjustedScore,
+                            };
+                        })
+                        .sort(
+                            (left, right) =>
+                                (right.vibeScore ?? 0) - (left.vibeScore ?? 0)
+                        );
+                    logger.debug(
+                        `[Radio:artist] Applied light preference weighting across ${similarTrackPreferenceScores.size} similar-track preferences`
+                    );
+                }
+
                 // 7. Mix: ~40% original artist, ~60% similar (vibe-boosted)
                 const originalCount = Math.min(
                     Math.ceil(limitNum * 0.4),
@@ -3875,7 +4178,7 @@ router.get("/radio", async (req, res) => {
             case "vibe":
                 // Vibe Match - finds tracks that sound like the given track
                 // Pure audio feature matching with graceful fallbacks
-                const sourceTrackId = value as string;
+                const sourceTrackId = radioValue;
                 if (!sourceTrackId) {
                     return res
                         .status(400)
@@ -4255,6 +4558,11 @@ router.get("/radio", async (req, res) => {
 
                         // Build source feature vector once
                         const sourceVector = buildFeatureVector(sourceTrack);
+                        const vibePreferenceScores =
+                            await buildTrackPreferenceScoreMapForUser(
+                                userId,
+                                analyzedTracks.map((track) => track.id)
+                            );
 
                         // Check if source track has Enhanced mode data
                         const sourceUsesEnhancedFeatures =
@@ -4287,8 +4595,18 @@ router.get("/radio", async (req, res) => {
                                 t.essentiaGenres || []
                             );
 
-                            // Final score: 95% cosine similarity + 5% tag bonus
-                            const finalScore = score * 0.95 + tagBonus;
+                            // Final score: 95% cosine similarity + 5% tag bonus,
+                            // plus light thumbs preference weighting.
+                            const finalScore = Math.max(
+                                0,
+                                Math.min(
+                                    1,
+                                    applyTrackPreferenceSimilarityBias(
+                                        score * 0.95 + tagBonus,
+                                        vibePreferenceScores.get(t.id) ?? 0
+                                    )
+                                )
+                            );
 
                             return {
                                 id: t.id,
@@ -4320,6 +4638,11 @@ router.get("/radio", async (req, res) => {
                                 goodMatches.length - enhancedCount
                             }`
                         );
+                        if (vibePreferenceScores.size > 0) {
+                            logger.debug(
+                                `[Radio:vibe] Applied light preference weighting to ${vibePreferenceScores.size} analyzed candidates`
+                            );
+                        }
 
                         if (goodMatches.length > 0) {
                             logger.debug(
@@ -4463,12 +4786,32 @@ router.get("/radio", async (req, res) => {
                 trackIds = allTracks.map((t) => t.id);
         }
 
-        // For vibe mode, keep the sorted order (by match score)
-        // For other modes, shuffle the results
-        const finalIds =
-            type === "vibe"
-                ? trackIds.slice(0, limitNum) // Already sorted by match score
-                : shuffleArray(trackIds).slice(0, limitNum);
+        // Keep deterministic ordering for vibe (similarity-ranked) and liked (likedAt-ranked) queues.
+        // Shuffle the source pool for all other radio modes.
+        const preserveInputOrder =
+            radioType === "vibe" || radioType === "liked";
+        const basePoolIds =
+            preserveInputOrder ?
+                trackIds
+            :   shuffleArray(trackIds).slice(
+                    0,
+                    Math.max(limitNum * 4, limitNum)
+                );
+        const preferenceScoreMap =
+            radioType === "liked" ?
+                new Map<string, number>()
+            :   await buildTrackPreferenceScoreMapForUser(userId, basePoolIds);
+        const preferenceWeightedPoolIds =
+            preferenceScoreMap.size > 0 ?
+                applyTrackPreferenceOrderBias(basePoolIds, preferenceScoreMap)
+            :   basePoolIds;
+        const finalIds = preferenceWeightedPoolIds.slice(0, limitNum);
+
+        if (preferenceScoreMap.size > 0) {
+            logger.debug(
+                `[Radio:${radioType}] Applied light preference weighting using ${preferenceScoreMap.size} track preferences`
+            );
+        }
 
         if (finalIds.length === 0) {
             return res.json({ tracks: [] });
@@ -4498,10 +4841,9 @@ router.get("/radio", async (req, res) => {
             },
         });
 
-        // For vibe mode, reorder tracks to match the sorted finalIds order
-        // (Prisma's findMany with IN doesn't preserve order)
+        // Reorder tracks whenever we preserve input order since Prisma IN does not preserve ordering.
         let orderedTracks = tracks;
-        if (type === "vibe") {
+        if (preserveInputOrder) {
             const trackMap = new Map(tracks.map((t) => [t.id, t]));
             orderedTracks = finalIds
                 .map((id) => trackMap.get(id))
@@ -4510,14 +4852,14 @@ router.get("/radio", async (req, res) => {
 
         // === VIBE QUEUE LOGGING ===
         // Log detailed info for vibe matching analysis (using ordered tracks)
-        if (type === "vibe" && vibeSourceFeatures) {
+        if (radioType === "vibe" && vibeSourceFeatures) {
             logger.debug("\n" + "=".repeat(100));
             logger.debug("VIBE QUEUE ANALYSIS - Source Track");
             logger.debug("=".repeat(100));
 
             // Find source track for logging
             const srcTrack = await prisma.track.findUnique({
-                where: { id: value as string },
+                where: { id: radioValue as string },
                 include: {
                     album: { include: { artist: { select: { name: true } } } },
                     trackGenres: {
@@ -4690,9 +5032,9 @@ router.get("/radio", async (req, res) => {
             }),
         }));
 
-        // For vibe mode, keep sorted order. For other modes, shuffle.
+        // Keep deterministic ordering for vibe/liked queues. Shuffle all other radio queues.
         const finalTracks =
-            type === "vibe" ? transformedTracks : shuffleArray(transformedTracks);
+            preserveInputOrder ? transformedTracks : shuffleArray(transformedTracks);
 
         // Include source features if this was a vibe request
         const response: any = { tracks: finalTracks };

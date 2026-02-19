@@ -39,6 +39,12 @@ jest.mock("../../../utils/db", () => ({
         track: {
             findMany: jest.fn(),
         },
+        likedTrack: {
+            findMany: jest.fn(),
+        },
+        dislikedEntity: {
+            findMany: jest.fn(),
+        },
         discoveryAlbum: {
             findMany: jest.fn(),
             deleteMany: jest.fn(),
@@ -99,6 +105,8 @@ describe("DiscoveryRecommendationsService", () => {
         mockAddMonths.mockReturnValue(EXPIRES_AT);
 
         jest.spyOn(Math, "random").mockReturnValue(0);
+        (mockPrisma.likedTrack.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.dislikedEntity.findMany as jest.Mock).mockResolvedValue([]);
 
         service = new DiscoveryRecommendationsService();
     });
@@ -502,6 +510,75 @@ describe("DiscoveryRecommendationsService", () => {
                     tier: "wildcard",
                 }),
             ]);
+        });
+
+        it("applies light thumbs weighting when ranking discovery candidates", async () => {
+            jest
+                .spyOn(service as any, "buildArtistScoreMap")
+                .mockResolvedValue(
+                    new Map([
+                        ["artist-disliked", 0.6],
+                        ["artist-liked", 0.6],
+                    ])
+                );
+            (mockPrisma.play.findMany as jest.Mock).mockResolvedValue([]);
+            (mockPrisma.discoverExclusion.findMany as jest.Mock).mockResolvedValue([]);
+            (mockPrisma.likedTrack.findMany as jest.Mock).mockResolvedValue([
+                {
+                    trackId: "track-liked",
+                    likedAt: new Date("2026-02-19T12:00:00.000Z"),
+                },
+            ]);
+            (mockPrisma.dislikedEntity.findMany as jest.Mock).mockResolvedValue([
+                {
+                    entityId: "track-disliked",
+                    dislikedAt: new Date("2026-02-19T12:00:00.000Z"),
+                },
+            ]);
+            (mockPrisma.track.findMany as jest.Mock).mockResolvedValue([
+                {
+                    id: "track-disliked",
+                    title: "Disliked Candidate",
+                    duration: 180,
+                    filePath: "/music/disliked.flac",
+                    albumId: "album-disliked",
+                    album: {
+                        title: "Album Disliked",
+                        rgMbid: "rg-disliked",
+                        coverUrl: null,
+                        artistId: "artist-disliked",
+                        artist: {
+                            id: "artist-disliked",
+                            name: "Artist Disliked",
+                            mbid: "mbid-disliked",
+                        },
+                    },
+                },
+                {
+                    id: "track-liked",
+                    title: "Liked Candidate",
+                    duration: 182,
+                    filePath: "/music/liked.flac",
+                    albumId: "album-liked",
+                    album: {
+                        title: "Album Liked",
+                        rgMbid: "rg-liked",
+                        coverUrl: null,
+                        artistId: "artist-liked",
+                        artist: {
+                            id: "artist-liked",
+                            name: "Artist Liked",
+                            mbid: "mbid-liked",
+                        },
+                    },
+                },
+            ]);
+
+            const result = await (service as any).selectTracks("user-1", 1);
+
+            expect(result).toHaveLength(1);
+            expect(result[0].trackId).toBe("track-liked");
+            expect(result[0].similarity).toBeCloseTo(0.625);
         });
 
         it("limits repeated artists and uses relaxed caps only when needed to hit target size", async () => {

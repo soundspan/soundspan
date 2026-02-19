@@ -36,6 +36,18 @@ jest.mock("../../utils/db", () => ({
             delete: jest.fn(),
             deleteMany: jest.fn(),
         },
+        likedTrack: {
+            findUnique: jest.fn(),
+            findMany: jest.fn(),
+            upsert: jest.fn(),
+            deleteMany: jest.fn(),
+        },
+        dislikedEntity: {
+            findUnique: jest.fn(),
+            findMany: jest.fn(),
+            upsert: jest.fn(),
+            deleteMany: jest.fn(),
+        },
         play: {
             findFirst: jest.fn(),
             create: jest.fn(),
@@ -274,6 +286,14 @@ const mockTrackFindMany = prisma.track.findMany as jest.Mock;
 const mockTrackCount = prisma.track.count as jest.Mock;
 const mockTrackDelete = prisma.track.delete as jest.Mock;
 const mockTrackDeleteMany = prisma.track.deleteMany as jest.Mock;
+const mockLikedTrackFindUnique = prisma.likedTrack.findUnique as jest.Mock;
+const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
+const mockLikedTrackUpsert = prisma.likedTrack.upsert as jest.Mock;
+const mockLikedTrackDeleteMany = prisma.likedTrack.deleteMany as jest.Mock;
+const mockDislikedEntityFindUnique = prisma.dislikedEntity.findUnique as jest.Mock;
+const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
+const mockDislikedEntityUpsert = prisma.dislikedEntity.upsert as jest.Mock;
+const mockDislikedEntityDeleteMany = prisma.dislikedEntity.deleteMany as jest.Mock;
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
 const mockPlayFindFirst = prisma.play.findFirst as jest.Mock;
@@ -1171,6 +1191,8 @@ describe("library catalog list runtime coverage", () => {
     const coverArtHandler = getHandler("get", "/cover-art/:id?", 1);
     const albumCoverHandler = getHandler("get", "/album-cover/:mbid", 1);
     const coverArtColorsHandler = getHandler("get", "/cover-art-colors", 1);
+    const trackPreferenceHandler = getHandler("get", "/tracks/:id/preference");
+    const setTrackPreferenceHandler = getHandler("post", "/tracks/:id/preference");
     const trackByIdHandler = getHandler("get", "/tracks/:id");
     const audioInfoHandler = getHandler("get", "/tracks/:id/audio-info", 1);
     const deleteTrackHandler = getHandler("delete", "/tracks/:id", 1);
@@ -1199,6 +1221,14 @@ describe("library catalog list runtime coverage", () => {
         mockTrackCount.mockResolvedValue(0);
         mockTrackDelete.mockResolvedValue(undefined);
         mockTrackDeleteMany.mockResolvedValue({ count: 0 });
+        mockLikedTrackFindUnique.mockResolvedValue(null);
+        mockLikedTrackFindMany.mockResolvedValue([]);
+        mockLikedTrackUpsert.mockResolvedValue({ userId: "user-1", trackId: "track-1" });
+        mockLikedTrackDeleteMany.mockResolvedValue({ count: 0 });
+        mockDislikedEntityFindUnique.mockResolvedValue(null);
+        mockDislikedEntityFindMany.mockResolvedValue([]);
+        mockDislikedEntityUpsert.mockResolvedValue({ id: "disliked-1" });
+        mockDislikedEntityDeleteMany.mockResolvedValue({ count: 0 });
         mockPlayGroupBy.mockResolvedValue([]);
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
@@ -2570,6 +2600,139 @@ describe("library catalog list runtime coverage", () => {
         await trackByIdHandler(errReq, errRes);
         expect(errRes.statusCode).toBe(500);
         expect(errRes.body).toEqual({ error: "Failed to fetch track" });
+    });
+
+    it("returns resolved thumbs preference state for a track", async () => {
+        mockTrackFindUnique.mockResolvedValue({ id: "track-1" });
+        mockLikedTrackFindUnique
+            .mockResolvedValueOnce({
+                likedAt: new Date("2026-02-19T00:00:00.000Z"),
+            })
+            .mockResolvedValueOnce({
+                likedAt: new Date("2026-02-18T00:00:00.000Z"),
+            });
+        mockDislikedEntityFindUnique
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                dislikedAt: new Date("2026-02-19T12:00:00.000Z"),
+            });
+
+        const likedReq = {
+            params: { id: "track-1" },
+            user: { id: "user-1" },
+        } as any;
+        const likedRes = createRes();
+        await trackPreferenceHandler(likedReq, likedRes);
+        expect(likedRes.statusCode).toBe(200);
+        expect(likedRes.body).toEqual(
+            expect.objectContaining({
+                trackId: "track-1",
+                signal: "thumbs_up",
+                state: "liked",
+                score: 1,
+            })
+        );
+
+        const conflictedReq = {
+            params: { id: "track-1" },
+            user: { id: "user-1" },
+        } as any;
+        const conflictedRes = createRes();
+        await trackPreferenceHandler(conflictedReq, conflictedRes);
+        expect(conflictedRes.statusCode).toBe(200);
+        expect(conflictedRes.body).toEqual(
+            expect.objectContaining({
+                trackId: "track-1",
+                signal: "thumbs_down",
+                state: "disliked",
+                score: -1,
+            })
+        );
+    });
+
+    it("updates thumbs preference state for up/down/clear signals", async () => {
+        mockTrackFindUnique.mockResolvedValue({ id: "track-1" });
+        mockLikedTrackUpsert.mockResolvedValue({ userId: "user-1", trackId: "track-1" });
+        mockLikedTrackDeleteMany.mockResolvedValue({ count: 1 });
+        mockDislikedEntityUpsert.mockResolvedValue({ id: "disliked-track-1" });
+        mockDislikedEntityDeleteMany.mockResolvedValue({ count: 1 });
+
+        const invalidReq = {
+            params: { id: "track-1" },
+            user: { id: "user-1" },
+            body: { signal: "invalid" },
+        } as any;
+        const invalidRes = createRes();
+        await setTrackPreferenceHandler(invalidReq, invalidRes);
+        expect(invalidRes.statusCode).toBe(400);
+        expect(invalidRes.body).toEqual({
+            error: "Invalid preference signal. Use thumbs_up, thumbs_down, or clear.",
+        });
+
+        const thumbsUpReq = {
+            params: { id: "track-1" },
+            user: { id: "user-1" },
+            body: { signal: "thumbs_up" },
+        } as any;
+        const thumbsUpRes = createRes();
+        await setTrackPreferenceHandler(thumbsUpReq, thumbsUpRes);
+        expect(thumbsUpRes.statusCode).toBe(200);
+        expect(thumbsUpRes.body).toEqual(
+            expect.objectContaining({
+                signal: "thumbs_up",
+                state: "liked",
+                score: 1,
+            })
+        );
+        expect(mockLikedTrackUpsert).toHaveBeenCalled();
+        expect(mockDislikedEntityDeleteMany).toHaveBeenCalled();
+
+        const thumbsDownReq = {
+            params: { id: "track-1" },
+            user: { id: "user-1" },
+            body: { signal: "thumbs_down" },
+        } as any;
+        const thumbsDownRes = createRes();
+        await setTrackPreferenceHandler(thumbsDownReq, thumbsDownRes);
+        expect(thumbsDownRes.statusCode).toBe(200);
+        expect(thumbsDownRes.body).toEqual(
+            expect.objectContaining({
+                signal: "thumbs_down",
+                state: "disliked",
+                score: -1,
+            })
+        );
+        expect(mockDislikedEntityUpsert).toHaveBeenCalled();
+        expect(mockLikedTrackDeleteMany).toHaveBeenCalled();
+
+        const clearReq = {
+            params: { id: "track-1" },
+            user: { id: "user-1" },
+            body: { signal: "clear" },
+        } as any;
+        const clearRes = createRes();
+        await setTrackPreferenceHandler(clearReq, clearRes);
+        expect(clearRes.statusCode).toBe(200);
+        expect(clearRes.body).toEqual(
+            expect.objectContaining({
+                signal: "clear",
+                state: "neutral",
+                score: 0,
+            })
+        );
+        expect(mockLikedTrackDeleteMany).toHaveBeenCalledWith({
+            where: {
+                userId: "user-1",
+                trackId: "track-1",
+            },
+        });
+        expect(mockDislikedEntityDeleteMany).toHaveBeenCalledWith({
+            where: {
+                userId: "user-1",
+                entityType: "track",
+                entityId: "track-1",
+            },
+        });
     });
 
     it("handles audio-info lookup for missing track, missing file, and parsed metadata", async () => {
@@ -4401,6 +4564,37 @@ describe("library catalog list runtime coverage", () => {
         await radioHandler(emptyAllReq, emptyAllRes);
         expect(emptyAllRes.statusCode).toBe(200);
         expect(emptyAllRes.body).toEqual({ tracks: [] });
+    });
+
+    it("returns liked radio tracks using deterministic liked-order membership", async () => {
+        mockLikedTrackFindMany.mockResolvedValueOnce([
+            { trackId: "liked-2" },
+            { trackId: "liked-1" },
+        ]);
+        mockTrackFindMany.mockResolvedValueOnce([
+            createRadioTrack("liked-1"),
+            createRadioTrack("liked-2"),
+        ]);
+
+        const req = {
+            query: { type: "liked", limit: "5000" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+        await radioHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockLikedTrackFindMany).toHaveBeenCalledWith({
+            where: { userId: "user-1" },
+            select: { trackId: true },
+            orderBy: { likedAt: "desc" },
+            take: 5000,
+        });
+        expect(res.body.tracks.map((track: any) => track.id)).toEqual([
+            "liked-2",
+            "liked-1",
+        ]);
+        expect(mockShuffleArray).not.toHaveBeenCalled();
     });
 
     it("uses genre-based artist fallback when lastfm similar artists are insufficient", async () => {

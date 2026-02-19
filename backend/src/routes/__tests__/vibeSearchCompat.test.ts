@@ -22,6 +22,12 @@ jest.mock("../../utils/db", () => ({
         track: {
             count: jest.fn(),
         },
+        likedTrack: {
+            findMany: jest.fn(),
+        },
+        dislikedEntity: {
+            findMany: jest.fn(),
+        },
         $queryRaw: jest.fn(),
     },
 }));
@@ -60,6 +66,8 @@ import {
 } from "../../services/vibeVocabulary";
 
 const mockTrackCount = prisma.track.count as jest.Mock;
+const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
+const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockRedisXAdd = redisClient.xAdd as jest.Mock;
 const mockRedisBlPop = redisClient.blPop as jest.Mock;
@@ -116,6 +124,8 @@ describe("vibe search transport compatibility", () => {
         mockRedisXAdd.mockResolvedValue("1712345-0");
         mockRedisDel.mockResolvedValue(1);
         mockQueryRaw.mockResolvedValue([]);
+        mockLikedTrackFindMany.mockResolvedValue([]);
+        mockDislikedEntityFindMany.mockResolvedValue([]);
         mockFindSimilarTracks.mockResolvedValue([]);
         mockGetVocabulary.mockReturnValue(null);
         mockExpandQueryWithVocabulary.mockImplementation((embedding: number[]) => ({
@@ -183,6 +193,66 @@ describe("vibe search transport compatibility", () => {
         await similarHandler(errReq, errRes);
         expect(errRes.statusCode).toBe(500);
         expect(errRes.body).toEqual({ error: "Failed to find similar tracks" });
+    });
+
+    it("applies light thumbs weighting to vibe similar-track ordering", async () => {
+        mockFindSimilarTracks.mockResolvedValueOnce([
+            {
+                id: "track-disliked",
+                title: "Disliked",
+                distance: 0.18,
+                similarity: 0.86,
+                albumId: "a-1",
+                albumTitle: "Album 1",
+                albumCoverUrl: null,
+                artistId: "ar-1",
+                artistName: "Artist 1",
+            },
+            {
+                id: "track-liked",
+                title: "Liked",
+                distance: 0.2,
+                similarity: 0.85,
+                albumId: "a-2",
+                albumTitle: "Album 2",
+                albumCoverUrl: null,
+                artistId: "ar-2",
+                artistName: "Artist 2",
+            },
+        ]);
+        mockLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                trackId: "track-liked",
+                likedAt: new Date("2026-02-19T12:00:00.000Z"),
+            },
+        ]);
+        mockDislikedEntityFindMany.mockResolvedValueOnce([
+            {
+                entityId: "track-disliked",
+                dislikedAt: new Date("2026-02-19T12:00:00.000Z"),
+            },
+        ]);
+
+        const req = {
+            params: { trackId: "source-track" },
+            query: { limit: "20" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+        await similarHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.tracks[0]).toEqual(
+            expect.objectContaining({
+                id: "track-liked",
+                similarity: expect.any(Number),
+            })
+        );
+        expect(res.body.tracks[1]).toEqual(
+            expect.objectContaining({
+                id: "track-disliked",
+            })
+        );
     });
 
     it("handles vibe status route success and error branches", async () => {

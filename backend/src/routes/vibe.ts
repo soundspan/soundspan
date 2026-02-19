@@ -6,6 +6,12 @@ import { redisClient } from "../utils/redis";
 import { requireAuth } from "../middleware/auth";
 import { findSimilarTracks } from "../services/hybridSimilarity";
 import {
+    applyTrackPreferenceOrderBias,
+    applyTrackPreferenceSimilarityBias,
+    resolveTrackPreference,
+    TRACK_DISLIKE_ENTITY_TYPE,
+} from "../services/trackPreference";
+import {
     getVocabulary,
     expandQueryWithVocabulary,
     rerankWithFeatures,
@@ -43,6 +49,74 @@ interface TextSearchResult {
     speechiness: number | null;
 }
 
+async function buildTrackPreferenceScoreMapForUser(
+    userId: string | undefined,
+    trackIds: string[]
+): Promise<Map<string, number>> {
+    if (!userId || trackIds.length === 0) {
+        return new Map<string, number>();
+    }
+
+    const uniqueTrackIds = Array.from(
+        new Set(
+            trackIds.filter(
+                (trackId): trackId is string =>
+                    typeof trackId === "string" && trackId.length > 0
+            )
+        )
+    );
+    if (uniqueTrackIds.length === 0) {
+        return new Map<string, number>();
+    }
+
+    const [likedEntries, dislikedEntries] = await Promise.all([
+        prisma.likedTrack.findMany({
+            where: {
+                userId,
+                trackId: { in: uniqueTrackIds },
+            },
+            select: {
+                trackId: true,
+                likedAt: true,
+            },
+        }),
+        prisma.dislikedEntity.findMany({
+            where: {
+                userId,
+                entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                entityId: { in: uniqueTrackIds },
+            },
+            select: {
+                entityId: true,
+                dislikedAt: true,
+            },
+        }),
+    ]);
+
+    const likedByTrackId = new Map<string, Date>();
+    for (const entry of likedEntries) {
+        likedByTrackId.set(entry.trackId, entry.likedAt);
+    }
+
+    const dislikedByTrackId = new Map<string, Date>();
+    for (const entry of dislikedEntries) {
+        dislikedByTrackId.set(entry.entityId, entry.dislikedAt);
+    }
+
+    const scoreMap = new Map<string, number>();
+    for (const trackId of uniqueTrackIds) {
+        const resolved = resolveTrackPreference({
+            likedAt: likedByTrackId.get(trackId) ?? null,
+            dislikedAt: dislikedByTrackId.get(trackId) ?? null,
+        });
+        if (resolved.score !== 0) {
+            scoreMap.set(trackId, resolved.score);
+        }
+    }
+
+    return scoreMap;
+}
+
 /**
  * GET /api/vibe/similar/:trackId
  * Find tracks similar to a given track using hybrid similarity (CLAP + audio features)
@@ -50,14 +124,47 @@ interface TextSearchResult {
 router.get("/similar/:trackId", requireAuth, async (req, res) => {
     try {
         const { trackId } = req.params;
+        const userId = req.user?.id;
         const limit = Math.min(
             Math.max(1, parseInt(req.query.limit as string) || 20),
             100
         );
 
         const tracks = await findSimilarTracks(trackId, limit);
+        let weightedTracks = tracks;
 
-        if (tracks.length === 0) {
+        const preferenceScores = await buildTrackPreferenceScoreMapForUser(
+            userId,
+            tracks.map((track) => track.id)
+        );
+        if (preferenceScores.size > 0) {
+            const ordering = applyTrackPreferenceOrderBias(
+                tracks.map((track) => track.id),
+                preferenceScores
+            );
+            const trackById = new Map(tracks.map((track) => [track.id, track]));
+            weightedTracks = ordering
+                .map((id) => trackById.get(id))
+                .filter((track): track is (typeof tracks)[number] => Boolean(track))
+                .map((track) => ({
+                    ...track,
+                    similarity: Math.max(
+                        0,
+                        Math.min(
+                            1,
+                            applyTrackPreferenceSimilarityBias(
+                                track.similarity,
+                                preferenceScores.get(track.id) ?? 0
+                            )
+                        )
+                    ),
+                }));
+            logger.debug(
+                `[Vibe] Applied light preference weighting using ${preferenceScores.size} track preferences`
+            );
+        }
+
+        if (weightedTracks.length === 0) {
             return res.status(404).json({
                 error: "No similar tracks found",
                 message: "This track may not have been analyzed yet, or no analyzer is running",
@@ -66,7 +173,7 @@ router.get("/similar/:trackId", requireAuth, async (req, res) => {
 
         res.json({
             sourceTrackId: trackId,
-            tracks: tracks.map((t) => ({
+            tracks: weightedTracks.map((t) => ({
                 id: t.id,
                 title: t.title,
                 distance: t.distance,

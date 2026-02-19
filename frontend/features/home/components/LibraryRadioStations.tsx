@@ -30,7 +30,8 @@ interface RadioStation {
             | "discovery"
             | "favorites"
             | "all"
-            | "workout";
+            | "workout"
+            | "liked";
         value?: string;
     };
     minTracks?: number;
@@ -50,6 +51,14 @@ const STATIC_STATIONS: RadioStation[] = [
         color: "from-[#3b82f6]/60 to-amber-600/40",
         filter: { type: "all" },
         minTracks: 10,
+    },
+    {
+        id: "liked",
+        name: "My Liked",
+        description: "All your thumbs-up tracks",
+        color: "from-emerald-500/50 to-green-700/40",
+        filter: { type: "liked" },
+        minTracks: 1,
     },
     {
         id: "workout",
@@ -232,7 +241,7 @@ export function LibraryRadioStations() {
             if (station.filter.value) {
                 params.set("value", station.filter.value);
             }
-            params.set("limit", "100");
+            params.set("limit", station.filter.type === "liked" ? "10000" : "100");
 
             const response = await api.get<{ tracks: Track[] }>(
                 `/library/radio?${params.toString()}`
