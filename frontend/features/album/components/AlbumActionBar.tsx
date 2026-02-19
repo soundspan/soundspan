@@ -92,7 +92,7 @@ export function AlbumActionBar({
                                     <>
                                         <button
                                             onClick={handleLockedAction}
-                                            className="h-12 w-12 rounded-full flex items-center justify-center shadow-lg border border-red-400/60 bg-red-500/20 text-red-100"
+                                            className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm border border-red-400/60 bg-red-500/20 text-red-100"
                                             title={lockMessage}
                                         >
                                             {showPause ? (
@@ -100,6 +100,7 @@ export function AlbumActionBar({
                                             ) : (
                                                 <Play className="w-5 h-5 fill-current ml-0.5" />
                                             )}
+                                            <span>{showPause ? "Pause" : "Play All"}</span>
                                         </button>
 
                                         <button
@@ -146,7 +147,7 @@ export function AlbumActionBar({
                         <>
                             <button
                                 onClick={handlePlayPauseClick}
-                                className="h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105"
+                                className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm text-black transition-all hover:scale-105"
                                 style={{ backgroundColor: BRAND_PLAY }}
                             >
                                 {showPlaySpinner ? (
@@ -156,6 +157,7 @@ export function AlbumActionBar({
                                 ) : (
                                     <Play className="w-5 h-5 fill-current text-black ml-0.5" />
                                 )}
+                                <span>{showPause ? "Pause" : "Play All"}</span>
                             </button>
 
                             {/* Shuffle Button */}
