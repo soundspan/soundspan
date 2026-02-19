@@ -19,6 +19,8 @@ Read these in order before non-trivial work:
 - Machine-readable canonical policy: `.github/policies/agent-governance.json`
 - Enforcement runner: `.github/scripts/enforce-agent-policies.mjs`
 - Session preflight generator: `.github/scripts/agent-session-preflight.mjs`
+- Release notes template artifact: `docs/RELEASE_NOTES_TEMPLATE.md`
+- Release notes generator: `.github/scripts/generate-release-notes.mjs`
 - Human-readable rules contract: `docs/AGENT_RULES.md`
 - Human-readable project context: `docs/AGENT_CONTEXT.md`
 - Context map index: `docs/CONTEXT_INDEX.json`
@@ -93,6 +95,7 @@ Default Codex subagent model: `gpt-5.3-codex-spark` unless user-overridden.
 
 - Local: `node .github/scripts/enforce-agent-policies.mjs`
 - Session preflight: `npm run agent:preflight`
+- Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`
 - CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code`
 - If process expectations change, update all of:
   - `AGENTS.md`

@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-context-index",
-    "version": "2026-02-19.01",
+    "version": "2026-02-19.02",
     "description": "Machine-readable index for startup context retrieval and split-doc drift checks."
   },
   "startupReadOrder": [
@@ -229,6 +229,7 @@
     "queueLifecycle": "npm run agent:queue:open -- --help",
     "indexBuild": "npm run index:build",
     "indexVerify": "npm run index:verify",
-    "indexQueryStrictFresh": "node tools/index/indexer.mjs query \"<query>\" --strict-fresh"
+    "indexQueryStrictFresh": "node tools/index/indexer.mjs query \"<query>\" --strict-fresh",
+    "releaseNotes": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]"
   }
 }

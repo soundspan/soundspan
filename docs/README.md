@@ -16,6 +16,7 @@ This index is the central navigation page for all project documentation under `d
 | [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md) | Operators/network admins | Reverse proxy and Cloudflare Tunnel routing guidance |
 | [`TESTING.md`](TESTING.md) | Contributors/operators | Test frameworks, directory structure, commands, CI coverage visibility, and manual-vs-automated boundaries |
 | [`REPO_INDEXING.md`](REPO_INDEXING.md) | Contributors/agents | Deterministic local indexing/vectorization, drift controls, and retrieval operations |
+| [`RELEASE_NOTES_TEMPLATE.md`](RELEASE_NOTES_TEMPLATE.md) | Maintainers | Canonical release-notes format and command (`npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`) |
 
 ## Compatibility and Brand Tracking
 

@@ -11,6 +11,18 @@ The chart supports:
 - All-in-One mode (single pod)
 - Individual mode (separate services)
 
+Published Helm chart reference:
+
+- Repository URL: `https://soundspan.github.io/soundspan`
+- Chart name: `soundspan`
+- Chart reference: `soundspan/soundspan`
+
+```bash
+helm repo add soundspan https://soundspan.github.io/soundspan
+helm repo update
+helm search repo soundspan/soundspan
+```
+
 ### All-in-One install
 
 ```bash

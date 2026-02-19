@@ -10,6 +10,7 @@
     "index:rebuild": "node tools/index/indexer.mjs build --full",
     "index:query": "node tools/index/indexer.mjs query",
     "index:verify": "node tools/index/indexer.mjs verify --strict",
+    "release:notes": "node .github/scripts/generate-release-notes.mjs",
     "release:prepare": "node .github/scripts/release-version-sync.mjs --write",
     "release:verify": "node .github/scripts/release-version-sync.mjs --check"
   },

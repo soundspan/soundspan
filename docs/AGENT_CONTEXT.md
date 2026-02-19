@@ -218,7 +218,12 @@ Use this section as the first-stop index for shared patterns and consolidation o
 For this repository, documentation updates are part of the definition of done for user-facing or behavior-changing work.
 
 - Always update `CHANGELOG.md` under **`[Unreleased]`** for user-visible or behavior-changing deltas.
+- Use `docs/RELEASE_NOTES_TEMPLATE.md` for release notes and GitHub release bodies; generate drafts with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`.
 - In `CHANGELOG.md`, keep the **`Fixed`** section limited to regressions/bugs. Feature additions and behavior upgrades should be documented under **`Added`**/**`Changed`**.
+- Keep Helm release references explicit in release notes:
+  - chart repo URL: `https://soundspan.github.io/soundspan`
+  - chart name: `soundspan`
+  - chart reference: `soundspan/soundspan`
 - Keep `README.md` aligned with current repository behavior for user-visible features.
 - For major implemented features, keep an explicit known-gap ledger and revisit criteria in the canonical feature docs (for example OpenSubsonic gap/non-goal sections in `docs/OPENSUBSONIC_COMPATIBILITY.md`).
 - At task start and before phase boundaries, review known-gap ledgers for impacted features and explicitly decide whether any deferred gaps must be promoted to in-scope for the work being planned.

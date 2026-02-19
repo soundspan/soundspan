@@ -38,6 +38,7 @@ The README stays intentionally user-focused. Technical and operator material liv
 
 - Documentation index (all guides): [`docs/README.md`](docs/README.md)
 - Deployment modes and updates: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+- Release notes template and generator: [`docs/RELEASE_NOTES_TEMPLATE.md`](docs/RELEASE_NOTES_TEMPLATE.md) (`npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`)
 - Configuration and security: [`docs/CONFIGURATION_AND_SECURITY.md`](docs/CONFIGURATION_AND_SECURITY.md)
 - Integration setup (Lidarr, Soulseek, YouTube Music, TIDAL, OpenSubsonic): [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)
 - Testing frameworks, structure, and CI visibility: [`docs/TESTING.md`](docs/TESTING.md)

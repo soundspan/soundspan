@@ -1345,6 +1345,166 @@ function checkContextIndexContract(config) {
   }
 }
 
+function checkReleaseNotesContract(config) {
+  const contractPath = "contracts.releaseNotes";
+  const contract = config?.contracts?.releaseNotes;
+  if (!contract || typeof contract !== "object") {
+    addFailure(`${contractPath} is required and must be an object.`);
+    return;
+  }
+
+  const requiredStrings = {
+    templateFile: "docs/RELEASE_NOTES_TEMPLATE.md",
+    generatorScript: ".github/scripts/generate-release-notes.mjs",
+    npmScriptName: "release:notes",
+    npmScriptCommand: "node .github/scripts/generate-release-notes.mjs",
+    commandExample:
+      "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+    helmRepoName: "soundspan",
+    helmRepoUrl: "https://soundspan.github.io/soundspan",
+    helmChartName: "soundspan",
+    helmChartReference: "soundspan/soundspan",
+  };
+
+  for (const [fieldName, expectedValue] of Object.entries(requiredStrings)) {
+    const actualValue = toNonEmptyString(contract[fieldName]);
+    if (!actualValue) {
+      addFailure(`${contractPath}.${fieldName} must be a non-empty string.`);
+      continue;
+    }
+    if (actualValue !== expectedValue) {
+      addFailure(
+        `${contractPath}.${fieldName} must equal "${expectedValue}" (found "${actualValue}").`,
+      );
+    }
+  }
+
+  checkExactOrderedArray({
+    value: contract.requiredSections,
+    expected: [
+      "## Release Summary",
+      "## Fixed",
+      "## Added",
+      "## Changed",
+      "## Admin/Operations",
+      "## Deployment and Distribution",
+      "## Breaking Changes",
+      "## Known Issues",
+      "## Compatibility and Migration",
+      "## Full Changelog",
+    ],
+    pathName: `${contractPath}.requiredSections`,
+  });
+
+  checkExactOrderedArray({
+    value: contract.requiredTemplateTokens,
+    expected: [
+      "{{VERSION}}",
+      "{{RELEASE_DATE}}",
+      "{{COMPARE_URL}}",
+      "{{RELEASE_SUMMARY}}",
+      "{{FIXED_ITEMS}}",
+      "{{ADDED_ITEMS}}",
+      "{{CHANGED_ITEMS}}",
+      "{{ADMIN_ITEMS}}",
+      "{{BREAKING_ITEMS}}",
+      "{{KNOWN_ISSUES}}",
+      "{{COMPATIBILITY_AND_MIGRATION}}",
+      "{{FULL_CHANGELOG_URL}}",
+    ],
+    pathName: `${contractPath}.requiredTemplateTokens`,
+  });
+
+  const templateFile = toNonEmptyString(contract.templateFile);
+  const templateContent = templateFile ? readFileIfPresent(templateFile) : null;
+  if (templateContent !== null) {
+    let cursor = 0;
+    for (const section of contract.requiredSections ?? []) {
+      const index = templateContent.indexOf(section, cursor);
+      if (index === -1) {
+        if (templateContent.includes(section)) {
+          addFailure(
+            `${templateFile} contains section out of order relative to ${contractPath}.requiredSections: ${section}`,
+          );
+        } else {
+          addFailure(`${templateFile} is missing required section: ${section}`);
+        }
+        continue;
+      }
+      cursor = index + section.length;
+    }
+
+    for (const token of contract.requiredTemplateTokens ?? []) {
+      if (!templateContent.includes(token)) {
+        addFailure(`${templateFile} is missing required template token: ${token}`);
+      }
+    }
+
+    const requiredTemplateSnippets = [
+      `Helm chart repository: \`${contract.helmRepoUrl}\``,
+      `Helm chart name: \`${contract.helmChartName}\``,
+      `Helm chart reference: \`${contract.helmChartReference}\``,
+      `helm repo add ${contract.helmRepoName} ${contract.helmRepoUrl}`,
+      `helm upgrade --install soundspan ${contract.helmChartReference} --version {{VERSION}}`,
+    ];
+    for (const snippet of requiredTemplateSnippets) {
+      if (!templateContent.includes(snippet)) {
+        addFailure(`${templateFile} is missing required Helm release snippet: ${snippet}`);
+      }
+    }
+  }
+
+  const generatorScript = toNonEmptyString(contract.generatorScript);
+  if (generatorScript) {
+    readFileIfPresent(generatorScript);
+  }
+
+  const packageJson = readJsonIfPresent("package.json");
+  if (packageJson && typeof packageJson === "object") {
+    const scriptName = toNonEmptyString(contract.npmScriptName);
+    const scriptCommand = toNonEmptyString(contract.npmScriptCommand);
+    const scripts =
+      packageJson.scripts && typeof packageJson.scripts === "object"
+        ? packageJson.scripts
+        : null;
+
+    if (!scripts) {
+      addFailure("package.json scripts block is required for release-notes generator wiring.");
+    } else if (scriptName && scriptCommand) {
+      const configuredCommand = toNonEmptyString(scripts[scriptName]);
+      if (!configuredCommand) {
+        addFailure(`package.json scripts must define "${scriptName}".`);
+      } else if (configuredCommand !== scriptCommand) {
+        addFailure(
+          `package.json scripts["${scriptName}"] must equal "${scriptCommand}" (found "${configuredCommand}").`,
+        );
+      }
+    }
+  }
+
+  const contextIndex = readJsonIfPresent("docs/CONTEXT_INDEX.json");
+  if (contextIndex && typeof contextIndex === "object") {
+    const commandExample = toNonEmptyString(contract.commandExample);
+    const commands =
+      contextIndex.commands && typeof contextIndex.commands === "object"
+        ? contextIndex.commands
+        : null;
+
+    if (!commands) {
+      addFailure("docs/CONTEXT_INDEX.json commands block is required.");
+    } else if (commandExample) {
+      const releaseNotesCommand = toNonEmptyString(commands.releaseNotes);
+      if (!releaseNotesCommand) {
+        addFailure("docs/CONTEXT_INDEX.json.commands.releaseNotes must be present.");
+      } else if (releaseNotesCommand !== commandExample) {
+        addFailure(
+          `docs/CONTEXT_INDEX.json.commands.releaseNotes must equal contracts.releaseNotes.commandExample.`,
+        );
+      }
+    }
+  }
+}
+
 function checkSessionArtifactsContract(config) {
   const contractPath = "contracts.sessionArtifacts";
   const contract = config?.contracts?.sessionArtifacts;
@@ -2913,6 +3073,7 @@ function runPolicyChecks(activeConfigPath = configPath) {
   checkWorkspaceLayoutContract(config, repoRoot);
   checkDocumentationModelContract(config);
   checkContextIndexContract(config);
+  checkReleaseNotesContract(config);
   checkSessionArtifactsContract(config);
   checkRuleCatalogContract(config);
   checkOrchestratorSubagentContracts(config);

@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-governance",
-    "version": "2026-02-19.01",
+    "version": "2026-02-19.02",
     "description": "Executable governance checks for AGENTS policy and local-context hygiene."
   },
   "contracts": {
@@ -55,8 +55,46 @@
         "queueLifecycle",
         "indexBuild",
         "indexVerify",
-        "indexQueryStrictFresh"
+        "indexQueryStrictFresh",
+        "releaseNotes"
       ]
+    },
+    "releaseNotes": {
+      "templateFile": "docs/RELEASE_NOTES_TEMPLATE.md",
+      "generatorScript": ".github/scripts/generate-release-notes.mjs",
+      "npmScriptName": "release:notes",
+      "npmScriptCommand": "node .github/scripts/generate-release-notes.mjs",
+      "commandExample": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+      "requiredSections": [
+        "## Release Summary",
+        "## Fixed",
+        "## Added",
+        "## Changed",
+        "## Admin/Operations",
+        "## Deployment and Distribution",
+        "## Breaking Changes",
+        "## Known Issues",
+        "## Compatibility and Migration",
+        "## Full Changelog"
+      ],
+      "requiredTemplateTokens": [
+        "{{VERSION}}",
+        "{{RELEASE_DATE}}",
+        "{{COMPARE_URL}}",
+        "{{RELEASE_SUMMARY}}",
+        "{{FIXED_ITEMS}}",
+        "{{ADDED_ITEMS}}",
+        "{{CHANGED_ITEMS}}",
+        "{{ADMIN_ITEMS}}",
+        "{{BREAKING_ITEMS}}",
+        "{{KNOWN_ISSUES}}",
+        "{{COMPATIBILITY_AND_MIGRATION}}",
+        "{{FULL_CHANGELOG_URL}}"
+      ],
+      "helmRepoName": "soundspan",
+      "helmRepoUrl": "https://soundspan.github.io/soundspan",
+      "helmChartName": "soundspan",
+      "helmChartReference": "soundspan/soundspan"
     },
     "sessionArtifacts": {
       "executionQueueFile": ".agents/EXECUTION_QUEUE.json",
@@ -282,6 +320,7 @@
         "rule_tdd_default",
         "rule_coverage_default_100",
         "rule_scope_completeness_gate",
+        "rule_release_notes_template_required",
         "orch_hybrid_instruction_contract",
         "orch_scope_tightness",
         "orch_machine_payload_authoritative",
@@ -404,6 +443,8 @@
           "## Orchestrator/Subagent Contract Pointer",
           "## Policy-as-Code Enforcement",
           "node .github/scripts/enforce-agent-policies.mjs",
+          "Release notes template artifact: `docs/RELEASE_NOTES_TEMPLATE.md`",
+          "Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`",
           "`orch_atomic_single_objective_scope`",
           "`orch_codex_model_default`",
           "gpt-5.3-codex-spark"
@@ -424,11 +465,13 @@
           "`rule_context_index_drift_guard`",
           "`rule_canonical_agents_root`",
           "`rule_worktree_root_required`",
+          "`rule_release_notes_template_required`",
           "### Accuracy, Recency, and Sourcing (Required)",
           "### Context7 MCP and Web Search Policy",
           "### Container-First Policy (Required)",
           "### Secrets and Sensitive Data",
           "### Baseline Workflow (Required)",
+          "### Release Notes Format (Required)",
           "### CLI Worktree Parallelism (Required)",
           "Default to read-only exploration first; edit only when required by the task.",
           "When operating in Codex CLI, prefer Git worktrees for non-trivial parallelizable tasks instead of stacking unrelated edits in one working tree.",
@@ -485,6 +528,8 @@
           "### Post-Compaction Startup Checklist (Required)",
           "Treat every context-compaction recovery as a fresh startup sequence before doing new implementation work.",
           "Do not proceed with non-trivial edits until the checklist is complete.",
+          "Use exact Helm release references in release notes:",
+          "chart reference: `soundspan/soundspan`",
           "`orch_atomic_single_objective_scope`",
           "`orch_codex_model_default`",
           "gpt-5.3-codex-spark",
@@ -509,6 +554,7 @@
           "## Testing",
           "## Local Testing Bootstrap",
           "## Common Tasks",
+          "docs/RELEASE_NOTES_TEMPLATE.md",
           "`.agents/EXECUTION_QUEUE.json` (canonical execution queue + atomic state)",
           "Multi-agent queue usage:",
           "single scope/queue authority for orchestrator and subagents.",
@@ -527,6 +573,17 @@
         ]
       },
       {
+        "file": "docs/RELEASE_NOTES_TEMPLATE.md",
+        "snippets": [
+          "# soundspan {{VERSION}} Release Notes",
+          "Helm chart repository: `https://soundspan.github.io/soundspan`",
+          "Helm chart name: `soundspan`",
+          "Helm chart reference: `soundspan/soundspan`",
+          "helm repo add soundspan https://soundspan.github.io/soundspan",
+          "helm upgrade --install soundspan soundspan/soundspan --version {{VERSION}}"
+        ]
+      },
+      {
         "file": ".github/workflows/pr-checks.yml",
         "snippets": [
           "Policy as Code",
@@ -539,7 +596,8 @@
           "\"agent:queue:open\"",
           "\"agent:queue:start\"",
           "\"agent:queue:complete\"",
-          "\"agent:queue:close-feature\""
+          "\"agent:queue:close-feature\"",
+          "\"release:notes\""
         ]
       }
     ],
@@ -588,6 +646,21 @@
         ]
       },
       {
+        "file": "docs/RELEASE_NOTES_TEMPLATE.md",
+        "sections": [
+          "## Release Summary",
+          "## Fixed",
+          "## Added",
+          "## Changed",
+          "## Admin/Operations",
+          "## Deployment and Distribution",
+          "## Breaking Changes",
+          "## Known Issues",
+          "## Compatibility and Migration",
+          "## Full Changelog"
+        ]
+      },
+      {
         "file": ".agents/CONTINUITY.md",
         "optional": false,
         "sections": [
@@ -609,6 +682,21 @@
           "4. Run `npm run agent:preflight` to regenerate `.agents/SESSION_BRIEF.json`.",
           "5. Re-confirm active user scope, exclusions, and acceptance criteria from the latest user instruction.",
           "6. Publish a short resume plan naming the exact next atomic task before editing code."
+        ]
+      },
+      {
+        "file": "docs/RELEASE_NOTES_TEMPLATE.md",
+        "sequence": [
+          "## Release Summary",
+          "## Fixed",
+          "## Added",
+          "## Changed",
+          "## Admin/Operations",
+          "## Deployment and Distribution",
+          "## Breaking Changes",
+          "## Known Issues",
+          "## Compatibility and Migration",
+          "## Full Changelog"
         ]
       }
     ],

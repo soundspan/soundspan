@@ -153,10 +153,21 @@ git commit -m "chore(release): prepare 1.6.0"
 git push origin main
 ```
 
-3. Publish the GitHub release with the same tag:
+3. Generate release notes from the previous release tag to the release tag:
 
 ```bash
-gh release create 1.6.0 --target main --generate-notes
+npm run release:notes -- --version 1.6.0 --from 1.5.0 --to 1.6.0 --output /tmp/soundspan-1.6.0-release-notes.md
+```
+
+Helm release reference for notes and operator docs:
+- chart repo URL: `https://soundspan.github.io/soundspan`
+- chart name: `soundspan`
+- chart reference: `soundspan/soundspan`
+
+4. Publish the GitHub release with the same tag:
+
+```bash
+gh release create 1.6.0 --target main --notes-file /tmp/soundspan-1.6.0-release-notes.md
 ```
 
 Publishing the release triggers:
