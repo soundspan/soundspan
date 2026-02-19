@@ -947,7 +947,6 @@ export function OverlayPlayer() {
     if (!hasMedia) return null;
 
     return (
-        <>
         <motion.div
             ref={overlayRef}
             tabIndex={-1}
@@ -2042,13 +2041,12 @@ export function OverlayPlayer() {
 
             {/* Safe area padding at bottom */}
             <div style={{ height: "env(safe-area-inset-bottom)" }} />
-        </motion.div>
 
-        <PlaylistSelector
-            isOpen={isPlaylistSelectorOpen}
-            onClose={() => setIsPlaylistSelectorOpen(false)}
-            onSelectPlaylist={handleAddToPlaylist}
-        />
-        </>
+            <PlaylistSelector
+                isOpen={isPlaylistSelectorOpen}
+                onClose={() => setIsPlaylistSelectorOpen(false)}
+                onSelectPlaylist={handleAddToPlaylist}
+            />
+        </motion.div>
     );
 }
