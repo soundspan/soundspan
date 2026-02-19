@@ -716,7 +716,7 @@ export default function PlaylistDetailPage() {
                                                 handlePlayTrack(trackIndex)
                                             }
                                             className={cn(
-                                                "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-4 px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
+                                                "grid grid-cols-[28px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_80px] gap-2 px-2 md:gap-4 md:px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                                                 isCurrentlyPlaying &&
                                                     "bg-white/10",
                                                 isInQueue &&
@@ -808,8 +808,8 @@ export default function PlaylistDetailPage() {
                                             </p>
 
                                             {/* Duration + Actions */}
-                                            <div className="flex items-center justify-end gap-2">
-                                                <span className="text-sm text-gray-400 w-12 text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                                <span className="hidden sm:inline text-sm text-gray-400 w-12 text-right">
                                                     {formatTime(
                                                         playlistItem.track
                                                             .duration
@@ -847,8 +847,8 @@ export default function PlaylistDetailPage() {
                                                 <TrackPreferenceButtons
                                                     trackId={playlistItem.track.id}
                                                     mode="up-only"
-                                                    buttonSizeClassName="h-10 w-10"
-                                                    iconSizeClassName="h-5 w-5"
+                                                    buttonSizeClassName="h-8 w-8"
+                                                    iconSizeClassName="h-4 w-4"
                                                 />
                                             </div>
                                         </div>

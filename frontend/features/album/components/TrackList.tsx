@@ -120,7 +120,7 @@ const TrackRow = memo(
                 data-tv-card-index={index}
                 tabIndex={0}
                 className={cn(
-                    "group relative flex items-center gap-3 md:gap-4 px-3 md:px-4 py-3 hover:bg-[#141414] transition-colors cursor-pointer",
+                    "group relative flex items-center gap-2 md:gap-4 px-2 md:px-4 py-3 hover:bg-[#141414] transition-colors cursor-pointer",
                     isPlaying && "bg-[#1a1a1a] border-l-2",
                     isInQueue &&
                         !isPlaying &&
@@ -240,11 +240,11 @@ const TrackRow = memo(
                     />
                 )}
 
-                <div className="ml-1 flex w-[96px] flex-shrink-0 items-center justify-end md:w-[104px]">
+                <div className="flex w-[64px] flex-shrink-0 items-center justify-end md:w-[104px]">
                     <TrackPreferenceButtons
                         trackId={track.id}
-                        buttonSizeClassName="h-10 w-10"
-                        iconSizeClassName="h-5 w-5"
+                        buttonSizeClassName="h-8 w-8 md:h-10 md:w-10"
+                        iconSizeClassName="h-4 w-4 md:h-5 md:w-5"
                     />
                 </div>
             </div>

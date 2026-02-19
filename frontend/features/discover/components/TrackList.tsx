@@ -70,7 +70,7 @@ export function TrackList({
                                     : onPlayTrack(index)
                             }
                             className={cn(
-                                "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,2fr)_80px_90px_80px] gap-4 px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
+                                "grid grid-cols-[28px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,2fr)_80px_90px_80px] gap-2 px-2 md:gap-4 md:px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                                 isTrackPlaying && "bg-white/10",
                                 isInQueue && !isTrackPlaying && "bg-[#3b82f6]/[0.06]"
                             )}
@@ -199,14 +199,14 @@ export function TrackList({
                                 </span>
                             </div>
 
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1">
                                 <TrackPreferenceButtons
                                     trackId={track.id}
                                     mode="up-only"
-                                    buttonSizeClassName="h-8 w-8"
-                                    iconSizeClassName="h-4 w-4"
+                                    buttonSizeClassName="h-7 w-7"
+                                    iconSizeClassName="h-3.5 w-3.5"
                                 />
-                                <span className="text-sm text-gray-400 w-10 text-right">
+                                <span className="hidden sm:inline text-sm text-gray-400 w-10 text-right">
                                     {formatTime(track.duration)}
                                 </span>
                                 <TrackOverflowMenu
