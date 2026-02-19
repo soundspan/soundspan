@@ -8,6 +8,7 @@ import { howlerEngine } from "@/lib/howler-engine";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { getListenTogetherSessionSnapshot } from "@/lib/listen-together-session";
+import { shouldAutoMatchVibeAtQueueEnd } from "./autoMatchVibePlayback";
 import {
     createMigratingStorageKey,
     PODCAST_DEBUG_STORAGE_KEY,
@@ -89,6 +90,7 @@ const TRACK_ERROR_SKIP_DELAY_MS = 1200;
 const STARTUP_PLAYBACK_RECOVERY_DELAY_MS = 1400;
 const STARTUP_PLAYBACK_RECOVERY_RECHECK_DELAY_MS = 900;
 const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
+const AUTO_MATCH_VIBE_RETRY_COOLDOWN_MS = 8000;
 
 /**
  * HowlerAudioElement - Unified audio playback using Howler.js
@@ -133,7 +135,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     } = useAudioPlayback();
 
     // Controls context
-    const { pause, next, nextPodcastEpisode } = useAudioControls();
+    const { pause, next, nextPodcastEpisode, startVibeMode } = useAudioControls();
     const queryClient = useQueryClient();
 
     // Refs
@@ -173,6 +175,9 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     const startupRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const startupRecoveryLoadListenerRef = useRef<(() => void) | null>(null);
     const startupRecoveryAttemptedTrackIdRef = useRef<string | null>(null);
+    const autoMatchVibePromiseRef = useRef<Promise<boolean> | null>(null);
+    const autoMatchVibeTrackIdRef = useRef<string | null>(null);
+    const autoMatchVibeLastAttemptAtRef = useRef<number>(0);
 
     // Heartbeat monitor for detecting stalled playback
     const heartbeatRef = useRef<HeartbeatMonitor | null>(null);
@@ -288,6 +293,55 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         [clearPendingTrackErrorSkip, next]
     );
 
+    const requestAutoMatchVibe = useCallback(
+        (
+            seedTrackId: string | null,
+            options?: { force?: boolean }
+        ): Promise<boolean> => {
+            if (!seedTrackId) return Promise.resolve(false);
+            if (getListenTogetherSessionSnapshot()?.groupId) {
+                return Promise.resolve(false);
+            }
+
+            if (autoMatchVibePromiseRef.current) {
+                if (autoMatchVibeTrackIdRef.current === seedTrackId) {
+                    return autoMatchVibePromiseRef.current;
+                }
+                return Promise.resolve(false);
+            }
+
+            const now = Date.now();
+            if (
+                !options?.force &&
+                autoMatchVibeTrackIdRef.current === seedTrackId &&
+                now - autoMatchVibeLastAttemptAtRef.current <
+                    AUTO_MATCH_VIBE_RETRY_COOLDOWN_MS
+            ) {
+                return Promise.resolve(false);
+            }
+
+            autoMatchVibeTrackIdRef.current = seedTrackId;
+            autoMatchVibeLastAttemptAtRef.current = now;
+
+            const request = startVibeMode()
+                .then((result) => result.success && result.trackCount > 0)
+                .catch((error) => {
+                    console.error(
+                        "[HowlerAudioElement] Auto Match Vibe request failed:",
+                        error
+                    );
+                    return false;
+                })
+                .finally(() => {
+                    autoMatchVibePromiseRef.current = null;
+                });
+
+            autoMatchVibePromiseRef.current = request;
+            return request;
+        },
+        [startVibeMode]
+    );
+
     useEffect(() => {
         currentTrackRef.current = currentTrack;
         if (currentTrack?.id !== startupRecoveryAttemptedTrackIdRef.current) {
@@ -302,6 +356,31 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     useEffect(() => {
         playbackTypeRef.current = playbackType;
     }, [playbackType]);
+
+    useEffect(() => {
+        const shouldAutoMatchVibe = shouldAutoMatchVibeAtQueueEnd({
+            playbackType,
+            queueLength: queue.length,
+            currentIndex,
+            repeatMode,
+            isListenTogether: Boolean(
+                getListenTogetherSessionSnapshot()?.groupId
+            ),
+        });
+
+        if (!shouldAutoMatchVibe || !currentTrack?.id) {
+            return;
+        }
+
+        void requestAutoMatchVibe(currentTrack.id);
+    }, [
+        playbackType,
+        queue.length,
+        currentIndex,
+        repeatMode,
+        currentTrack?.id,
+        requestAutoMatchVibe,
+    ]);
 
     useEffect(() => {
         if (playbackType !== "track") {
@@ -554,7 +633,29 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                     howlerEngine.seek(0);
                     howlerEngine.play();
                 } else {
-                    next();
+                    const isListenTogether = Boolean(
+                        getListenTogetherSessionSnapshot()?.groupId
+                    );
+                    const shouldAutoMatchVibe = shouldAutoMatchVibeAtQueueEnd({
+                        playbackType,
+                        queueLength: queue.length,
+                        currentIndex,
+                        repeatMode,
+                        isListenTogether,
+                    });
+
+                    if (!shouldAutoMatchVibe || !currentTrack?.id) {
+                        next();
+                        return;
+                    }
+
+                    const endedTrackId = currentTrack.id;
+                    void requestAutoMatchVibe(endedTrackId, {
+                        force: true,
+                    }).finally(() => {
+                        if (currentTrackRef.current?.id !== endedTrackId) return;
+                        next();
+                    });
                 }
             } else {
                 pause();
@@ -649,7 +750,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             howlerEngine.off("play", handlePlay);
             howlerEngine.off("pause", handlePause);
         };
-    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, next, nextPodcastEpisode, pause, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, queue, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType, saveAudiobookProgress, savePodcastProgress, scheduleTrackErrorSkip, clearPendingTrackErrorSkip, clearStartupPlaybackRecovery, isPlaying, scheduleStartupPlaybackRecovery]);
+    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, next, nextPodcastEpisode, pause, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, queue, currentIndex, requestAutoMatchVibe, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType, saveAudiobookProgress, savePodcastProgress, scheduleTrackErrorSkip, clearPendingTrackErrorSkip, clearStartupPlaybackRecovery, isPlaying, scheduleStartupPlaybackRecovery]);
 
     // Load and play audio when track changes
     useEffect(() => {

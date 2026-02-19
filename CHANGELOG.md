@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Clarified mobile direction across README, migration guidance, and device-link UI copy: soundspan is PWA-first, with Subsonic-compatible apps as mobile native clients.
+- Player now auto-triggers Match Vibe on the last queued track (outside Listen Together, with repeat off) to extend playback instead of ending the queue.
 
 ### Fixed
 
