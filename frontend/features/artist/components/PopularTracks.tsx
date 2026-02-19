@@ -238,10 +238,10 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                     track={{
                                         id: track.id,
                                         title: track.displayTitle ?? track.title,
-                                        artist: track.artist ?? artist,
+                                        artist: { name: track.artist?.name ?? artist.name, id: track.artist?.id ?? artist.id },
                                         album: track.album ? { title: track.album.title ?? "", id: track.album.id, coverArt: track.album.coverArt } : { title: "" },
                                         duration: track.duration,
-                                        streamSource: track.streamSource,
+                                        streamSource: track.streamSource === "tidal" || track.streamSource === "youtube" ? track.streamSource : undefined,
                                     }}
                                     isInListenTogetherGroup={isInListenTogetherGroup}
                                 />

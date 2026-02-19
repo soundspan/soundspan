@@ -107,10 +107,10 @@ const TrackRow = memo(
         const overflowTrack = {
             id: track.id,
             title: track.displayTitle ?? track.title,
-            artist: track.artist ?? album.artist ?? { name: "" },
+            artist: { name: track.artist?.name ?? album.artist?.name ?? "", id: track.artist?.id ?? album.artist?.id },
             album: { title: album.title, coverArt: album.coverArt, id: album.id },
             duration: track.duration ?? 0,
-            streamSource: track.streamSource,
+            streamSource: track.streamSource === "tidal" || track.streamSource === "youtube" ? track.streamSource : undefined,
         };
 
         return (
