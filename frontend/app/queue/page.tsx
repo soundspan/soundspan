@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Card } from "@/components/ui/Card";
@@ -22,6 +22,7 @@ import {
     ChevronUp,
     ChevronDown,
     X,
+    Save,
 } from "lucide-react";
 import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 
@@ -88,6 +89,29 @@ export default function QueuePage() {
         });
     };
 
+    const [showSaveDialog, setShowSaveDialog] = useState(false);
+    const [playlistName, setPlaylistName] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
+
+    const handleSaveAsPlaylist = async () => {
+        const name = playlistName.trim() || `Queue — ${new Date().toLocaleDateString()}`;
+        setIsSaving(true);
+        try {
+            const playlist = await api.createPlaylist(name);
+            for (const track of queue) {
+                await api.addTrackToPlaylist(playlist.id, track.id);
+            }
+            toast.success(`Saved ${queue.length} tracks to "${name}"`);
+            setShowSaveDialog(false);
+            setPlaylistName("");
+            router.push(`/playlist/${playlist.id}`);
+        } catch {
+            toast.error("Failed to save playlist");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     if (!isAuthenticated) {
         return null;
     }
@@ -108,13 +132,22 @@ export default function QueuePage() {
                     className="mb-8"
                     actions={
                         queue.length > 0 ? (
-                            <Button
-                                variant="secondary"
-                                onClick={handleClearQueue}
-                            >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Clear Queue
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => setShowSaveDialog(true)}
+                                >
+                                    <Save className="w-4 h-4 mr-2" />
+                                    Save as Playlist
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    onClick={handleClearQueue}
+                                >
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Clear Queue
+                                </Button>
+                            </div>
                         ) : null
                     }
                 />
@@ -389,6 +422,52 @@ export default function QueuePage() {
                     </section>
                 )}
             </div>
+
+            {/* Save as Playlist Dialog */}
+            {showSaveDialog && (
+                <div
+                    className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4"
+                    onClick={() => setShowSaveDialog(false)}
+                >
+                    <div
+                        className="bg-[#121212] rounded-xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="p-6">
+                            <h2 className="text-lg font-bold text-white mb-1">
+                                Save Queue as Playlist
+                            </h2>
+                            <p className="text-sm text-gray-400 mb-4">
+                                Save all {queue.length} tracks to a new playlist
+                            </p>
+                            <input
+                                type="text"
+                                value={playlistName}
+                                onChange={(e) => setPlaylistName(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && handleSaveAsPlaylist()}
+                                placeholder={`Queue — ${new Date().toLocaleDateString()}`}
+                                className="w-full px-3 py-2 bg-[#1a1a1a] border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#3b82f6]/50"
+                                autoFocus
+                            />
+                        </div>
+                        <div className="flex gap-3 p-6 pt-0">
+                            <button
+                                onClick={() => setShowSaveDialog(false)}
+                                className="flex-1 px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white font-medium rounded-lg transition-colors border border-white/10"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleSaveAsPlaylist}
+                                disabled={isSaving}
+                                className="flex-1 px-4 py-2.5 bg-[#3b82f6] hover:bg-[#2563eb] text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                {isSaving ? "Saving..." : "Save"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

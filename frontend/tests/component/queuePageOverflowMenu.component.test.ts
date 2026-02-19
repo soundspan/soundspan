@@ -46,6 +46,7 @@ mock.module("lucide-react", {
         ListMusic: Icon,
         ChevronUp: Icon,
         ChevronDown: Icon,
+        Save: Icon,
         EllipsisVertical: Icon,
         ListEnd: Icon,
         ListPlus: Icon,
@@ -144,6 +145,7 @@ mock.module("@/lib/api", {
         api: {
             getCoverArtUrl: (url: string) => url,
             addTrackToPlaylist: async () => undefined,
+            createPlaylist: async () => ({ id: "new-playlist-id", name: "Test" }),
         },
     },
 });
@@ -183,8 +185,8 @@ mock.module("@/components/ui/EmptyState", {
 
 mock.module("@/components/layout/PageHeader", {
     namedExports: {
-        PageHeader: ({ title }: { title: string }) =>
-            React.createElement("div", { "data-testid": "page-header" }, title),
+        PageHeader: ({ title, actions }: { title: string; actions?: React.ReactNode }) =>
+            React.createElement("div", { "data-testid": "page-header" }, title, actions),
     },
 });
 
@@ -289,4 +291,29 @@ test("Queue page keeps Move Up/Down and Play buttons alongside overflow menu", a
 
     // Play now button should still exist
     assert.match(html, /title="Play now"/, "Should keep Play now button");
+});
+
+// ─── 5.1 Save Queue as Playlist ───────────────────────────────────────
+
+test("Queue page renders Save as Playlist button when queue has tracks", async () => {
+    const mod = await import("../../app/queue/page.tsx");
+    const QueuePage = mod.default;
+
+    const html = renderToStaticMarkup(React.createElement(QueuePage));
+
+    // Should have a "Save as Playlist" button
+    assert.match(html, /Save as Playlist/, "Should render Save as Playlist button");
+});
+
+test("Queue page does not render Save as Playlist when queue is empty", async () => {
+    state.queue = [];
+    state.currentTrack = null;
+
+    const mod = await import("../../app/queue/page.tsx");
+    const QueuePage = mod.default;
+
+    const html = renderToStaticMarkup(React.createElement(QueuePage));
+
+    // Should NOT have the button when empty
+    assert.doesNotMatch(html, /Save as Playlist/, "Should not render Save as Playlist when empty");
 });
