@@ -232,14 +232,6 @@ const TrackRow = memo(
                     {track.duration ? formatTime(track.duration) : ""}
                 </div>
 
-                {(isPlayable || blockedByListenTogether) && (
-                    <TrackOverflowMenu
-                        track={overflowTrack}
-                        showGoToAlbum={false}
-                        isInListenTogetherGroup={isInListenTogetherGroup}
-                    />
-                )}
-
                 <div className="flex w-[64px] flex-shrink-0 items-center justify-end md:w-[104px]">
                     <TrackPreferenceButtons
                         trackId={track.id}
@@ -247,6 +239,14 @@ const TrackRow = memo(
                         iconSizeClassName="h-4 w-4 md:h-5 md:w-5"
                     />
                 </div>
+
+                {(isPlayable || blockedByListenTogether) && (
+                    <TrackOverflowMenu
+                        track={overflowTrack}
+                        showGoToAlbum={false}
+                        isInListenTogetherGroup={isInListenTogetherGroup}
+                    />
+                )}
             </div>
         );
     },

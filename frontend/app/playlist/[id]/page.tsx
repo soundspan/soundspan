@@ -852,6 +852,12 @@ export default function PlaylistDetailPage() {
                                                             .duration
                                                     )}
                                                 </span>
+                                                <TrackPreferenceButtons
+                                                    trackId={playlistItem.track.id}
+                                                    mode="both"
+                                                    buttonSizeClassName="h-8 w-8"
+                                                    iconSizeClassName="h-4 w-4"
+                                                />
                                                 <TrackOverflowMenu
                                                     track={{
                                                         id: playlistItem.track.id,
@@ -880,12 +886,6 @@ export default function PlaylistDetailPage() {
                                                             className="text-red-400 hover:text-red-300"
                                                         />
                                                     ) : undefined}
-                                                />
-                                                <TrackPreferenceButtons
-                                                    trackId={playlistItem.track.id}
-                                                    mode="both"
-                                                    buttonSizeClassName="h-8 w-8"
-                                                    iconSizeClassName="h-4 w-4"
                                                 />
                                             </div>
                                         </div>
