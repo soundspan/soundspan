@@ -7,6 +7,7 @@ import {
     type TrackPreferenceResponse,
     type TrackPreferenceSignal,
 } from "@/lib/api";
+import { getNextTrackPreferenceSignal } from "@/hooks/trackPreferenceSignals";
 
 export function useTrackPreference(trackId?: string | null) {
     const queryClient = useQueryClient();
@@ -52,12 +53,12 @@ export function useTrackPreference(trackId?: string | null) {
     };
 
     const toggleThumbsUp = async () => {
-        const nextSignal = signal === "thumbs_up" ? "clear" : "thumbs_up";
+        const nextSignal = getNextTrackPreferenceSignal(signal, "thumbs_up");
         return setSignal(nextSignal);
     };
 
     const toggleThumbsDown = async () => {
-        const nextSignal = signal === "thumbs_down" ? "clear" : "thumbs_down";
+        const nextSignal = getNextTrackPreferenceSignal(signal, "thumbs_down");
         return setSignal(nextSignal);
     };
 
