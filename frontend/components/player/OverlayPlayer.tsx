@@ -24,6 +24,8 @@ import {
     RefreshCw,
     Trash2,
     X,
+    Plus,
+    Link as LinkIcon,
 } from "lucide-react";
 import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { cn } from "@/utils/cn";
@@ -44,6 +46,7 @@ import {
     writeMigratingStorageItem,
 } from "@/lib/storage-migration";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
+import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 
 const OVERLAY_ACTIVE_TAB_KEY = OVERLAY_ACTIVE_TAB_STORAGE_KEY;
 
@@ -150,6 +153,7 @@ export function OverlayPlayer() {
     const [drawerDragOffset, setDrawerDragOffset] = useState(0);
     const [isDrawerDragActive, setIsDrawerDragActive] = useState(false);
     const [isVibeLoading, setIsVibeLoading] = useState(false);
+    const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<"queue" | "lyrics" | "related">("queue");
     const [relatedStreamMatches, setRelatedStreamMatches] = useState<Record<string, RelatedStreamMatch>>({});
@@ -919,6 +923,33 @@ export function OverlayPlayer() {
         }
     };
 
+    const handleAddToPlaylist = useCallback(
+        async (playlistId: string) => {
+            if (!currentTrack?.id) return;
+            await api.addTrackToPlaylist(playlistId, currentTrack.id);
+            toast.success(`Added "${currentTrack.displayTitle || currentTrack.title}" to playlist`);
+        },
+        [currentTrack]
+    );
+
+    const handleCopyLink = useCallback(() => {
+        const albumId = currentTrack?.album?.id;
+        const artistHref = currentTrack?.artist
+            ? getArtistHref({ id: currentTrack.artist.id, name: currentTrack.artist.name, mbid: currentTrack.artist.mbid })
+            : null;
+        const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+        const link = albumId
+            ? `${baseUrl}/album/${albumId}`
+            : artistHref
+                ? `${baseUrl}${artistHref}`
+                : null;
+        if (link) {
+            navigator.clipboard.writeText(link).then(() => {
+                toast.success("Link copied to clipboard");
+            });
+        }
+    }, [currentTrack]);
+
     const handleDrawerTabToggle = (tab: "queue" | "lyrics" | "related") => {
         if (!isMobileOrTablet) {
             setActiveTab(tab);
@@ -935,6 +966,7 @@ export function OverlayPlayer() {
     if (!hasMedia) return null;
 
     return (
+        <>
         <motion.div
             ref={overlayRef}
             tabIndex={-1}
@@ -1162,13 +1194,51 @@ export function OverlayPlayer() {
 
                             {canSkip ? (
                                 <>
-                                    <div className="mb-3 flex items-center justify-center">
+                                    <div className="mb-3 flex items-center justify-center gap-3">
                                         <TrackPreferenceButtons
                                             trackId={preferenceTrackId}
-                                            className="gap-8"
-                                            buttonSizeClassName="h-14 w-14"
-                                            iconSizeClassName="h-7 w-7"
+                                            className="gap-5"
+                                            buttonSizeClassName="h-11 w-11"
+                                            iconSizeClassName="h-6 w-6"
                                         />
+                                        <button
+                                            onClick={() => setIsPlaylistSelectorOpen(true)}
+                                            className="flex h-11 w-11 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                            title="Add to playlist"
+                                            aria-label="Add to playlist"
+                                        >
+                                            <Plus className="h-6 w-6" />
+                                        </button>
+                                        {!featuresLoading && vibeEmbeddings && (
+                                            <button
+                                                onClick={handleVibeToggle}
+                                                disabled={isVibeLoading}
+                                                className={cn(
+                                                    "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
+                                                    vibeMode
+                                                        ? "text-[#60a5fa] bg-white/[0.05]"
+                                                        : "text-gray-400 hover:text-white hover:bg-white/10"
+                                                )}
+                                                title={vibeMode ? "Turn off vibe mode" : "Match this vibe"}
+                                                aria-label="Match Vibe"
+                                            >
+                                                {isVibeLoading ? (
+                                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                                ) : (
+                                                    <AudioWaveform className="h-6 w-6" />
+                                                )}
+                                            </button>
+                                        )}
+                                        {(currentTrack?.album?.id || currentTrack?.artist) && (
+                                            <button
+                                                onClick={handleCopyLink}
+                                                className="flex h-11 w-11 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                                title="Copy link"
+                                                aria-label="Copy link"
+                                            >
+                                                <LinkIcon className="h-6 w-6" />
+                                            </button>
+                                        )}
                                     </div>
 
                                     <div
@@ -1298,29 +1368,6 @@ export function OverlayPlayer() {
                                         ) : (
                                             <Play className="ml-1 h-7 w-7" />
                                         )}
-                                    </button>
-                                </div>
-                            )}
-
-                            {!featuresLoading && vibeEmbeddings && canSkip && (
-                                <div className="flex items-center justify-center">
-                                    <button
-                                        onClick={handleVibeToggle}
-                                        disabled={isVibeLoading}
-                                        className={cn(
-                                            "inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-sm transition-colors",
-                                            vibeMode
-                                                ? "bg-white/[0.03] text-[#60a5fa]"
-                                                : "text-gray-300 hover:text-white"
-                                        )}
-                                        title={vibeMode ? "Turn off vibe mode" : "Match this vibe"}
-                                    >
-                                        {isVibeLoading ? (
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                        ) : (
-                                            <AudioWaveform className="h-4 w-4" />
-                                        )}
-                                        <span>{vibeMode ? "Vibe On" : "Match Vibe"}</span>
                                     </button>
                                 </div>
                             )}
@@ -2025,5 +2072,12 @@ export function OverlayPlayer() {
             {/* Safe area padding at bottom */}
             <div style={{ height: "env(safe-area-inset-bottom)" }} />
         </motion.div>
+
+        <PlaylistSelector
+            isOpen={isPlaylistSelectorOpen}
+            onClose={() => setIsPlaylistSelectorOpen(false)}
+            onSelectPlaylist={handleAddToPlaylist}
+        />
+        </>
     );
 }
