@@ -12,7 +12,7 @@ export function LinkDeviceSection() {
                     <Smartphone className="w-5 h-5 text-purple-400" />
                 </div>
                 <div>
-                    <h3 className="font-medium text-white">Link Mobile Device</h3>
+                    <h3 className="font-medium text-white">Link Device</h3>
                     <p className="text-sm text-gray-400">
                         Connect your phone without typing passwords
                     </p>
@@ -20,8 +20,8 @@ export function LinkDeviceSection() {
             </div>
 
             <p className="text-sm text-gray-400 mb-4">
-                Generate a QR code or 6-digit code to quickly link your mobile device.
-                No need to type your server URL or password on your phone.
+                Generate a QR code or 6-digit code to quickly link a compatible device.
+                For general mobile playback, use the soundspan PWA or a Subsonic-compatible client.
             </p>
 
             <Link
@@ -35,7 +35,6 @@ export function LinkDeviceSection() {
         </div>
     );
 }
-
 
 
 

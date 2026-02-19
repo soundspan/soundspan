@@ -1,4 +1,4 @@
-# soundspan
+# soundspan™
 
 [![GHCR Image](https://img.shields.io/badge/Image-ghcr.io%2Fsoundspan%2Fsoundspan-0A84FF)](https://ghcr.io/soundspan/soundspan)
 [![GitHub Release](https://img.shields.io/github/v/release/soundspan/soundspan?label=Release)](https://github.com/soundspan/soundspan/releases)
@@ -186,11 +186,13 @@ Full setup guides are documented in [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.m
 
 ### Progressive Web App (PWA)
 
-Install soundspan to Android/iOS home screen for app-like behavior, background playback, media controls, and faster repeat loads.
+Install soundspan as a PWA from your browser install flow for app-like behavior, background playback, media controls, and faster repeat loads.
+
+PWA is the only current first-party mobile direction. soundspan does not currently ship a native iOS/Android app.
 
 ### Subsonic-compatible apps
 
-Subsonic-compatible client apps are supported through soundspan's OpenSubsonic `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
+For mobile native clients, use Subsonic-compatible apps through soundspan's OpenSubsonic `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
 
 ### Android TV
 
@@ -340,6 +342,8 @@ For optional third-party integrations (YouTube Music, TIDAL, Soulseek):
 - Streaming/downloading features require your own valid subscriptions where applicable
 
 soundspan is provided "as is" without warranty.
+
+Trademark disclaimer: soundspan is an open-source project. All product names, logos, and brands are property of their respective owners.
 
 ---
 

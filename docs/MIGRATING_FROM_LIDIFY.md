@@ -15,7 +15,7 @@ It assumes both repositories are side-by-side on disk:
   - Compose defaults changed for PostgreSQL (from user/database `lidifydb/lidify` to `soundspan/soundspan`)
   - Compose defaults changed for network/container names (`lidify_*` -> `soundspan_*`)
   - Frontend local storage keys changed (`lidify_*` -> `soundspan_*`)
-  - Device deep-link scheme changed (`lidify://` -> `soundspan://`)
+  - Mobile direction is PWA-first; for native mobile clients, use OpenSubsonic-compatible apps against soundspan `/rest`
 
 Because of those required remaps, this is not a zero-touch migration.
 
@@ -150,7 +150,7 @@ If you intentionally want new resource names, do blue/green instead of in-place.
 
 1. Open soundspan and verify login.
 2. Re-save Lidarr integration settings in soundspan admin to refresh webhook configuration.
-3. Update any mobile/deep-link integrations from `lidify://` to `soundspan://`.
+3. Repoint mobile client integrations to soundspan's OpenSubsonic `/rest` endpoint (or use the soundspan PWA install flow).
 4. Expect browser playback UI state reset unless you manually migrate local storage.
 
 Optional browser local storage key migration (run once in browser devtools on soundspan origin):

@@ -1,4 +1,5 @@
 export const BRAND_NAME = "soundspan";
+export const BRAND_NAME_TRADEMARK = `${BRAND_NAME}™`;
 export const BRAND_SLUG = "soundspan";
 export const BRAND_METADATA_TITLE = `${BRAND_NAME} - Listen without limits`;
 export const BRAND_DESCRIPTION = "Self-hosted music streaming platform";

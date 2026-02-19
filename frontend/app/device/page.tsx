@@ -6,7 +6,6 @@ import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import {
     BRAND_DEEP_LINK_SCHEME,
-    BRAND_NAME,
 } from "@/lib/brand";
 import { cn } from "@/utils/cn";
 import { QRCodeSVG } from "qrcode.react";
@@ -184,10 +183,13 @@ export default function DeviceLinkPage() {
                 {/* Title */}
                 <div className="mb-8">
                     <h1 className="text-3xl md:text-4xl font-black text-white mb-2">
-                        Link Mobile Device
+                        Link Device
                     </h1>
                     <p className="text-gray-400">
-                        Scan the QR code or enter the code in the {BRAND_NAME} app to link your device
+                        Scan the QR code or enter the code in a compatible client to link your device
+                    </p>
+                    <p className="text-gray-500 text-sm mt-2">
+                        Mobile direction is PWA-first. For native mobile clients, use Subsonic-compatible apps.
                     </p>
                 </div>
 
@@ -209,7 +211,7 @@ export default function DeviceLinkPage() {
                         {!linkCode && !isGenerating && (
                             <div className="text-center py-8">
                                 <p className="text-gray-400 mb-4">
-                                    Generate a one-time code to link your mobile device
+                                    Generate a one-time code to link a compatible device
                                 </p>
                                 <button
                                     onClick={generateCode}
@@ -269,7 +271,7 @@ export default function DeviceLinkPage() {
                                     <>
                                         <div className="mb-4">
                                             <p className="text-gray-400 text-sm mb-2">
-                                                QR deep-link scheme:
+                                                Client link URI scheme:
                                             </p>
                                             <div className="inline-flex rounded-lg border border-white/10 bg-white/5 p-1 gap-1">
                                                 <span className="px-3 py-1.5 rounded-md text-xs font-medium bg-[#3b82f6] text-black">
@@ -389,13 +391,13 @@ export default function DeviceLinkPage() {
                             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
                                 1
                             </span>
-                            <span>Open the {BRAND_NAME} app on your mobile device</span>
+                            <span>Open a compatible mobile client on your device</span>
                         </li>
                         <li className="flex gap-3">
                             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
                                 2
                             </span>
-                            <span>Tap &quot;Scan QR Code&quot; or &quot;Enter Code&quot; on the login screen</span>
+                            <span>Tap &quot;Scan QR Code&quot; or &quot;Enter Code&quot; if that client supports this flow</span>
                         </li>
                         <li className="flex gap-3">
                             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
@@ -407,7 +409,7 @@ export default function DeviceLinkPage() {
                             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
                                 4
                             </span>
-                            <span>Your device will be automatically logged in and linked to your account</span>
+                            <span>Your device will be linked to your account after the client completes verification</span>
                         </li>
                     </ol>
                 </Card>

@@ -7,7 +7,11 @@ import { api } from "@/lib/api";
 import Image from "next/image";
 import { Loader2 } from "lucide-react";
 import { GalaxyBackground } from "@/components/ui/GalaxyBackground";
-import { BRAND_MARKETING_TAGLINE, BRAND_NAME } from "@/lib/brand";
+import {
+    BRAND_MARKETING_TAGLINE,
+    BRAND_NAME,
+    BRAND_NAME_TRADEMARK,
+} from "@/lib/brand";
 
 interface Artist {
     id: string;
@@ -251,7 +255,7 @@ export default function LoginPage() {
                                 />
                             </div>
                             <span className="brand-wordmark text-5xl font-bold bg-gradient-to-r from-white via-white to-gray-200 bg-clip-text text-transparent drop-shadow-2xl">
-                                {BRAND_NAME}
+                                {BRAND_NAME_TRADEMARK}
                             </span>
                         </div>
                     </div>
