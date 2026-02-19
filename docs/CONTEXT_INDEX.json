@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-context-index",
-    "version": "2026-02-19.02",
+    "version": "2026-02-19.03",
     "description": "Machine-readable index for startup context retrieval and split-doc drift checks."
   },
   "startupReadOrder": [
@@ -107,6 +107,7 @@
       "canonicalAgentsRoot": "/home/joshd/git/soundspan/.agents",
       "worktreesRoot": "/home/joshd/git/soundspan/.worktrees",
       "semanticMergeRequired": true,
+      "semanticMergeOnAgentsEditRequired": true,
       "worktreeAgentsSymlinkRequired": true
     },
     "sessionBriefContract": {

@@ -45,6 +45,7 @@ Canonical local artifact roots are under `.agents/`:
 - Shared queue authority for orchestrator and subagents: `.agents/EXECUTION_QUEUE.json` (single source of truth)
 - Canonical shared `.agents` root is `/home/joshd/git/soundspan/.agents` (git-ignored local context).
 - Treat `.agents/**` as shared multi-writer state and apply semantic merges (preserve concurrent entries; never clobber with blind overwrite).
+- `.agents/**` may be concurrently modified by other Codex sessions; every edit under `.agents/**` must be semantically merged against latest on-disk state before write.
 - All additional Git worktrees must be created under `/home/joshd/git/soundspan/.worktrees`.
 - In non-primary worktrees, `.agents` must be a symlink to the canonical shared root.
 

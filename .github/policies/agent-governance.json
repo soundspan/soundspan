@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-governance",
-    "version": "2026-02-19.02",
+    "version": "2026-02-19.03",
     "description": "Executable governance checks for AGENTS policy and local-context hygiene."
   },
   "contracts": {
@@ -296,6 +296,7 @@
       "worktreesRoot": "/home/joshd/git/soundspan/.worktrees",
       "enforceWorktreeRoot": true,
       "requireSemanticMergeForAgents": true,
+      "requireSemanticMergeOnAgentsEdit": true,
       "requireWorktreeAgentsSymlink": true
     },
     "ruleCatalog": {
@@ -317,6 +318,7 @@
         "rule_context_index_drift_guard",
         "rule_canonical_agents_root",
         "rule_worktree_root_required",
+        "rule_agents_semantic_merge_required",
         "rule_tdd_default",
         "rule_coverage_default_100",
         "rule_scope_completeness_gate",
@@ -430,6 +432,7 @@
           "Feature-sharded cold archive: `.agents/archives/<feature_id>.jsonl`",
           "Canonical shared `.agents` root is `/home/joshd/git/soundspan/.agents` (git-ignored local context).",
           "Treat `.agents/**` as shared multi-writer state and apply semantic merges (preserve concurrent entries; never clobber with blind overwrite).",
+          "`.agents/**` may be concurrently modified by other Codex sessions; every edit under `.agents/**` must be semantically merged against latest on-disk state before write.",
           "All additional Git worktrees must be created under `/home/joshd/git/soundspan/.worktrees`.",
           "In non-primary worktrees, `.agents` must be a symlink to the canonical shared root.",
           "Queue-first execution rule:",
@@ -465,6 +468,7 @@
           "`rule_context_index_drift_guard`",
           "`rule_canonical_agents_root`",
           "`rule_worktree_root_required`",
+          "`rule_agents_semantic_merge_required`",
           "`rule_release_notes_template_required`",
           "### Accuracy, Recency, and Sourcing (Required)",
           "### Context7 MCP and Web Search Policy",
@@ -478,6 +482,7 @@
           "Prefer parallel agents/subagents for independent task slices when available.",
           "Canonical shared `.agents` root is `/home/joshd/git/soundspan/.agents` (git-ignored local context).",
           "Treat `.agents/**` as shared multi-writer state; reconcile concurrent edits using semantic merges instead of blind overwrite.",
+          "`.agents/**` may be concurrently modified by other Codex sessions; every `.agents/**` edit must be semantically merged against latest on-disk state before write.",
           "All non-primary Git worktrees must live under `/home/joshd/git/soundspan/.worktrees`.",
           "If running from a worktree, `.agents` in that worktree must be a symlink to the canonical root.",
           "For worktree execution, copy required local `.gitignore`d context files into the worktree",
@@ -560,6 +565,7 @@
           "single scope/queue authority for orchestrator and subagents.",
           "feature-sharded archive files under `.agents/archives/`",
           "Canonical shared local agent context root is `/home/joshd/git/soundspan/.agents` (git-ignored).",
+          "every `.agents/**` edit must be semantically merged against latest on-disk state before write.",
           "All additional Git worktrees for this repo must be created under `/home/joshd/git/soundspan/.worktrees`.",
           "In non-primary worktrees, `.agents` must be a symlink to the canonical shared root.",
           "selectors: `id`, `plan_ref`, `owner`, `depends_on`",

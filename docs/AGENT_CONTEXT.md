@@ -230,6 +230,7 @@ For this repository, documentation updates are part of the definition of done fo
 - Maintain canonical continuity in `.agents/CONTINUITY.md` for cross-feature context survivability. This is the first file to read at the start of every assistant turn.
 - Canonical shared local agent context root is `/home/joshd/git/soundspan/.agents` (git-ignored).
 - Treat `.agents/**` as shared multi-writer context; preserve concurrent updates with semantic merges (no blind overwrite).
+- `.agents/**` may be concurrently modified by other Codex sessions; every `.agents/**` edit must be semantically merged against latest on-disk state before write.
 - All additional Git worktrees for this repo must be created under `/home/joshd/git/soundspan/.worktrees`.
 - In non-primary worktrees, `.agents` must be a symlink to the canonical shared root.
 - Keep machine-readable session state current:

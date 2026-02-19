@@ -707,6 +707,9 @@ function checkWorkspaceLayoutContract(config, runtimeRepoRoot) {
   if (contract.requireSemanticMergeForAgents !== true) {
     addFailure(`${contractPath}.requireSemanticMergeForAgents must equal true.`);
   }
+  if (contract.requireSemanticMergeOnAgentsEdit !== true) {
+    addFailure(`${contractPath}.requireSemanticMergeOnAgentsEdit must equal true.`);
+  }
   if (contract.requireWorktreeAgentsSymlink !== true) {
     addFailure(`${contractPath}.requireWorktreeAgentsSymlink must equal true.`);
   }
@@ -1267,6 +1270,8 @@ function checkContextIndexContract(config) {
       if (contractWorkspaceLayout) {
         const expectedBooleanByField = {
           semanticMergeRequired: contractWorkspaceLayout.requireSemanticMergeForAgents,
+          semanticMergeOnAgentsEditRequired:
+            contractWorkspaceLayout.requireSemanticMergeOnAgentsEdit,
           worktreeAgentsSymlinkRequired:
             contractWorkspaceLayout.requireWorktreeAgentsSymlink,
         };

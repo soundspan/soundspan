@@ -24,6 +24,7 @@ These IDs are stable cross-references for enforceable behavior and map to policy
 - `rule_context_index_drift_guard`: Keep `docs/CONTEXT_INDEX.json` synchronized with policy/documentation contracts and fail checks on drift.
 - `rule_canonical_agents_root`: Treat `/home/joshd/git/soundspan/.agents` as the single canonical local agent-context root.
 - `rule_worktree_root_required`: Keep all non-primary Git worktrees under `/home/joshd/git/soundspan/.worktrees`.
+- `rule_agents_semantic_merge_required`: `.agents/**` is shared multi-session state; every `.agents/**` edit must be semantically merged against latest on-disk state.
 - `rule_tdd_default`: Prefer true TDD and document deviations when strict TDD is impractical.
 - `rule_coverage_default_100`: Treat 100% coverage as default bar unless user-approved exception exists.
 - `rule_scope_completeness_gate`: Explicitly map outcomes to all in-scope user requests before closeout.
@@ -114,6 +115,7 @@ At task start, explicitly determine:
 - Prefer parallel agents/subagents for independent task slices when available.
 - Canonical shared `.agents` root is `/home/joshd/git/soundspan/.agents` (git-ignored local context).
 - Treat `.agents/**` as shared multi-writer state; reconcile concurrent edits using semantic merges instead of blind overwrite.
+- `.agents/**` may be concurrently modified by other Codex sessions; every `.agents/**` edit must be semantically merged against latest on-disk state before write.
 - All non-primary Git worktrees must live under `/home/joshd/git/soundspan/.worktrees`.
 - For worktree execution, copy required local `.gitignore`d context files into the worktree (for example `.agents/**`, `.agents/plans/**`, and other local context files needed for correctness), keep them untracked, and never commit/push them.
 
