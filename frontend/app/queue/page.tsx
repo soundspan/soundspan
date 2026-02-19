@@ -16,13 +16,14 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import {
     Music,
     Play,
-    X,
     GripVertical,
     Trash2,
     ListMusic,
     ChevronUp,
     ChevronDown,
+    X,
 } from "lucide-react";
+import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 
 export default function QueuePage() {
     const router = useRouter();
@@ -301,18 +302,24 @@ export default function QueuePage() {
                                                 >
                                                     <Play className="w-4 h-4" />
                                                 </button>
-                                                <button
-                                                    onClick={() =>
-                                                        handleRemoveTrack(
-                                                            queueIndex
-                                                        )
-                                                    }
-                                                    className="p-2 hover:bg-red-500/10 rounded-md transition-colors text-red-400"
-                                                    title="Remove"
-                                                >
-                                                    <X className="w-4 h-4" />
-                                                </button>
                                             </div>
+                                            <TrackOverflowMenu
+                                                track={track}
+                                                showPlayNext={false}
+                                                showAddToQueue={false}
+                                                isInListenTogetherGroup={isInGroup}
+                                                extraItemsAfter={
+                                                    <TrackMenuButton
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleRemoveTrack(queueIndex);
+                                                        }}
+                                                        icon={<X className="h-4 w-4" />}
+                                                        label="Remove from queue"
+                                                        className="text-red-400 hover:text-red-300"
+                                                    />
+                                                }
+                                            />
                                         </div>
                                     );
                                 })}
