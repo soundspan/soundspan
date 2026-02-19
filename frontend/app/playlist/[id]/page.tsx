@@ -12,6 +12,7 @@ import { formatTime } from "@/utils/formatTime";
 import { usePlaylistQuery } from "@/hooks/useQueries";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/lib/toast-context";
 import { useDownloadContext } from "@/lib/download-context";
@@ -24,7 +25,6 @@ import {
     Shuffle,
     Eye,
     EyeOff,
-    ListPlus,
     ListMusic,
     Music,
     Volume2,
@@ -77,7 +77,7 @@ export default function PlaylistDetailPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, addToQueue, pause, resume } = useAudioControls();
+    const { playTracks, pause, resume } = useAudioControls();
     const queuedTrackIds = useQueuedTrackIds();
     const playlistId = params.id as string;
 
@@ -353,24 +353,6 @@ export default function PlaylistDetailPage() {
             duration: item.track.duration,
         }));
         playTracks(tracks, index);
-    };
-
-    const handleAddToQueue = (track: Track) => {
-        const formattedTrack = {
-            id: track.id,
-            title: track.title,
-            artist: {
-                name: track.album.artist.name,
-                id: track.album.artist.id,
-            },
-            album: {
-                title: track.album.title,
-                coverArt: track.album.coverArt,
-                id: track.album.id,
-            },
-            duration: track.duration,
-        };
-        addToQueue(formattedTrack);
     };
 
 
@@ -827,39 +809,41 @@ export default function PlaylistDetailPage() {
 
                                             {/* Duration + Actions */}
                                             <div className="flex items-center justify-end gap-2">
-                                                <button
-                                                    className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleAddToQueue(
-                                                            playlistItem.track
-                                                        );
-                                                    }}
-                                                    title="Add to Queue"
-                                                >
-                                                    <ListPlus className="w-4 h-4" />
-                                                </button>
                                                 <span className="text-sm text-gray-400 w-12 text-right">
                                                     {formatTime(
                                                         playlistItem.track
                                                             .duration
                                                     )}
                                                 </span>
-                                                {playlist.isOwner && (
-                                                    <button
-                                                        className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-400 hover:text-red-400 transition-all"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleRemoveTrack(
-                                                                playlistItem
-                                                                    .track.id
-                                                            );
-                                                        }}
-                                                        title="Remove from Playlist"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                )}
+                                                <TrackOverflowMenu
+                                                    track={{
+                                                        id: playlistItem.track.id,
+                                                        title: playlistItem.track.title,
+                                                        artist: {
+                                                            name: playlistItem.track.album.artist.name,
+                                                            id: playlistItem.track.album.artist.id,
+                                                        },
+                                                        album: {
+                                                            title: playlistItem.track.album.title,
+                                                            coverArt: playlistItem.track.album.coverArt,
+                                                            id: playlistItem.track.album.id,
+                                                        },
+                                                        duration: playlistItem.track.duration,
+                                                    }}
+                                                    extraItemsAfter={playlist.isOwner ? (
+                                                        <TrackMenuButton
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveTrack(
+                                                                    playlistItem.track.id
+                                                                );
+                                                            }}
+                                                            icon={<Trash2 className="h-4 w-4" />}
+                                                            label="Remove from playlist"
+                                                            className="text-red-400 hover:text-red-300"
+                                                        />
+                                                    ) : undefined}
+                                                />
                                                 <TrackPreferenceButtons
                                                     trackId={playlistItem.track.id}
                                                     mode="up-only"
