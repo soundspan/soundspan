@@ -689,66 +689,37 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            // Spotify-style: "Add to queue" should add to the Up Next list.
-            // Maintain a cursor so bulk adds preserve order and insert contiguously.
-            const playingIdx = state.currentIndex;
-            const plannedInsertAt = upNextInsertRef.current;
+            // "Add to queue" appends to the END of the queue (after all existing tracks).
+            // "Play Next" (separate action) inserts immediately after the current track.
             const insertCount = validTracks.length;
 
             state.setQueue((prevQueue) => {
-                const insertAt = Math.min(
-                    Math.max(0, plannedInsertAt),
-                    prevQueue.length
-                );
-                const newQueue = [...prevQueue];
-                newQueue.splice(insertAt, 0, ...validTracks);
-                upNextInsertRef.current = insertAt + insertCount;
+                const insertAt = prevQueue.length;
+                const newQueue = [...prevQueue, ...validTracks];
                 lastQueueInsertAtRef.current = insertAt + insertCount - 1;
-                queueDebugLog("addTracksToQueue() applied", {
-                    plannedInsertAt,
+                queueDebugLog("addTracksToQueue() appended to end", {
                     insertAt,
                     insertCount,
-                    playingIdx,
                     prevLen: prevQueue.length,
                     newLen: newQueue.length,
                     insertedTrackIds: validTracks.map((t) => t.id),
-                    nextUpSliceIds: newQueue
-                        .slice(state.currentIndex + 1, state.currentIndex + 1 + Math.min(6, insertCount))
-                        .map((t) => t?.id),
                 });
 
                 return newQueue;
             });
 
-            // Update shuffle indices if shuffle is on - use functional update
+            // Update shuffle indices if shuffle is on — append new indices at end of shuffle order
             if (state.isShuffle) {
                 state.setShuffleIndices((prevIndices) => {
                     if (prevIndices.length === 0) return prevIndices;
 
-                    const insertAt = Math.min(
-                        Math.max(0, plannedInsertAt),
-                        state.queue.length
-                    );
-                    const shifted = prevIndices.map((i) =>
-                        i >= insertAt ? i + insertCount : i
-                    );
-                    const currentShufflePos = shifted.indexOf(playingIdx);
-                    const baseInsertPos =
-                        currentShufflePos >= 0 ? currentShufflePos + 1 : 0;
-                    const insertPos = Math.min(
-                        Math.max(baseInsertPos, shuffleInsertPosRef.current),
-                        shifted.length
-                    );
+                    const queueLen = state.queue.length; // length before append
                     const insertedIndices = Array.from(
                         { length: insertCount },
-                        (_, offset) => insertAt + offset
+                        (_, offset) => queueLen + offset
                     );
-                    const newIndices = [...shifted];
-                    newIndices.splice(insertPos, 0, ...insertedIndices);
-                    shuffleInsertPosRef.current = insertPos + insertCount;
-                    queueDebugLog("addTracksToQueue() shuffleIndices updated", {
-                        insertAt,
-                        insertPos,
+                    const newIndices = [...prevIndices, ...insertedIndices];
+                    queueDebugLog("addTracksToQueue() shuffleIndices appended", {
                         insertCount,
                         prevIndicesLen: prevIndices.length,
                         newIndicesLen: newIndices.length,

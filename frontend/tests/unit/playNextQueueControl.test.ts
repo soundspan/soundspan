@@ -6,7 +6,7 @@ import test from "node:test";
  *
  * playNext inserts a track at currentIndex + 1 (immediately after the
  * currently playing track), before any other Up-Next items.
- * This is distinct from addToQueue which uses a cursor that advances.
+ * This is distinct from addToQueue which appends to the end of the queue.
  *
  * Since playNext lives inside a React context callback with complex
  * dependencies, we test the core queue manipulation logic in isolation.
