@@ -1,5 +1,6 @@
 import { Play, Music } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { cn } from "@/utils/cn";
 import { DiscoverTrack } from "../types";
 import { api } from "@/lib/api";
@@ -132,7 +133,13 @@ export function TrackList({
                                         )}
                                     </p>
                                     <p className="text-xs text-gray-400 truncate">
-                                        {track.artist}
+                                        <Link
+                                            href={`/artist/${encodeURIComponent(track.artist)}`}
+                                            className="hover:underline hover:text-white"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            {track.artist}
+                                        </Link>
                                     </p>
                                     <div className="md:hidden mt-1">
                                         <span

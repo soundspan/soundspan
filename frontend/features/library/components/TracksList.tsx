@@ -5,10 +5,12 @@ import { Track } from "../types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { CachedImage } from "@/components/ui/CachedImage";
+import Link from "next/link";
 import { AudioLines, Trash2, Play } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { formatTime } from "@/utils/formatTime";
 import { api } from "@/lib/api";
+import { getArtistHref } from "@/utils/artistRoute";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
@@ -115,7 +117,18 @@ const TrackRow = memo(
                             )}
                         </h3>
                         <p className="text-xs text-gray-400 truncate">
-                            {track.album?.artist?.name}
+                            {track.album?.artist ? (() => {
+                                const href = getArtistHref({ id: track.album!.artist!.id, name: track.album!.artist!.name });
+                                return href ? (
+                                    <Link
+                                        href={href}
+                                        className="hover:underline hover:text-white"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        {track.album!.artist!.name}
+                                    </Link>
+                                ) : track.album!.artist!.name;
+                            })() : null}
                         </p>
                     </div>
                 </div>
