@@ -11,6 +11,7 @@ import { formatNumber } from "@/utils/formatNumber";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { toast } from "sonner";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
+import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 
 interface PopularTracksProps {
     tracks: Track[];
@@ -211,7 +212,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                     )}
                             </div>
 
-                            {/* Duration + Preview */}
+                            {/* Duration + Preview + Overflow */}
                             <div className="flex items-center justify-end gap-2">
                                 {isPreviewOnly && !blockedByListenTogether && (
                                     <button
@@ -233,6 +234,17 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                         {formatTime(track.duration)}
                                     </span>
                                 )}
+                                <TrackOverflowMenu
+                                    track={{
+                                        id: track.id,
+                                        title: track.displayTitle ?? track.title,
+                                        artist: track.artist ?? artist,
+                                        album: track.album ? { title: track.album.title ?? "", id: track.album.id, coverArt: track.album.coverArt } : { title: "" },
+                                        duration: track.duration,
+                                        streamSource: track.streamSource,
+                                    }}
+                                    isInListenTogetherGroup={isInListenTogetherGroup}
+                                />
                             </div>
                         </div>
                     );

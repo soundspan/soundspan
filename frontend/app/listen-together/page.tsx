@@ -21,6 +21,7 @@ import {
     RefreshCw,
     Disc3,
 } from "lucide-react";
+import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 import { useAuth } from "@/lib/auth-context";
 import { useListenTogether } from "@/lib/listen-together-context";
 import { api } from "@/lib/api";
@@ -856,19 +857,30 @@ function QueueItem({
                 {formatDuration(item.duration)}
             </span>
 
-            {/* Remove */}
-            {canRemove && (
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onRemove();
-                    }}
-                    className="opacity-0 group-hover:opacity-100 text-[#525252] hover:text-red-400 transition-all flex-shrink-0"
-                    title="Remove from queue"
-                >
-                    <Trash2 className="w-3.5 h-3.5" />
-                </button>
-            )}
+            {/* Overflow Menu */}
+            <TrackOverflowMenu
+                track={{
+                    id: item.id,
+                    title: item.title,
+                    artist: item.artist,
+                    album: item.album,
+                    duration: item.duration,
+                }}
+                showPlayNext={false}
+                showAddToQueue={false}
+                isInListenTogetherGroup
+                extraItemsAfter={canRemove ? (
+                    <TrackMenuButton
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onRemove();
+                        }}
+                        icon={<Trash2 className="h-4 w-4" />}
+                        label="Remove from queue"
+                        className="text-red-400 hover:text-red-300"
+                    />
+                ) : undefined}
+            />
         </div>
     );
 }
