@@ -1,6 +1,14 @@
-import React, { memo, useCallback, useMemo } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
-import { Play, Pause, Volume2, ListPlus, Plus, Disc } from "lucide-react";
+import {
+    Play,
+    Pause,
+    Volume2,
+    ListPlus,
+    Plus,
+    Disc,
+    EllipsisVertical,
+} from "lucide-react";
 import { cn } from "@/utils/cn";
 import type { Track, Album, AlbumSource } from "../types";
 import type { ColorPalette } from "@/hooks/useImageColor";
@@ -73,6 +81,37 @@ const TrackRow = memo(
         const blockedByListenTogether = isInListenTogetherGroup && !isLocalLibraryTrack;
         const isPlayable = (isOwned || isTidalTrack || isYouTubeTrack) && !blockedByListenTogether;
         const isPreviewOnly = !isPlayable;
+        const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+        const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+
+        useEffect(() => {
+            if (!isActionsMenuOpen) {
+                return;
+            }
+
+            const handleOutsideClick = (event: MouseEvent) => {
+                if (
+                    actionsMenuRef.current &&
+                    !actionsMenuRef.current.contains(event.target as Node)
+                ) {
+                    setIsActionsMenuOpen(false);
+                }
+            };
+
+            const handleEscape = (event: KeyboardEvent) => {
+                if (event.key === "Escape") {
+                    setIsActionsMenuOpen(false);
+                }
+            };
+
+            document.addEventListener("mousedown", handleOutsideClick);
+            document.addEventListener("keydown", handleEscape);
+
+            return () => {
+                document.removeEventListener("mousedown", handleOutsideClick);
+                document.removeEventListener("keydown", handleEscape);
+            };
+        }, [isActionsMenuOpen]);
 
         const handleAddToQueue = useCallback(
             (e: React.MouseEvent) => {
@@ -92,6 +131,27 @@ const TrackRow = memo(
                 onAddToPlaylist(track.id);
             },
             [track.id, onAddToPlaylist]
+        );
+
+        const handleToggleActionsMenu = useCallback((e: React.MouseEvent) => {
+            e.stopPropagation();
+            setIsActionsMenuOpen((previousState) => !previousState);
+        }, []);
+
+        const handleAddToQueueFromMenu = useCallback(
+            (e: React.MouseEvent) => {
+                handleAddToQueue(e);
+                setIsActionsMenuOpen(false);
+            },
+            [handleAddToQueue]
+        );
+
+        const handleAddToPlaylistFromMenu = useCallback(
+            (e: React.MouseEvent) => {
+                handleAddToPlaylist(e);
+                setIsActionsMenuOpen(false);
+            },
+            [handleAddToPlaylist]
         );
 
         const handlePreview = useCallback(
@@ -222,33 +282,6 @@ const TrackRow = memo(
                         </div>
                     )}
 
-                {(isPlayable || blockedByListenTogether) && (
-                    <>
-                        <button
-                            onClick={handleAddToQueue}
-                            disabled={blockedByListenTogether}
-                            className={cn(
-                                "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 rounded-full transition-all",
-                                blockedByListenTogether
-                                    ? "text-red-300/80 bg-red-500/10 cursor-not-allowed"
-                                    : "hover:bg-[#2a2a2a] text-gray-400 hover:text-white"
-                            )}
-                            aria-label="Add to queue"
-                            title={blockedByListenTogether ? "Listen Together requires local tracks" : "Add to queue"}
-                        >
-                            <ListPlus className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={handleAddToPlaylist}
-                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-2 hover:bg-[#2a2a2a] rounded-full transition-all text-gray-400 hover:text-white"
-                            aria-label="Add to playlist"
-                            title="Add to playlist"
-                        >
-                            <Plus className="w-4 h-4" />
-                        </button>
-                    </>
-                )}
-
                 {isPreviewOnly && (
                     <button
                         onClick={handlePreview}
@@ -268,6 +301,69 @@ const TrackRow = memo(
                 <div className="text-xs md:text-sm text-gray-400 w-10 md:w-12 text-right tabular-nums">
                     {track.duration ? formatTime(track.duration) : ""}
                 </div>
+
+                {(isPlayable || blockedByListenTogether) && (
+                    <div
+                        ref={actionsMenuRef}
+                        className="relative ml-1 flex w-10 flex-shrink-0 items-center justify-center"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            onClick={handleToggleActionsMenu}
+                            className={cn(
+                                "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 rounded-full p-2 transition-colors",
+                                isActionsMenuOpen
+                                    ? "bg-[#2a2a2a] text-white"
+                                    : "text-gray-400 hover:bg-[#2a2a2a] hover:text-white"
+                            )}
+                            aria-label="Track actions"
+                            aria-expanded={isActionsMenuOpen}
+                            aria-haspopup="menu"
+                            title="Track actions"
+                        >
+                            <EllipsisVertical className="h-4 w-4" />
+                        </button>
+                        {isActionsMenuOpen && (
+                            <div
+                                className="absolute right-0 top-full z-30 mt-1 min-w-[150px] rounded-md border border-white/10 bg-[#111111] p-1 shadow-xl"
+                                role="menu"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <button
+                                    type="button"
+                                    onClick={handleAddToQueueFromMenu}
+                                    disabled={blockedByListenTogether}
+                                    className={cn(
+                                        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors",
+                                        blockedByListenTogether
+                                            ? "cursor-not-allowed text-red-300/80"
+                                            : "text-gray-200 hover:bg-white/10 hover:text-white"
+                                    )}
+                                    role="menuitem"
+                                    title={
+                                        blockedByListenTogether
+                                            ? "Listen Together requires local tracks"
+                                            : "Add to queue"
+                                    }
+                                >
+                                    <ListPlus className="h-4 w-4" />
+                                    Add to queue
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleAddToPlaylistFromMenu}
+                                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-gray-200 transition-colors hover:bg-white/10 hover:text-white"
+                                    role="menuitem"
+                                    title="Add to playlist"
+                                >
+                                    <Plus className="h-4 w-4" />
+                                    Add to playlist
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="ml-1 flex w-[96px] flex-shrink-0 items-center justify-end md:w-[104px]">
                     <TrackPreferenceButtons
