@@ -1,23 +1,21 @@
 "use client";
 
-import { useState, memo, useCallback } from "react";
+import { memo } from "react";
 import { Track } from "../types";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { CachedImage } from "@/components/ui/CachedImage";
-import { AudioLines, ListPlus, Plus, Trash2, Play } from "lucide-react";
+import { AudioLines, Trash2, Play } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { formatTime } from "@/utils/formatTime";
 import { api } from "@/lib/api";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
+import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 
 interface TracksListProps {
     tracks: Track[];
     onPlay: (tracks: Track[], startIndex?: number) => void;
-    onAddToQueue: (track: Track) => void;
-    onAddToPlaylist: (playlistId: string, trackId: string) => void;
     onDelete: (trackId: string, trackTitle: string) => void;
     canDelete?: boolean;
     isLoading?: boolean;
@@ -30,8 +28,6 @@ interface TrackRowProps {
     isCurrentlyPlaying: boolean;
     isInQueue: boolean;
     onPlayTrack: () => void;
-    onAddToQueue: (track: Track) => void;
-    onShowAddToPlaylist: (trackId: string) => void;
     onDelete: (trackId: string, trackTitle: string) => void;
     canDelete: boolean;
 }
@@ -43,11 +39,17 @@ const TrackRow = memo(
         isCurrentlyPlaying,
         isInQueue,
         onPlayTrack,
-        onAddToQueue,
-        onShowAddToPlaylist,
         onDelete,
         canDelete,
     }: TrackRowProps) {
+        const overflowTrack = {
+            id: track.id,
+            title: track.displayTitle ?? track.title,
+            artist: track.album?.artist ? { name: track.album.artist.name, id: track.album.artist.id } : { name: "" },
+            album: { title: track.album?.title ?? "", coverArt: track.album?.coverArt, id: track.album?.id },
+            duration: track.duration,
+        };
+
         return (
             <div
                 key={track.id}
@@ -127,41 +129,23 @@ const TrackRow = memo(
 
                 {/* Actions + Duration */}
                 <div className="flex items-center gap-1">
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onAddToQueue(track);
-                        }}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Add to Queue"
-                    >
-                        <ListPlus className="w-4 h-4" />
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onShowAddToPlaylist(track.id);
-                        }}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Add to Playlist"
-                    >
-                        <Plus className="w-4 h-4" />
-                    </button>
-                    {canDelete && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onDelete(track.id, track.title);
-                            }}
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Delete Track"
-                        >
-                            <Trash2 className="w-4 h-4" />
-                        </button>
-                    )}
                     <span className="text-xs text-gray-500 w-10 text-right">
                         {formatTime(track.duration)}
                     </span>
+                    <TrackOverflowMenu
+                        track={overflowTrack}
+                        extraItemsAfter={canDelete ? (
+                            <TrackMenuButton
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(track.id, track.title);
+                                }}
+                                icon={<Trash2 className="h-4 w-4" />}
+                                label="Delete track"
+                                className="text-red-400 hover:text-red-300"
+                            />
+                        ) : undefined}
+                    />
                 </div>
             </div>
         );
@@ -179,8 +163,6 @@ const TrackRow = memo(
 export function TracksList({
     tracks,
     onPlay,
-    onAddToQueue,
-    onAddToPlaylist,
     onDelete,
     canDelete = false,
     isLoading = false,
@@ -188,23 +170,6 @@ export function TracksList({
     const { currentTrack } = useAudioState();
     const queuedTrackIds = useQueuedTrackIds();
     const currentTrackId = currentTrack?.id;
-    const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
-    const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
-
-    const handleShowAddToPlaylist = useCallback((trackId: string) => {
-        setSelectedTrackId(trackId);
-        setShowPlaylistSelector(true);
-    }, []);
-
-    const handleAddToPlaylist = useCallback(
-        async (playlistId: string) => {
-            if (!selectedTrackId) return;
-            onAddToPlaylist(playlistId, selectedTrackId);
-            setShowPlaylistSelector(false);
-            setSelectedTrackId(null);
-        },
-        [selectedTrackId, onAddToPlaylist],
-    );
 
     if (isLoading) {
         return (
@@ -246,23 +211,12 @@ export function TracksList({
                             isCurrentlyPlaying={isCurrentlyPlaying}
                             isInQueue={isInQueue}
                             onPlayTrack={() => onPlay(tracks, index)}
-                            onAddToQueue={onAddToQueue}
-                            onShowAddToPlaylist={handleShowAddToPlaylist}
                             onDelete={onDelete}
                             canDelete={canDelete}
                         />
                     );
                 })}
             </div>
-
-            <PlaylistSelector
-                isOpen={showPlaylistSelector}
-                onClose={() => {
-                    setShowPlaylistSelector(false);
-                    setSelectedTrackId(null);
-                }}
-                onSelectPlaylist={handleAddToPlaylist}
-            />
         </>
     );
 }

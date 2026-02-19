@@ -148,10 +148,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         openPlaylistSelector(trackIds, true);
     };
 
-    const handleAddToPlaylist = (trackId: string) => {
-        openPlaylistSelector([trackId]);
-    };
-
     const handlePlaylistSelected = async (playlistId: string) => {
         if (!pendingTrackIds.length) return;
 
@@ -239,10 +235,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                             currentTrackId={currentTrack?.id}
                             colors={colors}
                             onPlayTrack={handlePlayTrack}
-                            onAddToQueue={(track: AlbumTrack) =>
-                                addToQueue(track, album)
-                            }
-                            onAddToPlaylist={handleAddToPlaylist}
                             previewTrack={previewTrack}
                             previewPlaying={previewPlaying}
                             onPreview={(track: AlbumTrack, e: React.MouseEvent) =>

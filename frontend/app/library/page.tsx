@@ -201,8 +201,6 @@ export default function LibraryPage() {
     const {
         playArtist,
         playAlbum,
-        addTrackToQueue,
-        addTrackToPlaylist,
         deleteArtist,
         deleteAlbum,
         deleteTrack,
@@ -515,8 +513,6 @@ export default function LibraryPage() {
                         tracks={tracks}
                         isLoading={isLoading}
                         onPlay={handlePlayTracks}
-                        onAddToQueue={addTrackToQueue}
-                        onAddToPlaylist={addTrackToPlaylist}
                         onDelete={handleDeleteTrack}
                         canDelete={canDeleteFromLibrary}
                     />

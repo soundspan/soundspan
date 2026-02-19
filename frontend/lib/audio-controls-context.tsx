@@ -76,6 +76,7 @@ interface AudioControlsContextType {
     previous: () => void;
 
     // Queue controls
+    playNext: (track: Track) => void;
     addToQueue: (track: Track, options?: { silent?: boolean }) => void;
     addTracksToQueue: (tracks: Track[], options?: { silent?: boolean }) => void;
     removeFromQueue: (index: number) => void;
@@ -776,6 +777,81 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         [addTracksToQueue]
     );
 
+    const playNext = useCallback(
+        (track: Track) => {
+            if (!track?.id) return;
+            const playbackState = playbackRef.current;
+
+            const ltSession = getActiveListenTogetherSession();
+            if (ltSession) {
+                if (!isListenTogetherLocalTrack(track)) {
+                    toast.error("Listen Together only supports local library tracks");
+                    return;
+                }
+                void listenTogetherSocket
+                    .addToQueue([track.id])
+                    .then(() => toast.success(`Playing "${track.title}" next in group queue`))
+                    .catch((err) => {
+                        toast.error(err?.message || "Failed to add track to Listen Together queue");
+                    });
+                return;
+            }
+
+            // If nothing is playing, just start the track
+            if (state.queue.length === 0 || state.playbackType !== "track") {
+                state.setPlaybackType("track");
+                state.setQueue([track]);
+                state.setCurrentIndex(0);
+                state.setCurrentTrack(track);
+                state.setCurrentAudiobook(null);
+                state.setCurrentPodcast(null);
+                playbackState.setIsPlaying(true);
+                playbackState.setCurrentTime(0);
+                state.setRepeatOneCount(0);
+                state.setShuffleIndices(generateShuffleIndices(1, 0));
+                toast.success(`Playing "${track.title}" next`);
+                return;
+            }
+
+            // Insert immediately after the currently playing track (before any Up Next items)
+            const insertAt = state.currentIndex + 1;
+
+            state.setQueue((prevQueue) => {
+                const newQueue = [...prevQueue];
+                newQueue.splice(insertAt, 0, track);
+                return newQueue;
+            });
+
+            // Bump the Up Next cursor to account for the newly inserted track
+            upNextInsertRef.current = Math.max(upNextInsertRef.current, insertAt) + 1;
+
+            // Update shuffle indices if shuffle is on
+            if (state.isShuffle) {
+                state.setShuffleIndices((prevIndices) => {
+                    if (prevIndices.length === 0) return prevIndices;
+                    // Shift all indices >= insertAt up by 1
+                    const shifted = prevIndices.map((i) =>
+                        i >= insertAt ? i + 1 : i
+                    );
+                    // Insert the new track index right after the current track in shuffle order
+                    const currentShufflePos = shifted.indexOf(state.currentIndex);
+                    const shuffleInsertPos = currentShufflePos >= 0 ? currentShufflePos + 1 : 0;
+                    const newIndices = [...shifted];
+                    newIndices.splice(shuffleInsertPos, 0, insertAt);
+                    return newIndices;
+                });
+            }
+
+            toast.success(`Playing "${track.title}" next`);
+            queueDebugLog("playNext()", {
+                trackId: track.id,
+                insertAt,
+                queueLen: state.queue.length + 1,
+            });
+        },
+        [state, generateShuffleIndices, getActiveListenTogetherSession]
+    );
+
     const removeFromQueue = useCallback(
         (index: number) => {
             const ltSession = getActiveListenTogetherSession();
@@ -1192,6 +1268,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             play,
             next,
             previous,
+            playNext,
             addToQueue,
             addTracksToQueue,
             removeFromQueue,
@@ -1221,6 +1298,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             play,
             next,
             previous,
+            playNext,
             addToQueue,
             addTracksToQueue,
             removeFromQueue,

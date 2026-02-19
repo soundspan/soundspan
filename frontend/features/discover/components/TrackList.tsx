@@ -5,6 +5,7 @@ import { DiscoverTrack } from "../types";
 import { api } from "@/lib/api";
 import { formatTime } from "@/utils/formatTime";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
+import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 
 const tierColors: Record<string, string> = {
     high: "text-green-400",
@@ -194,6 +195,17 @@ export function TrackList({
                                 <span className="text-sm text-gray-400 w-10 text-right">
                                     {formatTime(track.duration)}
                                 </span>
+                                <TrackOverflowMenu
+                                    track={{
+                                        id: track.id,
+                                        title: track.title,
+                                        artist: { name: track.artist },
+                                        album: { title: track.album, id: track.albumId, coverArt: track.coverUrl ?? undefined },
+                                        duration: track.duration,
+                                        streamSource: track.streamSource,
+                                    }}
+                                    showGoToAlbum={!!track.albumId}
+                                />
                             </div>
                         </div>
                     );

@@ -59,6 +59,7 @@ export function useAudio() {
         resume: controls.resume,
         next: controls.next,
         previous: controls.previous,
+        playNext: controls.playNext,
         addToQueue: controls.addToQueue,
         addTracksToQueue: controls.addTracksToQueue,
         removeFromQueue: controls.removeFromQueue,
