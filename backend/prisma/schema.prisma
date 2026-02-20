@@ -77,6 +77,7 @@ model PlaybackState {
   queue        Json?
   currentIndex Int      @default(0)
   isShuffle    Boolean  @default(false)
+  isPlaying    Boolean  @default(false)
   currentTime  Float    @default(0)
   updatedAt    DateTime @updatedAt
   createdAt    DateTime @default(now())

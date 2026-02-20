@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { SystemSettings } from "../types";
+import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
 
 const defaultSystemSettings: SystemSettings = {
     lidarrEnabled: true,
@@ -56,18 +57,18 @@ export function useSystemSettings() {
     const [originalSettings, setOriginalSettings] = useState<SystemSettings>(
         defaultSystemSettings
     );
+    const [loadError, setLoadError] = useState(false);
+    const lastLoadAttemptAtRef = useRef(0);
 
     const isAdmin = user?.role === "admin";
 
-    useEffect(() => {
-        if (isAuthenticated && isAdmin) {
-            loadSystemSettings();
-        }
-    }, [isAuthenticated, isAdmin]);
-
-    const loadSystemSettings = async () => {
+    const loadSystemSettings = useCallback(async (options?: { background?: boolean }) => {
+        const isBackground = options?.background === true;
         try {
-            setIsLoading(true);
+            lastLoadAttemptAtRef.current = Date.now();
+            if (!isBackground) {
+                setIsLoading(true);
+            }
             const [sysData, userData] = await Promise.all([
                 api.getSystemSettings(),
                 api.getSettings(),
@@ -95,13 +96,54 @@ export function useSystemSettings() {
 
             setSystemSettings(combinedSettings);
             setOriginalSettings(combinedSettings);
+            setLoadError(false);
         } catch (error) {
             console.error("Failed to load system settings:", error);
-            // No toast - error will be visible in the UI if settings fail to load
+            setLoadError(true);
         } finally {
-            setIsLoading(false);
+            if (!isBackground) {
+                setIsLoading(false);
+            }
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        if (isAuthenticated && isAdmin) {
+            void loadSystemSettings();
+            return;
+        }
+        setIsLoading(false);
+        setLoadError(false);
+    }, [isAuthenticated, isAdmin, loadSystemSettings]);
+
+    useEffect(() => {
+        if (!isAuthenticated || !isAdmin) return;
+        if (typeof window === "undefined" || typeof document === "undefined") {
+            return;
+        }
+
+        const maybeRetryLoad = () => {
+            if (document.hidden) return;
+            if (
+                shouldRetryFailedSettingsLoad(
+                    loadError,
+                    lastLoadAttemptAtRef.current
+                )
+            ) {
+                void loadSystemSettings({ background: true });
+            }
+        };
+
+        window.addEventListener("focus", maybeRetryLoad);
+        window.addEventListener("online", maybeRetryLoad);
+        document.addEventListener("visibilitychange", maybeRetryLoad);
+
+        return () => {
+            window.removeEventListener("focus", maybeRetryLoad);
+            window.removeEventListener("online", maybeRetryLoad);
+            document.removeEventListener("visibilitychange", maybeRetryLoad);
+        };
+    }, [isAuthenticated, isAdmin, loadError, loadSystemSettings]);
 
     const saveSystemSettings = async (settingsToSave: SystemSettings, _showToast = false) => {
         try {
@@ -232,5 +274,6 @@ export function useSystemSettings() {
         saveSystemSettings,
         testService,
         loadSystemSettings,
+        loadError,
     };
 }

@@ -33,13 +33,6 @@ const mockLoggerDebug = logger.debug as jest.Mock;
 const mockLoggerWarn = logger.warn as jest.Mock;
 const mockLoggerError = logger.error as jest.Mock;
 
-const FALLBACK_LYRICS_RESPONSE = {
-    syncedLyrics: null,
-    plainLyrics: null,
-    source: "none",
-    synced: false,
-} as const;
-
 function getHandler(
     path: string,
     method: "get" | "delete",
@@ -152,7 +145,7 @@ describe("lyrics routes runtime", () => {
         expect(res.statusCode).toBe(200);
     });
 
-    it("returns fallback when lyrics lookup exceeds route timeout", async () => {
+    it("returns 504 when lyrics lookup exceeds route timeout", async () => {
         jest.useFakeTimers();
         mockGetLyrics.mockReturnValue(new Promise(() => {}));
 
@@ -163,17 +156,17 @@ describe("lyrics routes runtime", () => {
         const res = createRes();
 
         const pending = getLyricsHandler(req, res);
-        await jest.advanceTimersByTimeAsync(10000);
+        await jest.advanceTimersByTimeAsync(20000);
         await pending;
 
-        expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual(FALLBACK_LYRICS_RESPONSE);
+        expect(res.statusCode).toBe(504);
+        expect(res.body).toEqual({ error: "Lyrics lookup timed out" });
         expect(mockLoggerWarn).toHaveBeenCalledWith(
-            "[Lyrics] GET /lyrics/track-slow timed out after 10000ms"
+            "[Lyrics] GET /lyrics/track-slow timed out after 20000ms"
         );
     });
 
-    it("returns fallback when lyrics lookup throws", async () => {
+    it("returns 503 when lyrics lookup throws", async () => {
         const error = new Error("lyrics service unavailable");
         mockGetLyrics.mockRejectedValueOnce(error);
 
@@ -185,8 +178,8 @@ describe("lyrics routes runtime", () => {
 
         await getLyricsHandler(req, res);
 
-        expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual(FALLBACK_LYRICS_RESPONSE);
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toEqual({ error: "Failed to load lyrics" });
         expect(mockLoggerError).toHaveBeenCalledWith(
             "Get lyrics error for track track-error:",
             error

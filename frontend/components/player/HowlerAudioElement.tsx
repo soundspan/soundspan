@@ -22,9 +22,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
     fetchLyrics,
     lyricsQueryKeys,
-    LYRICS_QUERY_STALE_TIME,
     type LyricsLookupMetadata,
 } from "@/hooks/useLyrics";
+import { LYRICS_QUERY_STALE_TIME } from "@/lib/lyrics-cache-policy";
 import {
     useEffect,
     useLayoutEffect,
@@ -461,11 +461,6 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             heartbeatRef.current?.stop();
         }
     }, [isPlaying, isBuffering]);
-
-    // Initialize Howler engine from saved preferences on mount
-    useEffect(() => {
-        howlerEngine.initializeFromStorage();
-    }, []);
 
     // Prefetch lyrics in the background as soon as a track is loaded.
     useEffect(() => {

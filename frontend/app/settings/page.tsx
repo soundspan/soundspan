@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { RestartModal } from "@/components/ui/RestartModal";
 import { useSettingsData } from "@/features/settings/hooks/useSettingsData";
 import { useSystemSettings } from "@/features/settings/hooks/useSystemSettings";
+import { shouldShowSettingsPageLoading } from "@/features/settings/hooks/settingsHydration";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { InlineStatus, useInlineStatus } from "@/components/ui/InlineStatus";
 import {
@@ -139,6 +140,7 @@ export default function SettingsPage() {
     // User settings hook
     const {
         settings: userSettings,
+        isLoading: userSettingsLoading,
         updateSettings: updateUserSettings,
         saveSettings: saveUserSettings,
     } = useSettingsData();
@@ -146,6 +148,7 @@ export default function SettingsPage() {
     // System settings hook (only used if admin)
     const {
         systemSettings,
+        isLoading: systemSettingsLoading,
         changedServices,
         updateSystemSettings,
         saveSystemSettings,
@@ -222,6 +225,22 @@ export default function SettingsPage() {
 
     if (!isAuthenticated) {
         return null;
+    }
+
+    if (
+        shouldShowSettingsPageLoading({
+            authLoading,
+            isAuthenticated,
+            isUserSettingsLoading: userSettingsLoading,
+            isAdmin,
+            isSystemSettingsLoading: systemSettingsLoading,
+        })
+    ) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+                <GradientSpinner size="md" />
+            </div>
+        );
     }
 
     return (

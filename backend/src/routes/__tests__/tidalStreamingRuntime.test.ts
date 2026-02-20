@@ -194,6 +194,31 @@ describe("tidal streaming route runtime", () => {
         expect(errRes.statusCode).toBe(500);
     });
 
+    it("restores user oauth during status checks when sidecar session is missing", async () => {
+        mockAxiosGet.mockResolvedValueOnce({ data: { authenticated: false } });
+        prisma.userSettings.findUnique.mockResolvedValueOnce({
+            userId: "u1",
+            tidalOAuthJson: "enc:{\"access_token\":\"abc\"}",
+            tidalStreamingQuality: "LOSSLESS",
+        });
+
+        const req = { user: { id: "u1" } } as any;
+        const res = createRes();
+        await statusHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            enabled: true,
+            available: true,
+            authenticated: true,
+            credentialsConfigured: true,
+        });
+        expect(tidalStreamingService.restoreOAuth).toHaveBeenCalledWith(
+            "u1",
+            "{\"access_token\":\"abc\"}"
+        );
+    });
+
     it("evaluates the tidal-enabled middleware for 404, 503, and success", async () => {
         const layer = getRouteLayer("/auth/device-code", "post");
         const middleware = layer.route.stack[1].handle;

@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import {
+    LYRICS_QUERY_GC_TIME,
+    resolveLyricsQueryStaleTime,
+} from "@/lib/lyrics-cache-policy";
 
 export interface LyricsData {
     syncedLyrics: string | null;
@@ -14,16 +18,6 @@ export interface LyricsLookupMetadata {
     album?: string;
     duration?: number;
 }
-
-const FALLBACK_LYRICS: LyricsData = {
-    syncedLyrics: null,
-    plainLyrics: null,
-    source: "none",
-    synced: false,
-};
-
-export const LYRICS_QUERY_STALE_TIME = 1000 * 60 * 60 * 24 * 7; // 7 days
-export const LYRICS_QUERY_GC_TIME = 1000 * 60 * 60 * 24 * 30; // 30 days
 
 export const lyricsQueryKeys = {
     lyrics: (trackId: string, metadata?: LyricsLookupMetadata) =>
@@ -43,26 +37,21 @@ export async function fetchLyrics(
     trackId: string,
     metadata?: LyricsLookupMetadata
 ): Promise<LyricsData> {
-    try {
-        return await new Promise<LyricsData>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error("Lyrics request timed out"));
-            }, 15000);
+    return await new Promise<LyricsData>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error("Lyrics request timed out"));
+        }, 20000);
 
-            api.getLyrics(trackId, metadata)
-                .then((data) => {
-                    clearTimeout(timeout);
-                    resolve(data);
-                })
-                .catch((error) => {
-                    clearTimeout(timeout);
-                    reject(error);
-                });
-        });
-    } catch (error) {
-        console.warn(`[Lyrics] Falling back to empty lyrics for track ${trackId}:`, error);
-        return FALLBACK_LYRICS;
-    }
+        api.getLyrics(trackId, metadata)
+            .then((data) => {
+                clearTimeout(timeout);
+                resolve(data);
+            })
+            .catch((error) => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+    });
 }
 
 /**
@@ -83,8 +72,9 @@ export function useLyrics(
             return fetchLyrics(trackId, metadata);
         },
         enabled: !!trackId,
-        staleTime: LYRICS_QUERY_STALE_TIME,
+        staleTime: (query) =>
+            resolveLyricsQueryStaleTime(query.state.data as LyricsData | undefined),
         gcTime: LYRICS_QUERY_GC_TIME,
-        retry: 0,
+        retry: 1,
     });
 }

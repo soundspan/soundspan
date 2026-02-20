@@ -120,6 +120,7 @@ describe("playbackState routes runtime", () => {
             queue: null,
             currentIndex: 1,
             isShuffle: false,
+            isPlaying: false,
             currentTime: 45,
         };
 
@@ -146,11 +147,13 @@ describe("playbackState routes runtime", () => {
                 playbackType: "podcast",
                 queue: PrismaClient.DbNull,
                 currentIndex: 1,
+                isPlaying: false,
                 currentTime: 45,
             }),
             create: expect.objectContaining({
                 userId: "u1",
                 deviceId: "mobile",
+                isPlaying: false,
                 queue: PrismaClient.DbNull,
             }),
         });
@@ -250,6 +253,7 @@ describe("playbackState routes runtime", () => {
                 currentIndex: 999,
                 currentTime: -25,
                 isShuffle: true,
+                isPlaying: true,
             },
         } as any;
         const res = createRes();
@@ -268,10 +272,12 @@ describe("playbackState routes runtime", () => {
                 currentIndex: 1,
                 currentTime: 0,
                 isShuffle: true,
+                isPlaying: true,
             }),
             create: expect.objectContaining({
                 userId: "u1",
                 deviceId: "legacy",
+                isPlaying: true,
                 queue: [
                     expect.objectContaining({ id: "t1" }),
                     expect.objectContaining({ id: "t2" }),
@@ -314,6 +320,28 @@ describe("playbackState routes runtime", () => {
         const whereArg = mockUpsert.mock.calls[0][0].where;
         expect(whereArg.userId_deviceId.deviceId).toHaveLength(128);
         expect(mockUpsert.mock.calls[0][0].update.queue).toBe(PrismaClient.DbNull);
+        expect(res.statusCode).toBe(200);
+    });
+
+    it("does not overwrite persisted play intent when isPlaying is omitted", async () => {
+        mockUpsert.mockResolvedValueOnce({ id: "state-4" });
+
+        const req = {
+            user: { id: "u1" },
+            header: () => "desktop",
+            body: {
+                playbackType: "track",
+                trackId: "track-77",
+            },
+        } as any;
+        const res = createRes();
+
+        await postState(req, res);
+
+        expect(mockUpsert.mock.calls[0][0].update).toEqual(
+            expect.not.objectContaining({ isPlaying: expect.anything() })
+        );
+        expect(mockUpsert.mock.calls[0][0].create.isPlaying).toBe(false);
         expect(res.statusCode).toBe(200);
     });
 

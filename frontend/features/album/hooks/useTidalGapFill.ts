@@ -13,6 +13,10 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
 import type { Track, Album, AlbumSource } from "../types";
+import {
+    createProviderStatusCacheEntry,
+    isProviderStatusCacheFresh,
+} from "./providerStatusCache";
 
 interface TidalMatch {
     id: number;
@@ -24,24 +28,36 @@ interface TidalMatch {
 
 // ── Global TIDAL status cache (60s TTL) ───────────────────────────
 let _tidalStatusCache: { available: boolean; checkedAt: number } | null = null;
-const TIDAL_STATUS_CACHE_TTL = 60_000;
+let _tidalStatusInFlight: Promise<boolean> | null = null;
 
 async function getTidalAvailable(): Promise<boolean> {
     const now = Date.now();
-    if (
-        _tidalStatusCache &&
-        now - _tidalStatusCache.checkedAt < TIDAL_STATUS_CACHE_TTL
-    ) {
+    if (_tidalStatusCache && isProviderStatusCacheFresh(_tidalStatusCache, now)) {
         return _tidalStatusCache.available;
     }
+    if (_tidalStatusInFlight) {
+        return _tidalStatusInFlight;
+    }
+
+    const loadStatus = async () => {
+        try {
+            const status = await api.getTidalStreamingStatus();
+            const available =
+                status.enabled && status.available && status.authenticated;
+            _tidalStatusCache = createProviderStatusCacheEntry(available);
+            return available;
+        } catch {
+            _tidalStatusCache = createProviderStatusCacheEntry(false);
+            return false;
+        } finally {
+            _tidalStatusInFlight = null;
+        }
+    };
+
+    _tidalStatusInFlight = loadStatus();
     try {
-        const status = await api.getTidalStreamingStatus();
-        const available =
-            status.enabled && status.available && status.authenticated;
-        _tidalStatusCache = { available, checkedAt: now };
-        return available;
+        return await _tidalStatusInFlight;
     } catch {
-        _tidalStatusCache = { available: false, checkedAt: now };
         return false;
     }
 }
@@ -52,6 +68,7 @@ async function getTidalAvailable(): Promise<boolean> {
  */
 export function invalidateTidalStatusCache() {
     _tidalStatusCache = null;
+    _tidalStatusInFlight = null;
 }
 
 // ── Global match cache (keyed by albumId) ─────────────────────────

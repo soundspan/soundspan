@@ -6,10 +6,7 @@
  */
 
 import { Howl, HowlOptions, Howler } from "howler";
-import {
-    createMigratingStorageKey,
-    readMigratingStorageItem,
-} from "@/lib/storage-migration";
+import { DEFAULT_AUDIO_VOLUME, clampAudioVolume } from "@/lib/audio-volume";
 
 interface ExtendedHowlOptions extends HowlOptions {
     xhr?: {
@@ -43,11 +40,6 @@ interface HowlerEngineState {
     isMuted: boolean;
 }
 
-const HOWLER_STORAGE_KEYS = {
-    VOLUME: createMigratingStorageKey("volume"),
-    MUTED: createMigratingStorageKey("muted"),
-};
-
 class HowlerEngine {
     private howl: Howl | null = null;
     private timeUpdateInterval: NodeJS.Timeout | null = null;
@@ -58,7 +50,7 @@ class HowlerEngine {
         isPlaying: false,
         currentTime: 0,
         duration: 0,
-        volume: 1,
+        volume: DEFAULT_AUDIO_VOLUME,
         isMuted: false,
     };
     private isLoading: boolean = false; // Guard against duplicate loads
@@ -101,33 +93,6 @@ class HowlerEngine {
             "timeupdate",
         ];
         events.forEach((event) => this.eventListeners.set(event, new Set()));
-    }
-
-    /**
-     * Initialize engine with saved preferences
-     * Call this before first playback
-     */
-    initializeFromStorage(): void {
-        if (typeof window === 'undefined') return;
-
-        try {
-            const savedVolume = readMigratingStorageItem(HOWLER_STORAGE_KEYS.VOLUME);
-            const savedMuted = readMigratingStorageItem(HOWLER_STORAGE_KEYS.MUTED);
-
-            if (savedVolume) {
-                this.state.volume = parseFloat(savedVolume);
-            }
-            if (savedMuted === 'true') {
-                this.state.isMuted = true;
-            }
-
-            // Apply to global Howler if available
-            if (typeof Howler !== 'undefined') {
-                Howler.volume(this.state.isMuted ? 0 : this.state.volume);
-            }
-        } catch (error) {
-            console.error('[HowlerEngine] Failed to initialize from storage:', error);
-        }
     }
 
     /**
@@ -566,7 +531,7 @@ class HowlerEngine {
      * Set volume (0-1)
      */
     setVolume(volume: number): void {
-        this.state.volume = Math.max(0, Math.min(1, volume));
+        this.state.volume = clampAudioVolume(volume);
 
         if (this.howl && !this.state.isMuted) {
             this.howl.volume(this.state.volume);

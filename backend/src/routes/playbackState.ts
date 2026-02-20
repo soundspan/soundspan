@@ -49,6 +49,7 @@ router.get("/", requireAuth, async (req, res) => {
                     queue: legacyState.queue ?? Prisma.DbNull,
                     currentIndex: legacyState.currentIndex,
                     isShuffle: legacyState.isShuffle,
+                    isPlaying: legacyState.isPlaying,
                     currentTime: legacyState.currentTime,
                 },
                 create: {
@@ -61,6 +62,7 @@ router.get("/", requireAuth, async (req, res) => {
                     queue: legacyState.queue ?? Prisma.DbNull,
                     currentIndex: legacyState.currentIndex,
                     isShuffle: legacyState.isShuffle,
+                    isPlaying: legacyState.isPlaying,
                     currentTime: legacyState.currentTime,
                 },
             });
@@ -86,6 +88,7 @@ router.post("/", requireAuth, async (req, res) => {
             queue,
             currentIndex,
             isShuffle,
+            isPlaying,
             currentTime,
         } = req.body;
 
@@ -143,31 +146,38 @@ router.post("/", requireAuth, async (req, res) => {
             typeof currentTime === "number" && Number.isFinite(currentTime)
                 ? Math.max(0, currentTime)
                 : 0;
+        const hasExplicitIsPlaying = typeof isPlaying === "boolean";
+        const safeIsPlaying = hasExplicitIsPlaying ? isPlaying : false;
+
+        const updatePayload: Prisma.PlaybackStateUncheckedUpdateInput = {
+            playbackType,
+            trackId: trackId || null,
+            audiobookId: audiobookId || null,
+            podcastId: podcastId || null,
+            queue: safeQueue === null ? Prisma.DbNull : safeQueue,
+            currentIndex: safeCurrentIndex,
+            isShuffle: isShuffle || false,
+            currentTime: safeCurrentTime,
+            ...(hasExplicitIsPlaying ? { isPlaying: safeIsPlaying } : {}),
+        };
+        const createPayload: Prisma.PlaybackStateUncheckedCreateInput = {
+            userId,
+            deviceId,
+            playbackType,
+            trackId: trackId || null,
+            audiobookId: audiobookId || null,
+            podcastId: podcastId || null,
+            queue: safeQueue === null ? Prisma.DbNull : safeQueue,
+            currentIndex: safeCurrentIndex,
+            isShuffle: isShuffle || false,
+            isPlaying: safeIsPlaying,
+            currentTime: safeCurrentTime,
+        };
 
         const playbackState = await prisma.playbackState.upsert({
             where: { userId_deviceId: { userId, deviceId } },
-            update: {
-                playbackType,
-                trackId: trackId || null,
-                audiobookId: audiobookId || null,
-                podcastId: podcastId || null,
-                queue: safeQueue === null ? Prisma.DbNull : safeQueue,
-                currentIndex: safeCurrentIndex,
-                isShuffle: isShuffle || false,
-                currentTime: safeCurrentTime,
-            },
-            create: {
-                userId,
-                deviceId,
-                playbackType,
-                trackId: trackId || null,
-                audiobookId: audiobookId || null,
-                podcastId: podcastId || null,
-                queue: safeQueue === null ? Prisma.DbNull : safeQueue,
-                currentIndex: safeCurrentIndex,
-                isShuffle: isShuffle || false,
-                currentTime: safeCurrentTime,
-            },
+            update: updatePayload,
+            create: createPayload,
         });
 
         res.json(playbackState);

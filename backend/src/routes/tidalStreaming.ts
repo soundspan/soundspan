@@ -201,11 +201,13 @@ router.get("/status", requireAuth, async (req: Request, res: Response) => {
             tidalStreamingService.isAvailable(),
             tidalStreamingService.getAuthStatus(userId),
         ]);
+        const authenticated =
+            enabled && available ? await ensureUserOAuth(userId) : false;
 
         res.json({
             enabled,
             available,
-            authenticated: authStatus.authenticated,
+            authenticated,
             credentialsConfigured: authStatus.credentialsConfigured,
         });
     } catch (err: any) {

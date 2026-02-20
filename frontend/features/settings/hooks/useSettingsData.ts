@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { UserSettings } from "../types";
+import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
 
 const defaultSettings: UserSettings = {
     displayName: "",
@@ -20,16 +21,16 @@ export function useSettingsData() {
     const [settings, setSettings] = useState<UserSettings>(defaultSettings);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [loadError, setLoadError] = useState(false);
+    const lastLoadAttemptAtRef = useRef(0);
 
-    useEffect(() => {
-        if (isAuthenticated) {
-            loadSettings();
-        }
-    }, [isAuthenticated]);
-
-    const loadSettings = async () => {
+    const loadSettings = useCallback(async (options?: { background?: boolean }) => {
+        const isBackground = options?.background === true;
         try {
-            setIsLoading(true);
+            lastLoadAttemptAtRef.current = Date.now();
+            if (!isBackground) {
+                setIsLoading(true);
+            }
             const data = await api.getSettings();
             setSettings({
                 ...data,
@@ -37,13 +38,54 @@ export function useSettingsData() {
                 shareOnlinePresence: data.shareOnlinePresence ?? false,
                 shareListeningStatus: data.shareListeningStatus ?? false,
             });
+            setLoadError(false);
         } catch (error) {
             console.error("Failed to load settings:", error);
-            // No toast - error visible in UI if settings fail to load
+            setLoadError(true);
         } finally {
-            setIsLoading(false);
+            if (!isBackground) {
+                setIsLoading(false);
+            }
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        if (isAuthenticated) {
+            void loadSettings();
+            return;
+        }
+        setIsLoading(false);
+        setLoadError(false);
+    }, [isAuthenticated, loadSettings]);
+
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        if (typeof window === "undefined" || typeof document === "undefined") {
+            return;
+        }
+
+        const maybeRetryLoad = () => {
+            if (document.hidden) return;
+            if (
+                shouldRetryFailedSettingsLoad(
+                    loadError,
+                    lastLoadAttemptAtRef.current
+                )
+            ) {
+                void loadSettings({ background: true });
+            }
+        };
+
+        window.addEventListener("focus", maybeRetryLoad);
+        window.addEventListener("online", maybeRetryLoad);
+        document.addEventListener("visibilitychange", maybeRetryLoad);
+
+        return () => {
+            window.removeEventListener("focus", maybeRetryLoad);
+            window.removeEventListener("online", maybeRetryLoad);
+            document.removeEventListener("visibilitychange", maybeRetryLoad);
+        };
+    }, [isAuthenticated, loadError, loadSettings]);
 
     const saveSettings = async (newSettings: UserSettings) => {
         try {
@@ -71,5 +113,6 @@ export function useSettingsData() {
         updateSettings,
         saveSettings,
         loadSettings,
+        loadError,
     };
 }

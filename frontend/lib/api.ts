@@ -138,6 +138,17 @@ export interface TrackPreferenceResponse {
     updatedAt: string | null;
 }
 
+export interface AlbumPreferenceResponse {
+    albumId: string;
+    trackCount: number;
+    signal: TrackPreferenceSignal;
+    state: "liked" | "disliked" | "neutral";
+    score: number;
+    likedAt: string | null;
+    dislikedAt: string | null;
+    updatedAt: string | null;
+}
+
 interface ApiError extends Error {
     status?: number;
     data?: Record<string, unknown>;
@@ -840,6 +851,16 @@ class ApiClient {
     async setTrackPreference(trackId: string, signal: TrackPreferenceSignal) {
         return this.request<TrackPreferenceResponse>(
             `/library/tracks/${encodeURIComponent(trackId)}/preference`,
+            {
+                method: "POST",
+                body: JSON.stringify({ signal }),
+            }
+        );
+    }
+
+    async setAlbumPreference(albumId: string, signal: TrackPreferenceSignal) {
+        return this.request<AlbumPreferenceResponse>(
+            `/library/albums/${encodeURIComponent(albumId)}/preference`,
             {
                 method: "POST",
                 body: JSON.stringify({ signal }),
@@ -1788,6 +1809,7 @@ class ApiClient {
         queue?: ApiData[];
         currentIndex?: number;
         isShuffle?: boolean;
+        isPlaying?: boolean;
         currentTime?: number;
     }) {
         return this.request<ApiData>("/playback-state", {

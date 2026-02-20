@@ -14,6 +14,10 @@ import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { api } from "@/lib/api";
 import type { Album, Track } from "../types";
 import type { AlbumSource } from "../types";
+import {
+    createProviderStatusCacheEntry,
+    isProviderStatusCacheFresh,
+} from "./providerStatusCache";
 
 interface YtMusicMatch {
     videoId: string;
@@ -25,20 +29,35 @@ interface YtMusicMatch {
 // Shared across all hook instances so we don't re-fetch on every
 // album/artist page navigation. Expires after 60 seconds.
 let _ytStatusCache: { available: boolean; checkedAt: number } | null = null;
-const YT_STATUS_CACHE_TTL = 60_000; // 60 seconds
+let _ytStatusInFlight: Promise<boolean> | null = null;
 
 async function getYtMusicAvailable(): Promise<boolean> {
     const now = Date.now();
-    if (_ytStatusCache && now - _ytStatusCache.checkedAt < YT_STATUS_CACHE_TTL) {
+    if (_ytStatusCache && isProviderStatusCacheFresh(_ytStatusCache, now)) {
         return _ytStatusCache.available;
     }
+    if (_ytStatusInFlight) {
+        return _ytStatusInFlight;
+    }
+
+    const loadStatus = async () => {
+        try {
+            const status = await api.getYtMusicStatus();
+            const available = status.enabled && status.available && status.authenticated;
+            _ytStatusCache = createProviderStatusCacheEntry(available);
+            return available;
+        } catch {
+            _ytStatusCache = createProviderStatusCacheEntry(false);
+            return false;
+        } finally {
+            _ytStatusInFlight = null;
+        }
+    };
+
+    _ytStatusInFlight = loadStatus();
     try {
-        const status = await api.getYtMusicStatus();
-        const available = status.enabled && status.available && status.authenticated;
-        _ytStatusCache = { available, checkedAt: now };
-        return available;
+        return await _ytStatusInFlight;
     } catch {
-        _ytStatusCache = { available: false, checkedAt: now };
         return false;
     }
 }
@@ -46,6 +65,7 @@ async function getYtMusicAvailable(): Promise<boolean> {
 /** Invalidate the cached status (e.g. after auth changes). */
 export function invalidateYtMusicStatusCache() {
     _ytStatusCache = null;
+    _ytStatusInFlight = null;
 }
 
 // ── Global match cache ────────────────────────────────────────────

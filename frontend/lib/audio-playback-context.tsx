@@ -23,6 +23,7 @@ import {
     LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX,
     PLAYBACK_PROGRESS_SAVE_INTERVAL_MS,
 } from "@/lib/playback-state-cadence";
+import { resolveHydratedPlaybackIntent } from "@/lib/playback-intent";
 
 interface AudioPlaybackContextType {
     isPlaying: boolean;
@@ -67,7 +68,14 @@ function readStorage(key: MigratingStorageKey): string | null {
 }
 
 export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
-    const [isPlaying, setIsPlaying] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(() => {
+        if (typeof window === "undefined") return false;
+        try {
+            return readStorage(STORAGE_KEYS.IS_PLAYING) === "true";
+        } catch {
+            return false;
+        }
+    });
     const [currentTime, setCurrentTime] = useState(() => {
         if (typeof window === "undefined") return 0;
         try {
@@ -89,6 +97,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const [isHydrated] = useState(() => typeof window !== "undefined");
     const lastSaveTimeRef = useRef<number>(0);
     const lastServerProgressSaveRef = useRef<number>(0);
+    const initialIsPlayingRef = useRef(isPlaying);
     const currentTimeRef = useRef<number>(currentTime);
 
     // Clear audio error
@@ -197,6 +206,44 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         currentTimeRef.current = currentTime;
     }, [currentTime]);
+
+    useEffect(() => {
+        if (!isHydrated || typeof window === "undefined") return;
+        try {
+            writeMigratingStorageItem(
+                STORAGE_KEYS.IS_PLAYING,
+                isPlaying ? "true" : "false"
+            );
+        } catch {
+            // Ignore storage failures (private mode/quota/etc.)
+        }
+    }, [isHydrated, isPlaying]);
+
+    // Restore explicit play/pause intent from persisted backend playback state.
+    useEffect(() => {
+        if (!isHydrated) return;
+
+        let cancelled = false;
+        void api
+            .getPlaybackState()
+            .then((serverState) => {
+                if (cancelled) return;
+                const resolvedIntent = resolveHydratedPlaybackIntent(
+                    serverState,
+                    initialIsPlayingRef.current
+                );
+                if (resolvedIntent !== initialIsPlayingRef.current) {
+                    setIsPlaying(resolvedIntent);
+                }
+            })
+            .catch(() => {
+                // Best-effort startup hydration only.
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isHydrated]);
 
     // Sync currentTime from audiobook/podcast progress when not playing.
     useEffect(() => {
@@ -324,6 +371,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                     queue: limitedQueue,
                     currentIndex: adjustedIndex,
                     isShuffle: state.isShuffle,
+                    isPlaying,
                     currentTime: Math.max(0, currentTimeRef.current),
                 });
                 lastServerProgressSaveRef.current = now;
@@ -347,6 +395,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             state.queue,
             state.currentIndex,
             state.isShuffle,
+            isPlaying,
         ]
     );
 

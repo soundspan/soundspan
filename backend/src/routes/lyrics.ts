@@ -9,13 +9,18 @@ import {
 } from "../services/lyrics";
 
 const router = Router();
-const LYRICS_ROUTE_TIMEOUT_MS = 10000;
-const FALLBACK_LYRICS_RESPONSE = {
-    syncedLyrics: null,
-    plainLyrics: null,
-    source: "none",
-    synced: false,
-} as const;
+// Keep this above service-level LRCLIB timeout + embedded fallback chain to avoid
+// returning temporary false negatives during first-open lookup.
+const LYRICS_ROUTE_TIMEOUT_MS = 20000;
+
+class LyricsRouteTimeoutError extends Error {
+    constructor(trackId: string) {
+        super(
+            `Lyrics lookup timed out for ${trackId} after ${LYRICS_ROUTE_TIMEOUT_MS}ms`
+        );
+        this.name = "LyricsRouteTimeoutError";
+    }
+}
 
 router.use(requireAuth);
 
@@ -36,7 +41,7 @@ async function getLyricsWithRouteTimeout(
             logger.warn(
                 `[Lyrics] GET /lyrics/${trackId} timed out after ${LYRICS_ROUTE_TIMEOUT_MS}ms`
             );
-            resolve({ ...FALLBACK_LYRICS_RESPONSE });
+            reject(new LyricsRouteTimeoutError(trackId));
         }, LYRICS_ROUTE_TIMEOUT_MS);
 
         getLyrics(trackId, context)
@@ -126,6 +131,8 @@ async function getLyricsWithRouteTimeout(
  *         description: Track not found
  *       500:
  *         description: Server error
+ *       504:
+ *         description: Lyrics lookup timed out
  */
 router.get("/:trackId", async (req, res) => {
     const startedAt = Date.now();
@@ -159,9 +166,13 @@ router.get("/:trackId", async (req, res) => {
         );
         res.json(result);
     } catch (error) {
+        if (error instanceof LyricsRouteTimeoutError) {
+            return res.status(504).json({
+                error: "Lyrics lookup timed out",
+            });
+        }
         logger.error(`Get lyrics error for track ${req.params.trackId}:`, error);
-        // Degrade gracefully for UX: surface "no lyrics" instead of a hard failure.
-        res.json(FALLBACK_LYRICS_RESPONSE);
+        res.status(503).json({ error: "Failed to load lyrics" });
     }
 });
 

@@ -22,6 +22,7 @@ import {
     parsePlaybackStateSaveTimestamp,
     shouldSkipPlaybackStatePoll,
 } from "@/lib/playback-state-cadence";
+import { resolveInitialAudioVolume } from "@/lib/audio-volume";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -258,8 +259,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     );
     const [previousPlayerMode, setPreviousPlayerMode] =
         useState<PlayerMode>("full");
-    const [volume, setVolume] = useState(
-        () => { const v = readStorage(STORAGE_KEYS.VOLUME); return v ? parseFloat(v) : 0.5; }
+    const [volume, setVolume] = useState(() =>
+        resolveInitialAudioVolume(readStorage(STORAGE_KEYS.VOLUME))
     );
     const [isMuted, setIsMuted] = useState(
         () => readStorage(STORAGE_KEYS.IS_MUTED) === "true"
