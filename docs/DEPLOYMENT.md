@@ -6,6 +6,18 @@ For Kubernetes deployments, see [`KUBERNETES.md`](KUBERNETES.md).
 For reverse proxy/tunnel routing, see [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md).
 For container-by-container environment variables (required/optional, defaults, and purpose), see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
+## Important: Frontend Build-Time Environment Variables
+
+In production frontend images, `NEXT_PUBLIC_*` values are compiled into the browser bundle at image build time.
+
+- Runtime changes to `NEXT_PUBLIC_API_URL` or `NEXT_PUBLIC_API_PATH_MODE` on a pre-published image do not change browser API behavior.
+- For pre-published images, use reverse-proxy path routing for backend API traffic:
+  - route `/api/*` to backend (`:3006`)
+  - route app pages/assets to frontend (`:3030`)
+- Keep frontend runtime `BACKEND_URL` pointed at backend so frontend proxy routes can reach the API.
+
+If you need a different `NEXT_PUBLIC_*` behavior, build a custom frontend image with your desired build args.
+
 ## Quick Start
 
 ### One-command install (AIO container)
@@ -65,7 +77,7 @@ cd frontend && PORT=3031 BACKEND_URL=http://127.0.0.1:3007 NEXT_PUBLIC_API_URL=h
 
 - Treat `3030`/`3006` as potentially occupied by a live/local deployment. For local host-run validation and E2E, use `3031`/`3007`.
 - `auto` mode uses frontend proxy routing by default; set `BACKEND_URL=http://127.0.0.1:3007` so proxied API calls reach the correct backend in host-run local dev.
-- If you want direct browser-to-backend calls, set both `NEXT_PUBLIC_API_URL=http://127.0.0.1:3007` and `NEXT_PUBLIC_API_PATH_MODE=direct`.
+- If you want direct browser-to-backend calls in host-run dev, set both `NEXT_PUBLIC_API_URL=http://127.0.0.1:3007` and `NEXT_PUBLIC_API_PATH_MODE=direct`.
 - For Playwright against host-run stack, pin the UI base URL explicitly:
 
 ```bash

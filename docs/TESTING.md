@@ -126,6 +126,7 @@ Notes:
 ### Frontend E2E on host-run +1 ports (recommended)
 
 When a live/dev stack may already be using canonical ports (`3030`/`3006`), run local validation on `3031`/`3007`.
+This section is for host-run source workflows (`npm run dev`), not pre-published production frontend images.
 
 ```bash
 docker compose -f docker-compose.local.yml up -d postgres-local redis-local

@@ -3,6 +3,12 @@
 This guide covers routing for soundspan, including Listen Together Socket.IO traffic.
 It applies to any split frontend/backend deployment model (Kubernetes individual mode, docker-compose with separate `frontend` + `backend` services, or manual container setups).
 
+Important for pre-published frontend images:
+
+- `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_PATH_MODE` are build-time variables.
+- Changing them at container runtime does not change browser routing behavior.
+- Use edge reverse-proxy path routing for backend-direct API access.
+
 ## Why this matters
 
 When frontend and backend are separate services, Socket.IO traffic still has to reach backend somehow.
@@ -25,16 +31,18 @@ For split frontend/backend deployments:
 
 - Route all app traffic (including `/socket.io/listen-together`) to frontend service (`:3030`)
 - Frontend proxies `/socket.io/listen-together` to backend service (`:3006`)
-- For API calls, frontend proxy mode is used when `NEXT_PUBLIC_API_PATH_MODE=proxy` or `auto`
+- Route `/api/*` to frontend when using frontend proxy mode (works without `NEXT_PUBLIC_*` runtime env overrides)
 
-### Optional: Direct path-split routing
+### Optional: Direct backend path-split routing
 
-If you prefer to bypass frontend for Socket.IO:
+Use this when you want backend-direct API paths with pre-published frontend images (no custom frontend rebuild):
 
+- Route `/api/*` (Prefix) to backend service (`:3006`)
 - Route `/socket.io/listen-together` (Prefix) to backend service (`:3006`)
 - Route all other app traffic (for example `/`) to frontend service (`:3030`)
 
-If you prefer direct browser API calls too, set `NEXT_PUBLIC_API_PATH_MODE=direct` and `NEXT_PUBLIC_API_URL` so browser requests skip frontend `/api/*` proxy routes.
+This route split is the runtime-safe replacement for trying to set `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_API_PATH_MODE` on a prebuilt image.
+If you do want true in-app `direct` mode, publish a custom frontend image built with the desired `NEXT_PUBLIC_*` values.
 
 For single-service deployments (all-in-one image, Helm `deploymentMode: aio`):
 
@@ -64,6 +72,14 @@ Optional direct path-split variant:
 server {
     listen 443 ssl http2;
     server_name soundspan.example.com;
+
+    location /api/ {
+        proxy_pass http://soundspan-backend:3006;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
     location /socket.io/listen-together {
         proxy_pass http://soundspan-backend:3006;
@@ -101,6 +117,9 @@ Optional direct path-split variant:
 
 ```caddy
 soundspan.example.com {
+    @api path /api/*
+    reverse_proxy @api soundspan-backend:3006
+
     @listenTogether path /socket.io/listen-together*
     reverse_proxy @listenTogether soundspan-backend:3006
 

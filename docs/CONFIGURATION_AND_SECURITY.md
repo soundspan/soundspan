@@ -117,13 +117,32 @@ The worker entrypoint (`backend/src/worker.ts`) loads shared backend config and 
 
 ## External Access Settings
 
-If users access soundspan from outside your local network, set API URL and allowed origins.
+If users access soundspan from outside your local network, configure CORS and API routing intentionally.
+
+### Frontend Build-Time vs Runtime
+
+`NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_PATH_MODE` are frontend build-time variables.
+
+- They work as expected in source-build flows (`npm run dev`, `npm run build` with env/build args).
+- In pre-published frontend images, changing these vars at container runtime does not change browser behavior.
+
+### Source-Build Direct Mode (optional)
+
+If you build the frontend yourself and want direct browser calls to backend:
 
 ```env
 NEXT_PUBLIC_API_URL=https://soundspan-api.yourdomain.com
 NEXT_PUBLIC_API_PATH_MODE=direct
 ALLOWED_ORIGINS=http://localhost:3030,https://soundspan.yourdomain.com
 ```
+
+### Pre-Published Image Recommendation (no rebuild)
+
+For users consuming published images:
+
+- Leave `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_API_PATH_MODE` unset unless you are publishing your own rebuilt frontend image.
+- Route `/api/*` to backend in your reverse proxy, and route app traffic to frontend.
+- Set backend `ALLOWED_ORIGINS` to include your frontend origin.
 
 `NEXT_PUBLIC_API_PATH_MODE` controls how the browser reaches backend APIs:
 
@@ -132,6 +151,7 @@ ALLOWED_ORIGINS=http://localhost:3030,https://soundspan.yourdomain.com
 - `direct`: always call backend directly (uses `NEXT_PUBLIC_API_URL` when provided, else derives `protocol://<host>:3006`).
 
 Set this in frontend build/dev environment (same place you set `NEXT_PUBLIC_API_URL`).
+For pre-published images, see reverse-proxy path routing guidance in [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md).
 
 For Listen Together, the frontend proxies `/socket.io/listen-together` to backend by default in split deployments.
 If you bypass frontend proxying intentionally, your edge proxy/tunnel must route `/socket.io/listen-together` to backend `:3006`.

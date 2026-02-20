@@ -108,11 +108,11 @@ Status labels:
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
 | `BACKEND_URL` | `frontend` (and `audio-analyzer-clap-local` in local profile) | Optional (required when default route is not correct) | split stack: `http://backend:3006`; local CLAP: `http://host.docker.internal:3007` | Server-side URL used by frontend proxy/SSR and local CLAP callback target. |
-| `NEXT_PUBLIC_API_URL` | `frontend` | Optional | empty | Explicit browser API base URL. |
-| `NEXT_PUBLIC_API_PATH_MODE` | `frontend` | Optional | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. |
-| `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |
-| `NEXT_PUBLIC_APP_VERSION` | `frontend` (build-time) | Optional | `frontend/package.json` version | Explicit app version override in UI. |
-| `ANALYZE` | `frontend` (build-time) | Optional | unset (`false`) | Enables Next.js bundle analyzer when `true`. |
+| `NEXT_PUBLIC_API_URL` | `frontend` (build-time) | Optional (build-time only) | empty | Explicit browser API base URL. Runtime changes on prebuilt images do not affect browser bundle behavior. |
+| `NEXT_PUBLIC_API_PATH_MODE` | `frontend` (build-time) | Optional (build-time only) | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. Runtime changes on prebuilt images do not affect browser bundle behavior. |
+| `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional (build-time only) | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |
+| `NEXT_PUBLIC_APP_VERSION` | `frontend` (build-time) | Optional (build-time only) | `frontend/package.json` version | Explicit app version override in UI. |
+| `ANALYZE` | `frontend` (build-time) | Optional (build-time only) | unset (`false`) | Enables Next.js bundle analyzer when `true`. |
 
 ## Integration and Feature Variables
 
