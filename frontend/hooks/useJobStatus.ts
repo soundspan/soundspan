@@ -10,15 +10,23 @@ export interface JobStatus {
     error?: string;
 }
 
+export interface UseJobStatusOptions {
+    pollInterval?: number;
+    onComplete?: (result: Record<string, unknown>) => void;
+    onError?: (error: string) => void;
+}
+
+export interface UseJobStatusReturn {
+    jobStatus: JobStatus | null;
+    isPolling: boolean;
+    checkStatus: () => Promise<void>;
+}
+
 export function useJobStatus(
     jobId: string | null,
     jobType: JobType,
-    options?: {
-        pollInterval?: number;
-        onComplete?: (result: Record<string, unknown>) => void;
-        onError?: (error: string) => void;
-    }
-) {
+    options?: UseJobStatusOptions
+): UseJobStatusReturn {
     const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
     const [isPolling, setIsPolling] = useState(false);
     const pollInterval = options?.pollInterval || 5000;

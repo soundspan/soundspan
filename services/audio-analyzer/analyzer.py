@@ -147,6 +147,7 @@ class DatabaseConnection:
     """PostgreSQL connection manager"""
 
     def __init__(self, url: str):
+        """Store connection URL and initialize disconnected state."""
         self.url = url
         self.conn = None
 
@@ -163,7 +164,7 @@ class DatabaseConnection:
         self.conn.autocommit = False
         logger.info("Connected to PostgreSQL with UTF-8 encoding")
 
-    def get_cursor(self):
+    def get_cursor(self) -> RealDictCursor:
         """Get a database cursor"""
         if not self.conn:
             self.connect()
@@ -277,6 +278,7 @@ class AudioAnalyzer:
     """
     
     def __init__(self):
+        """Initialize feature extractors and load ML models when available."""
         self.enhanced_mode = False
         self.musicnn_model = None  # Base MusiCNN model
         self.prediction_models = {}  # Classification head models
@@ -628,7 +630,7 @@ class AudioAnalyzer:
                 result.pop(k, None)
         return result
     
-    def _extract_ml_features(self, audio_16k) -> Dict[str, Any]:
+    def _extract_ml_features(self, audio_16k: np.ndarray) -> Dict[str, Any]:
         """
         Extract features using Essentia MusiCNN + classification heads.
         
@@ -1065,6 +1067,7 @@ class AnalysisWorker:
     IDLE_SHUTDOWN_CYCLES = 10  # Shut down pool after this many empty cycles (~50s at 5s interval)
 
     def __init__(self):
+        """Initialize Redis/DB clients and runtime state for batch processing."""
         self.redis = redis.from_url(REDIS_URL)
         self.db = DatabaseConnection(DATABASE_URL)
         self.running = False

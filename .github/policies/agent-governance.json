@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-governance",
-    "version": "2026-02-20.01",
+    "version": "2026-02-20.04",
     "description": "Executable governance checks for AGENTS policy and local-context hygiene."
   },
   "contracts": {
@@ -55,8 +55,22 @@
         "queueLifecycle",
         "indexBuild",
         "indexVerify",
+        "featureIndexVerify",
+        "routeMapGenerate",
+        "routeMapVerify",
+        "domainReadmesGenerate",
+        "domainReadmesVerify",
+        "jsdocCoverageGenerate",
+        "jsdocCoverageVerify",
         "indexQueryStrictFresh",
-        "releaseNotes"
+        "releaseNotes",
+        "featureIndexFile",
+        "testMatrixFile",
+        "routeMapFile",
+        "jsdocCoverageFile",
+        "routesReadmeFile",
+        "servicesReadmeFile",
+        "frontendFeaturesReadmeFile"
       ]
     },
     "releaseNotes": {
@@ -96,6 +110,63 @@
       "helmRepoUrl": "https://soundspan.github.io/soundspan",
       "helmChartName": "soundspan",
       "helmChartReference": "soundspan/soundspan"
+    },
+    "featureIndex": {
+      "file": "docs/FEATURE_INDEX.json",
+      "requiredMetadataId": "soundspan-feature-index",
+      "requiredTopLevelKeys": [
+        "metadata",
+        "sources",
+        "coverage",
+        "features"
+      ],
+      "requiredMetadataKeys": [
+        "id",
+        "version",
+        "description",
+        "last_updated",
+        "update_expectation"
+      ],
+      "requiredCoverageKeys": [
+        "frontend_feature_dirs",
+        "verification_rules"
+      ],
+      "requiredFeatureFields": [
+        "id",
+        "name",
+        "summary",
+        "update_expectation",
+        "frontend",
+        "backend",
+        "tests",
+        "docs"
+      ],
+      "requiredFrontendFields": [
+        "feature_dirs",
+        "routes",
+        "primary_files"
+      ],
+      "requiredBackendFields": [
+        "routes",
+        "services"
+      ],
+      "requiredTestsFields": [
+        "targeted_commands",
+        "primary_specs"
+      ],
+      "frontendFeatureRoot": "frontend/features",
+      "enforceFrontendFeatureCoverage": true
+    },
+    "testMatrix": {
+      "file": "docs/TEST_MATRIX.md",
+      "requiredSections": [
+        "# Test Matrix",
+        "## Usage Rule",
+        "## Fast Commands",
+        "## Feature-to-Test Map",
+        "## Update Triggers",
+        "## Verification Workflow"
+      ]
     },
     "sessionArtifacts": {
       "executionQueueFile": ".agents/EXECUTION_QUEUE.json",
@@ -323,6 +394,8 @@
         "rule_tdd_default",
         "rule_coverage_default_100",
         "rule_scope_completeness_gate",
+        "rule_feature_index_required",
+        "rule_test_matrix_required",
         "rule_release_notes_template_required",
         "orch_hybrid_instruction_contract",
         "orch_scope_tightness",
@@ -335,7 +408,10 @@
         "orch_default_cli_routing",
         "orch_unconfirmed_unknowns",
         "orch_atomic_single_objective_scope",
-        "orch_codex_model_default"
+        "orch_codex_model_default",
+        "rule_route_map_required",
+        "rule_domain_readmes_required",
+        "rule_jsdoc_coverage_required"
       ]
     },
     "orchestratorSubagent": {
@@ -412,6 +488,47 @@
       "defaultModelRouting": {
         "codex": "gpt-5.3-codex-spark"
       }
+    },
+    "routeMap": {
+      "file": "docs/ROUTE_MAP.md",
+      "generatorScript": "tools/docs/generate-route-map.mjs",
+      "npmGenerateScriptName": "route-map:generate",
+      "npmGenerateScriptCommand": "node tools/docs/generate-route-map.mjs --write",
+      "npmVerifyScriptName": "route-map:verify",
+      "npmVerifyScriptCommand": "node tools/docs/generate-route-map.mjs --check",
+      "requiredSections": [
+        "# Route Map",
+        "## Backend API Endpoint Map",
+        "## Frontend Page Route Map",
+        "## Frontend API Route Handler Map"
+      ]
+    },
+    "domainReadmes": {
+      "generatorScript": "tools/docs/generate-domain-readmes.mjs",
+      "npmGenerateScriptName": "domain-readmes:generate",
+      "npmGenerateScriptCommand": "node tools/docs/generate-domain-readmes.mjs --write",
+      "npmVerifyScriptName": "domain-readmes:verify",
+      "npmVerifyScriptCommand": "node tools/docs/generate-domain-readmes.mjs --check",
+      "requiredFiles": [
+        "backend/src/routes/README.md",
+        "backend/src/services/README.md",
+        "frontend/features/README.md"
+      ],
+      "requiredSection": "## Start Here",
+      "frontendFeatureRoot": "frontend/features"
+    },
+    "jsdocCoverage": {
+      "file": "docs/JSDOC_COVERAGE.md",
+      "generatorScript": "tools/docs/generate-jsdoc-coverage.mjs",
+      "npmGenerateScriptName": "jsdoc-coverage:generate",
+      "npmGenerateScriptCommand": "node tools/docs/generate-jsdoc-coverage.mjs --write",
+      "npmVerifyScriptName": "jsdoc-coverage:verify",
+      "npmVerifyScriptCommand": "node tools/docs/generate-jsdoc-coverage.mjs --check",
+      "requiredSections": [
+        "# JSDoc Coverage Baseline",
+        "## Coverage Summary",
+        "## Missing Exported Symbols (Top 250)"
+      ]
     }
   },
   "checks": {
@@ -449,10 +566,18 @@
           "node .github/scripts/enforce-agent-policies.mjs",
           "Release notes template artifact: `docs/RELEASE_NOTES_TEMPLATE.md`",
           "Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`",
+          "Feature index artifact: `docs/FEATURE_INDEX.json`",
+          "Test matrix artifact: `docs/TEST_MATRIX.md`",
           "Release notes content rule: summarize changes in plain English and avoid raw commit-jargon wording.",
           "`orch_atomic_single_objective_scope`",
           "`orch_codex_model_default`",
-          "gpt-5.3-codex-spark"
+          "gpt-5.3-codex-spark",
+          "Route map artifact: `docs/ROUTE_MAP.md`",
+          "Domain start-here readmes: `backend/src/routes/README.md`, `backend/src/services/README.md`, `frontend/features/*/README.md`",
+          "Route map generator: `npm run route-map:generate`",
+          "Domain readmes generator: `npm run domain-readmes:generate`",
+          "JSDoc coverage artifact: `docs/JSDOC_COVERAGE.md`",
+          "JSDoc coverage verify: `npm run jsdoc-coverage:verify`"
         ]
       },
       {
@@ -471,6 +596,8 @@
           "`rule_canonical_agents_root`",
           "`rule_worktree_root_required`",
           "`rule_agents_semantic_merge_required`",
+          "`rule_feature_index_required`",
+          "`rule_test_matrix_required`",
           "`rule_release_notes_template_required`",
           "### Accuracy, Recency, and Sourcing (Required)",
           "### Context7 MCP and Web Search Policy",
@@ -479,6 +606,8 @@
           "### Baseline Workflow (Required)",
           "### Release Notes Format (Required)",
           "Summarize release-note items in plain English for operators/users; do not copy raw commit-jargon wording as release-note bullets.",
+          "### Feature and Test Discoverability (Required)",
+          "Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted entry in `docs/FEATURE_INDEX.json`.",
           "### CLI Worktree Parallelism (Required)",
           "Default to read-only exploration first; edit only when required by the task.",
           "When operating in Codex CLI, prefer Git worktrees for non-trivial parallelizable tasks instead of stacking unrelated edits in one working tree.",
@@ -542,7 +671,13 @@
           "`orch_codex_model_default`",
           "gpt-5.3-codex-spark",
           "Run an automated stale reference scan for `.agents/plans/**` paths; unresolved references must fail preflight/policy checks by default.",
-          "Validate `.agents/SESSION_BRIEF.json` schema when present; stale brief age beyond policy threshold is a CI/local failure until refreshed via preflight."
+          "Validate `.agents/SESSION_BRIEF.json` schema when present; stale brief age beyond policy threshold is a CI/local failure until refreshed via preflight.",
+          "`rule_route_map_required`",
+          "`rule_domain_readmes_required`",
+          "Treat `docs/ROUTE_MAP.md` as the canonical generated map for backend endpoints and frontend routes.",
+          "Regenerate route map artifacts with `npm run route-map:generate` whenever backend route handlers, route mounts, or frontend app routes change.",
+          "Maintain per-domain start-here READMEs in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md`.",
+          "Keep `docs/JSDOC_COVERAGE.md` current via `npm run jsdoc-coverage:verify` whenever exported-symbol surface changes."
         ]
       },
       {
@@ -564,6 +699,9 @@
           "## Common Tasks",
           "docs/RELEASE_NOTES_TEMPLATE.md",
           "Write release-note bullets in plain English for users/operators; avoid raw commit-jargon phrasing in published notes.",
+          "Keep `docs/FEATURE_INDEX.json` current as the machine-readable feature map (findability + ownership pointers).",
+          "Keep `docs/TEST_MATRIX.md` current as the feature-to-targeted-test command map.",
+          "Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted `docs/FEATURE_INDEX.json` entries in the same change set.",
           "`.agents/EXECUTION_QUEUE.json` (canonical execution queue + atomic state)",
           "Multi-agent queue usage:",
           "single scope/queue authority for orchestrator and subagents.",
@@ -573,7 +711,10 @@
           "All additional Git worktrees for this repo must be created under `/home/joshd/git/soundspan/.worktrees`.",
           "In non-primary worktrees, `.agents` must be a symlink to the canonical shared root.",
           "selectors: `id`, `plan_ref`, `owner`, `depends_on`",
-          "required: `PLAN.md`"
+          "required: `PLAN.md`",
+          "Keep `docs/ROUTE_MAP.md` current as the generated backend/frontend route map (`npm run route-map:generate`).",
+          "Keep per-domain start-here guides current in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md` (`npm run domain-readmes:generate`).",
+          "Keep `docs/JSDOC_COVERAGE.md` current for exported-symbol documentation drift checks (`npm run jsdoc-coverage:verify`)."
         ]
       },
       {
@@ -594,6 +735,27 @@
         ]
       },
       {
+        "file": "docs/README.md",
+        "snippets": [
+          "[`FEATURE_INDEX.json`](FEATURE_INDEX.json)",
+          "[`TEST_MATRIX.md`](TEST_MATRIX.md)",
+          "[`ROUTE_MAP.md`](ROUTE_MAP.md)",
+          "[`JSDOC_COVERAGE.md`](JSDOC_COVERAGE.md)",
+          "[`../backend/src/routes/README.md`](../backend/src/routes/README.md)",
+          "[`../backend/src/services/README.md`](../backend/src/services/README.md)",
+          "[`../frontend/features/README.md`](../frontend/features/README.md)"
+        ]
+      },
+      {
+        "file": ".github/scripts/agent-queue-lifecycle.mjs",
+        "snippets": [
+          "function moveFeaturePlanDirectory(queueFile, featureId)",
+          ".agents/plans/archived/",
+          "rewrote",
+          "queue plan_ref entries"
+        ]
+      },
+      {
         "file": ".github/workflows/pr-checks.yml",
         "snippets": [
           "Policy as Code",
@@ -607,7 +769,14 @@
           "\"agent:queue:start\"",
           "\"agent:queue:complete\"",
           "\"agent:queue:close-feature\"",
-          "\"release:notes\""
+          "\"feature-index:verify\"",
+          "\"release:notes\"",
+          "\"route-map:generate\"",
+          "\"route-map:verify\"",
+          "\"domain-readmes:generate\"",
+          "\"domain-readmes:verify\"",
+          "\"jsdoc-coverage:generate\"",
+          "\"jsdoc-coverage:verify\""
         ]
       }
     ],
@@ -671,6 +840,25 @@
         ]
       },
       {
+        "file": "docs/TEST_MATRIX.md",
+        "sections": [
+          "# Test Matrix",
+          "## Usage Rule",
+          "## Fast Commands",
+          "## Feature-to-Test Map",
+          "## Update Triggers",
+          "## Verification Workflow"
+        ]
+      },
+      {
+        "file": "docs/JSDOC_COVERAGE.md",
+        "sections": [
+          "# JSDoc Coverage Baseline",
+          "## Coverage Summary",
+          "## Missing Exported Symbols (Top 250)"
+        ]
+      },
+      {
         "file": ".agents/CONTINUITY.md",
         "optional": false,
         "sections": [
@@ -679,6 +867,42 @@
           "## [PROGRESS]",
           "## [DISCOVERIES]",
           "## [OUTCOMES]"
+        ]
+      },
+      {
+        "file": "docs/ROUTE_MAP.md",
+        "sections": [
+          "# Route Map",
+          "## Backend API Endpoint Map",
+          "## Frontend Page Route Map",
+          "## Frontend API Route Handler Map"
+        ]
+      },
+      {
+        "file": "backend/src/routes/README.md",
+        "sections": [
+          "# Backend Routes",
+          "## Start Here",
+          "## Mounted Route Modules",
+          "## Update Rule"
+        ]
+      },
+      {
+        "file": "backend/src/services/README.md",
+        "sections": [
+          "# Backend Services",
+          "## Start Here",
+          "## Service Modules",
+          "## Update Rule"
+        ]
+      },
+      {
+        "file": "frontend/features/README.md",
+        "sections": [
+          "# Frontend Features",
+          "## Start Here",
+          "## Feature Domains",
+          "## Update Rule"
         ]
       }
     ],

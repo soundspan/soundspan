@@ -29,7 +29,7 @@ import gc
 import threading
 import uuid
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import traceback
 import numpy as np
 import librosa
@@ -102,6 +102,7 @@ class CLAPAnalyzer:
     """
 
     def __init__(self):
+        """Initialize analyzer state and lazy model-loading controls."""
         self.model = None
         self._lock = threading.Lock()
         self.last_work_time: float = time.time()
@@ -294,6 +295,7 @@ class DatabaseConnection:
     """PostgreSQL connection manager with pgvector support and auto-reconnect"""
 
     def __init__(self, url: str):
+        """Store connection URL and initialize disconnected state."""
         self.url = url
         self.conn = None
 
@@ -332,7 +334,7 @@ class DatabaseConnection:
         self.close()
         self.connect()
 
-    def get_cursor(self):
+    def get_cursor(self) -> RealDictCursor:
         """Get a database cursor, reconnecting if necessary"""
         if not self.is_connected():
             self.reconnect()
@@ -364,6 +366,7 @@ class Worker:
     """
 
     def __init__(self, worker_id: int, analyzer: CLAPAnalyzer, stop_event: threading.Event):
+        """Initialize worker identity, shared analyzer, and shutdown signal."""
         self.worker_id = worker_id
         self.analyzer = analyzer
         self.stop_event = stop_event
@@ -547,6 +550,7 @@ class TextEmbedHandler:
     """
 
     def __init__(self, analyzer: CLAPAnalyzer, stop_event: threading.Event):
+        """Initialize stream-consumer identity and handler dependencies."""
         self.analyzer = analyzer
         self.stop_event = stop_event
         self.redis_client = None
@@ -683,7 +687,7 @@ class TextEmbedHandler:
             fallback.expire(response_key, TEXT_EMBED_RESPONSE_TTL_SECONDS)
             fallback.execute()
 
-    def _handle_message(self, message_id, fields):
+    def _handle_message(self, message_id: str, fields: Dict[str, str]):
         """Handle a single text embedding stream message."""
         request_id = None
         response_key = None
@@ -750,6 +754,7 @@ class ControlHandler:
     """
 
     def __init__(self, stop_event: threading.Event):
+        """Initialize control-channel listener state."""
         self.stop_event = stop_event
         self.redis_client = None
         self.pubsub = None
@@ -784,7 +789,7 @@ class ControlHandler:
                 self.pubsub.close()
             logger.info("ControlHandler stopped")
 
-    def _handle_message(self, message):
+    def _handle_message(self, message: Dict[str, Any]):
         """Handle a control message"""
         try:
             data = message['data']

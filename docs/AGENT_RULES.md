@@ -28,6 +28,11 @@ These IDs are stable cross-references for enforceable behavior and map to policy
 - `rule_tdd_default`: Prefer true TDD and document deviations when strict TDD is impractical.
 - `rule_coverage_default_100`: Treat 100% coverage as default bar unless user-approved exception exists.
 - `rule_scope_completeness_gate`: Explicitly map outcomes to all in-scope user requests before closeout.
+- `rule_feature_index_required`: Maintain `docs/FEATURE_INDEX.json` as the canonical machine-readable feature map.
+- `rule_test_matrix_required`: Maintain `docs/TEST_MATRIX.md` as the canonical targeted test-command matrix.
+- `rule_route_map_required`: Maintain `docs/ROUTE_MAP.md` as the canonical generated backend/frontend route map.
+- `rule_domain_readmes_required`: Maintain per-domain start-here READMEs in `backend/src/routes`, `backend/src/services`, and `frontend/features/*`.
+- `rule_jsdoc_coverage_required`: Maintain `docs/JSDOC_COVERAGE.md` as the generated exported-symbol documentation drift tracker.
 - `rule_release_notes_template_required`: Enforce canonical release-notes template + generator workflow, section order, and plain-English non-jargon summaries through policy checks.
 
 ## Global Operating Agreements (All LLMs)
@@ -83,6 +88,17 @@ These rules are cross-agent defaults for this workspace and apply unless the use
   - repository URL: `https://soundspan.github.io/soundspan`
   - chart name: `soundspan`
   - chart reference: `soundspan/soundspan`
+
+### Feature and Test Discoverability (Required)
+
+- Treat `docs/FEATURE_INDEX.json` as the canonical machine-readable feature map and ownership/findability index.
+- Treat `docs/TEST_MATRIX.md` as the canonical map from feature domains to targeted test commands.
+- Treat `docs/ROUTE_MAP.md` as the canonical generated map for backend endpoints and frontend routes.
+- Keep `docs/JSDOC_COVERAGE.md` current via `npm run jsdoc-coverage:verify` whenever exported-symbol surface changes.
+- Regenerate route map artifacts with `npm run route-map:generate` whenever backend route handlers, route mounts, or frontend app routes change.
+- Maintain per-domain start-here READMEs in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md`.
+- Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted entry in `docs/FEATURE_INDEX.json`.
+- Whenever test entrypoints or reliable targeted commands change, update `docs/TEST_MATRIX.md` in the same change set.
 
 ### Container-First Policy (Required)
 
@@ -160,8 +176,13 @@ When policy expectations change, update all relevant governance artifacts in the
 2. `docs/AGENT_RULES.md` (human-readable rules contract)
 3. `docs/AGENT_CONTEXT.md` (human-readable context contract, when impacted)
 4. `docs/CONTEXT_INDEX.json` (machine-readable context map)
-5. `.github/policies/agent-governance.json` (machine-readable source of truth)
-6. `.github/scripts/enforce-agent-policies.mjs` (enforcement logic)
+5. `docs/FEATURE_INDEX.json` (machine-readable feature map, when impacted)
+6. `docs/TEST_MATRIX.md` (targeted test command map, when impacted)
+7. `docs/ROUTE_MAP.md` (generated backend/frontend route map, when impacted)
+8. `docs/JSDOC_COVERAGE.md` (generated exported-symbol JSDoc coverage tracker, when impacted)
+9. `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md` (domain start-here guides, when impacted)
+10. `.github/policies/agent-governance.json` (machine-readable source of truth)
+11. `.github/scripts/enforce-agent-policies.mjs` (enforcement logic)
 
 ## LLM Continuity and Execution Discipline
 

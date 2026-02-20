@@ -167,6 +167,7 @@ class DeviceCodePollRequest(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    """Payload for single-query YouTube Music search requests."""
     query: str
     filter: Optional[Literal["songs", "albums", "artists", "videos"]] = None
     limit: int = 20

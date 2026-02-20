@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { AppError, ErrorCategory } from "../utils/errors";
 import { config } from "../config";
 
+/** Maps application/runtime errors to consistent HTTP responses and logging. */
 export function errorHandler(
     err: Error,
     req: Request,

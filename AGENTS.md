@@ -21,6 +21,11 @@ Read these in order before non-trivial work:
 - Session preflight generator: `.github/scripts/agent-session-preflight.mjs`
 - Release notes template artifact: `docs/RELEASE_NOTES_TEMPLATE.md`
 - Release notes generator: `.github/scripts/generate-release-notes.mjs`
+- Feature index artifact: `docs/FEATURE_INDEX.json`
+- Test matrix artifact: `docs/TEST_MATRIX.md`
+- Route map artifact: `docs/ROUTE_MAP.md`
+- JSDoc coverage artifact: `docs/JSDOC_COVERAGE.md`
+- Domain start-here readmes: `backend/src/routes/README.md`, `backend/src/services/README.md`, `frontend/features/*/README.md`
 - Human-readable rules contract: `docs/AGENT_RULES.md`
 - Human-readable project context: `docs/AGENT_CONTEXT.md`
 - Context map index: `docs/CONTEXT_INDEX.json`
@@ -98,11 +103,21 @@ Default Codex subagent model: `gpt-5.3-codex-spark` unless user-overridden.
 - Session preflight: `npm run agent:preflight`
 - Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`
 - Release notes content rule: summarize changes in plain English and avoid raw commit-jargon wording.
+- Route map generator: `npm run route-map:generate`
+- Domain readmes generator: `npm run domain-readmes:generate`
+- JSDoc coverage verify: `npm run jsdoc-coverage:verify`
 - CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code`
 - If process expectations change, update all of:
   - `AGENTS.md`
   - `docs/AGENT_RULES.md`
   - `docs/AGENT_CONTEXT.md`
   - `docs/CONTEXT_INDEX.json`
+  - `docs/FEATURE_INDEX.json`
+  - `docs/TEST_MATRIX.md`
+  - `docs/ROUTE_MAP.md`
+  - `docs/JSDOC_COVERAGE.md`
+  - `backend/src/routes/README.md`
+  - `backend/src/services/README.md`
+  - `frontend/features/README.md`
   - `.github/policies/agent-governance.json`
   - `.github/scripts/enforce-agent-policies.mjs`

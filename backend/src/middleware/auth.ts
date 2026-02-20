@@ -43,6 +43,7 @@ export interface JWTPayload {
     type?: string;
 }
 
+/** Creates a short-lived access token for authenticated API/session flows. */
 export function generateToken(user: {
     id: string;
     username: string;
@@ -61,6 +62,7 @@ export function generateToken(user: {
     );
 }
 
+/** Creates a long-lived refresh token tied to the user's token version. */
 export function generateRefreshToken(user: {
     id: string;
     tokenVersion: number;
@@ -180,6 +182,7 @@ async function authenticateRequest(
     return null;
 }
 
+/** Enforces authenticated access and attaches the resolved user to `req.user`. */
 export async function requireAuth(
     req: Request,
     res: Response,
@@ -193,6 +196,7 @@ export async function requireAuth(
     return res.status(401).json({ error: "Not authenticated" });
 }
 
+/** Enforces administrator role access after `requireAuth` has populated `req.user`. */
 export async function requireAdmin(
     req: Request,
     res: Response,
@@ -205,6 +209,7 @@ export async function requireAdmin(
 }
 
 // For streaming URLs that may use query params or need special handling
+/** Authenticates via session, API key, query token, or bearer token for media routes. */
 export async function requireAuthOrToken(
     req: Request,
     res: Response,

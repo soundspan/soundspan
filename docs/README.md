@@ -16,6 +16,10 @@ This index is the central navigation page for all project documentation under `d
 | [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md) | Operators/network admins | Reverse proxy and Cloudflare Tunnel routing guidance |
 | [`TESTING.md`](TESTING.md) | Contributors/operators | Test frameworks, directory structure, commands, CI coverage visibility, and manual-vs-automated boundaries |
 | [`REPO_INDEXING.md`](REPO_INDEXING.md) | Contributors/agents | Deterministic local indexing/vectorization, drift controls, and retrieval operations |
+| [`FEATURE_INDEX.json`](FEATURE_INDEX.json) | Contributors/agents | Machine-readable feature map linking domains to implementation files, tests, and docs |
+| [`TEST_MATRIX.md`](TEST_MATRIX.md) | Contributors/agents | Canonical feature-to-targeted-test command matrix for fast local validation |
+| [`ROUTE_MAP.md`](ROUTE_MAP.md) | Contributors/agents | Generated backend endpoint and frontend route map for quick entrypoint discovery |
+| [`JSDOC_COVERAGE.md`](JSDOC_COVERAGE.md) | Contributors/agents | Generated baseline of exported-symbol JSDoc coverage by backend/frontend area |
 | [`RELEASE_NOTES_TEMPLATE.md`](RELEASE_NOTES_TEMPLATE.md) | Maintainers | Canonical release-notes format and command (`npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`) |
 
 ## Compatibility and Brand Tracking
@@ -49,5 +53,15 @@ This index is the central navigation page for all project documentation under `d
 ### Contributors and maintainers
 
 1. Start with [`TESTING.md`](TESTING.md) for test framework/layout/command standards
-2. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-3. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
+2. Use [`FEATURE_INDEX.json`](FEATURE_INDEX.json) to locate feature entrypoints quickly
+3. Use [`TEST_MATRIX.md`](TEST_MATRIX.md) to run targeted impacted checks before broader suites
+4. Use [`ROUTE_MAP.md`](ROUTE_MAP.md) to jump straight to backend endpoint and frontend page handlers
+5. Use domain start-here guides in [`../backend/src/routes/README.md`](../backend/src/routes/README.md), [`../backend/src/services/README.md`](../backend/src/services/README.md), and [`../frontend/features/README.md`](../frontend/features/README.md)
+6. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+7. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
+
+Quick helper command:
+- `npm run feature-index:verify` validates `docs/FEATURE_INDEX.json` coverage against `frontend/features/*`.
+- `npm run route-map:verify` validates `docs/ROUTE_MAP.md` is up to date with backend/frontend route sources.
+- `npm run domain-readmes:verify` validates per-domain start-here READMEs are up to date.
+- `npm run jsdoc-coverage:verify` validates `docs/JSDOC_COVERAGE.md` is up to date with current exported-symbol scan results.

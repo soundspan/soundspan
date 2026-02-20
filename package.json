@@ -10,6 +10,13 @@
     "index:rebuild": "node tools/index/indexer.mjs build --full",
     "index:query": "node tools/index/indexer.mjs query",
     "index:verify": "node tools/index/indexer.mjs verify --strict",
+    "feature-index:verify": "node tools/docs/feature-index-check.mjs --strict",
+    "jsdoc-coverage:generate": "node tools/docs/generate-jsdoc-coverage.mjs --write",
+    "jsdoc-coverage:verify": "node tools/docs/generate-jsdoc-coverage.mjs --check",
+    "route-map:generate": "node tools/docs/generate-route-map.mjs --write",
+    "route-map:verify": "node tools/docs/generate-route-map.mjs --check",
+    "domain-readmes:generate": "node tools/docs/generate-domain-readmes.mjs --write",
+    "domain-readmes:verify": "node tools/docs/generate-domain-readmes.mjs --check",
     "release:notes": "node .github/scripts/generate-release-notes.mjs",
     "release:prepare": "node .github/scripts/release-version-sync.mjs --write",
     "release:verify": "node .github/scripts/release-version-sync.mjs --check"

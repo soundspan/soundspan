@@ -188,6 +188,116 @@ function saveQueue(queueFile, queue) {
   fs.writeFileSync(queueFile, `${JSON.stringify(queue, null, 2)}\n`, "utf8");
 }
 
+function ensureSafeFeatureId(featureId) {
+  if (!/^[A-Za-z0-9._-]+$/.test(featureId)) {
+    fail(
+      `Invalid --feature-id ${featureId}. Use only letters, numbers, ".", "_", and "-".`,
+    );
+  }
+}
+
+function listMarkdownFiles(rootDir) {
+  if (!fs.existsSync(rootDir)) {
+    return [];
+  }
+  const stats = fs.statSync(rootDir);
+  if (!stats.isDirectory()) {
+    return [];
+  }
+
+  const files = [];
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        files.push(entryPath);
+      }
+    }
+  }
+
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+function moveFeaturePlanDirectory(queueFile, featureId) {
+  ensureSafeFeatureId(featureId);
+
+  const agentsRoot = path.resolve(path.dirname(queueFile));
+  const currentDir = path.resolve(agentsRoot, "plans", "current", featureId);
+  const deferredDir = path.resolve(agentsRoot, "plans", "deferred", featureId);
+  const archivedDir = path.resolve(agentsRoot, "plans", "archived", featureId);
+
+  const currentExists = fs.existsSync(currentDir);
+  const deferredExists = fs.existsSync(deferredDir);
+  const archivedExists = fs.existsSync(archivedDir);
+
+  if (currentExists && deferredExists) {
+    fail(
+      `Feature ${featureId} exists in both current and deferred plans. Resolve manually before closing.`,
+    );
+  }
+
+  if (archivedExists && (currentExists || deferredExists)) {
+    fail(
+      `Archived plan already exists for ${featureId} while current/deferred plan still exists. Resolve manually before closing.`,
+    );
+  }
+
+  const sourceDir = currentExists ? currentDir : deferredExists ? deferredDir : null;
+  let moved = false;
+  if (sourceDir) {
+    fs.mkdirSync(path.dirname(archivedDir), { recursive: true });
+    fs.renameSync(sourceDir, archivedDir);
+    moved = true;
+  } else if (!archivedExists) {
+    fail(
+      `No plan directory found for feature ${featureId} under .agents/plans/current or .agents/plans/deferred.`,
+    );
+  }
+
+  const fromCurrentPrefix = `.agents/plans/current/${featureId}`;
+  const fromDeferredPrefix = `.agents/plans/deferred/${featureId}`;
+  const toArchivedPrefix = `.agents/plans/archived/${featureId}`;
+  const plansRoot = path.resolve(agentsRoot, "plans");
+
+  let rewrittenFiles = 0;
+  let rewrittenReferences = 0;
+  for (const markdownFile of listMarkdownFiles(plansRoot)) {
+    const before = fs.readFileSync(markdownFile, "utf8");
+    let after = before;
+    for (const fromPrefix of [fromCurrentPrefix, fromDeferredPrefix]) {
+      const replaced = after.split(fromPrefix).join(toArchivedPrefix);
+      if (replaced !== after) {
+        const changeCount = after.split(fromPrefix).length - 1;
+        rewrittenReferences += changeCount;
+        after = replaced;
+      }
+    }
+    if (after !== before) {
+      fs.writeFileSync(markdownFile, after, "utf8");
+      rewrittenFiles += 1;
+    }
+  }
+
+  return {
+    moved,
+    rewrittenFiles,
+    rewrittenReferences,
+    archivedPlanRef: `${toArchivedPrefix}/PLAN.md`,
+    previousPlanRefs: new Set([
+      `${fromCurrentPrefix}/PLAN.md`,
+      `${fromDeferredPrefix}/PLAN.md`,
+    ]),
+  };
+}
+
 function usage() {
   info("Usage:");
   info("  open-item --id <id> --title <title> --feature-id <feature_id> --plan-ref <ref> --acceptance <criterion> [--acceptance <criterion> ...]");
@@ -338,6 +448,28 @@ function commandCloseFeature(repoRoot, flags) {
   const featureId = getSingleFlag(flags, "feature-id", true);
   const taskId = getSingleFlag(flags, "task-id", false);
   const objective = getSingleFlag(flags, "objective", false);
+  ensureSafeFeatureId(featureId);
+
+  const planMoveResult = moveFeaturePlanDirectory(queueFile, featureId);
+  let updatedPlanRefs = 0;
+  for (const item of queue.items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    if (item.feature_id !== featureId) {
+      continue;
+    }
+    const existingPlanRef = toNonEmptyString(item.plan_ref);
+    if (!existingPlanRef) {
+      continue;
+    }
+    if (!planMoveResult.previousPlanRefs.has(existingPlanRef)) {
+      continue;
+    }
+    item.plan_ref = planMoveResult.archivedPlanRef;
+    item.updated_at = now;
+    updatedPlanRefs += 1;
+  }
 
   queue.feature_id = featureId;
   if (taskId) {
@@ -351,7 +483,12 @@ function commandCloseFeature(repoRoot, flags) {
   queue.last_updated = now;
 
   saveQueue(queueFile, queue);
-  info(`Marked feature ${featureId} complete in hot queue. Run npm run agent:preflight to archive/reset.`);
+  const moveStatus = planMoveResult.moved
+    ? "moved"
+    : "already archived";
+  info(
+    `Marked feature ${featureId} complete in hot queue, ${moveStatus} plan directory, rewrote ${planMoveResult.rewrittenReferences} plan references across ${planMoveResult.rewrittenFiles} markdown files, and updated ${updatedPlanRefs} queue plan_ref entries. Run npm run agent:preflight to archive/reset.`,
+  );
 }
 
 function main() {

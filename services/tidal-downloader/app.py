@@ -66,6 +66,7 @@ STREAM_CACHE_TTL = 600  # 10 minutes
 # ════════════════════════════════════════════════════════════════════
 
 class AuthTokenRequest(BaseModel):
+    """Payload for device-code token exchange polling."""
     device_code: str
 
 
@@ -85,20 +86,24 @@ class SessionCheckPayload(BaseModel):
 
 
 class RefreshRequest(BaseModel):
+    """Payload for refreshing a TIDAL access token."""
     refresh_token: str
 
 
 class SearchRequest(BaseModel):
+    """Payload for TIDAL catalog search queries."""
     query: str
 
 
 class DownloadTrackRequest(BaseModel):
+    """Payload for downloading a single TIDAL track."""
     track_id: int
     quality: Literal["LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"] = "HIGH"
     output_template: str = "{album.artist}/{album.title}/{item.number:02d}. {item.title}"
 
 
 class DownloadAlbumRequest(BaseModel):
+    """Payload for downloading all tracks from a TIDAL album."""
     album_id: int
     quality: Literal["LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"] = "HIGH"
     output_template: str = "{album.artist}/{album.title}/{item.number:02d}. {item.title}"
@@ -113,6 +118,7 @@ class UserAuthRestoreRequest(BaseModel):
 
 
 class BatchSearchQuery(BaseModel):
+    """Single query descriptor for batch TIDAL search requests."""
     query: str
     filter: Optional[str] = None
     limit: int = 5

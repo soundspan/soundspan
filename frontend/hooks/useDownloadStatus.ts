@@ -34,7 +34,7 @@ export interface DownloadStatus {
 export function useDownloadStatus(
     pollingInterval: number = 15000,
     isAuthenticated: boolean = false
-) {
+): DownloadStatus {
     const [status, setStatus] = useState<DownloadStatus>({
         activeDownloads: [],
         recentDownloads: [],

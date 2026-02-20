@@ -31,6 +31,7 @@ function decodeSubsonicPassword(input: string): string | null {
     }
 }
 
+/** Validates OpenSubsonic credentials and enriches request context for `/rest` handlers. */
 export async function requireSubsonicAuth(
     req: Request,
     res: Response,
@@ -249,6 +250,7 @@ export async function requireSubsonicAuth(
     next();
 }
 
+/** Rate-limits failed Subsonic auth attempts per IP and username pair. */
 export const subsonicRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 30,

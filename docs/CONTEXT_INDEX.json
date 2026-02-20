@@ -1,8 +1,8 @@
 {
   "metadata": {
     "id": "soundspan-agent-context-index",
-    "version": "2026-02-20.01",
-    "description": "Machine-readable index for startup context retrieval and split-doc drift checks, including release-notes plain-English policy alignment."
+    "version": "2026-02-20.04",
+    "description": "Machine-readable index for startup context retrieval and split-doc drift checks, including release-notes plain-English plus feature/test/route/JSDoc discoverability policy alignment."
   },
   "startupReadOrder": [
     "AGENTS.md",
@@ -230,7 +230,21 @@
     "queueLifecycle": "npm run agent:queue:open -- --help",
     "indexBuild": "npm run index:build",
     "indexVerify": "npm run index:verify",
+    "featureIndexVerify": "npm run feature-index:verify",
+    "routeMapGenerate": "npm run route-map:generate",
+    "routeMapVerify": "npm run route-map:verify",
+    "domainReadmesGenerate": "npm run domain-readmes:generate",
+    "domainReadmesVerify": "npm run domain-readmes:verify",
+    "jsdocCoverageGenerate": "npm run jsdoc-coverage:generate",
+    "jsdocCoverageVerify": "npm run jsdoc-coverage:verify",
     "indexQueryStrictFresh": "node tools/index/indexer.mjs query \"<query>\" --strict-fresh",
-    "releaseNotes": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]"
+    "releaseNotes": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+    "featureIndexFile": "cat docs/FEATURE_INDEX.json",
+    "testMatrixFile": "cat docs/TEST_MATRIX.md",
+    "routeMapFile": "cat docs/ROUTE_MAP.md",
+    "jsdocCoverageFile": "cat docs/JSDOC_COVERAGE.md",
+    "routesReadmeFile": "cat backend/src/routes/README.md",
+    "servicesReadmeFile": "cat backend/src/services/README.md",
+    "frontendFeaturesReadmeFile": "cat frontend/features/README.md"
   }
 }

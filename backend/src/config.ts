@@ -46,6 +46,7 @@ let musicConfig: MusicConfig = {
 };
 
 // Initialize music configuration asynchronously
+/** Loads and validates music-path/cache settings, with safe fallback to env defaults. */
 export async function initializeMusicConfig() {
     try {
         musicConfig = await validateMusicConfig();
@@ -58,6 +59,7 @@ export async function initializeMusicConfig() {
     }
 }
 
+/** Centralized runtime configuration object for backend services and integrations. */
 export const config = {
     port: parseInt(process.env.PORT || "3006", 10),
     nodeEnv: process.env.NODE_ENV || "development",

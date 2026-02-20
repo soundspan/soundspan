@@ -213,6 +213,32 @@ Use this section as the first-stop index for shared patterns and consolidation o
 - If consolidation is valuable but out-of-scope/risky, record it explicitly in the active plan/handoff docs as a deferred follow-up opportunity.
 - In completion summaries, include a one-line statement of what was reused vs newly introduced so future sessions can discover reuse points quickly.
 
+## Route and Domain Lookup
+
+Use this section as the quickest path from feature language to exact code locations.
+
+### Route-to-handler lookup flow
+
+1. Open `docs/ROUTE_MAP.md` (generated, canonical route map).
+2. For backend API lookups, match by method + endpoint under `## Backend API Endpoint Map` and jump to the listed handler file/line.
+3. For frontend route lookups, use `## Frontend Page Route Map` to map URL path to `frontend/app/**/page.tsx`.
+4. For frontend proxy handlers, use `## Frontend API Route Handler Map` (usually `frontend/app/api/[...path]/route.ts`).
+5. For OpenSubsonic endpoints (`/rest/*`), start at `backend/src/routes/subsonic.ts` and alias helpers in `backend/src/utils/subsonic*.ts`.
+
+### Domain glossary (code pointers)
+
+| Domain term | What it covers | Primary files |
+| --- | --- | --- |
+| Enrichment | Artist/album/track metadata enrichment lifecycle, retries, and failure tracking. | `backend/src/routes/enrichment.ts`, `backend/src/services/enrichment.ts`, `backend/src/services/enrichmentState.ts`, `backend/src/services/enrichmentFailureService.ts` |
+| Vibe search | Similar-track and prompt-driven vibe retrieval over embeddings. | `backend/src/routes/vibe.ts`, `backend/src/services/hybridSimilarity.ts`, `backend/src/services/vibeVocabulary.ts`, `frontend/app/vibe/page.tsx` |
+| CLAP embeddings | Audio embedding extraction pipeline and cleanup/ops controls. | `services/audio-analyzer-clap/analyzer.py`, `backend/src/services/vibeAnalysisCleanup.ts`, `backend/src/routes/analysis.ts` |
+| Discover Weekly | Weekly recommendation generation, persistence, and repair workflows. | `backend/src/routes/discover.ts`, `backend/src/services/discoverWeekly.ts`, `backend/src/services/discovery/discoveryRecommendations.ts`, `frontend/features/discover/hooks/useDiscoverData.ts` |
+| Acquisition | Gap-fill download/import orchestration across providers (Lidarr/Soulseek/streaming). | `backend/src/services/acquisitionService.ts`, `backend/src/routes/downloads.ts`, `backend/src/services/downloadQueue.ts` |
+| Listen Together | Shared queue/session orchestration and socket/state sync. | `backend/src/routes/listenTogether.ts`, `backend/src/services/listenTogether.ts`, `backend/src/services/listenTogetherManager.ts`, `backend/src/services/listenTogetherSocket.ts`, `backend/src/services/listenTogetherClusterSync.ts` |
+| Mood buckets | Mood-cluster generation, cache, and worker refresh jobs for mixes. | `backend/src/services/moodBucketService.ts`, `backend/src/workers/moodBucketWorker.ts`, `backend/src/routes/mixes.ts` |
+| Programmatic playlists | Auto-built mixes and artist-diversity constrained playlist generation. | `backend/src/services/programmaticPlaylists.ts`, `backend/src/services/programmaticPlaylistArtistCap.ts`, `backend/src/routes/mixes.ts` |
+| Subsonic compatibility | OpenSubsonic route surface, IDs, media responses, and auth bridge. | `backend/src/routes/subsonic.ts`, `backend/src/middleware/subsonicAuth.ts`, `backend/src/utils/subsonicIds.ts`, `backend/src/utils/subsonicMedia.ts`, `backend/src/utils/subsonicResponse.ts`, `backend/src/utils/subsonicIndexes.ts` |
+
 ## Fork Documentation Maintenance
 
 For this repository, documentation updates are part of the definition of done for user-facing or behavior-changing work.
@@ -220,6 +246,12 @@ For this repository, documentation updates are part of the definition of done fo
 - Always update `CHANGELOG.md` under **`[Unreleased]`** for user-visible or behavior-changing deltas.
 - Use `docs/RELEASE_NOTES_TEMPLATE.md` for release notes and GitHub release bodies; generate drafts with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`.
 - Write release-note bullets in plain English for users/operators; avoid raw commit-jargon phrasing in published notes.
+- Keep `docs/FEATURE_INDEX.json` current as the machine-readable feature map (findability + ownership pointers).
+- Keep `docs/TEST_MATRIX.md` current as the feature-to-targeted-test command map.
+- Keep `docs/ROUTE_MAP.md` current as the generated backend/frontend route map (`npm run route-map:generate`).
+- Keep `docs/JSDOC_COVERAGE.md` current for exported-symbol documentation drift checks (`npm run jsdoc-coverage:verify`).
+- Keep per-domain start-here guides current in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md` (`npm run domain-readmes:generate`).
+- Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted `docs/FEATURE_INDEX.json` entries in the same change set.
 - In `CHANGELOG.md`, keep the **`Fixed`** section limited to regressions/bugs. Feature additions and behavior upgrades should be documented under **`Added`**/**`Changed`**.
 - Keep Helm release references explicit in release notes:
   - chart repo URL: `https://soundspan.github.io/soundspan`
@@ -263,6 +295,7 @@ For this repository, documentation updates are part of the definition of done fo
   - `npm run agent:queue:start -- --id <id>`
   - `npm run agent:queue:complete -- --id <id> --summary <summary> --output <output> --evidence <evidence>`
   - `npm run agent:queue:close-feature -- --feature-id <feature_id>`
+  - `close-feature` now moves `.agents/plans/current|deferred/<feature_id>` into `.agents/plans/archived/<feature_id>` and rewrites plan-path references under `.agents/plans/**`.
 - Plans directory structure:
   - `.agents/plans/current/`: actively executing features only.
   - `.agents/plans/deferred/`: intentionally parked features.

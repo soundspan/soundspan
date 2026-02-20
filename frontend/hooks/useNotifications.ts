@@ -28,11 +28,40 @@ export interface DownloadHistoryItem {
     metadata?: Record<string, unknown>;
 }
 
+export interface UseNotificationsReturn {
+    notifications: Notification[];
+    unreadCount: number;
+    isLoading: boolean;
+    error: string | null;
+    refetch: () => Promise<unknown>;
+    markAsRead: (id: string) => void;
+    markAllAsRead: () => void;
+    clearNotification: (id: string) => void;
+    clearAll: () => void;
+}
+
+export interface UseDownloadHistoryReturn {
+    history: DownloadHistoryItem[];
+    isLoading: boolean;
+    error: string | null;
+    refetch: () => Promise<unknown>;
+    clearDownload: (id: string) => Promise<void>;
+    clearAll: () => Promise<void>;
+    retryDownload: (id: string) => Promise<void>;
+}
+
+export interface UseActiveDownloadsReturn {
+    downloads: DownloadHistoryItem[];
+    isLoading: boolean;
+    error: string | null;
+    refetch: () => Promise<unknown>;
+}
+
 /**
  * Hook for managing notifications using React Query as single source of truth.
  * All components using this hook share the same cache and update together.
  */
-export function useNotifications() {
+export function useNotifications(): UseNotificationsReturn {
     const queryClient = useQueryClient();
 
     // Single source of truth - React Query cache
@@ -144,7 +173,7 @@ export function useNotifications() {
 /**
  * Hook for download history - unchanged from original
  */
-export function useDownloadHistory() {
+export function useDownloadHistory(): UseDownloadHistoryReturn {
     const fetchHistory = useCallback(async () => {
         return api.get<DownloadHistoryItem[]>("/notifications/downloads/history");
     }, []);
@@ -211,7 +240,7 @@ export function useDownloadHistory() {
  * - Polls every 10s when downloads are active (for progress updates)
  * - Polls every 30s when idle (to catch new downloads)
  */
-export function useActiveDownloads() {
+export function useActiveDownloads(): UseActiveDownloadsReturn {
     const fetchDownloads = useCallback(async () => {
         return api.get<DownloadHistoryItem[]>("/notifications/downloads/active");
     }, []);

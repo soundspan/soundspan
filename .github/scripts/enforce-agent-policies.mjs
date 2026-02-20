@@ -1514,6 +1514,739 @@ function checkReleaseNotesContract(config) {
   }
 }
 
+function checkFeatureIndexContract(config) {
+  const contractPath = "contracts.featureIndex";
+  const contract = config?.contracts?.featureIndex;
+  if (!contract || typeof contract !== "object") {
+    addFailure(`${contractPath} is required and must be an object.`);
+    return;
+  }
+
+  const featureIndexFile = toNonEmptyString(contract.file);
+  if (!featureIndexFile) {
+    addFailure(`${contractPath}.file must be a non-empty string.`);
+    return;
+  }
+
+  const featureIndexVerifyScript = "tools/docs/feature-index-check.mjs";
+  const featureIndexVerifyCommand = "node tools/docs/feature-index-check.mjs --strict";
+  readFileIfPresent(featureIndexVerifyScript);
+
+  const featureIndex = readJsonIfPresent(featureIndexFile);
+  if (featureIndex === null) {
+    return;
+  }
+
+  const requiredTopLevelKeys = validateStringArray(
+    contract.requiredTopLevelKeys,
+    `${contractPath}.requiredTopLevelKeys`,
+  );
+  for (const key of requiredTopLevelKeys) {
+    if (!(key in featureIndex)) {
+      addFailure(`${featureIndexFile} is missing required top-level key: ${key}`);
+    }
+  }
+
+  const metadata = featureIndex.metadata;
+  if (!metadata || typeof metadata !== "object") {
+    addFailure(`${featureIndexFile}.metadata must be an object.`);
+  } else {
+    const requiredMetadataKeys = validateStringArray(
+      contract.requiredMetadataKeys,
+      `${contractPath}.requiredMetadataKeys`,
+    );
+    for (const key of requiredMetadataKeys) {
+      if (!(key in metadata)) {
+        addFailure(`${featureIndexFile}.metadata is missing required field: ${key}`);
+      }
+    }
+
+    const requiredMetadataId = toNonEmptyString(contract.requiredMetadataId);
+    if (requiredMetadataId) {
+      const actualId = toNonEmptyString(metadata.id);
+      if (actualId !== requiredMetadataId) {
+        addFailure(
+          `${featureIndexFile}.metadata.id must equal ${requiredMetadataId}.`,
+        );
+      }
+    }
+
+    if (!isValidIsoDate(metadata.last_updated)) {
+      addFailure(`${featureIndexFile}.metadata.last_updated must be a valid ISO timestamp.`);
+    }
+  }
+
+  const coverage = featureIndex.coverage;
+  if (!coverage || typeof coverage !== "object") {
+    addFailure(`${featureIndexFile}.coverage must be an object.`);
+  } else {
+    const requiredCoverageKeys = validateStringArray(
+      contract.requiredCoverageKeys,
+      `${contractPath}.requiredCoverageKeys`,
+    );
+    for (const key of requiredCoverageKeys) {
+      if (!(key in coverage)) {
+        addFailure(`${featureIndexFile}.coverage is missing required field: ${key}`);
+      }
+    }
+  }
+
+  if (!Array.isArray(featureIndex.features)) {
+    addFailure(`${featureIndexFile}.features must be an array.`);
+    return;
+  }
+
+  const requiredFeatureFields = validateStringArray(
+    contract.requiredFeatureFields,
+    `${contractPath}.requiredFeatureFields`,
+  );
+  const requiredFrontendFields = validateStringArray(
+    contract.requiredFrontendFields,
+    `${contractPath}.requiredFrontendFields`,
+  );
+  const requiredBackendFields = validateStringArray(
+    contract.requiredBackendFields,
+    `${contractPath}.requiredBackendFields`,
+  );
+  const requiredTestsFields = validateStringArray(
+    contract.requiredTestsFields,
+    `${contractPath}.requiredTestsFields`,
+  );
+
+  const coveredFrontendDirs = new Set();
+
+  for (const [index, feature] of featureIndex.features.entries()) {
+    if (!feature || typeof feature !== "object") {
+      addFailure(`${featureIndexFile}.features[${index}] must be an object.`);
+      continue;
+    }
+
+    for (const fieldName of requiredFeatureFields) {
+      if (!(fieldName in feature)) {
+        addFailure(
+          `${featureIndexFile}.features[${index}] is missing required field ${fieldName}.`,
+        );
+      }
+    }
+
+    if (!isNonEmptyString(feature.id)) {
+      addFailure(`${featureIndexFile}.features[${index}].id must be a non-empty string.`);
+    }
+
+    const frontend = feature.frontend;
+    if (!frontend || typeof frontend !== "object") {
+      addFailure(`${featureIndexFile}.features[${index}].frontend must be an object.`);
+    } else {
+      for (const fieldName of requiredFrontendFields) {
+        if (!(fieldName in frontend)) {
+          addFailure(
+            `${featureIndexFile}.features[${index}].frontend is missing field ${fieldName}.`,
+          );
+        }
+      }
+
+      const featureDirs = validateStringArray(
+        frontend.feature_dirs ?? [],
+        `${featureIndexFile}.features[${index}].frontend.feature_dirs`,
+      );
+      for (const dirName of featureDirs) {
+        coveredFrontendDirs.add(dirName);
+      }
+
+      validateStringArray(
+        frontend.routes ?? [],
+        `${featureIndexFile}.features[${index}].frontend.routes`,
+      );
+      validateStringArray(
+        frontend.primary_files ?? [],
+        `${featureIndexFile}.features[${index}].frontend.primary_files`,
+      );
+    }
+
+    const backend = feature.backend;
+    if (!backend || typeof backend !== "object") {
+      addFailure(`${featureIndexFile}.features[${index}].backend must be an object.`);
+    } else {
+      for (const fieldName of requiredBackendFields) {
+        if (!(fieldName in backend)) {
+          addFailure(
+            `${featureIndexFile}.features[${index}].backend is missing field ${fieldName}.`,
+          );
+        }
+      }
+      validateStringArray(
+        backend.routes ?? [],
+        `${featureIndexFile}.features[${index}].backend.routes`,
+      );
+      validateStringArray(
+        backend.services ?? [],
+        `${featureIndexFile}.features[${index}].backend.services`,
+      );
+    }
+
+    const tests = feature.tests;
+    if (!tests || typeof tests !== "object") {
+      addFailure(`${featureIndexFile}.features[${index}].tests must be an object.`);
+    } else {
+      for (const fieldName of requiredTestsFields) {
+        if (!(fieldName in tests)) {
+          addFailure(
+            `${featureIndexFile}.features[${index}].tests is missing field ${fieldName}.`,
+          );
+        }
+      }
+      validateStringArray(
+        tests.targeted_commands ?? [],
+        `${featureIndexFile}.features[${index}].tests.targeted_commands`,
+      );
+      validateStringArray(
+        tests.primary_specs ?? [],
+        `${featureIndexFile}.features[${index}].tests.primary_specs`,
+      );
+    }
+
+    validateStringArray(
+      feature.docs ?? [],
+      `${featureIndexFile}.features[${index}].docs`,
+    );
+  }
+
+  if (contract.enforceFrontendFeatureCoverage === true) {
+    const coverage = featureIndex.coverage ?? {};
+    const listedFeatureDirs = validateStringArray(
+      coverage.frontend_feature_dirs ?? [],
+      `${featureIndexFile}.coverage.frontend_feature_dirs`,
+    );
+    const listedFeatureDirSet = new Set(listedFeatureDirs);
+
+    const frontendFeatureRoot = toNonEmptyString(contract.frontendFeatureRoot);
+    if (!frontendFeatureRoot) {
+      addFailure(`${contractPath}.frontendFeatureRoot must be a non-empty string.`);
+    } else if (!fs.existsSync(frontendFeatureRoot)) {
+      addFailure(`${contractPath}.frontendFeatureRoot does not exist: ${frontendFeatureRoot}`);
+    } else {
+      const actualDirs = fs
+        .readdirSync(frontendFeatureRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort((a, b) => a.localeCompare(b));
+
+      for (const dirName of actualDirs) {
+        if (!listedFeatureDirSet.has(dirName)) {
+          addFailure(
+            `${featureIndexFile}.coverage.frontend_feature_dirs is missing frontend/features directory: ${dirName}`,
+          );
+        }
+      }
+
+      for (const dirName of listedFeatureDirs) {
+        if (!actualDirs.includes(dirName)) {
+          addFailure(
+            `${featureIndexFile}.coverage.frontend_feature_dirs includes unknown frontend/features directory: ${dirName}`,
+          );
+        }
+      }
+    }
+
+    for (const dirName of listedFeatureDirs) {
+      if (!coveredFrontendDirs.has(dirName)) {
+        addFailure(
+          `${featureIndexFile}.coverage.frontend_feature_dirs entry ${dirName} is not referenced by any features[].frontend.feature_dirs entry.`,
+        );
+      }
+    }
+  }
+
+  const packageJson = readJsonIfPresent("package.json");
+  if (packageJson && typeof packageJson === "object") {
+    const scripts =
+      packageJson.scripts && typeof packageJson.scripts === "object"
+        ? packageJson.scripts
+        : null;
+    if (!scripts) {
+      addFailure("package.json scripts block is required for feature-index verification wiring.");
+    } else {
+      const configuredVerify = toNonEmptyString(scripts["feature-index:verify"]);
+      if (!configuredVerify) {
+        addFailure('package.json scripts must define "feature-index:verify".');
+      } else if (configuredVerify !== featureIndexVerifyCommand) {
+        addFailure(
+          `package.json scripts["feature-index:verify"] must equal "${featureIndexVerifyCommand}" (found "${configuredVerify}").`,
+        );
+      }
+    }
+  }
+
+  const verifyResult = runCommandSafe("node", [featureIndexVerifyScript, "--strict"]);
+  if (!verifyResult.ok) {
+    const details = verifyResult.stderr || verifyResult.stdout || "unknown failure";
+    addFailure(
+      `Feature index drift check failed. Run npm run feature-index:verify and update ${featureIndexFile}. Details: ${details}`,
+    );
+  }
+}
+
+function checkTestMatrixContract(config) {
+  const contractPath = "contracts.testMatrix";
+  const contract = config?.contracts?.testMatrix;
+  if (!contract || typeof contract !== "object") {
+    addFailure(`${contractPath} is required and must be an object.`);
+    return;
+  }
+
+  const testMatrixFile = toNonEmptyString(contract.file);
+  if (!testMatrixFile) {
+    addFailure(`${contractPath}.file must be a non-empty string.`);
+    return;
+  }
+
+  const content = readFileIfPresent(testMatrixFile);
+  if (content === null) {
+    return;
+  }
+
+  const requiredSections = validateStringArray(
+    contract.requiredSections,
+    `${contractPath}.requiredSections`,
+  );
+  let cursor = 0;
+  for (const section of requiredSections) {
+    const index = content.indexOf(section, cursor);
+    if (index === -1) {
+      if (content.includes(section)) {
+        addFailure(
+          `${testMatrixFile} contains section out of order relative to ${contractPath}.requiredSections: ${section}`,
+        );
+      } else {
+        addFailure(`${testMatrixFile} is missing required section: ${section}`);
+      }
+      continue;
+    }
+    cursor = index + section.length;
+  }
+
+  const featureIndexFile = toNonEmptyString(config?.contracts?.featureIndex?.file);
+  if (!featureIndexFile) {
+    return;
+  }
+  const featureIndex = readJsonIfPresent(featureIndexFile);
+  if (!featureIndex || !Array.isArray(featureIndex.features)) {
+    return;
+  }
+
+  for (const [index, feature] of featureIndex.features.entries()) {
+    const featureId = toNonEmptyString(feature?.id);
+    if (!featureId) {
+      continue;
+    }
+
+    if (!content.includes(`\`${featureId}\``) && !content.includes(featureId)) {
+      addFailure(
+        `${testMatrixFile} must reference feature id ${featureId} from ${featureIndexFile}.features[${index}].`,
+      );
+    }
+
+    const targetedCommands = validateStringArray(
+      feature?.tests?.targeted_commands ?? [],
+      `${featureIndexFile}.features[${index}].tests.targeted_commands`,
+    );
+    for (const command of targetedCommands) {
+      if (!content.includes(command)) {
+        addFailure(
+          `${testMatrixFile} is missing targeted command for feature ${featureId}: ${command}`,
+        );
+      }
+    }
+
+    const primarySpecs = validateStringArray(
+      feature?.tests?.primary_specs ?? [],
+      `${featureIndexFile}.features[${index}].tests.primary_specs`,
+    );
+    for (const specPath of primarySpecs) {
+      if (!content.includes(specPath)) {
+        addFailure(
+          `${testMatrixFile} is missing primary spec for feature ${featureId}: ${specPath}`,
+        );
+      }
+    }
+  }
+}
+
+function checkJSDocCoverageContract(config) {
+  const contractPath = "contracts.jsdocCoverage";
+  const contract = config?.contracts?.jsdocCoverage;
+  if (!contract || typeof contract !== "object") {
+    addFailure(`${contractPath} is required and must be an object.`);
+    return;
+  }
+
+  const requiredStrings = {
+    file: "docs/JSDOC_COVERAGE.md",
+    generatorScript: "tools/docs/generate-jsdoc-coverage.mjs",
+    npmGenerateScriptName: "jsdoc-coverage:generate",
+    npmGenerateScriptCommand: "node tools/docs/generate-jsdoc-coverage.mjs --write",
+    npmVerifyScriptName: "jsdoc-coverage:verify",
+    npmVerifyScriptCommand: "node tools/docs/generate-jsdoc-coverage.mjs --check",
+  };
+
+  for (const [fieldName, expectedValue] of Object.entries(requiredStrings)) {
+    const actualValue = toNonEmptyString(contract[fieldName]);
+    if (!actualValue) {
+      addFailure(`${contractPath}.${fieldName} must be a non-empty string.`);
+      continue;
+    }
+    if (actualValue !== expectedValue) {
+      addFailure(
+        `${contractPath}.${fieldName} must equal "${expectedValue}" (found "${actualValue}").`,
+      );
+    }
+  }
+
+  const jsdocCoverageFile = toNonEmptyString(contract.file);
+  const jsdocContent = jsdocCoverageFile ? readFileIfPresent(jsdocCoverageFile) : null;
+  if (jsdocContent !== null) {
+    const requiredSections = validateStringArray(
+      contract.requiredSections,
+      `${contractPath}.requiredSections`,
+    );
+    let cursor = 0;
+    for (const section of requiredSections) {
+      const index = jsdocContent.indexOf(section, cursor);
+      if (index === -1) {
+        if (jsdocContent.includes(section)) {
+          addFailure(
+            `${jsdocCoverageFile} contains section out of order relative to ${contractPath}.requiredSections: ${section}`,
+          );
+        } else {
+          addFailure(`${jsdocCoverageFile} is missing required section: ${section}`);
+        }
+        continue;
+      }
+      cursor = index + section.length;
+    }
+  }
+
+  const generatorScript = toNonEmptyString(contract.generatorScript);
+  if (generatorScript) {
+    readFileIfPresent(generatorScript);
+    const verifyResult = runCommandSafe("node", [generatorScript, "--check"]);
+    if (!verifyResult.ok) {
+      const details = verifyResult.stderr || verifyResult.stdout || "unknown failure";
+      addFailure(
+        `${contractPath} generator check failed. Run npm run jsdoc-coverage:generate. Details: ${details}`,
+      );
+    }
+  }
+
+  const packageJson = readJsonIfPresent("package.json");
+  if (!packageJson || typeof packageJson !== "object") {
+    return;
+  }
+
+  const scripts =
+    packageJson.scripts && typeof packageJson.scripts === "object"
+      ? packageJson.scripts
+      : null;
+  if (!scripts) {
+    addFailure("package.json scripts block is required for jsdoc-coverage wiring.");
+    return;
+  }
+
+  const generateScriptName = toNonEmptyString(contract.npmGenerateScriptName);
+  const generateScriptCommand = toNonEmptyString(contract.npmGenerateScriptCommand);
+  const verifyScriptName = toNonEmptyString(contract.npmVerifyScriptName);
+  const verifyScriptCommand = toNonEmptyString(contract.npmVerifyScriptCommand);
+
+  if (generateScriptName && generateScriptCommand) {
+    const configuredGenerate = toNonEmptyString(scripts[generateScriptName]);
+    if (!configuredGenerate) {
+      addFailure(`package.json scripts must define "${generateScriptName}".`);
+    } else if (configuredGenerate !== generateScriptCommand) {
+      addFailure(
+        `package.json scripts["${generateScriptName}"] must equal "${generateScriptCommand}" (found "${configuredGenerate}").`,
+      );
+    }
+  }
+
+  if (verifyScriptName && verifyScriptCommand) {
+    const configuredVerify = toNonEmptyString(scripts[verifyScriptName]);
+    if (!configuredVerify) {
+      addFailure(`package.json scripts must define "${verifyScriptName}".`);
+    } else if (configuredVerify !== verifyScriptCommand) {
+      addFailure(
+        `package.json scripts["${verifyScriptName}"] must equal "${verifyScriptCommand}" (found "${configuredVerify}").`,
+      );
+    }
+  }
+
+  const contextIndex = readJsonIfPresent("docs/CONTEXT_INDEX.json");
+  if (contextIndex && typeof contextIndex === "object") {
+    const commands =
+      contextIndex.commands && typeof contextIndex.commands === "object"
+        ? contextIndex.commands
+        : null;
+    if (!commands) {
+      addFailure("docs/CONTEXT_INDEX.json commands block is required.");
+      return;
+    }
+
+    const generateCommand = toNonEmptyString(commands.jsdocCoverageGenerate);
+    if (generateCommand !== "npm run jsdoc-coverage:generate") {
+      addFailure(
+        'docs/CONTEXT_INDEX.json.commands.jsdocCoverageGenerate must equal "npm run jsdoc-coverage:generate".',
+      );
+    }
+
+    const verifyCommand = toNonEmptyString(commands.jsdocCoverageVerify);
+    if (verifyCommand !== "npm run jsdoc-coverage:verify") {
+      addFailure(
+        'docs/CONTEXT_INDEX.json.commands.jsdocCoverageVerify must equal "npm run jsdoc-coverage:verify".',
+      );
+    }
+
+    const jsdocCoverageFileCommand = toNonEmptyString(commands.jsdocCoverageFile);
+    if (jsdocCoverageFileCommand !== "cat docs/JSDOC_COVERAGE.md") {
+      addFailure(
+        'docs/CONTEXT_INDEX.json.commands.jsdocCoverageFile must equal "cat docs/JSDOC_COVERAGE.md".',
+      );
+    }
+  }
+}
+
+function checkRouteMapContract(config) {
+  const contractPath = "contracts.routeMap";
+  const contract = config?.contracts?.routeMap;
+  if (!contract || typeof contract !== "object") {
+    addFailure(`${contractPath} is required and must be an object.`);
+    return;
+  }
+
+  const requiredStrings = {
+    file: "docs/ROUTE_MAP.md",
+    generatorScript: "tools/docs/generate-route-map.mjs",
+    npmGenerateScriptName: "route-map:generate",
+    npmGenerateScriptCommand: "node tools/docs/generate-route-map.mjs --write",
+    npmVerifyScriptName: "route-map:verify",
+    npmVerifyScriptCommand: "node tools/docs/generate-route-map.mjs --check",
+  };
+
+  for (const [fieldName, expectedValue] of Object.entries(requiredStrings)) {
+    const actualValue = toNonEmptyString(contract[fieldName]);
+    if (!actualValue) {
+      addFailure(`${contractPath}.${fieldName} must be a non-empty string.`);
+      continue;
+    }
+    if (actualValue !== expectedValue) {
+      addFailure(
+        `${contractPath}.${fieldName} must equal "${expectedValue}" (found "${actualValue}").`,
+      );
+    }
+  }
+
+  const routeMapFile = toNonEmptyString(contract.file);
+  const content = routeMapFile ? readFileIfPresent(routeMapFile) : null;
+
+  if (content !== null) {
+    const requiredSections = validateStringArray(
+      contract.requiredSections,
+      `${contractPath}.requiredSections`,
+    );
+    let cursor = 0;
+    for (const section of requiredSections) {
+      const index = content.indexOf(section, cursor);
+      if (index === -1) {
+        if (content.includes(section)) {
+          addFailure(
+            `${routeMapFile} contains section out of order relative to ${contractPath}.requiredSections: ${section}`,
+          );
+        } else {
+          addFailure(`${routeMapFile} is missing required section: ${section}`);
+        }
+        continue;
+      }
+      cursor = index + section.length;
+    }
+  }
+
+  const generatorScript = toNonEmptyString(contract.generatorScript);
+  if (generatorScript) {
+    readFileIfPresent(generatorScript);
+    const verifyResult = runCommandSafe("node", [generatorScript, "--check"]);
+    if (!verifyResult.ok) {
+      const details = verifyResult.stderr || verifyResult.stdout || "unknown failure";
+      addFailure(
+        `${contractPath} generator check failed. Run npm run route-map:generate. Details: ${details}`,
+      );
+    }
+  }
+
+  const packageJson = readJsonIfPresent("package.json");
+  if (!packageJson || typeof packageJson !== "object") {
+    return;
+  }
+
+  const scripts =
+    packageJson.scripts && typeof packageJson.scripts === "object"
+      ? packageJson.scripts
+      : null;
+  if (!scripts) {
+    addFailure("package.json scripts block is required for route-map wiring.");
+    return;
+  }
+
+  const generateScriptName = toNonEmptyString(contract.npmGenerateScriptName);
+  const generateScriptCommand = toNonEmptyString(contract.npmGenerateScriptCommand);
+  const verifyScriptName = toNonEmptyString(contract.npmVerifyScriptName);
+  const verifyScriptCommand = toNonEmptyString(contract.npmVerifyScriptCommand);
+
+  if (generateScriptName && generateScriptCommand) {
+    const configuredGenerate = toNonEmptyString(scripts[generateScriptName]);
+    if (!configuredGenerate) {
+      addFailure(`package.json scripts must define "${generateScriptName}".`);
+    } else if (configuredGenerate !== generateScriptCommand) {
+      addFailure(
+        `package.json scripts["${generateScriptName}"] must equal "${generateScriptCommand}" (found "${configuredGenerate}").`,
+      );
+    }
+  }
+
+  if (verifyScriptName && verifyScriptCommand) {
+    const configuredVerify = toNonEmptyString(scripts[verifyScriptName]);
+    if (!configuredVerify) {
+      addFailure(`package.json scripts must define "${verifyScriptName}".`);
+    } else if (configuredVerify !== verifyScriptCommand) {
+      addFailure(
+        `package.json scripts["${verifyScriptName}"] must equal "${verifyScriptCommand}" (found "${configuredVerify}").`,
+      );
+    }
+  }
+}
+
+function checkDomainReadmesContract(config) {
+  const contractPath = "contracts.domainReadmes";
+  const contract = config?.contracts?.domainReadmes;
+  if (!contract || typeof contract !== "object") {
+    addFailure(`${contractPath} is required and must be an object.`);
+    return;
+  }
+
+  const requiredStrings = {
+    generatorScript: "tools/docs/generate-domain-readmes.mjs",
+    npmGenerateScriptName: "domain-readmes:generate",
+    npmGenerateScriptCommand: "node tools/docs/generate-domain-readmes.mjs --write",
+    npmVerifyScriptName: "domain-readmes:verify",
+    npmVerifyScriptCommand: "node tools/docs/generate-domain-readmes.mjs --check",
+    requiredSection: "## Start Here",
+    frontendFeatureRoot: "frontend/features",
+  };
+
+  for (const [fieldName, expectedValue] of Object.entries(requiredStrings)) {
+    const actualValue = toNonEmptyString(contract[fieldName]);
+    if (!actualValue) {
+      addFailure(`${contractPath}.${fieldName} must be a non-empty string.`);
+      continue;
+    }
+    if (actualValue !== expectedValue) {
+      addFailure(
+        `${contractPath}.${fieldName} must equal "${expectedValue}" (found "${actualValue}").`,
+      );
+    }
+  }
+
+  const requiredFiles = validateStringArray(
+    contract.requiredFiles,
+    `${contractPath}.requiredFiles`,
+  );
+  const requiredSection = toNonEmptyString(contract.requiredSection);
+
+  for (const filePath of requiredFiles) {
+    const content = readFileIfPresent(filePath);
+    if (content === null || !requiredSection) {
+      continue;
+    }
+    if (!content.includes(requiredSection)) {
+      addFailure(`${filePath} is missing required section: ${requiredSection}`);
+    }
+  }
+
+  const frontendFeatureRoot = toNonEmptyString(contract.frontendFeatureRoot);
+  if (frontendFeatureRoot) {
+    if (!fs.existsSync(frontendFeatureRoot)) {
+      addFailure(`${contractPath}.frontendFeatureRoot does not exist: ${frontendFeatureRoot}`);
+    } else {
+      const featureDirs = fs
+        .readdirSync(frontendFeatureRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort((a, b) => a.localeCompare(b));
+
+      for (const dirName of featureDirs) {
+        const readmeFile = path.join(frontendFeatureRoot, dirName, "README.md");
+        const content = readFileIfPresent(readmeFile);
+        if (content === null || !requiredSection) {
+          continue;
+        }
+        if (!content.includes(requiredSection)) {
+          addFailure(`${readmeFile} is missing required section: ${requiredSection}`);
+        }
+      }
+    }
+  }
+
+  const generatorScript = toNonEmptyString(contract.generatorScript);
+  if (generatorScript) {
+    readFileIfPresent(generatorScript);
+    const verifyResult = runCommandSafe("node", [generatorScript, "--check"]);
+    if (!verifyResult.ok) {
+      const details = verifyResult.stderr || verifyResult.stdout || "unknown failure";
+      addFailure(
+        `${contractPath} generator check failed. Run npm run domain-readmes:generate. Details: ${details}`,
+      );
+    }
+  }
+
+  const packageJson = readJsonIfPresent("package.json");
+  if (!packageJson || typeof packageJson !== "object") {
+    return;
+  }
+
+  const scripts =
+    packageJson.scripts && typeof packageJson.scripts === "object"
+      ? packageJson.scripts
+      : null;
+  if (!scripts) {
+    addFailure("package.json scripts block is required for domain-readmes wiring.");
+    return;
+  }
+
+  const generateScriptName = toNonEmptyString(contract.npmGenerateScriptName);
+  const generateScriptCommand = toNonEmptyString(contract.npmGenerateScriptCommand);
+  const verifyScriptName = toNonEmptyString(contract.npmVerifyScriptName);
+  const verifyScriptCommand = toNonEmptyString(contract.npmVerifyScriptCommand);
+
+  if (generateScriptName && generateScriptCommand) {
+    const configuredGenerate = toNonEmptyString(scripts[generateScriptName]);
+    if (!configuredGenerate) {
+      addFailure(`package.json scripts must define "${generateScriptName}".`);
+    } else if (configuredGenerate !== generateScriptCommand) {
+      addFailure(
+        `package.json scripts["${generateScriptName}"] must equal "${generateScriptCommand}" (found "${configuredGenerate}").`,
+      );
+    }
+  }
+
+  if (verifyScriptName && verifyScriptCommand) {
+    const configuredVerify = toNonEmptyString(scripts[verifyScriptName]);
+    if (!configuredVerify) {
+      addFailure(`package.json scripts must define "${verifyScriptName}".`);
+    } else if (configuredVerify !== verifyScriptCommand) {
+      addFailure(
+        `package.json scripts["${verifyScriptName}"] must equal "${verifyScriptCommand}" (found "${configuredVerify}").`,
+      );
+    }
+  }
+}
+
 function checkSessionArtifactsContract(config) {
   const contractPath = "contracts.sessionArtifacts";
   const contract = config?.contracts?.sessionArtifacts;
@@ -3083,6 +3816,11 @@ function runPolicyChecks(activeConfigPath = configPath) {
   checkDocumentationModelContract(config);
   checkContextIndexContract(config);
   checkReleaseNotesContract(config);
+  checkFeatureIndexContract(config);
+  checkTestMatrixContract(config);
+  checkRouteMapContract(config);
+  checkDomainReadmesContract(config);
+  checkJSDocCoverageContract(config);
   checkSessionArtifactsContract(config);
   checkRuleCatalogContract(config);
   checkOrchestratorSubagentContracts(config);

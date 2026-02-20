@@ -6,7 +6,7 @@ import { useAudio } from "@/lib/audio-context";
  * Hook that promotes mini -> full when viewing the currently playing media page.
  * Overlay mode remains manual and is never auto-switched by this hook.
  */
-export function usePlayerMode() {
+export function usePlayerMode(): void {
     const pathname = usePathname();
     const { currentTrack, currentAudiobook, currentPodcast, playerMode, setPlayerMode } = useAudio();
 
