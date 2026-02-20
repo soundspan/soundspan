@@ -13,15 +13,15 @@ Scope:
 | Backend middleware | 4 | 7 | 7 | 0 | 100.0% |
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
 | Backend routes | 38 | 54 | 1 | 53 | 1.9% |
-| Backend services | 72 | 89 | 59 | 30 | 66.3% |
+| Backend services | 73 | 89 | 59 | 30 | 66.3% |
 | Backend utils | 28 | 73 | 56 | 17 | 76.7% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 70 | 70 | 12 | 58 | 17.1% |
 | Frontend features | 135 | 114 | 8 | 106 | 7.0% |
 | Frontend hooks | 25 | 82 | 55 | 27 | 67.1% |
 | Frontend lib | 40 | 46 | 13 | 33 | 28.3% |
-| Frontend other | 60 | 57 | 6 | 51 | 10.5% |
-| **Total** | **496** | **620** | **234** | **386** | **37.7%** |
+| Frontend other | 61 | 58 | 6 | 52 | 10.3% |
+| **Total** | **498** | **621** | **234** | **387** | **37.7%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -109,7 +109,7 @@ Scope:
 | Backend services | normalizeCacheQuery | backend/src/services/search.ts:5 |
 | Backend services | SearchService | backend/src/services/search.ts:96 |
 | Backend services | SegmentedProviderAdapterError | backend/src/services/segmented-streaming/providerAdapters/adapterError.ts:1 |
-| Backend services | SegmentedSessionError | backend/src/services/segmented-streaming/sessionService.ts:110 |
+| Backend services | SegmentedSessionError | backend/src/services/segmented-streaming/sessionService.ts:118 |
 | Backend utils | DependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:114 |
 | Backend utils | createDependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:192 |
 | Backend utils | EnvFileSyncSkippedError | backend/src/utils/envWriter.ts:5 |
@@ -162,8 +162,8 @@ Scope:
 | Frontend components | MoodMixer | frontend/components/MoodMixer.tsx:109 |
 | Frontend components | shouldAutoMatchVibeAtQueueEnd | frontend/components/player/autoMatchVibePlayback.ts:9 |
 | Frontend components | KeyboardShortcutsTooltip | frontend/components/player/KeyboardShortcutsTooltip.tsx:6 |
-| Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:27 |
-| Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:98 |
+| Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:22 |
+| Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:110 |
 | Frontend components | PlayerModeWrapper | frontend/components/player/PlayerModeWrapper.tsx:6 |
 | Frontend components | SeekSlider | frontend/components/player/SeekSlider.tsx:29 |
 | Frontend components | SyncedLyrics | frontend/components/player/SyncedLyrics.tsx:79 |

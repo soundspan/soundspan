@@ -72,6 +72,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/segmented-streaming/providerAdapters/ytMusicAdapter.ts` | Segmented Streaming |
 | `backend/src/services/segmented-streaming/segmentService.ts` | Segmented Streaming |
 | `backend/src/services/segmented-streaming/sessionService.ts` | Segmented Streaming |
+| `backend/src/services/segmented-streaming/trace.ts` | Segmented Streaming |
 | `backend/src/services/simpleDownloadManager.ts` | Core |
 | `backend/src/services/soulseek.ts` | Core |
 | `backend/src/services/spotify.ts` | Core |

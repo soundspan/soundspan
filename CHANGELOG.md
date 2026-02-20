@@ -20,11 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Segmented session creation now returns immediately and continues DASH asset generation in the background, with manifest/segment routes waiting for asset readiness instead of failing fast on startup races.
 - Segmented playback session quality now defaults to each user’s saved playback-quality setting when the frontend does not explicitly pass a quality value.
 - Next-track segmented playback now prewarms immediately and reuses prewarmed session manifests/tokens on track handoff.
+- Playback quality badge resolution is now centralized in a single shared resolver and applied consistently across Mini Player, Full Player, and Overlay Player.
+- Player orchestration component naming now reflects current runtime responsibility (`AudioPlaybackOrchestrator`), replacing the legacy `HowlerAudioElement` naming.
 
 ### Fixed
 
 - Recovery after segmented playback disruption now keeps local player state authoritative for resume position and play/pause intent.
 - `original` segmented quality now preserves lossless local sources via copy/remux (`-c:a copy`) instead of forcing lossy AAC transcoding.
+- Segmented manifest-relative `.m4s` segment requests are now served through a compatibility route, preventing session stalls when clients request chunk URLs outside the `/segments/` path prefix.
 
 ## [1.1.2] - 2026-02-20
 

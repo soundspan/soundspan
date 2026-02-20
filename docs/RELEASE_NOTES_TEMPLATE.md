@@ -1,13 +1,13 @@
-# [{{VERSION}}] Release Notes - {{RELEASE_DATE}}  
+# soundspan {{VERSION}} Release Notes - {{RELEASE_DATE}}
 
 ## Release Summary
 {{RELEASE_SUMMARY}}
 
-## Added
-{{ADDED_ITEMS}}
-
 ## Fixed
 {{FIXED_ITEMS}}
+
+## Added
+{{ADDED_ITEMS}}
 
 ## Changed
 {{CHANGED_ITEMS}}
@@ -38,4 +38,5 @@ helm upgrade --install soundspan soundspan/soundspan --version {{VERSION}}
 {{COMPATIBILITY_AND_MIGRATION}}
 
 ## Full Changelog
+{{COMPARE_URL}}
 {{FULL_CHANGELOG_URL}}
