@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
-import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
+import { useAudioState } from "@/lib/audio-context";
 import { api } from "@/lib/api";
-import type { PlaybackStreamProfile } from "@/lib/audio-playback-context";
 
 // ── TIDAL stream quality info ──────────────────────────────────────
 
@@ -216,31 +215,41 @@ export function formatYtQualityBadge(codec?: string | null, bitrate?: number | n
     return "YT MUSIC";
 }
 
-export function formatSegmentedQualityBadge(
-    profile: PlaybackStreamProfile,
-): string {
-    const sourceLabel =
-        profile.sourceType === "tidal"
-            ? "TIDAL"
-            : profile.sourceType === "ytmusic"
-                ? "YT MUSIC"
-                : "LOCAL";
-    const codecLabel = normalizeCodecLabel(profile.codec);
-    const bitrateLabel =
-        profile.bitrateKbps && profile.bitrateKbps > 0
-            ? `${profile.bitrateKbps} kbps`
-            : null;
+export interface PlaybackQualityBadge {
+    variant: "tidal" | "youtube" | "local";
+    label: string;
+}
 
-    if (codecLabel && bitrateLabel) {
-        return `${sourceLabel} · ${codecLabel} · ${bitrateLabel}`;
+export function resolvePlaybackQualityBadge(input: {
+    streamSource?: "local" | "tidal" | "youtube";
+    tidalQuality: TidalStreamQuality | null;
+    localQuality: LocalTrackQuality | null;
+    codec: string | null;
+    bitrate: number | null;
+}): PlaybackQualityBadge | null {
+    if (input.streamSource === "tidal") {
+        return {
+            variant: "tidal",
+            label: formatTidalQualityBadge(input.tidalQuality) || "TIDAL",
+        };
     }
-    if (codecLabel) {
-        return `${sourceLabel} · ${codecLabel}`;
+
+    if (input.streamSource === "youtube") {
+        return {
+            variant: "youtube",
+            label: formatYtQualityBadge(input.codec, input.bitrate),
+        };
     }
-    if (bitrateLabel) {
-        return `${sourceLabel} · ${bitrateLabel}`;
+
+    const localLabel = formatLocalQualityBadge(input.localQuality);
+    if (!localLabel) {
+        return null;
     }
-    return sourceLabel;
+
+    return {
+        variant: "local",
+        label: localLabel,
+    };
 }
 
 /**
@@ -258,11 +267,9 @@ export function useStreamBitrate(): {
     codec: string | null;
     tidalQuality: TidalStreamQuality | null;
     localQuality: LocalTrackQuality | null;
-    segmentedBadgeLabel: string | null;
-    segmentedSourceType: "local" | "tidal" | "ytmusic" | "unknown" | null;
+    qualityBadge: PlaybackQualityBadge | null;
 } {
     const { currentTrack, playbackType } = useAudioState();
-    const { streamProfile } = useAudioPlayback();
     const [bitrate, setBitrate] = useState<number | null>(null);
     const [codec, setCodec] = useState<string | null>(null);
     const [tidalQuality, setTidalQuality] = useState<TidalStreamQuality | null>(null);
@@ -364,23 +371,22 @@ export function useStreamBitrate(): {
         };
     }, [currentTrack, playbackType]);
 
-    const segmentedBadgeLabel =
-        streamProfile?.mode === "dash"
-            ? formatSegmentedQualityBadge(streamProfile)
+    const qualityBadge =
+        playbackType === "track" && currentTrack
+            ? resolvePlaybackQualityBadge({
+                streamSource: currentTrack.streamSource,
+                tidalQuality,
+                localQuality,
+                codec,
+                bitrate,
+            })
             : null;
 
     return {
-        bitrate:
-            streamProfile?.mode === "dash"
-                ? streamProfile.bitrateKbps
-                : bitrate,
-        codec: streamProfile?.mode === "dash" ? streamProfile.codec : codec,
-        tidalQuality:
-            streamProfile?.mode === "dash" ? null : tidalQuality,
-        localQuality:
-            streamProfile?.mode === "dash" ? null : localQuality,
-        segmentedBadgeLabel,
-        segmentedSourceType:
-            streamProfile?.mode === "dash" ? streamProfile.sourceType : null,
+        bitrate,
+        codec,
+        tidalQuality,
+        localQuality,
+        qualityBadge,
     };
 }
