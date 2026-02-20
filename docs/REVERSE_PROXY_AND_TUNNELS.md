@@ -25,6 +25,7 @@ For split frontend/backend deployments:
 
 - Route all app traffic (including `/socket.io/listen-together`) to frontend service (`:3030`)
 - Frontend proxies `/socket.io/listen-together` to backend service (`:3006`)
+- For API calls, frontend proxy mode is used when `NEXT_PUBLIC_API_PATH_MODE=proxy` (or `auto` on canonical frontend ports)
 
 ### Optional: Direct path-split routing
 
@@ -32,6 +33,8 @@ If you prefer to bypass frontend for Socket.IO:
 
 - Route `/socket.io/listen-together` (Prefix) to backend service (`:3006`)
 - Route all other app traffic (for example `/`) to frontend service (`:3030`)
+
+If you prefer direct browser API calls too, set `NEXT_PUBLIC_API_PATH_MODE=direct` and `NEXT_PUBLIC_API_URL` so browser requests skip frontend `/api/*` proxy routes.
 
 For single-service deployments (all-in-one image, Helm `deploymentMode: aio`):
 

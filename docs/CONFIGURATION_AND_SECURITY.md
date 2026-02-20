@@ -121,8 +121,17 @@ If users access soundspan from outside your local network, set API URL and allow
 
 ```env
 NEXT_PUBLIC_API_URL=https://soundspan-api.yourdomain.com
+NEXT_PUBLIC_API_PATH_MODE=direct
 ALLOWED_ORIGINS=http://localhost:3030,https://soundspan.yourdomain.com
 ```
+
+`NEXT_PUBLIC_API_PATH_MODE` controls how the browser reaches backend APIs:
+
+- `auto` (default): use `NEXT_PUBLIC_API_URL` when set; otherwise use same-origin proxy mode on frontend ports `3030`/`443`/`80`, and direct `:3006` calls on other ports.
+- `proxy`: always use same-origin `/api/*` calls through `frontend/app/api/[...path]/route.ts`.
+- `direct`: always call backend directly (uses `NEXT_PUBLIC_API_URL` when provided, else derives `protocol://<host>:3006`).
+
+Set this in frontend build/dev environment (same place you set `NEXT_PUBLIC_API_URL`).
 
 For Listen Together, the frontend proxies `/socket.io/listen-together` to backend by default in split deployments.
 If you bypass frontend proxying intentionally, your edge proxy/tunnel must route `/socket.io/listen-together` to backend `:3006`.

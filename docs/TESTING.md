@@ -130,7 +130,7 @@ When a live/dev stack may already be using canonical ports (`3030`/`3006`), run 
 ```bash
 docker compose -f docker-compose.local.yml up -d postgres-local redis-local
 PORT=3007 npm --prefix backend run dev
-PORT=3031 BACKEND_URL=http://127.0.0.1:3007 NEXT_PUBLIC_API_URL=http://127.0.0.1:3007 npm --prefix frontend run dev
+PORT=3031 BACKEND_URL=http://127.0.0.1:3007 NEXT_PUBLIC_API_URL=http://127.0.0.1:3007 NEXT_PUBLIC_API_PATH_MODE=direct npm --prefix frontend run dev
 ```
 
 Run Playwright against the explicit +1 frontend URL:

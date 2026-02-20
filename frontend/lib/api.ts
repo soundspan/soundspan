@@ -1,3 +1,5 @@
+import { resolveApiBaseUrl } from "./api-base-url";
+
 const AUTH_TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
 const PLAYBACK_DEVICE_ID_KEY = "soundspan_playback_device_id";
@@ -164,36 +166,20 @@ function toSearchParams(params: Record<string, string | number | boolean | undef
     return new URLSearchParams(entries);
 }
 
-// Dynamically determine API URL based on configuration
 const getApiBaseUrl = () => {
-    // Server-side rendering
     if (typeof window === "undefined") {
-        return process.env.BACKEND_URL || "http://127.0.0.1:3006";
+        return resolveApiBaseUrl({
+            isServer: true,
+            backendUrl: process.env.BACKEND_URL,
+        });
     }
 
-    // Explicit env var takes precedence
-    if (process.env.NEXT_PUBLIC_API_URL) {
-        return process.env.NEXT_PUBLIC_API_URL;
-    }
-
-    // Docker all-in-one mode: Use relative URLs (Next.js rewrites will proxy)
-    // This is detected by checking if we're on the same port as the frontend
-    const frontendPort =
-        window.location.port ||
-        (window.location.protocol === "https:" ? "443" : "80");
-    if (
-        frontendPort === "3030" ||
-        frontendPort === "443" ||
-        frontendPort === "80"
-    ) {
-        // Use relative paths - Next.js rewrites will proxy to backend
-        return "";
-    }
-
-    // Development mode: Backend on separate port
-    const currentHost = window.location.hostname;
-    const apiPort = "3006";
-    return `${window.location.protocol}//${currentHost}:${apiPort}`;
+    return resolveApiBaseUrl({
+        isServer: false,
+        configuredApiUrl: process.env.NEXT_PUBLIC_API_URL,
+        apiPathMode: process.env.NEXT_PUBLIC_API_PATH_MODE,
+        browserLocation: window.location,
+    });
 };
 
 class ApiClient {

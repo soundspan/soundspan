@@ -23,7 +23,7 @@ fi
 echo "[START] Starting soundspan Frontend..."
 echo "[CONFIG] Environment: ${NODE_ENV:-production}"
 echo "[CONFIG] API URL: ${NEXT_PUBLIC_API_URL:-not set}"
+echo "[CONFIG] API path mode: ${NEXT_PUBLIC_API_PATH_MODE:-auto}"
 
 # Execute the main command
 exec "$@"
-

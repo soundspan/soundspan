@@ -166,6 +166,7 @@ export const proxyRequest = async (
     targetPath: string,
     methodOverride?: string
 ): Promise<Response> => {
+    // Used by frontend same-origin API mode (`/app/api/[...path]` route handlers).
     const targetUrl = buildTargetUrl(request, targetPath);
     const headers = buildProxyHeaders(request);
     const method = methodOverride ?? request.method;
