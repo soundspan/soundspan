@@ -10,6 +10,9 @@ const state = {
     socialUsers: [] as Array<{ id: string }>,
     isMobile: false,
     isTablet: false,
+    notificationHookOptions: [] as Array<{ enabled?: boolean } | undefined>,
+    activeDownloadsHookOptions: [] as Array<{ enabled?: boolean } | undefined>,
+    socialPresenceHookOptions: [] as Array<{ enabled?: boolean } | undefined>,
 };
 
 const Icon = () => React.createElement("i");
@@ -23,20 +26,44 @@ const tab = (name: string) => {
 
 mock.module("@/hooks/useNotifications", {
     namedExports: {
-        useNotifications: () => ({ unreadCount: state.unreadCount }),
-        useActiveDownloads: () => ({ downloads: state.downloads }),
+        useNotifications: (options?: { enabled?: boolean }) => {
+            state.notificationHookOptions.push(options);
+            return { unreadCount: state.unreadCount };
+        },
+        useActiveDownloads: (options?: { enabled?: boolean }) => {
+            state.activeDownloadsHookOptions.push(options);
+            return { downloads: state.downloads };
+        },
     },
 });
 
 mock.module("@/hooks/useSocialPresence", {
     namedExports: {
-        useSocialPresence: () => ({ users: state.socialUsers }),
+        useSocialPresence: (options?: { enabled?: boolean }) => {
+            state.socialPresenceHookOptions.push(options);
+            return { users: state.socialUsers };
+        },
     },
 });
 
 mock.module("@/lib/auth-context", {
     namedExports: {
         useAuth: () => ({ user: { role: state.userRole } }),
+    },
+});
+
+mock.module("@/lib/download-context", {
+    namedExports: {
+        useDownloadContext: () => ({
+            pendingDownloads: [],
+            downloadStatus: {
+                activeDownloads: state.downloads,
+                recentDownloads: [],
+                hasActiveDownloads: state.downloads.length > 0,
+                failedDownloads: [],
+            },
+            downloadsEnabled: true,
+        }),
     },
 });
 
@@ -97,6 +124,9 @@ beforeEach(() => {
     state.socialUsers = [];
     state.isMobile = false;
     state.isTablet = false;
+    state.notificationHookOptions = [];
+    state.activeDownloadsHookOptions = [];
+    state.socialPresenceHookOptions = [];
 });
 
 test("shows all tabs for admin users on desktop", async () => {
@@ -120,6 +150,14 @@ test("shows all tabs for admin users on desktop", async () => {
     assert.match(html, />History</);
     assert.match(html, />Social</);
     assert.match(html, /notifications-tab/);
+    assert.equal(
+        state.notificationHookOptions.some((options) => options?.enabled === true),
+        true
+    );
+    assert.equal(
+        state.socialPresenceHookOptions.some((options) => options?.enabled === true),
+        true
+    );
 });
 
 test("hides admin-only tabs for non-admin users and falls back from hidden active tab", async () => {
@@ -228,6 +266,14 @@ test("renders collapsed desktop strip without the panel badge when idle", async 
     assert.match(html, /Open activity panel/);
     assert.match(html, /translateX\(332px\)/);
     assert.doesNotMatch(html, /w-2\.5 h-2\.5/);
+    assert.equal(
+        state.notificationHookOptions.some((options) => options?.enabled === false),
+        true
+    );
+    assert.equal(
+        state.socialPresenceHookOptions.some((options) => options?.enabled === false),
+        true
+    );
 });
 
 test("activity panel toggle hides on mobile and renders on desktop", async () => {
@@ -253,4 +299,21 @@ test("activity panel toggle omits badge when idle", async () => {
 
     const html = renderToStaticMarkup(React.createElement(ActivityPanelToggle));
     assert.doesNotMatch(html, /w-1 h-1 rounded-full/);
+});
+
+test("activity panel toggle can disable polling when panel is open", async () => {
+    const { ActivityPanelToggle } = await import(
+        "../../components/layout/ActivityPanel.tsx"
+    );
+
+    renderToStaticMarkup(
+        React.createElement(ActivityPanelToggle, {
+            pollingEnabled: false,
+        })
+    );
+
+    assert.equal(
+        state.notificationHookOptions.some((options) => options?.enabled === false),
+        true
+    );
 });

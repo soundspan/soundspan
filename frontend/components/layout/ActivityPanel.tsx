@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useNotifications } from "@/hooks/useNotifications";
-import { useActiveDownloads } from "@/hooks/useNotifications";
+import { useCallback, useMemo, useState } from "react";
+import {
+    useNotifications,
+    type DownloadHistoryItem,
+} from "@/hooks/useNotifications";
 import { NotificationsTab } from "@/components/activity/NotificationsTab";
 import { ActiveDownloadsTab } from "@/components/activity/ActiveDownloadsTab";
 import { HistoryTab } from "@/components/activity/HistoryTab";
 import { SocialTab } from "@/components/activity/SocialTab";
 import { useSocialPresence } from "@/hooks/useSocialPresence";
 import { useAuth } from "@/lib/auth-context";
+import { useDownloadContext } from "@/lib/download-context";
 import {
     getActivityPanelBadgeState,
     getActivityTabBadge,
@@ -72,16 +75,40 @@ export function ActivityPanel({
         visibleTabIds,
         fallbackTab
     );
-    const { unreadCount } = useNotifications();
-    const { downloads: activeDownloads } = useActiveDownloads();
-    const { users: socialUsers } = useSocialPresence();
+    const { downloadStatus } = useDownloadContext();
+    const activeDownloadsForTab = useMemo<DownloadHistoryItem[]>(
+        () =>
+            downloadStatus.activeDownloads.map((download) => ({
+                ...download,
+                updatedAt: download.completedAt ?? download.createdAt,
+            })),
+        [downloadStatus.activeDownloads]
+    );
+    const pollingEnabled = isOpen;
+    const {
+        notifications,
+        unreadCount,
+        isLoading: isNotificationsLoading,
+        error: notificationsError,
+        markAsRead,
+        clearNotification,
+        clearAll,
+    } = useNotifications({ enabled: pollingEnabled });
+    const {
+        users: socialUsers,
+        isLoading: isSocialLoading,
+        error: socialError,
+    } = useSocialPresence({ enabled: pollingEnabled });
+    const refetchActiveDownloads = useCallback(async () => {
+        window.dispatchEvent(new CustomEvent("download-status-changed"));
+    }, []);
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
 
     const badgeState = getActivityPanelBadgeState({
         unreadCount,
-        activeDownloadCount: activeDownloads.length,
+        activeDownloadCount: downloadStatus.activeDownloads.length,
         socialUserCount: socialUsers.length,
         isAdmin,
     });
@@ -160,13 +187,33 @@ export function ActivityPanel({
                     {/* Tab Content */}
                     <div className="flex-1 overflow-hidden">
                         {effectiveActiveTab === "notifications" && (
-                            <NotificationsTab />
+                            <NotificationsTab
+                                notifications={notifications}
+                                loading={isNotificationsLoading}
+                                error={notificationsError}
+                                markAsRead={markAsRead}
+                                clearNotification={clearNotification}
+                                clearAll={clearAll}
+                                queryEnabled={false}
+                            />
                         )}
                         {effectiveActiveTab === "active" && (
-                            <ActiveDownloadsTab />
+                            <ActiveDownloadsTab
+                                downloads={activeDownloadsForTab}
+                                loading={false}
+                                refetch={refetchActiveDownloads}
+                                queryEnabled={false}
+                            />
                         )}
                         {effectiveActiveTab === "history" && <HistoryTab />}
-                        {effectiveActiveTab === "social" && <SocialTab />}
+                        {effectiveActiveTab === "social" && (
+                            <SocialTab
+                                users={socialUsers}
+                                isLoading={isSocialLoading}
+                                error={socialError}
+                                queryEnabled={false}
+                            />
+                        )}
                     </div>
                 </div>
             </>
@@ -282,11 +329,33 @@ export function ActivityPanel({
                 {/* Tab Content */}
                 <div className="flex-1 overflow-hidden">
                     {effectiveActiveTab === "notifications" && (
-                        <NotificationsTab />
+                        <NotificationsTab
+                            notifications={notifications}
+                            loading={isNotificationsLoading}
+                            error={notificationsError}
+                            markAsRead={markAsRead}
+                            clearNotification={clearNotification}
+                            clearAll={clearAll}
+                            queryEnabled={false}
+                        />
                     )}
-                    {effectiveActiveTab === "active" && <ActiveDownloadsTab />}
+                    {effectiveActiveTab === "active" && (
+                        <ActiveDownloadsTab
+                            downloads={activeDownloadsForTab}
+                            loading={false}
+                            refetch={refetchActiveDownloads}
+                            queryEnabled={false}
+                        />
+                    )}
                     {effectiveActiveTab === "history" && <HistoryTab />}
-                    {effectiveActiveTab === "social" && <SocialTab />}
+                    {effectiveActiveTab === "social" && (
+                        <SocialTab
+                            users={socialUsers}
+                            isLoading={isSocialLoading}
+                            error={socialError}
+                            queryEnabled={false}
+                        />
+                    )}
                 </div>
                 </div>
             </div>
@@ -295,9 +364,11 @@ export function ActivityPanel({
 }
 
 // Toggle button for TopBar
-export function ActivityPanelToggle() {
-    const { unreadCount } = useNotifications();
-    const { downloads: activeDownloads } = useActiveDownloads();
+export function ActivityPanelToggle({
+    pollingEnabled = true,
+}: { pollingEnabled?: boolean } = {}) {
+    const { downloadStatus } = useDownloadContext();
+    const { unreadCount } = useNotifications({ enabled: pollingEnabled });
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
 
@@ -305,7 +376,8 @@ export function ActivityPanelToggle() {
         return null;
     }
 
-    const hasActivity = unreadCount > 0 || activeDownloads.length > 0;
+    const hasActivity =
+        unreadCount > 0 || downloadStatus.activeDownloads.length > 0;
 
     return (
         <button

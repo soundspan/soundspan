@@ -46,10 +46,20 @@ interface Audiobook {
     } | null;
 }
 
+interface AudiobookshelfConfigStatus {
+    configured?: boolean;
+}
+
 type FilterType = "all" | "listening" | "finished";
 type SortType = "title" | "author" | "recent" | "series";
 const CURRENT_AUDIOBOOK_KEY = createMigratingStorageKey("current_audiobook");
 const PLAYBACK_TYPE_KEY = createMigratingStorageKey("playback_type");
+
+const isAudiobookshelfConfigStatus = (
+    value: unknown
+): value is AudiobookshelfConfigStatus => {
+    return Boolean(value) && typeof value === "object" && "configured" in value;
+};
 
 export default function AudiobooksPage() {
     const router = useRouter();
@@ -72,7 +82,7 @@ export default function AudiobooksPage() {
     const isConfigured =
         !error &&
         (!audiobooksData ||
-            !("configured" in audiobooksData) ||
+            !isAudiobookshelfConfigStatus(audiobooksData) ||
             audiobooksData.configured !== false);
     const audiobooks: Audiobook[] = useMemo(
         () => (Array.isArray(audiobooksData) ? audiobooksData : []),
@@ -189,13 +199,10 @@ export default function AudiobooksPage() {
         return filteredBooks.slice(start, start + itemsPerPage);
     }, [filteredBooks, currentPage, itemsPerPage]);
     
-    // Reset to page 1 when filters change (render-time adjustment)
-    const filterKey = `${filter}-${sortBy}-${selectedGenre}-${groupBySeries}`;
-    const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
-    if (prevFilterKey !== filterKey) {
-        setPrevFilterKey(filterKey);
+    // Reset to page 1 when filters change.
+    useEffect(() => {
         setCurrentPage(1);
-    }
+    }, [filter, sortBy, selectedGenre, groupBySeries]);
 
     // Get series and standalone books for artist-style view
     const getSeriesAndStandalone = () => {

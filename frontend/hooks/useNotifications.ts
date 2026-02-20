@@ -57,11 +57,16 @@ export interface UseActiveDownloadsReturn {
     refetch: () => Promise<unknown>;
 }
 
+interface PollingOptions {
+    enabled?: boolean;
+}
+
 /**
  * Hook for managing notifications using React Query as single source of truth.
  * All components using this hook share the same cache and update together.
  */
-export function useNotifications(): UseNotificationsReturn {
+export function useNotifications(options: PollingOptions = {}): UseNotificationsReturn {
+    const enabled = options.enabled ?? true;
     const queryClient = useQueryClient();
 
     // Single source of truth - React Query cache
@@ -73,10 +78,11 @@ export function useNotifications(): UseNotificationsReturn {
     } = useQuery<Notification[]>({
         queryKey: ["notifications"],
         queryFn: () => api.get<Notification[]>("/notifications"),
+        enabled,
         staleTime: 15_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchInterval: 30000,
+        refetchInterval: enabled ? 30000 : false,
     });
 
     // Derive unread count from data (computed, not stored)
@@ -246,7 +252,10 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
  * - Polls every 10s when downloads are active (for progress updates)
  * - Polls every 30s when idle (to catch new downloads)
  */
-export function useActiveDownloads(): UseActiveDownloadsReturn {
+export function useActiveDownloads(
+    options: PollingOptions = {}
+): UseActiveDownloadsReturn {
+    const enabled = options.enabled ?? true;
     const fetchDownloads = useCallback(async () => {
         return api.get<DownloadHistoryItem[]>("/notifications/downloads/active");
     }, []);
@@ -259,11 +268,15 @@ export function useActiveDownloads(): UseActiveDownloadsReturn {
     } = useQuery<DownloadHistoryItem[]>({
         queryKey: ["active-downloads"],
         queryFn: fetchDownloads,
+        enabled,
         staleTime: 8_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
         // Adaptive polling: 10s when active, 30s when idle
         refetchInterval: (query) => {
+            if (!enabled) {
+                return false;
+            }
             const data = query.state.data;
             return data && data.length > 0 ? 10000 : 30000;
         },

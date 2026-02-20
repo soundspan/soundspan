@@ -95,17 +95,15 @@ export function DownloadNotifications() {
         downloadStatus.failedDownloads.length > 0 ||
         downloadStatus.recentDownloads.length > 0;
 
-    // Render-time adjustment: sync open/dismissed state with shouldShow changes
-    const [prevShouldShow, setPrevShouldShow] = useState(shouldShow);
-    if (shouldShow !== prevShouldShow) {
-        setPrevShouldShow(shouldShow);
+    // Keep visibility in sync when download activity appears/disappears.
+    useEffect(() => {
         if (shouldShow) {
             setIsOpen(true);
             setDismissed(false);
-        } else {
-            setIsOpen(false);
+            return;
         }
-    }
+        setIsOpen(false);
+    }, [shouldShow]);
 
     const shouldRender = (shouldShow && !dismissed) || isOpen;
     if (!shouldRender) return null;

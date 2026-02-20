@@ -26,7 +26,11 @@ import Image from "next/image";
 import { APP_VERSION } from "@/lib/version";
 import { BRAND_NAME } from "@/lib/brand";
 
-export function TopBar() {
+interface TopBarProps {
+    isActivityPanelOpen?: boolean;
+}
+
+export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
     const pathname = usePathname();
     const router = useRouter();
     const { logout } = useAuth();
@@ -279,6 +283,7 @@ export function TopBar() {
                                 alt={BRAND_NAME}
                                 width={40}
                                 height={40}
+                                sizes="40px"
                                 className="group-hover:scale-105 transition-transform"
                             />
                             <span className="brand-wordmark text-3xl font-bold bg-gradient-to-r from-white via-white to-gray-300 bg-clip-text text-transparent">
@@ -395,7 +400,9 @@ export function TopBar() {
                                 )}
                             />
                         </button>
-                        <ActivityPanelToggle />
+                        <ActivityPanelToggle
+                            pollingEnabled={!isActivityPanelOpen}
+                        />
                         <Link
                             href="/settings"
                             className={cn(

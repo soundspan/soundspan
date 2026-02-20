@@ -113,7 +113,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                     </a>
                     <div className="h-screen bg-black overflow-hidden flex flex-col">
                         <MediaControlsHandler />
-                        <TopBar />
+                        <TopBar isActivityPanelOpen={activityPanel.isOpen} />
 
                         {/* Sidebar - renders MobileSidebar for hamburger menu */}
                         <Sidebar />
@@ -169,7 +169,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                     style={{ paddingTop: "64px" }}
                 >
                     <MediaControlsHandler />
-                    <TopBar />
+                    <TopBar isActivityPanelOpen={activityPanel.isOpen} />
                     <div className="flex-1 flex gap-2 p-2 pt-0 overflow-hidden">
                         <Sidebar />
                         <main

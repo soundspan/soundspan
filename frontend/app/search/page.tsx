@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SearchIcon } from "lucide-react";
@@ -71,15 +71,13 @@ export default function SearchPage() {
         handleDownload,
     } = useSoulseekSearch({ query });
 
-    // Sync query from URL params on navigation (render-time adjustment)
+    // Sync query from URL params on navigation.
     const urlQuery = searchParams.get("q") ?? "";
-    const [prevUrlQuery, setPrevUrlQuery] = useState(urlQuery);
-    if (urlQuery !== prevUrlQuery) {
-        setPrevUrlQuery(urlQuery);
+    useEffect(() => {
         if (urlQuery) {
             setQuery(urlQuery);
         }
-    }
+    }, [urlQuery]);
 
     // Derived state
     const topArtist = discoverResults.find((r) => r.type === "music");

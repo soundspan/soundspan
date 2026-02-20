@@ -51,7 +51,9 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         []
     );
     const { isAuthenticated, user } = useAuth();
-    const downloadStatus = useDownloadStatus(15000, isAuthenticated);
+    const shouldPollDownloads =
+        isAuthenticated && user?.role === "admin";
+    const downloadStatus = useDownloadStatus(15000, shouldPollDownloads);
     const [downloadsEnabled, setDownloadsEnabled] = useState(false);
 
     // Fetch download service availability on mount / when auth changes
@@ -74,20 +76,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         return () => { mounted = false; };
     }, [isAuthenticated, user?.role]);
 
-    // Sync pending downloads with actual download status (render-time adjustment)
-    const [prevActiveDownloads, setPrevActiveDownloads] = useState(downloadStatus.activeDownloads);
-    const [prevRecentDownloads, setPrevRecentDownloads] = useState(downloadStatus.recentDownloads);
-    const [prevFailedDownloads, setPrevFailedDownloads] = useState(downloadStatus.failedDownloads);
-
-    if (
-        prevActiveDownloads !== downloadStatus.activeDownloads ||
-        prevRecentDownloads !== downloadStatus.recentDownloads ||
-        prevFailedDownloads !== downloadStatus.failedDownloads
-    ) {
-        setPrevActiveDownloads(downloadStatus.activeDownloads);
-        setPrevRecentDownloads(downloadStatus.recentDownloads);
-        setPrevFailedDownloads(downloadStatus.failedDownloads);
-
+    // Sync pending downloads with actual download status.
+    useEffect(() => {
         setPendingDownloads((prev) => {
             const next = prev.filter((pending) => {
                 const hasActiveJob = downloadStatus.activeDownloads.some(
@@ -105,7 +95,11 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             });
             return next.length === prev.length ? prev : next;
         });
-    }
+    }, [
+        downloadStatus.activeDownloads,
+        downloadStatus.recentDownloads,
+        downloadStatus.failedDownloads,
+    ]);
 
     // Cleanup pending downloads older than 2 minutes
     // This handles cases where jobs fail immediately and don't appear in any API response

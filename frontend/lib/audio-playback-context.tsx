@@ -19,6 +19,10 @@ import {
     writeMigratingStorageItem,
     type MigratingStorageKey,
 } from "@/lib/storage-migration";
+import {
+    LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX,
+    PLAYBACK_PROGRESS_SAVE_INTERVAL_MS,
+} from "@/lib/playback-state-cadence";
 
 interface AudioPlaybackContextType {
     isPlaying: boolean;
@@ -53,6 +57,9 @@ const STORAGE_KEYS = {
     IS_PLAYING: createMigratingStorageKey("is_playing"),
     CURRENT_TIME: createMigratingStorageKey("current_time"),
     CURRENT_TIME_TRACK_ID: createMigratingStorageKey("current_time_track_id"),
+    LAST_PLAYBACK_STATE_SAVE_AT: createMigratingStorageKey(
+        LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX
+    ),
 };
 
 function readStorage(key: MigratingStorageKey): string | null {
@@ -191,22 +198,39 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         currentTimeRef.current = currentTime;
     }, [currentTime]);
 
-    // Sync currentTime from audiobook/podcast progress when not playing (render-time adjustment)
-    const progressKey = isHydrated && !isPlaying
-        ? `${state.playbackType}-${state.currentAudiobook?.progress?.currentTime}-${state.currentPodcast?.progress?.currentTime}`
-        : null;
-    const [prevProgressKey, setPrevProgressKey] = useState<string | null>(progressKey);
-
-    if (progressKey !== prevProgressKey) {
-        setPrevProgressKey(progressKey);
-        if (progressKey !== null) {
-            if (state.playbackType === "audiobook" && state.currentAudiobook?.progress?.currentTime) {
-                setCurrentTime(state.currentAudiobook.progress.currentTime);
-            } else if (state.playbackType === "podcast" && state.currentPodcast?.progress?.currentTime) {
-                setCurrentTime(state.currentPodcast.progress.currentTime);
-            }
+    // Sync currentTime from audiobook/podcast progress when not playing.
+    useEffect(() => {
+        if (!isHydrated || isPlaying) {
+            return;
         }
-    }
+
+        const audiobookProgress =
+            state.playbackType === "audiobook"
+                ? state.currentAudiobook?.progress?.currentTime
+                : null;
+        if (audiobookProgress) {
+            setCurrentTime((prev) =>
+                prev === audiobookProgress ? prev : audiobookProgress
+            );
+            return;
+        }
+
+        const podcastProgress =
+            state.playbackType === "podcast"
+                ? state.currentPodcast?.progress?.currentTime
+                : null;
+        if (podcastProgress) {
+            setCurrentTime((prev) =>
+                prev === podcastProgress ? prev : podcastProgress
+            );
+        }
+    }, [
+        isHydrated,
+        isPlaying,
+        state.playbackType,
+        state.currentAudiobook?.progress?.currentTime,
+        state.currentPodcast?.progress?.currentTime,
+    ]);
 
     // Cleanup seek lock timeout on unmount
     useEffect(() => {
@@ -277,7 +301,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             if (!isHydrated || !state.playbackType) return;
 
             const now = Date.now();
-            if (!force && now - lastServerProgressSaveRef.current < 10000) {
+            if (
+                !force &&
+                now - lastServerProgressSaveRef.current <
+                    PLAYBACK_PROGRESS_SAVE_INTERVAL_MS
+            ) {
                 return;
             }
 
@@ -299,6 +327,10 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                     currentTime: Math.max(0, currentTimeRef.current),
                 });
                 lastServerProgressSaveRef.current = now;
+                writeMigratingStorageItem(
+                    STORAGE_KEYS.LAST_PLAYBACK_STATE_SAVE_AT,
+                    now.toString()
+                );
             } catch (err) {
                 // Ignore auth/state sync failures to avoid disrupting playback.
                 if (err instanceof Error && err.message !== "Not authenticated") {
@@ -324,7 +356,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
         const intervalId = window.setInterval(() => {
             void savePlaybackProgressToServer(false);
-        }, 10000);
+        }, PLAYBACK_PROGRESS_SAVE_INTERVAL_MS);
 
         return () => window.clearInterval(intervalId);
     }, [isHydrated, isPlaying, state.playbackType, savePlaybackProgressToServer]);

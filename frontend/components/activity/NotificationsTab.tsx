@@ -10,40 +10,41 @@ import {
     CheckCircle,
     ExternalLink,
 } from "lucide-react";
-import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import Link from "next/link";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+    useNotifications,
+    type Notification,
+} from "@/hooks/useNotifications";
 
-interface Notification {
-    id: string;
-    type: string;
-    title: string;
-    message: string | null;
-    metadata: Record<string, unknown> | null;
-    read: boolean;
-    createdAt: string;
+interface NotificationsTabProps {
+    notifications?: Notification[];
+    loading?: boolean;
+    error?: string | null;
+    markAsRead?: (id: string) => void;
+    clearNotification?: (id: string) => void;
+    clearAll?: () => void;
+    queryEnabled?: boolean;
 }
 
-export function NotificationsTab() {
-    const queryClient = useQueryClient();
+export function NotificationsTab({
+    notifications: notificationsProp,
+    loading: loadingProp,
+    error: errorProp,
+    markAsRead: markAsReadProp,
+    clearNotification: clearNotificationProp,
+    clearAll: clearAllProp,
+    queryEnabled = true,
+}: NotificationsTabProps = {}) {
     const previousNotificationIds = useRef<Set<string>>(new Set());
-
-    const {
-        data: notifications = [],
-        isLoading: loading,
-        error,
-    } = useQuery<Notification[]>({
-        queryKey: ["notifications"],
-        queryFn: async () => {
-            const result = await api.getNotifications();
-            return result;
-        },
-        staleTime: 15_000,
-        refetchOnWindowFocus: false,
-        refetchOnReconnect: false,
-        refetchInterval: 30000, // Poll every 30 seconds
-    });
+    const notificationsQuery = useNotifications({ enabled: queryEnabled });
+    const notifications = notificationsProp ?? notificationsQuery.notifications;
+    const loading = loadingProp ?? notificationsQuery.isLoading;
+    const error = errorProp ?? notificationsQuery.error;
+    const markAsRead = markAsReadProp ?? notificationsQuery.markAsRead;
+    const clearNotification =
+        clearNotificationProp ?? notificationsQuery.clearNotification;
+    const clearAll = clearAllProp ?? notificationsQuery.clearAll;
 
     // Dispatch events when new playlist-related notifications arrive
     useEffect(() => {
@@ -75,93 +76,9 @@ export function NotificationsTab() {
         );
     }
 
-    // Mark as read - optimistic update
-    const markAsReadMutation = useMutation({
-        mutationFn: (id: string) => api.markNotificationAsRead(id),
-        onMutate: async (id: string) => {
-            await queryClient.cancelQueries({ queryKey: ["notifications"] });
-
-            const previousNotifications = queryClient.getQueryData<
-                Notification[]
-            >(["notifications"]);
-
-            // Optimistically update
-            queryClient.setQueryData<Notification[]>(
-                ["notifications"],
-                (old) =>
-                    old?.map((n) => (n.id === id ? { ...n, read: true } : n)) ||
-                    []
-            );
-
-            return { previousNotifications };
-        },
-        onError: (_err, _id, context) => {
-            // Rollback on error
-            if (context?.previousNotifications) {
-                queryClient.setQueryData(
-                    ["notifications"],
-                    context.previousNotifications
-                );
-            }
-        },
-    });
-
-    // Clear single notification - optimistic update
-    const clearMutation = useMutation({
-        mutationFn: (id: string) => api.clearNotification(id),
-        onMutate: async (id: string) => {
-            await queryClient.cancelQueries({ queryKey: ["notifications"] });
-
-            const previousNotifications = queryClient.getQueryData<
-                Notification[]
-            >(["notifications"]);
-
-            // Optimistically remove
-            queryClient.setQueryData<Notification[]>(
-                ["notifications"],
-                (old) => old?.filter((n) => n.id !== id) || []
-            );
-
-            return { previousNotifications };
-        },
-        onError: (_err, _id, context) => {
-            if (context?.previousNotifications) {
-                queryClient.setQueryData(
-                    ["notifications"],
-                    context.previousNotifications
-                );
-            }
-        },
-    });
-
-    // Clear all notifications - optimistic update
-    const clearAllMutation = useMutation({
-        mutationFn: () => api.clearAllNotifications(),
-        onMutate: async () => {
-            await queryClient.cancelQueries({ queryKey: ["notifications"] });
-
-            const previousNotifications = queryClient.getQueryData<
-                Notification[]
-            >(["notifications"]);
-
-            // Optimistically clear all
-            queryClient.setQueryData<Notification[]>(["notifications"], []);
-
-            return { previousNotifications };
-        },
-        onError: (_err, _vars, context) => {
-            if (context?.previousNotifications) {
-                queryClient.setQueryData(
-                    ["notifications"],
-                    context.previousNotifications
-                );
-            }
-        },
-    });
-
-    const handleMarkAsRead = (id: string) => markAsReadMutation.mutate(id);
-    const handleClear = (id: string) => clearMutation.mutate(id);
-    const handleClearAll = () => clearAllMutation.mutate();
+    const handleMarkAsRead = (id: string) => markAsRead(id);
+    const handleClear = (id: string) => clearNotification(id);
+    const handleClearAll = () => clearAll();
 
     const getIcon = (type: string) => {
         switch (type) {
@@ -179,14 +96,15 @@ export function NotificationsTab() {
     };
 
     const getLink = (notification: Notification): string | null => {
-        if (notification.metadata?.playlistId) {
-            return `/playlist/${notification.metadata.playlistId}`;
+        const metadata = notification.metadata as Record<string, unknown> | undefined;
+        if (typeof metadata?.playlistId === "string") {
+            return `/playlist/${metadata.playlistId}`;
         }
-        if (notification.metadata?.albumId) {
-            return `/album/${notification.metadata.albumId}`;
+        if (typeof metadata?.albumId === "string") {
+            return `/album/${metadata.albumId}`;
         }
-        if (notification.metadata?.artistId) {
-            return `/artist/${notification.metadata.artistId}`;
+        if (typeof metadata?.artistId === "string") {
+            return `/artist/${metadata.artistId}`;
         }
         return null;
     };

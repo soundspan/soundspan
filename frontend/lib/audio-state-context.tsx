@@ -17,6 +17,11 @@ import {
     writeMigratingStorageItem,
     type MigratingStorageKey,
 } from "@/lib/storage-migration";
+import {
+    LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX,
+    parsePlaybackStateSaveTimestamp,
+    shouldSkipPlaybackStatePoll,
+} from "@/lib/playback-state-cadence";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -203,6 +208,9 @@ const STORAGE_KEYS = {
     PODCAST_EPISODE_QUEUE: createMigratingStorageKey("podcast_episode_queue"),
     CURRENT_TIME: createMigratingStorageKey("current_time"),
     CURRENT_TIME_TRACK_ID: createMigratingStorageKey("current_time_track_id"),
+    LAST_PLAYBACK_STATE_SAVE_AT: createMigratingStorageKey(
+        LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX
+    ),
 };
 
 function readStorage(key: MigratingStorageKey): string | null {
@@ -495,68 +503,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         isHydrated,
     ]);
 
-    // Save playback state to server
-    useEffect(() => {
-        if (!isHydrated) return;
-        if (!playbackType) return;
-
-        const saveToServer = async () => {
-            try {
-                // Limit queue to first 100 items to reduce payload size
-                // Backend also limits to 100, so this matches server storage
-                const limitedQueue = queue?.slice(0, 100);
-                const adjustedIndex = Math.min(
-                    currentIndex,
-                    (limitedQueue?.length || 1) - 1
-                );
-
-                const result = await api.savePlaybackState({
-                    playbackType,
-                    trackId: currentTrack?.id,
-                    audiobookId: currentAudiobook?.id,
-                    podcastId: currentPodcast?.id,
-                    queue: limitedQueue,
-                    currentIndex: adjustedIndex,
-                    isShuffle,
-                    currentTime:
-                        typeof window !== "undefined"
-                            ? Number(
-                                  readStorage(STORAGE_KEYS.CURRENT_TIME) || 0
-                              ) || 0
-                            : 0,
-                });
-                setLastServerSync(new Date(result.updatedAt));
-                queueDebugLog("Saved playback state to server", {
-                    playbackType,
-                    trackId: currentTrack?.id,
-                    queueLen: limitedQueue?.length || 0,
-                    currentIndex: adjustedIndex,
-                    isShuffle,
-                    updatedAt: result.updatedAt,
-                });
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message !== "Not authenticated") {
-                    console.error(
-                        "[AudioState] Failed to save to server:",
-                        err
-                    );
-                }
-            }
-        };
-
-        const timeoutId = setTimeout(saveToServer, 1000);
-        return () => clearTimeout(timeoutId);
-    }, [
-        playbackType,
-        currentTrack?.id,
-        currentAudiobook?.id,
-        currentPodcast?.id,
-        queue,
-        currentIndex,
-        isShuffle,
-        isHydrated,
-    ]);
-
     // Poll server for persisted changes for this device (pauses when tab is hidden)
     useEffect(() => {
         if (!isHydrated) return;
@@ -575,6 +521,13 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         const pollInterval = setInterval(async () => {
             // Skip polling when tab is hidden, unmounted, or not authenticated
             if (!isAuthenticated || !mounted || !isVisible) return;
+
+            const lastLocalSave = parsePlaybackStateSaveTimestamp(
+                readStorage(STORAGE_KEYS.LAST_PLAYBACK_STATE_SAVE_AT)
+            );
+            if (shouldSkipPlaybackStatePoll(lastLocalSave)) {
+                return;
+            }
 
             try {
                 const serverState = await api.getPlaybackState();

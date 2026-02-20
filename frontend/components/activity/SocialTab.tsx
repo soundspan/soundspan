@@ -3,7 +3,10 @@
 import Image from "next/image";
 import { Music2, Users, Radio } from "lucide-react";
 import { cn } from "@/utils/cn";
-import { useSocialPresence } from "@/hooks/useSocialPresence";
+import {
+    useSocialPresence,
+    type SocialOnlineUser,
+} from "@/hooks/useSocialPresence";
 import { api } from "@/lib/api";
 
 function formatLastSeen(isoDate: string): string {
@@ -17,8 +20,23 @@ function formatLastSeen(isoDate: string): string {
     return "today";
 }
 
-export function SocialTab() {
-    const { users, isLoading, error } = useSocialPresence();
+interface SocialTabProps {
+    users?: SocialOnlineUser[];
+    isLoading?: boolean;
+    error?: unknown;
+    queryEnabled?: boolean;
+}
+
+export function SocialTab({
+    users: usersProp,
+    isLoading: isLoadingProp,
+    error: errorProp,
+    queryEnabled = true,
+}: SocialTabProps = {}) {
+    const socialQuery = useSocialPresence({ enabled: queryEnabled });
+    const users = usersProp ?? socialQuery.users;
+    const isLoading = isLoadingProp ?? socialQuery.isLoading;
+    const error = errorProp ?? socialQuery.error;
     const hasUsers = users.length > 0;
     const showLoadingState = isLoading && !hasUsers;
     const showUnavailableState = Boolean(error) && !hasUsers;

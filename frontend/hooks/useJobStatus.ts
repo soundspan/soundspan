@@ -77,14 +77,14 @@ export function useJobStatus(
         }
     }, [jobId, jobType]);
 
-    // Start polling when jobId is set (render-time adjustment)
-    const [prevJobId, setPrevJobId] = useState(jobId);
-    if (jobId !== prevJobId) {
-        setPrevJobId(jobId);
-        if (jobId) {
-            setIsPolling(true);
+    // Start/stop polling when the job identity changes.
+    useEffect(() => {
+        if (!jobId) {
+            setIsPolling(false);
+            return;
         }
-    }
+        setIsPolling(true);
+    }, [jobId]);
 
     // Poll for status updates
     useEffect(() => {

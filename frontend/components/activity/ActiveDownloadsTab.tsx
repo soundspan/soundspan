@@ -5,11 +5,28 @@ import { Download, Loader2, Music, Disc, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "../ui/GradientSpinner";
-import { useActiveDownloads } from "@/hooks/useNotifications";
+import {
+    useActiveDownloads,
+    type DownloadHistoryItem,
+} from "@/hooks/useNotifications";
 
-export function ActiveDownloadsTab() {
-    // Use shared React Query hook instead of duplicate polling
-    const { downloads, isLoading: loading, refetch } = useActiveDownloads();
+interface ActiveDownloadsTabProps {
+    downloads?: DownloadHistoryItem[];
+    loading?: boolean;
+    refetch?: () => Promise<unknown>;
+    queryEnabled?: boolean;
+}
+
+export function ActiveDownloadsTab({
+    downloads: downloadsProp,
+    loading: loadingProp,
+    refetch: refetchProp,
+    queryEnabled = true,
+}: ActiveDownloadsTabProps = {}) {
+    const downloadsQuery = useActiveDownloads({ enabled: queryEnabled });
+    const downloads = downloadsProp ?? downloadsQuery.downloads;
+    const loading = loadingProp ?? downloadsQuery.isLoading;
+    const refetch = refetchProp ?? downloadsQuery.refetch;
     const [cancelling, setCancelling] = useState<Set<string>>(new Set());
 
     const handleCancel = async (id: string) => {

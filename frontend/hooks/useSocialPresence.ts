@@ -42,14 +42,23 @@ interface ConnectedUsersResponse {
     users: AdminConnectedUser[];
 }
 
-export function useSocialPresence() {
+interface SocialPresenceOptions {
+    enabled?: boolean;
+}
+
+export function useSocialPresence(options: SocialPresenceOptions = {}) {
+    const enabled = options.enabled ?? true;
     const query = useQuery<SocialOnlineResponse>({
         queryKey: ["social-presence", "online"],
         queryFn: () => api.get<SocialOnlineResponse>("/social/online"),
+        enabled,
         staleTime: 5_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
         refetchInterval: (state) => {
+            if (!enabled) {
+                return false;
+            }
             const users = state.state.data?.users;
             return users && users.length > 0
                 ? SOCIAL_POLL_ACTIVE_MS

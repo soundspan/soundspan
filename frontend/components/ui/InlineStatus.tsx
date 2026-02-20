@@ -31,12 +31,10 @@ export function InlineStatus({
 }: InlineStatusProps) {
     const [visible, setVisible] = useState(status !== "idle");
 
-    // Sync visibility with status changes during render
-    const [prevStatus, setPrevStatus] = useState(status);
-    if (status !== prevStatus) {
-        setPrevStatus(status);
+    // Sync visibility with status changes.
+    useEffect(() => {
         setVisible(status !== "idle");
-    }
+    }, [status]);
 
     // Auto-clear success/error after delay
     useEffect(() => {
@@ -211,4 +209,3 @@ export function SaveButton({
         </div>
     );
 }
-
