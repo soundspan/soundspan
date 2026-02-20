@@ -456,9 +456,11 @@ class Worker:
         try:
             cursor.execute("""
                 UPDATE "Track"
-                SET "vibeAnalysisStatus" = %s
+                SET
+                    "vibeAnalysisStatus" = %s,
+                    "vibeAnalysisStatusUpdatedAt" = %s
                 WHERE id = %s
-            """, (status, track_id))
+            """, (status, datetime.utcnow(), track_id))
             self.db.commit()
         except Exception as e:
             logger.error(f"Failed to update track vibe status: {e}")
@@ -480,9 +482,10 @@ class Worker:
                 SET
                     "vibeAnalysisStatus" = 'failed',
                     "vibeAnalysisError" = %s,
-                    "vibeAnalysisRetryCount" = COALESCE("vibeAnalysisRetryCount", 0) + 1
+                    "vibeAnalysisRetryCount" = COALESCE("vibeAnalysisRetryCount", 0) + 1,
+                    "vibeAnalysisStatusUpdatedAt" = %s
                 WHERE id = %s
-            """, (error[:500], track_id))
+            """, (error[:500], datetime.utcnow(), track_id))
             self.db.commit()
             logger.error(f"Track {track_id} failed: {error}")
 

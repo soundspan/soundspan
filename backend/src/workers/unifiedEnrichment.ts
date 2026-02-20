@@ -1350,9 +1350,14 @@ async function queueAudioAnalysis(): Promise<number> {
  * Only runs if CLAP analyzer is available
  */
 async function queueVibeEmbeddings(): Promise<number> {
-      const tracks = await withEnrichmentPrismaRetry(
-          "queueVibeEmbeddings.track.select",
-          () => prisma.$queryRaw<{ id: string; filePath: string; vibeAnalysisStatus: string | null }[]>`
+    const tracks = await withEnrichmentPrismaRetry(
+        "queueVibeEmbeddings.track.select",
+        () =>
+            prisma.$queryRaw<{
+                id: string;
+                filePath: string;
+                vibeAnalysisStatus: string | null;
+            }[]>`
           SELECT t.id, t."filePath", t."vibeAnalysisStatus"
           FROM "Track" t
           LEFT JOIN track_embeddings te ON t.id = te.track_id
@@ -1360,46 +1365,50 @@ async function queueVibeEmbeddings(): Promise<number> {
             AND t."filePath" IS NOT NULL
             AND (t."vibeAnalysisStatus" IS NULL OR t."vibeAnalysisStatus" = 'pending')
           LIMIT 1000
-      `);
- 
-     if (tracks.length === 0) {
-         return 0;
-     }
+      `,
+    );
 
- const redis = getRedis();
-      let queued = 0;
+    if (tracks.length === 0) {
+        return 0;
+    }
 
-      for (const track of tracks) {
-          try {
-              await prisma.track.update({
-                  where: { id: track.id },
-                  data: {
-                      vibeAnalysisStatus: 'processing',
-                      vibeAnalysisStartedAt: new Date(),
-                      vibeAnalysisStatusUpdatedAt: new Date(),
-                  },
-              });
-              
-              await withEnrichmentQueueRedisRetry(
-                  `queueVibeEmbeddings.rpush(${track.id})`,
-                  () =>
-                      redis.rpush(
-                          "audio:clap:queue",
-                          JSON.stringify({
-                              trackId: track.id,
-                              filePath: track.filePath,
-                          })
-                      )
-              );
-              
-              queued++;
-          } catch (error) {
-              logger.error(`   Failed to queue vibe embedding for ${track.id}:`, error);
-          }
-      }
+    const redis = getRedis();
+    let queued = 0;
 
-      return queued;
- }
+    for (const track of tracks) {
+        try {
+            await withEnrichmentQueueRedisRetry(
+                `queueVibeEmbeddings.rpush(${track.id})`,
+                () =>
+                    redis.rpush(
+                        "audio:clap:queue",
+                        JSON.stringify({
+                            trackId: track.id,
+                            filePath: track.filePath,
+                        }),
+                    ),
+            );
+
+            await prisma.track.update({
+                where: { id: track.id },
+                data: {
+                    vibeAnalysisStatus: "processing",
+                    vibeAnalysisStartedAt: new Date(),
+                    vibeAnalysisStatusUpdatedAt: new Date(),
+                },
+            });
+
+            queued++;
+        } catch (error) {
+            logger.error(
+                `   Failed to queue vibe embedding for ${track.id}:`,
+                error,
+            );
+        }
+    }
+
+    return queued;
+}
 
 /**
  * Check if enrichment should stop and handle state cleanup if stopping.
@@ -1583,8 +1592,8 @@ async function executeVibePhase(): Promise<number> {
     return result;
 }
 
- /**
-  * Get comprehensive enrichment progress
+/**
+ * Get comprehensive enrichment progress
  *
  * Returns separate progress for:
  * - Artists & Track Tags: "Core" enrichment (must complete before app is fully usable)
@@ -1602,7 +1611,7 @@ export async function getEnrichmentProgress() {
         audioFailed,
         clapEmbeddingCount,
         clapProcessing,
-        clapFailedCount,
+        clapFailedByStatus,
     ] = await withEnrichmentPrismaRetry("getEnrichmentProgress.dbReads", () =>
         prisma.$transaction([
             prisma.artist.groupBy({
@@ -1641,8 +1650,8 @@ export async function getEnrichmentProgress() {
             prisma.track.count({
                 where: { vibeAnalysisStatus: "processing" },
             }),
-            prisma.enrichmentFailure.count({
-                where: { entityType: "vibe", resolved: false, skipped: false },
+            prisma.track.count({
+                where: { vibeAnalysisStatus: "failed" },
             }),
         ]),
     );
@@ -1669,15 +1678,23 @@ export async function getEnrichmentProgress() {
 
     const features = await featureDetection.getFeatures();
     const clapCompleted = Number(clapEmbeddingCount[0]?.count || 0);
-    const clapFailed = clapFailedCount;
+    const clapFailed = clapFailedByStatus;
     const clapTotal = Number(clapEligibleTrackCount[0]?.count || 0);
     const clapPending = Math.max(0, clapTotal - clapCompleted - clapFailed);
     const clapRequiredForFullCompletion = features.vibeEmbeddings;
+    const artistProgress =
+        artistTotal > 0 ? Math.round((artistCompleted / artistTotal) * 100) : 0;
+    const trackTagsPending = Math.max(0, trackTotal - trackTagsEnriched);
+    const trackTagsProgress =
+        trackTotal > 0 ? Math.round((trackTagsEnriched / trackTotal) * 100) : 0;
+    const audioProgress =
+        trackTotal > 0 ? Math.round((audioCompleted / trackTotal) * 100) : 0;
+    const clapProgress =
+        clapTotal > 0 ? Math.round((clapCompleted / clapTotal) * 100) : 0;
 
     // Core enrichment is complete when artists and track tags are done
     // Audio analysis is separate - it runs in background and doesn't block
-    const coreComplete =
-        artistPending === 0 && trackTotal - trackTagsEnriched === 0;
+    const coreComplete = artistPending === 0 && trackTagsPending === 0;
 
     return {
         // Core enrichment (blocking)
@@ -1689,18 +1706,18 @@ export async function getEnrichmentProgress() {
                 artistCounts.find((s) => s.enrichmentStatus === "failed")
                     ?._count || 0,
             progress:
-                artistTotal > 0 ?
-                    Math.round((artistCompleted / artistTotal) * 100)
-                :   0,
+                artistPending > 0 ?
+                    Math.min(artistProgress, 99)
+                :   artistProgress,
         },
         trackTags: {
             total: trackTotal,
             enriched: trackTagsEnriched,
-            pending: trackTotal - trackTagsEnriched,
+            pending: trackTagsPending,
             progress:
-                trackTotal > 0 ?
-                    Math.round((trackTagsEnriched / trackTotal) * 100)
-                :   0,
+                trackTagsPending > 0 ?
+                    Math.min(trackTagsProgress, 99)
+                :   trackTagsProgress,
         },
 
         // Background enrichment (non-blocking, runs in audio-analyzer container)
@@ -1711,9 +1728,9 @@ export async function getEnrichmentProgress() {
             processing: audioProcessing,
             failed: audioFailed,
             progress:
-                trackTotal > 0 ?
-                    Math.round((audioCompleted / trackTotal) * 100)
-                :   0,
+                audioPending > 0 || audioProcessing > 0 ?
+                    Math.min(audioProgress, 99)
+                :   audioProgress,
             isBackground: true, // Flag to indicate this runs separately
         },
 
@@ -1725,9 +1742,9 @@ export async function getEnrichmentProgress() {
             processing: clapProcessing,
             failed: clapFailed,
             progress:
-                clapTotal > 0 ?
-                    Math.round((clapCompleted / clapTotal) * 100)
-                :   0,
+                clapPending > 0 || clapProcessing > 0 || clapQueueLength > 0 ?
+                    Math.min(clapProgress, 99)
+                :   clapProgress,
             isBackground: true,
         },
 

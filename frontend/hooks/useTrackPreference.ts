@@ -8,6 +8,10 @@ import {
     type TrackPreferenceSignal,
 } from "@/lib/api";
 import { getNextTrackPreferenceSignal } from "@/hooks/trackPreferenceSignals";
+import {
+    applyOptimisticTrackPreferenceMutation,
+    type TrackPreferenceOptimisticQueryClient,
+} from "@/hooks/trackPreferenceOptimistic";
 
 export function useTrackPreference(trackId?: string | null) {
     const queryClient = useQueryClient();
@@ -33,25 +37,11 @@ export function useTrackPreference(trackId?: string | null) {
         },
         onMutate: async (nextSignal) => {
             if (!trackId) return null;
-
-            const canonicalQueryKey = ["track-preference", trackId] as const;
-            await queryClient.cancelQueries({
-                queryKey: canonicalQueryKey,
-                exact: true,
-            });
-
-            const previousPreference =
-                queryClient.getQueryData<TrackPreferenceResponse>(canonicalQueryKey);
-            queryClient.setQueryData(canonicalQueryKey, {
+            return applyOptimisticTrackPreferenceMutation(
+                queryClient as TrackPreferenceOptimisticQueryClient,
                 trackId,
-                signal: nextSignal,
-                score:
-                    nextSignal === "thumbs_up" ? 1
-                    : nextSignal === "thumbs_down" ? -1
-                    : 0,
-            });
-
-            return { canonicalQueryKey, previousPreference };
+                nextSignal
+            );
         },
         onSuccess: (data, _signal, context) => {
             const canonicalQueryKey =

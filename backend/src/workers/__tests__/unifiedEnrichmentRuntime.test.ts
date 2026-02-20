@@ -254,6 +254,55 @@ describe("unified enrichment runtime behavior", () => {
         expect(prisma.track.updateMany).toHaveBeenCalled();
     });
 
+    it("caps CLAP progress below 100 while any CLAP work remains", async () => {
+        const { prisma } = setupUnifiedEnrichmentMocks();
+        (prisma.$transaction as jest.Mock).mockResolvedValue([
+            [{ enrichmentStatus: "completed", _count: 1 }],
+            3201,
+            [{ count: BigInt(3201) }],
+            3201,
+            3201,
+            0,
+            0,
+            0,
+            [{ count: BigInt(3200) }],
+            0,
+            0,
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const progress = await enrichment.getEnrichmentProgress();
+
+        expect(progress.clapEmbeddings.pending).toBe(1);
+        expect(progress.clapEmbeddings.progress).toBe(99);
+    });
+
+    it("derives CLAP failed counts from track vibe status to avoid phantom pending work", async () => {
+        const { prisma } = setupUnifiedEnrichmentMocks();
+        (prisma.$transaction as jest.Mock).mockResolvedValue([
+            [{ enrichmentStatus: "completed", _count: 1 }],
+            1,
+            [{ count: BigInt(1) }],
+            1,
+            1,
+            0,
+            0,
+            0,
+            [{ count: BigInt(0) }],
+            0,
+            1,
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const progress = await enrichment.getEnrichmentProgress();
+
+        expect(progress.clapEmbeddings.failed).toBe(1);
+        expect(progress.clapEmbeddings.pending).toBe(0);
+        expect(progress.isFullyComplete).toBe(true);
+    });
+
     it("disconnects enrichment redis clients during stop", async () => {
         const { queueRedisPrimary } = setupUnifiedEnrichmentMocks();
 
@@ -1838,6 +1887,33 @@ describe("unified enrichment runtime behavior", () => {
 
         expect(logger.error).toHaveBeenCalledWith(
             "   Failed to queue vibe embedding for track-vibe-fail:",
+            expect.any(Error)
+        );
+    });
+
+    it("does not mark vibe status processing when CLAP queue push fails", async () => {
+        const { prisma, getFeatures, queueRedisPrimary, logger } =
+            setupUnifiedEnrichmentMocks();
+        getFeatures.mockResolvedValueOnce({ vibeEmbeddings: true });
+        (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+            {
+                id: "track-vibe-rpush-fail",
+                filePath: "/music/track-vibe-rpush-fail.flac",
+                vibeAnalysisStatus: null,
+            },
+        ]);
+        (queueRedisPrimary.rpush as jest.Mock).mockRejectedValueOnce(
+            new Error("push failed")
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const queued = await enrichment.reRunVibeEmbeddingsOnly();
+
+        expect(queued).toBe(0);
+        expect(prisma.track.update).not.toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalledWith(
+            "   Failed to queue vibe embedding for track-vibe-rpush-fail:",
             expect.any(Error)
         );
     });

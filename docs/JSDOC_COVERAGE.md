@@ -18,10 +18,10 @@ Scope:
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 69 | 69 | 11 | 58 | 15.9% |
 | Frontend features | 133 | 110 | 4 | 106 | 3.6% |
-| Frontend hooks | 24 | 79 | 55 | 24 | 69.6% |
+| Frontend hooks | 25 | 81 | 55 | 26 | 67.9% |
 | Frontend lib | 32 | 40 | 8 | 32 | 20.0% |
 | Frontend other | 59 | 57 | 6 | 51 | 10.5% |
-| **Total** | **474** | **602** | **222** | **380** | **36.9%** |
+| **Total** | **475** | **604** | **222** | **382** | **36.8%** |
 
 ## Missing Exported Symbols (Top 250)
 
