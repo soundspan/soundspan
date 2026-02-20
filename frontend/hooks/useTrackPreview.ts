@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { howlerEngine } from "@/lib/howler-engine";
+import { createRuntimeAudioEngine } from "@/lib/audio-engine";
+
+const playbackEngine = createRuntimeAudioEngine();
 
 interface PreviewableTrack {
     id: string;
@@ -88,8 +90,8 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 return;
             }
 
-            if (howlerEngine.isPlaying()) {
-                howlerEngine.pause();
+            if (playbackEngine.isPlaying()) {
+                playbackEngine.pause();
                 mainPlayerWasPausedRef.current = true;
             }
 
@@ -153,9 +155,9 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             }
         };
 
-        howlerEngine.on("play", stopPreview);
+        playbackEngine.on("play", stopPreview);
         return () => {
-            howlerEngine.off("play", stopPreview);
+            playbackEngine.off("play", stopPreview);
         };
     }, []);
 

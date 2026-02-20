@@ -51,9 +51,17 @@ export function MiniPlayer() {
         codec: streamCodec,
         tidalQuality,
         localQuality,
+        segmentedBadgeLabel,
+        segmentedSourceType,
     } = useStreamBitrate();
     const ytQualityLabel = formatYtQualityBadge(streamCodec, streamBitrate);
     const localQualityLabel = formatLocalQualityBadge(localQuality);
+    const segmentedBadgeClass =
+        segmentedSourceType === "tidal"
+            ? "bg-cyan-500/20 text-cyan-300"
+            : segmentedSourceType === "ytmusic"
+                ? "bg-red-500/20 text-red-300"
+                : "bg-sky-500/20 text-sky-300";
     const currentMediaId = currentTrack?.id || currentAudiobook?.id || currentPodcast?.id || "default";
     const artworkLayoutId = `mobile-player-artwork-${currentMediaId}`;
 
@@ -154,6 +162,18 @@ export function MiniPlayer() {
                                     <p className="truncate text-xs text-gray-300/80">
                                         {subtitle}
                                     </p>
+                                    {segmentedBadgeLabel ? (
+                                        <span
+                                            className={cn(
+                                                "max-w-[45vw] flex-shrink-0 overflow-hidden text-ellipsis whitespace-nowrap rounded px-1 py-0.5 text-[9px] font-bold leading-none",
+                                                segmentedBadgeClass
+                                            )}
+                                            title={segmentedBadgeLabel}
+                                        >
+                                            {segmentedBadgeLabel}
+                                        </span>
+                                    ) : (
+                                        <>
                                     {currentTrack?.streamSource === "tidal" && (
                                         <TidalBadge
                                             quality={tidalQuality}
@@ -175,6 +195,8 @@ export function MiniPlayer() {
                                         >
                                             {localQualityLabel}
                                         </span>
+                                    )}
+                                        </>
                                     )}
                                     <SyncBadge compact />
                                 </div>

@@ -42,6 +42,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/social.ts` | `/api/social` |
 | `backend/src/routes/soulseek.ts` | `/api/soulseek` |
 | `backend/src/routes/spotify.ts` | `/api/spotify` |
+| `backend/src/routes/streaming.ts` | `/api/streaming` |
 | `backend/src/routes/subsonic.ts` | `/rest` |
 | `backend/src/routes/system.ts` | `/api/system` |
 | `backend/src/routes/systemSettings.ts` | `/api/system-settings` |

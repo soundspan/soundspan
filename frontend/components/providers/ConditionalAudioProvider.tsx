@@ -6,7 +6,7 @@ import { AudioPlaybackProvider } from "@/lib/audio-playback-context";
 import { AudioControlsProvider } from "@/lib/audio-controls-context";
 import { ListenTogetherProvider } from "@/lib/listen-together-context";
 import { useAuth } from "@/lib/auth-context";
-import { HowlerAudioElement } from "@/components/player/HowlerAudioElement";
+import { AudioRuntimeElement } from "@/components/player/AudioRuntimeElement";
 import { AudioErrorBoundary } from "@/components/providers/AudioErrorBoundary";
 
 export function ConditionalAudioProvider({
@@ -34,8 +34,8 @@ export function ConditionalAudioProvider({
             <AudioStateProvider>
                 <AudioPlaybackProvider>
                     <AudioControlsProvider>
-                        {/* HowlerAudioElement handles both web and native platforms */}
-                        <HowlerAudioElement />
+                        {/* AudioRuntimeElement bridges engine selection with legacy-safe fallback */}
+                        <AudioRuntimeElement />
                         <ListenTogetherProvider>
                             {children}
                         </ListenTogetherProvider>

@@ -494,6 +494,36 @@ SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 INTERNAL_API_SECRET=$INTERNAL_API_SECRET
 ENVEOF
 
+# Write frontend runtime config (runtime-only; no image rebuild required).
+RUNTIME_CONFIG_FILE="/app/frontend/public/runtime-config.js"
+ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
+case "$ENGINE_MODE" in
+    ""|"videojs"|"react-all-player"|"howler-rollback")
+        ;;
+    *)
+        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected videojs|react-all-player|howler-rollback. Falling back to default (videojs)."
+        ENGINE_MODE=""
+        ;;
+esac
+
+if [ -n "$ENGINE_MODE" ]; then
+    ENGINE_MODE_JSON="\"$ENGINE_MODE\""
+else
+    ENGINE_MODE_JSON="null"
+fi
+
+cat > "$RUNTIME_CONFIG_FILE" << CONFIGEOF
+window.__SOUNDSPAN_RUNTIME_CONFIG__ = Object.assign(
+  {},
+  window.__SOUNDSPAN_RUNTIME_CONFIG__ || {},
+  {
+    STREAMING_ENGINE_MODE: $ENGINE_MODE_JSON,
+  },
+);
+CONFIGEOF
+
+echo "Frontend runtime STREAMING_ENGINE_MODE: ${ENGINE_MODE:-videojs (default)}"
+
 echo "Starting soundspan..."
 exec env \
     NODE_ENV=production \

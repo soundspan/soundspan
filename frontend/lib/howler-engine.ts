@@ -17,6 +17,12 @@ interface ExtendedHowlOptions extends HowlOptions {
     };
 }
 
+export interface HowlerRequestOptions {
+    withCredentials?: boolean;
+    requestHeaders?: Record<string, string>;
+    timeoutMs?: number;
+}
+
 export type HowlerEventType =
     | "play"
     | "pause"
@@ -61,6 +67,7 @@ class HowlerEngine {
     private maxPlayRetries: number = 1; // Keep conservative to avoid loops
     private pendingAutoplay: boolean = false; // Track pending autoplay for retries
     private lastFormat: string | undefined; // Store format for retries
+    private lastRequestOptions: HowlerRequestOptions | undefined; // Store request options for retries/reload
     private readonly popFadeMs: number = 10; // ms - micro-fade to reduce click/pop on track changes
     private shouldRetryLoads: boolean = false; // Only retry transient load errors where it helps (Android WebView)
     private cleanupTimeoutId: NodeJS.Timeout | null = null; // Track cleanup timeout to prevent race conditions
@@ -100,12 +107,14 @@ class HowlerEngine {
      * @param src - Audio URL
      * @param autoplay - Whether to auto-play after loading
      * @param format - Audio format hint (mp3, flac, etc.) - required for URLs without extensions
+     * @param requestOptions - Optional request headers/credentials/timeout for fetch-backed loads
      */
     load(
         src: string,
         autoplay: boolean = false,
         format?: string,
-        isRetry: boolean = false
+        isRetry: boolean = false,
+        requestOptions?: HowlerRequestOptions
     ): void {
         // Don't reload if same source and already loaded
         if (this.state.currentSrc === src && this.howl) {
@@ -171,6 +180,10 @@ class HowlerEngine {
         // Check if this is a podcast/audiobook stream (they need HTML5 Audio for Range request support)
         const isPodcastOrAudiobook =
             src.includes("/api/podcasts/") || src.includes("/api/audiobooks/");
+        const xhrOptions = this.buildXhrOptions(
+            isAndroidWebView,
+            requestOptions
+        );
 
         // Build Howl config
         // Note: On Android WebView, HTML5 Audio causes crackling/popping on track changes
@@ -183,13 +196,20 @@ class HowlerEngine {
             autoplay: false, // We'll handle autoplay with fade
             preload: true,
             volume: this.state.isMuted ? 0 : this.state.volume,
-            // On Android WebView, increase the xhr timeout
-            ...(isAndroidWebView && { xhr: { timeout: 30000 } }),
+            ...(xhrOptions ? { xhr: xhrOptions } : {}),
         };
 
         // Store for potential retry
         this.pendingAutoplay = autoplay;
         this.lastFormat = format;
+        this.lastRequestOptions = requestOptions
+            ? {
+                  ...requestOptions,
+                  requestHeaders: requestOptions.requestHeaders
+                      ? { ...requestOptions.requestHeaders }
+                      : undefined,
+              }
+            : undefined;
         this.playRetryCount = 0;
         this.clearPlayRetryTimeout();
         // Reset retry count only when this is NOT a retry attempt.
@@ -237,6 +257,7 @@ class HowlerEngine {
                     const srcToRetry = this.state.currentSrc;
                     const autoplayToRetry = this.pendingAutoplay;
                     const formatToRetry = this.lastFormat;
+                    const requestOptionsToRetry = this.lastRequestOptions;
 
                     // CRITICAL: Clean up the failed Howl instance BEFORE retrying
                     // This prevents "HTML5 Audio pool exhausted" errors
@@ -248,7 +269,8 @@ class HowlerEngine {
                             srcToRetry,
                             autoplayToRetry,
                             formatToRetry,
-                            true
+                            true,
+                            requestOptionsToRetry
                         );
                     }, 500 * this.retryCount); // Exponential backoff
                     return;
@@ -414,15 +436,20 @@ class HowlerEngine {
         const format = this.howl ? (this.howl as unknown as { _format?: string[] })._format : undefined;
 
         this.cleanup();
-        this.load(src, false, format?.[0]);
+        this.load(src, false, format?.[0], false, this.lastRequestOptions);
     }
 
     /**
      * Preload a track in the background for gapless playback
      * @param src - Audio URL to preload
      * @param format - Audio format hint (mp3, flac, etc.)
+     * @param requestOptions - Optional request headers/credentials/timeout for fetch-backed loads
      */
-    preload(src: string, format?: string): void {
+    preload(
+        src: string,
+        format?: string,
+        requestOptions?: HowlerRequestOptions
+    ): void {
         // Don't preload if same as current source
         if (this.state.currentSrc === src) {
             return;
@@ -449,6 +476,10 @@ class HowlerEngine {
         // Check if this is a podcast/audiobook stream
         const isPodcastOrAudiobook =
             src.includes("/api/podcasts/") || src.includes("/api/audiobooks/");
+        const xhrOptions = this.buildXhrOptions(
+            isAndroidWebView,
+            requestOptions
+        );
 
         // Build Howl config (same logic as load())
         const howlConfig: ExtendedHowlOptions = {
@@ -457,7 +488,7 @@ class HowlerEngine {
             autoplay: false,
             preload: true,
             volume: 0, // Start muted for preload
-            ...(isAndroidWebView && { xhr: { timeout: 30000 } }),
+            ...(xhrOptions ? { xhr: xhrOptions } : {}),
         };
 
         // Only add format if provided
@@ -775,6 +806,42 @@ class HowlerEngine {
         void ctx.resume().catch((err) => {
             console.warn("[HowlerEngine] Failed to resume audio context:", err);
         });
+    }
+
+    private buildXhrOptions(
+        isAndroidWebView: boolean,
+        requestOptions?: HowlerRequestOptions
+    ): ExtendedHowlOptions["xhr"] | undefined {
+        const timeoutOverride =
+            typeof requestOptions?.timeoutMs === "number" &&
+            Number.isFinite(requestOptions.timeoutMs) &&
+            requestOptions.timeoutMs > 0
+                ? requestOptions.timeoutMs
+                : undefined;
+        const timeout = timeoutOverride ?? (isAndroidWebView ? 30000 : undefined);
+        const hasHeaders =
+            Boolean(requestOptions?.requestHeaders) &&
+            Object.keys(requestOptions?.requestHeaders ?? {}).length > 0;
+        const hasWithCredentials =
+            typeof requestOptions?.withCredentials === "boolean";
+
+        if (!hasHeaders && !hasWithCredentials && typeof timeout !== "number") {
+            return undefined;
+        }
+
+        return {
+            ...(hasHeaders
+                ? {
+                      headers: {
+                          ...requestOptions?.requestHeaders,
+                      },
+                  }
+                : {}),
+            ...(hasWithCredentials
+                ? { withCredentials: requestOptions?.withCredentials }
+                : {}),
+            ...(typeof timeout === "number" ? { timeout } : {}),
+        };
     }
 
     /**

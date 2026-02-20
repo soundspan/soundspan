@@ -72,6 +72,7 @@ Status labels:
 | `LOG_QUERIES` | `backend`, `backend-worker` | Optional | `false` | Enables Prisma query logging in development. |
 | `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` | Preserves Redis streams/groups by default; do not flush on start. |
 | `TRANSCODE_CACHE_PATH` | `backend` | Optional | `/app/cache/transcodes` (compose) | Directory for transcoding cache files. |
+| `SEGMENTED_STREAMING_CACHE_PATH` | `backend` | Optional | defaults to `TRANSCODE_CACHE_PATH` | Base directory for segmented streaming cache artifacts (`segmented-dash` subdirectory is created under this path). |
 | `TRANSCODE_CACHE_MAX_GB` | `backend` | Optional | `10` | Max transcode cache size in GB. |
 | `ALLOWED_ORIGINS` | `backend` | Optional | `http://localhost:3000,http://localhost:3030` | Allowed CORS origins (comma-separated). |
 | `SECURE_COOKIES` | `backend` | Optional | `false` | Forces secure cookies when `true`. |
@@ -108,6 +109,7 @@ Status labels:
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
 | `BACKEND_URL` | `frontend` (and `audio-analyzer-clap-local` in local profile) | Optional (required when default route is not correct) | split stack: `http://backend:3006`; local CLAP: `http://host.docker.internal:3007` | Server-side URL used by frontend proxy/SSR and local CLAP callback target. |
+| `STREAMING_ENGINE_MODE` | `frontend`, `soundspan` (AIO) | Optional | defaults to `videojs` when unset/invalid | Runtime (non-build-time) audio engine mode: `videojs` (default segmented), `react-all-player` (future compatibility), `howler-rollback` (explicit rollback only). |
 | `NEXT_PUBLIC_API_URL` | `frontend` (build-time) | Optional (build-time only) | empty | Explicit browser API base URL. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_API_PATH_MODE` | `frontend` (build-time) | Optional (build-time only) | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional (build-time only) | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |

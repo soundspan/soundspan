@@ -25,6 +25,13 @@ import {
 } from "@/lib/playback-state-cadence";
 import { resolveHydratedPlaybackIntent } from "@/lib/playback-intent";
 
+export interface PlaybackStreamProfile {
+    mode: "direct" | "dash";
+    sourceType: "local" | "tidal" | "ytmusic" | "unknown";
+    codec: string | null;
+    bitrateKbps: number | null;
+}
+
 interface AudioPlaybackContextType {
     isPlaying: boolean;
     currentTime: number;
@@ -36,6 +43,7 @@ interface AudioPlaybackContextType {
     isSeekLocked: boolean; // True when a seek operation is in progress
     audioError: string | null; // Error message from state machine
     playbackState: PlaybackState; // Raw state machine state for advanced use
+    streamProfile: PlaybackStreamProfile | null;
     setIsPlaying: (playing: boolean) => void;
     setCurrentTime: (time: number) => void;
     setCurrentTimeFromEngine: (time: number) => void; // For timeupdate events - respects seek lock
@@ -44,6 +52,7 @@ interface AudioPlaybackContextType {
     setTargetSeekPosition: (position: number | null) => void;
     setCanSeek: (canSeek: boolean) => void;
     setDownloadProgress: (progress: number | null) => void;
+    setStreamProfile: (profile: PlaybackStreamProfile | null) => void;
     lockSeek: (targetTime: number) => void; // Lock updates during seek
     unlockSeek: () => void; // Unlock after seek completes
     clearAudioError: () => void; // Clear the audio error state
@@ -94,6 +103,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     );
     const [audioError, setAudioError] = useState<string | null>(null);
     const [playbackState, setPlaybackState] = useState<PlaybackState>("IDLE");
+    const [streamProfile, setStreamProfile] =
+        useState<PlaybackStreamProfile | null>(null);
     const [isHydrated] = useState(() => typeof window !== "undefined");
     const lastSaveTimeRef = useRef<number>(0);
     const lastServerProgressSaveRef = useRef<number>(0);
@@ -442,6 +453,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             isSeekLocked,
             audioError,
             playbackState,
+            streamProfile,
             setIsPlaying,
             setCurrentTime,
             setCurrentTimeFromEngine,
@@ -450,6 +462,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             setTargetSeekPosition,
             setCanSeek,
             setDownloadProgress,
+            setStreamProfile,
             lockSeek,
             unlockSeek,
             clearAudioError,
@@ -465,6 +478,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             isSeekLocked,
             audioError,
             playbackState,
+            streamProfile,
             setCurrentTimeFromEngine,
             lockSeek,
             unlockSeek,

@@ -149,6 +149,49 @@ export interface AlbumPreferenceResponse {
     updatedAt: string | null;
 }
 
+export interface SegmentedStreamingSessionResponse {
+    sessionId: string;
+    manifestUrl: string;
+    sessionToken: string;
+    expiresAt: string;
+    playbackProfile?: {
+        protocol?: "dash";
+        sourceType?: "local" | "tidal" | "ytmusic";
+        codec?: string;
+        bitrateKbps?: number;
+    };
+    engineHints?: {
+        protocol?: "dash";
+        sourceType?: "local" | "tidal" | "ytmusic";
+        recommendedEngine?: "videojs";
+    };
+}
+
+export interface CreateSegmentedStreamingSessionInput {
+    trackId: string;
+    sourceType?: "local" | "tidal" | "ytmusic";
+    desiredQuality?: "original" | "high" | "medium" | "low";
+}
+
+export interface SegmentedStreamingHeartbeatResponse {
+    sessionId: string;
+    sessionToken: string;
+    expiresAt: string;
+}
+
+export interface SegmentedStreamingSnapshotInput {
+    positionSec?: number;
+    isPlaying?: boolean;
+    bufferedUntilSec?: number;
+}
+
+export interface SegmentedStreamingHandoffResponse
+    extends SegmentedStreamingSessionResponse {
+    previousSessionId: string;
+    resumeAtSec: number;
+    shouldPlay: boolean;
+}
+
 interface ApiError extends Error {
     status?: number;
     data?: Record<string, unknown>;
@@ -284,6 +327,16 @@ class ApiClient {
             return this.baseUrl;
         }
         return getApiBaseUrl();
+    }
+
+    private toAbsoluteApiUrl(pathOrUrl: string): string {
+        if (/^https?:\/\//i.test(pathOrUrl)) {
+            return pathOrUrl;
+        }
+        const normalizedPath = pathOrUrl.startsWith("/")
+            ? pathOrUrl
+            : `/${pathOrUrl}`;
+        return `${this.getBaseUrl()}${normalizedPath}`;
     }
 
     private isTimeoutError(error: unknown): boolean {
@@ -928,6 +981,70 @@ class ApiClient {
             return `${baseUrl}?token=${encodeURIComponent(token)}`;
         }
         return baseUrl;
+    }
+
+    async createSegmentedStreamingSession(
+        input: CreateSegmentedStreamingSessionInput,
+    ): Promise<SegmentedStreamingSessionResponse> {
+        const session = await this.request<SegmentedStreamingSessionResponse>(
+            "/streaming/v1/sessions",
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    trackId: input.trackId,
+                    sourceType: input.sourceType,
+                    desiredQuality: input.desiredQuality,
+                }),
+            },
+        );
+
+        return {
+            ...session,
+            manifestUrl: this.toAbsoluteApiUrl(session.manifestUrl),
+        };
+    }
+
+    getStreamingAuthToken(): string | null {
+        return this.getCurrentToken();
+    }
+
+    async heartbeatSegmentedStreamingSession(
+        sessionId: string,
+        sessionToken: string,
+        snapshot: SegmentedStreamingSnapshotInput,
+    ): Promise<SegmentedStreamingHeartbeatResponse> {
+        return this.request<SegmentedStreamingHeartbeatResponse>(
+            `/streaming/v1/sessions/${encodeURIComponent(sessionId)}/heartbeat`,
+            {
+                method: "POST",
+                body: JSON.stringify(snapshot),
+                headers: {
+                    "x-streaming-session-token": sessionToken,
+                },
+            },
+        );
+    }
+
+    async handoffSegmentedStreamingSession(
+        sessionId: string,
+        sessionToken: string,
+        snapshot: SegmentedStreamingSnapshotInput,
+    ): Promise<SegmentedStreamingHandoffResponse> {
+        const handoff = await this.request<SegmentedStreamingHandoffResponse>(
+            `/streaming/v1/sessions/${encodeURIComponent(sessionId)}/handoff`,
+            {
+                method: "POST",
+                body: JSON.stringify(snapshot),
+                headers: {
+                    "x-streaming-session-token": sessionToken,
+                },
+            },
+        );
+
+        return {
+            ...handoff,
+            manifestUrl: this.toAbsoluteApiUrl(handoff.manifestUrl),
+        };
     }
 
     /**

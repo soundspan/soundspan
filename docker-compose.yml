@@ -118,6 +118,9 @@ services:
             # Used by next.config.ts rewrites() inside the container.
             # IMPORTANT: "localhost" inside a container refers to itself, not the host.
             BACKEND_URL: ${BACKEND_URL:-http://backend:3006}
+            # Runtime streaming-engine selector injected via /runtime-config.js.
+            # Keep unset for default segmented engine (videojs). Set to howler-rollback only for incident rollback.
+            STREAMING_ENGINE_MODE: ${STREAMING_ENGINE_MODE:-}
             # Exposed to the browser; leave empty by default so the app uses /api via rewrites.
             NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
             NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING: ${NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING:-false}

@@ -35,9 +35,9 @@
     "dompurify": "^3.3.1",
     "framer-motion": "^12.23.26",
     "howler": "^2.2.4",
+    "http-proxy-middleware": "^3.0.5",
     "lucide-react": "^0.552.0",
     "next": "^16.0.10",
-    "http-proxy-middleware": "^3.0.5",
     "qrcode.react": "^4.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -45,7 +45,8 @@
     "recharts": "^3.6.0",
     "socket.io-client": "^4.8.3",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "video.js": "^8.23.7"
   },
   "devDependencies": {
     "@next/bundle-analyzer": "^15.1.3",

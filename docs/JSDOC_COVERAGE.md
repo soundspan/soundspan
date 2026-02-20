@@ -12,16 +12,16 @@ Scope:
 | --- | --- | --- | --- | --- | --- |
 | Backend middleware | 4 | 7 | 7 | 0 | 100.0% |
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
-| Backend routes | 37 | 54 | 1 | 53 | 1.9% |
-| Backend services | 65 | 87 | 59 | 28 | 67.8% |
-| Backend utils | 27 | 71 | 54 | 17 | 76.1% |
+| Backend routes | 38 | 54 | 1 | 53 | 1.9% |
+| Backend services | 72 | 89 | 59 | 30 | 66.3% |
+| Backend utils | 28 | 73 | 56 | 17 | 76.7% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
-| Frontend components | 69 | 69 | 11 | 58 | 15.9% |
+| Frontend components | 70 | 70 | 12 | 58 | 17.1% |
 | Frontend features | 135 | 114 | 8 | 106 | 7.0% |
-| Frontend hooks | 25 | 81 | 55 | 26 | 67.9% |
-| Frontend lib | 35 | 44 | 11 | 33 | 25.0% |
-| Frontend other | 59 | 57 | 6 | 51 | 10.5% |
-| **Total** | **480** | **612** | **229** | **383** | **37.4%** |
+| Frontend hooks | 25 | 82 | 55 | 27 | 67.1% |
+| Frontend lib | 40 | 46 | 13 | 33 | 28.3% |
+| Frontend other | 60 | 57 | 6 | 51 | 10.5% |
+| **Total** | **496** | **620** | **234** | **386** | **37.7%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -108,6 +108,8 @@ Scope:
 | Backend services | mapCalendarReleaseToRadarItem | backend/src/services/releaseContracts.ts:71 |
 | Backend services | normalizeCacheQuery | backend/src/services/search.ts:5 |
 | Backend services | SearchService | backend/src/services/search.ts:96 |
+| Backend services | SegmentedProviderAdapterError | backend/src/services/segmented-streaming/providerAdapters/adapterError.ts:1 |
+| Backend services | SegmentedSessionError | backend/src/services/segmented-streaming/sessionService.ts:110 |
 | Backend utils | DependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:114 |
 | Backend utils | createDependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:192 |
 | Backend utils | EnvFileSyncSkippedError | backend/src/utils/envWriter.ts:5 |
@@ -231,7 +233,7 @@ Scope:
 | Frontend features | useDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:107 |
 | Frontend features | getProviderSlotCount | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:32 |
 | Frontend features | applyDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:43 |
-| Frontend features | usePreviewPlayer | frontend/features/discover/hooks/usePreviewPlayer.ts:5 |
+| Frontend features | usePreviewPlayer | frontend/features/discover/hooks/usePreviewPlayer.ts:7 |
 | Frontend features | AudiobooksGrid | frontend/features/home/components/AudiobooksGrid.tsx:59 |
 | Frontend features | ContinueListening | frontend/features/home/components/ContinueListening.tsx:143 |
 | Frontend features | HomeHero | frontend/features/home/components/HomeHero.tsx:10 |
@@ -275,5 +277,3 @@ Scope:
 | Frontend features | LibrarySafetySection | frontend/features/settings/components/sections/LibrarySafetySection.tsx:9 |
 | Frontend features | LidarrCard | frontend/features/settings/components/sections/LidarrSection.tsx:16 |
 | Frontend features | LinkDeviceSection | frontend/features/settings/components/sections/LinkDeviceSection.tsx:4 |
-| Frontend features | getImpactedHistoryCount | frontend/features/settings/components/sections/playbackHistoryConfig.ts:19 |
-| Frontend features | PlaybackHistorySection | frontend/features/settings/components/sections/PlaybackHistorySection.tsx:17 |

@@ -4,13 +4,23 @@ All notable changes to soundspan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
 
 ### Added
 
+- Added segmented streaming session/DASH delivery architecture across backend and frontend, including Video.js-based segmented playback with direct-stream compatibility fallback.
+- Added segmented playback baseline capture tooling (`tools/streaming/capture-playback-baseline.mjs`) for reliability/latency before-vs-after reporting.
+- Added segmented streaming session lifecycle API routes: session create, manifest, segment, heartbeat, and handoff endpoints under `/api/streaming/v1/sessions`.
+
 ### Changed
 
+- Segmented streaming engine control now uses runtime `STREAMING_ENGINE_MODE` injection (`videojs` default, explicit `howler-rollback` opt-in) so prebuilt images can roll back without rebuilds.
+- Segmented streaming cache location now supports `SEGMENTED_STREAMING_CACHE_PATH` and defaults to `TRANSCODE_CACHE_PATH` when unset.
+
 ### Fixed
+
+- Recovery after segmented playback disruption now keeps local player state authoritative for resume position and play/pause intent.
 
 ## [1.1.2] - 2026-02-20
 

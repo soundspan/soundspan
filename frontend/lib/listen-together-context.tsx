@@ -31,7 +31,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useAudioState, type Track } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { howlerEngine } from "@/lib/howler-engine";
+import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import {
     listenTogetherSocket,
     type GroupSnapshot,
@@ -43,6 +43,8 @@ import {
     type SocketRouteProbeResult,
 } from "@/lib/listen-together-socket";
 import { setListenTogetherSessionSnapshot } from "@/lib/listen-together-session";
+
+const playbackEngine = createRuntimeAudioEngine();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -269,7 +271,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         const targetSec = targetMs / 1000;
 
         // Seek if needed
-        const drift = Math.abs(howlerEngine.getCurrentTime() - targetSec);
+        const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
         if (drift > 1.5 || state.currentTrack?.id !== targetTrack?.id) {
             ctrl.seek(targetSec, {
                 allowListenTogetherFollower: true,
@@ -318,7 +320,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         }
 
         const targetSec = targetMs / 1000;
-        const drift = Math.abs(howlerEngine.getCurrentTime() - targetSec);
+        const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
 
         // Seek if drift is significant
         if (drift > 1.5) {
@@ -329,14 +331,14 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         }
 
         // Play/pause
-        if (delta.isPlaying && !howlerEngine.isPlaying()) {
+        if (delta.isPlaying && !playbackEngine.isPlaying()) {
             ctrl.resume({
                 suppressListenTogetherBroadcast: true,
                 listenTogetherForceIsPlaying: true,
                 listenTogetherPositionMs: delta.positionMs,
                 listenTogetherServerTimeMs: delta.serverTime,
             });
-        } else if (!delta.isPlaying && howlerEngine.isPlaying()) {
+        } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
             ctrl.pause({ suppressListenTogetherBroadcast: true });
         }
 
@@ -376,7 +378,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         };
 
         const onReloaded = () => {
-            howlerEngine.off("load", onReloaded);
+            playbackEngine.off("load", onReloaded);
             clearRecoveryTimeout();
 
             const active = activeGroupRef.current;
@@ -396,13 +398,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
         // Force stream re-open to recover from dead socket-backed stream handles
         // after backend pod failover.
-        howlerEngine.on("load", onReloaded);
+        playbackEngine.on("load", onReloaded);
         clearRecoveryTimeout();
         reconnectAudioRecoveryTimeoutRef.current = setTimeout(() => {
-            howlerEngine.off("load", onReloaded);
+            playbackEngine.off("load", onReloaded);
             reconnectAudioRecoveryTimeoutRef.current = null;
         }, 10_000);
-        howlerEngine.reload();
+        playbackEngine.reload();
     }, []);
 
     // -----------------------------------------------------------------------
@@ -841,10 +843,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             if (!listenTogetherSocket.isConnected) return;
 
             // Only push if we're actually playing
-            if (!howlerEngine.isPlaying()) return;
+            if (!playbackEngine.isPlaying()) return;
 
             // Use seek to sync position (lightweight, no ready gate)
-            const positionMs = howlerEngine.getCurrentTime() * 1000;
+            const positionMs = playbackEngine.getCurrentTime() * 1000;
             listenTogetherSocket.seek(positionMs).catch(() => {});
         }, 5000); // Every 5 seconds
 
@@ -889,8 +891,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     localTrackIds.includes(nowPlayingTrack.id)
                 ) {
                     currentTrackId = nowPlayingTrack.id;
-                    currentTimeMs = Math.max(0, howlerEngine.getCurrentTime() * 1000);
-                    isPlaying = howlerEngine.isPlaying();
+                    currentTimeMs = Math.max(0, playbackEngine.getCurrentTime() * 1000);
+                    isPlaying = playbackEngine.isPlaying();
                 }
 
                 if (removedCount > 0) {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { useAudioState } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
 import { api } from "@/lib/api";
+import type { PlaybackStreamProfile } from "@/lib/audio-playback-context";
 
 // ── TIDAL stream quality info ──────────────────────────────────────
 
@@ -215,6 +216,33 @@ export function formatYtQualityBadge(codec?: string | null, bitrate?: number | n
     return "YT MUSIC";
 }
 
+export function formatSegmentedQualityBadge(
+    profile: PlaybackStreamProfile,
+): string {
+    const sourceLabel =
+        profile.sourceType === "tidal"
+            ? "TIDAL"
+            : profile.sourceType === "ytmusic"
+                ? "YT MUSIC"
+                : "LOCAL";
+    const codecLabel = normalizeCodecLabel(profile.codec);
+    const bitrateLabel =
+        profile.bitrateKbps && profile.bitrateKbps > 0
+            ? `${profile.bitrateKbps} kbps`
+            : null;
+
+    if (codecLabel && bitrateLabel) {
+        return `${sourceLabel} DASH · ${codecLabel} · ${bitrateLabel}`;
+    }
+    if (codecLabel) {
+        return `${sourceLabel} DASH · ${codecLabel}`;
+    }
+    if (bitrateLabel) {
+        return `${sourceLabel} DASH · ${bitrateLabel}`;
+    }
+    return `${sourceLabel} DASH`;
+}
+
 /**
  * Returns audio quality metadata for the currently playing track:
  *   - YouTube Music: bitrate (kbps) + codec
@@ -230,8 +258,11 @@ export function useStreamBitrate(): {
     codec: string | null;
     tidalQuality: TidalStreamQuality | null;
     localQuality: LocalTrackQuality | null;
+    segmentedBadgeLabel: string | null;
+    segmentedSourceType: "local" | "tidal" | "ytmusic" | "unknown" | null;
 } {
     const { currentTrack, playbackType } = useAudioState();
+    const { streamProfile } = useAudioPlayback();
     const [bitrate, setBitrate] = useState<number | null>(null);
     const [codec, setCodec] = useState<string | null>(null);
     const [tidalQuality, setTidalQuality] = useState<TidalStreamQuality | null>(null);
@@ -333,5 +364,23 @@ export function useStreamBitrate(): {
         };
     }, [currentTrack, playbackType]);
 
-    return { bitrate, codec, tidalQuality, localQuality };
+    const segmentedBadgeLabel =
+        streamProfile?.mode === "dash"
+            ? formatSegmentedQualityBadge(streamProfile)
+            : null;
+
+    return {
+        bitrate:
+            streamProfile?.mode === "dash"
+                ? streamProfile.bitrateKbps
+                : bitrate,
+        codec: streamProfile?.mode === "dash" ? streamProfile.codec : codec,
+        tidalQuality:
+            streamProfile?.mode === "dash" ? null : tidalQuality,
+        localQuality:
+            streamProfile?.mode === "dash" ? null : localQuality,
+        segmentedBadgeLabel,
+        segmentedSourceType:
+            streamProfile?.mode === "dash" ? streamProfile.sourceType : null,
+    };
 }

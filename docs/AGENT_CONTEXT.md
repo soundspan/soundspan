@@ -54,7 +54,7 @@ Browser → Frontend (Next.js :3030) → Backend (Express.js :3006) → PostgreS
 | Language | TypeScript (`strict: false`) |
 | Styling | Tailwind CSS |
 | State / Queries | React Query (`@tanstack/react-query`) |
-| Audio playback | Howler.js via custom engine (`/frontend/lib/howler-engine.ts`) |
+| Audio playback | Hybrid runtime audio engine (`/frontend/lib/audio-engine/*`) with Video.js as segmented default and non-default Howler rollback gate |
 | Icons | Lucide React |
 | Animations | Framer Motion |
 | Toasts | Sonner |
@@ -142,7 +142,7 @@ Browser → Frontend (Next.js :3030) → Backend (Express.js :3006) → PostgreS
 - **Styling:** Tailwind utility classes only. No CSS modules or styled-components. Use `clsx` or `tailwind-merge` for conditional classes.
 - **Icons:** Use Lucide React (`lucide-react`). Import individual icons.
 - **Toasts:** Use Sonner's `toast` function for user notifications.
-- **Audio playback** is managed through context providers in `frontend/lib/audio-*-context.tsx`. The `HowlerAudioElement` component wraps the Howler.js engine.
+- **Audio playback** is managed through context providers in `frontend/lib/audio-*-context.tsx`. `HowlerAudioElement` now uses the runtime audio-engine abstraction (`frontend/lib/audio-engine/index.ts`), defaulting to Video.js for DASH segmented sources and allowing Howler only via explicit runtime rollback mode (`STREAMING_ENGINE_MODE=howler-rollback`).
 
 ### General
 

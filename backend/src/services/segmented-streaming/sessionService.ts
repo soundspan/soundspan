@@ -1,0 +1,701 @@
+import { promises as fsPromises } from "fs";
+import path from "path";
+import { randomUUID } from "crypto";
+import jwt, { type JwtPayload } from "jsonwebtoken";
+import { prisma } from "../../utils/db";
+import { redisClient } from "../../utils/redis";
+import { config } from "../../config";
+import { logger } from "../../utils/logger";
+import {
+    segmentedManifestService,
+    type SegmentedManifestQuality,
+} from "./manifestService";
+import { segmentedStreamingCacheService } from "./cacheService";
+import {
+    tidalSegmentedProviderAdapter,
+} from "./providerAdapters/tidalAdapter";
+import { ytMusicSegmentedProviderAdapter } from "./providerAdapters/ytMusicAdapter";
+import { SegmentedProviderAdapterError } from "./providerAdapters/adapterError";
+
+const SESSION_KEY_PREFIX = "streaming:session:v1:";
+const SESSION_TTL_SECONDS = 5 * 60;
+const SEGMENT_FILE_PATTERN = /^[A-Za-z0-9_.-]+\.m4s$/;
+const SESSION_TOKEN_TYPE = "segmented-streaming-session-v1";
+const SESSION_TOKEN_SECRET =
+    process.env.JWT_SECRET || process.env.SESSION_SECRET || config.sessionSecret;
+export const SEGMENTED_SESSION_TOKEN_QUERY_PARAM = "st";
+
+const SEGMENTED_QUALITY_VALUES = [
+    "original",
+    "high",
+    "medium",
+    "low",
+] as const;
+const SEGMENTED_SOURCE_TYPE_VALUES = ["local", "tidal", "ytmusic"] as const;
+
+export type SegmentedSessionQuality = (typeof SEGMENTED_QUALITY_VALUES)[number];
+export type SegmentedSessionSourceType =
+    (typeof SEGMENTED_SOURCE_TYPE_VALUES)[number];
+
+export interface CreateLocalSegmentedSessionInput {
+    userId: string;
+    trackId: string;
+    desiredQuality?: SegmentedSessionQuality;
+}
+
+export interface CreateTidalSegmentedSessionInput {
+    userId: string;
+    tidalTrackId: number;
+    desiredQuality?: SegmentedSessionQuality;
+}
+
+export interface CreateYtMusicSegmentedSessionInput {
+    userId: string;
+    videoId: string;
+    desiredQuality?: SegmentedSessionQuality;
+}
+
+export interface SegmentedSessionRecord {
+    sessionId: string;
+    userId: string;
+    trackId: string;
+    cacheKey: string;
+    quality: SegmentedSessionQuality;
+    sourceType: SegmentedSessionSourceType;
+    manifestPath: string;
+    assetDir: string;
+    createdAt: string;
+    expiresAt: string;
+    lastHeartbeatAt?: string;
+    lastKnownPositionSec?: number;
+    lastKnownIsPlaying?: boolean;
+}
+
+export interface SegmentedSessionResponse {
+    sessionId: string;
+    manifestUrl: string;
+    sessionToken: string;
+    expiresAt: string;
+    playbackProfile: {
+        protocol: "dash";
+        sourceType: SegmentedSessionSourceType;
+        codec: "aac";
+        bitrateKbps: number;
+    };
+    engineHints: {
+        protocol: "dash";
+        sourceType: SegmentedSessionSourceType;
+        recommendedEngine: "videojs";
+    };
+}
+
+export interface SegmentedSessionSnapshotInput {
+    positionSec?: number;
+    isPlaying?: boolean;
+    bufferedUntilSec?: number;
+}
+
+export interface SegmentedSessionHeartbeatResponse {
+    sessionId: string;
+    sessionToken: string;
+    expiresAt: string;
+}
+
+export interface SegmentedSessionHandoffResponse extends SegmentedSessionResponse {
+    previousSessionId: string;
+    resumeAtSec: number;
+    shouldPlay: boolean;
+}
+
+export class SegmentedSessionError extends Error {
+    statusCode: number;
+    code: string;
+
+    constructor(message: string, statusCode: number, code: string) {
+        super(message);
+        this.statusCode = statusCode;
+        this.code = code;
+    }
+}
+
+interface SegmentedSessionTokenPayload extends JwtPayload {
+    type: typeof SESSION_TOKEN_TYPE;
+    sessionId: string;
+    userId: string;
+    trackId: string;
+    quality: SegmentedSessionQuality;
+    sourceType: SegmentedSessionSourceType;
+}
+
+class SegmentedSessionService {
+    private readonly inMemorySessions = new Map<string, SegmentedSessionRecord>();
+
+    async createLocalSession(
+        input: CreateLocalSegmentedSessionInput,
+    ): Promise<SegmentedSessionResponse> {
+        const quality = normalizeQuality(input.desiredQuality);
+
+        const track = await prisma.track.findUnique({
+            where: { id: input.trackId },
+            select: {
+                id: true,
+                filePath: true,
+                fileModified: true,
+            },
+        });
+
+        if (!track) {
+            throw new SegmentedSessionError("Track not found", 404, "TRACK_NOT_FOUND");
+        }
+
+        if (!track.filePath || !track.fileModified) {
+            throw new SegmentedSessionError(
+                "Track is not available for segmented local playback",
+                404,
+                "TRACK_NOT_LOCALLY_AVAILABLE",
+            );
+        }
+
+        const normalizedFilePath = track.filePath.replace(/\\/g, "/");
+        const sourcePath = path.join(config.music.musicPath, normalizedFilePath);
+
+        try {
+            await fsPromises.access(sourcePath);
+        } catch {
+            throw new SegmentedSessionError(
+                "Track source file was not found on disk",
+                404,
+                "TRACK_SOURCE_MISSING",
+            );
+        }
+
+        const asset = await segmentedManifestService.getOrCreateLocalDashAsset({
+            trackId: track.id,
+            sourcePath,
+            sourceModified: track.fileModified,
+            quality: quality as SegmentedManifestQuality,
+        });
+
+        const sessionId = randomUUID();
+        const createdAt = new Date();
+        const expiresAt = new Date(
+            createdAt.getTime() + SESSION_TTL_SECONDS * 1000,
+        );
+
+        const sessionRecord: SegmentedSessionRecord = {
+            sessionId,
+            userId: input.userId,
+            trackId: track.id,
+            cacheKey: asset.cacheKey,
+            quality,
+            sourceType: "local",
+            manifestPath: asset.manifestPath,
+            assetDir: asset.outputDir,
+            createdAt: createdAt.toISOString(),
+            expiresAt: expiresAt.toISOString(),
+        };
+
+        await this.persistSession(sessionRecord);
+        segmentedStreamingCacheService.registerSessionReference(
+            sessionRecord.cacheKey,
+            sessionRecord.sessionId,
+        );
+        return this.toSessionResponse(sessionRecord);
+    }
+
+    async createTidalSession(
+        input: CreateTidalSegmentedSessionInput,
+    ): Promise<SegmentedSessionResponse> {
+        const quality = normalizeQuality(input.desiredQuality);
+
+        try {
+            const tidalAsset =
+                await tidalSegmentedProviderAdapter.getOrCreateDashAsset({
+                    userId: input.userId,
+                    tidalTrackId: input.tidalTrackId,
+                    quality: quality as SegmentedManifestQuality,
+                });
+
+            const sessionId = randomUUID();
+            const createdAt = new Date();
+            const expiresAt = new Date(
+                createdAt.getTime() + SESSION_TTL_SECONDS * 1000,
+            );
+
+            const sessionRecord: SegmentedSessionRecord = {
+                sessionId,
+                userId: input.userId,
+                trackId: tidalAsset.providerTrackId,
+                cacheKey: tidalAsset.asset.cacheKey,
+                quality,
+                sourceType: "tidal",
+                manifestPath: tidalAsset.asset.manifestPath,
+                assetDir: tidalAsset.asset.outputDir,
+                createdAt: createdAt.toISOString(),
+                expiresAt: expiresAt.toISOString(),
+            };
+
+            await this.persistSession(sessionRecord);
+            segmentedStreamingCacheService.registerSessionReference(
+                sessionRecord.cacheKey,
+                sessionRecord.sessionId,
+            );
+            return this.toSessionResponse(sessionRecord);
+        } catch (error) {
+            if (error instanceof SegmentedProviderAdapterError) {
+                throw new SegmentedSessionError(
+                    error.message,
+                    error.statusCode,
+                    error.code,
+                );
+            }
+            throw error;
+        }
+    }
+
+    async createYtMusicSession(
+        input: CreateYtMusicSegmentedSessionInput,
+    ): Promise<SegmentedSessionResponse> {
+        const quality = normalizeQuality(input.desiredQuality);
+
+        try {
+            const ytMusicAsset =
+                await ytMusicSegmentedProviderAdapter.getOrCreateDashAsset({
+                    userId: input.userId,
+                    videoId: input.videoId,
+                    quality: quality as SegmentedManifestQuality,
+                });
+
+            const sessionId = randomUUID();
+            const createdAt = new Date();
+            const expiresAt = new Date(
+                createdAt.getTime() + SESSION_TTL_SECONDS * 1000,
+            );
+
+            const sessionRecord: SegmentedSessionRecord = {
+                sessionId,
+                userId: input.userId,
+                trackId: ytMusicAsset.providerTrackId,
+                cacheKey: ytMusicAsset.asset.cacheKey,
+                quality,
+                sourceType: "ytmusic",
+                manifestPath: ytMusicAsset.asset.manifestPath,
+                assetDir: ytMusicAsset.asset.outputDir,
+                createdAt: createdAt.toISOString(),
+                expiresAt: expiresAt.toISOString(),
+            };
+
+            await this.persistSession(sessionRecord);
+            segmentedStreamingCacheService.registerSessionReference(
+                sessionRecord.cacheKey,
+                sessionRecord.sessionId,
+            );
+            return this.toSessionResponse(sessionRecord);
+        } catch (error) {
+            if (error instanceof SegmentedProviderAdapterError) {
+                throw new SegmentedSessionError(
+                    error.message,
+                    error.statusCode,
+                    error.code,
+                );
+            }
+            throw error;
+        }
+    }
+
+    async getAuthorizedSession(
+        sessionId: string,
+        userId: string,
+    ): Promise<SegmentedSessionRecord | null> {
+        const session = await this.readSession(sessionId);
+        if (!session) {
+            return null;
+        }
+
+        if (session.userId !== userId) {
+            return null;
+        }
+
+        const expiresAtMs = Date.parse(session.expiresAt);
+        if (!Number.isFinite(expiresAtMs) || Date.now() > expiresAtMs) {
+            await this.deleteSession(sessionId);
+            return null;
+        }
+
+        return session;
+    }
+
+    validateSessionToken(
+        session: SegmentedSessionRecord,
+        sessionToken: string | null | undefined,
+    ): void {
+        const normalizedToken = sessionToken?.trim();
+        if (!normalizedToken) {
+            throw new SegmentedSessionError(
+                "Session token is required",
+                401,
+                "STREAMING_SESSION_TOKEN_REQUIRED",
+            );
+        }
+
+        const payload = this.decodeSessionToken(normalizedToken);
+        if (
+            payload.sessionId !== session.sessionId ||
+            payload.userId !== session.userId ||
+            payload.trackId !== session.trackId ||
+            payload.quality !== session.quality ||
+            payload.sourceType !== session.sourceType
+        ) {
+            throw new SegmentedSessionError(
+                "Session token scope mismatch",
+                403,
+                "STREAMING_SESSION_TOKEN_SCOPE_MISMATCH",
+            );
+        }
+    }
+
+    async heartbeatSession(
+        session: SegmentedSessionRecord,
+        snapshot: SegmentedSessionSnapshotInput = {},
+    ): Promise<SegmentedSessionHeartbeatResponse> {
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000);
+        const normalizedPositionSec = normalizePositionSec(snapshot.positionSec);
+        const normalizedIsPlaying = normalizeIsPlaying(snapshot.isPlaying);
+
+        const updatedSession: SegmentedSessionRecord = {
+            ...session,
+            expiresAt: expiresAt.toISOString(),
+            lastHeartbeatAt: now.toISOString(),
+            lastKnownPositionSec:
+                normalizedPositionSec ?? session.lastKnownPositionSec,
+            lastKnownIsPlaying: normalizedIsPlaying ?? session.lastKnownIsPlaying,
+        };
+
+        await this.persistSession(updatedSession);
+
+        return {
+            sessionId: updatedSession.sessionId,
+            sessionToken: this.issueSessionToken(updatedSession),
+            expiresAt: updatedSession.expiresAt,
+        };
+    }
+
+    async createHandoffSession(
+        session: SegmentedSessionRecord,
+        snapshot: SegmentedSessionSnapshotInput = {},
+    ): Promise<SegmentedSessionHandoffResponse> {
+        const resumeAtSec =
+            normalizePositionSec(snapshot.positionSec) ??
+            normalizePositionSec(session.lastKnownPositionSec) ??
+            0;
+        const shouldPlay =
+            normalizeIsPlaying(snapshot.isPlaying) ??
+            session.lastKnownIsPlaying ??
+            true;
+
+        await this.heartbeatSession(session, {
+            positionSec: resumeAtSec,
+            isPlaying: shouldPlay,
+            bufferedUntilSec: snapshot.bufferedUntilSec,
+        });
+
+        let nextSession: SegmentedSessionResponse;
+        if (session.sourceType === "tidal") {
+            nextSession = await this.createTidalSession({
+                userId: session.userId,
+                tidalTrackId: parseTidalTrackId(session.trackId),
+                desiredQuality: session.quality,
+            });
+        } else if (session.sourceType === "ytmusic") {
+            nextSession = await this.createYtMusicSession({
+                userId: session.userId,
+                videoId: session.trackId,
+                desiredQuality: session.quality,
+            });
+        } else {
+            nextSession = await this.createLocalSession({
+                userId: session.userId,
+                trackId: session.trackId,
+                desiredQuality: session.quality,
+            });
+        }
+
+        return {
+            ...nextSession,
+            previousSessionId: session.sessionId,
+            resumeAtSec,
+            shouldPlay,
+        };
+    }
+
+    resolveSegmentPath(
+        session: SegmentedSessionRecord,
+        segmentName: string,
+    ): string {
+        if (!SEGMENT_FILE_PATTERN.test(segmentName)) {
+            throw new SegmentedSessionError(
+                "Invalid segment file name",
+                400,
+                "INVALID_SEGMENT_NAME",
+            );
+        }
+
+        const resolved = path.resolve(session.assetDir, segmentName);
+        const assetDirResolved = path.resolve(session.assetDir);
+        if (!resolved.startsWith(`${assetDirResolved}${path.sep}`)) {
+            throw new SegmentedSessionError(
+                "Invalid segment path",
+                400,
+                "INVALID_SEGMENT_PATH",
+            );
+        }
+
+        return resolved;
+    }
+
+    private async persistSession(session: SegmentedSessionRecord): Promise<void> {
+        const key = this.getSessionKey(session.sessionId);
+        this.inMemorySessions.set(session.sessionId, session);
+
+        try {
+            await redisClient.setEx(
+                key,
+                SESSION_TTL_SECONDS,
+                JSON.stringify(session),
+            );
+        } catch (error) {
+            logger.warn(
+                "[SegmentedStreaming] Failed to persist streaming session to Redis, using process memory fallback",
+                error,
+            );
+        }
+    }
+
+    private async readSession(
+        sessionId: string,
+    ): Promise<SegmentedSessionRecord | null> {
+        const key = this.getSessionKey(sessionId);
+
+        try {
+            const payload = await redisClient.get(key);
+            if (payload) {
+                const parsed = parseSessionRecord(payload);
+                if (parsed) {
+                    this.inMemorySessions.set(sessionId, parsed);
+                    return parsed;
+                }
+            }
+        } catch (error) {
+            logger.warn(
+                "[SegmentedStreaming] Failed to read streaming session from Redis, falling back to process memory",
+                error,
+            );
+        }
+
+        return this.inMemorySessions.get(sessionId) ?? null;
+    }
+
+    private async deleteSession(sessionId: string): Promise<void> {
+        const existingSession = this.inMemorySessions.get(sessionId);
+        this.inMemorySessions.delete(sessionId);
+        if (existingSession) {
+            segmentedStreamingCacheService.clearSessionReference(
+                existingSession.cacheKey,
+                existingSession.sessionId,
+            );
+        }
+        const key = this.getSessionKey(sessionId);
+        try {
+            await redisClient.del(key);
+        } catch {
+            // Intentionally ignored: key expiry fallback still applies.
+        }
+    }
+
+    private getSessionKey(sessionId: string): string {
+        return `${SESSION_KEY_PREFIX}${sessionId}`;
+    }
+
+    private toSessionResponse(
+        session: SegmentedSessionRecord,
+    ): SegmentedSessionResponse {
+        const sessionToken = this.issueSessionToken(session);
+        const encodedSessionToken = encodeURIComponent(sessionToken);
+
+        return {
+            sessionId: session.sessionId,
+            manifestUrl: `/api/streaming/v1/sessions/${session.sessionId}/manifest.mpd?${SEGMENTED_SESSION_TOKEN_QUERY_PARAM}=${encodedSessionToken}`,
+            sessionToken,
+            expiresAt: session.expiresAt,
+            playbackProfile: {
+                protocol: "dash",
+                sourceType: session.sourceType,
+                codec: "aac",
+                bitrateKbps: qualityToBitrateKbps(session.quality),
+            },
+            engineHints: {
+                protocol: "dash",
+                sourceType: session.sourceType,
+                recommendedEngine: "videojs",
+            },
+        };
+    }
+
+    private issueSessionToken(session: SegmentedSessionRecord): string {
+        const payload: SegmentedSessionTokenPayload = {
+            type: SESSION_TOKEN_TYPE,
+            sessionId: session.sessionId,
+            userId: session.userId,
+            trackId: session.trackId,
+            quality: session.quality,
+            sourceType: session.sourceType,
+        };
+
+        return jwt.sign(payload, SESSION_TOKEN_SECRET, {
+            expiresIn: SESSION_TTL_SECONDS,
+            subject: session.sessionId,
+        });
+    }
+
+    private decodeSessionToken(sessionToken: string): SegmentedSessionTokenPayload {
+        try {
+            const decoded = jwt.verify(sessionToken, SESSION_TOKEN_SECRET);
+            if (!isSegmentedSessionTokenPayload(decoded)) {
+                throw new SegmentedSessionError(
+                    "Invalid session token payload",
+                    401,
+                    "STREAMING_SESSION_TOKEN_INVALID",
+                );
+            }
+            return decoded;
+        } catch (error) {
+            if (error instanceof SegmentedSessionError) {
+                throw error;
+            }
+
+            if (error instanceof Error && error.name === "TokenExpiredError") {
+                throw new SegmentedSessionError(
+                    "Session token has expired",
+                    401,
+                    "STREAMING_SESSION_TOKEN_EXPIRED",
+                );
+            }
+
+            throw new SegmentedSessionError(
+                "Invalid session token",
+                401,
+                "STREAMING_SESSION_TOKEN_INVALID",
+            );
+        }
+    }
+}
+
+const normalizeQuality = (
+    quality: string | null | undefined,
+): SegmentedSessionQuality => {
+    const normalized = quality?.trim().toLowerCase();
+    if (
+        normalized === "original" ||
+        normalized === "high" ||
+        normalized === "medium" ||
+        normalized === "low"
+    ) {
+        return normalized;
+    }
+    return "medium";
+};
+
+const qualityToBitrateKbps = (quality: SegmentedSessionQuality): number => {
+    if (quality === "original" || quality === "high") {
+        return 320;
+    }
+    if (quality === "low") {
+        return 128;
+    }
+    return 192;
+};
+
+const parseSessionRecord = (payload: string): SegmentedSessionRecord | null => {
+    try {
+        const parsed = JSON.parse(payload) as SegmentedSessionRecord;
+        if (
+            !parsed ||
+            typeof parsed !== "object" ||
+            typeof parsed.sessionId !== "string" ||
+            typeof parsed.userId !== "string" ||
+            typeof parsed.trackId !== "string" ||
+            typeof parsed.cacheKey !== "string" ||
+            !isSegmentedSessionQuality(parsed.quality) ||
+            !isSegmentedSessionSourceType(parsed.sourceType) ||
+            typeof parsed.manifestPath !== "string" ||
+            typeof parsed.assetDir !== "string" ||
+            typeof parsed.expiresAt !== "string" ||
+            (parsed.lastHeartbeatAt !== undefined &&
+                typeof parsed.lastHeartbeatAt !== "string") ||
+            (parsed.lastKnownPositionSec !== undefined &&
+                !isNonNegativeFiniteNumber(parsed.lastKnownPositionSec)) ||
+            (parsed.lastKnownIsPlaying !== undefined &&
+                typeof parsed.lastKnownIsPlaying !== "boolean")
+        ) {
+            return null;
+        }
+        return parsed;
+    } catch {
+        return null;
+    }
+};
+
+const isSegmentedSessionQuality = (
+    value: unknown,
+): value is SegmentedSessionQuality =>
+    value === "original" ||
+    value === "high" ||
+    value === "medium" ||
+    value === "low";
+
+const isSegmentedSessionSourceType = (
+    value: unknown,
+): value is SegmentedSessionSourceType =>
+    value === "local" || value === "tidal" || value === "ytmusic";
+
+const isNonNegativeFiniteNumber = (value: unknown): value is number =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+const normalizePositionSec = (value: unknown): number | undefined =>
+    isNonNegativeFiniteNumber(value) ? value : undefined;
+
+const normalizeIsPlaying = (value: unknown): boolean | undefined =>
+    typeof value === "boolean" ? value : undefined;
+
+const isSegmentedSessionTokenPayload = (
+    payload: unknown,
+): payload is SegmentedSessionTokenPayload => {
+    if (!payload || typeof payload !== "object") {
+        return false;
+    }
+
+    const candidate = payload as Partial<SegmentedSessionTokenPayload>;
+    return (
+        candidate.type === SESSION_TOKEN_TYPE &&
+        typeof candidate.sessionId === "string" &&
+        typeof candidate.userId === "string" &&
+        typeof candidate.trackId === "string" &&
+        isSegmentedSessionQuality(candidate.quality) &&
+        isSegmentedSessionSourceType(candidate.sourceType)
+    );
+};
+
+const parseTidalTrackId = (trackId: string): number => {
+    const parsed = Number.parseInt(trackId, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new SegmentedSessionError(
+            "Invalid TIDAL session track reference",
+            500,
+            "INVALID_TIDAL_SESSION_TRACK",
+        );
+    }
+    return parsed;
+};
+
+export const segmentedStreamingSessionService = new SegmentedSessionService();

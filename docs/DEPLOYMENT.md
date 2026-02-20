@@ -132,6 +132,80 @@ Notes:
 - Redis remains critical for sessions/queues/realtime; use a highly available Redis endpoint for HA-focused deployments.
 - Compose defaults now set `REDIS_FLUSH_ON_STARTUP=false` to preserve Redis stream/group metadata unless you explicitly override it.
 
+## Segmented Streaming Rollout and Rollback Cookbook
+
+### Runtime Control Model (Single Knob)
+
+Use one runtime knob for frontend engine rollback:
+
+- `STREAMING_ENGINE_MODE` (container runtime env, not `NEXT_PUBLIC_*` build args)
+- allowed values:
+  - unset/empty (default behavior): `videojs`
+  - `videojs`: default segmented runtime
+  - `react-all-player`: compatibility/testing mode (non-default)
+  - `howler-rollback`: explicit incident rollback mode
+
+Operational guardrails:
+
+- Keep `howler-rollback` fail-closed and non-default.
+- Do not rely on build-time flags for rollback in prebuilt images.
+- Recovery policy remains local-player authoritative after disruption (local play/pause/position intent wins).
+- Segmented cache base path can be overridden with `SEGMENTED_STREAMING_CACHE_PATH`; when unset it defaults to `TRANSCODE_CACHE_PATH`.
+
+### Progressive Rollout Levels
+
+| Stage | Scope | Promotion guardrails |
+| --- | --- | --- |
+| 0 | Dev/staging only | Segmented session create/manifest/segment requests succeed and no critical regressions in queue/seek/repeat/shuffle flows. |
+| 1 | Local-library segmented users only | Rolling-update tests complete with no fatal interruption spikes; startup and seek latencies stay within accepted SLO budgets. |
+| 2 | Limited production cohort (local + selected provider tracks) | Rebuffer/hour and handoff-failure metrics stay below rollback thresholds for at least 24h. |
+| 3 | Broader production cohort including provider-heavy sessions | Error budget and session continuity metrics remain stable through at least one controlled deploy window. |
+| 4 | Default segmented runtime (`videojs`) | Keep direct-stream compatibility and explicit `howler-rollback` escape hatch documented and validated. |
+
+### Rollback Trigger Matrix
+
+| Trigger | Signal | Immediate action |
+| --- | --- | --- |
+| Session create failures | sustained `session.create` error/reject increase against baseline | Switch frontend to `STREAMING_ENGINE_MODE=howler-rollback` and restart frontend runtime. |
+| Handoff recovery failures | sustained `session.handoff_failure`/`session.handoff_load_error` increase | Switch to `howler-rollback`; keep backend telemetry enabled for diagnosis. |
+| Segment/manifest instability | repeated manifest/segment fetch errors with user-facing interruptions | Roll back frontend engine to Howler immediately; investigate segmented backend path offline. |
+| Deployment disruption regression | interruption rate breaches rollout SLO window during controlled deploy | Trigger rollback mode for the active deployment wave before further rollout expansion. |
+
+### Howler Rollback Procedure (Explicit Non-Default Gate)
+
+1. Set runtime env on frontend process and restart frontend service only (no rebuild).
+
+Split stack:
+
+```bash
+STREAMING_ENGINE_MODE=howler-rollback docker compose up -d frontend
+```
+
+AIO:
+
+```bash
+STREAMING_ENGINE_MODE=howler-rollback docker compose -f docker-compose.aio.yml up -d soundspan
+```
+
+2. Validate rollback:
+   - playback starts/continues for local, TIDAL, and YouTube queue paths;
+   - no new segmented handoff retry storms;
+   - player controls (seek, queue progression, repeat/shuffle, Listen Together) remain functional.
+
+3. After stabilization, restore segmented default and restart frontend runtime.
+
+Split stack:
+
+```bash
+STREAMING_ENGINE_MODE=videojs docker compose up -d frontend
+```
+
+AIO:
+
+```bash
+STREAMING_ENGINE_MODE=videojs docker compose -f docker-compose.aio.yml up -d soundspan
+```
+
 ## Updating a Deployment
 
 ```bash

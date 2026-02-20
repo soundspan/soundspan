@@ -183,9 +183,17 @@ export function FullPlayer() {
         codec: streamCodec,
         tidalQuality,
         localQuality,
+        segmentedBadgeLabel,
+        segmentedSourceType,
     } = useStreamBitrate();
     const ytQualityLabel = formatYtQualityBadge(streamCodec, streamBitrate);
     const localQualityLabel = formatLocalQualityBadge(localQuality);
+    const segmentedBadgeClass =
+        segmentedSourceType === "tidal"
+            ? "bg-cyan-500/20 text-cyan-300"
+            : segmentedSourceType === "ytmusic"
+                ? "bg-red-500/20 text-red-300"
+                : "bg-sky-500/20 text-sky-300";
 
     // Determine if seeking is allowed
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -275,6 +283,18 @@ export function FullPlayer() {
                             )}
                             {/* Quality & status badges */}
                             <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            {segmentedBadgeLabel ? (
+                                <span
+                                    className={cn(
+                                        "inline-flex max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-bold px-1.5 py-0.5 rounded",
+                                        segmentedBadgeClass
+                                    )}
+                                    title={segmentedBadgeLabel}
+                                >
+                                    {segmentedBadgeLabel}
+                                </span>
+                            ) : (
+                                <>
                             {/* TIDAL streaming indicator */}
                             {currentTrack?.streamSource === "tidal" && (
                                 <TidalBadge quality={tidalQuality} className="inline-flex items-center" />
@@ -296,6 +316,8 @@ export function FullPlayer() {
                                 >
                                     {localQualityLabel}
                                 </span>
+                            )}
+                                </>
                             )}
                             {/* Vibe match score when in vibe mode */}
                             {vibeMode && vibeMatchScore !== null && (
