@@ -1492,33 +1492,37 @@ class AnalysisWorker:
             """, (MAX_RETRIES, BATCH_SIZE))
 
             tracks = cursor.fetchall()
-            if tracks:
-                logger.info(f"DB reconciliation found {len(tracks)} pending tracks, queuing...")
-                track_ids = [t['id'] for t in tracks]
-                cursor.execute("""
-                    UPDATE "Track"
-                    SET "analysisStatus" = 'processing',
-                        "analysisStartedAt" = NOW(),
-                        "updatedAt" = NOW()
-                    WHERE id = ANY(%s)
-                    AND "analysisStatus" = 'pending'
-                    RETURNING id
-                """, (track_ids,))
-                marked_ids = {row['id'] for row in cursor.fetchall()}
+            if not tracks:
+                # Explicitly close the read transaction so this connection
+                # does not remain idle-in-transaction between reconciliation polls.
                 self.db.commit()
-                if not marked_ids:
-                    return False
-                pipe = self.redis.pipeline()
-                for t in tracks:
-                    if t['id'] not in marked_ids:
-                        continue
-                    pipe.rpush(ANALYSIS_QUEUE, json.dumps({
-                        'trackId': t['id'],
-                        'filePath': t['filePath']
-                    }))
-                pipe.execute()
-                return True
-            return False
+                return False
+
+            logger.info(f"DB reconciliation found {len(tracks)} pending tracks, queuing...")
+            track_ids = [t['id'] for t in tracks]
+            cursor.execute("""
+                UPDATE "Track"
+                SET "analysisStatus" = 'processing',
+                    "analysisStartedAt" = NOW(),
+                    "updatedAt" = NOW()
+                WHERE id = ANY(%s)
+                AND "analysisStatus" = 'pending'
+                RETURNING id
+            """, (track_ids,))
+            marked_ids = {row['id'] for row in cursor.fetchall()}
+            self.db.commit()
+            if not marked_ids:
+                return False
+            pipe = self.redis.pipeline()
+            for t in tracks:
+                if t['id'] not in marked_ids:
+                    continue
+                pipe.rpush(ANALYSIS_QUEUE, json.dumps({
+                    'trackId': t['id'],
+                    'filePath': t['filePath']
+                }))
+            pipe.execute()
+            return True
         except Exception as e:
             logger.error(f"DB reconciliation failed: {e}")
             self.db.rollback()
