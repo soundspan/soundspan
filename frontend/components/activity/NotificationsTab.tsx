@@ -39,6 +39,9 @@ export function NotificationsTab() {
             const result = await api.getNotifications();
             return result;
         },
+        staleTime: 15_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
         refetchInterval: 30000, // Poll every 30 seconds
     });
 

@@ -81,6 +81,50 @@ const COVER_ART_IMAGE_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
 const COVER_ART_NOT_FOUND_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 const COVER_ART_IMAGE_CACHE_CONTROL = `public, max-age=${COVER_ART_IMAGE_CACHE_TTL_SECONDS}, immutable`;
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
+const AUDIO_INFO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const AUDIO_INFO_CACHE_MAX_ENTRIES = 2000;
+
+interface AudioInfoResponsePayload {
+    codec: string | null;
+    bitrate: number | null;
+    sampleRate: number | null;
+    bitDepth: number | null;
+    lossless: boolean | null;
+    channels: number | null;
+}
+
+interface AudioInfoCacheEntry {
+    expiresAt: number;
+    payload: AudioInfoResponsePayload;
+}
+
+const audioInfoCache = new Map<string, AudioInfoCacheEntry>();
+
+const buildAudioInfoCacheKey = (
+    trackId: string,
+    filePath: string,
+    fileModified?: Date | null
+): string => {
+    const modifiedToken =
+        fileModified instanceof Date ? fileModified.toISOString() : "unknown";
+    return `${trackId}:${filePath}:${modifiedToken}`;
+};
+
+const pruneAudioInfoCache = (now: number) => {
+    for (const [key, entry] of audioInfoCache.entries()) {
+        if (entry.expiresAt <= now) {
+            audioInfoCache.delete(key);
+        }
+    }
+
+    while (audioInfoCache.size > AUDIO_INFO_CACHE_MAX_ENTRIES) {
+        const oldestKey = audioInfoCache.keys().next().value as
+            | string
+            | undefined;
+        if (!oldestKey) break;
+        audioInfoCache.delete(oldestKey);
+    }
+};
 
 const hasReliableEnhancedAnalysis = (
     analysisMode: string | null | undefined,
@@ -3001,17 +3045,35 @@ router.get("/tracks/:id", async (req, res) => {
 
 // GET /library/tracks/:id/audio-info
 // Returns audio quality metadata (bitrate, sample rate, bit depth, codec)
-// by probing the file on disk with music-metadata. Results should be
-// cached client-side — this reads the file each time.
+// by probing the file on disk with music-metadata. Uses a short-lived
+// in-process cache keyed by track/file identity to avoid repeated probes.
 router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
     try {
+        const trackId = req.params.id;
         const track = await prisma.track.findUnique({
-            where: { id: req.params.id },
-            select: { filePath: true },
+            where: { id: trackId },
+            select: {
+                filePath: true,
+                fileModified: true,
+            },
         });
 
         if (!track?.filePath) {
             return res.status(404).json({ error: "Track not found" });
+        }
+
+        const cacheKey = buildAudioInfoCacheKey(
+            trackId,
+            track.filePath,
+            track.fileModified
+        );
+        const now = Date.now();
+        const cachedEntry = audioInfoCache.get(cacheKey);
+        if (cachedEntry && cachedEntry.expiresAt > now) {
+            return res.json(cachedEntry.payload);
+        }
+        if (cachedEntry) {
+            audioInfoCache.delete(cacheKey);
         }
 
         const absolutePath = path.join(
@@ -3027,14 +3089,22 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
         const metadata = await parseFile(absolutePath, { duration: false, skipCovers: true });
         const fmt = metadata.format;
 
-        res.json({
+        const payload: AudioInfoResponsePayload = {
             codec: fmt.codec || null,
             bitrate: fmt.bitrate ? Math.round(fmt.bitrate / 1000) : null,    // kbps
             sampleRate: fmt.sampleRate || null,                               // Hz
             bitDepth: fmt.bitsPerSample || null,                              // e.g. 16, 24
             lossless: fmt.lossless ?? null,
             channels: fmt.numberOfChannels || null,
+        };
+
+        audioInfoCache.set(cacheKey, {
+            payload,
+            expiresAt: now + AUDIO_INFO_CACHE_TTL_MS,
         });
+        pruneAudioInfoCache(now);
+
+        res.json(payload);
     } catch (error) {
         logger.error("Get audio info error:", error);
         res.status(500).json({ error: "Failed to read audio metadata" });

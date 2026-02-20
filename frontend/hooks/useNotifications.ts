@@ -73,6 +73,9 @@ export function useNotifications(): UseNotificationsReturn {
     } = useQuery<Notification[]>({
         queryKey: ["notifications"],
         queryFn: () => api.get<Notification[]>("/notifications"),
+        staleTime: 15_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
         refetchInterval: 30000,
     });
 
@@ -186,6 +189,9 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
     } = useQuery<DownloadHistoryItem[]>({
         queryKey: ["download-history"],
         queryFn: fetchHistory,
+        staleTime: 15_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
         refetchInterval: 30000, // 30s - history doesn't need frequent updates
     });
 
@@ -253,6 +259,9 @@ export function useActiveDownloads(): UseActiveDownloadsReturn {
     } = useQuery<DownloadHistoryItem[]>({
         queryKey: ["active-downloads"],
         queryFn: fetchDownloads,
+        staleTime: 8_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
         // Adaptive polling: 10s when active, 30s when idle
         refetchInterval: (query) => {
             const data = query.state.data;

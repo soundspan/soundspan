@@ -21,7 +21,7 @@ export function useTrackPreference(trackId?: string | null) {
         queryKey,
         queryFn: () => api.getTrackPreference(normalizedTrackId),
         enabled: Boolean(trackId),
-        staleTime: 30_000,
+        staleTime: 120_000,
     });
 
     const preferenceMutation = useMutation({

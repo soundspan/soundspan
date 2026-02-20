@@ -200,6 +200,7 @@ class ApiClient {
     private baseUrl: string;
     private token: string | null = null;
     private tokenInitialized: boolean = false;
+    private readonly inFlightGetRequests = new Map<string, Promise<unknown>>();
 
     constructor(baseUrl?: string) {
         // Don't set baseUrl in constructor - determine it dynamically on each request
@@ -431,6 +432,15 @@ class ApiClient {
         }
     }
 
+    private buildInFlightGetKey(
+        endpoint: string,
+        timeoutMs: number,
+        hasSignal: boolean
+    ): string | null {
+        if (hasSignal) return null;
+        return `${endpoint}|timeout=${timeoutMs}|token=${this.token ?? ""}`;
+    }
+
     async request<T>(
         endpoint: string,
         options: RequestInit & {
@@ -463,75 +473,108 @@ class ApiClient {
         const url = `${this.getBaseUrl()}/api${endpoint}`;
         const method = (fetchOptions.method || "GET").toUpperCase();
         const isIdempotentMethod = method === "GET" || method === "HEAD";
+        const isRetryAttempt = _retryCount > 0 || _timeoutRetryCount > 0;
+        const inFlightGetKey =
+            method === "GET" && !isRetryAttempt
+                ? this.buildInFlightGetKey(
+                      endpoint,
+                      timeoutMs,
+                      Boolean(fetchOptions.signal)
+                  )
+                : null;
 
-        let response: Response;
-        try {
-            response = await this.fetchWithTimeout(
-                url,
-                {
-                    ...fetchOptions,
-                    headers,
-                    credentials: "include", // Still send cookies for backward compatibility
-                },
-                timeoutMs
-            );
-        } catch (error) {
-            if (
-                this.isTimeoutError(error) &&
-                isIdempotentMethod &&
-                _timeoutRetryCount < MAX_TIMEOUT_RETRIES
-            ) {
-                await this.delay(DEFAULT_TIMEOUT_RETRY_BACKOFF_MS);
-                return this.request<T>(endpoint, {
-                    ...options,
-                    _timeoutRetryCount: _timeoutRetryCount + 1,
-                });
+        if (inFlightGetKey) {
+            const existingRequest = this.inFlightGetRequests.get(inFlightGetKey);
+            if (existingRequest) {
+                return existingRequest as Promise<T>;
             }
-            throw error;
         }
 
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({
-                error: response.statusText,
-            }));
-
-            // Only log non-404 errors (404s are often expected)
-            if (!(silent404 && response.status === 404)) {
-                console.error(`[API] Request failed: ${url}`, error);
-            }
-
-            // Handle 401 with token refresh (retry once)
-            if (
-                response.status === 401 &&
-                _retryCount === 0 &&
-                endpoint !== "/auth/refresh"
-            ) {
-                const refreshed = await this.refreshAccessToken();
-
-                if (refreshed) {
-                    // Retry the request with new token
+        const performRequest = async (): Promise<T> => {
+            let response: Response;
+            try {
+                response = await this.fetchWithTimeout(
+                    url,
+                    {
+                        ...fetchOptions,
+                        headers,
+                        credentials: "include", // Still send cookies for backward compatibility
+                    },
+                    timeoutMs
+                );
+            } catch (error) {
+                if (
+                    this.isTimeoutError(error) &&
+                    isIdempotentMethod &&
+                    _timeoutRetryCount < MAX_TIMEOUT_RETRIES
+                ) {
+                    await this.delay(DEFAULT_TIMEOUT_RETRY_BACKOFF_MS);
                     return this.request<T>(endpoint, {
                         ...options,
-                        _retryCount: 1, // Prevent infinite loops
+                        _timeoutRetryCount: _timeoutRetryCount + 1,
                     });
                 }
+                throw error;
             }
 
-            if (response.status === 401) {
-                const err = new Error("Not authenticated");
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({
+                    error: response.statusText,
+                }));
+
+                // Only log non-404 errors (404s are often expected)
+                if (!(silent404 && response.status === 404)) {
+                    console.error(`[API] Request failed: ${url}`, error);
+                }
+
+                // Handle 401 with token refresh (retry once)
+                if (
+                    response.status === 401 &&
+                    _retryCount === 0 &&
+                    endpoint !== "/auth/refresh"
+                ) {
+                    const refreshed = await this.refreshAccessToken();
+
+                    if (refreshed) {
+                        // Retry the request with new token
+                        return this.request<T>(endpoint, {
+                            ...options,
+                            _retryCount: 1, // Prevent infinite loops
+                        });
+                    }
+                }
+
+                if (response.status === 401) {
+                    const err = new Error("Not authenticated");
+                    (err as ApiError).status = response.status;
+                    (err as ApiError).data = error;
+                    throw err;
+                }
+
+                const err = new Error(error.error || "An error occurred");
                 (err as ApiError).status = response.status;
                 (err as ApiError).data = error;
                 throw err;
             }
 
-            const err = new Error(error.error || "An error occurred");
-            (err as ApiError).status = response.status;
-            (err as ApiError).data = error;
-            throw err;
+            const data = await response.json();
+            return data;
+        };
+
+        if (!inFlightGetKey) {
+            return performRequest();
         }
 
-        const data = await response.json();
-        return data;
+        const requestPromise = performRequest();
+        this.inFlightGetRequests.set(inFlightGetKey, requestPromise);
+        void requestPromise
+            .finally(() => {
+                if (this.inFlightGetRequests.get(inFlightGetKey) === requestPromise) {
+                    this.inFlightGetRequests.delete(inFlightGetKey);
+                }
+            })
+            .catch(() => undefined);
+        return requestPromise;
     }
 
     // Generic POST method for convenience

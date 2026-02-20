@@ -46,6 +46,9 @@ export function useSocialPresence() {
     const query = useQuery<SocialOnlineResponse>({
         queryKey: ["social-presence", "online"],
         queryFn: () => api.get<SocialOnlineResponse>("/social/online"),
+        staleTime: 5_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
         refetchInterval: (state) => {
             const users = state.state.data?.users;
             return users && users.length > 0
@@ -65,6 +68,9 @@ export function useAdminConnectedUsers(enabled: boolean) {
         queryKey: ["social-presence", "connected"],
         queryFn: () => api.get<ConnectedUsersResponse>("/social/connected"),
         enabled,
+        staleTime: 5_000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
         refetchInterval: (state) => {
             const users = state.state.data?.users;
             return users && users.length > 0
@@ -78,4 +84,3 @@ export function useAdminConnectedUsers(enabled: boolean) {
         users: query.data?.users ?? [],
     };
 }
-

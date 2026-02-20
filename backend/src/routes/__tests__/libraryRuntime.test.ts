@@ -4859,6 +4859,44 @@ describe("library album cover and media route edge coverage", () => {
         existsSpy.mockRestore();
     });
 
+    it("reuses cached audio metadata for repeated requests to the same track identity", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+
+        mockTrackFindUnique.mockResolvedValue({
+            filePath: "library/Cached-track.flac",
+            fileModified: new Date("2026-01-01T00:00:00.000Z"),
+        });
+        mockParseFile.mockResolvedValue({
+            format: {
+                codec: "FLAC",
+                bitrate: 768000,
+                sampleRate: 96000,
+                bitsPerSample: 24,
+                lossless: true,
+                numberOfChannels: 2,
+            },
+        });
+
+        const req = {
+            params: { id: "cache-hit-track" },
+            user: { id: "user-1" },
+        } as any;
+        const firstRes = createRes();
+        await audioInfoHandler(req, firstRes);
+
+        const secondRes = createRes();
+        await audioInfoHandler(req, secondRes);
+
+        expect(firstRes.statusCode).toBe(200);
+        expect(secondRes.statusCode).toBe(200);
+        expect(secondRes.body).toEqual(firstRes.body);
+        expect(mockParseFile).toHaveBeenCalledTimes(1);
+
+        existsSpy.mockRestore();
+    });
+
     it("returns stream 401 when authentication is missing", async () => {
         const req = { params: { id: "track-1" }, query: {} } as any;
         const res = createRes();
