@@ -200,7 +200,7 @@ export function FullPlayer() {
                 <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                 <div className="flex items-center h-full px-6 gap-4">
                     {/* Artwork & Info */}
-                    <div className="flex items-center gap-3 w-72">
+                    <div className="flex items-center gap-3 w-80">
                         {mediaLink ? (
                             <Link
                                 href={mediaLink}
@@ -490,8 +490,8 @@ export function FullPlayer() {
                     </div>
 
                     {/* Right Controls */}
-                    <div className="flex w-72 items-center justify-end gap-3">
-                        <div className="flex w-44 items-center gap-2.5">
+                    <div className="flex w-80 items-center justify-end gap-3">
+                        <div className="flex w-48 items-center gap-2.5">
                             <button
                                 onClick={toggleMute}
                                 className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110"
