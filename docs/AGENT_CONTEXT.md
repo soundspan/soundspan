@@ -219,6 +219,7 @@ For this repository, documentation updates are part of the definition of done fo
 
 - Always update `CHANGELOG.md` under **`[Unreleased]`** for user-visible or behavior-changing deltas.
 - Use `docs/RELEASE_NOTES_TEMPLATE.md` for release notes and GitHub release bodies; generate drafts with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`.
+- Write release-note bullets in plain English for users/operators; avoid raw commit-jargon phrasing in published notes.
 - In `CHANGELOG.md`, keep the **`Fixed`** section limited to regressions/bugs. Feature additions and behavior upgrades should be documented under **`Added`**/**`Changed`**.
 - Keep Helm release references explicit in release notes:
   - chart repo URL: `https://soundspan.github.io/soundspan`

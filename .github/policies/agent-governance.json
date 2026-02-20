@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-governance",
-    "version": "2026-02-19.03",
+    "version": "2026-02-20.01",
     "description": "Executable governance checks for AGENTS policy and local-context hygiene."
   },
   "contracts": {
@@ -65,6 +65,7 @@
       "npmScriptName": "release:notes",
       "npmScriptCommand": "node .github/scripts/generate-release-notes.mjs",
       "commandExample": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+      "plainEnglishSummariesRequired": true,
       "requiredSections": [
         "## Release Summary",
         "## Fixed",
@@ -448,6 +449,7 @@
           "node .github/scripts/enforce-agent-policies.mjs",
           "Release notes template artifact: `docs/RELEASE_NOTES_TEMPLATE.md`",
           "Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`",
+          "Release notes content rule: summarize changes in plain English and avoid raw commit-jargon wording.",
           "`orch_atomic_single_objective_scope`",
           "`orch_codex_model_default`",
           "gpt-5.3-codex-spark"
@@ -476,6 +478,7 @@
           "### Secrets and Sensitive Data",
           "### Baseline Workflow (Required)",
           "### Release Notes Format (Required)",
+          "Summarize release-note items in plain English for operators/users; do not copy raw commit-jargon wording as release-note bullets.",
           "### CLI Worktree Parallelism (Required)",
           "Default to read-only exploration first; edit only when required by the task.",
           "When operating in Codex CLI, prefer Git worktrees for non-trivial parallelizable tasks instead of stacking unrelated edits in one working tree.",
@@ -560,6 +563,7 @@
           "## Local Testing Bootstrap",
           "## Common Tasks",
           "docs/RELEASE_NOTES_TEMPLATE.md",
+          "Write release-note bullets in plain English for users/operators; avoid raw commit-jargon phrasing in published notes.",
           "`.agents/EXECUTION_QUEUE.json` (canonical execution queue + atomic state)",
           "Multi-agent queue usage:",
           "single scope/queue authority for orchestrator and subagents.",

@@ -28,7 +28,7 @@ These IDs are stable cross-references for enforceable behavior and map to policy
 - `rule_tdd_default`: Prefer true TDD and document deviations when strict TDD is impractical.
 - `rule_coverage_default_100`: Treat 100% coverage as default bar unless user-approved exception exists.
 - `rule_scope_completeness_gate`: Explicitly map outcomes to all in-scope user requests before closeout.
-- `rule_release_notes_template_required`: Enforce canonical release-notes template + generator workflow and section order through policy checks.
+- `rule_release_notes_template_required`: Enforce canonical release-notes template + generator workflow, section order, and plain-English non-jargon summaries through policy checks.
 
 ## Global Operating Agreements (All LLMs)
 
@@ -78,6 +78,7 @@ These rules are cross-agent defaults for this workspace and apply unless the use
 - Treat `docs/RELEASE_NOTES_TEMPLATE.md` as the canonical release-notes structure.
 - Generate release notes with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`.
 - Keep section order fixed: `Release Summary`, `Fixed`, `Added`, `Changed`, `Admin/Operations`, `Deployment and Distribution`, `Breaking Changes`, `Known Issues`, `Compatibility and Migration`, `Full Changelog`.
+- Summarize release-note items in plain English for operators/users; do not copy raw commit-jargon wording as release-note bullets.
 - Use exact Helm release references in release notes:
   - repository URL: `https://soundspan.github.io/soundspan`
   - chart name: `soundspan`

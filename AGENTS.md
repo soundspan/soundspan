@@ -97,6 +97,7 @@ Default Codex subagent model: `gpt-5.3-codex-spark` unless user-overridden.
 - Local: `node .github/scripts/enforce-agent-policies.mjs`
 - Session preflight: `npm run agent:preflight`
 - Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`
+- Release notes content rule: summarize changes in plain English and avoid raw commit-jargon wording.
 - CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code`
 - If process expectations change, update all of:
   - `AGENTS.md`

@@ -1,8 +1,8 @@
 {
   "metadata": {
     "id": "soundspan-agent-context-index",
-    "version": "2026-02-19.03",
-    "description": "Machine-readable index for startup context retrieval and split-doc drift checks."
+    "version": "2026-02-20.01",
+    "description": "Machine-readable index for startup context retrieval and split-doc drift checks, including release-notes plain-English policy alignment."
   },
   "startupReadOrder": [
     "AGENTS.md",

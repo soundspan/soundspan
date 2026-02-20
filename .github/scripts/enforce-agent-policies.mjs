@@ -1384,6 +1384,10 @@ function checkReleaseNotesContract(config) {
     }
   }
 
+  if (contract.plainEnglishSummariesRequired !== true) {
+    addFailure(`${contractPath}.plainEnglishSummariesRequired must be true.`);
+  }
+
   checkExactOrderedArray({
     value: contract.requiredSections,
     expected: [
