@@ -4,6 +4,7 @@ This guide covers Docker-based deployment options and runtime mode selection.
 
 For Kubernetes deployments, see [`KUBERNETES.md`](KUBERNETES.md).
 For reverse proxy/tunnel routing, see [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md).
+For container-by-container environment variables (required/optional, defaults, and purpose), see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
 ## Quick Start
 
