@@ -232,15 +232,15 @@ export function formatSegmentedQualityBadge(
             : null;
 
     if (codecLabel && bitrateLabel) {
-        return `${sourceLabel} DASH · ${codecLabel} · ${bitrateLabel}`;
+        return `${sourceLabel} · ${codecLabel} · ${bitrateLabel}`;
     }
     if (codecLabel) {
-        return `${sourceLabel} DASH · ${codecLabel}`;
+        return `${sourceLabel} · ${codecLabel}`;
     }
     if (bitrateLabel) {
-        return `${sourceLabel} DASH · ${bitrateLabel}`;
+        return `${sourceLabel} · ${bitrateLabel}`;
     }
-    return `${sourceLabel} DASH`;
+    return sourceLabel;
 }
 
 /**
