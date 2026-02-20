@@ -1,11 +1,11 @@
 "use client";
 
-import { HowlerAudioElement } from "@/components/player/HowlerAudioElement";
+import { AudioPlaybackOrchestrator } from "@/components/player/AudioPlaybackOrchestrator";
 
 /**
  * Runtime audio host. Engine selection is delegated to the runtime engine
- * factory consumed by HowlerAudioElement.
+ * factory consumed by AudioPlaybackOrchestrator.
  */
 export function AudioRuntimeElement() {
-    return <HowlerAudioElement />;
+    return <AudioPlaybackOrchestrator />;
 }

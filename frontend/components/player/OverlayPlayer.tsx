@@ -3,6 +3,7 @@
 import { useAudio } from "@/lib/audio-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useLyrics } from "@/hooks/useLyrics";
+import { resolvePlaybackQualityBadge } from "@/hooks/useStreamBitrate";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Image from "next/image";
@@ -95,6 +96,17 @@ interface RelatedStreamMatch {
     duration?: number;
 }
 
+const resolveOverlayQualityBadge = (
+    streamSource: "tidal" | "youtube" | undefined,
+) =>
+    resolvePlaybackQualityBadge({
+        streamSource,
+        tidalQuality: null,
+        localQuality: null,
+        codec: null,
+        bitrate: null,
+    });
+
 export function OverlayPlayer() {
     const {
         currentTrack,
@@ -166,6 +178,10 @@ export function OverlayPlayer() {
     const [matchingRelatedTrackKey, setMatchingRelatedTrackKey] = useState<string | null>(null);
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
     const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(500);
+    const currentTrackQualityBadge = useMemo(
+        () => resolveOverlayQualityBadge(currentTrack?.streamSource),
+        [currentTrack?.streamSource],
+    );
     const canSkip = playbackType === "track";
     const preferenceTrackId = canSkip ? currentTrack?.id : undefined;
     const isDesktopOverlayLayout = canSkip && !isMobileOrTablet;
@@ -1186,10 +1202,12 @@ export function OverlayPlayer() {
                                             {title}
                                         </h1>
                                     )}
-                                    {!isMobileOrTablet && currentTrack?.streamSource === "tidal" && (
+                                    {!isMobileOrTablet &&
+                                        currentTrackQualityBadge?.variant === "tidal" && (
                                         <TidalBadge />
                                     )}
-                                    {!isMobileOrTablet && currentTrack?.streamSource === "youtube" && (
+                                    {!isMobileOrTablet &&
+                                        currentTrackQualityBadge?.variant === "youtube" && (
                                         <YouTubeBadge />
                                     )}
                                 </div>
@@ -1209,12 +1227,14 @@ export function OverlayPlayer() {
                                         {subtitle}
                                     </p>
                                 )}
-                                {isMobileOrTablet && currentTrack?.streamSource === "tidal" && (
+                                {isMobileOrTablet &&
+                                    currentTrackQualityBadge?.variant === "tidal" && (
                                     <div className="mt-1 flex justify-center landscape:justify-start">
                                         <TidalBadge />
                                     </div>
                                 )}
-                                {isMobileOrTablet && currentTrack?.streamSource === "youtube" && (
+                                {isMobileOrTablet &&
+                                    currentTrackQualityBadge?.variant === "youtube" && (
                                     <div className="mt-1 flex justify-center landscape:justify-start">
                                         <YouTubeBadge />
                                     </div>
@@ -1555,10 +1575,10 @@ export function OverlayPlayer() {
                                                     <p className="min-w-0 truncate text-xs text-gray-400">
                                                         {subtitle}
                                                     </p>
-                                                    {currentTrack?.streamSource === "tidal" && (
+                                                    {currentTrackQualityBadge?.variant === "tidal" && (
                                                         <TidalBadge className="text-[9px] px-1 py-0.5 leading-none" />
                                                     )}
-                                                    {currentTrack?.streamSource === "youtube" && (
+                                                    {currentTrackQualityBadge?.variant === "youtube" && (
                                                         <YouTubeBadge className="text-[9px] px-1 py-0.5 leading-none" />
                                                     )}
                                                 </div>
@@ -1733,6 +1753,10 @@ export function OverlayPlayer() {
                                                         {queueTracks.map((track, queueIndex) => {
                                                             const isCurrentTrack = queueIndex === currentIndex;
                                                             const isPlayedTrack = queueIndex < currentIndex;
+                                                            const queueTrackQualityBadge =
+                                                                resolveOverlayQualityBadge(
+                                                                    track.streamSource,
+                                                                );
                                                             return (
                                                                 <div
                                                                     key={`${track.id}-${queueIndex}`}
@@ -1803,10 +1827,10 @@ export function OverlayPlayer() {
                                                                                 >
                                                                                     {track.displayTitle ?? track.title}
                                                                                 </p>
-                                                                                {track.streamSource === "tidal" && (
+                                                                                {queueTrackQualityBadge?.variant === "tidal" && (
                                                                                     <TidalBadge className="text-[9px] px-1 py-0.5 leading-none" />
                                                                                 )}
-                                                                                {track.streamSource === "youtube" && (
+                                                                                {queueTrackQualityBadge?.variant === "youtube" && (
                                                                                     <YouTubeBadge
                                                                                         className="text-[9px] px-1 py-0.5 leading-none"
                                                                                     />

@@ -224,12 +224,12 @@ const isSegmentedSessionUsable = (
 };
 
 /**
- * HowlerAudioElement - Unified audio playback using Howler.js
+ * AudioPlaybackOrchestrator - Unified audio playback using Howler.js
  *
  * Handles: web playback, progress saving for audiobooks/podcasts
  * Browser media controls are handled separately by useMediaSession hook
  */
-export const HowlerAudioElement = memo(function HowlerAudioElement() {
+export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator() {
     // State context
     const {
         currentTrack,
@@ -407,7 +407,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 startupRecoveryAttemptedTrackIdRef.current = trackId;
 
                 console.warn(
-                    "[HowlerAudioElement] Startup playback watchdog triggered reload+retry"
+                    "[AudioPlaybackOrchestrator] Startup playback watchdog triggered reload+retry"
                 );
 
                 const onReloaded = () => {
@@ -517,7 +517,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 if (!lastPlayingStateRef.current) return;
 
                 console.warn(
-                    `[HowlerAudioElement] Transient stream error recovery ${attemptNumber}/${TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS}: reload and retry current track`
+                    `[AudioPlaybackOrchestrator] Transient stream error recovery ${attemptNumber}/${TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS}: reload and retry current track`
                 );
                 howlerEngine.reload();
             }, TRANSIENT_TRACK_ERROR_RECOVERY_DELAY_MS);
@@ -719,13 +719,13 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 );
 
                 console.warn(
-                    "[HowlerAudioElement] Segmented handoff recovery succeeded after playback error:",
+                    "[AudioPlaybackOrchestrator] Segmented handoff recovery succeeded after playback error:",
                     error
                 );
                 return true;
             } catch (handoffError) {
                 console.error(
-                    "[HowlerAudioElement] Segmented handoff recovery failed:",
+                    "[AudioPlaybackOrchestrator] Segmented handoff recovery failed:",
                     handoffError
                 );
                 logSegmentedClientMetric("session.handoff_failure", {
@@ -781,7 +781,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 .then((result) => result.success && result.trackCount > 0)
                 .catch((error) => {
                     console.error(
-                        "[HowlerAudioElement] Auto Match Vibe request failed:",
+                        "[AudioPlaybackOrchestrator] Auto Match Vibe request failed:",
                         error
                     );
                     return false;
@@ -891,7 +891,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 })
                 .catch((error) => {
                     console.warn(
-                        "[HowlerAudioElement] Segmented heartbeat failed:",
+                        "[AudioPlaybackOrchestrator] Segmented heartbeat failed:",
                         error
                     );
                 });
@@ -954,7 +954,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         heartbeatRef.current = new HeartbeatMonitor({
             onStall: () => {
                 // Playback stalled - time not moving but Howler says playing
-                console.warn("[HowlerAudioElement] Heartbeat detected stall");
+                console.warn("[AudioPlaybackOrchestrator] Heartbeat detected stall");
                 logSegmentedClientMetric("player.rebuffer", {
                     reason: "heartbeat_stall",
                     trackId: currentTrackRef.current?.id ?? null,
@@ -967,7 +967,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             },
             onUnexpectedStop: () => {
                 // Howler stopped without us knowing
-                console.warn("[HowlerAudioElement] Heartbeat detected unexpected stop");
+                console.warn("[AudioPlaybackOrchestrator] Heartbeat detected unexpected stop");
                 if (playbackStateMachine.isPlaying) {
                     // Sync React state to actual state
                     setIsPlaying(false);
@@ -976,7 +976,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             },
             onBufferTimeout: () => {
                 // Been buffering too long - likely connection lost
-                console.error("[HowlerAudioElement] Buffer timeout - connection may be lost");
+                console.error("[AudioPlaybackOrchestrator] Buffer timeout - connection may be lost");
                 logSegmentedClientMetric("player.rebuffer_timeout", {
                     reason: "heartbeat_buffer_timeout",
                     trackId: currentTrackRef.current?.id ?? null,
@@ -996,7 +996,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             },
             onRecovery: () => {
                 // Recovered from stall
-                console.log("[HowlerAudioElement] Recovered from stall");
+                console.log("[AudioPlaybackOrchestrator] Recovered from stall");
                 logSegmentedClientMetric("player.rebuffer_recovered", {
                     reason: "heartbeat_recovery",
                     trackId: currentTrackRef.current?.id ?? null,
@@ -1100,7 +1100,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 dispatchQueryEvent("audiobook-progress-updated");
             } catch (err) {
                 console.error(
-                    "[HowlerAudioElement] Failed to save audiobook progress:",
+                    "[AudioPlaybackOrchestrator] Failed to save audiobook progress:",
                     err
                 );
             }
@@ -1134,7 +1134,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 dispatchQueryEvent("podcast-progress-updated");
             } catch (err) {
                 console.error(
-                    "[HowlerAudioElement] Failed to save podcast progress:",
+                    "[AudioPlaybackOrchestrator] Failed to save podcast progress:",
                     err
                 );
             }
@@ -1244,7 +1244,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         };
 
         const handleError = async (data: { error: unknown }) => {
-            console.error("[HowlerAudioElement] Playback error:", data.error);
+            console.error("[AudioPlaybackOrchestrator] Playback error:", data.error);
 
             const errorMessage = data.error instanceof Error
                 ? data.error.message
@@ -1670,7 +1670,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                     segmentedHandoffAttemptRef.current = 0;
                 } catch (error) {
                     console.warn(
-                        "[HowlerAudioElement] Segmented session init failed, falling back to direct stream.",
+                        "[AudioPlaybackOrchestrator] Segmented session init failed, falling back to direct stream.",
                         error
                     );
                     logSegmentedClientMetric("session.create_failure", {
@@ -1815,7 +1815,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                     if (retryAttempt <= AUDIO_LOAD_TIMEOUT_RETRIES) {
                         loadTimeoutRetryCountRef.current = retryAttempt;
                         console.warn(
-                            `[HowlerAudioElement] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms; retrying (${retryAttempt}/${AUDIO_LOAD_TIMEOUT_RETRIES})`
+                            `[AudioPlaybackOrchestrator] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms; retrying (${retryAttempt}/${AUDIO_LOAD_TIMEOUT_RETRIES})`
                         );
                         clearLoadListeners();
                         if (loadTimeoutRef.current) {
@@ -1837,7 +1837,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                     }
 
                     console.error(
-                        `[HowlerAudioElement] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms`
+                        `[AudioPlaybackOrchestrator] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms`
                     );
                     loadTimeoutRetryCountRef.current = 0;
                     isLoadingRef.current = false;
@@ -1972,7 +1972,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             })
             .catch((error) => {
                 console.warn(
-                    "[HowlerAudioElement] Segmented prewarm failed for next track:",
+                    "[AudioPlaybackOrchestrator] Segmented prewarm failed for next track:",
                     error,
                 );
             })
@@ -2034,7 +2034,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 return status.cached;
             } catch (err) {
                 console.error(
-                    "[HowlerAudioElement] Failed to check cache status:",
+                    "[AudioPlaybackOrchestrator] Failed to check cache status:",
                     err
                 );
                 setCanSeek(true);
@@ -2217,14 +2217,14 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                         }
 
                         console.warn(
-                            "[HowlerAudioElement] Cache polling timeout"
+                            "[AudioPlaybackOrchestrator] Cache polling timeout"
                         );
                         setIsBuffering(false);
                         setTargetSeekPosition(null);
                     }
                 } catch (error) {
                     console.error(
-                        "[HowlerAudioElement] Cache polling error:",
+                        "[AudioPlaybackOrchestrator] Cache polling error:",
                         error
                     );
                 }
@@ -2395,7 +2395,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                         }
                     } catch (e) {
                         console.warn(
-                            "[HowlerAudioElement] Could not check cache status:",
+                            "[AudioPlaybackOrchestrator] Could not check cache status:",
                             e
                         );
                     }
@@ -2439,7 +2439,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                             // Pausing here would break playback if the seek just takes a while.
                         } catch (e) {
                             console.error(
-                                "[HowlerAudioElement] Seek check error:",
+                                "[AudioPlaybackOrchestrator] Seek check error:",
                                 e
                             );
                         }
