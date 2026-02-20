@@ -114,7 +114,7 @@ describe("streaming route runtime", () => {
     );
     const getSegmentAlias = getHandler(
         "get",
-        "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.m4s)",
+        "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.(?:m4s|webm))",
     );
     const postHeartbeat = getHandler("post", "/v1/sessions/:sessionId/heartbeat");
     const postHandoff = getHandler("post", "/v1/sessions/:sessionId/handoff");

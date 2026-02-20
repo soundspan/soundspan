@@ -183,6 +183,33 @@ function isLikelyTransientStreamError(error: unknown): boolean {
     );
 }
 
+function isLosslessSegmentedSession(
+    session: SegmentedStreamingSessionResponse,
+): boolean {
+    const sourceType =
+        session.playbackProfile?.sourceType ?? session.engineHints?.sourceType;
+    const codec = session.playbackProfile?.codec?.trim().toLowerCase();
+    return sourceType === "local" && codec === "flac";
+}
+
+function supportsLosslessSegmentedPlayback(): boolean {
+    if (typeof window === "undefined") {
+        return false;
+    }
+
+    const mediaSourceCtor = (window as Window & {
+        MediaSource?: {
+            isTypeSupported?: (mimeType: string) => boolean;
+        };
+    }).MediaSource;
+
+    if (typeof mediaSourceCtor?.isTypeSupported !== "function") {
+        return false;
+    }
+
+    return mediaSourceCtor.isTypeSupported('audio/webm; codecs="flac"');
+}
+
 const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey("current_time_track_id");
 const AUDIO_LOAD_TIMEOUT_MS = 20_000;
 const AUDIO_LOAD_TIMEOUT_RETRIES = 1;
@@ -1611,6 +1638,24 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         );
                         initSource = "create";
                     }
+
+                    if (
+                        isLosslessSegmentedSession(segmentedSession) &&
+                        !supportsLosslessSegmentedPlayback()
+                    ) {
+                        logSegmentedClientMetric("session.create_fallback_direct", {
+                            trackId: currentTrack.id,
+                            sourceType:
+                                segmentedSession.playbackProfile?.sourceType ??
+                                segmentedSession.engineHints?.sourceType ??
+                                segmentedTrackContext.sourceType,
+                            reason: "lossless_segmented_unsupported",
+                        });
+                        throw new Error(
+                            "Lossless segmented playback is not supported by this browser.",
+                        );
+                    }
+
                     if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
                         return;
                     }
@@ -1961,6 +2006,20 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             })
             .then((session) => {
                 if (!isSegmentedSessionUsable(session)) {
+                    return;
+                }
+                if (
+                    isLosslessSegmentedSession(session) &&
+                    !supportsLosslessSegmentedPlayback()
+                ) {
+                    logSegmentedClientMetric("session.prewarm_skip", {
+                        trackId: nextTrack.id,
+                        sourceType:
+                            session.playbackProfile?.sourceType ??
+                            session.engineHints?.sourceType ??
+                            nextSegmentedTrackContext.sourceType,
+                        reason: "lossless_segmented_unsupported",
+                    });
                     return;
                 }
                 prewarmedSegmentedSessionRef.current.set(nextSessionKey, session);

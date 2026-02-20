@@ -154,7 +154,11 @@ const handleSegmentFetch = async (
             req.params.segmentName,
         );
         res.setHeader("Cache-Control", "private, max-age=30");
-        res.type("video/iso.segment");
+        if (req.params.segmentName.toLowerCase().endsWith(".webm")) {
+            res.type("video/webm");
+        } else {
+            res.type("video/iso.segment");
+        }
         logSegmentedStreamingMetric("segment.fetch", {
             status: "success",
             sessionId: session.sessionId,
@@ -385,7 +389,7 @@ router.get(
 );
 
 router.get(
-    "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.m4s)",
+    "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.(?:m4s|webm))",
     requireAuth,
     handleSegmentFetch,
 );

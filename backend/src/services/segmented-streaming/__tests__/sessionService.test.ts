@@ -2,12 +2,20 @@ const resolveSessionService = async () => {
     jest.resetModules();
 
     const mockTrackFindUnique = jest.fn();
+    const mockUserSettingsFindUnique = jest.fn();
     const mockManifestGetOrCreateLocalDashAsset = jest.fn();
     const mockRedisSetEx = jest.fn();
     const mockRedisGet = jest.fn();
     const mockRedisDel = jest.fn();
     const mockRegisterSessionReference = jest.fn();
     const mockClearSessionReference = jest.fn();
+    const mockFsAccess = jest.fn();
+
+    jest.doMock("fs", () => ({
+        promises: {
+            access: (...args: unknown[]) => mockFsAccess(...args),
+        },
+    }));
 
     jest.doMock("../../../utils/db", () => ({
         prisma: {
@@ -15,7 +23,8 @@ const resolveSessionService = async () => {
                 findUnique: (...args: unknown[]) => mockTrackFindUnique(...args),
             },
             userSettings: {
-                findUnique: jest.fn(),
+                findUnique: (...args: unknown[]) =>
+                    mockUserSettingsFindUnique(...args),
             },
         },
     }));
@@ -100,12 +109,14 @@ const resolveSessionService = async () => {
         segmentedStreamingSessionService: module.segmentedStreamingSessionService,
         mocks: {
             mockTrackFindUnique,
+            mockUserSettingsFindUnique,
             mockManifestGetOrCreateLocalDashAsset,
             mockRedisSetEx,
             mockRedisGet,
             mockRedisDel,
             mockRegisterSessionReference,
             mockClearSessionReference,
+            mockFsAccess,
         },
     };
 };
@@ -115,6 +126,7 @@ describe("segmentedStreamingSessionService local quality handling", () => {
         jest.resetModules();
         jest.dontMock("../../../utils/db");
         jest.dontMock("../../../utils/redis");
+        jest.dontMock("fs");
         jest.dontMock("../../../config");
         jest.dontMock("../../../utils/logger");
         jest.dontMock("../manifestService");
@@ -125,29 +137,45 @@ describe("segmentedStreamingSessionService local quality handling", () => {
         jest.dontMock("../providerAdapters/adapterError");
     });
 
-    it("rejects local original quality segmented sessions so clients can fall back to direct playback", async () => {
+    it("returns FLAC playback profile for local original segmented sessions", async () => {
         const { segmentedStreamingSessionService, mocks } =
             await resolveSessionService();
 
+        mocks.mockUserSettingsFindUnique.mockResolvedValueOnce({
+            playbackQuality: "medium",
+        });
         mocks.mockTrackFindUnique.mockResolvedValueOnce({
             id: "track-1",
             filePath: "albums/track-1.flac",
             fileModified: new Date("2026-02-20T00:00:00.000Z"),
         });
-
-        await expect(
-            segmentedStreamingSessionService.createLocalSession({
-                userId: "user-1",
-                trackId: "track-1",
-                desiredQuality: "original",
-            }),
-        ).rejects.toMatchObject({
-            statusCode: 409,
-            code: "STREAMING_ORIGINAL_QUALITY_REQUIRES_DIRECT",
+        mocks.mockFsAccess.mockResolvedValue(undefined);
+        mocks.mockManifestGetOrCreateLocalDashAsset.mockResolvedValueOnce({
+            cacheKey: "cache-1",
+            outputDir: "/tmp/segmented/cache-1",
+            manifestPath: "/tmp/segmented/cache-1/manifest.mpd",
+            quality: "original",
         });
 
-        expect(mocks.mockManifestGetOrCreateLocalDashAsset).not.toHaveBeenCalled();
-        expect(mocks.mockRedisSetEx).not.toHaveBeenCalled();
-        expect(mocks.mockRegisterSessionReference).not.toHaveBeenCalled();
+        const session = await segmentedStreamingSessionService.createLocalSession({
+            userId: "user-1",
+            trackId: "track-1",
+            desiredQuality: "original",
+        });
+
+        expect(session.playbackProfile).toMatchObject({
+            protocol: "dash",
+            sourceType: "local",
+            codec: "flac",
+            bitrateKbps: null,
+        });
+        expect(mocks.mockManifestGetOrCreateLocalDashAsset).toHaveBeenCalledWith(
+            expect.objectContaining({
+                trackId: "track-1",
+                quality: "original",
+            }),
+        );
+        expect(mocks.mockRedisSetEx).toHaveBeenCalledTimes(1);
+        expect(mocks.mockRegisterSessionReference).toHaveBeenCalledTimes(1);
     });
 });

@@ -108,7 +108,7 @@ describe("segmentedSegmentService", () => {
         await wait(0);
     });
 
-    it("preserves original lossless quality via ALAC transcoding (no lossy bitrate)", async () => {
+    it("chunks local original lossless tracks as FLAC WebM-DASH (no lossy bitrate)", async () => {
         const { segmentedSegmentService, mocks } = await resolveSegmentService();
         const ffmpegProcess = createMockFfmpegProcess();
 
@@ -132,7 +132,11 @@ describe("segmentedSegmentService", () => {
 
         const ffmpegArgs = mocks.mockSpawn.mock.calls[0][1] as string[];
         expect(ffmpegArgs).toContain("-c:a");
-        expect(ffmpegArgs).toContain("alac");
+        expect(ffmpegArgs).toContain("flac");
+        expect(ffmpegArgs).toContain("-dash_segment_type");
+        expect(ffmpegArgs).toContain("webm");
+        expect(ffmpegArgs).toContain("init-$RepresentationID$.webm");
+        expect(ffmpegArgs).toContain("chunk-$RepresentationID$-$Number%05d$.webm");
         expect(ffmpegArgs).not.toContain("-b:a");
         expect(ffmpegArgs).not.toContain("320k");
 

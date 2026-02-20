@@ -25,6 +25,16 @@ const SOURCE_URL_REGEX = /^https?:\/\//i;
 const LOSSLESS_FILE_EXTENSION_REGEX =
     /\.(flac|wav|aiff|aif|alac|ape|wv|tta|dff|dsf)$/i;
 
+type DashSegmentContainer = "fmp4" | "webm";
+
+interface DashEncodingPlan {
+    audioCodec: "aac" | "flac";
+    segmentContainer: DashSegmentContainer;
+    initSegmentName: string;
+    mediaSegmentName: string;
+    bitrateKbps: number | null;
+}
+
 const resolveSourceKind = (sourcePath: string): "local" | "remote" =>
     SOURCE_URL_REGEX.test(sourcePath) ? "remote" : "local";
 
@@ -197,11 +207,11 @@ class SegmentedSegmentService {
         const ensureDirMs = segmentedTraceDurationMs(ensureDirStartedAtMs);
 
         const bitrate = DASH_QUALITY_BITRATES[params.quality];
-        const shouldUseLosslessOriginalTranscode =
-            params.quality === "original" &&
-            !SOURCE_URL_REGEX.test(params.sourcePath) &&
-            LOSSLESS_FILE_EXTENSION_REGEX.test(params.sourcePath);
-        const audioCodec = shouldUseLosslessOriginalTranscode ? "alac" : "aac";
+        const encodingPlan = this.resolveDashEncodingPlan({
+            quality: params.quality,
+            sourcePath: params.sourcePath,
+            bitrateKbps: bitrate,
+        });
         const ffmpegArgs = [
             "-hide_banner",
             "-loglevel",
@@ -213,10 +223,15 @@ class SegmentedSegmentService {
             "-map",
             "0:a:0",
             "-c:a",
-            audioCodec,
-            ...(audioCodec === "aac" ? ["-b:a", `${bitrate}k`] : []),
+            encodingPlan.audioCodec,
+            ...(encodingPlan.bitrateKbps !== null
+                ? ["-b:a", `${encodingPlan.bitrateKbps}k`]
+                : []),
             "-f",
             "dash",
+            ...(encodingPlan.segmentContainer === "webm"
+                ? ["-dash_segment_type", "webm"]
+                : []),
             "-seg_duration",
             "4",
             "-use_template",
@@ -224,9 +239,9 @@ class SegmentedSegmentService {
             "-use_timeline",
             "1",
             "-init_seg_name",
-            "init-$RepresentationID$.m4s",
+            encodingPlan.initSegmentName,
             "-media_seg_name",
-            "chunk-$RepresentationID$-$Number%05d$.m4s",
+            encodingPlan.mediaSegmentName,
             "manifest.mpd",
         ];
 
@@ -238,8 +253,9 @@ class SegmentedSegmentService {
             quality: params.quality,
             sourceKind,
             cacheKey: params.cacheKey,
-            bitrateKbps: bitrate,
-            transcodeMode: audioCodec,
+            bitrateKbps: encodingPlan.bitrateKbps,
+            transcodeMode: encodingPlan.audioCodec,
+            segmentContainer: encodingPlan.segmentContainer,
             ensureDirMs,
         });
 
@@ -338,6 +354,35 @@ class SegmentedSegmentService {
             outputDir: params.outputDir,
             manifestPath: params.manifestPath,
             quality: params.quality,
+        };
+    }
+
+    private resolveDashEncodingPlan(params: {
+        quality: SegmentedDashQuality;
+        sourcePath: string;
+        bitrateKbps: number;
+    }): DashEncodingPlan {
+        const isOriginalLocalLossless =
+            params.quality === "original" &&
+            !SOURCE_URL_REGEX.test(params.sourcePath) &&
+            LOSSLESS_FILE_EXTENSION_REGEX.test(params.sourcePath);
+
+        if (isOriginalLocalLossless) {
+            return {
+                audioCodec: "flac",
+                segmentContainer: "webm",
+                initSegmentName: "init-$RepresentationID$.webm",
+                mediaSegmentName: "chunk-$RepresentationID$-$Number%05d$.webm",
+                bitrateKbps: null,
+            };
+        }
+
+        return {
+            audioCodec: "aac",
+            segmentContainer: "fmp4",
+            initSegmentName: "init-$RepresentationID$.m4s",
+            mediaSegmentName: "chunk-$RepresentationID$-$Number%05d$.m4s",
+            bitrateKbps: params.bitrateKbps,
         };
     }
 }

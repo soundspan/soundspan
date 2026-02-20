@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { config } from "../../config";
 
 const MANIFEST_FILE_NAME = "manifest.mpd";
-const DASH_SEGMENT_FILE_REGEX = /\.m4s$/i;
+const DASH_SEGMENT_FILE_REGEX = /\.(m4s|webm)$/i;
 const SEGMENTED_CACHE_BASE_PATH_ENV = "SEGMENTED_STREAMING_CACHE_PATH";
 
 export type SegmentedDashQuality = "original" | "high" | "medium" | "low";

@@ -25,7 +25,7 @@ import {
 
 const SESSION_KEY_PREFIX = "streaming:session:v1:";
 const SESSION_TTL_SECONDS = 5 * 60;
-const SEGMENT_FILE_PATTERN = /^[A-Za-z0-9_.-]+\.m4s$/;
+const SEGMENT_FILE_PATTERN = /^[A-Za-z0-9_.-]+\.(m4s|webm)$/i;
 const SESSION_TOKEN_TYPE = "segmented-streaming-session-v1";
 const SESSION_TOKEN_SECRET =
     process.env.JWT_SECRET || process.env.SESSION_SECRET || config.sessionSecret;
@@ -87,7 +87,7 @@ export interface SegmentedSessionResponse {
     playbackProfile: {
         protocol: "dash";
         sourceType: SegmentedSessionSourceType;
-        codec: "aac" | "source";
+        codec: "aac" | "flac" | "source";
         bitrateKbps: number | null;
     };
     engineHints: {
@@ -173,14 +173,6 @@ class SegmentedSessionService {
                     "Track is not available for segmented local playback",
                     404,
                     "TRACK_NOT_LOCALLY_AVAILABLE",
-                );
-            }
-
-            if (quality === "original") {
-                throw new SegmentedSessionError(
-                    "Original quality for local tracks requires direct playback mode",
-                    409,
-                    "STREAMING_ORIGINAL_QUALITY_REQUIRES_DIRECT",
                 );
             }
 
@@ -665,7 +657,7 @@ class SegmentedSessionService {
             playbackProfile: {
                 protocol: "dash",
                 sourceType: session.sourceType,
-                codec: qualityToPlaybackCodec(session.quality),
+                codec: qualityToPlaybackCodec(session.quality, session.sourceType),
                 bitrateKbps: qualityToBitrateKbps(session.quality),
             },
             engineHints: {
@@ -823,8 +815,12 @@ const normalizeQuality = (
 
 const qualityToPlaybackCodec = (
     quality: SegmentedSessionQuality,
-): "aac" | "source" => {
+    sourceType: SegmentedSessionSourceType,
+): "aac" | "flac" | "source" => {
     if (quality === "original") {
+        if (sourceType === "local") {
+            return "flac";
+        }
         return "source";
     }
     return "aac";
