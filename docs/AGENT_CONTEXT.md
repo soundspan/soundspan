@@ -244,7 +244,10 @@ Use this section as the quickest path from feature language to exact code locati
 For this repository, documentation updates are part of the definition of done for user-facing or behavior-changing work.
 
 - Always update `CHANGELOG.md` under **`[Unreleased]`** for user-visible or behavior-changing deltas.
+- Treat `CHANGELOG.md` as the canonical release-note source of truth for release publishing.
+- Before publishing a release, run `npm run release:prepare -- --version <X.Y.Z>` to promote `## [Unreleased]` into `## [<version>] - <date>` and recreate a fresh empty `## [Unreleased]` scaffold (`Added`, `Changed`, `Fixed`).
 - Use `docs/RELEASE_NOTES_TEMPLATE.md` for release notes and GitHub release bodies; generate drafts with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`.
+- `release:notes` reads release bullets from the corresponding `CHANGELOG.md` version section (Fixed/Added/Changed/Admin/Breaking) and renders them through the template.
 - Write release-note bullets in plain English for users/operators; avoid raw commit-jargon phrasing in published notes.
 - Keep `docs/FEATURE_INDEX.json` current as the machine-readable feature map (findability + ownership pointers).
 - Keep `docs/TEST_MATRIX.md` current as the feature-to-targeted-test command map.

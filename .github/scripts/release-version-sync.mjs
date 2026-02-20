@@ -3,6 +3,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import {
+  CHANGELOG_PATH,
+  assertChangelogPreparedForRelease,
+  formatReleaseDate,
+  prepareChangelogForRelease,
+  readChangelog,
+  writeChangelog,
+} from "./changelog-utils.mjs";
 
 const RELEASE_IMAGE_SECTIONS = [
   "aio",
@@ -162,6 +170,34 @@ function runCommand(command, args, options = {}) {
   }
 }
 
+function updateChangelogForRelease(releaseVersion) {
+  let prepared;
+  try {
+    prepared = prepareChangelogForRelease({
+      changelogContent: readChangelog(),
+      version: releaseVersion,
+      releaseDate: formatReleaseDate(),
+    });
+  } catch (error) {
+    fail(`${CHANGELOG_PATH} release-prepare update failed: ${error.message}`);
+  }
+
+  if (prepared.changed) {
+    writeChangelog(prepared.content);
+  }
+}
+
+function verifyChangelogForRelease(releaseVersion) {
+  try {
+    assertChangelogPreparedForRelease({
+      changelogContent: readChangelog(),
+      version: releaseVersion,
+    });
+  } catch (error) {
+    fail(`${CHANGELOG_PATH} release-prepare validation failed: ${error.message}`);
+  }
+}
+
 function assertPackageSurface(target, releaseVersion) {
   const packageJsonPath = path.join(target.dir, "package.json");
   const lockJsonPath = path.join(target.dir, "package-lock.json");
@@ -220,6 +256,8 @@ function verifyAllSurfaces(releaseVersion) {
   for (const target of PACKAGE_TARGETS) {
     assertPackageSurface(target, releaseVersion);
   }
+
+  verifyChangelogForRelease(releaseVersion);
 
   const chartYamlPath = path.join("charts", "soundspan", "Chart.yaml");
   const valuesYamlPath = path.join("charts", "soundspan", "values.yaml");
@@ -304,6 +342,8 @@ function main() {
       "--release-tag",
       releaseVersion,
     ]);
+
+    updateChangelogForRelease(releaseVersion);
   }
 
   verifyAllSurfaces(releaseVersion);

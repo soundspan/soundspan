@@ -1,8 +1,8 @@
 {
   "metadata": {
     "id": "soundspan-agent-context-index",
-    "version": "2026-02-20.04",
-    "description": "Machine-readable index for startup context retrieval and split-doc drift checks, including release-notes plain-English plus feature/test/route/JSDoc discoverability policy alignment."
+    "version": "2026-02-20.05",
+    "description": "Machine-readable index for startup context retrieval and split-doc drift checks, including changelog-sourced release notes, plain-English requirements, and feature/test/route/JSDoc discoverability policy alignment."
   },
   "startupReadOrder": [
     "AGENTS.md",
@@ -238,7 +238,10 @@
     "jsdocCoverageGenerate": "npm run jsdoc-coverage:generate",
     "jsdocCoverageVerify": "npm run jsdoc-coverage:verify",
     "indexQueryStrictFresh": "node tools/index/indexer.mjs query \"<query>\" --strict-fresh",
+    "releasePrepare": "npm run release:prepare -- --version <X.Y.Z>",
+    "releaseVerify": "npm run release:verify -- --version <X.Y.Z>",
     "releaseNotes": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+    "changelogFile": "cat CHANGELOG.md",
     "featureIndexFile": "cat docs/FEATURE_INDEX.json",
     "testMatrixFile": "cat docs/TEST_MATRIX.md",
     "routeMapFile": "cat docs/ROUTE_MAP.md",

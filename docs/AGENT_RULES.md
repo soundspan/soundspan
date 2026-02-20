@@ -34,6 +34,7 @@ These IDs are stable cross-references for enforceable behavior and map to policy
 - `rule_domain_readmes_required`: Maintain per-domain start-here READMEs in `backend/src/routes`, `backend/src/services`, and `frontend/features/*`.
 - `rule_jsdoc_coverage_required`: Maintain `docs/JSDOC_COVERAGE.md` as the generated exported-symbol documentation drift tracker.
 - `rule_release_notes_template_required`: Enforce canonical release-notes template + generator workflow, section order, and plain-English non-jargon summaries through policy checks.
+- `rule_release_notes_changelog_source_required`: Treat `CHANGELOG.md` as release-notes source of truth and rotate `Unreleased` during `release:prepare`.
 
 ## Global Operating Agreements (All LLMs)
 
@@ -80,8 +81,12 @@ These rules are cross-agent defaults for this workspace and apply unless the use
 
 ### Release Notes Format (Required)
 
+- Treat `CHANGELOG.md` as the source of truth for release-note content (not commit subjects).
+- Prepare releases with `npm run release:prepare -- --version <X.Y.Z>` before generating release notes.
+- `release:prepare` must promote `## [Unreleased]` into `## [<version>] - <date>` and recreate a fresh empty `## [Unreleased]` scaffold with `### Added`, `### Changed`, and `### Fixed`.
 - Treat `docs/RELEASE_NOTES_TEMPLATE.md` as the canonical release-notes structure.
 - Generate release notes with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`.
+- `release:notes` must read Fixed/Added/Changed/Admin/Breaking bullets from the matching `CHANGELOG.md` version section.
 - Keep section order fixed: `Release Summary`, `Fixed`, `Added`, `Changed`, `Admin/Operations`, `Deployment and Distribution`, `Breaking Changes`, `Known Issues`, `Compatibility and Migration`, `Full Changelog`.
 - Summarize release-note items in plain English for operators/users; do not copy raw commit-jargon wording as release-note bullets.
 - Use exact Helm release references in release notes:

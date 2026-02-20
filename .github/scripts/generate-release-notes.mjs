@@ -3,6 +3,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import {
+  CHANGELOG_PATH,
+  extractSectionBullets,
+  findSectionByKey,
+  parseChangelog,
+  pickBulletsByHeadingAliases,
+  readChangelog,
+} from "./changelog-utils.mjs";
 
 const TEMPLATE_PATH = "docs/RELEASE_NOTES_TEMPLATE.md";
 const DEFAULT_REPO_WEB_URL = "https://github.com/soundspan/soundspan";
@@ -129,84 +137,6 @@ function resolveRepoWebUrl() {
   return normalizeRepoWebUrl(remoteUrl) ?? DEFAULT_REPO_WEB_URL;
 }
 
-function parseConventionalSubject(subject) {
-  const match = subject.match(
-    /^(?<type>[a-z]+)(?:\([^)]+\))?(?<breaking>!)?:\s*(?<summary>.+)$/i,
-  );
-  if (!match || !match.groups) {
-    return null;
-  }
-
-  return {
-    type: match.groups.type.toLowerCase(),
-    breaking: Boolean(match.groups.breaking),
-    summary: match.groups.summary.trim(),
-  };
-}
-
-function classifyCommit(commit) {
-  const conventional = parseConventionalSubject(commit.subject);
-  if (!conventional) {
-    return {
-      category: "changed",
-      summary: commit.subject.trim(),
-      breaking: /BREAKING CHANGE/i.test(commit.body),
-    };
-  }
-
-  let category = "changed";
-  if (conventional.type === "fix") {
-    category = "fixed";
-  } else if (conventional.type === "feat") {
-    category = "added";
-  } else if (["chore", "ci", "build", "release", "ops"].includes(conventional.type)) {
-    category = "admin";
-  }
-
-  return {
-    category,
-    summary: conventional.summary,
-    breaking:
-      conventional.breaking || /BREAKING CHANGE/i.test(commit.body),
-  };
-}
-
-function loadCommits(fromRef, toRef) {
-  const range = `${fromRef}..${toRef}`;
-  const raw = runCommand("git", [
-    "log",
-    "--no-merges",
-    "--pretty=format:%H%x1f%s%x1f%b%x1e",
-    range,
-  ]);
-
-  if (!raw) {
-    return [];
-  }
-
-  return raw
-    .split("\x1e")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-    .map((entry) => {
-      const [hash = "", subject = "", body = ""] = entry.split("\x1f");
-      return {
-        hash: hash.trim(),
-        subject: subject.trim(),
-        body: body.trim(),
-      };
-    })
-    .filter((entry) => entry.hash && entry.subject);
-}
-
-function formatCommitLine(commit, summary, repoWebUrl) {
-  const shortHash = commit.hash.slice(0, 7);
-  if (repoWebUrl) {
-    return `- ${summary} ([\`${shortHash}\`](${repoWebUrl}/commit/${commit.hash}))`;
-  }
-  return `- ${summary} (\`${shortHash}\`)`;
-}
-
 function formatCount(count, singular, plural) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -259,6 +189,47 @@ function formatBulletBlock(items, emptyLabel) {
   return items.join("\n");
 }
 
+function loadReleaseItemsFromChangelog(version) {
+  let parsed;
+  try {
+    parsed = parseChangelog(readChangelog(CHANGELOG_PATH));
+  } catch (error) {
+    fail(`Failed to parse ${CHANGELOG_PATH}: ${error.message}`);
+  }
+
+  const releaseSection = findSectionByKey(parsed, version);
+  if (!releaseSection) {
+    fail(
+      `Missing ${CHANGELOG_PATH} section [${version}]. Run npm run release:prepare -- --version ${version} before generating release notes.`,
+    );
+  }
+
+  const bulletsByHeading = extractSectionBullets(releaseSection.section.body);
+  const fixed = pickBulletsByHeadingAliases(bulletsByHeading, ["Fixed", "Fixes"]);
+  const added = pickBulletsByHeadingAliases(bulletsByHeading, ["Added", "New"]);
+  const changed = pickBulletsByHeadingAliases(bulletsByHeading, [
+    "Changed",
+    "Updated",
+  ]);
+  const admin = pickBulletsByHeadingAliases(bulletsByHeading, [
+    "Admin/Operations",
+    "Admin",
+    "Operations",
+  ]);
+  const breaking = pickBulletsByHeadingAliases(bulletsByHeading, [
+    "Breaking Changes",
+    "Breaking",
+  ]);
+
+  return {
+    fixed,
+    added,
+    changed,
+    admin,
+    breaking,
+  };
+}
+
 function renderTemplate(templateText, replacements) {
   let rendered = templateText;
   for (const [token, value] of Object.entries(replacements)) {
@@ -284,24 +255,7 @@ function main() {
   const repoWebUrl = resolveRepoWebUrl();
   const compareUrl = `${repoWebUrl}/compare/${encodeURIComponent(fromRef)}...${encodeURIComponent(toRef)}`;
   const releaseDate = new Date().toISOString().slice(0, 10);
-  const commits = loadCommits(fromRef, toRef);
-
-  const categorized = {
-    fixed: [],
-    added: [],
-    changed: [],
-    admin: [],
-    breaking: [],
-  };
-
-  for (const commit of commits) {
-    const normalized = classifyCommit(commit);
-    const line = formatCommitLine(commit, normalized.summary, repoWebUrl);
-    categorized[normalized.category].push(line);
-    if (normalized.breaking) {
-      categorized.breaking.push(line);
-    }
-  }
+  const categorized = loadReleaseItemsFromChangelog(version);
 
   const counts = {
     fixed: categorized.fixed.length,

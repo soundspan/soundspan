@@ -1359,8 +1359,14 @@ function checkReleaseNotesContract(config) {
   }
 
   const requiredStrings = {
+    sourceOfTruthFile: "CHANGELOG.md",
+    unreleasedSectionHeading: "## [Unreleased]",
     templateFile: "docs/RELEASE_NOTES_TEMPLATE.md",
     generatorScript: ".github/scripts/generate-release-notes.mjs",
+    prepareScript: ".github/scripts/release-version-sync.mjs",
+    prepareNpmScriptName: "release:prepare",
+    prepareNpmScriptCommand: "node .github/scripts/release-version-sync.mjs --write",
+    prepareCommandExample: "npm run release:prepare -- --version <X.Y.Z>",
     npmScriptName: "release:notes",
     npmScriptCommand: "node .github/scripts/generate-release-notes.mjs",
     commandExample:
@@ -1386,6 +1392,9 @@ function checkReleaseNotesContract(config) {
 
   if (contract.plainEnglishSummariesRequired !== true) {
     addFailure(`${contractPath}.plainEnglishSummariesRequired must be true.`);
+  }
+  if (contract.prepareRotatesUnreleased !== true) {
+    addFailure(`${contractPath}.prepareRotatesUnreleased must be true.`);
   }
 
   checkExactOrderedArray({
@@ -1422,6 +1431,12 @@ function checkReleaseNotesContract(config) {
       "{{FULL_CHANGELOG_URL}}",
     ],
     pathName: `${contractPath}.requiredTemplateTokens`,
+  });
+
+  checkExactOrderedArray({
+    value: contract.requiredChangelogSubsections,
+    expected: ["### Added", "### Changed", "### Fixed"],
+    pathName: `${contractPath}.requiredChangelogSubsections`,
   });
 
   const templateFile = toNonEmptyString(contract.templateFile);
@@ -1464,14 +1479,68 @@ function checkReleaseNotesContract(config) {
   }
 
   const generatorScript = toNonEmptyString(contract.generatorScript);
+  const sourceOfTruthFile = toNonEmptyString(contract.sourceOfTruthFile);
+  const sourceOfTruthHeading = toNonEmptyString(contract.unreleasedSectionHeading);
+  const prepareScript = toNonEmptyString(contract.prepareScript);
   if (generatorScript) {
-    readFileIfPresent(generatorScript);
+    const generatorContent = readFileIfPresent(generatorScript);
+    if (generatorContent !== null) {
+      if (sourceOfTruthFile && !generatorContent.includes(sourceOfTruthFile)) {
+        if (!generatorContent.includes("CHANGELOG_PATH")) {
+          addFailure(
+            `${generatorScript} must reference ${sourceOfTruthFile} (or CHANGELOG_PATH) as release-note source of truth.`,
+          );
+        }
+      }
+      if (
+        !generatorContent.includes("Missing CHANGELOG") &&
+        !generatorContent.includes("Missing ${CHANGELOG_PATH}")
+      ) {
+        addFailure(
+          `${generatorScript} must fail clearly when the requested CHANGELOG release section is missing.`,
+        );
+      }
+    }
+  }
+
+  if (prepareScript) {
+    const prepareContent = readFileIfPresent(prepareScript);
+    if (prepareContent !== null) {
+      if (sourceOfTruthFile && !prepareContent.includes(sourceOfTruthFile)) {
+        if (!prepareContent.includes("CHANGELOG_PATH")) {
+          addFailure(
+            `${prepareScript} must reference ${sourceOfTruthFile} (or CHANGELOG_PATH) for release rotation updates.`,
+          );
+        }
+      }
+      if (!prepareContent.includes("prepareChangelogForRelease")) {
+        addFailure(
+          `${prepareScript} must call changelog rotation during release preparation.`,
+        );
+      }
+    }
+  }
+
+  if (sourceOfTruthFile) {
+    const changelogContent = readFileIfPresent(sourceOfTruthFile);
+    if (changelogContent !== null) {
+      if (sourceOfTruthHeading && !changelogContent.includes(sourceOfTruthHeading)) {
+        addFailure(`${sourceOfTruthFile} is missing required section heading ${sourceOfTruthHeading}.`);
+      }
+      for (const subsection of contract.requiredChangelogSubsections ?? []) {
+        if (!changelogContent.includes(subsection)) {
+          addFailure(`${sourceOfTruthFile} is missing required changelog subsection ${subsection}.`);
+        }
+      }
+    }
   }
 
   const packageJson = readJsonIfPresent("package.json");
   if (packageJson && typeof packageJson === "object") {
     const scriptName = toNonEmptyString(contract.npmScriptName);
     const scriptCommand = toNonEmptyString(contract.npmScriptCommand);
+    const prepareScriptName = toNonEmptyString(contract.prepareNpmScriptName);
+    const prepareScriptCommand = toNonEmptyString(contract.prepareNpmScriptCommand);
     const scripts =
       packageJson.scripts && typeof packageJson.scripts === "object"
         ? packageJson.scripts
@@ -1489,11 +1558,23 @@ function checkReleaseNotesContract(config) {
         );
       }
     }
+
+    if (prepareScriptName && prepareScriptCommand) {
+      const configuredPrepareCommand = toNonEmptyString(scripts[prepareScriptName]);
+      if (!configuredPrepareCommand) {
+        addFailure(`package.json scripts must define "${prepareScriptName}".`);
+      } else if (configuredPrepareCommand !== prepareScriptCommand) {
+        addFailure(
+          `package.json scripts["${prepareScriptName}"] must equal "${prepareScriptCommand}" (found "${configuredPrepareCommand}").`,
+        );
+      }
+    }
   }
 
   const contextIndex = readJsonIfPresent("docs/CONTEXT_INDEX.json");
   if (contextIndex && typeof contextIndex === "object") {
     const commandExample = toNonEmptyString(contract.commandExample);
+    const prepareCommandExample = toNonEmptyString(contract.prepareCommandExample);
     const commands =
       contextIndex.commands && typeof contextIndex.commands === "object"
         ? contextIndex.commands
@@ -1508,6 +1589,17 @@ function checkReleaseNotesContract(config) {
       } else if (releaseNotesCommand !== commandExample) {
         addFailure(
           `docs/CONTEXT_INDEX.json.commands.releaseNotes must equal contracts.releaseNotes.commandExample.`,
+        );
+      }
+    }
+
+    if (prepareCommandExample) {
+      const releasePrepareCommand = toNonEmptyString(commands?.releasePrepare);
+      if (!releasePrepareCommand) {
+        addFailure("docs/CONTEXT_INDEX.json.commands.releasePrepare must be present.");
+      } else if (releasePrepareCommand !== prepareCommandExample) {
+        addFailure(
+          "docs/CONTEXT_INDEX.json.commands.releasePrepare must equal contracts.releaseNotes.prepareCommandExample.",
         );
       }
     }

@@ -19,6 +19,7 @@ Read these in order before non-trivial work:
 - Machine-readable canonical policy: `.github/policies/agent-governance.json`
 - Enforcement runner: `.github/scripts/enforce-agent-policies.mjs`
 - Session preflight generator: `.github/scripts/agent-session-preflight.mjs`
+- Release notes source of truth: `CHANGELOG.md`
 - Release notes template artifact: `docs/RELEASE_NOTES_TEMPLATE.md`
 - Release notes generator: `.github/scripts/generate-release-notes.mjs`
 - Feature index artifact: `docs/FEATURE_INDEX.json`
@@ -101,7 +102,10 @@ Default Codex subagent model: `gpt-5.3-codex-spark` unless user-overridden.
 
 - Local: `node .github/scripts/enforce-agent-policies.mjs`
 - Session preflight: `npm run agent:preflight`
+- Release prep (changelog rotation): `npm run release:prepare -- --version <X.Y.Z>`
 - Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`
+- Release workflow rule: `release:prepare` must promote `## [Unreleased]` into `## [<version>] - <date>` and recreate a fresh empty `## [Unreleased]` scaffold (`Added`, `Changed`, `Fixed`).
+- Release notes source rule: `release:notes` must read items from the corresponding `CHANGELOG.md` version section (plain-English changelog bullets are canonical).
 - Release notes content rule: summarize changes in plain English and avoid raw commit-jargon wording.
 - Route map generator: `npm run route-map:generate`
 - Domain readmes generator: `npm run domain-readmes:generate`
