@@ -268,7 +268,7 @@ Scope:
 | Frontend features | AccountSection | frontend/features/settings/components/sections/AccountSection.tsx:21 |
 | Frontend features | AIServicesSection | frontend/features/settings/components/sections/AIServicesSection.tsx:15 |
 | Frontend features | AudiobookshelfSection | frontend/features/settings/components/sections/AudiobookshelfSection.tsx:15 |
-| Frontend features | CacheSection | frontend/features/settings/components/sections/CacheSection.tsx:143 |
+| Frontend features | CacheSection | frontend/features/settings/components/sections/CacheSection.tsx:144 |
 | Frontend features | DownloadPreferencesSection | frontend/features/settings/components/sections/DownloadPreferencesSection.tsx:12 |
 | Frontend features | DownloadServicesSection | frontend/features/settings/components/sections/DownloadServicesSection.tsx:16 |
 | Frontend features | IntegrationsSection | frontend/features/settings/components/sections/IntegrationsSection.tsx:13 |

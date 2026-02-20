@@ -1817,6 +1817,7 @@ describe("unified enrichment runtime behavior", () => {
         });
         (prisma.$queryRaw as jest.Mock)
             .mockResolvedValueOnce([{ count: BigInt(0) }])
+            .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([
                 {
                     id: "track-vibe-fail",
@@ -1824,6 +1825,7 @@ describe("unified enrichment runtime behavior", () => {
                     vibeAnalysisStatus: null,
                 },
             ])
+            .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([{ count: BigInt(0) }]);
         (prisma.track.update as jest.Mock).mockRejectedValueOnce(
             new Error("update failed")
@@ -1869,6 +1871,7 @@ describe("unified enrichment runtime behavior", () => {
         );
         (prisma.$queryRaw as jest.Mock)
             .mockResolvedValueOnce([{ count: BigInt(0) }])
+            .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([
                 {
                     id: "track-vibe-ok",
@@ -1876,6 +1879,7 @@ describe("unified enrichment runtime behavior", () => {
                     vibeAnalysisStatus: null,
                 },
             ])
+            .mockResolvedValueOnce([{ count: BigInt(0) }])
             .mockResolvedValueOnce([{ count: BigInt(1) }]);
         (queueRedisPrimary.llen as jest.Mock).mockResolvedValue(0);
 
@@ -2067,6 +2071,63 @@ describe("unified enrichment runtime behavior", () => {
             tracks: 0,
             audioQueued: 0,
         });
+    });
+
+    it("keeps state idle when runEnrichmentCycle starts already fully complete", async () => {
+        const { prisma, enrichmentStateService } = setupUnifiedEnrichmentMocks();
+        (prisma.artist.groupBy as jest.Mock).mockResolvedValueOnce([
+            { enrichmentStatus: "completed", _count: 3 },
+        ]);
+        (prisma.track.count as jest.Mock).mockImplementation(async (args?: any) => {
+            const where = args?.where;
+            if (!where) return 10;
+            if (where.AND) return 10;
+            if (where.analysisStatus === "completed") return 10;
+            if (where.analysisStatus === "pending") return 0;
+            if (where.analysisStatus === "processing") return 0;
+            if (where.analysisStatus === "failed") return 0;
+            if (where.vibeAnalysisStatus === "processing") return 0;
+            return 0;
+        });
+        (prisma.$queryRaw as jest.Mock).mockResolvedValue([{ count: BigInt(8) }]);
+        (prisma.enrichmentFailure.count as jest.Mock).mockResolvedValue(0);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        enrichment.__unifiedEnrichmentTestables.__setRuntimeStateForTests({
+            isPaused: false,
+            isRunning: false,
+            immediateEnrichmentRequested: false,
+            isStopping: false,
+            lastRunTime: 0,
+        });
+
+        await expect(
+            enrichment.__unifiedEnrichmentTestables.runEnrichmentCycle(false)
+        ).resolves.toEqual({
+            artists: 0,
+            tracks: 0,
+            audioQueued: 0,
+        });
+
+        expect(enrichmentStateService.updateState).not.toHaveBeenCalledWith(
+            expect.objectContaining({ status: "running" })
+        );
+        expect(enrichmentStateService.updateState).not.toHaveBeenCalledWith(
+            expect.objectContaining({ currentPhase: "artists" })
+        );
+        expect(enrichmentStateService.updateState).not.toHaveBeenCalledWith(
+            expect.objectContaining({ currentPhase: "tracks" })
+        );
+        expect(enrichmentStateService.updateState).not.toHaveBeenCalledWith(
+            expect.objectContaining({ currentPhase: "audio" })
+        );
+        expect(enrichmentStateService.updateState).not.toHaveBeenCalledWith(
+            expect.objectContaining({ currentPhase: "vibe" })
+        );
+        expect(enrichmentStateService.updateState).not.toHaveBeenCalledWith(
+            expect.objectContaining({ currentPhase: "podcasts" })
+        );
     });
 
     it("returns partial results when runEnrichmentCycle halts after track, audio, and vibe phases", async () => {

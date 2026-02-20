@@ -80,7 +80,8 @@ function EnrichmentStage({
     failed?: number;
     processing?: number;
 }) {
-    const isComplete = progress === 100;
+    const unresolved = Math.max(0, total - (completed + failed));
+    const isComplete = unresolved === 0 && processing === 0;
     const hasActivity = processing > 0;
 
     return (

@@ -685,12 +685,38 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
     let artistsProcessed = 0;
     let tracksProcessed = 0;
     let audioQueued = 0;
+    let startingProgress: Awaited<ReturnType<typeof getEnrichmentProgress>> | null =
+        null;
     let hadOutstandingWorkAtCycleStart = true;
     let cycleHadError = false;
 
     try {
-        const startingProgress = await getEnrichmentProgress();
+        startingProgress = await getEnrichmentProgress();
         hadOutstandingWorkAtCycleStart = !startingProgress.isFullyComplete;
+
+        // Skip phase churn when the system is already fully complete and no
+        // completion follow-up work is queued (for example mood-bucket backfill).
+        if (!bypassRunningCheck && startingProgress.isFullyComplete) {
+            const currentState = await enrichmentStateService.getState();
+            const hasPendingCompletionFollowUp =
+                currentState?.pendingMoodBucketBackfill === true ||
+                currentState?.moodBucketBackfillInProgress === true;
+
+            if (!hasPendingCompletionFollowUp) {
+                if (
+                    currentState?.status !== "idle" ||
+                    currentState?.currentPhase !== null
+                ) {
+                    await enrichmentStateService.updateState({
+                        status: "idle",
+                        currentPhase: null,
+                    });
+                }
+                consecutiveSystemFailures = 0;
+                isRunning = false;
+                return emptyResult;
+            }
+        }
     } catch (error) {
         logger.warn(
             "[Enrichment] Failed to read starting progress, defaulting to notification-safe mode:",
@@ -1568,6 +1594,7 @@ export async function getEnrichmentProgress() {
     const [
         artistCounts,
         trackTotal,
+        clapEligibleTrackCount,
         trackTagsEnriched,
         audioCompleted,
         audioPending,
@@ -1583,6 +1610,11 @@ export async function getEnrichmentProgress() {
                 _count: true,
             }),
             prisma.track.count(),
+            prisma.$queryRaw<{ count: bigint }[]>`
+                SELECT COUNT(*) as count
+                FROM "Track"
+                WHERE "filePath" IS NOT NULL
+            `,
             prisma.track.count({
                 where: {
                     AND: [
@@ -1634,8 +1666,13 @@ export async function getEnrichmentProgress() {
             error,
         );
     }
+
+    const features = await featureDetection.getFeatures();
     const clapCompleted = Number(clapEmbeddingCount[0]?.count || 0);
     const clapFailed = clapFailedCount;
+    const clapTotal = Number(clapEligibleTrackCount[0]?.count || 0);
+    const clapPending = Math.max(0, clapTotal - clapCompleted - clapFailed);
+    const clapRequiredForFullCompletion = features.vibeEmbeddings;
 
     // Core enrichment is complete when artists and track tags are done
     // Audio analysis is separate - it runs in background and doesn't block
@@ -1682,14 +1719,14 @@ export async function getEnrichmentProgress() {
 
         // CLAP embeddings (for vibe similarity search)
         clapEmbeddings: {
-            total: trackTotal,
+            total: clapTotal,
             completed: clapCompleted,
-            pending: trackTotal - clapCompleted - clapFailed,
+            pending: clapPending,
             processing: clapProcessing,
             failed: clapFailed,
             progress:
-                trackTotal > 0 ?
-                    Math.round((clapCompleted / trackTotal) * 100)
+                clapTotal > 0 ?
+                    Math.round((clapCompleted / clapTotal) * 100)
                 :   0,
             isBackground: true,
         },
@@ -1700,9 +1737,14 @@ export async function getEnrichmentProgress() {
             coreComplete &&
             audioPending === 0 &&
             audioProcessing === 0 &&
-            clapProcessing === 0 &&
-            clapQueueLength === 0 &&
-            clapCompleted + clapFailed >= trackTotal,
+            (
+                !clapRequiredForFullCompletion ||
+                (
+                    clapProcessing === 0 &&
+                    clapQueueLength === 0 &&
+                    clapPending === 0
+                )
+            ),
     };
 }
 
