@@ -24,6 +24,42 @@ import {
 } from "../middleware/rateLimiter";
 
 const router = Router();
+const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
+const ytOauthSessionCache = new Map<
+    string,
+    { authenticated: boolean; expiresAt: number }
+>();
+const ytOauthRestoreInFlight = new Map<string, Promise<boolean>>();
+
+const setYtOAuthCache = (
+    userId: string,
+    authenticated: boolean,
+    ttlMs = OAUTH_CACHE_TTL_MS
+) => {
+    if (!authenticated || ttlMs <= 0) {
+        ytOauthSessionCache.delete(userId);
+        return;
+    }
+    ytOauthSessionCache.set(userId, {
+        authenticated,
+        expiresAt: Date.now() + ttlMs,
+    });
+};
+
+const getCachedYtOAuth = (userId: string): boolean | null => {
+    const entry = ytOauthSessionCache.get(userId);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+        ytOauthSessionCache.delete(userId);
+        return null;
+    }
+    return entry.authenticated;
+};
+
+const invalidateYtOAuthCache = (userId: string) => {
+    ytOauthSessionCache.delete(userId);
+    ytOauthRestoreInFlight.delete(userId);
+};
 
 // ── Guard middleware ───────────────────────────────────────────────
 
@@ -53,36 +89,64 @@ async function requireYtMusicEnabled(
  * if already restored.
  */
 async function ensureUserOAuth(userId: string): Promise<boolean> {
-    try {
-        // Quick check — is the sidecar already aware of this user?
-        const status = await ytMusicService.getAuthStatus(userId);
-        if (status.authenticated) return true;
-
-        // Not authenticated in sidecar — try restoring from DB
-        const userSettings = await prisma.userSettings.findUnique({
-            where: { userId },
-            select: { ytMusicOAuthJson: true },
-        });
-
-        if (!userSettings?.ytMusicOAuthJson) return false;
-
-        const oauthJson = decrypt(userSettings.ytMusicOAuthJson);
-        if (!oauthJson) return false;
-
-        // Also pass client credentials so the sidecar can build OAuthCredentials
-        const systemSettings = await getSystemSettings();
-        await ytMusicService.restoreOAuthWithCredentials(
-            userId,
-            oauthJson,
-            systemSettings?.ytMusicClientId || undefined,
-            systemSettings?.ytMusicClientSecret || undefined
-        );
-        logger.info(`[YTMusic] Restored OAuth credentials for user ${userId}`);
-        return true;
-    } catch (err) {
-        logger.debug(`[YTMusic] OAuth restore failed for user ${userId}:`, err);
-        return false;
+    const cached = getCachedYtOAuth(userId);
+    if (cached !== null) {
+        return cached;
     }
+
+    const existingInFlight = ytOauthRestoreInFlight.get(userId);
+    if (existingInFlight) {
+        return existingInFlight;
+    }
+
+    const restorePromise = (async () => {
+        try {
+            // Quick check — is the sidecar already aware of this user?
+            const status = await ytMusicService.getAuthStatus(userId);
+            if (status.authenticated) {
+                setYtOAuthCache(userId, true);
+                return true;
+            }
+
+            // Not authenticated in sidecar — try restoring from DB
+            const userSettings = await prisma.userSettings.findUnique({
+                where: { userId },
+                select: { ytMusicOAuthJson: true },
+            });
+
+            if (!userSettings?.ytMusicOAuthJson) {
+                setYtOAuthCache(userId, false);
+                return false;
+            }
+
+            const oauthJson = decrypt(userSettings.ytMusicOAuthJson);
+            if (!oauthJson) {
+                setYtOAuthCache(userId, false);
+                return false;
+            }
+
+            // Also pass client credentials so the sidecar can build OAuthCredentials
+            const systemSettings = await getSystemSettings();
+            await ytMusicService.restoreOAuthWithCredentials(
+                userId,
+                oauthJson,
+                systemSettings?.ytMusicClientId || undefined,
+                systemSettings?.ytMusicClientSecret || undefined
+            );
+            logger.info(`[YTMusic] Restored OAuth credentials for user ${userId}`);
+            setYtOAuthCache(userId, true);
+            return true;
+        } catch (err) {
+            logger.debug(`[YTMusic] OAuth restore failed for user ${userId}:`, err);
+            setYtOAuthCache(userId, false);
+            return false;
+        }
+    })().finally(() => {
+        ytOauthRestoreInFlight.delete(userId);
+    });
+
+    ytOauthRestoreInFlight.set(userId, restorePromise);
+    return restorePromise;
 }
 
 async function requireUserOAuth(
@@ -91,6 +155,7 @@ async function requireUserOAuth(
 ): Promise<boolean> {
     const ok = await ensureUserOAuth(userId);
     if (!ok) {
+        setYtOAuthCache(userId, false);
         res.status(401).json({
             error: "YouTube Music authentication expired or missing. Please reconnect your account.",
         });
@@ -99,8 +164,18 @@ async function requireUserOAuth(
     return true;
 }
 
-function handleYtMusicAuthError(res: Response, err: any): boolean {
+function handleYtMusicAuthError(
+    res: Response,
+    err: any,
+    userId?: string
+): boolean {
     if (err?.response?.status !== 401) return false;
+    if (userId) {
+        setYtOAuthCache(userId, false);
+    } else {
+        ytOauthSessionCache.clear();
+        ytOauthRestoreInFlight.clear();
+    }
     res.status(401).json({
         error: "YouTube Music authentication expired or invalid. Please reconnect your account.",
     });
@@ -213,6 +288,7 @@ router.post(
                         ytMusicOAuthJson: encrypt(result.oauth_json),
                     },
                 });
+                setYtOAuthCache(userId, true);
                 logger.info(`[YTMusic] Device code auth completed for user ${userId}`);
             }
 
@@ -270,6 +346,7 @@ router.post(
                 settings?.ytMusicClientId || undefined,
                 settings?.ytMusicClientSecret || undefined
             );
+            setYtOAuthCache(userId, true);
 
             logger.info(`[YTMusic] OAuth credentials saved for user ${userId}`);
             res.json({ success: true });
@@ -299,6 +376,8 @@ router.post(
                 create: { userId, ytMusicOAuthJson: null },
                 update: { ytMusicOAuthJson: null },
             });
+            invalidateYtOAuthCache(userId);
+            setYtOAuthCache(userId, false);
 
             logger.info(`[YTMusic] OAuth credentials cleared for user ${userId}`);
             res.json({ success: true });

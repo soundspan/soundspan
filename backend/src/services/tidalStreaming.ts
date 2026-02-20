@@ -10,9 +10,21 @@
  */
 
 import axios, { AxiosInstance } from "axios";
+import http from "node:http";
+import https from "node:https";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { encrypt } from "../utils/encryption";
+
+const SIDECAR_AGENT_OPTIONS = {
+    keepAlive: true,
+    maxSockets: 64,
+    maxFreeSockets: 16,
+};
+const SIDE_CAR_HTTP_AGENT = new http.Agent(SIDECAR_AGENT_OPTIONS);
+const SIDE_CAR_HTTPS_AGENT = new https.Agent(SIDECAR_AGENT_OPTIONS);
+const AVAILABILITY_CACHE_TTL_MS = 10_000;
+const ENABLED_CACHE_TTL_MS = 30_000;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -46,6 +58,10 @@ interface TidalMatchInput {
 class TidalStreamingService {
     private client: AxiosInstance;
     private readonly sidecarUrl: string;
+    private availabilityCache: { value: boolean; expiresAt: number } | null = null;
+    private enabledCache: { value: boolean; expiresAt: number } | null = null;
+    private availabilityInFlight: Promise<boolean> | null = null;
+    private enabledInFlight: Promise<boolean> | null = null;
     private static readonly UNDESIRED_MISMATCH_TERMS = [
         "karaoke",
         "tribute",
@@ -72,6 +88,8 @@ class TidalStreamingService {
             baseURL: this.sidecarUrl,
             timeout: 30000,
             headers: { "Content-Type": "application/json" },
+            httpAgent: SIDE_CAR_HTTP_AGENT,
+            httpsAgent: SIDE_CAR_HTTPS_AGENT,
         });
     }
 
@@ -81,12 +99,33 @@ class TidalStreamingService {
      * Check whether the TIDAL sidecar is reachable.
      */
     async isAvailable(): Promise<boolean> {
-        try {
-            const res = await this.client.get("/health", { timeout: 5000 });
-            return res.data?.status === "ok";
-        } catch {
-            return false;
+        const now = Date.now();
+        if (this.availabilityCache && this.availabilityCache.expiresAt > now) {
+            return this.availabilityCache.value;
         }
+        if (this.availabilityInFlight) {
+            return this.availabilityInFlight;
+        }
+
+        this.availabilityInFlight = (async () => {
+            let available = false;
+            try {
+                const res = await this.client.get("/health", { timeout: 5000 });
+                available = res.data?.status === "ok";
+            } catch {
+                available = false;
+            }
+
+            this.availabilityCache = {
+                value: available,
+                expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
+            };
+            return available;
+        })().finally(() => {
+            this.availabilityInFlight = null;
+        });
+
+        return this.availabilityInFlight;
     }
 
     /**
@@ -95,14 +134,36 @@ class TidalStreamingService {
      * has `tidalEnabled` set in SystemSettings.
      */
     async isEnabled(): Promise<boolean> {
-        try {
-            const settings = await prisma.systemSettings.findUnique({
-                where: { id: "default" },
-            });
-            return !!settings?.tidalEnabled;
-        } catch {
-            return false;
+        const now = Date.now();
+        if (this.enabledCache && this.enabledCache.expiresAt > now) {
+            return this.enabledCache.value;
         }
+        if (this.enabledInFlight) {
+            return this.enabledInFlight;
+        }
+
+        this.enabledInFlight = (async () => {
+            let enabled = false;
+            try {
+                const settings = await prisma.systemSettings.findUnique({
+                    where: { id: "default" },
+                    select: { tidalEnabled: true },
+                });
+                enabled = !!settings?.tidalEnabled;
+            } catch {
+                enabled = false;
+            }
+
+            this.enabledCache = {
+                value: enabled,
+                expiresAt: Date.now() + ENABLED_CACHE_TTL_MS,
+            };
+            return enabled;
+        })().finally(() => {
+            this.enabledInFlight = null;
+        });
+
+        return this.enabledInFlight;
     }
 
     // ── Per-user auth ──────────────────────────────────────────────

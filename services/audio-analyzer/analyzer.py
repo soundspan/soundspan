@@ -127,6 +127,25 @@ SLEEP_INTERVAL = int(os.getenv('SLEEP_INTERVAL', '5'))
 # Uses SLEEP_INTERVAL for backward compatibility, minimum 5s
 BRPOP_TIMEOUT = max(5, int(os.getenv('BRPOP_TIMEOUT', str(SLEEP_INTERVAL))))
 
+# DB reconciliation cadence (adaptive backoff while idle)
+DB_RECONCILE_MIN_INTERVAL_SECONDS = max(
+    BRPOP_TIMEOUT,
+    int(os.getenv('DB_RECONCILE_MIN_INTERVAL_SECONDS', str(BRPOP_TIMEOUT))),
+)
+DB_RECONCILE_MAX_INTERVAL_SECONDS = max(
+    DB_RECONCILE_MIN_INTERVAL_SECONDS,
+    int(
+        os.getenv(
+            'DB_RECONCILE_MAX_INTERVAL_SECONDS',
+            str(max(BRPOP_TIMEOUT * 12, 60)),
+        )
+    ),
+)
+DB_RECONCILE_BACKOFF_MULTIPLIER = max(
+    1.0,
+    float(os.getenv('DB_RECONCILE_BACKOFF_MULTIPLIER', '2.0')),
+)
+
 # Idle timeout before unloading ML models from memory (seconds)
 # Models are reloaded automatically when new work arrives
 MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
@@ -1080,6 +1099,8 @@ class AnalysisWorker:
         self._pending_resize: int | None = None
         self._pending_resize_time: float = 0.0
         self.batch_count = 0
+        self._reconcile_interval_seconds = float(DB_RECONCILE_MIN_INTERVAL_SECONDS)
+        self._next_reconcile_at = 0.0
         self._setup_control_channel()
     
     def _setup_control_channel(self):
@@ -1091,6 +1112,35 @@ class AnalysisWorker:
         except Exception as e:
             logger.warning(f"Failed to subscribe to control channel: {e}")
             self.pubsub = None
+
+    def _schedule_next_reconciliation(self, found_work: bool):
+        """Update DB reconciliation schedule using adaptive idle backoff."""
+        now = time.time()
+        if found_work:
+            self._reconcile_interval_seconds = float(DB_RECONCILE_MIN_INTERVAL_SECONDS)
+        else:
+            self._reconcile_interval_seconds = min(
+                float(DB_RECONCILE_MAX_INTERVAL_SECONDS),
+                max(
+                    float(DB_RECONCILE_MIN_INTERVAL_SECONDS),
+                    self._reconcile_interval_seconds
+                    * float(DB_RECONCILE_BACKOFF_MULTIPLIER),
+                ),
+            )
+        self._next_reconcile_at = now + self._reconcile_interval_seconds
+
+    def _run_db_reconciliation_if_due(self) -> bool:
+        """
+        Run DB reconciliation when due and update adaptive schedule.
+
+        Returns:
+            bool: True if reconciliation found pending work.
+        """
+        if time.time() < self._next_reconcile_at:
+            return False
+        found_work = self._run_db_reconciliation()
+        self._schedule_next_reconciliation(found_work)
+        return found_work
     
     def _check_control_signals(self):
         """Check for pause/resume/stop/set_workers control signals (non-blocking)"""
@@ -1560,7 +1610,8 @@ class AnalysisWorker:
         self._retry_failed_tracks()
 
         # Check for any already-queued work before entering BRPOP loop
-        self._run_db_reconciliation()
+        initial_found_work = self._run_db_reconciliation()
+        self._schedule_next_reconciliation(initial_found_work)
 
         try:
             while self.running:
@@ -1587,6 +1638,7 @@ class AnalysisWorker:
                         self.consecutive_empty = 0
                         self._last_work_time = time.time()
                         self.batch_count += 1
+                        self._schedule_next_reconciliation(True)
                         # Periodic maintenance even while queue stays busy.
                         if self.batch_count % 50 == 0:
                             self._cleanup_stale_processing()
@@ -1594,7 +1646,7 @@ class AnalysisWorker:
                     else:
                         # BRPOP timed out -- run periodic maintenance
                         self.consecutive_empty += 1
-                        found_work = self._run_db_reconciliation()
+                        found_work = self._run_db_reconciliation_if_due()
 
                         # Unload models when idle: immediately if DB has no pending
                         # work, or after MODEL_IDLE_TIMEOUT as a fallback

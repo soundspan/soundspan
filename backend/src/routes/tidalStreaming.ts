@@ -20,6 +20,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import axios from "axios";
 import { z } from "zod";
 import {
     requireAuth,
@@ -31,6 +32,71 @@ import { encrypt, decrypt } from "../utils/encryption";
 import { logger } from "../utils/logger";
 
 const router = Router();
+const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
+const USER_QUALITY_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
+const tidalOauthSessionCache = new Map<
+    string,
+    { authenticated: boolean; expiresAt: number }
+>();
+const tidalOauthRestoreInFlight = new Map<string, Promise<boolean>>();
+const userQualityCache = new Map<string, { quality: string; expiresAt: number }>();
+
+const setTidalOAuthCache = (
+    userId: string,
+    authenticated: boolean,
+    ttlMs = OAUTH_CACHE_TTL_MS
+) => {
+    if (!authenticated || ttlMs <= 0) {
+        tidalOauthSessionCache.delete(userId);
+        return;
+    }
+    tidalOauthSessionCache.set(userId, {
+        authenticated,
+        expiresAt: Date.now() + ttlMs,
+    });
+};
+
+const getCachedTidalOAuth = (userId: string): boolean | null => {
+    const entry = tidalOauthSessionCache.get(userId);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+        tidalOauthSessionCache.delete(userId);
+        return null;
+    }
+    return entry.authenticated;
+};
+
+const invalidateTidalUserCaches = (userId: string) => {
+    tidalOauthSessionCache.delete(userId);
+    tidalOauthRestoreInFlight.delete(userId);
+    userQualityCache.delete(userId);
+};
+
+async function getUserPreferredTidalQuality(userId: string): Promise<string> {
+    if (USER_QUALITY_CACHE_TTL_MS > 0) {
+        const cached = userQualityCache.get(userId);
+        if (cached && cached.expiresAt > Date.now()) {
+            return cached.quality;
+        }
+    }
+
+    try {
+        const userSettings = await prisma.userSettings.findUnique({
+            where: { userId },
+            select: { tidalStreamingQuality: true },
+        });
+        const quality = userSettings?.tidalStreamingQuality || "HIGH";
+        if (USER_QUALITY_CACHE_TTL_MS > 0) {
+            userQualityCache.set(userId, {
+                quality,
+                expiresAt: Date.now() + USER_QUALITY_CACHE_TTL_MS,
+            });
+        }
+        return quality;
+    } catch {
+        return "HIGH";
+    }
+}
 
 // ── Guard middleware ───────────────────────────────────────────────
 
@@ -65,30 +131,57 @@ async function requireTidalStreamingEnabled(
  * sidecar. Called before any per-user streaming request.
  */
 async function ensureUserOAuth(userId: string): Promise<boolean> {
-    // Check if sidecar already has this user's session
-    try {
-        const { data } = await (await import("axios")).default.get(
-            `${process.env.TIDAL_SIDECAR_URL || "http://127.0.0.1:8585"}/user/auth/status?user_id=${encodeURIComponent(userId)}`
-        );
-        if (data.authenticated) return true;
-    } catch {
-        // Sidecar might not have the session, try to restore
+    const cached = getCachedTidalOAuth(userId);
+    if (cached !== null) {
+        return cached;
     }
 
-    // Load from DB and restore
-    const userSettings = await prisma.userSettings.findUnique({
-        where: { userId },
+    const existingInFlight = tidalOauthRestoreInFlight.get(userId);
+    if (existingInFlight) {
+        return existingInFlight;
+    }
+
+    const restorePromise = (async () => {
+        // Check if sidecar already has this user's session
+        try {
+            const { data } = await axios.get(
+                `${process.env.TIDAL_SIDECAR_URL || "http://127.0.0.1:8585"}/user/auth/status?user_id=${encodeURIComponent(userId)}`,
+                { timeout: 5000 }
+            );
+            if (data.authenticated) {
+                setTidalOAuthCache(userId, true);
+                return true;
+            }
+        } catch {
+            // Sidecar might not have the session, try to restore
+        }
+
+        // Load from DB and restore
+        const userSettings = await prisma.userSettings.findUnique({
+            where: { userId },
+            select: { tidalOAuthJson: true },
+        });
+        if (!userSettings?.tidalOAuthJson) {
+            setTidalOAuthCache(userId, false);
+            return false;
+        }
+
+        let oauthJson: string;
+        try {
+            oauthJson = decrypt(userSettings.tidalOAuthJson);
+        } catch {
+            oauthJson = userSettings.tidalOAuthJson;
+        }
+
+        const restored = await tidalStreamingService.restoreOAuth(userId, oauthJson);
+        setTidalOAuthCache(userId, restored);
+        return restored;
+    })().finally(() => {
+        tidalOauthRestoreInFlight.delete(userId);
     });
-    if (!userSettings?.tidalOAuthJson) return false;
 
-    let oauthJson: string;
-    try {
-        oauthJson = decrypt(userSettings.tidalOAuthJson);
-    } catch {
-        oauthJson = userSettings.tidalOAuthJson;
-    }
-
-    return tidalStreamingService.restoreOAuth(userId, oauthJson);
+    tidalOauthRestoreInFlight.set(userId, restorePromise);
+    return restorePromise;
 }
 
 // ── Routes ─────────────────────────────────────────────────────────
@@ -193,6 +286,7 @@ router.post(
 
             // Restore to sidecar immediately
             await tidalStreamingService.restoreOAuth(userId, oauthJson);
+            setTidalOAuthCache(userId, true);
 
             res.json({
                 status: "success",
@@ -241,6 +335,7 @@ router.post(
                 userId,
                 parsed.data.oauthJson
             );
+            setTidalOAuthCache(userId, true);
 
             res.json({ success: true });
         } catch (err: any) {
@@ -266,6 +361,8 @@ router.post("/auth/clear", requireAuth, async (req: Request, res: Response) => {
 
         // Clear from sidecar
         await tidalStreamingService.clearAuth(userId);
+        invalidateTidalUserCaches(userId);
+        setTidalOAuthCache(userId, false);
 
         res.json({ success: true });
     } catch (err: any) {
@@ -429,20 +526,14 @@ router.get(
         try {
             const hasAuth = await ensureUserOAuth(userId);
             if (!hasAuth) {
+                setTidalOAuthCache(userId, false);
                 return res
                     .status(401)
                     .json({ error: "Not authenticated to TIDAL" });
             }
 
             if (!quality) {
-                try {
-                    const userSettings = await prisma.userSettings.findUnique({
-                        where: { userId },
-                    });
-                    quality = userSettings?.tidalStreamingQuality || "HIGH";
-                } catch {
-                    quality = "HIGH";
-                }
+                quality = await getUserPreferredTidalQuality(userId);
             }
 
             const info = await tidalStreamingService.getStreamInfo(
@@ -452,6 +543,9 @@ router.get(
             );
             res.json(info);
         } catch (err: any) {
+            if (err?.response?.status === 401) {
+                setTidalOAuthCache(userId, false);
+            }
             logger.error("[TIDAL-STREAM] Stream info failed:", err.message);
             res.status(500).json({ error: "Failed to get stream info" });
         }
@@ -477,19 +571,13 @@ router.get(
         // Get user's preferred quality
         let quality = req.query.quality as string | undefined;
         if (!quality) {
-            try {
-                const userSettings = await prisma.userSettings.findUnique({
-                    where: { userId },
-                });
-                quality = userSettings?.tidalStreamingQuality || "HIGH";
-            } catch {
-                quality = "HIGH";
-            }
+            quality = await getUserPreferredTidalQuality(userId);
         }
 
         try {
             const hasAuth = await ensureUserOAuth(userId);
             if (!hasAuth) {
+                setTidalOAuthCache(userId, false);
                 return res
                     .status(401)
                     .json({ error: "Not authenticated to TIDAL" });
@@ -523,6 +611,9 @@ router.get(
 
             stream.data.pipe(res);
         } catch (err: any) {
+            if (err?.response?.status === 401) {
+                setTidalOAuthCache(userId, false);
+            }
             logger.error(
                 `[TIDAL-STREAM] Stream proxy failed for track ${trackId}:`,
                 err.message
