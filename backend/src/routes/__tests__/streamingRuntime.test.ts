@@ -116,6 +116,10 @@ describe("streaming route runtime", () => {
         "get",
         "/v1/sessions/:sessionId/segments/:segmentName",
     );
+    const getSegmentAlias = getHandler(
+        "get",
+        "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.m4s)",
+    );
     const postHeartbeat = getHandler("post", "/v1/sessions/:sessionId/heartbeat");
     const postHandoff = getHandler("post", "/v1/sessions/:sessionId/handoff");
 
@@ -590,5 +594,45 @@ describe("streaming route runtime", () => {
             error: "Invalid segment file name",
             code: "INVALID_SEGMENT_NAME",
         });
+    });
+
+    it("serves segment from manifest-relative alias route", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        mockResolveSegmentPath.mockReturnValueOnce(
+            "/tmp/assets/chunk-0-00002.m4s",
+        );
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00002.m4s",
+            },
+            query: { st: "token-1" },
+            originalUrl: "/api/streaming/v1/sessions/session-1/chunk-0-00002.m4s?st=token-1",
+        } as any;
+        const res = createResponse();
+
+        await getSegmentAlias(req, res);
+
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
+        expect(mockResolveSegmentPath).toHaveBeenCalledWith(
+            session,
+            "chunk-0-00002.m4s",
+        );
+        expect(mockFsAccess).toHaveBeenCalledWith("/tmp/assets/chunk-0-00002.m4s");
+        expect(res.sendFile).toHaveBeenCalledWith("/tmp/assets/chunk-0-00002.m4s");
     });
 });

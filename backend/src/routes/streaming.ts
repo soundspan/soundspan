@@ -9,6 +9,7 @@ import {
     SegmentedSessionError,
     segmentedStreamingSessionService,
 } from "../services/segmented-streaming/sessionService";
+import { logSegmentedStreamingTrace } from "../services/segmented-streaming/trace";
 
 const router = express.Router();
 
@@ -99,6 +100,112 @@ const getSegmentedMetricErrorFields = (
         errorCode,
         errorMessage,
     };
+};
+
+const handleSegmentFetch = async (
+    req: express.Request,
+    res: express.Response,
+): Promise<express.Response> => {
+    const startedAtMs = Date.now();
+    let sourceType: string | undefined;
+    const requestPath = req.originalUrl || req.path;
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            logSegmentedStreamingMetric("segment.fetch", {
+                status: "reject",
+                reason: "unauthorized",
+                sessionId: req.params.sessionId,
+                segmentName: req.params.segmentName,
+                latencyMs: segmentedMetricDurationMs(startedAtMs),
+            });
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const session = await segmentedStreamingSessionService.getAuthorizedSession(
+            req.params.sessionId,
+            userId,
+        );
+        if (!session) {
+            logSegmentedStreamingMetric("segment.fetch", {
+                status: "reject",
+                reason: "session_not_found",
+                sessionId: req.params.sessionId,
+                segmentName: req.params.segmentName,
+                latencyMs: segmentedMetricDurationMs(startedAtMs),
+            });
+            logSegmentedStreamingTrace("route.segment.reject", {
+                reason: "session_not_found",
+                sessionId: req.params.sessionId,
+                segmentName: req.params.segmentName,
+                requestPath,
+                latencyMs: segmentedMetricDurationMs(startedAtMs),
+            });
+            return res.status(404).json({ error: "Streaming session not found" });
+        }
+        sourceType = session.sourceType;
+
+        segmentedStreamingSessionService.validateSessionToken(
+            session,
+            resolveSessionToken(req),
+        );
+
+        const segmentPath = segmentedStreamingSessionService.resolveSegmentPath(
+            session,
+            req.params.segmentName,
+        );
+
+        await fsPromises.access(segmentPath);
+        res.setHeader("Cache-Control", "private, max-age=30");
+        res.type("video/iso.segment");
+        logSegmentedStreamingMetric("segment.fetch", {
+            status: "success",
+            sessionId: session.sessionId,
+            sourceType: session.sourceType,
+            segmentName: req.params.segmentName,
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+        logSegmentedStreamingTrace("route.segment.success", {
+            sessionId: session.sessionId,
+            sourceType: session.sourceType,
+            segmentName: req.params.segmentName,
+            requestPath,
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+        res.sendFile(segmentPath);
+        return res;
+    } catch (error) {
+        logSegmentedStreamingMetric("segment.fetch", {
+            status: "error",
+            sessionId: req.params.sessionId,
+            sourceType,
+            segmentName: req.params.segmentName,
+            ...getSegmentedMetricErrorFields(error),
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+        logSegmentedStreamingTrace("route.segment.error", {
+            sessionId: req.params.sessionId,
+            sourceType,
+            segmentName: req.params.segmentName,
+            requestPath,
+            ...getSegmentedMetricErrorFields(error),
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+        const segmentedError = toSegmentedSessionError(error);
+        if (segmentedError) {
+            return res.status(segmentedError.statusCode).json({
+                error: segmentedError.message,
+                code: segmentedError.code,
+            });
+        }
+
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return res.status(404).json({ error: "Segment not found" });
+        }
+
+        logger.error("[SegmentedStreaming] Failed to load segment:", error);
+        return res.status(500).json({ error: "Failed to load segment" });
+    }
 };
 
 router.post("/v1/sessions", requireAuth, async (req, res) => {
@@ -235,12 +342,25 @@ router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req, res)
             sourceType: session.sourceType,
             latencyMs: segmentedMetricDurationMs(startedAtMs),
         });
+        logSegmentedStreamingTrace("route.manifest.success", {
+            sessionId: session.sessionId,
+            sourceType: session.sourceType,
+            requestPath: req.originalUrl || req.path,
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
         return res.sendFile(session.manifestPath);
     } catch (error) {
         logSegmentedStreamingMetric("manifest.fetch", {
             status: "error",
             sessionId: req.params.sessionId,
             sourceType,
+            ...getSegmentedMetricErrorFields(error),
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+        logSegmentedStreamingTrace("route.manifest.error", {
+            sessionId: req.params.sessionId,
+            sourceType,
+            requestPath: req.originalUrl || req.path,
             ...getSegmentedMetricErrorFields(error),
             latencyMs: segmentedMetricDurationMs(startedAtMs),
         });
@@ -261,84 +381,17 @@ router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req, res)
     }
 });
 
-router.get("/v1/sessions/:sessionId/segments/:segmentName", requireAuth, async (req, res) => {
-    const startedAtMs = Date.now();
-    let sourceType: string | undefined;
-    try {
-        const userId = req.user?.id;
-        if (!userId) {
-            logSegmentedStreamingMetric("segment.fetch", {
-                status: "reject",
-                reason: "unauthorized",
-                sessionId: req.params.sessionId,
-                segmentName: req.params.segmentName,
-                latencyMs: segmentedMetricDurationMs(startedAtMs),
-            });
-            return res.status(401).json({ error: "Unauthorized" });
-        }
+router.get(
+    "/v1/sessions/:sessionId/segments/:segmentName",
+    requireAuth,
+    handleSegmentFetch,
+);
 
-        const session = await segmentedStreamingSessionService.getAuthorizedSession(
-            req.params.sessionId,
-            userId,
-        );
-        if (!session) {
-            logSegmentedStreamingMetric("segment.fetch", {
-                status: "reject",
-                reason: "session_not_found",
-                sessionId: req.params.sessionId,
-                segmentName: req.params.segmentName,
-                latencyMs: segmentedMetricDurationMs(startedAtMs),
-            });
-            return res.status(404).json({ error: "Streaming session not found" });
-        }
-        sourceType = session.sourceType;
-
-        segmentedStreamingSessionService.validateSessionToken(
-            session,
-            resolveSessionToken(req),
-        );
-
-        const segmentPath = segmentedStreamingSessionService.resolveSegmentPath(
-            session,
-            req.params.segmentName,
-        );
-
-        await fsPromises.access(segmentPath);
-        res.setHeader("Cache-Control", "private, max-age=30");
-        res.type("video/iso.segment");
-        logSegmentedStreamingMetric("segment.fetch", {
-            status: "success",
-            sessionId: session.sessionId,
-            sourceType: session.sourceType,
-            segmentName: req.params.segmentName,
-            latencyMs: segmentedMetricDurationMs(startedAtMs),
-        });
-        return res.sendFile(segmentPath);
-    } catch (error) {
-        logSegmentedStreamingMetric("segment.fetch", {
-            status: "error",
-            sessionId: req.params.sessionId,
-            sourceType,
-            segmentName: req.params.segmentName,
-            ...getSegmentedMetricErrorFields(error),
-            latencyMs: segmentedMetricDurationMs(startedAtMs),
-        });
-        const segmentedError = toSegmentedSessionError(error);
-        if (segmentedError) {
-            return res.status(segmentedError.statusCode).json({
-                error: segmentedError.message,
-                code: segmentedError.code,
-            });
-        }
-
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            return res.status(404).json({ error: "Segment not found" });
-        }
-
-        logger.error("[SegmentedStreaming] Failed to load segment:", error);
-        return res.status(500).json({ error: "Failed to load segment" });
-    }
-});
+router.get(
+    "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.m4s)",
+    requireAuth,
+    handleSegmentFetch,
+);
 
 router.post("/v1/sessions/:sessionId/heartbeat", requireAuth, async (req, res) => {
     const startedAtMs = Date.now();
