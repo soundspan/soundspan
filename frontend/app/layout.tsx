@@ -70,7 +70,7 @@ export default function RootLayout({
                 className={`${montserrat.variable} ${polea.variable} antialiased`}
                 style={{ fontFamily: "var(--font-montserrat)" }}
             >
-                <Script src="/runtime-config.js" strategy="beforeInteractive" />
+                <Script src="/runtime-config" strategy="beforeInteractive" />
                 <GlobalErrorBoundary>
                     <ServiceWorkerRegistration />
                     <AuthProvider>

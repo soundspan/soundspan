@@ -494,8 +494,7 @@ SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 INTERNAL_API_SECRET=$INTERNAL_API_SECRET
 ENVEOF
 
-# Write frontend runtime config (runtime-only; no image rebuild required).
-RUNTIME_CONFIG_FILE="/app/frontend/public/runtime-config.js"
+# Normalize runtime streaming engine mode (consumed by frontend /runtime-config route).
 ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
 case "$ENGINE_MODE" in
     ""|"videojs"|"react-all-player"|"howler-rollback")
@@ -506,22 +505,6 @@ case "$ENGINE_MODE" in
         ;;
 esac
 
-if [ -n "$ENGINE_MODE" ]; then
-    ENGINE_MODE_JSON="\"$ENGINE_MODE\""
-else
-    ENGINE_MODE_JSON="null"
-fi
-
-cat > "$RUNTIME_CONFIG_FILE" << CONFIGEOF
-window.__SOUNDSPAN_RUNTIME_CONFIG__ = Object.assign(
-  {},
-  window.__SOUNDSPAN_RUNTIME_CONFIG__ || {},
-  {
-    STREAMING_ENGINE_MODE: $ENGINE_MODE_JSON,
-  },
-);
-CONFIGEOF
-
 echo "Frontend runtime STREAMING_ENGINE_MODE: ${ENGINE_MODE:-videojs (default)}"
 
 echo "Starting soundspan..."
@@ -531,6 +514,7 @@ exec env \
     SESSION_SECRET="$SESSION_SECRET" \
     SETTINGS_ENCRYPTION_KEY="$SETTINGS_ENCRYPTION_KEY" \
     INTERNAL_API_SECRET="$INTERNAL_API_SECRET" \
+    STREAMING_ENGINE_MODE="$ENGINE_MODE" \
     /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
 EOF
 
