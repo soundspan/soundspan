@@ -82,6 +82,9 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
+          volumeMounts:
+            - name: frontend-next-cache
+              mountPath: /app/.next/cache
           livenessProbe:
             httpGet:
               path: /health/live
@@ -100,6 +103,9 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      volumes:
+        - name: frontend-next-cache
+          emptyDir: {}
       {{- with .Values.frontend.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
