@@ -151,13 +151,22 @@ describe("api entrypoint runtime behavior", () => {
         const stopPersistLoop = jest.fn();
         const persistAllGroups = jest.fn(async () => undefined);
 
-        const server = {
-            listen: jest.fn((_port, _host, cb?: () => void) => {
-                if (invokeListenCallback) {
-                    void Promise.resolve(cb?.());
-                }
-            }),
-        };
+        const serverEventHandlers = new Map<string, (...args: any[]) => void>();
+        const server: any = {};
+        server.listen = jest.fn((_port, _host, cb?: () => void) => {
+            if (invokeListenCallback) {
+                void Promise.resolve(cb?.());
+            }
+        });
+        server.close = jest.fn((cb?: () => void) => {
+            cb?.();
+        });
+        server.on = jest.fn((event: string, handler: (...args: any[]) => void) => {
+            serverEventHandlers.set(event, handler);
+            return server;
+        });
+        server.closeIdleConnections = jest.fn();
+        server.closeAllConnections = jest.fn();
         const createServer = jest.fn(() => server);
 
         const requireAuth = jest.fn((_req, _res, next) => next?.());
@@ -260,6 +269,7 @@ describe("api entrypoint runtime behavior", () => {
             app,
             createServer,
             server,
+            serverEventHandlers,
             redisClient,
             prisma,
             logger,
@@ -370,6 +380,10 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.redisClient.ping).toHaveBeenCalled();
         expect(mocks.createDependencyReadinessTracker).toHaveBeenCalledWith("api");
         expect(mocks.setupListenTogetherSocket).toHaveBeenCalledWith(mocks.server);
+        expect(mocks.server.on).toHaveBeenCalledWith(
+            "connection",
+            expect.any(Function)
+        );
         expect(mocks.startPersistLoop).toHaveBeenCalledTimes(1);
         expect(mocks.createBullBoard).toHaveBeenCalledTimes(1);
         expect(mocks.app.get).toHaveBeenCalledWith(
@@ -649,6 +663,8 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.stopPersistLoop).toHaveBeenCalledTimes(1);
         expect(mocks.persistAllGroups).toHaveBeenCalledTimes(1);
         expect(mocks.shutdownListenTogetherSocket).toHaveBeenCalledTimes(1);
+        expect(mocks.server.close).toHaveBeenCalledTimes(1);
+        expect(mocks.server.closeIdleConnections).toHaveBeenCalledTimes(1);
         expect(mocks.shutdownWorkers).toHaveBeenCalledTimes(1);
         expect(mocks.redisClient.quit).toHaveBeenCalledTimes(1);
         expect(mocks.prisma.$disconnect).toHaveBeenCalled();

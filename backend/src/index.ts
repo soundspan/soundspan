@@ -55,6 +55,7 @@ import subsonicRoutes from "./routes/subsonic";
 import { setupListenTogetherSocket, shutdownListenTogetherSocket } from "./services/listenTogetherSocket";
 import { startPersistLoop, stopPersistLoop, persistAllGroups } from "./services/listenTogether";
 import { createServer } from "http";
+import type { Socket } from "net";
 import { errorHandler } from "./middleware/errorHandler";
 import { requireAuth, requireAdmin } from "./middleware/auth";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
@@ -106,6 +107,7 @@ let workersInitialized = false;
 let isStartupComplete = false;
 let isDraining = false;
 const dependencyReadiness = createDependencyReadinessTracker("api");
+const HTTP_SERVER_CLOSE_TIMEOUT_MS = 12_000;
 
 if (backendProcessRole === "worker") {
     logger.error(
@@ -177,6 +179,14 @@ app.use(
     })
 );
 app.use(express.json({ limit: "1mb" })); // Increased from 100KB default to support large queue payloads
+
+// When the process is draining, force connection close so clients reconnect to healthy pods quickly.
+app.use((req, res, next) => {
+    if (isDraining) {
+        res.setHeader("Connection", "close");
+    }
+    next();
+});
 
 // Session
 // Trust proxy for reverse proxy setups (nginx, traefik, etc.)
@@ -416,6 +426,14 @@ async function checkPasswordReset() {
 }
 
 const httpServer = createServer(app);
+const activeHttpConnections = new Set<Socket>();
+
+httpServer.on("connection", (socket) => {
+    activeHttpConnections.add(socket);
+    socket.on("close", () => {
+        activeHttpConnections.delete(socket);
+    });
+});
 
 // Attach Socket.IO for Listen Together
 if (runApiRole) {
@@ -513,6 +531,66 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
 
 // Graceful shutdown handling
 let isShuttingDown = false;
+let healthCheckInterval: NodeJS.Timeout | null = null;
+
+async function closeHttpServerWithTimeout(timeoutMs: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve();
+        };
+
+        const timeoutId = setTimeout(() => {
+            const openConnections = activeHttpConnections.size;
+            if (openConnections > 0) {
+                logger.warn(
+                    `[Shutdown] HTTP server close timed out after ${timeoutMs}ms; forcing ${openConnections} active connection(s) closed`
+                );
+            }
+
+            for (const socket of activeHttpConnections) {
+                try {
+                    socket.destroy();
+                } catch {
+                    // Ignore socket teardown errors during shutdown.
+                }
+            }
+
+            const closeAllConnections = (
+                httpServer as typeof httpServer & {
+                    closeAllConnections?: () => void;
+                }
+            ).closeAllConnections;
+            if (typeof closeAllConnections === "function") {
+                closeAllConnections.call(httpServer);
+            }
+
+            finish();
+        }, timeoutMs);
+        timeoutId.unref?.();
+
+        try {
+            httpServer.close(() => {
+                finish();
+            });
+        } catch {
+            finish();
+            return;
+        }
+
+        const closeIdleConnections = (
+            httpServer as typeof httpServer & {
+                closeIdleConnections?: () => void;
+            }
+        ).closeIdleConnections;
+        if (typeof closeIdleConnections === "function") {
+            closeIdleConnections.call(httpServer);
+        }
+    });
+}
 
 async function gracefulShutdown(signal: string) {
     if (isShuttingDown) {
@@ -525,11 +603,19 @@ async function gracefulShutdown(signal: string) {
     logger.debug(`\nReceived ${signal}. Starting graceful shutdown...`);
 
     try {
+        if (healthCheckInterval) {
+            clearInterval(healthCheckInterval);
+            healthCheckInterval = null;
+        }
+
         // Shutdown Listen Together
         if (runApiRole) {
             stopPersistLoop();
             await persistAllGroups();
             shutdownListenTogetherSocket();
+
+            logger.debug("Closing HTTP server...");
+            await closeHttpServerWithTimeout(HTTP_SERVER_CLOSE_TIMEOUT_MS);
         }
 
         // Shutdown workers (intervals, crons, queues)
@@ -582,7 +668,7 @@ process.on("uncaughtException", (error) => {
 // Periodic health check to keep database connections alive and detect issues early
 // Runs every 5 minutes to prevent idle connection drops
 const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000;
-setInterval(async () => {
+healthCheckInterval = setInterval(async () => {
     try {
         const dependencySnapshot = await dependencyReadiness.probe(true);
         if (!dependencySnapshot.overallHealthy) {
