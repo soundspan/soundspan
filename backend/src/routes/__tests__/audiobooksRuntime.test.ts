@@ -292,6 +292,47 @@ describe("audiobooks route runtime", () => {
         });
     });
 
+    it("applies limit and offset pagination parameters for list endpoint", async () => {
+        prisma.audiobook.findMany.mockResolvedValueOnce([
+            {
+                id: "book-2",
+                title: "Book Two",
+                author: "Author Two",
+                narrator: null,
+                description: null,
+                localCoverPath: null,
+                coverUrl: null,
+                duration: 120,
+                libraryId: "lib-1",
+                series: null,
+                seriesSequence: null,
+                genres: [],
+            },
+        ]);
+
+        const req = {
+            user: { id: "user-1" },
+            query: { limit: "1", offset: "1" },
+        } as any;
+        const res = createRes();
+        await listHandler(req, res);
+
+        expect(prisma.audiobook.findMany).toHaveBeenCalledWith({
+            orderBy: { title: "asc" },
+            take: 1,
+            skip: 1,
+        });
+        expect(prisma.audiobookProgress.findMany).toHaveBeenCalledWith({
+            where: {
+                userId: "user-1",
+                audiobookshelfId: { in: ["book-2"] },
+            },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(Array.isArray(res.body)).toBe(true);
+        expect(res.body).toHaveLength(1);
+    });
+
     it("maps audiobook list response with user progress and normalized fields", async () => {
         const lastPlayedAt = new Date("2026-01-15T10:00:00.000Z");
 

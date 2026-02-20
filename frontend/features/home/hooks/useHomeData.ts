@@ -27,7 +27,7 @@ import {
     useTopPodcastsQuery,
     useAudiobooksQuery,
     useRefreshMixesMutation,
-    useBrowseAllQuery,
+    useFeaturedPlaylistsQuery,
     queryKeys,
 } from "@/hooks/useQueries";
 
@@ -116,9 +116,9 @@ export function useHomeData(): UseHomeDataReturn {
     const { data: podcastsData, isLoading: isLoadingPodcasts } =
         useTopPodcastsQuery(10);
     const { data: audiobooksData, isLoading: isLoadingAudiobooks } =
-        useAudiobooksQuery();
-    const { data: browseData, isLoading: isBrowseLoading } =
-        useBrowseAllQuery();
+        useAudiobooksQuery({ limit: 10 });
+    const { data: featuredPlaylistsData, isLoading: isBrowseLoading } =
+        useFeaturedPlaylistsQuery(20);
 
     // Mutation for refreshing mixes
     const { mutateAsync: refreshMixes, isPending: isRefreshingMixes } =
@@ -171,10 +171,10 @@ export function useHomeData(): UseHomeDataReturn {
         recentPodcasts: Array.isArray(podcastsData)
             ? podcastsData.slice(0, 10)
             : [],
-        recentAudiobooks: Array.isArray(audiobooksData)
-            ? audiobooksData.slice(0, 10)
+        recentAudiobooks: Array.isArray(audiobooksData) ? audiobooksData : [],
+        featuredPlaylists: Array.isArray(featuredPlaylistsData)
+            ? featuredPlaylistsData
             : [],
-        featuredPlaylists: browseData?.playlists || [],
         isLoading,
         isRefreshingMixes,
         isBrowseLoading,

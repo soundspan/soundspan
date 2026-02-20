@@ -92,6 +92,11 @@ describe("api entrypoint runtime behavior", () => {
         const redisStoreCtor = jest.fn(() => ({}));
         const corsMiddleware = jest.fn(() => "cors-middleware");
         const helmetMiddleware = jest.fn(() => "helmet-middleware");
+        const compressionFilter = jest.fn(() => true);
+        const compressionMiddleware = Object.assign(
+            jest.fn(() => "compression-middleware"),
+            { filter: compressionFilter }
+        );
 
         const redisClient = {
             isReady: true,
@@ -199,6 +204,7 @@ describe("api entrypoint runtime behavior", () => {
         jest.doMock("connect-redis", () => redisStoreCtor);
         jest.doMock("cors", () => corsMiddleware);
         jest.doMock("helmet", () => helmetMiddleware);
+        jest.doMock("compression", () => compressionMiddleware);
         jest.doMock("http", () => ({ createServer }));
         jest.doMock("../config", () => ({
             config,
@@ -270,6 +276,8 @@ describe("api entrypoint runtime behavior", () => {
             requireAuth,
             requireAdmin,
             shutdownWorkers,
+            compressionMiddleware,
+            compressionFilter,
         };
     }
 
@@ -346,6 +354,13 @@ describe("api entrypoint runtime behavior", () => {
         await flushPromises();
 
         expect(mocks.createServer).toHaveBeenCalledTimes(1);
+        expect(mocks.compressionMiddleware).toHaveBeenCalledWith(
+            expect.objectContaining({
+                threshold: 1024,
+                filter: expect.any(Function),
+            })
+        );
+        expect(mocks.app.use).toHaveBeenCalledWith("compression-middleware");
         expect(mocks.server.listen).toHaveBeenCalledWith(
             3006,
             "0.0.0.0",
@@ -363,6 +378,65 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(processOnSpy).toHaveBeenCalled();
         expect(setIntervalSpy).toHaveBeenCalled();
+    });
+
+    it("applies safe path and cache-control exclusions in compression filter", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout
+        );
+        process.exit = jest.fn() as any;
+
+        const mocks = setupApiEntrypointMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const compressionConfig = (mocks.compressionMiddleware as any).mock
+            .calls[0][0] as { filter: (req: any, res: any) => boolean };
+        expect(compressionConfig).toBeDefined();
+        expect(typeof compressionConfig.filter).toBe("function");
+
+        const cacheRes = {
+            getHeader: jest.fn<any, any>(() => undefined),
+        };
+
+        expect(
+            compressionConfig.filter(
+                { path: "/api/audiobooks/book-1/stream" },
+                cacheRes
+            )
+        ).toBe(false);
+        expect(
+            compressionConfig.filter(
+                { path: "/api/audiobooks/book-1/cover" },
+                cacheRes
+            )
+        ).toBe(false);
+        expect(
+            compressionConfig.filter(
+                { path: "/api/library/tracks/track-1/stream" },
+                cacheRes
+            )
+        ).toBe(false);
+
+        expect(
+            compressionConfig.filter({ path: "/api/mixes" }, cacheRes)
+        ).toBe(true);
+        expect(mocks.compressionFilter).toHaveBeenCalledWith(
+            { path: "/api/mixes" },
+            cacheRes
+        );
+
+        cacheRes.getHeader.mockReturnValueOnce("public, no-transform");
+        expect(
+            compressionConfig.filter({ path: "/api/mixes" }, cacheRes)
+        ).toBe(false);
     });
 
     it("exits early when BACKEND_PROCESS_ROLE is worker on API entrypoint", () => {

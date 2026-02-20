@@ -87,7 +87,12 @@ export const queryKeys = {
     popularArtists: (limit?: number) => ["popular-artists", limit] as const,
 
     // Audiobooks
-    audiobooks: () => ["audiobooks"] as const,
+    audiobooks: (params?: { limit?: number; offset?: number }) =>
+        [
+            "audiobooks",
+            params?.limit ?? null,
+            params?.offset ?? null,
+        ] as const,
     audiobook: (id: string) => ["audiobook", id] as const,
 
     // Podcasts
@@ -771,11 +776,33 @@ export function usePopularArtistsQuery(limit: number = 20) {
  *
  * @returns Query result with audiobooks array
  */
-export function useAudiobooksQuery() {
+interface AudiobooksQueryParams {
+    limit?: number;
+    offset?: number;
+    enabled?: boolean;
+}
+
+export function useAudiobooksQuery({
+    limit,
+    offset,
+    enabled = true,
+}: AudiobooksQueryParams = {}) {
+    const params = new URLSearchParams();
+    if (typeof limit === "number") {
+        params.set("limit", String(limit));
+    }
+    if (typeof offset === "number") {
+        params.set("offset", String(offset));
+    }
+    const endpoint = params.size
+        ? `/audiobooks?${params.toString()}`
+        : "/audiobooks";
+
     return useQuery({
-        queryKey: queryKeys.audiobooks(),
-        queryFn: () => api.getAudiobooks(),
+        queryKey: queryKeys.audiobooks({ limit, offset }),
+        queryFn: () => api.get(endpoint),
         staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled,
     });
 }
 

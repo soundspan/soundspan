@@ -235,9 +235,18 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
             });
         }
 
+        const parsedLimit = parseInt(req.query?.limit as string, 10);
+        const parsedOffset = parseInt(req.query?.offset as string, 10);
+        const hasLimit = Number.isFinite(parsedLimit) && parsedLimit > 0;
+        const hasOffset = Number.isFinite(parsedOffset) && parsedOffset > 0;
+        const take = hasLimit ? Math.min(parsedLimit, 100) : undefined;
+        const skip = hasOffset ? parsedOffset : undefined;
+
         // Read from cached database instead of hitting Audiobookshelf API
         const audiobooks = await prisma.audiobook.findMany({
             orderBy: { title: "asc" },
+            ...(take !== undefined ? { take } : {}),
+            ...(skip !== undefined ? { skip } : {}),
         });
 
         const audiobookIds = audiobooks.map((book) => book.id);

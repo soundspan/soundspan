@@ -3,6 +3,7 @@ import session from "express-session";
 import RedisStore from "connect-redis";
 import cors from "cors";
 import helmet from "helmet";
+import compression from "compression";
 import { config } from "./config";
 import { redisClient } from "./utils/redis";
 import { prisma } from "./utils/db";
@@ -69,6 +70,21 @@ import { BRAND_API_DOCS_TITLE, BRAND_NAME } from "./config/brand";
 
 const app = express();
 type BackendProcessRole = "all" | "api" | "worker";
+
+function isCompressionExcludedPath(path: string): boolean {
+    if (!path) return false;
+
+    return (
+        (path.startsWith("/api/library/tracks/") && path.endsWith("/stream")) ||
+        (path.startsWith("/api/audiobooks/") &&
+            (path.endsWith("/stream") || path.endsWith("/cover"))) ||
+        (path.startsWith("/api/podcasts/") && path.includes("/stream")) ||
+        path.startsWith("/api/library/cover-art/") ||
+        path.startsWith("/api/library/image/") ||
+        path.startsWith("/rest/stream") ||
+        path.startsWith("/rest/download")
+    );
+}
 
 function resolveBackendProcessRole(): BackendProcessRole {
     const raw = (process.env.BACKEND_PROCESS_ROLE || "all").trim().toLowerCase();
@@ -140,6 +156,24 @@ app.use(
             }
         },
         credentials: true,
+    })
+);
+app.use(
+    compression({
+        threshold: 1024,
+        filter: (req, res) => {
+            if (isCompressionExcludedPath(req.path)) {
+                return false;
+            }
+            const cacheControl = res.getHeader("Cache-Control");
+            if (
+                typeof cacheControl === "string" &&
+                cacheControl.includes("no-transform")
+            ) {
+                return false;
+            }
+            return compression.filter(req, res);
+        },
     })
 );
 app.use(express.json({ limit: "1mb" })); // Increased from 100KB default to support large queue payloads
