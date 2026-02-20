@@ -35,11 +35,11 @@ export const apiLimiter = rateLimit({
     ...trustProxyValidation,
 });
 
-// Auth limiter for login endpoints (20 attempts/15min per IP)
+// Auth limiter for login endpoints (40 attempts/15min per IP)
 // More lenient for self-hosted apps where users may have password manager issues
 export const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 20, // Increased from 5 for self-hosted environments
+    max: 40, // Increased from 5 for self-hosted environments
     skipSuccessfulRequests: true, // Don't count successful requests
     message: "Too many login attempts, please try again in 15 minutes.",
     standardHeaders: true,

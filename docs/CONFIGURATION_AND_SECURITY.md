@@ -95,7 +95,7 @@ The worker entrypoint (`backend/src/worker.ts`) loads shared backend config and 
 | `TZ` | No | `UTC` | Timezone for logs/scheduling context |
 | `LOG_LEVEL` | No | `warn` (prod), `debug` (dev) | Logger verbosity |
 | `LOG_QUERIES` | No | `false` | Enables Prisma query logging in development only |
-| `DATABASE_POOL_SIZE` | No | Role-aware: `api=4`, `worker=2`, `all=6` | Prisma DB pool connection limit (set explicitly to override role default). If `BACKEND_PROCESS_ROLE` is unset, role is inferred from entrypoint (`index.*` => `api`, `worker.*` => `worker`). |
+| `DATABASE_POOL_SIZE` | No | Role-aware: `api=8`, `worker=4`, `all=12` | Prisma DB pool connection limit (set explicitly to override role default). If `BACKEND_PROCESS_ROLE` is unset, role is inferred from entrypoint (`index.*` => `api`, `worker.*` => `worker`). |
 | `DATABASE_POOL_TIMEOUT` | No | `30` | Prisma DB pool timeout in seconds |
 | `PORT` | No | `3006` | Shared config field; not used for worker health endpoint |
 

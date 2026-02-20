@@ -49,7 +49,7 @@ describe("rateLimiter middleware config", () => {
         expect(apiOptions.windowMs).toBe(60_000);
         expect(apiOptions.message).toContain("Too many requests");
 
-        expect(authOptions.max).toBe(20);
+        expect(authOptions.max).toBe(40);
         expect(authOptions.windowMs).toBe(900_000);
         expect(authOptions.skipSuccessfulRequests).toBe(true);
 
@@ -80,4 +80,3 @@ describe("rateLimiter middleware config", () => {
         expect(skip({ path: "/api/other" })).toBe(false);
     });
 });
-

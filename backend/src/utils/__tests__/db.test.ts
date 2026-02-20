@@ -73,7 +73,7 @@ describe("db connection pool config", () => {
         const prismaOptions = prismaClientCtor.mock.calls[0][0];
         const resolvedUrl: string = prismaOptions.datasources.db.url;
 
-        expect(resolvedUrl).toContain("connection_limit=2");
+        expect(resolvedUrl).toContain("connection_limit=4");
         expect(resolvedUrl).toContain("pool_timeout=30");
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("role=worker"),
@@ -92,7 +92,7 @@ describe("db connection pool config", () => {
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining("Invalid BACKEND_PROCESS_ROLE"),
         );
-        expect(resolvedUrl).toContain("connection_limit=4");
+        expect(resolvedUrl).toContain("connection_limit=8");
         expect(resolvedUrl).toContain("pool_timeout=30");
     });
 
@@ -121,7 +121,7 @@ describe("db connection pool config", () => {
         const prismaOptions = prismaClientCtor.mock.calls[0][0];
         const resolvedUrl: string = prismaOptions.datasources.db.url;
 
-        expect(resolvedUrl).toContain("connection_limit=6");
+        expect(resolvedUrl).toContain("connection_limit=12");
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("role=all")
         );
@@ -136,7 +136,7 @@ describe("db connection pool config", () => {
         const resolvedUrl: string = prismaOptions.datasources.db.url;
 
         expect(resolvedUrl).toBe(
-            "not-a-valid-url?foo=bar&connection_limit=4&pool_timeout=30"
+            "not-a-valid-url?foo=bar&connection_limit=8&pool_timeout=30"
         );
     });
 });

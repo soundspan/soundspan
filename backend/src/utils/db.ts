@@ -48,9 +48,9 @@ function inferBackendProcessRole(): {
 const backendProcessRoleResolution = inferBackendProcessRole();
 const backendProcessRole = backendProcessRoleResolution.role;
 const defaultConnectionLimitByRole: Record<string, number> = {
-    api: 4,
-    worker: 2,
-    all: 6,
+    api: 8,
+    worker: 4,
+    all: 12,
 };
 
 // Role-aware defaults keep aggregate DB connection pressure predictable in HA

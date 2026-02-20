@@ -44,9 +44,9 @@ describe("prisma connection resilience contract", () => {
         expect(dbSource).toContain("BACKEND_PROCESS_ROLE");
         expect(dbSource).toContain("DATABASE_POOL_SIZE");
         expect(dbSource).toContain("worker");
-        expect(dbSource).toContain("api: 4");
-        expect(dbSource).toContain("worker: 2");
-        expect(dbSource).toContain("all: 6");
+        expect(dbSource).toContain("api: 8");
+        expect(dbSource).toContain("worker: 4");
+        expect(dbSource).toContain("all: 12");
     });
 
     it("infers worker role from worker entrypoint when BACKEND_PROCESS_ROLE is unset", () => {
