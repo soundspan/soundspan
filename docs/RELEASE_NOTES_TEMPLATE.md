@@ -1,16 +1,13 @@
-# soundspan {{VERSION}} Release Notes
-
-Release Date: {{RELEASE_DATE}}  
-Compare: {{COMPARE_URL}}
+# [{{VERSION}}] Release Notes - {{RELEASE_DATE}}  
 
 ## Release Summary
 {{RELEASE_SUMMARY}}
 
-## Fixed
-{{FIXED_ITEMS}}
-
 ## Added
 {{ADDED_ITEMS}}
+
+## Fixed
+{{FIXED_ITEMS}}
 
 ## Changed
 {{CHANGED_ITEMS}}
