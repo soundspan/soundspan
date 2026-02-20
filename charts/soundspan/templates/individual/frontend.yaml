@@ -35,12 +35,20 @@ spec:
       serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds | default 30 }}
       containers:
         - name: frontend
           image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
           imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep {{ .Values.frontend.lifecycle.preStopSleepSeconds | default 6 }}
           ports:
             - name: http
               containerPort: {{ .Values.frontend.port }}

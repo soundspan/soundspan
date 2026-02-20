@@ -32,10 +32,18 @@ spec:
       # AIO container runs its own postgres/redis internally — needs writable FS
       securityContext:
         fsGroup: 1000
+      terminationGracePeriodSeconds: {{ .Values.aio.terminationGracePeriodSeconds | default 45 }}
       containers:
         - name: soundspan
           image: "{{ .Values.aio.image.repository }}:{{ .Values.aio.image.tag }}"
           imagePullPolicy: {{ .Values.aio.image.pullPolicy }}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep {{ .Values.aio.lifecycle.preStopSleepSeconds | default 8 }}
           ports:
             - name: http
               containerPort: 3030

@@ -83,6 +83,10 @@ aio:
     repository: ghcr.io/soundspan/soundspan
     tag: 1.1.1
     pullPolicy: IfNotPresent
+  # Grace window + preStop sleep to drain requests before pod shutdown.
+  terminationGracePeriodSeconds: 45
+  lifecycle:
+    preStopSleepSeconds: 8
 
   # -- Resource limits for the AIO container
   resources:
@@ -140,6 +144,10 @@ backend:
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+  # Grace window + preStop sleep to allow readiness to fail and in-flight requests to finish.
+  terminationGracePeriodSeconds: 45
+  lifecycle:
+    preStopSleepSeconds: 10
   pdb:
     enabled: false
     # Use one of minAvailable or maxUnavailable
@@ -259,6 +267,10 @@ frontend:
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+  # Grace window + preStop sleep to give the load balancer time to stop routing.
+  terminationGracePeriodSeconds: 30
+  lifecycle:
+    preStopSleepSeconds: 6
   pdb:
     enabled: false
     # Use one of minAvailable or maxUnavailable
@@ -659,7 +671,6 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-
 
 
 
