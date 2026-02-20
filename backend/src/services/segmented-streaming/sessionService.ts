@@ -16,6 +16,11 @@ import {
 } from "./providerAdapters/tidalAdapter";
 import { ytMusicSegmentedProviderAdapter } from "./providerAdapters/ytMusicAdapter";
 import { SegmentedProviderAdapterError } from "./providerAdapters/adapterError";
+import {
+    logSegmentedStreamingTrace,
+    segmentedTraceDurationMs,
+    toSegmentedTraceErrorFields,
+} from "./trace";
 
 const SESSION_KEY_PREFIX = "streaming:session:v1:";
 const SESSION_TTL_SECONDS = 5 * 60;
@@ -133,88 +138,138 @@ class SegmentedSessionService {
     async createLocalSession(
         input: CreateLocalSegmentedSessionInput,
     ): Promise<SegmentedSessionResponse> {
+        const startedAtMs = Date.now();
+        let phase = "track_lookup";
+        let trackLookupMs: number | undefined;
+        let sourceAccessMs: number | undefined;
+        let assetBuildMs: number | undefined;
+        let persistMs: number | undefined;
         const quality = normalizeQuality(input.desiredQuality);
 
-        const track = await prisma.track.findUnique({
-            where: { id: input.trackId },
-            select: {
-                id: true,
-                filePath: true,
-                fileModified: true,
-            },
-        });
-
-        if (!track) {
-            throw new SegmentedSessionError("Track not found", 404, "TRACK_NOT_FOUND");
-        }
-
-        if (!track.filePath || !track.fileModified) {
-            throw new SegmentedSessionError(
-                "Track is not available for segmented local playback",
-                404,
-                "TRACK_NOT_LOCALLY_AVAILABLE",
-            );
-        }
-
-        const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-        const sourcePath = path.join(config.music.musicPath, normalizedFilePath);
-
         try {
-            await fsPromises.access(sourcePath);
-        } catch {
-            throw new SegmentedSessionError(
-                "Track source file was not found on disk",
-                404,
-                "TRACK_SOURCE_MISSING",
+            const trackLookupStartedAtMs = Date.now();
+            const track = await prisma.track.findUnique({
+                where: { id: input.trackId },
+                select: {
+                    id: true,
+                    filePath: true,
+                    fileModified: true,
+                },
+            });
+            trackLookupMs = segmentedTraceDurationMs(trackLookupStartedAtMs);
+
+            if (!track) {
+                throw new SegmentedSessionError("Track not found", 404, "TRACK_NOT_FOUND");
+            }
+
+            if (!track.filePath || !track.fileModified) {
+                throw new SegmentedSessionError(
+                    "Track is not available for segmented local playback",
+                    404,
+                    "TRACK_NOT_LOCALLY_AVAILABLE",
+                );
+            }
+
+            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
+            const sourcePath = path.join(config.music.musicPath, normalizedFilePath);
+            phase = "source_access";
+            const sourceAccessStartedAtMs = Date.now();
+
+            try {
+                await fsPromises.access(sourcePath);
+                sourceAccessMs = segmentedTraceDurationMs(sourceAccessStartedAtMs);
+            } catch {
+                sourceAccessMs = segmentedTraceDurationMs(sourceAccessStartedAtMs);
+                throw new SegmentedSessionError(
+                    "Track source file was not found on disk",
+                    404,
+                    "TRACK_SOURCE_MISSING",
+                );
+            }
+
+            phase = "asset_build";
+            const assetBuildStartedAtMs = Date.now();
+            const asset = await segmentedManifestService.getOrCreateLocalDashAsset({
+                trackId: track.id,
+                sourcePath,
+                sourceModified: track.fileModified,
+                quality: quality as SegmentedManifestQuality,
+            });
+            assetBuildMs = segmentedTraceDurationMs(assetBuildStartedAtMs);
+
+            const sessionId = randomUUID();
+            const createdAt = new Date();
+            const expiresAt = new Date(
+                createdAt.getTime() + SESSION_TTL_SECONDS * 1000,
             );
+
+            const sessionRecord: SegmentedSessionRecord = {
+                sessionId,
+                userId: input.userId,
+                trackId: track.id,
+                cacheKey: asset.cacheKey,
+                quality,
+                sourceType: "local",
+                manifestPath: asset.manifestPath,
+                assetDir: asset.outputDir,
+                createdAt: createdAt.toISOString(),
+                expiresAt: expiresAt.toISOString(),
+            };
+
+            phase = "persist_session";
+            const persistStartedAtMs = Date.now();
+            await this.persistSession(sessionRecord);
+            persistMs = segmentedTraceDurationMs(persistStartedAtMs);
+            segmentedStreamingCacheService.registerSessionReference(
+                sessionRecord.cacheKey,
+                sessionRecord.sessionId,
+            );
+
+            logSegmentedStreamingTrace("session.local.create_success", {
+                trackId: track.id,
+                quality,
+                cacheKey: sessionRecord.cacheKey,
+                trackLookupMs,
+                sourceAccessMs,
+                assetBuildMs,
+                persistMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
+            return this.toSessionResponse(sessionRecord);
+        } catch (error) {
+            logSegmentedStreamingTrace("session.local.create_error", {
+                trackId: input.trackId,
+                quality,
+                phase,
+                trackLookupMs,
+                sourceAccessMs,
+                assetBuildMs,
+                persistMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+                ...toSegmentedTraceErrorFields(error),
+            });
+            throw error;
         }
-
-        const asset = await segmentedManifestService.getOrCreateLocalDashAsset({
-            trackId: track.id,
-            sourcePath,
-            sourceModified: track.fileModified,
-            quality: quality as SegmentedManifestQuality,
-        });
-
-        const sessionId = randomUUID();
-        const createdAt = new Date();
-        const expiresAt = new Date(
-            createdAt.getTime() + SESSION_TTL_SECONDS * 1000,
-        );
-
-        const sessionRecord: SegmentedSessionRecord = {
-            sessionId,
-            userId: input.userId,
-            trackId: track.id,
-            cacheKey: asset.cacheKey,
-            quality,
-            sourceType: "local",
-            manifestPath: asset.manifestPath,
-            assetDir: asset.outputDir,
-            createdAt: createdAt.toISOString(),
-            expiresAt: expiresAt.toISOString(),
-        };
-
-        await this.persistSession(sessionRecord);
-        segmentedStreamingCacheService.registerSessionReference(
-            sessionRecord.cacheKey,
-            sessionRecord.sessionId,
-        );
-        return this.toSessionResponse(sessionRecord);
     }
 
     async createTidalSession(
         input: CreateTidalSegmentedSessionInput,
     ): Promise<SegmentedSessionResponse> {
+        const startedAtMs = Date.now();
+        let phase = "provider_asset";
+        let providerAssetMs: number | undefined;
+        let persistMs: number | undefined;
         const quality = normalizeQuality(input.desiredQuality);
 
         try {
+            const providerAssetStartedAtMs = Date.now();
             const tidalAsset =
                 await tidalSegmentedProviderAdapter.getOrCreateDashAsset({
                     userId: input.userId,
                     tidalTrackId: input.tidalTrackId,
                     quality: quality as SegmentedManifestQuality,
                 });
+            providerAssetMs = segmentedTraceDurationMs(providerAssetStartedAtMs);
 
             const sessionId = randomUUID();
             const createdAt = new Date();
@@ -235,13 +290,33 @@ class SegmentedSessionService {
                 expiresAt: expiresAt.toISOString(),
             };
 
+            phase = "persist_session";
+            const persistStartedAtMs = Date.now();
             await this.persistSession(sessionRecord);
+            persistMs = segmentedTraceDurationMs(persistStartedAtMs);
             segmentedStreamingCacheService.registerSessionReference(
                 sessionRecord.cacheKey,
                 sessionRecord.sessionId,
             );
+            logSegmentedStreamingTrace("session.tidal.create_success", {
+                trackId: sessionRecord.trackId,
+                quality,
+                cacheKey: sessionRecord.cacheKey,
+                providerAssetMs,
+                persistMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
             return this.toSessionResponse(sessionRecord);
         } catch (error) {
+            logSegmentedStreamingTrace("session.tidal.create_error", {
+                trackId: String(input.tidalTrackId),
+                quality,
+                phase,
+                providerAssetMs,
+                persistMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+                ...toSegmentedTraceErrorFields(error),
+            });
             if (error instanceof SegmentedProviderAdapterError) {
                 throw new SegmentedSessionError(
                     error.message,
@@ -256,15 +331,21 @@ class SegmentedSessionService {
     async createYtMusicSession(
         input: CreateYtMusicSegmentedSessionInput,
     ): Promise<SegmentedSessionResponse> {
+        const startedAtMs = Date.now();
+        let phase = "provider_asset";
+        let providerAssetMs: number | undefined;
+        let persistMs: number | undefined;
         const quality = normalizeQuality(input.desiredQuality);
 
         try {
+            const providerAssetStartedAtMs = Date.now();
             const ytMusicAsset =
                 await ytMusicSegmentedProviderAdapter.getOrCreateDashAsset({
                     userId: input.userId,
                     videoId: input.videoId,
                     quality: quality as SegmentedManifestQuality,
                 });
+            providerAssetMs = segmentedTraceDurationMs(providerAssetStartedAtMs);
 
             const sessionId = randomUUID();
             const createdAt = new Date();
@@ -285,13 +366,33 @@ class SegmentedSessionService {
                 expiresAt: expiresAt.toISOString(),
             };
 
+            phase = "persist_session";
+            const persistStartedAtMs = Date.now();
             await this.persistSession(sessionRecord);
+            persistMs = segmentedTraceDurationMs(persistStartedAtMs);
             segmentedStreamingCacheService.registerSessionReference(
                 sessionRecord.cacheKey,
                 sessionRecord.sessionId,
             );
+            logSegmentedStreamingTrace("session.ytmusic.create_success", {
+                trackId: sessionRecord.trackId,
+                quality,
+                cacheKey: sessionRecord.cacheKey,
+                providerAssetMs,
+                persistMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
             return this.toSessionResponse(sessionRecord);
         } catch (error) {
+            logSegmentedStreamingTrace("session.ytmusic.create_error", {
+                trackId: input.videoId,
+                quality,
+                phase,
+                providerAssetMs,
+                persistMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+                ...toSegmentedTraceErrorFields(error),
+            });
             if (error instanceof SegmentedProviderAdapterError) {
                 throw new SegmentedSessionError(
                     error.message,

@@ -8,6 +8,11 @@ import {
     type SegmentedManifestQuality,
 } from "../manifestService";
 import { SegmentedProviderAdapterError } from "./adapterError";
+import {
+    logSegmentedStreamingTrace,
+    segmentedTraceDurationMs,
+    toSegmentedTraceErrorFields,
+} from "../trace";
 
 export interface CreateYtMusicSegmentedAssetInput {
     userId: string;
@@ -27,15 +32,133 @@ class YtMusicSegmentedProviderAdapter {
     async getOrCreateDashAsset(
         input: CreateYtMusicSegmentedAssetInput,
     ): Promise<CreateYtMusicSegmentedAssetResult> {
+        const startedAtMs = Date.now();
+        let phase = "ensure_user_oauth";
+        let ensureUserOAuthMs: number | undefined;
+        let streamInfoMs: number | undefined;
+        let assetBuildMs: number | undefined;
         const normalizedVideoId = normalizeVideoId(input.videoId);
 
-        await this.ensureUserOAuth(input.userId);
+        try {
+            const ensureUserOAuthStartedAtMs = Date.now();
+            await this.ensureUserOAuth(input.userId);
+            ensureUserOAuthMs = segmentedTraceDurationMs(ensureUserOAuthStartedAtMs);
+
+            phase = "stream_info";
+            const streamInfoStartedAtMs = Date.now();
+            try {
+                await ytMusicService.getStreamInfo(input.userId, normalizedVideoId);
+                streamInfoMs = segmentedTraceDurationMs(streamInfoStartedAtMs);
+            } catch (error) {
+                streamInfoMs = segmentedTraceDurationMs(streamInfoStartedAtMs);
+                const status = getResponseStatus(error);
+                if (status === 401) {
+                    throw new SegmentedProviderAdapterError(
+                        "YouTube Music authentication is required",
+                        401,
+                        "YTMUSIC_AUTH_REQUIRED",
+                    );
+                }
+
+                if (status === 404) {
+                    throw new SegmentedProviderAdapterError(
+                        "YouTube Music track was not found",
+                        404,
+                        "YTMUSIC_TRACK_NOT_FOUND",
+                    );
+                }
+
+                if (status === 451) {
+                    throw new SegmentedProviderAdapterError(
+                        "YouTube Music track is age-restricted",
+                        451,
+                        "YTMUSIC_TRACK_AGE_RESTRICTED",
+                    );
+                }
+
+                throw new SegmentedProviderAdapterError(
+                    "YouTube Music stream metadata is unavailable",
+                    502,
+                    "YTMUSIC_STREAM_INFO_UNAVAILABLE",
+                );
+            }
+
+            const sourceUrl = this.buildSidecarStreamUrl({
+                userId: input.userId,
+                videoId: normalizedVideoId,
+            });
+
+            phase = "asset_build";
+            const assetBuildStartedAtMs = Date.now();
+            const asset = await segmentedManifestService.getOrCreateLocalDashAsset({
+                trackId: `ytmusic:${normalizedVideoId}`,
+                sourcePath: sourceUrl,
+                sourceModified: new Date(0),
+                quality: input.quality,
+                cacheIdentity: `ytmusic:${normalizedVideoId}`,
+            });
+            assetBuildMs = segmentedTraceDurationMs(assetBuildStartedAtMs);
+
+            logSegmentedStreamingTrace("provider.ytmusic.asset_success", {
+                trackId: normalizedVideoId,
+                quality: input.quality,
+                ensureUserOAuthMs,
+                streamInfoMs,
+                assetBuildMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
+
+            return {
+                providerTrackId: normalizedVideoId,
+                asset,
+            };
+        } catch (error) {
+            logSegmentedStreamingTrace("provider.ytmusic.asset_error", {
+                trackId: normalizedVideoId,
+                quality: input.quality,
+                phase,
+                ensureUserOAuthMs,
+                streamInfoMs,
+                assetBuildMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+                ...toSegmentedTraceErrorFields(error),
+            });
+            throw error;
+        }
+    }
+
+    private async ensureUserOAuth(userId: string): Promise<void> {
+        const startedAtMs = Date.now();
+        let phase = "auth_status";
+        let authStatusMs: number | undefined;
+        let userSettingsMs: number | undefined;
+        let restoreOAuthMs: number | undefined;
+        let restoredFromPersistence = false;
+        try {
+            const authStatusStartedAtMs = Date.now();
+            const authStatus = await ytMusicService.getAuthStatus(userId);
+            authStatusMs = segmentedTraceDurationMs(authStatusStartedAtMs);
+            if (authStatus.authenticated) {
+                logSegmentedStreamingTrace("provider.ytmusic.oauth_ready", {
+                    mode: "already_authenticated",
+                    authStatusMs,
+                    totalMs: segmentedTraceDurationMs(startedAtMs),
+                });
+                return;
+            }
+        } catch {
+            // Ignore status check failure and try restoring from persisted credentials.
+        }
 
         try {
-            await ytMusicService.getStreamInfo(input.userId, normalizedVideoId);
-        } catch (error) {
-            const status = getResponseStatus(error);
-            if (status === 401) {
+            phase = "user_settings";
+            const userSettingsStartedAtMs = Date.now();
+            const userSettings = await prisma.userSettings.findUnique({
+                where: { userId },
+                select: { ytMusicOAuthJson: true },
+            });
+            userSettingsMs = segmentedTraceDurationMs(userSettingsStartedAtMs);
+            if (!userSettings?.ytMusicOAuthJson) {
                 throw new SegmentedProviderAdapterError(
                     "YouTube Music authentication is required",
                     401,
@@ -43,81 +166,40 @@ class YtMusicSegmentedProviderAdapter {
                 );
             }
 
-            if (status === 404) {
-                throw new SegmentedProviderAdapterError(
-                    "YouTube Music track was not found",
-                    404,
-                    "YTMUSIC_TRACK_NOT_FOUND",
-                );
-            }
+            const oauthJson = decodeStoredOAuth(userSettings.ytMusicOAuthJson);
+            const systemSettings = await getSystemSettings();
 
-            if (status === 451) {
-                throw new SegmentedProviderAdapterError(
-                    "YouTube Music track is age-restricted",
-                    451,
-                    "YTMUSIC_TRACK_AGE_RESTRICTED",
-                );
-            }
-
-            throw new SegmentedProviderAdapterError(
-                "YouTube Music stream metadata is unavailable",
-                502,
-                "YTMUSIC_STREAM_INFO_UNAVAILABLE",
-            );
-        }
-
-        const sourceUrl = this.buildSidecarStreamUrl({
-            userId: input.userId,
-            videoId: normalizedVideoId,
-        });
-
-        const asset = await segmentedManifestService.getOrCreateLocalDashAsset({
-            trackId: `ytmusic:${normalizedVideoId}`,
-            sourcePath: sourceUrl,
-            sourceModified: new Date(0),
-            quality: input.quality,
-            cacheIdentity: `ytmusic:${normalizedVideoId}`,
-        });
-
-        return {
-            providerTrackId: normalizedVideoId,
-            asset,
-        };
-    }
-
-    private async ensureUserOAuth(userId: string): Promise<void> {
-        try {
-            const authStatus = await ytMusicService.getAuthStatus(userId);
-            if (authStatus.authenticated) {
-                return;
-            }
-        } catch {
-            // Ignore status check failure and try restoring from persisted credentials.
-        }
-
-        const userSettings = await prisma.userSettings.findUnique({
-            where: { userId },
-            select: { ytMusicOAuthJson: true },
-        });
-        if (!userSettings?.ytMusicOAuthJson) {
-            throw new SegmentedProviderAdapterError(
-                "YouTube Music authentication is required",
-                401,
-                "YTMUSIC_AUTH_REQUIRED",
-            );
-        }
-
-        const oauthJson = decodeStoredOAuth(userSettings.ytMusicOAuthJson);
-        const systemSettings = await getSystemSettings();
-
-        try {
+            phase = "restore_oauth";
+            const restoreOAuthStartedAtMs = Date.now();
             await ytMusicService.restoreOAuthWithCredentials(
                 userId,
                 oauthJson,
                 systemSettings?.ytMusicClientId || undefined,
                 systemSettings?.ytMusicClientSecret || undefined,
             );
-        } catch {
+            restoreOAuthMs = segmentedTraceDurationMs(restoreOAuthStartedAtMs);
+            restoredFromPersistence = true;
+            logSegmentedStreamingTrace("provider.ytmusic.oauth_ready", {
+                mode: "restored_from_persistence",
+                authStatusMs,
+                userSettingsMs,
+                restoreOAuthMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
+        } catch (error) {
+            logSegmentedStreamingTrace("provider.ytmusic.oauth_error", {
+                phase,
+                restoredFromPersistence,
+                authStatusMs,
+                userSettingsMs,
+                restoreOAuthMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+                ...toSegmentedTraceErrorFields(error),
+            });
+            if (error instanceof SegmentedProviderAdapterError) {
+                throw error;
+            }
+
             throw new SegmentedProviderAdapterError(
                 "YouTube Music authentication could not be restored",
                 401,

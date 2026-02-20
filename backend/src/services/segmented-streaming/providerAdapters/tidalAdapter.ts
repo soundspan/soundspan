@@ -7,6 +7,11 @@ import {
     type SegmentedManifestQuality,
 } from "../manifestService";
 import { SegmentedProviderAdapterError } from "./adapterError";
+import {
+    logSegmentedStreamingTrace,
+    segmentedTraceDurationMs,
+    toSegmentedTraceErrorFields,
+} from "../trace";
 
 const DEFAULT_TIDAL_STREAM_QUALITY = "HIGH";
 const TIDAL_STREAM_QUALITY_VALUES = new Set([
@@ -35,50 +40,26 @@ class TidalSegmentedProviderAdapter {
     async getOrCreateDashAsset(
         input: CreateTidalSegmentedAssetInput,
     ): Promise<CreateTidalSegmentedAssetResult> {
+        const startedAtMs = Date.now();
+        let phase = "user_settings";
+        let userSettingsMs: number | undefined;
+        let restoreOAuthMs: number | undefined;
+        let streamInfoMs: number | undefined;
+        let assetBuildMs: number | undefined;
         const normalizedTrackId = normalizeTidalTrackId(input.tidalTrackId);
 
-        const userSettings = await prisma.userSettings.findUnique({
-            where: { userId: input.userId },
-            select: {
-                tidalOAuthJson: true,
-                tidalStreamingQuality: true,
-            },
-        });
-
-        if (!userSettings?.tidalOAuthJson) {
-            throw new SegmentedProviderAdapterError(
-                "TIDAL authentication is required",
-                401,
-                "TIDAL_AUTH_REQUIRED",
-            );
-        }
-
-        const preferredQuality = normalizeTidalStreamQuality(
-            userSettings.tidalStreamingQuality,
-        );
-        const oauthJson = decodeStoredOAuth(userSettings.tidalOAuthJson);
-
-        const restored = await tidalStreamingService.restoreOAuth(
-            input.userId,
-            oauthJson,
-        );
-        if (!restored) {
-            throw new SegmentedProviderAdapterError(
-                "TIDAL authentication could not be restored",
-                401,
-                "TIDAL_AUTH_RESTORE_FAILED",
-            );
-        }
-
         try {
-            await tidalStreamingService.getStreamInfo(
-                input.userId,
-                normalizedTrackId,
-                preferredQuality,
-            );
-        } catch (error) {
-            const status = getResponseStatus(error);
-            if (status === 401) {
+            const userSettingsStartedAtMs = Date.now();
+            const userSettings = await prisma.userSettings.findUnique({
+                where: { userId: input.userId },
+                select: {
+                    tidalOAuthJson: true,
+                    tidalStreamingQuality: true,
+                },
+            });
+            userSettingsMs = segmentedTraceDurationMs(userSettingsStartedAtMs);
+
+            if (!userSettings?.tidalOAuthJson) {
                 throw new SegmentedProviderAdapterError(
                     "TIDAL authentication is required",
                     401,
@@ -86,39 +67,106 @@ class TidalSegmentedProviderAdapter {
                 );
             }
 
-            if (status === 404) {
+            const preferredQuality = normalizeTidalStreamQuality(
+                userSettings.tidalStreamingQuality,
+            );
+            const oauthJson = decodeStoredOAuth(userSettings.tidalOAuthJson);
+
+            phase = "restore_oauth";
+            const restoreOAuthStartedAtMs = Date.now();
+            const restored = await tidalStreamingService.restoreOAuth(
+                input.userId,
+                oauthJson,
+            );
+            restoreOAuthMs = segmentedTraceDurationMs(restoreOAuthStartedAtMs);
+            if (!restored) {
                 throw new SegmentedProviderAdapterError(
-                    "TIDAL track was not found",
-                    404,
-                    "TIDAL_TRACK_NOT_FOUND",
+                    "TIDAL authentication could not be restored",
+                    401,
+                    "TIDAL_AUTH_RESTORE_FAILED",
                 );
             }
 
-            throw new SegmentedProviderAdapterError(
-                "TIDAL stream metadata is unavailable",
-                502,
-                "TIDAL_STREAM_INFO_UNAVAILABLE",
-            );
+            phase = "stream_info";
+            const streamInfoStartedAtMs = Date.now();
+            try {
+                await tidalStreamingService.getStreamInfo(
+                    input.userId,
+                    normalizedTrackId,
+                    preferredQuality,
+                );
+                streamInfoMs = segmentedTraceDurationMs(streamInfoStartedAtMs);
+            } catch (error) {
+                streamInfoMs = segmentedTraceDurationMs(streamInfoStartedAtMs);
+                const status = getResponseStatus(error);
+                if (status === 401) {
+                    throw new SegmentedProviderAdapterError(
+                        "TIDAL authentication is required",
+                        401,
+                        "TIDAL_AUTH_REQUIRED",
+                    );
+                }
+
+                if (status === 404) {
+                    throw new SegmentedProviderAdapterError(
+                        "TIDAL track was not found",
+                        404,
+                        "TIDAL_TRACK_NOT_FOUND",
+                    );
+                }
+
+                throw new SegmentedProviderAdapterError(
+                    "TIDAL stream metadata is unavailable",
+                    502,
+                    "TIDAL_STREAM_INFO_UNAVAILABLE",
+                );
+            }
+
+            const sourceUrl = this.buildSidecarStreamUrl({
+                userId: input.userId,
+                tidalTrackId: normalizedTrackId,
+                streamQuality: preferredQuality,
+            });
+
+            phase = "asset_build";
+            const assetBuildStartedAtMs = Date.now();
+            const asset = await segmentedManifestService.getOrCreateLocalDashAsset({
+                trackId: `tidal:${normalizedTrackId}`,
+                sourcePath: sourceUrl,
+                sourceModified: new Date(0),
+                quality: input.quality,
+                cacheIdentity: `tidal:${normalizedTrackId}:${preferredQuality}`,
+            });
+            assetBuildMs = segmentedTraceDurationMs(assetBuildStartedAtMs);
+
+            logSegmentedStreamingTrace("provider.tidal.asset_success", {
+                trackId: String(normalizedTrackId),
+                quality: input.quality,
+                userSettingsMs,
+                restoreOAuthMs,
+                streamInfoMs,
+                assetBuildMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
+
+            return {
+                providerTrackId: String(normalizedTrackId),
+                asset,
+            };
+        } catch (error) {
+            logSegmentedStreamingTrace("provider.tidal.asset_error", {
+                trackId: String(normalizedTrackId),
+                quality: input.quality,
+                phase,
+                userSettingsMs,
+                restoreOAuthMs,
+                streamInfoMs,
+                assetBuildMs,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+                ...toSegmentedTraceErrorFields(error),
+            });
+            throw error;
         }
-
-        const sourceUrl = this.buildSidecarStreamUrl({
-            userId: input.userId,
-            tidalTrackId: normalizedTrackId,
-            streamQuality: preferredQuality,
-        });
-
-        const asset = await segmentedManifestService.getOrCreateLocalDashAsset({
-            trackId: `tidal:${normalizedTrackId}`,
-            sourcePath: sourceUrl,
-            sourceModified: new Date(0),
-            quality: input.quality,
-            cacheIdentity: `tidal:${normalizedTrackId}:${preferredQuality}`,
-        });
-
-        return {
-            providerTrackId: String(normalizedTrackId),
-            asset,
-        };
     }
 
     private buildSidecarStreamUrl(params: {
