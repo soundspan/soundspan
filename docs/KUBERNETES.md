@@ -26,14 +26,16 @@ helm search repo soundspan/soundspan
 ### All-in-One install
 
 ```bash
-helm install soundspan ./charts/soundspan \
+helm repo add soundspan https://soundspan.github.io/soundspan
+helm install soundspan soundspan/soundspan
   --set music.persistence.existingClaim=my-music-pvc
 ```
 
 ### Individual mode install
 
 ```bash
-helm install soundspan ./charts/soundspan \
+helm repo add soundspan https://soundspan.github.io/soundspan
+helm install soundspan soundspan/soundspan
   --set deploymentMode=individual \
   --set music.persistence.existingClaim=my-music-pvc \
   --set tidalSidecar.enabled=true \
@@ -43,7 +45,8 @@ helm install soundspan ./charts/soundspan \
 For HA-oriented defaults without configuring many individual switches:
 
 ```bash
-helm install soundspan ./charts/soundspan \
+helm repo add soundspan https://soundspan.github.io/soundspan
+helm install soundspan soundspan/soundspan
   --set deploymentMode=individual \
   --set haMode.enabled=true \
   --set music.persistence.existingClaim=my-music-pvc
@@ -53,18 +56,18 @@ See full values reference in [`../charts/soundspan/README.md`](../charts/soundsp
 
 ## Manual Deployment Notes
 
-Main-channel service images are published to GHCR (with release tags on release events).
+Images are published to GHCR.
 
 | Service | Image | Port |
 | --- | --- | --- |
-| All-in-One (AIO) | `ghcr.io/soundspan/soundspan:main` | 3030 |
-| Backend | `ghcr.io/soundspan/soundspan-backend:main` | 3006 |
-| Backend Worker (individual mode) | `ghcr.io/soundspan/soundspan-backend-worker:main` | — |
-| Frontend | `ghcr.io/soundspan/soundspan-frontend:main` | 3030 |
-| Audio Analyzer | `ghcr.io/soundspan/soundspan-audio-analyzer:main` | — |
-| Audio Analyzer CLAP | `ghcr.io/soundspan/soundspan-audio-analyzer-clap:main` | — |
-| TIDAL Sidecar | `ghcr.io/soundspan/soundspan-tidal-downloader:main` | 8585 |
-| YT Music Streamer | `ghcr.io/soundspan/soundspan-ytmusic-streamer:main` | 8586 |
+| All-in-One (AIO) | `ghcr.io/soundspan/soundspan:latest` | 3030 |
+| Backend | `ghcr.io/soundspan/soundspan-backend:latest` | 3006 |
+| Backend Worker (individual mode) | `ghcr.io/soundspan/soundspan-backend-worker:latest` | — |
+| Frontend | `ghcr.io/soundspan/soundspan-frontend:latest` | 3030 |
+| Audio Analyzer | `ghcr.io/soundspan/soundspan-audio-analyzer:latest` | — |
+| Audio Analyzer CLAP | `ghcr.io/soundspan/soundspan-audio-analyzer-clap:latest` | — |
+| TIDAL Sidecar | `ghcr.io/soundspan/soundspan-tidal-downloader:latest` | 8585 |
+| YT Music Streamer | `ghcr.io/soundspan/soundspan-ytmusic-streamer:latest` | 8586 |
 
 Notes:
 - The backend worker image is only used in `deploymentMode: individual`.
