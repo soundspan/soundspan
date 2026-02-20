@@ -158,6 +158,7 @@ export function Sidebar() {
                             alt={BRAND_NAME}
                             width={48}
                             height={48}
+                            sizes="48px"
                             className="flex-shrink-0"
                         />
                         <div className="flex-1 min-w-0">

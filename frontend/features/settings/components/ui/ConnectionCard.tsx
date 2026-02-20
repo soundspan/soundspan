@@ -33,6 +33,7 @@ export function ConnectionCard({
                             alt={title} 
                             width={24} 
                             height={24}
+                            sizes="24px"
                             className="w-6 h-6"
                         />
                     ) : (
@@ -71,4 +72,3 @@ export function ConnectionCard({
         </div>
     );
 }
-

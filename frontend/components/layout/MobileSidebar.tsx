@@ -97,6 +97,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             alt={BRAND_NAME}
                             width={32}
                             height={32}
+                            sizes="32px"
                             className="flex-shrink-0"
                         />
                         <span className="brand-wordmark text-lg font-bold text-white tracking-tight">

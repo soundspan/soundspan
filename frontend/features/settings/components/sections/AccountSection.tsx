@@ -256,7 +256,7 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
                         {twoFactorQR && (
                             <div className="flex justify-center">
                                 <div className="bg-white p-3 rounded-lg">
-                                    <Image src={twoFactorQR} alt="2FA QR Code" width={160} height={160} className="w-40 h-40" unoptimized />
+                                    <Image src={twoFactorQR} alt="2FA QR Code" width={160} height={160} sizes="160px" className="w-40 h-40" unoptimized />
                                 </div>
                             </div>
                         )}

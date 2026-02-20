@@ -553,6 +553,7 @@ export function MetadataEditor({
                                             alt="Preview"
                                             width={128}
                                             height={128}
+                                            sizes="128px"
                                             className="w-32 h-32 object-cover rounded"
                                             unoptimized
                                         />

@@ -251,6 +251,7 @@ export default function LoginPage() {
                                     alt={BRAND_NAME}
                                     width={60}
                                     height={60}
+                                    sizes="60px"
                                     className="relative z-10 drop-shadow-2xl"
                                 />
                             </div>

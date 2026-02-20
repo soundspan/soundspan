@@ -200,6 +200,7 @@ export default function OnboardingPage() {
                                         alt={BRAND_NAME}
                                         width={48}
                                         height={48}
+                                        sizes="48px"
                                         className="relative z-10 drop-shadow-2xl"
                                     />
                                 </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { RestartModal } from "@/components/ui/RestartModal";
@@ -17,17 +18,7 @@ import {
 import { AccountSection } from "@/features/settings/components/sections/AccountSection";
 import { SocialSection } from "@/features/settings/components/sections/SocialSection";
 import { PlaybackSection } from "@/features/settings/components/sections/PlaybackSection";
-import { PlaybackHistorySection } from "@/features/settings/components/sections/PlaybackHistorySection";
-import { DownloadPreferencesSection } from "@/features/settings/components/sections/DownloadPreferencesSection";
-import { DownloadServicesSection } from "@/features/settings/components/sections/DownloadServicesSection";
-import { AudiobookshelfSection } from "@/features/settings/components/sections/AudiobookshelfSection";
 import { IntegrationsSection } from "@/features/settings/components/sections/IntegrationsSection";
-import { AIServicesSection } from "@/features/settings/components/sections/AIServicesSection";
-import { StoragePathsSection } from "@/features/settings/components/sections/StoragePathsSection";
-import { LibrarySafetySection } from "@/features/settings/components/sections/LibrarySafetySection";
-import { CacheSection } from "@/features/settings/components/sections/CacheSection";
-import { UserManagementSection } from "@/features/settings/components/sections/UserManagementSection";
-import { YouTubeMusicAdminSection } from "@/features/settings/components/sections/YouTubeMusicSection";
 
 // Define sidebar items
 const sidebarItems: SidebarItem[] = [
@@ -46,6 +37,94 @@ const sidebarItems: SidebarItem[] = [
     { id: "cache", label: "Cache & Automation", adminOnly: true },
     { id: "users", label: "Users", adminOnly: true },
 ];
+
+function renderSectionFallback() {
+    return (
+        <div className="flex items-center justify-center py-8">
+            <GradientSpinner size="sm" />
+        </div>
+    );
+}
+
+const PlaybackHistorySection = dynamic(
+    () =>
+        import(
+            "@/features/settings/components/sections/PlaybackHistorySection"
+        ).then((mod) => mod.PlaybackHistorySection),
+    { loading: renderSectionFallback }
+);
+
+const DownloadPreferencesSection = dynamic(
+    () =>
+        import(
+            "@/features/settings/components/sections/DownloadPreferencesSection"
+        ).then((mod) => mod.DownloadPreferencesSection),
+    { loading: renderSectionFallback }
+);
+
+const DownloadServicesSection = dynamic(
+    () =>
+        import(
+            "@/features/settings/components/sections/DownloadServicesSection"
+        ).then((mod) => mod.DownloadServicesSection),
+    { loading: renderSectionFallback }
+);
+
+const AudiobookshelfSection = dynamic(
+    () =>
+        import(
+            "@/features/settings/components/sections/AudiobookshelfSection"
+        ).then((mod) => mod.AudiobookshelfSection),
+    { loading: renderSectionFallback }
+);
+
+const YouTubeMusicAdminSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/YouTubeMusicSection").then(
+            (mod) => mod.YouTubeMusicAdminSection
+        ),
+    { loading: renderSectionFallback }
+);
+
+const AIServicesSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/AIServicesSection").then(
+            (mod) => mod.AIServicesSection
+        ),
+    { loading: renderSectionFallback }
+);
+
+const StoragePathsSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/StoragePathsSection").then(
+            (mod) => mod.StoragePathsSection
+        ),
+    { loading: renderSectionFallback }
+);
+
+const LibrarySafetySection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/LibrarySafetySection").then(
+            (mod) => mod.LibrarySafetySection
+        ),
+    { loading: renderSectionFallback }
+);
+
+const CacheSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/CacheSection").then(
+            (mod) => mod.CacheSection
+        ),
+    { loading: renderSectionFallback }
+);
+
+const UserManagementSection = dynamic(
+    () =>
+        import(
+            "@/features/settings/components/sections/UserManagementSection"
+        ).then((mod) => mod.UserManagementSection),
+    { loading: renderSectionFallback }
+);
 
 export default function SettingsPage() {
     const { isAuthenticated, isLoading: authLoading, user } = useAuth();

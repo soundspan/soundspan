@@ -117,6 +117,7 @@ export function LibraryTracksList({ tracks, limit = 10 }: LibraryTracksListProps
                                     alt={track.album.title}
                                     width={40}
                                     height={40}
+                                    sizes="40px"
                                     className="object-cover w-full h-full"
                                     unoptimized
                                 />

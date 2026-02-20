@@ -28,6 +28,7 @@ export default function SetupPage() {
                     alt={BRAND_NAME}
                     width={120}
                     height={120}
+                    sizes="120px"
                     className="opacity-90"
                 />
             </div>

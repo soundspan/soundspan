@@ -106,6 +106,7 @@ export function TrackList({
                                             alt={track.album}
                                             width={40}
                                             height={40}
+                                            sizes="40px"
                                             className="object-cover"
                                             unoptimized
                                         />

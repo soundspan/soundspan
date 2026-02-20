@@ -153,6 +153,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                             alt={track.title}
                                             width={40}
                                             height={40}
+                                            sizes="40px"
                                             className="object-cover"
                                             unoptimized
                                         />

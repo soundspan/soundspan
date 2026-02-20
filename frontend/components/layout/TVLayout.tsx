@@ -203,7 +203,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             {/* Nav */}
             <header className="tv-nav">
                 <Link href="/" className="tv-logo">
-                    <Image src="/assets/images/soundspan.webp" alt={BRAND_NAME} width={24} height={24} />
+                    <Image src="/assets/images/soundspan.webp" alt={BRAND_NAME} width={24} height={24} sizes="24px" />
                     <span className="brand-wordmark">{BRAND_NAME}</span>
                 </Link>
 
@@ -248,7 +248,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             {hasMedia && (
                 <div className="tv-now-playing-bar">
                     {coverUrl && (
-                        <Image src={coverUrl} alt={title} width={48} height={48} className="tv-np-cover" />
+                        <Image src={coverUrl} alt={title} width={48} height={48} sizes="48px" className="tv-np-cover" />
                     )}
                     <div className="tv-np-info">
                         <div className="tv-np-title">{title}</div>

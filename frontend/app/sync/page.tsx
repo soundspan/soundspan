@@ -166,6 +166,7 @@ export default function SyncPage() {
                                             alt={BRAND_NAME}
                                             width={80}
                                             height={80}
+                                            sizes="80px"
                                             className="relative z-10"
                                         />
                                     </div>
