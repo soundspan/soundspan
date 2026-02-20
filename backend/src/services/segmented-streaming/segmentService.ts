@@ -24,8 +24,13 @@ const DASH_QUALITY_BITRATES: Record<SegmentedDashQuality, number> = {
 const SOURCE_URL_REGEX = /^https?:\/\//i;
 const LOSSLESS_FILE_EXTENSION_REGEX =
     /\.(flac|wav|aiff|aif|alac|ape|wv|tta|dff|dsf)$/i;
+const DASH_UNRECOGNIZED_OPTION_PATTERNS = {
+    "-ldash": /Unrecognized option 'ldash'\./i,
+    "-streaming": /Unrecognized option 'streaming'\./i,
+} as const;
 
 type DashSegmentContainer = "fmp4" | "webm";
+type DashCompatibilityFlag = keyof typeof DASH_UNRECOGNIZED_OPTION_PATTERNS;
 
 interface DashEncodingPlan {
     audioCodec: "aac" | "flac";
@@ -51,6 +56,40 @@ const summarizeStderr = (value: string): string => {
     }
     return `${trimmed.slice(0, 297)}...`;
 };
+
+const removeDashFlagWithValue = (
+    ffmpegArgs: string[],
+    flag: DashCompatibilityFlag,
+): string[] => {
+    const nextArgs: string[] = [];
+    for (let index = 0; index < ffmpegArgs.length; index += 1) {
+        const arg = ffmpegArgs[index];
+        if (arg !== flag) {
+            nextArgs.push(arg);
+            continue;
+        }
+
+        const nextArg = ffmpegArgs[index + 1];
+        if (typeof nextArg === "string" && !nextArg.startsWith("-")) {
+            index += 1;
+        }
+    }
+    return nextArgs;
+};
+
+class DashSegmentGenerationError extends Error {
+    readonly exitCode: number | null;
+    readonly stderr: string;
+
+    constructor(exitCode: number | null, stderr: string) {
+        super(
+            `DASH segment generation failed with exit code ${exitCode}: ${stderr.trim() || "no stderr output"}`,
+        );
+        this.name = "DashSegmentGenerationError";
+        this.exitCode = exitCode;
+        this.stderr = stderr;
+    }
+}
 
 export interface EnsureLocalDashSegmentsInput {
     trackId: string;
@@ -264,75 +303,13 @@ class SegmentedSegmentService {
             ensureDirMs,
         });
 
-        const ffmpegStartedAtMs = Date.now();
-        await new Promise<void>((resolve, reject) => {
-            const ffmpegProc = spawn(ffmpegPath.path, ffmpegArgs, {
-                cwd: params.outputDir,
-                stdio: ["ignore", "ignore", "pipe"],
-            });
-
-            let stderrBuffer = "";
-            const timeoutId = setTimeout(() => {
-                ffmpegProc.kill("SIGKILL");
-                const timeoutError = new Error(
-                    `DASH segment generation timed out after ${FFMPEG_TIMEOUT_MS}ms`,
-                );
-                logSegmentedStreamingTrace("asset.generate.ffmpeg_timeout", {
-                    trackId: params.trackId,
-                    quality: params.quality,
-                    sourceKind,
-                    cacheKey: params.cacheKey,
-                    ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
-                });
-                reject(timeoutError);
-            }, FFMPEG_TIMEOUT_MS);
-
-            ffmpegProc.stderr.on("data", (chunk: Buffer) => {
-                stderrBuffer += chunk.toString("utf8");
-            });
-
-            ffmpegProc.on("error", (error) => {
-                clearTimeout(timeoutId);
-                logSegmentedStreamingTrace("asset.generate.ffmpeg_spawn_error", {
-                    trackId: params.trackId,
-                    quality: params.quality,
-                    sourceKind,
-                    cacheKey: params.cacheKey,
-                    ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
-                    ...toSegmentedTraceErrorFields(error),
-                });
-                reject(error);
-            });
-
-            ffmpegProc.on("close", async (code) => {
-                clearTimeout(timeoutId);
-                if (code === 0) {
-                    logSegmentedStreamingTrace("asset.generate.ffmpeg_success", {
-                        trackId: params.trackId,
-                        quality: params.quality,
-                        sourceKind,
-                        cacheKey: params.cacheKey,
-                        ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
-                    });
-                    resolve();
-                    return;
-                }
-
-                logSegmentedStreamingTrace("asset.generate.ffmpeg_exit_error", {
-                    trackId: params.trackId,
-                    quality: params.quality,
-                    sourceKind,
-                    cacheKey: params.cacheKey,
-                    exitCode: code,
-                    ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
-                    stderr: summarizeStderr(stderrBuffer),
-                });
-                reject(
-                    new Error(
-                        `DASH segment generation failed with exit code ${code}: ${stderrBuffer.trim() || "no stderr output"}`,
-                    ),
-                );
-            });
+        await this.runFfmpegWithCompatibilityFallback({
+            trackId: params.trackId,
+            quality: params.quality,
+            sourceKind,
+            cacheKey: params.cacheKey,
+            outputDir: params.outputDir,
+            ffmpegArgs,
         });
 
         if (!(await segmentedStreamingCacheService.hasDashManifest(params.cacheKey))) {
@@ -360,6 +337,153 @@ class SegmentedSegmentService {
             manifestPath: params.manifestPath,
             quality: params.quality,
         };
+    }
+
+    private async runFfmpegWithCompatibilityFallback(params: {
+        trackId: string;
+        quality: SegmentedDashQuality;
+        sourceKind: "local" | "remote";
+        cacheKey: string;
+        outputDir: string;
+        ffmpegArgs: string[];
+    }): Promise<void> {
+        const attemptedFallbackFlags = new Set<DashCompatibilityFlag>();
+        let ffmpegArgs = params.ffmpegArgs;
+
+        while (true) {
+            try {
+                await this.runDashFfmpegProcess({
+                    ...params,
+                    ffmpegArgs,
+                });
+                return;
+            } catch (error) {
+                const unsupportedFlag = this.resolveUnsupportedDashFlag({
+                    error,
+                    ffmpegArgs,
+                    attemptedFallbackFlags,
+                });
+
+                if (!unsupportedFlag) {
+                    throw error;
+                }
+
+                attemptedFallbackFlags.add(unsupportedFlag);
+                ffmpegArgs = removeDashFlagWithValue(ffmpegArgs, unsupportedFlag);
+                logSegmentedStreamingTrace("asset.generate.ffmpeg_retry_without_flag", {
+                    trackId: params.trackId,
+                    quality: params.quality,
+                    sourceKind: params.sourceKind,
+                    cacheKey: params.cacheKey,
+                    removedFlag: unsupportedFlag,
+                    fallbackAttempt: attemptedFallbackFlags.size,
+                });
+            }
+        }
+    }
+
+    private async runDashFfmpegProcess(params: {
+        trackId: string;
+        quality: SegmentedDashQuality;
+        sourceKind: "local" | "remote";
+        cacheKey: string;
+        outputDir: string;
+        ffmpegArgs: string[];
+    }): Promise<void> {
+        const ffmpegStartedAtMs = Date.now();
+        await new Promise<void>((resolve, reject) => {
+            const ffmpegProc = spawn(ffmpegPath.path, params.ffmpegArgs, {
+                cwd: params.outputDir,
+                stdio: ["ignore", "ignore", "pipe"],
+            });
+
+            let stderrBuffer = "";
+            const timeoutId = setTimeout(() => {
+                ffmpegProc.kill("SIGKILL");
+                const timeoutError = new Error(
+                    `DASH segment generation timed out after ${FFMPEG_TIMEOUT_MS}ms`,
+                );
+                logSegmentedStreamingTrace("asset.generate.ffmpeg_timeout", {
+                    trackId: params.trackId,
+                    quality: params.quality,
+                    sourceKind: params.sourceKind,
+                    cacheKey: params.cacheKey,
+                    ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
+                });
+                reject(timeoutError);
+            }, FFMPEG_TIMEOUT_MS);
+
+            ffmpegProc.stderr.on("data", (chunk: Buffer) => {
+                stderrBuffer += chunk.toString("utf8");
+            });
+
+            ffmpegProc.on("error", (error) => {
+                clearTimeout(timeoutId);
+                logSegmentedStreamingTrace("asset.generate.ffmpeg_spawn_error", {
+                    trackId: params.trackId,
+                    quality: params.quality,
+                    sourceKind: params.sourceKind,
+                    cacheKey: params.cacheKey,
+                    ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
+                    ...toSegmentedTraceErrorFields(error),
+                });
+                reject(error);
+            });
+
+            ffmpegProc.on("close", (code) => {
+                clearTimeout(timeoutId);
+                if (code === 0) {
+                    logSegmentedStreamingTrace("asset.generate.ffmpeg_success", {
+                        trackId: params.trackId,
+                        quality: params.quality,
+                        sourceKind: params.sourceKind,
+                        cacheKey: params.cacheKey,
+                        ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
+                    });
+                    resolve();
+                    return;
+                }
+
+                logSegmentedStreamingTrace("asset.generate.ffmpeg_exit_error", {
+                    trackId: params.trackId,
+                    quality: params.quality,
+                    sourceKind: params.sourceKind,
+                    cacheKey: params.cacheKey,
+                    exitCode: code,
+                    ffmpegMs: segmentedTraceDurationMs(ffmpegStartedAtMs),
+                    stderr: summarizeStderr(stderrBuffer),
+                });
+                reject(new DashSegmentGenerationError(code, stderrBuffer));
+            });
+        });
+    }
+
+    private resolveUnsupportedDashFlag(params: {
+        error: unknown;
+        ffmpegArgs: string[];
+        attemptedFallbackFlags: Set<DashCompatibilityFlag>;
+    }): DashCompatibilityFlag | null {
+        if (!(params.error instanceof DashSegmentGenerationError)) {
+            return null;
+        }
+
+        const stderr = params.error.stderr;
+        const orderedFlags = Object.keys(
+            DASH_UNRECOGNIZED_OPTION_PATTERNS,
+        ) as DashCompatibilityFlag[];
+        for (const flag of orderedFlags) {
+            if (!params.ffmpegArgs.includes(flag)) {
+                continue;
+            }
+            if (params.attemptedFallbackFlags.has(flag)) {
+                continue;
+            }
+            if (DASH_UNRECOGNIZED_OPTION_PATTERNS[flag].test(stderr)) {
+                return flag;
+            }
+        }
+
+        return null;
     }
 
     private resolveDashEncodingPlan(params: {

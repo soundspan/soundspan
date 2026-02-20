@@ -147,6 +147,55 @@ describe("segmentedSegmentService", () => {
         await wait(0);
     });
 
+    it("retries generation without -ldash when ffmpeg build does not support it", async () => {
+        const { segmentedSegmentService, mocks } = await resolveSegmentService();
+        const firstFfmpegProcess = createMockFfmpegProcess();
+        const secondFfmpegProcess = createMockFfmpegProcess();
+
+        mocks.mockBuildDashCacheKey.mockReturnValue("cache-compat");
+        mocks.mockGetDashAssetPaths.mockReturnValue({
+            cacheKey: "cache-compat",
+            outputDir: "/tmp/cache-compat",
+            manifestPath: "/tmp/cache-compat/manifest.mpd",
+        });
+        mocks.mockHasDashManifest.mockResolvedValueOnce(false).mockResolvedValue(true);
+        mocks.mockEnsureDashAssetDirectory.mockResolvedValue(undefined);
+        mocks.mockSpawn
+            .mockReturnValueOnce(firstFfmpegProcess)
+            .mockReturnValueOnce(secondFfmpegProcess);
+
+        await segmentedSegmentService.ensureLocalDashSegments({
+            trackId: "track-compat",
+            sourcePath: "/music/track-compat.flac",
+            sourceModified: new Date("2026-02-20T00:00:00.000Z"),
+            quality: "original",
+        });
+        await wait(0);
+
+        const firstFfmpegArgs = mocks.mockSpawn.mock.calls[0][1] as string[];
+        expect(firstFfmpegArgs).toContain("-ldash");
+
+        firstFfmpegProcess.stderr.emit(
+            "data",
+            Buffer.from("Unrecognized option 'ldash'.\n"),
+        );
+        firstFfmpegProcess.emit("close", 1);
+        await wait(0);
+
+        const secondFfmpegArgs = mocks.mockSpawn.mock.calls[1][1] as string[];
+        expect(secondFfmpegArgs).not.toContain("-ldash");
+        expect(secondFfmpegArgs).toContain("-streaming");
+        expect(secondFfmpegArgs).toContain("1");
+
+        secondFfmpegProcess.emit("close", 0);
+        await wait(0);
+
+        expect(mocks.mockSpawn).toHaveBeenCalledTimes(2);
+        expect(
+            segmentedSegmentService.getBuildFailure("cache-compat"),
+        ).toBeNull();
+    });
+
     it("keeps AAC transcoding for non-original quality selections", async () => {
         const { segmentedSegmentService, mocks } = await resolveSegmentService();
         const ffmpegProcess = createMockFfmpegProcess();
