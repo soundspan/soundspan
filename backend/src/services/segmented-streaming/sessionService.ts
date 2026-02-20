@@ -11,6 +11,7 @@ import {
     type SegmentedManifestQuality,
 } from "./manifestService";
 import { segmentedStreamingCacheService } from "./cacheService";
+import { segmentedSegmentService } from "./segmentService";
 import {
     tidalSegmentedProviderAdapter,
 } from "./providerAdapters/tidalAdapter";
@@ -29,6 +30,8 @@ const SESSION_TOKEN_TYPE = "segmented-streaming-session-v1";
 const SESSION_TOKEN_SECRET =
     process.env.JWT_SECRET || process.env.SESSION_SECRET || config.sessionSecret;
 export const SEGMENTED_SESSION_TOKEN_QUERY_PARAM = "st";
+const ASSET_READY_POLL_INTERVAL_MS = 75;
+const ASSET_READY_TIMEOUT_MS = 20_000;
 
 const SEGMENTED_QUALITY_VALUES = [
     "original",
@@ -84,8 +87,8 @@ export interface SegmentedSessionResponse {
     playbackProfile: {
         protocol: "dash";
         sourceType: SegmentedSessionSourceType;
-        codec: "aac";
-        bitrateKbps: number;
+        codec: "aac" | "source";
+        bitrateKbps: number | null;
     };
     engineHints: {
         protocol: "dash";
@@ -144,7 +147,10 @@ class SegmentedSessionService {
         let sourceAccessMs: number | undefined;
         let assetBuildMs: number | undefined;
         let persistMs: number | undefined;
-        const quality = normalizeQuality(input.desiredQuality);
+        const quality = await this.resolveQualityForUser(
+            input.userId,
+            input.desiredQuality,
+        );
 
         try {
             const trackLookupStartedAtMs = Date.now();
@@ -259,7 +265,10 @@ class SegmentedSessionService {
         let phase = "provider_asset";
         let providerAssetMs: number | undefined;
         let persistMs: number | undefined;
-        const quality = normalizeQuality(input.desiredQuality);
+        const quality = await this.resolveQualityForUser(
+            input.userId,
+            input.desiredQuality,
+        );
 
         try {
             const providerAssetStartedAtMs = Date.now();
@@ -335,7 +344,10 @@ class SegmentedSessionService {
         let phase = "provider_asset";
         let providerAssetMs: number | undefined;
         let persistMs: number | undefined;
-        const quality = normalizeQuality(input.desiredQuality);
+        const quality = await this.resolveQualityForUser(
+            input.userId,
+            input.desiredQuality,
+        );
 
         try {
             const providerAssetStartedAtMs = Date.now();
@@ -555,6 +567,19 @@ class SegmentedSessionService {
         return resolved;
     }
 
+    async waitForManifestReady(session: SegmentedSessionRecord): Promise<void> {
+        await this.waitForAssetFile(session, session.manifestPath, "manifest");
+    }
+
+    async waitForSegmentReady(
+        session: SegmentedSessionRecord,
+        segmentName: string,
+    ): Promise<string> {
+        const segmentPath = this.resolveSegmentPath(session, segmentName);
+        await this.waitForAssetFile(session, segmentPath, "segment");
+        return segmentPath;
+    }
+
     private async persistSession(session: SegmentedSessionRecord): Promise<void> {
         const key = this.getSessionKey(session.sessionId);
         this.inMemorySessions.set(session.sessionId, session);
@@ -632,7 +657,7 @@ class SegmentedSessionService {
             playbackProfile: {
                 protocol: "dash",
                 sourceType: session.sourceType,
-                codec: "aac",
+                codec: qualityToPlaybackCodec(session.quality),
                 bitrateKbps: qualityToBitrateKbps(session.quality),
             },
             engineHints: {
@@ -690,11 +715,92 @@ class SegmentedSessionService {
             );
         }
     }
+
+    private async resolveQualityForUser(
+        userId: string,
+        desiredQuality: string | null | undefined,
+    ): Promise<SegmentedSessionQuality> {
+        const explicitQuality = normalizeQuality(desiredQuality);
+        if (explicitQuality) {
+            return explicitQuality;
+        }
+
+        try {
+            const userSettings = await prisma.userSettings.findUnique({
+                where: { userId },
+                select: {
+                    playbackQuality: true,
+                },
+            });
+            const settingsQuality = normalizeQuality(userSettings?.playbackQuality);
+            if (settingsQuality) {
+                return settingsQuality;
+            }
+        } catch (error) {
+            logger.warn(
+                "[SegmentedStreaming] Failed to read playback quality from user settings, using fallback",
+                error,
+            );
+        }
+
+        return "medium";
+    }
+
+    private async waitForAssetFile(
+        session: SegmentedSessionRecord,
+        assetPath: string,
+        assetType: "manifest" | "segment",
+    ): Promise<void> {
+        if (await pathExists(assetPath)) {
+            return;
+        }
+
+        const deadlineAtMs = Date.now() + ASSET_READY_TIMEOUT_MS;
+
+        while (Date.now() < deadlineAtMs) {
+            const buildFailure = segmentedSegmentService.getBuildFailure(
+                session.cacheKey,
+            );
+            if (buildFailure) {
+                throw new SegmentedSessionError(
+                    `Streaming ${assetType} build failed: ${buildFailure.message}`,
+                    502,
+                    "STREAMING_ASSET_BUILD_FAILED",
+                );
+            }
+
+            if (await pathExists(assetPath)) {
+                return;
+            }
+
+            if (!segmentedSegmentService.hasInFlightBuild(session.cacheKey)) {
+                throw new SegmentedSessionError(
+                    assetType === "manifest"
+                        ? "Manifest not found"
+                        : "Segment not found",
+                    404,
+                    assetType === "manifest"
+                        ? "STREAMING_MANIFEST_NOT_FOUND"
+                        : "STREAMING_SEGMENT_NOT_FOUND",
+                );
+            }
+
+            await wait(ASSET_READY_POLL_INTERVAL_MS);
+        }
+
+        throw new SegmentedSessionError(
+            assetType === "manifest"
+                ? "Manifest is still being prepared"
+                : "Segment is still being prepared",
+            503,
+            "STREAMING_ASSET_NOT_READY",
+        );
+    }
 }
 
 const normalizeQuality = (
     quality: string | null | undefined,
-): SegmentedSessionQuality => {
+): SegmentedSessionQuality | null => {
     const normalized = quality?.trim().toLowerCase();
     if (
         normalized === "original" ||
@@ -704,11 +810,25 @@ const normalizeQuality = (
     ) {
         return normalized;
     }
-    return "medium";
+    return null;
 };
 
-const qualityToBitrateKbps = (quality: SegmentedSessionQuality): number => {
-    if (quality === "original" || quality === "high") {
+const qualityToPlaybackCodec = (
+    quality: SegmentedSessionQuality,
+): "aac" | "source" => {
+    if (quality === "original") {
+        return "source";
+    }
+    return "aac";
+};
+
+const qualityToBitrateKbps = (
+    quality: SegmentedSessionQuality,
+): number | null => {
+    if (quality === "original") {
+        return null;
+    }
+    if (quality === "high") {
         return 320;
     }
     if (quality === "low") {
@@ -797,6 +917,21 @@ const parseTidalTrackId = (trackId: string): number => {
         );
     }
     return parsed;
+};
+
+const wait = async (durationMs: number): Promise<void> => {
+    await new Promise<void>((resolve) => {
+        setTimeout(resolve, durationMs);
+    });
+};
+
+const pathExists = async (candidatePath: string): Promise<boolean> => {
+    try {
+        await fsPromises.access(candidatePath);
+        return true;
+    } catch {
+        return false;
+    }
 };
 
 export const segmentedStreamingSessionService = new SegmentedSessionService();

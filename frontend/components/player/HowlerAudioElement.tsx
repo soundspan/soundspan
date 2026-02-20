@@ -3,7 +3,7 @@
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { api } from "@/lib/api";
+import { api, type SegmentedStreamingSessionResponse } from "@/lib/api";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import { resolveStreamingEngineMode } from "@/lib/audio-engine/howlerEngineAdapter";
 import type { AudioEngineSource } from "@/lib/audio-engine/types";
@@ -197,6 +197,7 @@ const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
 const AUTO_MATCH_VIBE_RETRY_COOLDOWN_MS = 8000;
 const SEGMENTED_HEARTBEAT_INTERVAL_MS = 15_000;
 const SEGMENTED_HANDOFF_MAX_ATTEMPTS = 2;
+const SEGMENTED_PREWARM_EXPIRY_GUARD_MS = 8_000;
 const howlerEngine = createRuntimeAudioEngine();
 
 interface ActiveSegmentedSessionSnapshot {
@@ -207,6 +208,20 @@ interface ActiveSegmentedSessionSnapshot {
     manifestUrl: string;
     expiresAt: string;
 }
+
+const buildSegmentedSessionKey = (context: SegmentedTrackContext): string =>
+    `${context.sourceType}:${context.sessionTrackId}`;
+
+const isSegmentedSessionUsable = (
+    session: Pick<SegmentedStreamingSessionResponse, "expiresAt">,
+): boolean => {
+    const expiresAtMs = Date.parse(session.expiresAt);
+    if (!Number.isFinite(expiresAtMs)) {
+        return false;
+    }
+
+    return expiresAtMs - Date.now() > SEGMENTED_PREWARM_EXPIRY_GUARD_MS;
+};
 
 /**
  * HowlerAudioElement - Unified audio playback using Howler.js
@@ -282,8 +297,11 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     const seekDebounceRef = useRef<NodeJS.Timeout | null>(null);
     const pendingSeekTimeRef = useRef<number | null>(null);
     // Preload management
-    const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastPreloadedTrackIdRef = useRef<string | null>(null);
+    const prewarmedSegmentedSessionRef = useRef<
+        Map<string, SegmentedStreamingSessionResponse>
+    >(new Map());
+    const segmentedPrewarmInFlightRef = useRef<Set<string>>(new Set());
     const pendingTrackErrorSkipRef = useRef<NodeJS.Timeout | null>(null);
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
     const currentTrackRef = useRef(currentTrack);
@@ -1566,12 +1584,33 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
 
                 try {
                     const segmentedInitStartedAtMs = Date.now();
-                    const segmentedSession = await api.createSegmentedStreamingSession(
-                        {
-                            trackId: segmentedTrackContext.sessionTrackId,
-                            sourceType: segmentedTrackContext.sourceType,
-                        }
+                    const segmentedSessionKey = buildSegmentedSessionKey(
+                        segmentedTrackContext,
                     );
+                    const prewarmedSession =
+                        prewarmedSegmentedSessionRef.current.get(
+                            segmentedSessionKey,
+                        );
+                    let segmentedSession: SegmentedStreamingSessionResponse;
+                    let initSource: "prewarm" | "create";
+                    if (prewarmedSession && isSegmentedSessionUsable(prewarmedSession)) {
+                        segmentedSession = prewarmedSession;
+                        prewarmedSegmentedSessionRef.current.delete(
+                            segmentedSessionKey,
+                        );
+                        initSource = "prewarm";
+                    } else {
+                        prewarmedSegmentedSessionRef.current.delete(
+                            segmentedSessionKey,
+                        );
+                        segmentedSession = await api.createSegmentedStreamingSession(
+                            {
+                                trackId: segmentedTrackContext.sessionTrackId,
+                                sourceType: segmentedTrackContext.sourceType,
+                            }
+                        );
+                        initSource = "create";
+                    }
                     if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
                         return;
                     }
@@ -1625,6 +1664,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                             segmentedSession.engineHints?.sourceType ??
                             segmentedTrackContext.sourceType,
                         sessionId: segmentedSession.sessionId,
+                        initSource,
                         latencyMs: Math.max(0, Date.now() - segmentedInitStartedAtMs),
                     });
                     segmentedHandoffAttemptRef.current = 0;
@@ -1842,10 +1882,10 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             return;
         }
 
-        // Clear any pending preload timeout
-        if (preloadTimeoutRef.current) {
-            clearTimeout(preloadTimeoutRef.current);
-            preloadTimeoutRef.current = null;
+        for (const [sessionKey, session] of prewarmedSegmentedSessionRef.current) {
+            if (!isSegmentedSessionUsable(session)) {
+                prewarmedSegmentedSessionRef.current.delete(sessionKey);
+            }
         }
 
         const nextTrack = getNextTrackInfo(
@@ -1861,41 +1901,94 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             return;
         }
 
-        // Preload after 2 seconds of playback to avoid preloading during rapid skipping
-        preloadTimeoutRef.current = setTimeout(() => {
-            let streamUrl: string;
-            let format = "mp3";
+        let streamUrl: string;
+        let format = "mp3";
 
-            if (nextTrack.streamSource === "tidal" && nextTrack.tidalTrackId) {
-                streamUrl = api.getTidalStreamUrl(nextTrack.tidalTrackId);
-                format = "mp4";
-            } else if (nextTrack.streamSource === "youtube" && nextTrack.youtubeVideoId) {
-                streamUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId);
-                format = "mp4";
-            } else {
-                streamUrl = api.getStreamUrl(nextTrack.id);
-                // Determine format from file path
-                const filePath = nextTrack.filePath || "";
-                if (filePath) {
-                    const ext = filePath.split(".").pop()?.toLowerCase();
-                    if (ext === "flac") format = "flac";
-                    else if (ext === "m4a" || ext === "aac") format = "mp4";
-                    else if (ext === "ogg" || ext === "opus") format = "webm";
-                    else if (ext === "wav") format = "wav";
+        if (nextTrack.streamSource === "tidal" && nextTrack.tidalTrackId) {
+            streamUrl = api.getTidalStreamUrl(nextTrack.tidalTrackId);
+            format = "mp4";
+        } else if (
+            nextTrack.streamSource === "youtube" &&
+            nextTrack.youtubeVideoId
+        ) {
+            streamUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId);
+            format = "mp4";
+        } else {
+            streamUrl = api.getStreamUrl(nextTrack.id);
+            // Determine format from file path
+            const filePath = nextTrack.filePath || "";
+            if (filePath) {
+                const ext = filePath.split(".").pop()?.toLowerCase();
+                if (ext === "flac") format = "flac";
+                else if (ext === "m4a" || ext === "aac") format = "mp4";
+                else if (ext === "ogg" || ext === "opus") format = "webm";
+                else if (ext === "wav") format = "wav";
+            }
+        }
+
+        howlerEngine.preload(streamUrl, format);
+        lastPreloadedTrackIdRef.current = nextTrack.id;
+
+        const nextSegmentedTrackContext = resolveSegmentedTrackContext(nextTrack);
+        const shouldPrewarmSegmentedSession =
+            Boolean(nextSegmentedTrackContext) &&
+            !getListenTogetherSessionSnapshot()?.groupId &&
+            resolveStreamingEngineMode() !== "howler-rollback";
+
+        if (!shouldPrewarmSegmentedSession || !nextSegmentedTrackContext) {
+            return;
+        }
+
+        const nextSessionKey = buildSegmentedSessionKey(nextSegmentedTrackContext);
+        const existingPrewarmedSession =
+            prewarmedSegmentedSessionRef.current.get(nextSessionKey);
+        if (
+            existingPrewarmedSession &&
+            isSegmentedSessionUsable(existingPrewarmedSession)
+        ) {
+            return;
+        }
+        if (segmentedPrewarmInFlightRef.current.has(nextSessionKey)) {
+            return;
+        }
+
+        prewarmedSegmentedSessionRef.current.delete(nextSessionKey);
+        segmentedPrewarmInFlightRef.current.add(nextSessionKey);
+        void api
+            .createSegmentedStreamingSession({
+                trackId: nextSegmentedTrackContext.sessionTrackId,
+                sourceType: nextSegmentedTrackContext.sourceType,
+            })
+            .then((session) => {
+                if (!isSegmentedSessionUsable(session)) {
+                    return;
                 }
-            }
-
-            howlerEngine.preload(streamUrl, format);
-            lastPreloadedTrackIdRef.current = nextTrack.id;
-        }, 2000);
-
-        return () => {
-            if (preloadTimeoutRef.current) {
-                clearTimeout(preloadTimeoutRef.current);
-                preloadTimeoutRef.current = null;
-            }
-        };
-    }, [playbackType, currentTrack, isPlaying, queue, currentIndex, isShuffle, shuffleIndices, repeatMode]);
+                prewarmedSegmentedSessionRef.current.set(nextSessionKey, session);
+                logSegmentedClientMetric("session.prewarm_success", {
+                    trackId: nextTrack.id,
+                    sourceType: nextSegmentedTrackContext.sourceType,
+                    sessionId: session.sessionId,
+                });
+            })
+            .catch((error) => {
+                console.warn(
+                    "[HowlerAudioElement] Segmented prewarm failed for next track:",
+                    error,
+                );
+            })
+            .finally(() => {
+                segmentedPrewarmInFlightRef.current.delete(nextSessionKey);
+            });
+    }, [
+        playbackType,
+        currentTrack,
+        isPlaying,
+        queue,
+        currentIndex,
+        isShuffle,
+        shuffleIndices,
+        repeatMode,
+    ]);
 
     // Check podcast cache status and control canSeek
     useEffect(() => {
@@ -2448,6 +2541,8 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
 
     // Cleanup on unmount
     useEffect(() => {
+        const prewarmedSegmentedSessions = prewarmedSegmentedSessionRef.current;
+        const segmentedPrewarmInFlight = segmentedPrewarmInFlightRef.current;
         return () => {
             howlerEngine.stop();
 
@@ -2475,10 +2570,9 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 cachePollingLoadListenerRef.current = null;
             }
             // Clean up preload refs
-            if (preloadTimeoutRef.current) {
-                clearTimeout(preloadTimeoutRef.current);
-            }
             lastPreloadedTrackIdRef.current = null;
+            prewarmedSegmentedSessions.clear();
+            segmentedPrewarmInFlight.clear();
         };
     }, [
         clearPendingTrackErrorSkip,

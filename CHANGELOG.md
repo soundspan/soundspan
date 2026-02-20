@@ -17,10 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Segmented streaming engine control now uses runtime `STREAMING_ENGINE_MODE` injection (`videojs` default, explicit `howler-rollback` opt-in) so prebuilt images can roll back without rebuilds.
 - Segmented streaming cache location now supports `SEGMENTED_STREAMING_CACHE_PATH` and defaults to `TRANSCODE_CACHE_PATH` when unset.
+- Segmented session creation now returns immediately and continues DASH asset generation in the background, with manifest/segment routes waiting for asset readiness instead of failing fast on startup races.
+- Segmented playback session quality now defaults to each user’s saved playback-quality setting when the frontend does not explicitly pass a quality value.
+- Next-track segmented playback now prewarms immediately and reuses prewarmed session manifests/tokens on track handoff.
 
 ### Fixed
 
 - Recovery after segmented playback disruption now keeps local player state authoritative for resume position and play/pause intent.
+- `original` segmented quality now preserves lossless local sources via copy/remux (`-c:a copy`) instead of forcing lossy AAC transcoding.
 
 ## [1.1.2] - 2026-02-20
 

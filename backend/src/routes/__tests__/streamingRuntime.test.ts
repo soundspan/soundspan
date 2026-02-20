@@ -1,13 +1,5 @@
 import { Request, Response } from "express";
 
-const mockFsAccess = jest.fn();
-
-jest.mock("fs", () => ({
-    promises: {
-        access: (...args: unknown[]) => mockFsAccess(...args),
-    },
-}));
-
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
 }));
@@ -39,7 +31,8 @@ const mockGetAuthorizedSession = jest.fn();
 const mockValidateSessionToken = jest.fn();
 const mockHeartbeatSession = jest.fn();
 const mockCreateHandoffSession = jest.fn();
-const mockResolveSegmentPath = jest.fn();
+const mockWaitForManifestReady = jest.fn();
+const mockWaitForSegmentReady = jest.fn();
 const mockGetRuntimeDrainState = jest.fn();
 
 jest.mock("../../utils/runtimeLifecycle", () => ({
@@ -61,7 +54,10 @@ jest.mock("../../services/segmented-streaming/sessionService", () => ({
         heartbeatSession: (...args: unknown[]) => mockHeartbeatSession(...args),
         createHandoffSession: (...args: unknown[]) =>
             mockCreateHandoffSession(...args),
-        resolveSegmentPath: (...args: unknown[]) => mockResolveSegmentPath(...args),
+        waitForManifestReady: (...args: unknown[]) =>
+            mockWaitForManifestReady(...args),
+        waitForSegmentReady: (...args: unknown[]) =>
+            mockWaitForSegmentReady(...args),
     },
 }));
 
@@ -132,10 +128,11 @@ describe("streaming route runtime", () => {
         mockValidateSessionToken.mockReset();
         mockHeartbeatSession.mockReset();
         mockCreateHandoffSession.mockReset();
-        mockResolveSegmentPath.mockReset();
+        mockWaitForManifestReady.mockReset();
+        mockWaitForSegmentReady.mockReset();
         mockGetRuntimeDrainState.mockReset();
-        mockFsAccess.mockReset();
-        mockFsAccess.mockResolvedValue(undefined);
+        mockWaitForManifestReady.mockResolvedValue(undefined);
+        mockWaitForSegmentReady.mockResolvedValue("/tmp/assets/chunk-0-00001.m4s");
         mockValidateSessionToken.mockImplementation(() => {});
         mockGetRuntimeDrainState.mockReturnValue(false);
     });
@@ -312,7 +309,7 @@ describe("streaming route runtime", () => {
 
         expect(mockGetAuthorizedSession).toHaveBeenCalledWith("session-1", "user-1");
         expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
-        expect(mockFsAccess).toHaveBeenCalledWith("/tmp/manifest.mpd");
+        expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
         expect(res.sendFile).toHaveBeenCalledWith("/tmp/manifest.mpd");
     });
 
@@ -352,7 +349,7 @@ describe("streaming route runtime", () => {
             error: "Session token is required",
             code: "STREAMING_SESSION_TOKEN_REQUIRED",
         });
-        expect(mockFsAccess).not.toHaveBeenCalled();
+        expect(mockWaitForManifestReady).not.toHaveBeenCalled();
     });
 
     it("returns 404 when manifest session is not found", async () => {
@@ -398,7 +395,7 @@ describe("streaming route runtime", () => {
 
         expect(mockGetAuthorizedSession).toHaveBeenCalledWith("session-1", "user-1");
         expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
-        expect(mockFsAccess).toHaveBeenCalledWith("/tmp/manifest.mpd");
+        expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
         expect(res.sendFile).toHaveBeenCalledWith("/tmp/manifest.mpd");
     });
 
@@ -536,10 +533,6 @@ describe("streaming route runtime", () => {
             expiresAt: "2099-01-01T00:05:00.000Z",
         };
         mockGetAuthorizedSession.mockResolvedValueOnce(session);
-        mockResolveSegmentPath.mockReturnValueOnce(
-            "/tmp/assets/chunk-0-00001.m4s",
-        );
-
         const req = {
             user: { id: "user-1" },
             params: {
@@ -553,8 +546,10 @@ describe("streaming route runtime", () => {
         await getSegment(req, res);
 
         expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
-        expect(mockResolveSegmentPath).toHaveBeenCalled();
-        expect(mockFsAccess).toHaveBeenCalledWith("/tmp/assets/chunk-0-00001.m4s");
+        expect(mockWaitForSegmentReady).toHaveBeenCalledWith(
+            session,
+            "chunk-0-00001.m4s",
+        );
         expect(res.sendFile).toHaveBeenCalledWith("/tmp/assets/chunk-0-00001.m4s");
     });
 
@@ -570,7 +565,7 @@ describe("streaming route runtime", () => {
             createdAt: "2099-01-01T00:00:00.000Z",
             expiresAt: "2099-01-01T00:05:00.000Z",
         });
-        mockResolveSegmentPath.mockImplementationOnce(() => {
+        mockWaitForSegmentReady.mockImplementationOnce(() => {
             throw new SegmentedSessionError(
                 "Invalid segment file name",
                 400,
@@ -610,9 +605,7 @@ describe("streaming route runtime", () => {
             expiresAt: "2099-01-01T00:05:00.000Z",
         };
         mockGetAuthorizedSession.mockResolvedValueOnce(session);
-        mockResolveSegmentPath.mockReturnValueOnce(
-            "/tmp/assets/chunk-0-00002.m4s",
-        );
+        mockWaitForSegmentReady.mockResolvedValueOnce("/tmp/assets/chunk-0-00002.m4s");
 
         const req = {
             user: { id: "user-1" },
@@ -628,11 +621,10 @@ describe("streaming route runtime", () => {
         await getSegmentAlias(req, res);
 
         expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
-        expect(mockResolveSegmentPath).toHaveBeenCalledWith(
+        expect(mockWaitForSegmentReady).toHaveBeenCalledWith(
             session,
             "chunk-0-00002.m4s",
         );
-        expect(mockFsAccess).toHaveBeenCalledWith("/tmp/assets/chunk-0-00002.m4s");
         expect(res.sendFile).toHaveBeenCalledWith("/tmp/assets/chunk-0-00002.m4s");
     });
 });

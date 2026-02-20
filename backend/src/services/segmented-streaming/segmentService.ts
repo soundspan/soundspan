@@ -12,6 +12,7 @@ import {
 } from "./trace";
 
 const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
+const BUILD_FAILURE_RETENTION_MS = 60_000;
 
 const DASH_QUALITY_BITRATES: Record<SegmentedDashQuality, number> = {
     original: 320,
@@ -21,6 +22,8 @@ const DASH_QUALITY_BITRATES: Record<SegmentedDashQuality, number> = {
 };
 
 const SOURCE_URL_REGEX = /^https?:\/\//i;
+const LOSSLESS_FILE_EXTENSION_REGEX =
+    /\.(flac|wav|aiff|aif|alac|ape|wv|tta|dff|dsf)$/i;
 
 const resolveSourceKind = (sourcePath: string): "local" | "remote" =>
     SOURCE_URL_REGEX.test(sourcePath) ? "remote" : "local";
@@ -53,6 +56,10 @@ export interface LocalDashSegmentAsset {
 
 class SegmentedSegmentService {
     private readonly inFlightBuilds = new Map<string, Promise<LocalDashSegmentAsset>>();
+    private readonly failedBuilds = new Map<
+        string,
+        { error: Error; failedAtMs: number }
+    >();
 
     async ensureLocalDashSegments(
         input: EnsureLocalDashSegmentsInput,
@@ -70,6 +77,7 @@ class SegmentedSegmentService {
         const manifestCheckStartedAtMs = Date.now();
 
         if (await segmentedStreamingCacheService.hasDashManifest(cacheKey)) {
+            this.failedBuilds.delete(cacheKey);
             logSegmentedStreamingTrace("asset.ensure.cache_hit", {
                 trackId: input.trackId,
                 quality: input.quality,
@@ -86,32 +94,20 @@ class SegmentedSegmentService {
 
         const existingBuild = this.inFlightBuilds.get(cacheKey);
         if (existingBuild) {
-            const waitStartedAtMs = Date.now();
-            try {
-                const waitedAsset = await existingBuild;
-                logSegmentedStreamingTrace("asset.ensure.inflight_wait_success", {
-                    trackId: input.trackId,
-                    quality: input.quality,
-                    sourceKind,
-                    cacheKey,
-                    waitMs: segmentedTraceDurationMs(waitStartedAtMs),
-                    totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
-                });
-                return waitedAsset;
-            } catch (error) {
-                logSegmentedStreamingTrace("asset.ensure.inflight_wait_error", {
-                    trackId: input.trackId,
-                    quality: input.quality,
-                    sourceKind,
-                    cacheKey,
-                    waitMs: segmentedTraceDurationMs(waitStartedAtMs),
-                    totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
-                    ...toSegmentedTraceErrorFields(error),
-                });
-                throw error;
-            }
+            logSegmentedStreamingTrace("asset.ensure.inflight_active", {
+                trackId: input.trackId,
+                quality: input.quality,
+                sourceKind,
+                cacheKey,
+                totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
+            });
+            return {
+                ...paths,
+                quality: input.quality,
+            };
         }
 
+        this.failedBuilds.delete(cacheKey);
         const buildPromise = this.generateDashAsset({
             ...input,
             cacheKey,
@@ -122,26 +118,67 @@ class SegmentedSegmentService {
         });
 
         this.inFlightBuilds.set(cacheKey, buildPromise);
-        try {
-            const builtAsset = await buildPromise;
-            logSegmentedStreamingTrace("asset.ensure.generated", {
-                trackId: input.trackId,
-                quality: input.quality,
-                sourceKind,
-                cacheKey,
-                totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
+        void buildPromise
+            .then(() => {
+                this.failedBuilds.delete(cacheKey);
+                logSegmentedStreamingTrace("asset.ensure.generated", {
+                    trackId: input.trackId,
+                    quality: input.quality,
+                    sourceKind,
+                    cacheKey,
+                    totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
+                });
+            })
+            .catch((error) => {
+                const resolvedError =
+                    error instanceof Error ? error : new Error(String(error));
+                this.failedBuilds.set(cacheKey, {
+                    error: resolvedError,
+                    failedAtMs: Date.now(),
+                });
+                logSegmentedStreamingTrace("asset.ensure.generate_error", {
+                    trackId: input.trackId,
+                    quality: input.quality,
+                    sourceKind,
+                    cacheKey,
+                    totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
+                    ...toSegmentedTraceErrorFields(error),
+                });
+            })
+            .finally(() => {
+                this.pruneFailedBuilds();
             });
-            return builtAsset;
-        } catch (error) {
-            logSegmentedStreamingTrace("asset.ensure.generate_error", {
-                trackId: input.trackId,
-                quality: input.quality,
-                sourceKind,
-                cacheKey,
-                totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
-                ...toSegmentedTraceErrorFields(error),
-            });
-            throw error;
+
+        logSegmentedStreamingTrace("asset.ensure.build_started", {
+            trackId: input.trackId,
+            quality: input.quality,
+            sourceKind,
+            cacheKey,
+            totalMs: segmentedTraceDurationMs(ensureStartedAtMs),
+        });
+
+        return {
+            ...paths,
+            quality: input.quality,
+        };
+    }
+
+    hasInFlightBuild(cacheKey: string): boolean {
+        return this.inFlightBuilds.has(cacheKey);
+    }
+
+    getBuildFailure(cacheKey: string): Error | null {
+        this.pruneFailedBuilds();
+        const failedBuild = this.failedBuilds.get(cacheKey);
+        return failedBuild?.error ?? null;
+    }
+
+    private pruneFailedBuilds(): void {
+        const now = Date.now();
+        for (const [cacheKey, failure] of this.failedBuilds.entries()) {
+            if (now - failure.failedAtMs > BUILD_FAILURE_RETENTION_MS) {
+                this.failedBuilds.delete(cacheKey);
+            }
         }
     }
 
@@ -160,6 +197,10 @@ class SegmentedSegmentService {
         const ensureDirMs = segmentedTraceDurationMs(ensureDirStartedAtMs);
 
         const bitrate = DASH_QUALITY_BITRATES[params.quality];
+        const shouldPreserveOriginalLossless =
+            params.quality === "original" &&
+            !SOURCE_URL_REGEX.test(params.sourcePath) &&
+            LOSSLESS_FILE_EXTENSION_REGEX.test(params.sourcePath);
         const ffmpegArgs = [
             "-hide_banner",
             "-loglevel",
@@ -171,9 +212,8 @@ class SegmentedSegmentService {
             "-map",
             "0:a:0",
             "-c:a",
-            "aac",
-            "-b:a",
-            `${bitrate}k`,
+            shouldPreserveOriginalLossless ? "copy" : "aac",
+            ...(shouldPreserveOriginalLossless ? [] : ["-b:a", `${bitrate}k`]),
             "-f",
             "dash",
             "-seg_duration",
@@ -198,6 +238,7 @@ class SegmentedSegmentService {
             sourceKind,
             cacheKey: params.cacheKey,
             bitrateKbps: bitrate,
+            transcodeMode: shouldPreserveOriginalLossless ? "copy" : "aac",
             ensureDirMs,
         });
 

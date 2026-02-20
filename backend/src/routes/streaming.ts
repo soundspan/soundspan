@@ -1,5 +1,4 @@
 import express from "express";
-import { promises as fsPromises } from "fs";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
@@ -150,12 +149,10 @@ const handleSegmentFetch = async (
             resolveSessionToken(req),
         );
 
-        const segmentPath = segmentedStreamingSessionService.resolveSegmentPath(
+        const segmentPath = await segmentedStreamingSessionService.waitForSegmentReady(
             session,
             req.params.segmentName,
         );
-
-        await fsPromises.access(segmentPath);
         res.setHeader("Cache-Control", "private, max-age=30");
         res.type("video/iso.segment");
         logSegmentedStreamingMetric("segment.fetch", {
@@ -333,7 +330,7 @@ router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req, res)
             resolveSessionToken(req),
         );
 
-        await fsPromises.access(session.manifestPath);
+        await segmentedStreamingSessionService.waitForManifestReady(session);
         res.setHeader("Cache-Control", "private, max-age=30");
         res.type("application/dash+xml");
         logSegmentedStreamingMetric("manifest.fetch", {
