@@ -73,8 +73,15 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const { enrichedTracks: tidalEnrichedTracks } = useTidalGapFill(rawAlbum, source);
     const tidalAlbum = rawAlbum ? { ...rawAlbum, tracks: tidalEnrichedTracks || rawAlbum.tracks } : rawAlbum;
     const { enrichedTracks } = useYtMusicGapFill(tidalAlbum, source);
-    const { playAlbum, shufflePlay, playTrackNow, addToQueue, addAllToQueue, downloadAlbum } =
-        useAlbumActions();
+    const {
+        playAlbum,
+        shufflePlay,
+        playTrackNow,
+        addAllToQueue,
+        downloadAlbum,
+        setAlbumPreference,
+        isApplyingAlbumPreference,
+    } = useAlbumActions();
     const { isPendingByMbid, downloadsEnabled } = useDownloadContext();
     const { previewTrack, previewPlaying, handlePreview } = useTrackPreview();
 
@@ -189,9 +196,18 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     }}
                     onDownloadAlbum={() => downloadAlbum(album)}
                     onAddToPlaylist={handleAddAlbumToPlaylist}
+                    onThumbsDownAlbum={() => {
+                        if (!hasTracks) return;
+                        void setAlbumPreference(album, "thumbs_down");
+                    }}
+                    onThumbsUpAlbum={() => {
+                        if (!hasTracks) return;
+                        void setAlbumPreference(album, "thumbs_up");
+                    }}
                     isPendingDownload={isPendingByMbid(
                         album?.mbid || album?.rgMbid || ""
                     )}
+                    isApplyingAlbumPreference={isApplyingAlbumPreference}
                     isPlaying={isPlaying}
                     isPlayingThisAlbum={currentTrack?.album?.id === album.id}
                     onPause={pause}

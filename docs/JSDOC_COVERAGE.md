@@ -17,11 +17,11 @@ Scope:
 | Backend utils | 27 | 71 | 54 | 17 | 76.1% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 69 | 69 | 11 | 58 | 15.9% |
-| Frontend features | 133 | 110 | 4 | 106 | 3.6% |
+| Frontend features | 135 | 114 | 8 | 106 | 7.0% |
 | Frontend hooks | 25 | 81 | 55 | 26 | 67.9% |
-| Frontend lib | 32 | 40 | 8 | 32 | 20.0% |
+| Frontend lib | 35 | 44 | 11 | 33 | 25.0% |
 | Frontend other | 59 | 57 | 6 | 51 | 10.5% |
-| **Total** | **475** | **604** | **222** | **382** | **36.8%** |
+| **Total** | **480** | **612** | **229** | **383** | **37.4%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -194,13 +194,13 @@ Scope:
 | Frontend components | TidalBadge | frontend/components/ui/TidalBadge.tsx:15 |
 | Frontend components | TrackOverflowMenu | frontend/components/ui/TrackOverflowMenu.tsx:43 |
 | Frontend components | YouTubeBadge | frontend/components/ui/YouTubeBadge.tsx:17 |
-| Frontend features | AlbumActionBar | frontend/features/album/components/AlbumActionBar.tsx:39 |
+| Frontend features | AlbumActionBar | frontend/features/album/components/AlbumActionBar.tsx:44 |
 | Frontend features | AlbumHero | frontend/features/album/components/AlbumHero.tsx:24 |
 | Frontend features | SimilarAlbums | frontend/features/album/components/SimilarAlbums.tsx:14 |
-| Frontend features | useAlbumActions | frontend/features/album/hooks/useAlbumActions.ts:9 |
+| Frontend features | useAlbumActions | frontend/features/album/hooks/useAlbumActions.ts:13 |
 | Frontend features | useAlbumData | frontend/features/album/hooks/useAlbumData.ts:10 |
-| Frontend features | useTidalGapFill | frontend/features/album/hooks/useTidalGapFill.ts:60 |
-| Frontend features | useYtMusicGapFill | frontend/features/album/hooks/useYtMusicGapFill.ts:57 |
+| Frontend features | useTidalGapFill | frontend/features/album/hooks/useTidalGapFill.ts:77 |
+| Frontend features | useYtMusicGapFill | frontend/features/album/hooks/useYtMusicGapFill.ts:77 |
 | Frontend features | ArtistActionBar | frontend/features/artist/components/ArtistActionBar.tsx:30 |
 | Frontend features | ArtistBio | frontend/features/artist/components/ArtistBio.tsx:12 |
 | Frontend features | ArtistHero | frontend/features/artist/components/ArtistHero.tsx:24 |

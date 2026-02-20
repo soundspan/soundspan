@@ -22,6 +22,7 @@ Start-here guide for `frontend/features/album`.
 | `components/AlbumHero.tsx` | components |
 | `components/SimilarAlbums.tsx` | components |
 | `components/TrackList.tsx` | components |
+| `hooks/providerStatusCache.ts` | hooks |
 | `hooks/useAlbumActions.ts` | hooks |
 | `hooks/useAlbumData.ts` | hooks |
 | `hooks/useTidalGapFill.ts` | hooks |

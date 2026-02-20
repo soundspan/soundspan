@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Album pages now include one-click thumbs-up/thumbs-down actions that apply to every track on the album in a single batch update.
+
 ### Changed
 
 - Home data loading now uses bounded featured-playlist and audiobook queries, reducing homepage overfetch.
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deployment docs now clarify frontend build-time vs runtime environment behavior and include centralized container-by-container environment variable references.
 - Backend scale defaults were raised for DB and auth throughput, and related deployment command examples were refreshed.
 - Additional governance/process updates tightened agent documentation, policy checks, and release-note workflow enforcement.
+- Volume startup normalization now uses one shared parsing/clamping policy so reloads restore the same effective player volume more consistently.
+- Playback-state persistence now stores explicit play/pause intent so reload behavior can restore whether playback should resume or remain paused.
 
 ### Fixed
 
@@ -29,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLAP enrichment progress now stays below 100% while work remains and derives failed counts from track status, preventing “1 remaining at 100%” and phantom-running enrichment states.
 - Vibe embedding queue writes now mark tracks as `processing` only after successful Redis enqueue, preventing false processing status when enqueue fails.
 - Fixed analyzer/reconciliation edge cases (including empty-result loop handling) that could leave enrichment status appearing active longer than expected.
+- Lyrics requests no longer cache timeout/service failures as immediate “no lyrics” results; failed lookups now surface retriable errors and empty `source=none` lyric responses refresh quickly.
+- Settings page hydration now blocks default-value rendering until saved settings load, and failed settings loads retry on focus/online recovery.
+- TIDAL status checks now lazily restore user OAuth from saved credentials, reducing false “not authenticated” states after sidecar restarts.
+- Album gap-fill provider status caching now expires negative availability quickly, so transient status failures stop suppressing matching for long windows.
+- Missing native album covers now self-heal by downloading and storing a fresh local image immediately, then routing follow-up requests back to the local cover path.
 
 ## [1.1.1] - 2026-02-20
 

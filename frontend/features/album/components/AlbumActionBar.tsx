@@ -8,6 +8,8 @@ import {
     Plus,
     Loader2,
     Search,
+    ThumbsUp,
+    ThumbsDown,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import type { Album } from "../types";
@@ -28,7 +30,10 @@ interface AlbumActionBarProps {
     onShuffle: () => void;
     onDownloadAlbum: () => void;
     onAddToPlaylist: () => void;
+    onThumbsUpAlbum?: () => void;
+    onThumbsDownAlbum?: () => void;
     isPendingDownload: boolean;
+    isApplyingAlbumPreference?: boolean;
     isPlaying?: boolean;
     isPlayingThisAlbum?: boolean;
     onPause?: () => void;
@@ -45,7 +50,10 @@ export function AlbumActionBar({
     onShuffle,
     onDownloadAlbum,
     onAddToPlaylist,
+    onThumbsUpAlbum,
+    onThumbsDownAlbum,
     isPendingDownload,
+    isApplyingAlbumPreference = false,
     isPlaying = false,
     isPlayingThisAlbum = false,
     onPause,
@@ -61,10 +69,19 @@ export function AlbumActionBar({
     const lockMessage = "Listen Together is active. Play, shuffle, and download are disabled here.";
     const canShowAddAllToQueue = Boolean(onAddAllToQueue);
     const canShowAddToPlaylist = isOwned;
+    const canShowAlbumPreference =
+        isOwned && (Boolean(onThumbsUpAlbum) || Boolean(onThumbsDownAlbum));
     const hasActionControls =
         isInListenTogetherGroup
-            ? hasLockedControls || canShowAddAllToQueue || canShowAddToPlaylist
-            : isOwned || showDownload || canShowAddAllToQueue || canShowAddToPlaylist;
+            ? hasLockedControls ||
+                canShowAddAllToQueue ||
+                canShowAddToPlaylist ||
+                canShowAlbumPreference
+            : isOwned ||
+                showDownload ||
+                canShowAddAllToQueue ||
+                canShowAddToPlaylist ||
+                canShowAlbumPreference;
     const { showSpinner: showPlaySpinner, trigger: triggerPlayFeedback } =
         usePlayButtonFeedback();
 
@@ -228,6 +245,49 @@ export function AlbumActionBar({
                         >
                             <Plus className="w-5 h-5" />
                         </button>
+                    )}
+
+                    {canShowAlbumPreference && (
+                        <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-1">
+                            {onThumbsDownAlbum && (
+                                <button
+                                    onClick={onThumbsDownAlbum}
+                                    disabled={isApplyingAlbumPreference}
+                                    className={cn(
+                                        "h-7 w-7 rounded-full flex items-center justify-center transition-all",
+                                        isApplyingAlbumPreference ?
+                                            "cursor-not-allowed text-white/35"
+                                        :   "text-white/70 hover:bg-white/10 hover:text-white"
+                                    )}
+                                    title="Thumbs down every track on this album"
+                                >
+                                    {isApplyingAlbumPreference ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <ThumbsDown className="h-4 w-4" />
+                                    )}
+                                </button>
+                            )}
+                            {onThumbsUpAlbum && (
+                                <button
+                                    onClick={onThumbsUpAlbum}
+                                    disabled={isApplyingAlbumPreference}
+                                    className={cn(
+                                        "h-7 w-7 rounded-full flex items-center justify-center transition-all",
+                                        isApplyingAlbumPreference ?
+                                            "cursor-not-allowed text-white/35"
+                                        :   "text-white/70 hover:bg-white/10 hover:text-white"
+                                    )}
+                                    title="Thumbs up every track on this album"
+                                >
+                                    {isApplyingAlbumPreference ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <ThumbsUp className="h-4 w-4" />
+                                    )}
+                                </button>
+                            )}
+                        </div>
                     )}
                 </div>
             )}

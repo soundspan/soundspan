@@ -173,12 +173,17 @@ jest.mock("../../services/imageProxy", () => ({
     },
 }));
 
+jest.mock("../../services/imageStorage", () => ({
+    downloadAndStoreImage: jest.fn(),
+}));
+
 import router from "../library";
 import { redisClient } from "../../utils/redis";
 import { fetchExternalImage } from "../../services/imageProxy";
 import { coverArtService } from "../../services/coverArt";
 import { prisma } from "../../utils/db";
 import { deezerService } from "../../services/deezer";
+import { downloadAndStoreImage } from "../../services/imageStorage";
 import { getSystemSettings } from "../../utils/systemSettings";
 import {
     backfillAllArtistCounts,
@@ -206,6 +211,7 @@ const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
 const mockArtistUpdateMany = prisma.artist.updateMany as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockDeezerCover = deezerService.getAlbumCover as jest.Mock;
+const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
 const mockCoverArtGetCoverArt = coverArtService.getCoverArt as jest.Mock;
 const mockGetSystemSettings = getSystemSettings as jest.Mock;
 const mockIsBackfillNeeded = isBackfillNeeded as jest.Mock;
@@ -280,6 +286,7 @@ describe("library cover-art proxy compatibility", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockRedisGet.mockResolvedValue(null);
+        mockDownloadAndStoreImage.mockResolvedValue(null);
     });
 
     it("blocks invalid/private cover-art URLs", async () => {
@@ -374,6 +381,9 @@ describe("library cover-art proxy compatibility", () => {
             artist: { name: "Example Artist" },
         });
         mockDeezerCover.mockResolvedValue("https://cdn.deezer.com/cover.jpg");
+        mockDownloadAndStoreImage.mockResolvedValue(
+            "native:albums/album-123.jpg"
+        );
 
         const req = {
             query: { url: "native:albums/album-123.jpg" },
@@ -392,14 +402,48 @@ describe("library cover-art proxy compatibility", () => {
             "Example Artist",
             "Example Album"
         );
+        expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
+            "https://cdn.deezer.com/cover.jpg",
+            "album-123",
+            "album"
+        );
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "album-123" },
-            data: { coverUrl: "https://cdn.deezer.com/cover.jpg" },
+            data: { coverUrl: "native:albums/album-123.jpg" },
         });
         expect(res.redirect).toHaveBeenCalledWith(
-            "https://cdn.deezer.com/cover.jpg"
+            "/api/library/cover-art?url=native%3Aalbums%2Falbum-123.jpg"
         );
 
+        existsSpy.mockRestore();
+    });
+
+    it("reuses already-healed native query-url covers without re-fetching Deezer", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(true);
+        mockAlbumFindUnique.mockResolvedValue({
+            id: "album-123",
+            title: "Example Album",
+            coverUrl: "native:albums/album-123.jpg",
+            artist: { name: "Example Artist" },
+        });
+
+        const req = {
+            query: { url: "native:missing-path.jpg" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockDeezerCover).not.toHaveBeenCalled();
+        expect(mockDownloadAndStoreImage).not.toHaveBeenCalled();
+        expect(res.redirect).toHaveBeenCalledWith(
+            "/api/library/cover-art?url=native%3Aalbums%2Falbum-123.jpg"
+        );
         existsSpy.mockRestore();
     });
 
@@ -503,6 +547,9 @@ describe("library cover-art proxy compatibility", () => {
             artist: { name: "Artist Name" },
         });
         mockDeezerCover.mockResolvedValue("https://cdn.deezer.com/album-789.jpg");
+        mockDownloadAndStoreImage.mockResolvedValue(
+            "native:albums/album-789.jpg"
+        );
 
         const req = {
             query: {},
@@ -519,10 +566,10 @@ describe("library cover-art proxy compatibility", () => {
         });
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "album-789" },
-            data: { coverUrl: "https://cdn.deezer.com/album-789.jpg" },
+            data: { coverUrl: "native:albums/album-789.jpg" },
         });
         expect(res.redirect).toHaveBeenCalledWith(
-            "https://cdn.deezer.com/album-789.jpg"
+            "/api/library/cover-art?url=native%3Aalbums%2Falbum-789.jpg"
         );
 
         existsSpy.mockRestore();

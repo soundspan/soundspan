@@ -25,6 +25,7 @@ import {
     fetchExternalImage,
     normalizeExternalImageUrl,
 } from "../services/imageProxy";
+import { downloadAndStoreImage } from "../services/imageStorage";
 import { dataCacheService } from "../services/dataCache";
 import {
     backfillAllArtistCounts,
@@ -178,6 +179,112 @@ const formatTrackPreferenceResponse = (
     updatedAt: preference.updatedAt ? preference.updatedAt.toISOString() : null,
 });
 
+type NormalizedTrackPreferenceSignal = Exclude<
+    ReturnType<typeof normalizeTrackPreferenceSignal>,
+    null
+>;
+
+const formatAlbumPreferenceResponse = (
+    albumId: string,
+    trackCount: number,
+    preference: ResolvedTrackPreference
+) => ({
+    albumId,
+    trackCount,
+    signal: preference.signal,
+    state: preference.state,
+    score: preference.score,
+    likedAt: preference.likedAt ? preference.likedAt.toISOString() : null,
+    dislikedAt: preference.dislikedAt ? preference.dislikedAt.toISOString() : null,
+    updatedAt: preference.updatedAt ? preference.updatedAt.toISOString() : null,
+});
+
+const applyTrackPreferenceSignalToTrackIds = async (
+    tx: {
+        likedTrack: {
+            deleteMany: typeof prisma.likedTrack.deleteMany;
+            createMany: typeof prisma.likedTrack.createMany;
+        };
+        dislikedEntity: {
+            deleteMany: typeof prisma.dislikedEntity.deleteMany;
+            createMany: typeof prisma.dislikedEntity.createMany;
+        };
+    },
+    userId: string,
+    trackIds: string[],
+    signal: NormalizedTrackPreferenceSignal,
+    now: Date
+) => {
+    if (trackIds.length === 0) {
+        return;
+    }
+
+    if (signal === "thumbs_up") {
+        await tx.dislikedEntity.deleteMany({
+            where: {
+                userId,
+                entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                entityId: { in: trackIds },
+            },
+        });
+        await tx.likedTrack.deleteMany({
+            where: {
+                userId,
+                trackId: { in: trackIds },
+            },
+        });
+        await tx.likedTrack.createMany({
+            data: trackIds.map((trackId) => ({
+                userId,
+                trackId,
+                likedAt: now,
+            })),
+            skipDuplicates: true,
+        });
+        return;
+    }
+
+    if (signal === "thumbs_down") {
+        await tx.likedTrack.deleteMany({
+            where: {
+                userId,
+                trackId: { in: trackIds },
+            },
+        });
+        await tx.dislikedEntity.deleteMany({
+            where: {
+                userId,
+                entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                entityId: { in: trackIds },
+            },
+        });
+        await tx.dislikedEntity.createMany({
+            data: trackIds.map((trackId) => ({
+                userId,
+                entityType: TRACK_DISLIKE_ENTITY_TYPE,
+                entityId: trackId,
+                dislikedAt: now,
+            })),
+            skipDuplicates: true,
+        });
+        return;
+    }
+
+    await tx.likedTrack.deleteMany({
+        where: {
+            userId,
+            trackId: { in: trackIds },
+        },
+    });
+    await tx.dislikedEntity.deleteMany({
+        where: {
+            userId,
+            entityType: TRACK_DISLIKE_ENTITY_TYPE,
+            entityId: { in: trackIds },
+        },
+    });
+};
+
 const buildTrackPreferenceScoreMapForUser = async (
     userId: string | undefined,
     trackIds: string[]
@@ -327,6 +434,12 @@ const getAlbumIdFromNativeCoverPath = (nativePath: string): string | null => {
     return parsed.name || null;
 };
 
+const getNativeCoverCachePath = (nativePath: string): string =>
+    path.join(config.music.transcodeCachePath, "../covers", nativePath);
+
+const buildNativeCoverProxyRedirectPath = (nativeCoverUrl: string): string =>
+    `/api/library/cover-art?url=${encodeURIComponent(nativeCoverUrl)}`;
+
 const tryHealMissingNativeAlbumCover = async (
     nativePath: string
 ): Promise<string | null> => {
@@ -342,6 +455,18 @@ const tryHealMissingNativeAlbumCover = async (
         return null;
     }
 
+    const existingNativeCover = album.coverUrl;
+    if (
+        typeof existingNativeCover === "string" &&
+        existingNativeCover.startsWith("native:")
+    ) {
+        const existingNativePath = existingNativeCover.replace("native:", "");
+        const existingNativeFilePath = getNativeCoverCachePath(existingNativePath);
+        if (fs.existsSync(existingNativeFilePath)) {
+            return buildNativeCoverProxyRedirectPath(existingNativeCover);
+        }
+    }
+
     const deezerCover = await deezerService.getAlbumCover(
         album.artist.name,
         album.title
@@ -350,12 +475,22 @@ const tryHealMissingNativeAlbumCover = async (
         return null;
     }
 
+    const localCoverPath = await downloadAndStoreImage(
+        deezerCover,
+        album.id,
+        "album"
+    );
+
+    const healedCoverUrl = localCoverPath ?? deezerCover;
+
     await prisma.album.update({
         where: { id: albumId },
-        data: { coverUrl: deezerCover },
+        data: { coverUrl: healedCoverUrl },
     });
 
-    return deezerCover;
+    return localCoverPath ?
+            buildNativeCoverProxyRedirectPath(localCoverPath)
+        :   deezerCover;
 };
 
 const isLibraryDeletionEnabled = async (): Promise<boolean> => {
@@ -2888,6 +3023,83 @@ router.get("/tracks/:id/preference", async (req, res) => {
     } catch (error) {
         logger.error("Get track preference error:", error);
         res.status(500).json({ error: "Failed to fetch track preference" });
+    }
+});
+
+// POST /library/albums/:id/preference
+router.post("/albums/:id/preference", async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+
+        const requestedAlbumId = req.params.id;
+        const signal = normalizeTrackPreferenceSignal(
+            req.body?.signal ?? req.body?.score ?? req.body?.action
+        );
+
+        if (!signal) {
+            return res.status(400).json({
+                error: "Invalid preference signal. Use thumbs_up, thumbs_down, or clear.",
+            });
+        }
+
+        const album = await prisma.album.findFirst({
+            where: {
+                OR: [{ id: requestedAlbumId }, { rgMbid: requestedAlbumId }],
+            },
+            select: {
+                id: true,
+            },
+        });
+        if (!album) {
+            return res.status(404).json({ error: "Album not found" });
+        }
+
+        const albumTracks = await prisma.track.findMany({
+            where: { albumId: album.id },
+            select: { id: true },
+        });
+        const trackIds = Array.from(
+            new Set(
+                albumTracks
+                    .map((track) => track.id)
+                    .filter(
+                        (trackId): trackId is string =>
+                            typeof trackId === "string" && trackId.length > 0
+                    )
+            )
+        );
+        const now = new Date();
+
+        if (trackIds.length > 0) {
+            await prisma.$transaction(async (tx) => {
+                await applyTrackPreferenceSignalToTrackIds(
+                    tx,
+                    userId,
+                    trackIds,
+                    signal,
+                    now
+                );
+            });
+        }
+
+        const preference = resolveTrackPreference({
+            likedAt: signal === "thumbs_up" ? now : null,
+            dislikedAt: signal === "thumbs_down" ? now : null,
+        });
+
+        res.json(
+            formatAlbumPreferenceResponse(
+                album.id,
+                trackIds.length,
+                preference
+            )
+        );
+    } catch (error) {
+        logger.error("Set album preference error:", error);
+        res.status(500).json({ error: "Failed to set album preference" });
     }
 });
 

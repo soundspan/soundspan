@@ -40,12 +40,14 @@ jest.mock("../../utils/db", () => ({
             findUnique: jest.fn(),
             findMany: jest.fn(),
             upsert: jest.fn(),
+            createMany: jest.fn(),
             deleteMany: jest.fn(),
         },
         dislikedEntity: {
             findUnique: jest.fn(),
             findMany: jest.fn(),
             upsert: jest.fn(),
+            createMany: jest.fn(),
             deleteMany: jest.fn(),
         },
         play: {
@@ -228,6 +230,10 @@ jest.mock("../../services/imageProxy", () => ({
     normalizeExternalImageUrl: jest.fn(() => null),
 }));
 
+jest.mock("../../services/imageStorage", () => ({
+    downloadAndStoreImage: jest.fn(),
+}));
+
 const mockLidarrDeleteArtist = jest.fn();
 jest.mock("../../services/lidarr", () => ({
     lidarrService: {
@@ -256,6 +262,7 @@ import {
     fetchExternalImage,
     normalizeExternalImageUrl,
 } from "../../services/imageProxy";
+import { downloadAndStoreImage } from "../../services/imageStorage";
 import { extractColorsFromImage } from "../../utils/colorExtractor";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { dataCacheService } from "../../services/dataCache";
@@ -289,10 +296,12 @@ const mockTrackDeleteMany = prisma.track.deleteMany as jest.Mock;
 const mockLikedTrackFindUnique = prisma.likedTrack.findUnique as jest.Mock;
 const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
 const mockLikedTrackUpsert = prisma.likedTrack.upsert as jest.Mock;
+const mockLikedTrackCreateMany = prisma.likedTrack.createMany as jest.Mock;
 const mockLikedTrackDeleteMany = prisma.likedTrack.deleteMany as jest.Mock;
 const mockDislikedEntityFindUnique = prisma.dislikedEntity.findUnique as jest.Mock;
 const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 const mockDislikedEntityUpsert = prisma.dislikedEntity.upsert as jest.Mock;
+const mockDislikedEntityCreateMany = prisma.dislikedEntity.createMany as jest.Mock;
 const mockDislikedEntityDeleteMany = prisma.dislikedEntity.deleteMany as jest.Mock;
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
@@ -336,6 +345,7 @@ const mockAudioStreamingCtor = AudioStreamingService as unknown as jest.Mock;
 const mockCoverArtGetCoverArt = coverArtService.getCoverArt as jest.Mock;
 const mockFetchExternalImage = fetchExternalImage as jest.Mock;
 const mockNormalizeExternalImageUrl = normalizeExternalImageUrl as jest.Mock;
+const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
 const mockExtractColorsFromImage = extractColorsFromImage as jest.Mock;
 const mockGetSystemSettings = getSystemSettings as jest.Mock;
 const mockGetArtistImagesBatch = dataCacheService.getArtistImagesBatch as jest.Mock;
@@ -1193,6 +1203,7 @@ describe("library catalog list runtime coverage", () => {
     const coverArtColorsHandler = getHandler("get", "/cover-art-colors", 1);
     const trackPreferenceHandler = getHandler("get", "/tracks/:id/preference");
     const setTrackPreferenceHandler = getHandler("post", "/tracks/:id/preference");
+    const setAlbumPreferenceHandler = getHandler("post", "/albums/:id/preference");
     const trackByIdHandler = getHandler("get", "/tracks/:id");
     const audioInfoHandler = getHandler("get", "/tracks/:id/audio-info", 1);
     const deleteTrackHandler = getHandler("delete", "/tracks/:id", 1);
@@ -1224,11 +1235,14 @@ describe("library catalog list runtime coverage", () => {
         mockLikedTrackFindUnique.mockResolvedValue(null);
         mockLikedTrackFindMany.mockResolvedValue([]);
         mockLikedTrackUpsert.mockResolvedValue({ userId: "user-1", trackId: "track-1" });
+        mockLikedTrackCreateMany.mockResolvedValue({ count: 0 });
         mockLikedTrackDeleteMany.mockResolvedValue({ count: 0 });
         mockDislikedEntityFindUnique.mockResolvedValue(null);
         mockDislikedEntityFindMany.mockResolvedValue([]);
         mockDislikedEntityUpsert.mockResolvedValue({ id: "disliked-1" });
+        mockDislikedEntityCreateMany.mockResolvedValue({ count: 0 });
         mockDislikedEntityDeleteMany.mockResolvedValue({ count: 0 });
+        mockDownloadAndStoreImage.mockResolvedValue("native:albums/cover-miss.jpg");
         mockPlayGroupBy.mockResolvedValue([]);
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
@@ -2735,6 +2749,165 @@ describe("library catalog list runtime coverage", () => {
         });
     });
 
+    it("updates album-wide track preferences in one batch request", async () => {
+        mockAlbumFindFirst.mockResolvedValue({
+            id: "album-1",
+        });
+        mockTrackFindMany
+            .mockResolvedValueOnce([{ id: "track-1" }, { id: "track-2" }])
+            .mockResolvedValueOnce([{ id: "track-1" }, { id: "track-2" }])
+            .mockResolvedValueOnce([{ id: "track-1" }, { id: "track-2" }]);
+        mockLikedTrackCreateMany.mockResolvedValue({ count: 2 });
+        mockDislikedEntityCreateMany.mockResolvedValue({ count: 2 });
+        mockPrismaTransaction.mockImplementation(async (callback: any) =>
+            callback({
+                likedTrack: {
+                    deleteMany: mockLikedTrackDeleteMany,
+                    createMany: mockLikedTrackCreateMany,
+                },
+                dislikedEntity: {
+                    deleteMany: mockDislikedEntityDeleteMany,
+                    createMany: mockDislikedEntityCreateMany,
+                },
+            })
+        );
+
+        const invalidReq = {
+            params: { id: "album-1" },
+            user: { id: "user-1" },
+            body: { signal: "invalid" },
+        } as any;
+        const invalidRes = createRes();
+        await setAlbumPreferenceHandler(invalidReq, invalidRes);
+        expect(invalidRes.statusCode).toBe(400);
+        expect(invalidRes.body).toEqual({
+            error: "Invalid preference signal. Use thumbs_up, thumbs_down, or clear.",
+        });
+
+        const thumbsUpReq = {
+            params: { id: "album-1" },
+            user: { id: "user-1" },
+            body: { signal: "thumbs_up" },
+        } as any;
+        const thumbsUpRes = createRes();
+        await setAlbumPreferenceHandler(thumbsUpReq, thumbsUpRes);
+        expect(thumbsUpRes.statusCode).toBe(200);
+        expect(thumbsUpRes.body).toEqual(
+            expect.objectContaining({
+                albumId: "album-1",
+                trackCount: 2,
+                signal: "thumbs_up",
+                state: "liked",
+                score: 1,
+            })
+        );
+        expect(mockLikedTrackCreateMany).toHaveBeenCalledWith({
+            data: [
+                {
+                    userId: "user-1",
+                    trackId: "track-1",
+                    likedAt: expect.any(Date),
+                },
+                {
+                    userId: "user-1",
+                    trackId: "track-2",
+                    likedAt: expect.any(Date),
+                },
+            ],
+            skipDuplicates: true,
+        });
+
+        const thumbsDownReq = {
+            params: { id: "album-1" },
+            user: { id: "user-1" },
+            body: { signal: "thumbs_down" },
+        } as any;
+        const thumbsDownRes = createRes();
+        await setAlbumPreferenceHandler(thumbsDownReq, thumbsDownRes);
+        expect(thumbsDownRes.statusCode).toBe(200);
+        expect(thumbsDownRes.body).toEqual(
+            expect.objectContaining({
+                albumId: "album-1",
+                trackCount: 2,
+                signal: "thumbs_down",
+                state: "disliked",
+                score: -1,
+            })
+        );
+        expect(mockDislikedEntityCreateMany).toHaveBeenCalledWith({
+            data: [
+                {
+                    userId: "user-1",
+                    entityType: "track",
+                    entityId: "track-1",
+                    dislikedAt: expect.any(Date),
+                },
+                {
+                    userId: "user-1",
+                    entityType: "track",
+                    entityId: "track-2",
+                    dislikedAt: expect.any(Date),
+                },
+            ],
+            skipDuplicates: true,
+        });
+
+        const clearReq = {
+            params: { id: "album-1" },
+            user: { id: "user-1" },
+            body: { signal: "clear" },
+        } as any;
+        const clearRes = createRes();
+        await setAlbumPreferenceHandler(clearReq, clearRes);
+        expect(clearRes.statusCode).toBe(200);
+        expect(clearRes.body).toEqual(
+            expect.objectContaining({
+                albumId: "album-1",
+                trackCount: 2,
+                signal: "clear",
+                state: "neutral",
+                score: 0,
+            })
+        );
+        expect(mockLikedTrackDeleteMany).toHaveBeenCalledWith({
+            where: {
+                userId: "user-1",
+                trackId: { in: ["track-1", "track-2"] },
+            },
+        });
+        expect(mockDislikedEntityDeleteMany).toHaveBeenCalledWith({
+            where: {
+                userId: "user-1",
+                entityType: "track",
+                entityId: { in: ["track-1", "track-2"] },
+            },
+        });
+    });
+
+    it("returns album preference response with zero tracks when album has no tracks", async () => {
+        mockAlbumFindFirst.mockResolvedValue({ id: "album-empty" });
+        mockTrackFindMany.mockResolvedValueOnce([]);
+
+        const req = {
+            params: { id: "album-empty" },
+            user: { id: "user-1" },
+            body: { signal: "thumbs_up" },
+        } as any;
+        const res = createRes();
+
+        await setAlbumPreferenceHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                albumId: "album-empty",
+                trackCount: 0,
+                signal: "thumbs_up",
+            })
+        );
+        expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    });
+
     it("handles audio-info lookup for missing track, missing file, and parsed metadata", async () => {
         mockTrackFindUnique
             .mockResolvedValueOnce(null)
@@ -3609,6 +3782,9 @@ describe("library catalog list runtime coverage", () => {
         mockDeezerGetAlbumCover.mockResolvedValueOnce(
             "https://images.example/cover.jpg"
         );
+        mockDownloadAndStoreImage.mockResolvedValueOnce(
+            "native:albums/cover-miss.jpg"
+        );
 
         const missingReq = {
             params: { id: "native:cover-miss.jpg" },
@@ -3622,13 +3798,19 @@ describe("library catalog list runtime coverage", () => {
             "Cover Artist",
             "Missed Album"
         );
+        expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
+            "https://images.example/cover.jpg",
+            "cover-miss",
+            "album"
+        );
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "cover-miss" },
-            data: { coverUrl: "https://images.example/cover.jpg" },
+            data: { coverUrl: "native:albums/cover-miss.jpg" },
         });
         expect(missingRes.statusCode).toBe(200);
         expect(missingRes.body).toEqual({
-            redirect: "https://images.example/cover.jpg",
+            redirect:
+                "/api/library/cover-art?url=native%3Aalbums%2Fcover-miss.jpg",
         });
         const presentReq = {
             params: { id: "native:cover-present.jpg" },

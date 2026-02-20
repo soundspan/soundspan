@@ -1,12 +1,19 @@
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { TrackPreferenceSignal } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-context";
 import { useListenTogether } from "@/lib/listen-together-context";
 import { useDownloadContext } from "@/lib/download-context";
+import { buildOptimisticTrackPreferenceResponse } from "@/hooks/trackPreferenceOptimistic";
 import { shuffleArray } from "@/utils/shuffle";
 import { toast } from "sonner";
 import { Album, Track } from "../types";
 
 export function useAlbumActions() {
+    const queryClient = useQueryClient();
+    const [isApplyingAlbumPreference, setIsApplyingAlbumPreference] =
+        useState(false);
     // Use controls-only hook to avoid re-renders from playback state changes
     const {
         playTracks,
@@ -181,6 +188,69 @@ export function useAlbumActions() {
         }
     };
 
+    const setAlbumPreference = async (
+        album: Album | null,
+        signal: TrackPreferenceSignal
+    ) => {
+        if (!album) {
+            toast.error("Album data not available");
+            return;
+        }
+
+        const trackIds = Array.from(
+            new Set(
+                (album.tracks || [])
+                    .map((track) => track.id)
+                    .filter(
+                        (trackId): trackId is string =>
+                            typeof trackId === "string" &&
+                            trackId.trim().length > 0
+                    )
+            )
+        );
+
+        if (trackIds.length === 0) {
+            toast.info("No tracks available for album preference update");
+            return;
+        }
+
+        setIsApplyingAlbumPreference(true);
+        try {
+            await api.setAlbumPreference(album.id, signal);
+
+            for (const trackId of trackIds) {
+                queryClient.setQueryData(
+                    ["track-preference", trackId],
+                    buildOptimisticTrackPreferenceResponse(trackId, signal)
+                );
+            }
+
+            if (signal === "thumbs_up") {
+                toast.success(
+                    trackIds.length === 1 ?
+                        "Liked 1 track from this album"
+                    :   `Liked ${trackIds.length} tracks from this album`
+                );
+            } else if (signal === "thumbs_down") {
+                toast.success(
+                    trackIds.length === 1 ?
+                        "Disliked 1 track from this album"
+                    :   `Disliked ${trackIds.length} tracks from this album`
+                );
+            } else {
+                toast.success(
+                    trackIds.length === 1 ?
+                        "Cleared preference for 1 album track"
+                    :   `Cleared preferences for ${trackIds.length} album tracks`
+                );
+            }
+        } catch {
+            toast.error("Failed to update album track preferences");
+        } finally {
+            setIsApplyingAlbumPreference(false);
+        }
+    };
+
     return {
         playAlbum,
         shufflePlay,
@@ -189,5 +259,7 @@ export function useAlbumActions() {
         addToQueue,
         addAllToQueue,
         downloadAlbum,
+        setAlbumPreference,
+        isApplyingAlbumPreference,
     };
 }
