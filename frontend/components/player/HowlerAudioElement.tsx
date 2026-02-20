@@ -82,11 +82,37 @@ function podcastDebugLog(message: string, data?: Record<string, unknown>) {
     console.log(`[PodcastDebug] ${message}`, data || {});
 }
 
+function isLikelyTransientStreamError(error: unknown): boolean {
+    const message =
+        (error instanceof Error ? error.message : String(error || ""))
+            .toLowerCase()
+            .trim();
+    if (!message) return false;
+
+    return (
+        message.includes("network") ||
+        message.includes("timeout") ||
+        message.includes("aborted") ||
+        message.includes("interrupted") ||
+        message.includes("socket hang up") ||
+        message.includes("connection reset") ||
+        message.includes("failed to fetch") ||
+        message.includes("media_err_network") ||
+        message.includes("source unavailable") ||
+        message.includes("503") ||
+        message.includes("502") ||
+        message.includes("504")
+    );
+}
+
 const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey("current_time_track_id");
 const AUDIO_LOAD_TIMEOUT_MS = 20_000;
 const AUDIO_LOAD_TIMEOUT_RETRIES = 1;
 const AUDIO_LOAD_RETRY_DELAY_MS = 350;
 const TRACK_ERROR_SKIP_DELAY_MS = 1200;
+const TRANSIENT_TRACK_ERROR_RECOVERY_DELAY_MS = 450;
+const TRANSIENT_TRACK_ERROR_RECOVERY_WINDOW_MS = 15_000;
+const TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS = 2;
 const STARTUP_PLAYBACK_RECOVERY_DELAY_MS = 1400;
 const STARTUP_PLAYBACK_RECOVERY_RECHECK_DELAY_MS = 900;
 const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
@@ -175,6 +201,13 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
     const startupRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const startupRecoveryLoadListenerRef = useRef<(() => void) | null>(null);
     const startupRecoveryAttemptedTrackIdRef = useRef<string | null>(null);
+    const transientTrackRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const transientTrackRecoveryLoadListenerRef = useRef<(() => void) | null>(
+        null
+    );
+    const transientTrackRecoveryTrackIdRef = useRef<string | null>(null);
+    const transientTrackRecoveryAttemptRef = useRef<number>(0);
+    const transientTrackRecoveryWindowStartedAtRef = useRef<number>(0);
     const autoMatchVibePromiseRef = useRef<Promise<boolean> | null>(null);
     const autoMatchVibeTrackIdRef = useRef<string | null>(null);
     const autoMatchVibeLastAttemptAtRef = useRef<number>(0);
@@ -200,6 +233,30 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             startupRecoveryLoadListenerRef.current = null;
         }
     }, []);
+
+    const clearTransientTrackRecovery = useCallback(
+        (resetAttempts: boolean = false) => {
+            if (transientTrackRecoveryTimeoutRef.current) {
+                clearTimeout(transientTrackRecoveryTimeoutRef.current);
+                transientTrackRecoveryTimeoutRef.current = null;
+            }
+
+            if (transientTrackRecoveryLoadListenerRef.current) {
+                howlerEngine.off(
+                    "load",
+                    transientTrackRecoveryLoadListenerRef.current
+                );
+                transientTrackRecoveryLoadListenerRef.current = null;
+            }
+
+            if (resetAttempts) {
+                transientTrackRecoveryTrackIdRef.current = null;
+                transientTrackRecoveryAttemptRef.current = 0;
+                transientTrackRecoveryWindowStartedAtRef.current = 0;
+            }
+        },
+        []
+    );
 
     const scheduleStartupPlaybackRecovery = useCallback(
         (trackId: string | null, recheckCount: number = 0) => {
@@ -293,6 +350,70 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         [clearPendingTrackErrorSkip, next]
     );
 
+    const attemptTransientTrackRecovery = useCallback(
+        (failedTrackId: string | null, error: unknown): boolean => {
+            if (playbackTypeRef.current !== "track") return false;
+            if (!failedTrackId) return false;
+            if (!lastPlayingStateRef.current) return false;
+            if (getListenTogetherSessionSnapshot()?.groupId) return false;
+            if (!isLikelyTransientStreamError(error)) return false;
+
+            const now = Date.now();
+            const isNewTrack =
+                transientTrackRecoveryTrackIdRef.current !== failedTrackId;
+            const isOutsideRecoveryWindow =
+                now - transientTrackRecoveryWindowStartedAtRef.current >
+                TRANSIENT_TRACK_ERROR_RECOVERY_WINDOW_MS;
+
+            if (isNewTrack || isOutsideRecoveryWindow) {
+                transientTrackRecoveryTrackIdRef.current = failedTrackId;
+                transientTrackRecoveryAttemptRef.current = 0;
+                transientTrackRecoveryWindowStartedAtRef.current = now;
+            }
+
+            if (
+                transientTrackRecoveryAttemptRef.current >=
+                TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS
+            ) {
+                return false;
+            }
+
+            transientTrackRecoveryAttemptRef.current += 1;
+            const attemptNumber = transientTrackRecoveryAttemptRef.current;
+            clearPendingTrackErrorSkip();
+            clearTransientTrackRecovery(false);
+
+            const onRecoveredLoad = () => {
+                clearTransientTrackRecovery(false);
+                if (playbackTypeRef.current !== "track") return;
+                if (currentTrackRef.current?.id !== failedTrackId) return;
+                if (!lastPlayingStateRef.current) return;
+                if (!howlerEngine.isPlaying()) {
+                    howlerEngine.play();
+                }
+            };
+
+            transientTrackRecoveryLoadListenerRef.current = onRecoveredLoad;
+            howlerEngine.on("load", onRecoveredLoad);
+
+            transientTrackRecoveryTimeoutRef.current = setTimeout(() => {
+                transientTrackRecoveryTimeoutRef.current = null;
+
+                if (playbackTypeRef.current !== "track") return;
+                if (currentTrackRef.current?.id !== failedTrackId) return;
+                if (!lastPlayingStateRef.current) return;
+
+                console.warn(
+                    `[HowlerAudioElement] Transient stream error recovery ${attemptNumber}/${TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS}: reload and retry current track`
+                );
+                howlerEngine.reload();
+            }, TRANSIENT_TRACK_ERROR_RECOVERY_DELAY_MS);
+
+            return true;
+        },
+        [clearPendingTrackErrorSkip, clearTransientTrackRecovery]
+    );
+
     const requestAutoMatchVibe = useCallback(
         (
             seedTrackId: string | null,
@@ -347,7 +468,10 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         if (currentTrack?.id !== startupRecoveryAttemptedTrackIdRef.current) {
             startupRecoveryAttemptedTrackIdRef.current = null;
         }
-    }, [currentTrack]);
+        if (currentTrack?.id !== transientTrackRecoveryTrackIdRef.current) {
+            clearTransientTrackRecovery(true);
+        }
+    }, [currentTrack, clearTransientTrackRecovery]);
 
     useEffect(() => {
         queueLengthRef.current = queue.length;
@@ -386,6 +510,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         if (playbackType !== "track") {
             clearPendingTrackErrorSkip();
             clearStartupPlaybackRecovery();
+            clearTransientTrackRecovery(true);
             return;
         }
 
@@ -400,6 +525,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         currentTrack?.id,
         clearPendingTrackErrorSkip,
         clearStartupPlaybackRecovery,
+        clearTransientTrackRecovery,
     ]);
 
     // Initialize heartbeat monitor
@@ -595,6 +721,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
                 currentPodcast?.duration ||
                 0;
             setDuration(data.duration || fallbackDuration);
+            clearTransientTrackRecovery(true);
 
             // Transition state machine - load complete
             if (playbackStateMachine.getState() === "LOADING") {
@@ -660,11 +787,28 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         const handleError = (data: { error: unknown }) => {
             console.error("[HowlerAudioElement] Playback error:", data.error);
 
-            // Transition state machine to ERROR
             const errorMessage = data.error instanceof Error
                 ? data.error.message
                 : String(data.error);
-            playbackStateMachine.forceTransition("ERROR", { error: errorMessage });
+
+            if (playbackType === "track") {
+                const failedTrackId = currentTrack?.id ?? null;
+                const isTransientRecoveryScheduled = attemptTransientTrackRecovery(
+                    failedTrackId,
+                    data.error
+                );
+
+                if (isTransientRecoveryScheduled) {
+                    playbackStateMachine.forceTransition("LOADING");
+                    setIsBuffering(true);
+                    return;
+                }
+            }
+
+            // Transition state machine to ERROR
+            playbackStateMachine.forceTransition("ERROR", {
+                error: errorMessage,
+            });
 
             // Show a descriptive toast for YouTube-sourced tracks that fail
             if (playbackType === "track" && currentTrack?.streamSource === "youtube") {
@@ -678,6 +822,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             setIsBuffering(false);
             isUserInitiatedRef.current = false;
             heartbeatRef.current?.stop();
+            clearTransientTrackRecovery(true);
 
             if (playbackType === "track") {
                 const failedTrackId = currentTrack?.id ?? null;
@@ -706,6 +851,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             playbackStateMachine.transition("PLAYING");
             clearPendingTrackErrorSkip();
             clearStartupPlaybackRecovery();
+            clearTransientTrackRecovery(true);
 
             if (!isUserInitiatedRef.current) {
                 setIsPlaying(true);
@@ -745,7 +891,36 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             howlerEngine.off("play", handlePlay);
             howlerEngine.off("pause", handlePause);
         };
-    }, [playbackType, currentTrack, currentAudiobook, currentPodcast, repeatMode, next, nextPodcastEpisode, pause, setCurrentTimeFromEngine, setDuration, setIsPlaying, setIsBuffering, queue, currentIndex, requestAutoMatchVibe, setCurrentTrack, setCurrentAudiobook, setCurrentPodcast, setPlaybackType, saveAudiobookProgress, savePodcastProgress, scheduleTrackErrorSkip, clearPendingTrackErrorSkip, clearStartupPlaybackRecovery, isPlaying, scheduleStartupPlaybackRecovery]);
+    }, [
+        playbackType,
+        currentTrack,
+        currentAudiobook,
+        currentPodcast,
+        repeatMode,
+        next,
+        nextPodcastEpisode,
+        pause,
+        setCurrentTimeFromEngine,
+        setDuration,
+        setIsPlaying,
+        setIsBuffering,
+        queue,
+        currentIndex,
+        requestAutoMatchVibe,
+        setCurrentTrack,
+        setCurrentAudiobook,
+        setCurrentPodcast,
+        setPlaybackType,
+        saveAudiobookProgress,
+        savePodcastProgress,
+        scheduleTrackErrorSkip,
+        clearPendingTrackErrorSkip,
+        clearStartupPlaybackRecovery,
+        clearTransientTrackRecovery,
+        attemptTransientTrackRecovery,
+        isPlaying,
+        scheduleStartupPlaybackRecovery,
+    ]);
 
     // Load and play audio when track changes
     useEffect(() => {
@@ -758,6 +933,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         if (!currentMediaId) {
             clearPendingTrackErrorSkip();
             clearStartupPlaybackRecovery();
+            clearTransientTrackRecovery(true);
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);
                 loadTimeoutRef.current = null;
@@ -1041,6 +1217,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
         setDuration,
         clearPendingTrackErrorSkip,
         clearStartupPlaybackRecovery,
+        clearTransientTrackRecovery,
     ]);
 
     // Preload next track for gapless playback (music only)
@@ -1668,6 +1845,7 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             }
             clearPendingTrackErrorSkip();
             clearStartupPlaybackRecovery();
+            clearTransientTrackRecovery(true);
             // Clean up all listener refs to prevent memory leaks
             if (loadListenerRef.current) {
                 howlerEngine.off("load", loadListenerRef.current);
@@ -1687,7 +1865,11 @@ export const HowlerAudioElement = memo(function HowlerAudioElement() {
             }
             lastPreloadedTrackIdRef.current = null;
         };
-    }, [clearPendingTrackErrorSkip, clearStartupPlaybackRecovery]);
+    }, [
+        clearPendingTrackErrorSkip,
+        clearStartupPlaybackRecovery,
+        clearTransientTrackRecovery,
+    ]);
 
     // This component doesn't render anything visible
     return null;

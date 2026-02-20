@@ -171,7 +171,7 @@ Scope:
 | Frontend components | ConditionalAudioProvider | frontend/components/providers/ConditionalAudioProvider.tsx:12 |
 | Frontend components | PWAInstallPrompt | frontend/components/PWAInstallPrompt.tsx:12 |
 | Frontend components | RemoveProgressButton | frontend/components/RemoveProgressButton.tsx:15 |
-| Frontend components | ServiceWorkerRegistration | frontend/components/ServiceWorkerRegistration.tsx:5 |
+| Frontend components | ServiceWorkerRegistration | frontend/components/ServiceWorkerRegistration.tsx:43 |
 | Frontend components | AudiobookCard | frontend/components/ui/AudiobookCard.tsx:21 |
 | Frontend components | ConfirmDialog | frontend/components/ui/ConfirmDialog.tsx:16 |
 | Frontend components | GalaxyBackground | frontend/components/ui/GalaxyBackground.tsx:17 |

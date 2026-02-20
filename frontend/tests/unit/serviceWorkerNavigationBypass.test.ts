@@ -20,3 +20,8 @@ test("service worker keeps conservative cover-art concurrency", () => {
         /const MAX_CONCURRENT_IMAGE_REQUESTS = 4;/
     );
 });
+
+test("service worker activates waiting updates only after explicit client message", () => {
+    assert.match(serviceWorkerSource, /event\.data\?\.type === 'SKIP_WAITING'/);
+    assert.match(serviceWorkerSource, /self\.skipWaiting\(\);/);
+});

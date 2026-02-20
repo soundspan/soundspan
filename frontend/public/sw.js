@@ -142,8 +142,13 @@ self.addEventListener('install', (event) => {
       return cache.addAll(PRECACHE_ASSETS);
     })
   );
-  // Take control immediately
-  self.skipWaiting();
+});
+
+// Activate updates only when explicitly requested by the client.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Activate event - clean up old caches
