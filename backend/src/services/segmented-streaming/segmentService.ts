@@ -33,7 +33,10 @@ interface DashEncodingPlan {
     initSegmentName: string;
     mediaSegmentName: string;
     bitrateKbps: number | null;
+    useExperimentalMuxing: boolean;
 }
+
+const DASH_SEGMENT_DURATION_SEC = "2";
 
 const resolveSourceKind = (sourcePath: string): "local" | "remote" =>
     SOURCE_URL_REGEX.test(sourcePath) ? "remote" : "local";
@@ -224,16 +227,17 @@ class SegmentedSegmentService {
             "0:a:0",
             "-c:a",
             encodingPlan.audioCodec,
+            ...(encodingPlan.useExperimentalMuxing ? ["-strict", "-2"] : []),
             ...(encodingPlan.bitrateKbps !== null
                 ? ["-b:a", `${encodingPlan.bitrateKbps}k`]
                 : []),
             "-f",
             "dash",
-            ...(encodingPlan.segmentContainer === "webm"
-                ? ["-dash_segment_type", "webm"]
-                : []),
+            ...(encodingPlan.segmentContainer === "fmp4"
+                ? ["-streaming", "1", "-ldash", "1"]
+                : ["-dash_segment_type", "webm"]),
             "-seg_duration",
-            "4",
+            DASH_SEGMENT_DURATION_SEC,
             "-use_template",
             "1",
             "-use_timeline",
@@ -256,6 +260,7 @@ class SegmentedSegmentService {
             bitrateKbps: encodingPlan.bitrateKbps,
             transcodeMode: encodingPlan.audioCodec,
             segmentContainer: encodingPlan.segmentContainer,
+            segmentDurationSec: Number.parseInt(DASH_SEGMENT_DURATION_SEC, 10),
             ensureDirMs,
         });
 
@@ -370,10 +375,11 @@ class SegmentedSegmentService {
         if (isOriginalLocalLossless) {
             return {
                 audioCodec: "flac",
-                segmentContainer: "webm",
-                initSegmentName: "init-$RepresentationID$.webm",
-                mediaSegmentName: "chunk-$RepresentationID$-$Number%05d$.webm",
+                segmentContainer: "fmp4",
+                initSegmentName: "init-$RepresentationID$.m4s",
+                mediaSegmentName: "chunk-$RepresentationID$-$Number%05d$.m4s",
                 bitrateKbps: null,
+                useExperimentalMuxing: true,
             };
         }
 
@@ -383,6 +389,7 @@ class SegmentedSegmentService {
             initSegmentName: "init-$RepresentationID$.m4s",
             mediaSegmentName: "chunk-$RepresentationID$-$Number%05d$.m4s",
             bitrateKbps: params.bitrateKbps,
+            useExperimentalMuxing: false,
         };
     }
 }

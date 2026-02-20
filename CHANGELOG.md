@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Recovery after segmented playback disruption now keeps local player state authoritative for resume position and play/pause intent.
-- Local `original` segmented sessions now chunk lossless sources as FLAC WebM-DASH assets, with client capability checks that fall back to direct playback when lossless segmented playback is unsupported.
+- Local `original` segmented sessions now chunk lossless sources as FLAC fMP4-DASH assets, with client capability checks that fall back to direct playback when lossless segmented playback is unsupported.
 - Segmented manifest-relative `.m4s` segment requests are now served through a compatibility route, preventing session stalls when clients request chunk URLs outside the `/segments/` path prefix.
 
 ## [1.1.2] - 2026-02-20

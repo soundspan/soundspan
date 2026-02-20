@@ -207,7 +207,10 @@ function supportsLosslessSegmentedPlayback(): boolean {
         return false;
     }
 
-    return mediaSourceCtor.isTypeSupported('audio/webm; codecs="flac"');
+    return (
+        mediaSourceCtor.isTypeSupported('audio/mp4; codecs="fLaC"') ||
+        mediaSourceCtor.isTypeSupported('audio/mp4; codecs="flac"')
+    );
 }
 
 const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey("current_time_track_id");

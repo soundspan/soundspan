@@ -25,7 +25,7 @@ import {
 
 const SESSION_KEY_PREFIX = "streaming:session:v1:";
 const SESSION_TTL_SECONDS = 5 * 60;
-const SEGMENT_FILE_PATTERN = /^[A-Za-z0-9_.-]+\.(m4s|webm)$/i;
+const SEGMENT_FILE_PATTERN = /^[A-Za-z0-9_.-]+\.m4s$/;
 const SESSION_TOKEN_TYPE = "segmented-streaming-session-v1";
 const SESSION_TOKEN_SECRET =
     process.env.JWT_SECRET || process.env.SESSION_SECRET || config.sessionSecret;
