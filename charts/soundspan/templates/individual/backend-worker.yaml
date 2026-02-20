@@ -55,6 +55,62 @@ spec:
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
           {{- $backendWorkerEnv := .Values.backendWorker.env | default (dict) }}
+          {{- $backendWorkerHasPostgresSecretEnv := or .Values.postgresql.enabled (not .Values.postgresql.external.url) }}
+          {{- $backendWorkerReservedEnv := dict
+            "NODE_ENV" true
+            "PORT" true
+            "TZ" true
+            "BACKEND_PROCESS_ROLE" true
+            "WORKER_HEALTH_PORT" true
+            "SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD" true
+            "READINESS_REQUIRE_DEPENDENCIES" true
+            "READINESS_DEPENDENCY_CHECK_INTERVAL_MS" true
+            "READINESS_DEPENDENCY_CHECK_TIMEOUT_MS" true
+            "MUSIC_PATH" true
+            "DATABASE_URL" true
+            "REDIS_URL" true
+            "REDIS_FLUSH_ON_STARTUP" true
+            "SESSION_SECRET" true
+            "SETTINGS_ENCRYPTION_KEY" true
+            "INTERNAL_API_SECRET" true
+            "TIDAL_SIDECAR_URL" true
+            "YTMUSIC_STREAMER_URL" true
+          }}
+          {{- if not (hasKey $backendWorkerEnv "TRANSCODE_CACHE_PATH") }}
+          {{- $_ := set $backendWorkerReservedEnv "TRANSCODE_CACHE_PATH" true }}
+          {{- end }}
+          {{- if $backendWorkerHasPostgresSecretEnv }}
+          {{- $_ := set $backendWorkerReservedEnv "POSTGRES_USER" true }}
+          {{- $_ := set $backendWorkerReservedEnv "POSTGRES_PASSWORD" true }}
+          {{- $_ := set $backendWorkerReservedEnv "POSTGRES_DB" true }}
+          {{- end }}
+          {{- if .Values.config.allowedOrigins }}
+          {{- $_ := set $backendWorkerReservedEnv "ALLOWED_ORIGINS" true }}
+          {{- end }}
+          {{- if .Values.config.logLevel }}
+          {{- $_ := set $backendWorkerReservedEnv "LOG_LEVEL" true }}
+          {{- end }}
+          {{- if .Values.config.docsPublic }}
+          {{- $_ := set $backendWorkerReservedEnv "DOCS_PUBLIC" true }}
+          {{- end }}
+          {{- if .Values.config.lidarrEnabled }}
+          {{- $_ := set $backendWorkerReservedEnv "LIDARR_ENABLED" true }}
+          {{- $_ := set $backendWorkerReservedEnv "LIDARR_URL" true }}
+          {{- $_ := set $backendWorkerReservedEnv "LIDARR_API_KEY" true }}
+          {{- end }}
+          {{- if .Values.config.audiobookshelfUrl }}
+          {{- $_ := set $backendWorkerReservedEnv "AUDIOBOOKSHELF_URL" true }}
+          {{- $_ := set $backendWorkerReservedEnv "AUDIOBOOKSHELF_TOKEN" true }}
+          {{- end }}
+          {{- if .Values.config.lastfmApiKey }}
+          {{- $_ := set $backendWorkerReservedEnv "LASTFM_API_KEY" true }}
+          {{- end }}
+          {{- if .Values.config.fanartApiKey }}
+          {{- $_ := set $backendWorkerReservedEnv "FANART_API_KEY" true }}
+          {{- end }}
+          {{- if .Values.config.openaiApiKey }}
+          {{- $_ := set $backendWorkerReservedEnv "OPENAI_API_KEY" true }}
+          {{- end }}
           env:
             - name: NODE_ENV
               value: {{ .Values.config.nodeEnv | quote }}
@@ -81,7 +137,7 @@ spec:
               value: /music/.soundspan/transcodes
             {{- end }}
             # Secret-backed env vars
-            {{- if or .Values.postgresql.enabled (not .Values.postgresql.external.url) }}
+            {{- if $backendWorkerHasPostgresSecretEnv }}
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
@@ -161,9 +217,11 @@ spec:
             - name: OPENAI_API_KEY
               value: {{ .Values.config.openaiApiKey | quote }}
             {{- end }}
-            {{- range $key, $val := $backendWorkerEnv }}
+            {{- range $key := keys $backendWorkerEnv | sortAlpha }}
+            {{- if not (hasKey $backendWorkerReservedEnv $key) }}
             - name: {{ $key }}
-              value: {{ $val | quote }}
+              value: {{ index $backendWorkerEnv $key | quote }}
+            {{- end }}
             {{- end }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}

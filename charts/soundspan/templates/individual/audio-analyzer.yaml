@@ -35,6 +35,16 @@ spec:
           imagePullPolicy: {{ .Values.audioAnalyzer.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
+          {{- $audioAnalyzerEnv := .Values.audioAnalyzer.env | default (dict) }}
+          {{- $audioAnalyzerReservedEnv := dict
+            "POSTGRES_USER" true
+            "POSTGRES_PASSWORD" true
+            "POSTGRES_DB" true
+            "DATABASE_URL" true
+            "REDIS_URL" true
+            "MUSIC_PATH" true
+            "TZ" true
+          }}
           env:
             - name: POSTGRES_USER
               valueFrom:
@@ -59,9 +69,11 @@ spec:
               value: /music
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
-            {{- range $key, $val := .Values.audioAnalyzer.env }}
+            {{- range $key := keys $audioAnalyzerEnv | sortAlpha }}
+            {{- if not (hasKey $audioAnalyzerReservedEnv $key) }}
             - name: {{ $key }}
-              value: {{ $val | quote }}
+              value: {{ index $audioAnalyzerEnv $key | quote }}
+            {{- end }}
             {{- end }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
