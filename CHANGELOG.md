@@ -12,8 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Album track rows now use a three-dot overflow menu between duration and thumbs controls for Add to Queue/Add to Playlist actions, reducing action clutter while preserving existing behavior.
+- Home data loading now uses bounded featured-playlist and audiobook queries, reducing homepage overfetch.
+- Frontend API routing now supports explicit `NEXT_PUBLIC_API_PATH_MODE` (`auto`, `proxy`, `direct`) for clearer proxy/direct deployment behavior.
+- Settings now code-splits heavy/admin sections, reducing initial settings page JavaScript payload.
 
 ### Fixed
+
+- Reduced unnecessary client API traffic by removing render-phase state writes and consolidating overlapping polling ownership in activity/download/playback flows.
+- Added backend response compression for compressible API responses while excluding stream/media and `no-transform` responses.
+- Added missing `next/image` `sizes` attributes across fixed-size image callsites to improve responsive image selection.
 
 ## [1.1.0] - 2026-02-19
 

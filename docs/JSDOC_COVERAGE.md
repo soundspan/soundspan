@@ -18,10 +18,10 @@ Scope:
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 69 | 69 | 11 | 58 | 15.9% |
 | Frontend features | 133 | 110 | 4 | 106 | 3.6% |
-| Frontend hooks | 24 | 79 | 56 | 23 | 70.9% |
-| Frontend lib | 30 | 38 | 6 | 32 | 15.8% |
+| Frontend hooks | 24 | 79 | 55 | 24 | 69.6% |
+| Frontend lib | 32 | 40 | 8 | 32 | 20.0% |
 | Frontend other | 59 | 57 | 6 | 51 | 10.5% |
-| **Total** | **472** | **600** | **221** | **379** | **36.8%** |
+| **Total** | **474** | **602** | **222** | **380** | **36.9%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -136,14 +136,14 @@ Scope:
 | Backend workers | processScan | backend/src/workers/processors/scanProcessor.ts:157 |
 | Backend workers | processValidation | backend/src/workers/processors/validationProcessor.ts:16 |
 | Backend workers | stopUnifiedEnrichmentWorker | backend/src/workers/unifiedEnrichment.ts:492 |
-| Frontend components | ActiveDownloadsTab | frontend/components/activity/ActiveDownloadsTab.tsx:10 |
+| Frontend components | ActiveDownloadsTab | frontend/components/activity/ActiveDownloadsTab.tsx:20 |
 | Frontend components | HistoryTab | frontend/components/activity/HistoryTab.tsx:19 |
-| Frontend components | NotificationsTab | frontend/components/activity/NotificationsTab.tsx:28 |
-| Frontend components | SocialTab | frontend/components/activity/SocialTab.tsx:20 |
+| Frontend components | NotificationsTab | frontend/components/activity/NotificationsTab.tsx:30 |
+| Frontend components | SocialTab | frontend/components/activity/SocialTab.tsx:30 |
 | Frontend components | DownloadNotifications | frontend/components/DownloadNotifications.tsx:19 |
 | Frontend components | EnrichmentFailuresModal | frontend/components/EnrichmentFailuresModal.tsx:19 |
-| Frontend components | ActivityPanelToggle | frontend/components/layout/ActivityPanel.tsx:298 |
-| Frontend components | ActivityPanel | frontend/components/layout/ActivityPanel.tsx:49 |
+| Frontend components | ActivityPanelToggle | frontend/components/layout/ActivityPanel.tsx:367 |
+| Frontend components | ActivityPanel | frontend/components/layout/ActivityPanel.tsx:52 |
 | Frontend components | getActivityPanelBadgeState | frontend/components/layout/activityPanelTabs.ts:24 |
 | Frontend components | getActivityTabBadge | frontend/components/layout/activityPanelTabs.ts:46 |
 | Frontend components | isActivityTabVisible | frontend/components/layout/activityPanelTabs.ts:65 |
@@ -155,7 +155,7 @@ Scope:
 | Frontend components | PageHeader | frontend/components/layout/PageHeader.tsx:17 |
 | Frontend components | Sidebar | frontend/components/layout/Sidebar.tsx:29 |
 | Frontend components | hasMyHistoryLink | frontend/components/layout/socialNavigation.ts:28 |
-| Frontend components | TopBar | frontend/components/layout/TopBar.tsx:29 |
+| Frontend components | TopBar | frontend/components/layout/TopBar.tsx:33 |
 | Frontend components | TVLayout | frontend/components/layout/TVLayout.tsx:26 |
 | Frontend components | MoodMixer | frontend/components/MoodMixer.tsx:109 |
 | Frontend components | shouldAutoMatchVibeAtQueueEnd | frontend/components/player/autoMatchVibePlayback.ts:9 |
@@ -177,8 +177,8 @@ Scope:
 | Frontend components | GalaxyBackground | frontend/components/ui/GalaxyBackground.tsx:17 |
 | Frontend components | CarouselItem | frontend/components/ui/HorizontalCarousel.tsx:142 |
 | Frontend components | HorizontalCarousel | frontend/components/ui/HorizontalCarousel.tsx:16 |
-| Frontend components | ConnectionTestButton | frontend/components/ui/InlineStatus.tsx:125 |
-| Frontend components | SaveButton | frontend/components/ui/InlineStatus.tsx:178 |
+| Frontend components | ConnectionTestButton | frontend/components/ui/InlineStatus.tsx:123 |
+| Frontend components | SaveButton | frontend/components/ui/InlineStatus.tsx:176 |
 | Frontend components | Input | frontend/components/ui/Input.tsx:10 |
 | Frontend components | LoadingScreen | frontend/components/ui/LoadingScreen.tsx:7 |
 | Frontend components | Modal | frontend/components/ui/Modal.tsx:17 |
