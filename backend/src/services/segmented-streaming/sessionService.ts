@@ -176,6 +176,14 @@ class SegmentedSessionService {
                 );
             }
 
+            if (quality === "original") {
+                throw new SegmentedSessionError(
+                    "Original quality for local tracks requires direct playback mode",
+                    409,
+                    "STREAMING_ORIGINAL_QUALITY_REQUIRES_DIRECT",
+                );
+            }
+
             const normalizedFilePath = track.filePath.replace(/\\/g, "/");
             const sourcePath = path.join(config.music.musicPath, normalizedFilePath);
             phase = "source_access";

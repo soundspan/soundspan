@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Recovery after segmented playback disruption now keeps local player state authoritative for resume position and play/pause intent.
-- `original` segmented quality now preserves lossless local sources via copy/remux (`-c:a copy`) instead of forcing lossy AAC transcoding.
+- Local `original` quality now skips segmented DASH session creation and falls back to direct playback, preserving source fidelity and avoiding codec/container incompatibility stalls.
 - Segmented manifest-relative `.m4s` segment requests are now served through a compatibility route, preventing session stalls when clients request chunk URLs outside the `/segments/` path prefix.
 
 ## [1.1.2] - 2026-02-20
