@@ -424,8 +424,7 @@ router.get(
             return res.status(400).json({ error: "Invalid trackId" });
         }
 
-        const quality =
-            (req.query.quality as string) || undefined;
+        let quality = req.query.quality as string | undefined;
 
         try {
             const hasAuth = await ensureUserOAuth(userId);
@@ -433,6 +432,17 @@ router.get(
                 return res
                     .status(401)
                     .json({ error: "Not authenticated to TIDAL" });
+            }
+
+            if (!quality) {
+                try {
+                    const userSettings = await prisma.userSettings.findUnique({
+                        where: { userId },
+                    });
+                    quality = userSettings?.tidalStreamingQuality || "HIGH";
+                } catch {
+                    quality = "HIGH";
+                }
             }
 
             const info = await tidalStreamingService.getStreamInfo(

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useAudioState } from "@/lib/audio-context";
 import { api } from "@/lib/api";
 
@@ -44,6 +44,94 @@ const CODEC_FRIENDLY_NAMES: Record<string, string> = {
     "WMA": "WMA",
     "DSD": "DSD",
 };
+
+// Shared across all hook instances so Mini/Full players do not duplicate requests.
+const ytInfoCache = new Map<string, { abr: number; acodec: string }>();
+const ytInfoInFlight = new Map<string, Promise<{ abr: number; acodec: string }>>();
+const tidalInfoCache = new Map<number, TidalStreamQuality>();
+const tidalInfoInFlight = new Map<number, Promise<TidalStreamQuality>>();
+const localInfoCache = new Map<string, LocalTrackQuality>();
+const localInfoInFlight = new Map<string, Promise<LocalTrackQuality>>();
+
+function fetchYtStreamInfo(videoId: string): Promise<{ abr: number; acodec: string }> {
+    const cached = ytInfoCache.get(videoId);
+    if (cached) return Promise.resolve(cached);
+
+    const inFlight = ytInfoInFlight.get(videoId);
+    if (inFlight) return inFlight;
+
+    const request = api
+        .getYtMusicStreamInfo(videoId)
+        .then((info) => {
+            const normalized = {
+                abr: info.abr,
+                acodec: info.acodec,
+            };
+            ytInfoCache.set(videoId, normalized);
+            return normalized;
+        })
+        .finally(() => {
+            ytInfoInFlight.delete(videoId);
+        });
+
+    ytInfoInFlight.set(videoId, request);
+    return request;
+}
+
+function fetchTidalStreamInfo(trackId: number): Promise<TidalStreamQuality> {
+    const cached = tidalInfoCache.get(trackId);
+    if (cached) return Promise.resolve(cached);
+
+    const inFlight = tidalInfoInFlight.get(trackId);
+    if (inFlight) return inFlight;
+
+    const request = api
+        .getTidalStreamInfo(trackId)
+        .then((info) => {
+            const normalized: TidalStreamQuality = {
+                quality: info.quality,
+                codec: info.acodec,
+                bitDepth: info.bit_depth,
+                sampleRate: info.sample_rate,
+            };
+            tidalInfoCache.set(trackId, normalized);
+            return normalized;
+        })
+        .finally(() => {
+            tidalInfoInFlight.delete(trackId);
+        });
+
+    tidalInfoInFlight.set(trackId, request);
+    return request;
+}
+
+function fetchLocalTrackQuality(trackId: string): Promise<LocalTrackQuality> {
+    const cached = localInfoCache.get(trackId);
+    if (cached) return Promise.resolve(cached);
+
+    const inFlight = localInfoInFlight.get(trackId);
+    if (inFlight) return inFlight;
+
+    const request = api
+        .getLocalTrackAudioInfo(trackId)
+        .then((info) => {
+            const normalized: LocalTrackQuality = {
+                codec: info.codec || "Unknown",
+                bitrate: info.bitrate,
+                sampleRate: info.sampleRate,
+                bitDepth: info.bitDepth,
+                lossless: info.lossless ?? false,
+            };
+            localInfoCache.set(trackId, normalized);
+            return normalized;
+        })
+        .finally(() => {
+            localInfoInFlight.delete(trackId);
+        });
+
+    localInfoInFlight.set(trackId, request);
+    return request;
+}
 
 export function friendlyCodecName(raw: string): string {
     return CODEC_FRIENDLY_NAMES[raw] || raw;
@@ -148,11 +236,6 @@ export function useStreamBitrate(): {
     const [codec, setCodec] = useState<string | null>(null);
     const [tidalQuality, setTidalQuality] = useState<TidalStreamQuality | null>(null);
     const [localQuality, setLocalQuality] = useState<LocalTrackQuality | null>(null);
-    const ytCacheRef = useRef<Map<string, { abr: number; acodec: string }>>(
-        new Map()
-    );
-    const tidalCacheRef = useRef<Map<number, TidalStreamQuality>>(new Map());
-    const localCacheRef = useRef<Map<string, LocalTrackQuality>>(new Map());
 
     // ── YouTube Music stream info ──────────────────────────────────
     useEffect(() => {
@@ -168,24 +251,11 @@ export function useStreamBitrate(): {
         }
 
         const videoId = currentTrack.youtubeVideoId;
-
-        // Check cache first
-        const cached = ytCacheRef.current.get(videoId);
-        if (cached) {
-            setBitrate(cached.abr);
-            setCodec(cached.acodec);
-            return;
-        }
-
         let cancelled = false;
 
-        api.getYtMusicStreamInfo(videoId)
+        fetchYtStreamInfo(videoId)
             .then((info) => {
                 if (cancelled) return;
-                ytCacheRef.current.set(videoId, {
-                    abr: info.abr,
-                    acodec: info.acodec,
-                });
                 setBitrate(info.abr);
                 setCodec(info.acodec);
             })
@@ -214,26 +284,11 @@ export function useStreamBitrate(): {
         }
 
         const trackId = currentTrack.tidalTrackId;
-
-        // Check cache first
-        const cached = tidalCacheRef.current.get(trackId);
-        if (cached) {
-            setTidalQuality(cached);
-            return;
-        }
-
         let cancelled = false;
 
-        api.getTidalStreamInfo(trackId)
-            .then((info) => {
+        fetchTidalStreamInfo(trackId)
+            .then((quality) => {
                 if (cancelled) return;
-                const quality: TidalStreamQuality = {
-                    quality: info.quality,
-                    codec: info.acodec,
-                    bitDepth: info.bit_depth,
-                    sampleRate: info.sample_rate,
-                };
-                tidalCacheRef.current.set(trackId, quality);
                 setTidalQuality(quality);
             })
             .catch(() => {
@@ -262,27 +317,11 @@ export function useStreamBitrate(): {
         }
 
         const trackId = currentTrack!.id;
-
-        // Check cache first
-        const cached = localCacheRef.current.get(trackId);
-        if (cached) {
-            setLocalQuality(cached);
-            return;
-        }
-
         let cancelled = false;
 
-        api.getLocalTrackAudioInfo(trackId)
-            .then((info) => {
+        fetchLocalTrackQuality(trackId)
+            .then((quality) => {
                 if (cancelled) return;
-                const quality: LocalTrackQuality = {
-                    codec: info.codec || "Unknown",
-                    bitrate: info.bitrate,
-                    sampleRate: info.sampleRate,
-                    bitDepth: info.bitDepth,
-                    lossless: info.lossless ?? false,
-                };
-                localCacheRef.current.set(trackId, quality);
                 setLocalQuality(quality);
             })
             .catch(() => {

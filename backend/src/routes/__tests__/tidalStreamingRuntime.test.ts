@@ -374,6 +374,40 @@ describe("tidal streaming route runtime", () => {
         await streamInfoHandler(okInfoReq, okInfoRes);
         expect(okInfoRes.statusCode).toBe(200);
         expect(okInfoRes.body).toEqual({ codec: "AAC", bitrate: 320 });
+        expect(tidalStreamingService.getStreamInfo).toHaveBeenLastCalledWith(
+            "u1",
+            42,
+            "LOSSLESS"
+        );
+
+        const defaultQualityReq = {
+            user: { id: "u1" },
+            params: { trackId: "43" },
+            query: {},
+        } as any;
+        const defaultQualityRes = createRes();
+        await streamInfoHandler(defaultQualityReq, defaultQualityRes);
+        expect(defaultQualityRes.statusCode).toBe(200);
+        expect(tidalStreamingService.getStreamInfo).toHaveBeenLastCalledWith(
+            "u1",
+            43,
+            "LOSSLESS"
+        );
+
+        prisma.userSettings.findUnique.mockRejectedValueOnce(new Error("db down"));
+        const dbFallbackReq = {
+            user: { id: "u1" },
+            params: { trackId: "44" },
+            query: {},
+        } as any;
+        const dbFallbackRes = createRes();
+        await streamInfoHandler(dbFallbackReq, dbFallbackRes);
+        expect(dbFallbackRes.statusCode).toBe(200);
+        expect(tidalStreamingService.getStreamInfo).toHaveBeenLastCalledWith(
+            "u1",
+            44,
+            "HIGH"
+        );
     });
 
     it("proxies stream responses and handles invalid track IDs", async () => {

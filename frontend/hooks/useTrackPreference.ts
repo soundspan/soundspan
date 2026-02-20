@@ -31,13 +31,39 @@ export function useTrackPreference(trackId?: string | null) {
             }
             return api.setTrackPreference(trackId, signal);
         },
-        onSuccess: (data) => {
-            const canonicalQueryKey = ["track-preference", data.trackId] as const;
-            queryClient.setQueryData(canonicalQueryKey, data);
-            void queryClient.invalidateQueries({
+        onMutate: async (nextSignal) => {
+            if (!trackId) return null;
+
+            const canonicalQueryKey = ["track-preference", trackId] as const;
+            await queryClient.cancelQueries({
                 queryKey: canonicalQueryKey,
                 exact: true,
             });
+
+            const previousPreference =
+                queryClient.getQueryData<TrackPreferenceResponse>(canonicalQueryKey);
+            queryClient.setQueryData(canonicalQueryKey, {
+                trackId,
+                signal: nextSignal,
+                score:
+                    nextSignal === "thumbs_up" ? 1
+                    : nextSignal === "thumbs_down" ? -1
+                    : 0,
+            });
+
+            return { canonicalQueryKey, previousPreference };
+        },
+        onSuccess: (data, _signal, context) => {
+            const canonicalQueryKey =
+                context?.canonicalQueryKey || (["track-preference", data.trackId] as const);
+            queryClient.setQueryData(canonicalQueryKey, data);
+        },
+        onError: (_error, _signal, context) => {
+            if (!context?.canonicalQueryKey) return;
+            queryClient.setQueryData(
+                context.canonicalQueryKey,
+                context.previousPreference ?? null
+            );
         },
     });
 

@@ -56,9 +56,10 @@ _user_apis: dict[str, TidalAPI] = {}
 _user_api_locks: dict[str, asyncio.Lock] = {}
 _user_auth_state: dict[str, dict[str, str]] = {}
 
-# ── Stream URL cache (per-user, keyed by (user_id, track_id)) ─────
-_stream_cache: dict[tuple[str, int], dict] = {}
+# ── Stream URL cache (per-user, keyed by (user_id, track_id, quality)) ─────
+_stream_cache: dict[tuple[str, int, str], dict] = {}
 STREAM_CACHE_TTL = 600  # 10 minutes
+STREAM_QUALITY_OPTIONS = {"LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -249,14 +250,42 @@ def _get_user_api(user_id: str) -> TidalAPI:
     return api
 
 
+def _normalize_stream_quality(quality: Optional[str]) -> str:
+    """Normalize stream quality values to supported tiddl literals."""
+    normalized = (quality or "HIGH").strip().upper()
+    if normalized == "MAX":
+        normalized = "HI_RES_LOSSLESS"
+    return normalized if normalized in STREAM_QUALITY_OPTIONS else "HIGH"
+
+
+def _clear_stream_cache(
+    user_id: str,
+    track_id: Optional[int] = None,
+    quality: Optional[str] = None,
+):
+    """Clear cached stream URLs for a user, optionally scoped by track/quality."""
+    normalized_quality = (
+        _normalize_stream_quality(quality) if quality is not None else None
+    )
+    keys_to_remove = []
+    for cache_user_id, cache_track_id, cache_quality in _stream_cache:
+        if cache_user_id != user_id:
+            continue
+        if track_id is not None and cache_track_id != track_id:
+            continue
+        if normalized_quality is not None and cache_quality != normalized_quality:
+            continue
+        keys_to_remove.append((cache_user_id, cache_track_id, cache_quality))
+
+    for key in keys_to_remove:
+        _stream_cache.pop(key, None)
+
+
 def _invalidate_user_api(user_id: str):
     """Remove a user's API instance (e.g. on logout)."""
     _user_apis.pop(user_id, None)
     _user_auth_state.pop(user_id, None)
-    # Clear any cached streams for this user
-    keys_to_remove = [k for k in _stream_cache if k[0] == user_id]
-    for k in keys_to_remove:
-        _stream_cache.pop(k, None)
+    _clear_stream_cache(user_id)
 
 
 def _get_user_lock(user_id: str) -> asyncio.Lock:
@@ -328,9 +357,7 @@ async def _refresh_user_api(user_id: str) -> TidalAPI:
             creds["country_code"] = new_country
 
             # Stream URLs are tied to prior auth state; clear on refresh.
-            keys_to_remove = [k for k in _stream_cache if k[0] == user_id]
-            for k in keys_to_remove:
-                _stream_cache.pop(k, None)
+            _clear_stream_cache(user_id)
 
             log.info(f"Refreshed TIDAL session for user {user_id}")
             return refreshed_api
@@ -371,13 +398,14 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
     Extract stream URL for a TIDAL track (synchronous — run in thread).
     Uses tiddl's stream extraction. Results are cached for STREAM_CACHE_TTL.
     """
-    cache_key = (user_id, track_id)
+    normalized_quality = _normalize_stream_quality(quality)
+    cache_key = (user_id, track_id, normalized_quality)
     cached = _stream_cache.get(cache_key)
     if cached and time.time() < cached.get("expires_at", 0):
         return cached
 
     api = _get_user_api(user_id)
-    stream = api.get_track_stream(track_id=track_id, quality=quality)
+    stream = api.get_track_stream(track_id=track_id, quality=normalized_quality)
     urls, file_extension = parse_track_stream(stream)
 
     # Determine codec/content type from stream info
@@ -397,6 +425,7 @@ def _get_stream_url_sync(user_id: str, track_id: int, quality: str = "HIGH") -> 
         "urls": urls,
         "content_type": content_type,
         "acodec": acodec,
+        "requested_quality": normalized_quality,
         "quality": stream.audioQuality,
         "bit_depth": getattr(stream, "bitDepth", None),
         "sample_rate": getattr(stream, "sampleRate", None),
@@ -881,70 +910,93 @@ async def user_stream_proxy(
     to the frontend player. Stream URLs are IP-locked to the server,
     so we must proxy.
     """
-    stream_info = await _run_user_api_call(
-        user_id,
-        lambda _current_api: _get_stream_url_sync(user_id, track_id, quality),
-        operation=f"stream URL fetch for track {track_id}",
-    )
-    stream_url = stream_info["url"]
-
-    if not stream_url:
-        raise HTTPException(status_code=404, detail="No stream URL available")
-
-    content_type = stream_info.get("content_type", "audio/mp4")
+    normalized_quality = _normalize_stream_quality(quality)
 
     # Build headers for upstream request
     headers = {}
     if request and "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
-    async def stream_audio():
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0)) as client:
-            try:
-                async with client.stream("GET", stream_url, headers=headers) as response:
-                    async for chunk in response.aiter_bytes(chunk_size=65536):
-                        yield chunk
-            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
-                log.error(f"Upstream stream error for track {track_id}: {e}")
-                return
+    async def _open_upstream_stream():
+        """
+        Open a stream from the current URL cache, and retry once with a fresh
+        URL when upstream rejects the cached URL (401/403).
+        """
+        for attempt in range(2):
+            if attempt == 1:
+                _clear_stream_cache(
+                    user_id,
+                    track_id=track_id,
+                    quality=normalized_quality,
+                )
 
-    # For range requests, fetch upstream first to get headers
-    if headers.get("Range"):
-        client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
-        upstream = await client.send(
-            client.build_request("GET", stream_url, headers=headers),
-            stream=True,
-        )
-        response_headers = {
-            "Content-Type": content_type,
-            "Accept-Ranges": "bytes",
-        }
-        if "content-range" in upstream.headers:
-            response_headers["Content-Range"] = upstream.headers["content-range"]
+            stream_info = await _run_user_api_call(
+                user_id,
+                lambda _current_api: _get_stream_url_sync(
+                    user_id, track_id, normalized_quality
+                ),
+                operation=f"stream URL fetch for track {track_id}",
+            )
+            stream_url = stream_info.get("url")
+            if not stream_url:
+                raise HTTPException(status_code=404, detail="No stream URL available")
 
-        async def range_stream():
+            client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
             try:
-                async for chunk in upstream.aiter_bytes(chunk_size=65536):
-                    yield chunk
+                upstream = await client.send(
+                    client.build_request("GET", stream_url, headers=headers),
+                    stream=True,
+                )
             except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
-                log.warning(f"Upstream read error during range stream for track {track_id}: {e}")
-            finally:
+                await client.aclose()
+                log.error(f"Upstream stream request failed for track {track_id}: {e}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Failed to fetch TIDAL stream",
+                ) from e
+
+            if attempt == 0 and upstream.status_code in (401, 403):
+                log.warning(
+                    "Cached TIDAL stream URL rejected for track %s (status=%s); refreshing once",
+                    track_id,
+                    upstream.status_code,
+                )
                 await upstream.aclose()
                 await client.aclose()
+                continue
 
-        return StreamingResponse(
-            range_stream(),
-            status_code=upstream.status_code,
-            headers=response_headers,
-        )
+            return client, upstream, stream_info
+
+        raise HTTPException(status_code=502, detail="Unable to refresh TIDAL stream URL")
+
+    client, upstream, stream_info = await _open_upstream_stream()
+
+    response_headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-cache",
+    }
+    content_type = upstream.headers.get("content-type") or stream_info.get(
+        "content_type", "audio/mp4"
+    )
+    if content_type:
+        response_headers["Content-Type"] = content_type
+    if "content-range" in upstream.headers:
+        response_headers["Content-Range"] = upstream.headers["content-range"]
+
+    async def proxy_stream():
+        try:
+            async for chunk in upstream.aiter_bytes(chunk_size=65536):
+                yield chunk
+        except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
+            log.warning(f"Upstream read error during stream for track {track_id}: {e}")
+        finally:
+            await upstream.aclose()
+            await client.aclose()
 
     return StreamingResponse(
-        stream_audio(),
-        media_type=content_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-cache",
-        },
+        proxy_stream(),
+        status_code=upstream.status_code,
+        headers=response_headers,
     )
 
 
