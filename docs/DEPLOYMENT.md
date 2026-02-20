@@ -63,8 +63,8 @@ cd frontend && PORT=3031 BACKEND_URL=http://127.0.0.1:3007 NEXT_PUBLIC_API_URL=h
 ### Local host-run guardrails (ports + testing)
 
 - Treat `3030`/`3006` as potentially occupied by a live/local deployment. For local host-run validation and E2E, use `3031`/`3007`.
-- When frontend runs on `3031`, set `NEXT_PUBLIC_API_URL=http://127.0.0.1:3007` so browser-side API calls do not fall back to `3006`.
-- Set `NEXT_PUBLIC_API_PATH_MODE=direct` to make the browser/backend path explicit and avoid an accidental frontend proxy hop in split local dev.
+- `auto` mode uses frontend proxy routing by default; set `BACKEND_URL=http://127.0.0.1:3007` so proxied API calls reach the correct backend in host-run local dev.
+- If you want direct browser-to-backend calls, set both `NEXT_PUBLIC_API_URL=http://127.0.0.1:3007` and `NEXT_PUBLIC_API_PATH_MODE=direct`.
 - For Playwright against host-run stack, pin the UI base URL explicitly:
 
 ```bash

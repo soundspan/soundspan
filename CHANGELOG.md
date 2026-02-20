@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reduced unnecessary client API traffic by removing render-phase state writes and consolidating overlapping polling ownership in activity/download/playback flows.
 - Added backend response compression for compressible API responses while excluding stream/media and `no-transform` responses.
 - Added missing `next/image` `sizes` attributes across fixed-size image callsites to improve responsive image selection.
+- Fixed frontend API auto-mode to default to same-origin proxy routing (instead of inferring direct `:3006` calls on non-canonical ports), preventing empty library views when inferred backend origin is wrong.
 
 ## [1.1.0] - 2026-02-19
 

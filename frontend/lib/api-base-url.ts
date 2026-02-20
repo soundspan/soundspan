@@ -1,6 +1,5 @@
 const DEFAULT_SERVER_BACKEND_URL = "http://127.0.0.1:3006";
 const DEFAULT_BROWSER_BACKEND_PORT = "3006";
-const AUTO_PROXY_FRONTEND_PORTS = new Set(["3030", "80", "443"]);
 
 /** Browser API routing mode: automatic, forced same-origin proxy, or forced direct backend. */
 export type ApiPathMode = "auto" | "proxy" | "direct";
@@ -39,13 +38,6 @@ const parseApiPathMode = (value?: string): ApiPathMode => {
     return "auto";
 };
 
-const getBrowserPort = (location: BrowserLocationLike): string => {
-    if (location.port) {
-        return location.port;
-    }
-    return location.protocol === "https:" ? "443" : "80";
-};
-
 const getBrowserDefaultBackendUrl = (location: BrowserLocationLike): string => {
     return `${location.protocol}//${location.hostname}:${DEFAULT_BROWSER_BACKEND_PORT}`;
 };
@@ -81,15 +73,5 @@ export const resolveApiBaseUrl = (
     if (configuredApiUrl) {
         return configuredApiUrl;
     }
-
-    if (!options.browserLocation) {
-        return "";
-    }
-
-    const frontendPort = getBrowserPort(options.browserLocation);
-    if (AUTO_PROXY_FRONTEND_PORTS.has(frontendPort)) {
-        return "";
-    }
-
-    return getBrowserDefaultBackendUrl(options.browserLocation);
+    return "";
 };

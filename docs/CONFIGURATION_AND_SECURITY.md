@@ -127,7 +127,7 @@ ALLOWED_ORIGINS=http://localhost:3030,https://soundspan.yourdomain.com
 
 `NEXT_PUBLIC_API_PATH_MODE` controls how the browser reaches backend APIs:
 
-- `auto` (default): use `NEXT_PUBLIC_API_URL` when set; otherwise use same-origin proxy mode on frontend ports `3030`/`443`/`80`, and direct `:3006` calls on other ports.
+- `auto` (default): use `NEXT_PUBLIC_API_URL` when set; otherwise use same-origin proxy mode (`/api/*`).
 - `proxy`: always use same-origin `/api/*` calls through `frontend/app/api/[...path]/route.ts`.
 - `direct`: always call backend directly (uses `NEXT_PUBLIC_API_URL` when provided, else derives `protocol://<host>:3006`).
 

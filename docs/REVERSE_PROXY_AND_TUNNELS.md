@@ -25,7 +25,7 @@ For split frontend/backend deployments:
 
 - Route all app traffic (including `/socket.io/listen-together`) to frontend service (`:3030`)
 - Frontend proxies `/socket.io/listen-together` to backend service (`:3006`)
-- For API calls, frontend proxy mode is used when `NEXT_PUBLIC_API_PATH_MODE=proxy` (or `auto` on canonical frontend ports)
+- For API calls, frontend proxy mode is used when `NEXT_PUBLIC_API_PATH_MODE=proxy` or `auto`
 
 ### Optional: Direct path-split routing
 

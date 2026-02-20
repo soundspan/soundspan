@@ -14,7 +14,7 @@ test("resolveApiBaseUrl auto mode uses proxy path on canonical frontend ports", 
     assert.equal(result, "");
 });
 
-test("resolveApiBaseUrl auto mode uses direct backend on non-canonical frontend ports", () => {
+test("resolveApiBaseUrl auto mode uses proxy path on non-canonical frontend ports", () => {
     const result = resolveApiBaseUrl({
         isServer: false,
         browserLocation: {
@@ -23,7 +23,7 @@ test("resolveApiBaseUrl auto mode uses direct backend on non-canonical frontend 
             port: "3031",
         },
     });
-    assert.equal(result, "http://127.0.0.1:3006");
+    assert.equal(result, "");
 });
 
 test("resolveApiBaseUrl auto mode prefers explicit NEXT_PUBLIC_API_URL", () => {
