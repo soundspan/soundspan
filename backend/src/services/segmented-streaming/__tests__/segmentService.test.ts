@@ -108,7 +108,7 @@ describe("segmentedSegmentService", () => {
         await wait(0);
     });
 
-    it("preserves lossless sources for original quality (copy codec, no lossy bitrate)", async () => {
+    it("preserves original lossless quality via ALAC transcoding (no lossy bitrate)", async () => {
         const { segmentedSegmentService, mocks } = await resolveSegmentService();
         const ffmpegProcess = createMockFfmpegProcess();
 
@@ -132,7 +132,7 @@ describe("segmentedSegmentService", () => {
 
         const ffmpegArgs = mocks.mockSpawn.mock.calls[0][1] as string[];
         expect(ffmpegArgs).toContain("-c:a");
-        expect(ffmpegArgs).toContain("copy");
+        expect(ffmpegArgs).toContain("alac");
         expect(ffmpegArgs).not.toContain("-b:a");
         expect(ffmpegArgs).not.toContain("320k");
 

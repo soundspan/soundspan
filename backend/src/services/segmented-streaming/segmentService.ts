@@ -197,10 +197,11 @@ class SegmentedSegmentService {
         const ensureDirMs = segmentedTraceDurationMs(ensureDirStartedAtMs);
 
         const bitrate = DASH_QUALITY_BITRATES[params.quality];
-        const shouldPreserveOriginalLossless =
+        const shouldUseLosslessOriginalTranscode =
             params.quality === "original" &&
             !SOURCE_URL_REGEX.test(params.sourcePath) &&
             LOSSLESS_FILE_EXTENSION_REGEX.test(params.sourcePath);
+        const audioCodec = shouldUseLosslessOriginalTranscode ? "alac" : "aac";
         const ffmpegArgs = [
             "-hide_banner",
             "-loglevel",
@@ -212,8 +213,8 @@ class SegmentedSegmentService {
             "-map",
             "0:a:0",
             "-c:a",
-            shouldPreserveOriginalLossless ? "copy" : "aac",
-            ...(shouldPreserveOriginalLossless ? [] : ["-b:a", `${bitrate}k`]),
+            audioCodec,
+            ...(audioCodec === "aac" ? ["-b:a", `${bitrate}k`] : []),
             "-f",
             "dash",
             "-seg_duration",
@@ -238,7 +239,7 @@ class SegmentedSegmentService {
             sourceKind,
             cacheKey: params.cacheKey,
             bitrateKbps: bitrate,
-            transcodeMode: shouldPreserveOriginalLossless ? "copy" : "aac",
+            transcodeMode: audioCodec,
             ensureDirMs,
         });
 
