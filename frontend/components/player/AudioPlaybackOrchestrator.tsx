@@ -217,7 +217,7 @@ const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey("current_time_track_
 const AUDIO_LOAD_TIMEOUT_MS = 20_000;
 const AUDIO_LOAD_TIMEOUT_RETRIES = 1;
 const AUDIO_LOAD_RETRY_DELAY_MS = 350;
-const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_DEFAULT_MS = 5_000;
+const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_DEFAULT_MS = 2_500;
 const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MIN_MS = 1_500;
 const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MAX_MS = 15_000;
 const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
@@ -243,6 +243,13 @@ interface ActiveSegmentedSessionSnapshot {
     sourceType: "local" | "tidal" | "ytmusic";
     manifestUrl: string;
     expiresAt: string;
+}
+
+interface SegmentedSessionPrewarmOptions {
+    sessionKey: string;
+    context: SegmentedTrackContext;
+    trackId: string;
+    reason: "startup_background" | "next_track";
 }
 
 const buildSegmentedSessionKey = (context: SegmentedTrackContext): string =>
@@ -444,6 +451,98 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             }
         },
         []
+    );
+
+    const prewarmSegmentedSession = useCallback(
+        ({
+            sessionKey,
+            context,
+            trackId,
+            reason,
+        }: SegmentedSessionPrewarmOptions): void => {
+            const existingPrewarmedSession =
+                prewarmedSegmentedSessionRef.current.get(sessionKey);
+            if (
+                existingPrewarmedSession &&
+                isSegmentedSessionUsable(existingPrewarmedSession)
+            ) {
+                return;
+            }
+
+            if (segmentedPrewarmInFlightRef.current.has(sessionKey)) {
+                return;
+            }
+
+            prewarmedSegmentedSessionRef.current.delete(sessionKey);
+            segmentedPrewarmInFlightRef.current.add(sessionKey);
+            void api
+                .createSegmentedStreamingSession({
+                    trackId: context.sessionTrackId,
+                    sourceType: context.sourceType,
+                })
+                .then((session) => {
+                    if (!isSegmentedSessionUsable(session)) {
+                        return;
+                    }
+                    if (session.engineHints?.preferDirectStartup === true) {
+                        logSegmentedClientMetric("session.prewarm_skip", {
+                            trackId,
+                            sourceType:
+                                session.playbackProfile?.sourceType ??
+                                session.engineHints?.sourceType ??
+                                context.sourceType,
+                            reason: "backend_prefer_direct_startup",
+                            trigger: reason,
+                        });
+                        return;
+                    }
+                    if (
+                        isLosslessSegmentedSession(session) &&
+                        !supportsLosslessSegmentedPlayback()
+                    ) {
+                        logSegmentedClientMetric("session.prewarm_skip", {
+                            trackId,
+                            sourceType:
+                                session.playbackProfile?.sourceType ??
+                                session.engineHints?.sourceType ??
+                                context.sourceType,
+                            reason: "lossless_segmented_unsupported",
+                            trigger: reason,
+                        });
+                        return;
+                    }
+
+                    prewarmedSegmentedSessionRef.current.set(sessionKey, session);
+                    logSegmentedClientMetric("session.prewarm_success", {
+                        trackId,
+                        sourceType:
+                            session.playbackProfile?.sourceType ??
+                            session.engineHints?.sourceType ??
+                            context.sourceType,
+                        sessionId: session.sessionId,
+                        trigger: reason,
+                    });
+                })
+                .catch((error) => {
+                    console.warn(
+                        "[AudioPlaybackOrchestrator] Segmented prewarm failed:",
+                        error,
+                    );
+                    logSegmentedClientMetric("session.prewarm_failure", {
+                        trackId,
+                        sourceType: context.sourceType,
+                        trigger: reason,
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : String(error ?? "unknown"),
+                    });
+                })
+                .finally(() => {
+                    segmentedPrewarmInFlightRef.current.delete(sessionKey);
+                });
+        },
+        [],
     );
 
     const scheduleStartupPlaybackRecovery = useCallback(
@@ -1661,150 +1760,124 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     return;
                 }
 
-                try {
-                    const segmentedInitStartedAtMs = Date.now();
-                    const segmentedSessionKey = buildSegmentedSessionKey(
-                        segmentedTrackContext,
-                    );
-                    const prewarmedSession =
-                        prewarmedSegmentedSessionRef.current.get(
-                            segmentedSessionKey,
-                        );
-                    let segmentedSession: SegmentedStreamingSessionResponse;
-                    let initSource: "prewarm" | "create";
-                    if (prewarmedSession && isSegmentedSessionUsable(prewarmedSession)) {
-                        segmentedSession = prewarmedSession;
-                        prewarmedSegmentedSessionRef.current.delete(
-                            segmentedSessionKey,
-                        );
-                        initSource = "prewarm";
-                    } else {
-                        prewarmedSegmentedSessionRef.current.delete(
-                            segmentedSessionKey,
-                        );
-                        segmentedSession = await api.createSegmentedStreamingSession(
-                            {
-                                trackId: segmentedTrackContext.sessionTrackId,
-                                sourceType: segmentedTrackContext.sourceType,
-                            }
-                        );
-                        initSource = "create";
-                    }
+                const segmentedInitStartedAtMs = Date.now();
+                const segmentedSessionKey = buildSegmentedSessionKey(
+                    segmentedTrackContext,
+                );
+                const prewarmedSession = prewarmedSegmentedSessionRef.current.get(
+                    segmentedSessionKey,
+                );
 
-                    if (
-                        segmentedSession.engineHints?.preferDirectStartup === true
-                    ) {
-                        logSegmentedClientMetric("session.create_fallback_direct", {
-                            trackId: currentTrack.id,
-                            sourceType:
-                                segmentedSession.playbackProfile?.sourceType ??
-                                segmentedSession.engineHints?.sourceType ??
-                                segmentedTrackContext.sourceType,
-                            reason: "backend_prefer_direct_startup",
-                        });
-                        throw new Error(
-                            "Segmented asset is still warming; using direct startup path.",
-                        );
-                    }
-
-                    if (
-                        isLosslessSegmentedSession(segmentedSession) &&
-                        !supportsLosslessSegmentedPlayback()
-                    ) {
-                        logSegmentedClientMetric("session.create_fallback_direct", {
-                            trackId: currentTrack.id,
-                            sourceType:
-                                segmentedSession.playbackProfile?.sourceType ??
-                                segmentedSession.engineHints?.sourceType ??
-                                segmentedTrackContext.sourceType,
-                            reason: "lossless_segmented_unsupported",
-                        });
-                        throw new Error(
-                            "Lossless segmented playback is not supported by this browser.",
-                        );
-                    }
-
-                    if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
-                        return;
-                    }
-
-                    sourceForLoad = {
-                        url: segmentedSession.manifestUrl,
+                if (!prewarmedSession || !isSegmentedSessionUsable(prewarmedSession)) {
+                    prewarmedSegmentedSessionRef.current.delete(segmentedSessionKey);
+                    prewarmSegmentedSession({
+                        sessionKey: segmentedSessionKey,
+                        context: segmentedTrackContext,
                         trackId: currentTrack.id,
-                        sessionId: segmentedSession.sessionId,
-                        sourceType:
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        protocol: "dash",
-                        mimeType: "application/dash+xml",
-                    };
-                    usingSegmentedSource = true;
-                    format = "mp4";
-
-                    sourceRequestHeaders = {
-                        "x-streaming-session-token": segmentedSession.sessionToken,
-                    };
-                    const authToken = api.getStreamingAuthToken();
-                    if (authToken) {
-                        sourceRequestHeaders.Authorization = `Bearer ${authToken}`;
-                    }
-
-                    activeSegmentedSessionRef.current = {
-                        sessionId: segmentedSession.sessionId,
-                        sessionToken: segmentedSession.sessionToken,
-                        trackId: currentTrack.id,
-                        sourceType:
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        manifestUrl: segmentedSession.manifestUrl,
-                        expiresAt: segmentedSession.expiresAt,
-                    };
-                    setStreamProfile({
-                        mode: "dash",
-                        sourceType:
-                            segmentedSession.playbackProfile?.sourceType ??
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        codec:
-                            segmentedSession.playbackProfile?.codec?.toUpperCase() ??
-                            "AAC",
-                        bitrateKbps:
-                            segmentedSession.playbackProfile?.bitrateKbps ?? null,
+                        reason: "startup_background",
                     });
-                    logSegmentedClientMetric("session.create_success", {
-                        trackId: currentTrack.id,
-                        sourceType:
-                            segmentedSession.playbackProfile?.sourceType ??
-                            segmentedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
-                        sessionId: segmentedSession.sessionId,
-                        initSource,
-                        latencyMs: Math.max(0, Date.now() - segmentedInitStartedAtMs),
-                    });
-                    segmentedHandoffAttemptRef.current = 0;
-                } catch (error) {
-                    console.warn(
-                        "[AudioPlaybackOrchestrator] Segmented session init failed, falling back to direct stream.",
-                        error
-                    );
-                    logSegmentedClientMetric("session.create_failure", {
+                    logSegmentedClientMetric("session.create_skipped_direct", {
                         trackId: currentTrack.id,
                         sourceType: segmentedTrackContext.sourceType,
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : String(error ?? "unknown"),
+                        reason: "session_not_prewarmed",
                     });
-                    activeSegmentedSessionRef.current = null;
-                    segmentedHandoffAttemptRef.current = 0;
-                    usingSegmentedSource = false;
-                    setStreamProfile({
-                        mode: "direct",
-                        sourceType: resolveDirectTrackSourceType(currentTrack),
-                        codec: null,
-                        bitrateKbps: null,
-                    });
+                    return;
                 }
+
+                prewarmedSegmentedSessionRef.current.delete(segmentedSessionKey);
+                const segmentedSession = prewarmedSession;
+
+                if (segmentedSession.engineHints?.preferDirectStartup === true) {
+                    prewarmSegmentedSession({
+                        sessionKey: segmentedSessionKey,
+                        context: segmentedTrackContext,
+                        trackId: currentTrack.id,
+                        reason: "startup_background",
+                    });
+                    logSegmentedClientMetric("session.create_fallback_direct", {
+                        trackId: currentTrack.id,
+                        sourceType:
+                            segmentedSession.playbackProfile?.sourceType ??
+                            segmentedSession.engineHints?.sourceType ??
+                            segmentedTrackContext.sourceType,
+                        reason: "backend_prefer_direct_startup",
+                    });
+                    return;
+                }
+
+                if (
+                    isLosslessSegmentedSession(segmentedSession) &&
+                    !supportsLosslessSegmentedPlayback()
+                ) {
+                    logSegmentedClientMetric("session.create_fallback_direct", {
+                        trackId: currentTrack.id,
+                        sourceType:
+                            segmentedSession.playbackProfile?.sourceType ??
+                            segmentedSession.engineHints?.sourceType ??
+                            segmentedTrackContext.sourceType,
+                        reason: "lossless_segmented_unsupported",
+                    });
+                    return;
+                }
+
+                if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
+                    return;
+                }
+
+                sourceForLoad = {
+                    url: segmentedSession.manifestUrl,
+                    trackId: currentTrack.id,
+                    sessionId: segmentedSession.sessionId,
+                    sourceType:
+                        segmentedSession.engineHints?.sourceType ??
+                        segmentedTrackContext.sourceType,
+                    protocol: "dash",
+                    mimeType: "application/dash+xml",
+                };
+                usingSegmentedSource = true;
+                format = "mp4";
+
+                sourceRequestHeaders = {
+                    "x-streaming-session-token": segmentedSession.sessionToken,
+                };
+                const authToken = api.getStreamingAuthToken();
+                if (authToken) {
+                    sourceRequestHeaders.Authorization = `Bearer ${authToken}`;
+                }
+
+                activeSegmentedSessionRef.current = {
+                    sessionId: segmentedSession.sessionId,
+                    sessionToken: segmentedSession.sessionToken,
+                    trackId: currentTrack.id,
+                    sourceType:
+                        segmentedSession.engineHints?.sourceType ??
+                        segmentedTrackContext.sourceType,
+                    manifestUrl: segmentedSession.manifestUrl,
+                    expiresAt: segmentedSession.expiresAt,
+                };
+                setStreamProfile({
+                    mode: "dash",
+                    sourceType:
+                        segmentedSession.playbackProfile?.sourceType ??
+                        segmentedSession.engineHints?.sourceType ??
+                        segmentedTrackContext.sourceType,
+                    codec:
+                        segmentedSession.playbackProfile?.codec?.toUpperCase() ??
+                        "AAC",
+                    bitrateKbps:
+                        segmentedSession.playbackProfile?.bitrateKbps ?? null,
+                });
+                logSegmentedClientMetric("session.create_success", {
+                    trackId: currentTrack.id,
+                    sourceType:
+                        segmentedSession.playbackProfile?.sourceType ??
+                        segmentedSession.engineHints?.sourceType ??
+                        segmentedTrackContext.sourceType,
+                    sessionId: segmentedSession.sessionId,
+                    initSource: "prewarm",
+                    latencyMs: Math.max(0, Date.now() - segmentedInitStartedAtMs),
+                });
+                segmentedHandoffAttemptRef.current = 0;
             };
 
             const clearLoadListeners = () => {
@@ -2068,6 +2141,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         clearStartupPlaybackRecovery,
         clearSegmentedStartupFallback,
         clearTransientTrackRecovery,
+        prewarmSegmentedSession,
     ]);
 
     // Preload next track for gapless playback (music only)
@@ -2143,51 +2217,12 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         ) {
             return;
         }
-        if (segmentedPrewarmInFlightRef.current.has(nextSessionKey)) {
-            return;
-        }
-
-        prewarmedSegmentedSessionRef.current.delete(nextSessionKey);
-        segmentedPrewarmInFlightRef.current.add(nextSessionKey);
-        void api
-            .createSegmentedStreamingSession({
-                trackId: nextSegmentedTrackContext.sessionTrackId,
-                sourceType: nextSegmentedTrackContext.sourceType,
-            })
-            .then((session) => {
-                if (!isSegmentedSessionUsable(session)) {
-                    return;
-                }
-                if (
-                    isLosslessSegmentedSession(session) &&
-                    !supportsLosslessSegmentedPlayback()
-                ) {
-                    logSegmentedClientMetric("session.prewarm_skip", {
-                        trackId: nextTrack.id,
-                        sourceType:
-                            session.playbackProfile?.sourceType ??
-                            session.engineHints?.sourceType ??
-                            nextSegmentedTrackContext.sourceType,
-                        reason: "lossless_segmented_unsupported",
-                    });
-                    return;
-                }
-                prewarmedSegmentedSessionRef.current.set(nextSessionKey, session);
-                logSegmentedClientMetric("session.prewarm_success", {
-                    trackId: nextTrack.id,
-                    sourceType: nextSegmentedTrackContext.sourceType,
-                    sessionId: session.sessionId,
-                });
-            })
-            .catch((error) => {
-                console.warn(
-                    "[AudioPlaybackOrchestrator] Segmented prewarm failed for next track:",
-                    error,
-                );
-            })
-            .finally(() => {
-                segmentedPrewarmInFlightRef.current.delete(nextSessionKey);
-            });
+        prewarmSegmentedSession({
+            sessionKey: nextSessionKey,
+            context: nextSegmentedTrackContext,
+            trackId: nextTrack.id,
+            reason: "next_track",
+        });
     }, [
         playbackType,
         currentTrack,
@@ -2197,6 +2232,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         isShuffle,
         shuffleIndices,
         repeatMode,
+        prewarmSegmentedSession,
     ]);
 
     // Check podcast cache status and control canSeek

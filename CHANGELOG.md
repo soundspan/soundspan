@@ -17,10 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Segmented streaming engine control now uses runtime `STREAMING_ENGINE_MODE` injection (`videojs` default, explicit `howler-rollback` opt-in) so prebuilt images can roll back without rebuilds.
 - Segmented streaming cache location now supports `SEGMENTED_STREAMING_CACHE_PATH` and defaults to `TRANSCODE_CACHE_PATH` when unset.
-- Segmented startup fallback timeout is now runtime-configurable via `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` (clamped to 1500-15000ms, default 5000ms) through `/runtime-config`.
+- Segmented startup fallback timeout is now runtime-configurable via `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` (clamped to 1500-15000ms, default 2500ms) through `/runtime-config`.
 - Segmented session creation now returns immediately and continues DASH asset generation in the background, with manifest/segment routes waiting for asset readiness instead of failing fast on startup races.
 - Segmented playback session quality now defaults to each user’s saved playback-quality setting when the frontend does not explicitly pass a quality value.
 - Next-track segmented playback now prewarms immediately and reuses prewarmed session manifests/tokens on track handoff.
+- Track startup now uses segmented delivery only when a usable prewarmed session already exists; otherwise playback starts direct immediately while segmented session prewarm continues asynchronously in the background.
 - Playback quality badge resolution is now centralized in a single shared resolver and applied consistently across Mini Player, Full Player, and Overlay Player.
 - Player orchestration component naming now reflects current runtime responsibility (`AudioPlaybackOrchestrator`), replacing the legacy `HowlerAudioElement` naming.
 
