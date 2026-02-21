@@ -1772,7 +1772,15 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
                     sourceType: activeSegmentedSessionRef.current?.sourceType ?? "direct",
                 });
-                playbackStateMachine.transition("BUFFERING");
+                const transitionedToBuffering =
+                    playbackStateMachine.transition("BUFFERING");
+                if (
+                    !transitionedToBuffering &&
+                    !playbackStateMachine.isBuffering
+                ) {
+                    // Keep machine + React state aligned even after event-race transitions.
+                    playbackStateMachine.forceTransition("BUFFERING");
+                }
                 setIsBuffering(true);
                 heartbeatRef.current?.startBufferTimeout();
             },
@@ -1816,8 +1824,14 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 });
                 if (playbackStateMachine.isBuffering) {
                     playbackStateMachine.transition("PLAYING");
-                    setIsBuffering(false);
+                } else if (
+                    !playbackStateMachine.isPlaying &&
+                    howlerEngine.isPlaying()
+                ) {
+                    playbackStateMachine.forceTransition("PLAYING");
                 }
+                setIsBuffering(false);
+                setIsPlaying(howlerEngine.isPlaying());
             },
             getCurrentTime: () => howlerEngine.getCurrentTime(),
             isActuallyPlaying: () => howlerEngine.isPlaying(),
