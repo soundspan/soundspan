@@ -5,7 +5,6 @@ import {
   type HowlerRequestOptions,
 } from "@/lib/howler-engine";
 import {
-  DEFAULT_STREAMING_ENGINE_MODE,
   type AudioEngine,
   type AudioEngineErrorPayload,
   type AudioEngineEventHandler,
@@ -14,9 +13,7 @@ import {
   type AudioEngineSource,
   type StreamingEngineMode,
 } from "@/lib/audio-engine/types";
-
-const STREAMING_ENGINE_MODE_KEY = "STREAMING_ENGINE_MODE";
-const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
+import { isHowlerRollbackModeEnabled } from "@/lib/audio-engine/engineMode";
 
 const MIME_TYPE_FORMAT_MAP: Record<string, string> = {
   "audio/aac": "aac",
@@ -90,33 +87,6 @@ export interface CreateHowlerRollbackEngineOptions
   extends HowlerEngineAdapterOptions {
   mode?: StreamingEngineMode | string;
 }
-
-const parseStreamingEngineModeInternal = (
-  value: string | null | undefined,
-): StreamingEngineMode => {
-  const normalized = value?.trim().toLowerCase();
-  if (
-    normalized === "videojs" ||
-    normalized === "howler-rollback"
-  ) {
-    return normalized;
-  }
-  return DEFAULT_STREAMING_ENGINE_MODE;
-};
-
-const readRuntimeEngineMode = (): string | undefined => {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-
-  const runtimeConfig = (
-    window as Window & {
-      [SOUNDSPAN_RUNTIME_CONFIG_KEY]?: Record<string, unknown>;
-    }
-  )[SOUNDSPAN_RUNTIME_CONFIG_KEY];
-  const runtimeValue = runtimeConfig?.[STREAMING_ENGINE_MODE_KEY];
-  return typeof runtimeValue === "string" ? runtimeValue : undefined;
-};
 
 const getRecord = (value: unknown): Record<string, unknown> | null => {
   if (typeof value !== "object" || value === null) {
@@ -499,22 +469,6 @@ export class HowlerEngineAdapter implements AudioEngine {
     }
   }
 }
-
-export const parseStreamingEngineMode = (
-  value: string | null | undefined,
-): StreamingEngineMode => parseStreamingEngineModeInternal(value);
-
-export const resolveStreamingEngineMode = (
-  value?: StreamingEngineMode | string,
-): StreamingEngineMode => {
-  return parseStreamingEngineModeInternal(value ?? readRuntimeEngineMode());
-};
-
-export const isHowlerRollbackModeEnabled = (
-  value?: StreamingEngineMode | string,
-): boolean => {
-  return resolveStreamingEngineMode(value) === "howler-rollback";
-};
 
 /**
  * Creates a Howler adapter only when explicit rollback mode is enabled.

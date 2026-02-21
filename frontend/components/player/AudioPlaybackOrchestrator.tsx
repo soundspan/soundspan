@@ -5,7 +5,7 @@ import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { api, type SegmentedStreamingSessionResponse } from "@/lib/api";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
-import { resolveStreamingEngineMode } from "@/lib/audio-engine/howlerEngineAdapter";
+import { resolveStreamingEngineMode } from "@/lib/audio-engine/engineMode";
 import type { AudioEngineSource } from "@/lib/audio-engine/types";
 import { resolveLocalAuthoritativeRecovery } from "@/lib/audio-engine/recoveryPolicy";
 import {

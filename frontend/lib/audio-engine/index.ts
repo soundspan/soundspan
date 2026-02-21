@@ -1,7 +1,7 @@
 import {
   HowlerEngineAdapter,
-  resolveStreamingEngineMode,
 } from "@/lib/audio-engine/howlerEngineAdapter";
+import { resolveStreamingEngineMode } from "@/lib/audio-engine/engineMode";
 import type {
   AudioEngine,
   AudioEngineEventHandler,
