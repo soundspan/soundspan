@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backend startup now probes ffmpeg DASH muxer capabilities once and suppresses unsupported flags proactively to reduce repeated startup failures/noise.
 - Local segmented sessions now signal cold/in-flight asset generation so frontend starts on direct playback immediately while DASH assets continue warming in the background.
 - Segmented handoff recovery now enforces a per-track cooldown to prevent rapid session churn/reseek loops during repeated transient playback errors.
+- Next-track segmented prewarm now performs bounded retries when assets are still warming, preventing repeated direct-only track transitions caused by one-shot prewarm skips.
 
 ## [1.1.2] - 2026-02-20
 

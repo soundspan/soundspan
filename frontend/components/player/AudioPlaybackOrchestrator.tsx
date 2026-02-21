@@ -235,6 +235,8 @@ const SEGMENTED_HEARTBEAT_INTERVAL_MS = 15_000;
 const SEGMENTED_HANDOFF_MAX_ATTEMPTS = 2;
 const SEGMENTED_HANDOFF_COOLDOWN_MS = 45_000;
 const SEGMENTED_PREWARM_EXPIRY_GUARD_MS = 8_000;
+const SEGMENTED_PREWARM_RETRY_DELAY_MS = 1_000;
+const SEGMENTED_PREWARM_MAX_RETRIES = 5;
 const howlerEngine = createRuntimeAudioEngine();
 
 interface ActiveSegmentedSessionSnapshot {
@@ -251,6 +253,7 @@ interface SegmentedSessionPrewarmOptions {
     context: SegmentedTrackContext;
     trackId: string;
     reason: "startup_background" | "next_track";
+    retryCount?: number;
 }
 
 const buildSegmentedSessionKey = (context: SegmentedTrackContext): string =>
@@ -378,6 +381,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         Map<string, SegmentedStreamingSessionResponse>
     >(new Map());
     const segmentedPrewarmInFlightRef = useRef<Set<string>>(new Set());
+    const segmentedPrewarmRetryTimeoutsRef = useRef<
+        Map<string, NodeJS.Timeout>
+    >(new Map());
     const pendingTrackErrorSkipRef = useRef<NodeJS.Timeout | null>(null);
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
     const currentTrackRef = useRef(currentTrack);
@@ -410,6 +416,16 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             clearTimeout(segmentedStartupFallbackTimeoutRef.current);
             segmentedStartupFallbackTimeoutRef.current = null;
         }
+    }, []);
+
+    const clearSegmentedPrewarmRetry = useCallback((sessionKey: string) => {
+        const existingTimeout =
+            segmentedPrewarmRetryTimeoutsRef.current.get(sessionKey);
+        if (!existingTimeout) {
+            return;
+        }
+        clearTimeout(existingTimeout);
+        segmentedPrewarmRetryTimeoutsRef.current.delete(sessionKey);
     }, []);
 
     const clearPendingTrackErrorSkip = useCallback(() => {
@@ -461,6 +477,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             context,
             trackId,
             reason,
+            retryCount = 0,
         }: SegmentedSessionPrewarmOptions): void => {
             const existingPrewarmedSession =
                 prewarmedSegmentedSessionRef.current.get(sessionKey);
@@ -468,6 +485,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 existingPrewarmedSession &&
                 isSegmentedSessionUsable(existingPrewarmedSession)
             ) {
+                clearSegmentedPrewarmRetry(sessionKey);
                 return;
             }
 
@@ -475,6 +493,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 return;
             }
 
+            clearSegmentedPrewarmRetry(sessionKey);
             prewarmedSegmentedSessionRef.current.delete(sessionKey);
             segmentedPrewarmInFlightRef.current.add(sessionKey);
             void api
@@ -487,6 +506,41 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         return;
                     }
                     if (session.engineHints?.preferDirectStartup === true) {
+                        if (
+                            reason === "next_track" &&
+                            retryCount < SEGMENTED_PREWARM_MAX_RETRIES
+                        ) {
+                            const nextAttempt = retryCount + 1;
+                            const retryTimeout = setTimeout(() => {
+                                segmentedPrewarmRetryTimeoutsRef.current.delete(
+                                    sessionKey,
+                                );
+                                prewarmSegmentedSession({
+                                    sessionKey,
+                                    context,
+                                    trackId,
+                                    reason,
+                                    retryCount: nextAttempt,
+                                });
+                            }, SEGMENTED_PREWARM_RETRY_DELAY_MS);
+                            segmentedPrewarmRetryTimeoutsRef.current.set(
+                                sessionKey,
+                                retryTimeout,
+                            );
+                            logSegmentedClientMetric(
+                                "session.prewarm_retry_scheduled",
+                                {
+                                    trackId,
+                                    sourceType:
+                                        session.playbackProfile?.sourceType ??
+                                        session.engineHints?.sourceType ??
+                                        context.sourceType,
+                                    trigger: reason,
+                                    attempt: nextAttempt,
+                                },
+                            );
+                            return;
+                        }
                         logSegmentedClientMetric("session.prewarm_skip", {
                             trackId,
                             sourceType:
@@ -495,6 +549,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                                 context.sourceType,
                             reason: "backend_prefer_direct_startup",
                             trigger: reason,
+                            attempt: retryCount,
                         });
                         return;
                     }
@@ -515,6 +570,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     }
 
                     prewarmedSegmentedSessionRef.current.set(sessionKey, session);
+                    clearSegmentedPrewarmRetry(sessionKey);
                     logSegmentedClientMetric("session.prewarm_success", {
                         trackId,
                         sourceType:
@@ -523,6 +579,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                             context.sourceType,
                         sessionId: session.sessionId,
                         trigger: reason,
+                        attempt: retryCount,
                     });
                 })
                 .catch((error) => {
@@ -544,7 +601,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     segmentedPrewarmInFlightRef.current.delete(sessionKey);
                 });
         },
-        [],
+        [clearSegmentedPrewarmRetry],
     );
 
     const scheduleStartupPlaybackRecovery = useCallback(
@@ -2812,6 +2869,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     useEffect(() => {
         const prewarmedSegmentedSessions = prewarmedSegmentedSessionRef.current;
         const segmentedPrewarmInFlight = segmentedPrewarmInFlightRef.current;
+        const segmentedPrewarmRetryTimeouts =
+            segmentedPrewarmRetryTimeoutsRef.current;
         return () => {
             howlerEngine.stop();
 
@@ -2843,6 +2902,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             lastPreloadedTrackIdRef.current = null;
             prewarmedSegmentedSessions.clear();
             segmentedPrewarmInFlight.clear();
+            for (const timeout of segmentedPrewarmRetryTimeouts.values()) {
+                clearTimeout(timeout);
+            }
+            segmentedPrewarmRetryTimeouts.clear();
         };
     }, [
         clearSegmentedStartupFallback,
