@@ -193,6 +193,11 @@ export interface SegmentedStreamingHandoffResponse
     shouldPlay: boolean;
 }
 
+export interface SegmentedStreamingClientMetricInput {
+    event: string;
+    fields?: Record<string, unknown>;
+}
+
 interface ApiError extends Error {
     status?: number;
     data?: Record<string, unknown>;
@@ -1046,6 +1051,15 @@ class ApiClient {
             ...handoff,
             manifestUrl: this.toAbsoluteApiUrl(handoff.manifestUrl),
         };
+    }
+
+    async reportSegmentedStreamingClientMetric(
+        input: SegmentedStreamingClientMetricInput,
+    ): Promise<void> {
+        await this.request<void>("/streaming/v1/client-metrics", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
     }
 
     /**

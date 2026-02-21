@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added segmented streaming session/DASH delivery architecture across backend and frontend, including Video.js-based segmented playback with direct-stream compatibility fallback.
 - Added segmented playback baseline capture tooling (`tools/streaming/capture-playback-baseline.mjs`) for reliability/latency before-vs-after reporting.
 - Added segmented streaming session lifecycle API routes: session create, manifest, segment, heartbeat, and handoff endpoints under `/api/streaming/v1/sessions`.
+- Added segmented client-signal ingestion (`POST /api/streaming/v1/client-metrics`) for live stall/rebuffer diagnostics from browser playback telemetry.
 
 ### Changed
 

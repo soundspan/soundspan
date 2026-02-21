@@ -147,7 +147,30 @@ function logSegmentedClientMetric(
         timestamp: new Date().toISOString(),
         ...fields,
     });
+
+    // Temporary high-signal beaconing to backend for live stall diagnostics.
+    if (!SEGMENTED_CLIENT_SIGNAL_EVENTS.has(event)) {
+        return;
+    }
+
+    void api
+        .reportSegmentedStreamingClientMetric({
+            event,
+            fields,
+        })
+        .catch(() => undefined);
 }
+
+const SEGMENTED_CLIENT_SIGNAL_EVENTS = new Set<string>([
+    "player.rebuffer",
+    "player.rebuffer_timeout",
+    "player.rebuffer_recovered",
+    "player.playback_error",
+    "session.handoff_failure",
+    "session.handoff_proactive_failure",
+    "session.handoff_load_error",
+    "session.handoff_proactive_load_error",
+]);
 
 function podcastDebugEnabled(): boolean {
     try {

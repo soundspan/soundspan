@@ -25,6 +25,11 @@ const continuitySnapshotSchema = z.object({
     bufferedUntilSec: z.number().finite().min(0).optional(),
 });
 
+const clientMetricSchema = z.object({
+    event: z.string().min(1).max(128),
+    fields: z.record(z.unknown()).optional(),
+});
+
 const resolveSessionToken = (req: express.Request): string | null => {
     const queryValue = req.query?.[SEGMENTED_SESSION_TOKEN_QUERY_PARAM];
     if (typeof queryValue === "string" && queryValue.trim()) {
@@ -557,6 +562,72 @@ router.post("/v1/sessions/:sessionId/handoff", requireAuth, async (req, res) => 
 
         logger.error("[SegmentedStreaming] Failed to process handoff:", error);
         return res.status(500).json({ error: "Failed to process streaming handoff" });
+    }
+});
+
+router.post("/v1/client-metrics", requireAuth, async (req, res) => {
+    const startedAtMs = Date.now();
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            logSegmentedStreamingMetric("client.signal", {
+                status: "reject",
+                reason: "unauthorized",
+                latencyMs: segmentedMetricDurationMs(startedAtMs),
+            });
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const parsedBody = clientMetricSchema.safeParse(req.body ?? {});
+        if (!parsedBody.success) {
+            logSegmentedStreamingMetric("client.signal", {
+                status: "reject",
+                reason: "invalid_request",
+                latencyMs: segmentedMetricDurationMs(startedAtMs),
+            });
+            return res.status(400).json({
+                error: "Invalid request body",
+                details: parsedBody.error.flatten(),
+            });
+        }
+
+        const fields = parsedBody.data.fields ?? {};
+        const sessionId =
+            typeof fields.sessionId === "string" ? fields.sessionId : undefined;
+        const sourceType =
+            typeof fields.sourceType === "string" ? fields.sourceType : undefined;
+        const trackId =
+            typeof fields.trackId === "string" ? fields.trackId : undefined;
+
+        logSegmentedStreamingMetric("client.signal", {
+            status: "success",
+            event: parsedBody.data.event,
+            sessionId,
+            sourceType,
+            trackId,
+            userId,
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+        logSegmentedStreamingTrace("route.client.signal", {
+            event: parsedBody.data.event,
+            sessionId,
+            sourceType,
+            trackId,
+            userId,
+            requestPath: req.originalUrl || req.path,
+            fields,
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+
+        return res.status(202).json({ accepted: true });
+    } catch (error) {
+        logSegmentedStreamingMetric("client.signal", {
+            status: "error",
+            ...getSegmentedMetricErrorFields(error),
+            latencyMs: segmentedMetricDurationMs(startedAtMs),
+        });
+        logger.error("[SegmentedStreaming] Failed to ingest client signal:", error);
+        return res.status(500).json({ error: "Failed to ingest client signal" });
     }
 });
 

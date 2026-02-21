@@ -118,6 +118,7 @@ describe("streaming route runtime", () => {
     );
     const postHeartbeat = getHandler("post", "/v1/sessions/:sessionId/heartbeat");
     const postHandoff = getHandler("post", "/v1/sessions/:sessionId/handoff");
+    const postClientMetric = getHandler("post", "/v1/client-metrics");
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -517,6 +518,46 @@ describe("streaming route runtime", () => {
         expect(res.statusCode).toBe(400);
         expect(mockGetAuthorizedSession).not.toHaveBeenCalled();
         expect(mockHeartbeatSession).not.toHaveBeenCalled();
+    });
+
+    it("accepts segmented client signal metrics", async () => {
+        const req = {
+            user: { id: "user-1" },
+            body: {
+                event: "player.rebuffer",
+                fields: {
+                    sessionId: "session-1",
+                    sourceType: "local",
+                    trackId: "track-1",
+                    reason: "heartbeat_stall",
+                },
+            },
+        } as any;
+        const res = createResponse();
+
+        await postClientMetric(req, res);
+
+        expect(res.statusCode).toBe(202);
+        expect(res.body).toEqual({ accepted: true });
+    });
+
+    it("returns 400 for invalid segmented client signal payloads", async () => {
+        const req = {
+            user: { id: "user-1" },
+            body: {
+                event: "",
+            },
+        } as any;
+        const res = createResponse();
+
+        await postClientMetric(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                error: "Invalid request body",
+            }),
+        );
     });
 
     it("serves session segment for authorized users", async () => {
