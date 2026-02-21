@@ -152,6 +152,7 @@ const handleSegmentFetch = async (
         segmentedStreamingSessionService.validateSessionToken(
             session,
             resolveSessionToken(req),
+            { allowSessionIdMismatch: true },
         );
 
         const segmentPath = await segmentedStreamingSessionService.waitForSegmentReady(
@@ -333,6 +334,7 @@ router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req, res)
         segmentedStreamingSessionService.validateSessionToken(
             session,
             resolveSessionToken(req),
+            { allowSessionIdMismatch: true },
         );
 
         await segmentedStreamingSessionService.waitForManifestReady(session);

@@ -309,7 +309,9 @@ describe("streaming route runtime", () => {
         await getManifest(req, res);
 
         expect(mockGetAuthorizedSession).toHaveBeenCalledWith("session-1", "user-1");
-        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1", {
+            allowSessionIdMismatch: true,
+        });
         expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
         expect(res.sendFile).toHaveBeenCalledWith("/tmp/manifest.mpd");
     });
@@ -395,7 +397,9 @@ describe("streaming route runtime", () => {
         await getManifest(req, res);
 
         expect(mockGetAuthorizedSession).toHaveBeenCalledWith("session-1", "user-1");
-        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1", {
+            allowSessionIdMismatch: true,
+        });
         expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
         expect(res.sendFile).toHaveBeenCalledWith("/tmp/manifest.mpd");
     });
@@ -586,7 +590,9 @@ describe("streaming route runtime", () => {
 
         await getSegment(req, res);
 
-        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1", {
+            allowSessionIdMismatch: true,
+        });
         expect(mockWaitForSegmentReady).toHaveBeenCalledWith(
             session,
             "chunk-0-00001.m4s",
@@ -661,7 +667,9 @@ describe("streaming route runtime", () => {
 
         await getSegmentAlias(req, res);
 
-        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1");
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1", {
+            allowSessionIdMismatch: true,
+        });
         expect(mockWaitForSegmentReady).toHaveBeenCalledWith(
             session,
             "chunk-0-00002.m4s",

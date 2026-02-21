@@ -136,6 +136,10 @@ interface SegmentedSessionTokenPayload extends JwtPayload {
     sourceType: SegmentedSessionSourceType;
 }
 
+interface ValidateSessionTokenOptions {
+    allowSessionIdMismatch?: boolean;
+}
+
 class SegmentedSessionService {
     private readonly inMemorySessions = new Map<string, SegmentedSessionRecord>();
 
@@ -448,6 +452,7 @@ class SegmentedSessionService {
     validateSessionToken(
         session: SegmentedSessionRecord,
         sessionToken: string | null | undefined,
+        options: ValidateSessionTokenOptions = {},
     ): void {
         const normalizedToken = sessionToken?.trim();
         if (!normalizedToken) {
@@ -474,13 +479,22 @@ class SegmentedSessionService {
             payload = this.decodeSessionTokenIgnoringExpiration(normalizedToken);
         }
 
-        if (
-            payload.sessionId !== session.sessionId ||
-            payload.userId !== session.userId ||
-            payload.trackId !== session.trackId ||
-            payload.quality !== session.quality ||
-            payload.sourceType !== session.sourceType
-        ) {
+        const scopeMatches =
+            payload.userId === session.userId &&
+            payload.trackId === session.trackId &&
+            payload.quality === session.quality &&
+            payload.sourceType === session.sourceType;
+        const sessionIdMatches = payload.sessionId === session.sessionId;
+
+        if (!scopeMatches) {
+            throw new SegmentedSessionError(
+                "Session token scope mismatch",
+                403,
+                "STREAMING_SESSION_TOKEN_SCOPE_MISMATCH",
+            );
+        }
+
+        if (!sessionIdMatches && !options.allowSessionIdMismatch) {
             throw new SegmentedSessionError(
                 "Session token scope mismatch",
                 403,

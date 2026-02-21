@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Next-track segmented prewarm now performs bounded retries when assets are still warming, preventing repeated direct-only track transitions caused by one-shot prewarm skips.
 - Direct-start track playback now performs proactive segmented handoff once prewarmed sessions become ready (with bounded retries/cooldown), instead of waiting for a playback-error-triggered recovery path.
 - Proactive direct-to-segmented promotion now logs explicit skip reasons and executes the handoff API path directly, making handoff behavior observable and deterministic per-track during startup warmup.
+- Manifest and segment token validation now tolerates in-flight session ID swaps during handoff while still enforcing user/track/quality/source scope, preventing intermittent 403 buffering stalls.
 
 ## [1.1.2] - 2026-02-20
 

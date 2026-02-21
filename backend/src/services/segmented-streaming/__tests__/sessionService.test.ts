@@ -343,4 +343,105 @@ describe("segmentedStreamingSessionService token validation", () => {
             );
         }
     });
+
+    it("rejects session-id token scope mismatches by default", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+
+        mocks.mockUserSettingsFindUnique.mockResolvedValue({
+            playbackQuality: "medium",
+        });
+        mocks.mockTrackFindUnique.mockResolvedValue({
+            id: "track-3",
+            filePath: "albums/track-3.flac",
+            fileModified: new Date("2026-02-20T00:00:00.000Z"),
+        });
+        mocks.mockFsAccess.mockResolvedValue(undefined);
+        mocks.mockManifestGetOrCreateLocalDashAsset.mockResolvedValue({
+            cacheKey: "cache-token-3",
+            outputDir: "/tmp/segmented/cache-token-3",
+            manifestPath: "/tmp/segmented/cache-token-3/manifest.mpd",
+            quality: "medium",
+        });
+        mocks.mockHasInFlightBuild.mockReturnValue(false);
+
+        const firstSession =
+            await segmentedStreamingSessionService.createLocalSession({
+                userId: "user-1",
+                trackId: "track-3",
+                desiredQuality: "medium",
+            });
+        const secondSession =
+            await segmentedStreamingSessionService.createLocalSession({
+                userId: "user-1",
+                trackId: "track-3",
+                desiredQuality: "medium",
+            });
+        const firstSessionRecord =
+            await segmentedStreamingSessionService.getAuthorizedSession(
+                firstSession.sessionId,
+                "user-1",
+            );
+        expect(firstSessionRecord).not.toBeNull();
+
+        expect(() =>
+            segmentedStreamingSessionService.validateSessionToken(
+                firstSessionRecord!,
+                secondSession.sessionToken,
+            ),
+        ).toThrow(
+            expect.objectContaining({
+                code: "STREAMING_SESSION_TOKEN_SCOPE_MISMATCH",
+            }),
+        );
+    });
+
+    it("allows session-id token scope mismatches for in-flight media requests when explicitly enabled", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+
+        mocks.mockUserSettingsFindUnique.mockResolvedValue({
+            playbackQuality: "medium",
+        });
+        mocks.mockTrackFindUnique.mockResolvedValue({
+            id: "track-4",
+            filePath: "albums/track-4.flac",
+            fileModified: new Date("2026-02-20T00:00:00.000Z"),
+        });
+        mocks.mockFsAccess.mockResolvedValue(undefined);
+        mocks.mockManifestGetOrCreateLocalDashAsset.mockResolvedValue({
+            cacheKey: "cache-token-4",
+            outputDir: "/tmp/segmented/cache-token-4",
+            manifestPath: "/tmp/segmented/cache-token-4/manifest.mpd",
+            quality: "medium",
+        });
+        mocks.mockHasInFlightBuild.mockReturnValue(false);
+
+        const firstSession =
+            await segmentedStreamingSessionService.createLocalSession({
+                userId: "user-1",
+                trackId: "track-4",
+                desiredQuality: "medium",
+            });
+        const secondSession =
+            await segmentedStreamingSessionService.createLocalSession({
+                userId: "user-1",
+                trackId: "track-4",
+                desiredQuality: "medium",
+            });
+        const firstSessionRecord =
+            await segmentedStreamingSessionService.getAuthorizedSession(
+                firstSession.sessionId,
+                "user-1",
+            );
+        expect(firstSessionRecord).not.toBeNull();
+
+        expect(() =>
+            segmentedStreamingSessionService.validateSessionToken(
+                firstSessionRecord!,
+                secondSession.sessionToken,
+                { allowSessionIdMismatch: true },
+            ),
+        ).not.toThrow();
+    });
 });
