@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proactive direct-to-segmented promotion now logs explicit skip reasons and executes the handoff API path directly, making handoff behavior observable and deterministic per-track during startup warmup.
 - Manifest and segment token validation now tolerates in-flight session ID swaps during handoff while still enforcing user/track/quality/source scope, preventing intermittent 403 buffering stalls.
 - Heartbeat stall recovery now force-reconciles playback state-machine and UI playback/buffering flags after event-race transitions, preventing persistent spinning states when playback resumes.
+- Heartbeat buffer timeouts now attempt segmented handoff/transient reload recovery before hard-failing playback, reducing red-circle stopouts after brief segmented stalls.
 
 ## [1.1.2] - 2026-02-20
 

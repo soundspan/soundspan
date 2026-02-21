@@ -1802,16 +1802,48 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
                     sourceType: activeSegmentedSessionRef.current?.sourceType ?? "direct",
                 });
-                if (howlerEngine.isPlaying()) {
-                    howlerEngine.pause();
+                const timeoutError = new Error(
+                    "Connection lost - audio stream timed out"
+                );
+                const failPlayback = () => {
+                    if (howlerEngine.isPlaying()) {
+                        howlerEngine.pause();
+                    }
+                    playbackStateMachine.transition("ERROR", {
+                        error: timeoutError.message,
+                        errorCode: 408,
+                    });
+                    setIsPlaying(false);
+                    setIsBuffering(false);
+                    heartbeatRef.current?.stop();
+                };
+
+                if (playbackTypeRef.current !== "track") {
+                    failPlayback();
+                    return;
                 }
-                playbackStateMachine.transition("ERROR", {
-                    error: "Connection lost - audio stream timed out",
-                    errorCode: 408,
-                });
-                setIsPlaying(false);
-                setIsBuffering(false);
-                heartbeatRef.current?.stop();
+
+                const failedTrackId = currentTrackRef.current?.id ?? null;
+                void attemptSegmentedHandoffRecovery(timeoutError).then(
+                    (didRecoverWithHandoff) => {
+                        if (didRecoverWithHandoff) {
+                            return;
+                        }
+
+                        const didScheduleTransientRecovery =
+                            attemptTransientTrackRecovery(
+                                failedTrackId,
+                                timeoutError
+                            );
+                        if (didScheduleTransientRecovery) {
+                            playbackStateMachine.forceTransition("LOADING");
+                            setIsBuffering(true);
+                            return;
+                        }
+
+                        failPlayback();
+                    }
+                );
             },
             onRecovery: () => {
                 // Recovered from stall
@@ -1841,7 +1873,12 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             heartbeatRef.current?.destroy();
             heartbeatRef.current = null;
         };
-    }, [setIsBuffering, setIsPlaying]);
+    }, [
+        attemptSegmentedHandoffRecovery,
+        attemptTransientTrackRecovery,
+        setIsBuffering,
+        setIsPlaying,
+    ]);
 
     // Keep heartbeat active while buffering so stall timeouts can still fire.
     useEffect(() => {
