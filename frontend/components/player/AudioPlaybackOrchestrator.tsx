@@ -13,6 +13,12 @@ import {
     resolveProactiveSegmentedHandoffEligibility,
     resolveSegmentedPrewarmMaxRetries,
 } from "@/lib/audio-engine/segmentedStartupPolicy";
+import {
+    isSeekWithinTolerance,
+    resolveBufferingRecoveryAction,
+    resolveTrustedTrackPositionSec,
+    shouldFallbackSegmentedStartupToDirect,
+} from "@/lib/audio-engine/segmentedPlaybackRegressionPolicy";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { getListenTogetherSessionSnapshot } from "@/lib/listen-together-session";
@@ -490,20 +496,6 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     }, []);
 
     const readTrustedTrackPositionSec = useCallback((trackId: string): number => {
-        const fallbackPosition = Math.max(0, currentTimeSnapshotRef.current || 0);
-        if (playbackTypeRef.current !== "track") {
-            return fallbackPosition;
-        }
-        if (currentTrackRef.current?.id !== trackId) {
-            return fallbackPosition;
-        }
-        if (isLoadingRef.current) {
-            return fallbackPosition;
-        }
-        if (activeEngineTrackIdRef.current !== trackId) {
-            return fallbackPosition;
-        }
-
         const enginePosition = Math.max(
             0,
             typeof howlerEngine.getActualCurrentTime === "function"
@@ -511,16 +503,15 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 : howlerEngine.getCurrentTime(),
         );
 
-        if (!Number.isFinite(enginePosition)) {
-            return fallbackPosition;
-        }
-
-        // Guard against stale engine position bleed-through during source transitions.
-        if (Math.abs(enginePosition - fallbackPosition) > 15) {
-            return fallbackPosition;
-        }
-
-        return enginePosition;
+        return resolveTrustedTrackPositionSec({
+            fallbackPositionSec: currentTimeSnapshotRef.current,
+            playbackType: playbackTypeRef.current,
+            currentTrackId: currentTrackRef.current?.id ?? null,
+            targetTrackId: trackId,
+            isLoading: isLoadingRef.current,
+            activeEngineTrackId: activeEngineTrackIdRef.current,
+            enginePositionSec: enginePosition,
+        });
     }, []);
 
     const clearStartupPlaybackRecovery = useCallback(() => {
@@ -1963,16 +1954,19 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
                     sourceType: activeSegmentedSessionRef.current?.sourceType ?? "direct",
                 });
-                if (playbackStateMachine.isBuffering) {
+                const enginePlaying = howlerEngine.isPlaying();
+                const recoveryAction = resolveBufferingRecoveryAction({
+                    machineIsBuffering: playbackStateMachine.isBuffering,
+                    machineIsPlaying: playbackStateMachine.isPlaying,
+                    engineIsPlaying: enginePlaying,
+                });
+                if (recoveryAction === "transition_playing") {
                     playbackStateMachine.transition("PLAYING");
-                } else if (
-                    !playbackStateMachine.isPlaying &&
-                    howlerEngine.isPlaying()
-                ) {
+                } else if (recoveryAction === "force_playing") {
                     playbackStateMachine.forceTransition("PLAYING");
                 }
                 setIsBuffering(false);
-                setIsPlaying(howlerEngine.isPlaying());
+                setIsPlaying(enginePlaying);
             },
             getCurrentTime: () => howlerEngine.getCurrentTime(),
             isActuallyPlaying: () => howlerEngine.isPlaying(),
@@ -3007,10 +3001,16 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     const fallbackTimeoutMs =
                         resolveSegmentedStartupFallbackTimeoutMs();
                     segmentedStartupFallbackTimeoutRef.current = setTimeout(() => {
-                        if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
-                            return;
-                        }
-                        if (!usingSegmentedSource) {
+                        if (
+                            !shouldFallbackSegmentedStartupToDirect({
+                                isLoading: isLoadingRef.current,
+                                sourceKind: usingSegmentedSource
+                                    ? "segmented"
+                                    : "direct",
+                                requestLoadId: thisLoadId,
+                                activeLoadId: loadIdRef.current,
+                            })
+                        ) {
                             return;
                         }
 
@@ -3542,8 +3542,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                                 const actualPos =
                                     howlerEngine.getActualCurrentTime();
-                                const seekSucceeded =
-                                    Math.abs(actualPos - seekTime) < 5; // Within 5 seconds
+                                const seekSucceeded = isSeekWithinTolerance(
+                                    actualPos,
+                                    seekTime
+                                );
 
                                 podcastDebugLog("seek: direct seek result", {
                                     seekTime,
@@ -3624,9 +3626,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         try {
                             const actualPos =
                                 howlerEngine.getActualCurrentTime();
-                            // Improved check: if we are more than 5 seconds away from target
-                            const seekFailed =
-                                Math.abs(actualPos - seekTime) > 5;
+                            const seekFailed = !isSeekWithinTolerance(
+                                actualPos,
+                                seekTime
+                            );
 
                             podcastDebugLog("seek check (streaming)", {
                                 time: seekTime,
