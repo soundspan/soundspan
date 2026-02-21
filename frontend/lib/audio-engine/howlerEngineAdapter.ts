@@ -97,7 +97,6 @@ const parseStreamingEngineModeInternal = (
   const normalized = value?.trim().toLowerCase();
   if (
     normalized === "videojs" ||
-    normalized === "react-all-player" ||
     normalized === "howler-rollback"
   ) {
     return normalized;

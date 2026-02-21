@@ -257,7 +257,7 @@ class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
       return "howler";
     }
 
-    if (mode === "videojs" || mode === "react-all-player") {
+    if (mode === "videojs") {
       return isDashProtocol(source) ? "videojs" : "howler";
     }
 

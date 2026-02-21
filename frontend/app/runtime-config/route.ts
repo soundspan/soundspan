@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 const VALID_STREAMING_ENGINE_MODES = new Set([
     "videojs",
-    "react-all-player",
     "howler-rollback",
 ]);
 const VALID_SEGMENTED_VHS_PROFILES = new Set(["balanced", "legacy"]);

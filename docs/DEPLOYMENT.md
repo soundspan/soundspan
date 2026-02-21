@@ -142,7 +142,6 @@ Use one runtime knob for frontend engine rollback:
 - allowed values:
   - unset/empty (default behavior): `videojs`
   - `videojs`: default segmented runtime
-  - `react-all-player`: compatibility/testing mode (non-default)
   - `howler-rollback`: explicit incident rollback mode
 
 Operational guardrails:

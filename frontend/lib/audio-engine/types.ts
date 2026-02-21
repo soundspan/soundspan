@@ -1,6 +1,5 @@
 export type StreamingEngineMode =
   | "videojs"
-  | "react-all-player"
   | "howler-rollback";
 
 export const DEFAULT_STREAMING_ENGINE_MODE: StreamingEngineMode = "videojs";

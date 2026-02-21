@@ -27,10 +27,10 @@ echo "[CONFIG] API path mode: ${NEXT_PUBLIC_API_PATH_MODE:-auto}"
 
 ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
 case "$ENGINE_MODE" in
-  ""|"videojs"|"react-all-player"|"howler-rollback")
+  ""|"videojs"|"howler-rollback")
     ;;
   *)
-    echo "[WARN] Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected videojs|react-all-player|howler-rollback. Falling back to default (videojs)."
+    echo "[WARN] Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected videojs|howler-rollback. Falling back to default (videojs)."
     ENGINE_MODE=""
     ;;
 esac
