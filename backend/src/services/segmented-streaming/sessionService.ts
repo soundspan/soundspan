@@ -458,7 +458,22 @@ class SegmentedSessionService {
             );
         }
 
-        const payload = this.decodeSessionToken(normalizedToken);
+        let payload: SegmentedSessionTokenPayload;
+        try {
+            payload = this.decodeSessionToken(normalizedToken);
+        } catch (error) {
+            if (
+                !(error instanceof SegmentedSessionError) ||
+                error.code !== "STREAMING_SESSION_TOKEN_EXPIRED"
+            ) {
+                throw error;
+            }
+
+            // Allow expired token claims for active sessions so in-flight segment
+            // requests can continue while heartbeat-issued tokens rotate.
+            payload = this.decodeSessionTokenIgnoringExpiration(normalizedToken);
+        }
+
         if (
             payload.sessionId !== session.sessionId ||
             payload.userId !== session.userId ||
@@ -470,6 +485,34 @@ class SegmentedSessionService {
                 "Session token scope mismatch",
                 403,
                 "STREAMING_SESSION_TOKEN_SCOPE_MISMATCH",
+            );
+        }
+    }
+
+    private decodeSessionTokenIgnoringExpiration(
+        sessionToken: string,
+    ): SegmentedSessionTokenPayload {
+        try {
+            const decoded = jwt.verify(sessionToken, SESSION_TOKEN_SECRET, {
+                ignoreExpiration: true,
+            });
+            if (!isSegmentedSessionTokenPayload(decoded)) {
+                throw new SegmentedSessionError(
+                    "Invalid session token payload",
+                    401,
+                    "STREAMING_SESSION_TOKEN_INVALID",
+                );
+            }
+            return decoded;
+        } catch (error) {
+            if (error instanceof SegmentedSessionError) {
+                throw error;
+            }
+
+            throw new SegmentedSessionError(
+                "Invalid session token",
+                401,
+                "STREAMING_SESSION_TOKEN_INVALID",
             );
         }
     }

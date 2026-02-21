@@ -218,3 +218,129 @@ describe("segmentedStreamingSessionService local quality handling", () => {
         });
     });
 });
+
+describe("segmentedStreamingSessionService token validation", () => {
+    afterEach(() => {
+        jest.useRealTimers();
+        jest.resetModules();
+        jest.dontMock("../../../utils/db");
+        jest.dontMock("../../../utils/redis");
+        jest.dontMock("fs");
+        jest.dontMock("../../../config");
+        jest.dontMock("../../../utils/logger");
+        jest.dontMock("../manifestService");
+        jest.dontMock("../cacheService");
+        jest.dontMock("../segmentService");
+        jest.dontMock("../providerAdapters/tidalAdapter");
+        jest.dontMock("../providerAdapters/ytMusicAdapter");
+        jest.dontMock("../providerAdapters/adapterError");
+    });
+
+    it("accepts expired token claims when the active session has been refreshed", async () => {
+        jest.useFakeTimers();
+        const baseNow = new Date("2026-02-21T00:00:00.000Z");
+        jest.setSystemTime(baseNow);
+
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+
+        mocks.mockUserSettingsFindUnique.mockResolvedValueOnce({
+            playbackQuality: "medium",
+        });
+        mocks.mockTrackFindUnique.mockResolvedValueOnce({
+            id: "track-1",
+            filePath: "albums/track-1.flac",
+            fileModified: new Date("2026-02-20T00:00:00.000Z"),
+        });
+        mocks.mockFsAccess.mockResolvedValue(undefined);
+        mocks.mockManifestGetOrCreateLocalDashAsset.mockResolvedValueOnce({
+            cacheKey: "cache-token-1",
+            outputDir: "/tmp/segmented/cache-token-1",
+            manifestPath: "/tmp/segmented/cache-token-1/manifest.mpd",
+            quality: "medium",
+        });
+        mocks.mockHasInFlightBuild.mockReturnValue(false);
+
+        const session = await segmentedStreamingSessionService.createLocalSession({
+            userId: "user-1",
+            trackId: "track-1",
+            desiredQuality: "medium",
+        });
+        const initialToken = session.sessionToken;
+
+        const initialRecord =
+            await segmentedStreamingSessionService.getAuthorizedSession(
+                session.sessionId,
+                "user-1",
+            );
+        expect(initialRecord).not.toBeNull();
+
+        jest.setSystemTime(new Date(baseNow.getTime() + 4 * 60 * 1000));
+        await segmentedStreamingSessionService.heartbeatSession(initialRecord!, {
+            positionSec: 32,
+            isPlaying: true,
+        });
+
+        const refreshedRecord =
+            await segmentedStreamingSessionService.getAuthorizedSession(
+                session.sessionId,
+                "user-1",
+            );
+        expect(refreshedRecord).not.toBeNull();
+
+        // Initial token is now expired, but refreshed session continuity should allow it.
+        jest.setSystemTime(new Date(baseNow.getTime() + 6 * 60 * 1000));
+        expect(() =>
+            segmentedStreamingSessionService.validateSessionToken(
+                refreshedRecord!,
+                initialToken,
+            ),
+        ).not.toThrow();
+    });
+
+    it("still rejects malformed session tokens", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+
+        mocks.mockUserSettingsFindUnique.mockResolvedValueOnce({
+            playbackQuality: "medium",
+        });
+        mocks.mockTrackFindUnique.mockResolvedValueOnce({
+            id: "track-2",
+            filePath: "albums/track-2.flac",
+            fileModified: new Date("2026-02-20T00:00:00.000Z"),
+        });
+        mocks.mockFsAccess.mockResolvedValue(undefined);
+        mocks.mockManifestGetOrCreateLocalDashAsset.mockResolvedValueOnce({
+            cacheKey: "cache-token-2",
+            outputDir: "/tmp/segmented/cache-token-2",
+            manifestPath: "/tmp/segmented/cache-token-2/manifest.mpd",
+            quality: "medium",
+        });
+        mocks.mockHasInFlightBuild.mockReturnValue(false);
+
+        const session = await segmentedStreamingSessionService.createLocalSession({
+            userId: "user-1",
+            trackId: "track-2",
+            desiredQuality: "medium",
+        });
+        const sessionRecord =
+            await segmentedStreamingSessionService.getAuthorizedSession(
+                session.sessionId,
+                "user-1",
+            );
+        expect(sessionRecord).not.toBeNull();
+
+        try {
+            segmentedStreamingSessionService.validateSessionToken(
+                sessionRecord!,
+                "not-a-jwt",
+            );
+            throw new Error("Expected validateSessionToken to throw");
+        } catch (error) {
+            expect((error as { code?: string }).code).toBe(
+                "STREAMING_SESSION_TOKEN_INVALID",
+            );
+        }
+    });
+});
