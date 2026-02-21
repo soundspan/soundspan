@@ -9,8 +9,9 @@ import { resolveStreamingEngineMode } from "@/lib/audio-engine/howlerEngineAdapt
 import type { AudioEngineSource } from "@/lib/audio-engine/types";
 import { resolveLocalAuthoritativeRecovery } from "@/lib/audio-engine/recoveryPolicy";
 import {
+    type ProactiveSegmentedHandoffSkipReason,
+    resolveProactiveSegmentedHandoffEligibility,
     resolveSegmentedPrewarmMaxRetries,
-    shouldAttemptProactiveSegmentedHandoff,
 } from "@/lib/audio-engine/segmentedStartupPolicy";
 import { audioSeekEmitter } from "@/lib/audio-seek-emitter";
 import { dispatchQueryEvent } from "@/lib/query-events";
@@ -241,8 +242,8 @@ const SEGMENTED_HANDOFF_COOLDOWN_MS = 45_000;
 const SEGMENTED_PREWARM_EXPIRY_GUARD_MS = 8_000;
 const SEGMENTED_PREWARM_RETRY_DELAY_MS = 1_000;
 const SEGMENTED_PROACTIVE_HANDOFF_RECHECK_MS = 1_000;
-const SEGMENTED_PROACTIVE_HANDOFF_COOLDOWN_MS = 2_500;
-const SEGMENTED_PROACTIVE_HANDOFF_MAX_ATTEMPTS = 3;
+const SEGMENTED_PROACTIVE_HANDOFF_COOLDOWN_MS = 1_200;
+const SEGMENTED_PROACTIVE_HANDOFF_MAX_ATTEMPTS = 6;
 const howlerEngine = createRuntimeAudioEngine();
 
 interface ActiveSegmentedSessionSnapshot {
@@ -418,6 +419,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     );
     const segmentedProactiveHandoffAttemptCountRef = useRef<number>(0);
     const segmentedProactiveHandoffLastAttemptAtRef = useRef<number>(0);
+    const segmentedProactiveHandoffCompletedTrackIdRef = useRef<string | null>(
+        null
+    );
+    const segmentedProactiveHandoffLastSkipKeyRef = useRef<string | null>(null);
 
     // Heartbeat monitor for detecting stalled playback
     const heartbeatRef = useRef<HeartbeatMonitor | null>(null);
@@ -480,6 +485,28 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             }
         },
         []
+    );
+
+    const logProactiveSegmentedHandoffSkip = useCallback(
+        (
+            trackId: string,
+            sourceType: "local" | "tidal" | "ytmusic",
+            reason: ProactiveSegmentedHandoffSkipReason | string,
+            fields: Record<string, unknown> = {},
+        ): void => {
+            const skipKey = `${trackId}:${reason}`;
+            if (segmentedProactiveHandoffLastSkipKeyRef.current === skipKey) {
+                return;
+            }
+            segmentedProactiveHandoffLastSkipKeyRef.current = skipKey;
+            logSegmentedClientMetric("session.handoff_proactive_skip", {
+                trackId,
+                sourceType,
+                reason,
+                ...fields,
+            });
+        },
+        [],
     );
 
     const prewarmSegmentedSession = useCallback(
@@ -1023,7 +1050,26 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             if (!segmentedTrackContext) {
                 return;
             }
+
+            const sourceType =
+                segmentedTrackContext.sourceType;
             if (getListenTogetherSessionSnapshot()?.groupId) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "listen_together_active",
+                );
+                return;
+            }
+
+            if (
+                segmentedProactiveHandoffCompletedTrackIdRef.current === track.id
+            ) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "already_promoted",
+                );
                 return;
             }
 
@@ -1039,37 +1085,55 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     trackId: track.id,
                     reason: "startup_background",
                 });
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "prewarm_not_ready",
+                );
                 return;
             }
 
-            const isCurrentlyPlaying =
-                howlerEngine.isPlaying() || lastPlayingStateRef.current;
             const activeSegmentedTrackId =
                 activeSegmentedSessionRef.current?.trackId ?? null;
             const attemptedTrackId =
                 segmentedProactiveHandoffAttemptedTrackIdRef.current;
-
-            if (
-                !shouldAttemptProactiveSegmentedHandoff({
-                    playbackType: playbackTypeRef.current,
-                    isListenTogether: false,
-                    currentTrackId: currentTrackRef.current?.id ?? null,
-                    targetTrackId: track.id,
-                    activeSegmentedTrackId,
-                    attemptedTrackId,
-                    isCurrentlyPlaying,
-                })
-            ) {
+            const eligibility = resolveProactiveSegmentedHandoffEligibility({
+                playbackType: playbackTypeRef.current,
+                isListenTogether: false,
+                currentTrackId: currentTrackRef.current?.id ?? null,
+                targetTrackId: track.id,
+                activeSegmentedTrackId,
+                attemptedTrackId,
+            });
+            if (!eligibility.eligible) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    eligibility.reason,
+                );
                 return;
             }
 
             if (segmentedHandoffInProgressRef.current) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "handoff_in_progress",
+                );
                 return;
             }
             if (
                 segmentedProactiveHandoffAttemptCountRef.current >=
                 SEGMENTED_PROACTIVE_HANDOFF_MAX_ATTEMPTS
             ) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "attempt_budget_exhausted",
+                    {
+                        maxAttempts: SEGMENTED_PROACTIVE_HANDOFF_MAX_ATTEMPTS,
+                    },
+                );
                 return;
             }
 
@@ -1079,63 +1143,223 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 now - segmentedProactiveHandoffLastAttemptAtRef.current <
                     SEGMENTED_PROACTIVE_HANDOFF_COOLDOWN_MS
             ) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "cooldown_active",
+                    {
+                        cooldownMs: SEGMENTED_PROACTIVE_HANDOFF_COOLDOWN_MS,
+                        elapsedMs:
+                            now - segmentedProactiveHandoffLastAttemptAtRef.current,
+                    },
+                );
                 return;
             }
 
+            segmentedHandoffInProgressRef.current = true;
             segmentedProactiveHandoffAttemptedTrackIdRef.current = track.id;
             segmentedProactiveHandoffAttemptCountRef.current += 1;
             segmentedProactiveHandoffLastAttemptAtRef.current = now;
+            segmentedProactiveHandoffLastSkipKeyRef.current = null;
             const proactiveAttempt = segmentedProactiveHandoffAttemptCountRef.current;
+            const handoffStartedAtMs = Date.now();
+            const currentPositionSec = Math.max(
+                0,
+                typeof howlerEngine.getActualCurrentTime === "function"
+                    ? howlerEngine.getActualCurrentTime()
+                    : howlerEngine.getCurrentTime(),
+            );
+            const shouldPlay =
+                lastPlayingStateRef.current || howlerEngine.isPlaying() || isPlaying;
 
-            activeSegmentedSessionRef.current = {
-                sessionId: prewarmedSession.sessionId,
-                sessionToken: prewarmedSession.sessionToken,
-                trackId: track.id,
-                sourceType:
-                    prewarmedSession.engineHints?.sourceType ??
-                    segmentedTrackContext.sourceType,
-                manifestUrl: prewarmedSession.manifestUrl,
-                expiresAt: prewarmedSession.expiresAt,
-            };
+            if (shouldPlay) {
+                setIsBuffering(true);
+                playbackStateMachine.forceTransition("LOADING");
+            }
 
             logSegmentedClientMetric("session.handoff_proactive_attempt", {
                 trackId: track.id,
                 sourceType:
                     prewarmedSession.playbackProfile?.sourceType ??
                     prewarmedSession.engineHints?.sourceType ??
-                    segmentedTrackContext.sourceType,
+                    sourceType,
                 sessionId: prewarmedSession.sessionId,
                 attempt: proactiveAttempt,
+                shouldPlay,
             });
 
-            void attemptSegmentedHandoffRecovery(new Error("startup_promotion")).then(
-                (didRecover) => {
-                    if (didRecover) {
-                        segmentedProactiveHandoffAttemptCountRef.current = 0;
+            void api
+                .handoffSegmentedStreamingSession(
+                    prewarmedSession.sessionId,
+                    prewarmedSession.sessionToken,
+                    {
+                        positionSec: currentPositionSec,
+                        isPlaying: shouldPlay,
+                    },
+                )
+                .then((handoff) => {
+                    if (
+                        playbackTypeRef.current !== "track" ||
+                        currentTrackRef.current?.id !== track.id
+                    ) {
                         return;
                     }
 
+                    const requestHeaders: Record<string, string> = {
+                        "x-streaming-session-token": handoff.sessionToken,
+                    };
+                    const authToken = api.getStreamingAuthToken();
+                    if (authToken) {
+                        requestHeaders.Authorization = `Bearer ${authToken}`;
+                    }
+
+                    activeSegmentedSessionRef.current = {
+                        sessionId: handoff.sessionId,
+                        sessionToken: handoff.sessionToken,
+                        trackId: track.id,
+                        sourceType:
+                            handoff.engineHints?.sourceType ?? sourceType,
+                        manifestUrl: handoff.manifestUrl,
+                        expiresAt: handoff.expiresAt,
+                    };
+                    setStreamProfile({
+                        mode: "dash",
+                        sourceType:
+                            handoff.playbackProfile?.sourceType ??
+                            handoff.engineHints?.sourceType ??
+                            sourceType,
+                        codec: handoff.playbackProfile?.codec?.toUpperCase() ?? "AAC",
+                        bitrateKbps: handoff.playbackProfile?.bitrateKbps ?? null,
+                    });
+                    logSegmentedClientMetric("session.handoff_proactive_api_success", {
+                        trackId: track.id,
+                        sourceType:
+                            handoff.playbackProfile?.sourceType ??
+                            handoff.engineHints?.sourceType ??
+                            sourceType,
+                        previousSessionId: prewarmedSession.sessionId,
+                        sessionId: handoff.sessionId,
+                        attempt: proactiveAttempt,
+                        latencyMs: Math.max(0, Date.now() - handoffStartedAtMs),
+                    });
+
+                    const clearHandoffListeners = () => {
+                        howlerEngine.off("load", onHandoffLoad);
+                        howlerEngine.off("loaderror", onHandoffLoadError);
+                    };
+
+                    const onHandoffLoad = () => {
+                        clearHandoffListeners();
+                        if (
+                            playbackTypeRef.current !== "track" ||
+                            currentTrackRef.current?.id !== track.id
+                        ) {
+                            return;
+                        }
+
+                        const recoveryDecision = resolveLocalAuthoritativeRecovery(
+                            {
+                                positionSec: currentPositionSec,
+                                shouldPlay: lastPlayingStateRef.current,
+                            },
+                            {
+                                resumeAtSec: handoff.resumeAtSec,
+                                shouldPlay: handoff.shouldPlay,
+                            },
+                        );
+
+                        const resumeAt = recoveryDecision.resumeAtSec;
+                        const shouldResumePlayback = recoveryDecision.shouldPlay;
+                        howlerEngine.seek(resumeAt);
+                        setCurrentTime(resumeAt);
+                        if (shouldResumePlayback) {
+                            void howlerEngine.play();
+                            setIsPlaying(true);
+                        } else {
+                            setIsPlaying(false);
+                        }
+
+                        setIsBuffering(false);
+                        segmentedProactiveHandoffCompletedTrackIdRef.current = track.id;
+                        segmentedProactiveHandoffAttemptCountRef.current = 0;
+                        segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
+                        segmentedProactiveHandoffLastSkipKeyRef.current = null;
+                        logSegmentedClientMetric("session.handoff_proactive_recovered", {
+                            trackId: track.id,
+                            sourceType:
+                                handoff.playbackProfile?.sourceType ??
+                                handoff.engineHints?.sourceType ??
+                                sourceType,
+                            sessionId: handoff.sessionId,
+                            attempt: proactiveAttempt,
+                            resumeAtSec: resumeAt,
+                            shouldResumePlayback,
+                            authority: recoveryDecision.authority,
+                            latencyMs: Math.max(0, Date.now() - handoffStartedAtMs),
+                        });
+                    };
+
+                    const onHandoffLoadError = () => {
+                        clearHandoffListeners();
+                        setIsBuffering(false);
+                        segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
+                        segmentedProactiveHandoffLastSkipKeyRef.current = null;
+                        logSegmentedClientMetric("session.handoff_proactive_load_error", {
+                            trackId: track.id,
+                            sourceType:
+                                handoff.playbackProfile?.sourceType ??
+                                handoff.engineHints?.sourceType ??
+                                sourceType,
+                            sessionId: handoff.sessionId,
+                            attempt: proactiveAttempt,
+                            latencyMs: Math.max(0, Date.now() - handoffStartedAtMs),
+                        });
+                    };
+
+                    howlerEngine.on("load", onHandoffLoad);
+                    howlerEngine.on("loaderror", onHandoffLoadError);
+                    howlerEngine.load(
+                        {
+                            url: handoff.manifestUrl,
+                            trackId: track.id,
+                            sessionId: handoff.sessionId,
+                            sourceType:
+                                handoff.engineHints?.sourceType ?? sourceType,
+                            protocol: "dash",
+                            mimeType: "application/dash+xml",
+                        },
+                        {
+                            autoplay: false,
+                            format: "mp4",
+                            withCredentials: true,
+                            requestHeaders,
+                        },
+                    );
+                })
+                .catch((handoffError) => {
                     if (currentTrackRef.current?.id === track.id) {
                         segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
                     }
-                    if (
-                        activeSegmentedSessionRef.current?.sessionId ===
-                        prewarmedSession.sessionId
-                    ) {
-                        activeSegmentedSessionRef.current = null;
-                    }
-
-                    logSegmentedClientMetric("session.handoff_proactive_deferred", {
+                    segmentedProactiveHandoffLastSkipKeyRef.current = null;
+                    logSegmentedClientMetric("session.handoff_proactive_failure", {
                         trackId: track.id,
                         sourceType:
                             prewarmedSession.playbackProfile?.sourceType ??
                             prewarmedSession.engineHints?.sourceType ??
-                            segmentedTrackContext.sourceType,
+                            sourceType,
                         sessionId: prewarmedSession.sessionId,
                         attempt: proactiveAttempt,
+                        error:
+                            handoffError instanceof Error
+                                ? handoffError.message
+                                : String(handoffError ?? "unknown"),
+                        latencyMs: Math.max(0, Date.now() - handoffStartedAtMs),
                     });
-                },
-            );
+                    setIsBuffering(false);
+                })
+                .finally(() => {
+                    segmentedHandoffInProgressRef.current = false;
+                });
         };
 
         runProactiveSegmentedCheck();
@@ -1147,7 +1371,16 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         return () => {
             clearInterval(proactiveCheckInterval);
         };
-    }, [attemptSegmentedHandoffRecovery, playbackType, prewarmSegmentedSession]);
+    }, [
+        isPlaying,
+        logProactiveSegmentedHandoffSkip,
+        playbackType,
+        prewarmSegmentedSession,
+        setCurrentTime,
+        setIsBuffering,
+        setIsPlaying,
+        setStreamProfile,
+    ]);
 
     const requestAutoMatchVibe = useCallback(
         (
@@ -1204,6 +1437,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
             segmentedProactiveHandoffAttemptCountRef.current = 0;
             segmentedProactiveHandoffLastAttemptAtRef.current = 0;
+            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
+            segmentedProactiveHandoffLastSkipKeyRef.current = null;
         }
         if (currentTrack?.id !== startupRecoveryAttemptedTrackIdRef.current) {
             startupRecoveryAttemptedTrackIdRef.current = null;
@@ -1219,6 +1454,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
             segmentedProactiveHandoffAttemptCountRef.current = 0;
             segmentedProactiveHandoffLastAttemptAtRef.current = 0;
+            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
+            segmentedProactiveHandoffLastSkipKeyRef.current = null;
             if (currentTrack) {
                 setStreamProfile({
                     mode: "direct",
@@ -1243,6 +1480,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
             segmentedProactiveHandoffAttemptCountRef.current = 0;
             segmentedProactiveHandoffLastAttemptAtRef.current = 0;
+            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
+            segmentedProactiveHandoffLastSkipKeyRef.current = null;
         }
     }, [currentTrack, clearTransientTrackRecovery, setStreamProfile]);
 
@@ -1260,6 +1499,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
             segmentedProactiveHandoffAttemptCountRef.current = 0;
             segmentedProactiveHandoffLastAttemptAtRef.current = 0;
+            segmentedProactiveHandoffCompletedTrackIdRef.current = null;
+            segmentedProactiveHandoffLastSkipKeyRef.current = null;
             setStreamProfile(null);
         }
     }, [playbackType, setStreamProfile]);
@@ -1613,6 +1854,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             ) {
                 segmentedHandoffAttemptRef.current = 0;
                 segmentedProactiveHandoffAttemptCountRef.current = 0;
+                segmentedProactiveHandoffCompletedTrackIdRef.current = currentTrack.id;
+                segmentedProactiveHandoffLastSkipKeyRef.current = null;
             }
         };
 
@@ -2007,6 +2250,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
                     segmentedProactiveHandoffAttemptCountRef.current = 0;
                     segmentedProactiveHandoffLastAttemptAtRef.current = 0;
+                    segmentedProactiveHandoffCompletedTrackIdRef.current = null;
+                    segmentedProactiveHandoffLastSkipKeyRef.current = null;
                     return;
                 }
 
@@ -2129,6 +2374,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 });
                 segmentedHandoffAttemptRef.current = 0;
                 segmentedProactiveHandoffAttemptCountRef.current = 0;
+                segmentedProactiveHandoffCompletedTrackIdRef.current = currentTrack.id;
+                segmentedProactiveHandoffLastSkipKeyRef.current = null;
             };
 
             const clearLoadListeners = () => {
@@ -2173,6 +2420,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
                     segmentedProactiveHandoffAttemptCountRef.current = 0;
                     segmentedProactiveHandoffLastAttemptAtRef.current = 0;
+                    segmentedProactiveHandoffCompletedTrackIdRef.current = null;
+                    segmentedProactiveHandoffLastSkipKeyRef.current = null;
                     if (playbackType === "track" && currentTrack) {
                         setStreamProfile({
                             mode: "direct",

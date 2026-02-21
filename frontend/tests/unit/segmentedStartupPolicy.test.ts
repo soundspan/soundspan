@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+    resolveProactiveSegmentedHandoffEligibility,
     resolveSegmentedPrewarmMaxRetries,
-    shouldAttemptProactiveSegmentedHandoff,
 } from "../../lib/audio-engine/segmentedStartupPolicy.ts";
 
 test("resolveSegmentedPrewarmMaxRetries returns larger budget for startup background", () => {
@@ -10,22 +10,21 @@ test("resolveSegmentedPrewarmMaxRetries returns larger budget for startup backgr
     assert.equal(resolveSegmentedPrewarmMaxRetries("next_track"), 5);
 });
 
-test("shouldAttemptProactiveSegmentedHandoff allows eligible direct-track promotion", () => {
-    assert.equal(
-        shouldAttemptProactiveSegmentedHandoff({
-            playbackType: "track",
-            isListenTogether: false,
-            currentTrackId: "track-1",
-            targetTrackId: "track-1",
-            activeSegmentedTrackId: null,
-            attemptedTrackId: null,
-            isCurrentlyPlaying: true,
-        }),
-        true,
-    );
+test("resolveProactiveSegmentedHandoffEligibility allows eligible direct-track promotion", () => {
+    const result = resolveProactiveSegmentedHandoffEligibility({
+        playbackType: "track",
+        isListenTogether: false,
+        currentTrackId: "track-1",
+        targetTrackId: "track-1",
+        activeSegmentedTrackId: null,
+        attemptedTrackId: null,
+    });
+
+    assert.equal(result.eligible, true);
+    assert.equal(result.reason, "eligible");
 });
 
-test("shouldAttemptProactiveSegmentedHandoff blocks invalid promotion scenarios", () => {
+test("resolveProactiveSegmentedHandoffEligibility provides deterministic skip reasons", () => {
     const base = {
         playbackType: "track",
         isListenTogether: false,
@@ -33,49 +32,47 @@ test("shouldAttemptProactiveSegmentedHandoff blocks invalid promotion scenarios"
         targetTrackId: "track-1",
         activeSegmentedTrackId: null,
         attemptedTrackId: null,
-        isCurrentlyPlaying: true,
     };
 
-    assert.equal(
-        shouldAttemptProactiveSegmentedHandoff({
-            ...base,
-            playbackType: "podcast",
-        }),
-        false,
-    );
-    assert.equal(
-        shouldAttemptProactiveSegmentedHandoff({
-            ...base,
-            isListenTogether: true,
-        }),
-        false,
-    );
-    assert.equal(
-        shouldAttemptProactiveSegmentedHandoff({
-            ...base,
-            currentTrackId: "other-track",
-        }),
-        false,
-    );
-    assert.equal(
-        shouldAttemptProactiveSegmentedHandoff({
-            ...base,
-            activeSegmentedTrackId: "track-1",
-        }),
-        false,
-    );
-    assert.equal(
-        shouldAttemptProactiveSegmentedHandoff({
-            ...base,
-            attemptedTrackId: "track-1",
-        }),
-        false,
-    );
-    assert.equal(
-        shouldAttemptProactiveSegmentedHandoff({
-            ...base,
-            isCurrentlyPlaying: false,
-        }),
-        false,
-    );
+    let result = resolveProactiveSegmentedHandoffEligibility({
+        ...base,
+        playbackType: "podcast",
+    });
+    assert.equal(result.eligible, false);
+    assert.equal(result.reason, "playback_not_track");
+
+    result = resolveProactiveSegmentedHandoffEligibility({
+        ...base,
+        isListenTogether: true,
+    });
+    assert.equal(result.eligible, false);
+    assert.equal(result.reason, "listen_together_active");
+
+    result = resolveProactiveSegmentedHandoffEligibility({
+        ...base,
+        currentTrackId: "other-track",
+    });
+    assert.equal(result.eligible, false);
+    assert.equal(result.reason, "track_mismatch");
+
+    result = resolveProactiveSegmentedHandoffEligibility({
+        ...base,
+        currentTrackId: null,
+    });
+    assert.equal(result.eligible, false);
+    assert.equal(result.reason, "track_mismatch");
+
+    result = resolveProactiveSegmentedHandoffEligibility({
+        ...base,
+        activeSegmentedTrackId: "track-1",
+    });
+    assert.equal(result.eligible, false);
+    assert.equal(result.reason, "already_segmented_active");
+
+    result = resolveProactiveSegmentedHandoffEligibility({
+        ...base,
+        attemptedTrackId: "track-1",
+    });
+    assert.equal(result.eligible, false);
+    assert.equal(result.reason, "already_attempted_this_track");
 });

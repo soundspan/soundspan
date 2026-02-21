@@ -10,8 +10,15 @@ interface ProactiveSegmentedHandoffEligibilityInput {
     targetTrackId: string;
     activeSegmentedTrackId: string | null;
     attemptedTrackId: string | null;
-    isCurrentlyPlaying: boolean;
 }
+
+export type ProactiveSegmentedHandoffSkipReason =
+    | "eligible"
+    | "playback_not_track"
+    | "listen_together_active"
+    | "track_mismatch"
+    | "already_segmented_active"
+    | "already_attempted_this_track";
 
 export function resolveSegmentedPrewarmMaxRetries(
     reason: SegmentedPrewarmReason,
@@ -21,27 +28,42 @@ export function resolveSegmentedPrewarmMaxRetries(
         : SEGMENTED_NEXT_TRACK_PREWARM_MAX_RETRIES;
 }
 
-export function shouldAttemptProactiveSegmentedHandoff(
+export function resolveProactiveSegmentedHandoffEligibility(
     input: ProactiveSegmentedHandoffEligibilityInput,
-): boolean {
+): { eligible: boolean; reason: ProactiveSegmentedHandoffSkipReason } {
     if (input.playbackType !== "track") {
-        return false;
+        return {
+            eligible: false,
+            reason: "playback_not_track",
+        };
     }
     if (input.isListenTogether) {
-        return false;
+        return {
+            eligible: false,
+            reason: "listen_together_active",
+        };
     }
     if (!input.currentTrackId || input.currentTrackId !== input.targetTrackId) {
-        return false;
+        return {
+            eligible: false,
+            reason: "track_mismatch",
+        };
     }
     if (input.activeSegmentedTrackId === input.targetTrackId) {
-        return false;
+        return {
+            eligible: false,
+            reason: "already_segmented_active",
+        };
     }
     if (input.attemptedTrackId === input.targetTrackId) {
-        return false;
-    }
-    if (!input.isCurrentlyPlaying) {
-        return false;
+        return {
+            eligible: false,
+            reason: "already_attempted_this_track",
+        };
     }
 
-    return true;
+    return {
+        eligible: true,
+        reason: "eligible",
+    };
 }
