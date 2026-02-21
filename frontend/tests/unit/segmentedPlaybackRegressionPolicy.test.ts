@@ -100,8 +100,21 @@ test("seek continuity tolerance check is stable around threshold", () => {
 });
 
 test("trusted track position guards against stale-time jump regression", () => {
+    const staleFallback = resolveTrustedTrackPositionSec({
+        fallbackPositionSec: 50,
+        fallbackTrackId: "track-previous",
+        playbackType: "track",
+        currentTrackId: "track-next",
+        targetTrackId: "track-next",
+        isLoading: true,
+        activeEngineTrackId: null,
+        enginePositionSec: 0,
+    });
+    assert.equal(staleFallback, 0);
+
     const guarded = resolveTrustedTrackPositionSec({
         fallbackPositionSec: 12.5,
+        fallbackTrackId: "track-1",
         playbackType: "track",
         currentTrackId: "track-1",
         targetTrackId: "track-1",
@@ -113,6 +126,7 @@ test("trusted track position guards against stale-time jump regression", () => {
 
     const accepted = resolveTrustedTrackPositionSec({
         fallbackPositionSec: 12.5,
+        fallbackTrackId: "track-1",
         playbackType: "track",
         currentTrackId: "track-1",
         targetTrackId: "track-1",

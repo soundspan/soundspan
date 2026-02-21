@@ -433,6 +433,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
     const currentTrackRef = useRef(currentTrack);
     const currentTimeSnapshotRef = useRef<number>(currentTime);
+    const currentTimeSnapshotTrackIdRef = useRef<string | null>(
+        playbackType === "track" ? currentTrack?.id ?? null : null,
+    );
     const queueLengthRef = useRef(queue.length);
     const playbackTypeRef = useRef(playbackType);
     const activeEngineTrackIdRef = useRef<string | null>(null);
@@ -505,6 +508,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
         return resolveTrustedTrackPositionSec({
             fallbackPositionSec: currentTimeSnapshotRef.current,
+            fallbackTrackId: currentTimeSnapshotTrackIdRef.current,
             playbackType: playbackTypeRef.current,
             currentTrackId: currentTrackRef.current?.id ?? null,
             targetTrackId: trackId,
@@ -1182,7 +1186,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
     useEffect(() => {
         currentTimeSnapshotRef.current = currentTime;
-    }, [currentTime]);
+        currentTimeSnapshotTrackIdRef.current =
+            playbackType === "track" ? currentTrackRef.current?.id ?? null : null;
+    }, [currentTime, playbackType]);
 
     useEffect(() => {
         if (playbackType !== "track") {

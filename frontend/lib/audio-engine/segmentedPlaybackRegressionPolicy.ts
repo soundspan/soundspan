@@ -1,5 +1,6 @@
 export interface TrustedTrackPositionInput {
     fallbackPositionSec: number;
+    fallbackTrackId?: string | null;
     playbackType: string;
     currentTrackId: string | null;
     targetTrackId: string;
@@ -40,6 +41,12 @@ export function resolveTrustedTrackPositionSec(
     const fallbackPosition = Math.max(0, input.fallbackPositionSec || 0);
     if (input.playbackType !== "track") {
         return fallbackPosition;
+    }
+    if (
+        input.fallbackTrackId &&
+        input.fallbackTrackId !== input.targetTrackId
+    ) {
+        return 0;
     }
     if (input.currentTrackId !== input.targetTrackId) {
         return fallbackPosition;
