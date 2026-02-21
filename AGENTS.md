@@ -26,6 +26,8 @@ Read these in order before non-trivial work:
 - Test matrix artifact: `docs/TEST_MATRIX.md`
 - Route map artifact: `docs/ROUTE_MAP.md`
 - JSDoc coverage artifact: `docs/JSDOC_COVERAGE.md`
+- Logging standards source of truth: `docs/LOGGING_STANDARDS.md`
+- Runtime logging rule: everything in project runtime code should be logged appropriately through shared logging helpers.
 - Domain start-here readmes: `backend/src/routes/README.md`, `backend/src/services/README.md`, `frontend/features/*/README.md`
 - Human-readable rules contract: `docs/AGENT_RULES.md`
 - Human-readable project context: `docs/AGENT_CONTEXT.md`
@@ -110,6 +112,8 @@ Default Codex subagent model: `gpt-5.3-codex-spark` unless user-overridden.
 - Route map generator: `npm run route-map:generate`
 - Domain readmes generator: `npm run domain-readmes:generate`
 - JSDoc coverage verify: `npm run jsdoc-coverage:verify`
+- Logging compliance verify: `npm run logging:compliance:verify`
+- Logging policy requirement: runtime code paths should not ship without appropriate scoped logging coverage.
 - CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code`
 - If process expectations change, update all of:
   - `AGENTS.md`
@@ -120,8 +124,10 @@ Default Codex subagent model: `gpt-5.3-codex-spark` unless user-overridden.
   - `docs/TEST_MATRIX.md`
   - `docs/ROUTE_MAP.md`
   - `docs/JSDOC_COVERAGE.md`
+  - `docs/LOGGING_STANDARDS.md`
   - `backend/src/routes/README.md`
   - `backend/src/services/README.md`
   - `frontend/features/README.md`
   - `.github/policies/agent-governance.json`
   - `.github/scripts/enforce-agent-policies.mjs`
+  - `.github/scripts/verify-logging-compliance.mjs`

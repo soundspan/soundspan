@@ -38,6 +38,7 @@ For integration-specific setup values, see [`INTEGRATIONS.md`](INTEGRATIONS.md).
 | `MAX_FILE_SIZE_MB` | `250` | Analyzer input file hard cap (`0` disables cap) |
 | `BATCH_ANALYSIS_TIMEOUT_SECONDS` | `900` | Batch processing timeout before permanent failure |
 | `LOG_LEVEL` | `warn` (prod) / `debug` (dev) | Logging verbosity |
+| `NEXT_PUBLIC_LOG_LEVEL` | `warn` (prod) / `info` (dev) | Frontend browser logger verbosity (build-time; `NEXT_PUBLIC_` required for client visibility) |
 | `DOCS_PUBLIC` | `false` | Allow public API docs in production when `true` |
 | `RUN_DB_MIGRATIONS_ON_STARTUP` | `true` | API entrypoint toggle to run `prisma migrate deploy` on startup |
 | `PRISMA_MIGRATE_MAX_ATTEMPTS` | `12` | Max startup migration retries for transient DB saturation/connectivity failures |

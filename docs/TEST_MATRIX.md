@@ -32,6 +32,14 @@ npm --prefix frontend run test:coverage:social
 npm --prefix frontend run test:predeploy
 ```
 
+### Governance
+
+```bash
+npm run feature-index:verify
+npm run logging:compliance:verify
+node .github/scripts/enforce-agent-policies.mjs
+```
+
 ## Feature-to-Test Map
 
 | Feature ID (`docs/FEATURE_INDEX.json`) | Targeted commands | Primary specs |
@@ -46,6 +54,7 @@ npm --prefix frontend run test:predeploy
 | `playlists-queue-and-player` | `npm --prefix frontend run test:component`<br>`npm --prefix frontend run test:unit`<br>`npm --prefix backend test -- --runInBand src/routes/__tests__/playlistsRuntime.test.ts` | `frontend/tests/component/trackOverflowMenu.component.test.ts`<br>`frontend/tests/component/queuePageOverflowMenu.component.test.ts`<br>`frontend/tests/component/miniPlayerEnhancements.component.test.ts`<br>`frontend/tests/unit/playNextQueueControl.test.ts`<br>`backend/src/routes/__tests__/playlistsRuntime.test.ts` |
 | `social-and-listen-together` | `npm --prefix backend test -- --runInBand src/routes/__tests__/listenTogetherRuntime.test.ts src/routes/__tests__/socialCompat.test.ts`<br>`npm --prefix frontend run test:coverage:social` | `backend/src/routes/__tests__/listenTogetherRuntime.test.ts`<br>`backend/src/routes/__tests__/socialCompat.test.ts`<br>`frontend/tests/component/activityPanel.component.test.ts`<br>`frontend/tests/component/socialTab.component.test.ts` |
 | `streaming-integrations-and-subsonic` | `npm --prefix backend test -- --runInBand src/routes/__tests__/tidalStreamingRuntime.test.ts src/routes/__tests__/youtubeMusicRuntime.test.ts src/routes/__tests__/subsonicRuntimeFocused.test.ts`<br>`npm --prefix backend test -- --runInBand src/routes/__tests__/subsonicCoreCompat.test.ts src/routes/__tests__/subsonicBrowseCompat.test.ts` | `backend/src/routes/__tests__/tidalStreamingRuntime.test.ts`<br>`backend/src/routes/__tests__/youtubeMusicRuntime.test.ts`<br>`backend/src/routes/__tests__/subsonicRuntimeFocused.test.ts`<br>`backend/src/routes/__tests__/subsonicCoreCompat.test.ts` |
+| `logging-and-observability-governance` | `npm --prefix backend test -- --runInBand src/utils/__tests__/logger.test.ts`<br>`npm --prefix frontend run test:unit -- tests/unit/logger.test.ts`<br>`python3 -m py_compile services/common/logging_utils.py services/ytmusic-streamer/app.py services/tidal-downloader/app.py`<br>`npm run logging:compliance:verify`<br>`node .github/scripts/enforce-agent-policies.mjs` | `backend/src/utils/__tests__/logger.test.ts`<br>`frontend/tests/unit/logger.test.ts`<br>`.github/scripts/verify-logging-compliance.mjs` |
 
 ## Update Triggers
 

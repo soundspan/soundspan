@@ -66,7 +66,7 @@ Status labels:
 | `NODE_ENV` | `backend`, `backend-worker`, `frontend` | Optional | `production` (compose) | Runtime mode. |
 | `BACKEND_PROCESS_ROLE` | `backend`, `backend-worker` | Optional | split stack: `all`; HA override for backend: `api`; worker: `worker` | Role split for API/worker processes. |
 | `WORKER_HEALTH_PORT` | `backend-worker` | Optional | `3010` | Worker health endpoint port (`/health/live`, `/health/ready`). |
-| `LOG_LEVEL` | `backend-worker` | Optional | `warn` | Worker log verbosity. |
+| `LOG_LEVEL` | `backend`, `backend-worker`, python sidecars using shared logger | Optional | backend-worker compose: `warn`; otherwise env-dependent defaults | Shared logger verbosity (`debug`, `info`, `warn`, `error`, `silent` for TS; Python also supports `critical`). |
 | `DATABASE_POOL_SIZE` | `backend`, `backend-worker` | Optional | role-aware: `api=8`, `worker=4`, `all=12` | Prisma DB pool connection limit. |
 | `DATABASE_POOL_TIMEOUT` | `backend`, `backend-worker` | Optional | `30` | Prisma DB pool timeout in seconds. |
 | `LOG_QUERIES` | `backend`, `backend-worker` | Optional | `false` | Enables Prisma query logging in development. |
@@ -114,6 +114,7 @@ Status labels:
 | `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` | `frontend`, `soundspan` (AIO) | Optional | `5000` (runtime clamp: `1500-15000`) | Runtime timeout for falling back from segmented startup to direct playback when DASH startup stalls. |
 | `NEXT_PUBLIC_API_URL` | `frontend` (build-time) | Optional (build-time only) | empty | Explicit browser API base URL. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_API_PATH_MODE` | `frontend` (build-time) | Optional (build-time only) | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. Runtime changes on prebuilt images do not affect browser bundle behavior. |
+| `NEXT_PUBLIC_LOG_LEVEL` | `frontend` (build-time) | Optional (build-time only) | `info` (dev), `warn` (prod) | Browser-visible frontend logger verbosity (`debug`, `info`, `warn`, `error`, `silent`). Uses `NEXT_PUBLIC_` because client-side code cannot read non-public env vars. |
 | `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional (build-time only) | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |
 | `NEXT_PUBLIC_APP_VERSION` | `frontend` (build-time) | Optional (build-time only) | `frontend/package.json` version | Explicit app version override in UI. |
 | `ANALYZE` | `frontend` (build-time) | Optional (build-time only) | unset (`false`) | Enables Next.js bundle analyzer when `true`. |

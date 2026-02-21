@@ -33,6 +33,7 @@ These IDs are stable cross-references for enforceable behavior and map to policy
 - `rule_route_map_required`: Maintain `docs/ROUTE_MAP.md` as the canonical generated backend/frontend route map.
 - `rule_domain_readmes_required`: Maintain per-domain start-here READMEs in `backend/src/routes`, `backend/src/services`, and `frontend/features/*`.
 - `rule_jsdoc_coverage_required`: Maintain `docs/JSDOC_COVERAGE.md` as the generated exported-symbol documentation drift tracker.
+- `rule_logging_contract_required`: Maintain `docs/LOGGING_STANDARDS.md` and enforce logging compliance checks across frontend/backend/python runtime code.
 - `rule_release_notes_template_required`: Enforce canonical release-notes template + generator workflow, section order, and plain-English non-jargon summaries through policy checks.
 - `rule_release_notes_changelog_source_required`: Treat `CHANGELOG.md` as release-notes source of truth and rotate `Unreleased` during `release:prepare`.
 
@@ -105,6 +106,19 @@ These rules are cross-agent defaults for this workspace and apply unless the use
 - Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted entry in `docs/FEATURE_INDEX.json`.
 - Whenever test entrypoints or reliable targeted commands change, update `docs/TEST_MATRIX.md` in the same change set.
 
+### Logging Standards Contract (Required)
+
+- Treat `docs/LOGGING_STANDARDS.md` as the canonical logging policy for frontend, backend, and Python sidecars.
+- Everything in project runtime code should be logged appropriately with shared logging helpers; do not leave silent failure paths or raw logging drift.
+- Use shared logging helpers by default:
+  - frontend: `frontend/lib/logger.ts`
+  - backend: `backend/src/utils/logger.ts`
+  - python sidecars: `services/common/logging_utils.py`
+- Prefer reusable wrappers/decorators (`with*Timing`, `log_exceptions`, `log_timing`) over repeated inline timing and try/catch logging blocks.
+- Enforce raw logging drift checks with:
+  - `npm run logging:compliance:verify` (strict)
+  - `npm run logging:compliance:generate` (baseline refresh after intentional migrations)
+
 ### Container-First Policy (Required)
 
 - Never install system packages on the host unless explicitly instructed by the user.
@@ -173,6 +187,7 @@ Critical agent/process rules are enforced by executable checks instead of prose-
 - Enforcement runner: `.github/scripts/enforce-agent-policies.mjs`
 - Local command: `node .github/scripts/enforce-agent-policies.mjs`
 - Session preflight command: `npm run agent:preflight`
+- Logging compliance command: `npm run logging:compliance:verify`
 - CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code` (runs before frontend lint/docker build checks)
 
 When policy expectations change, update all relevant governance artifacts in the same change set:

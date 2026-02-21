@@ -20,6 +20,7 @@ This index is the central navigation page for all project documentation under `d
 | [`TEST_MATRIX.md`](TEST_MATRIX.md) | Contributors/agents | Canonical feature-to-targeted-test command matrix for fast local validation |
 | [`ROUTE_MAP.md`](ROUTE_MAP.md) | Contributors/agents | Generated backend endpoint and frontend route map for quick entrypoint discovery |
 | [`JSDOC_COVERAGE.md`](JSDOC_COVERAGE.md) | Contributors/agents | Generated baseline of exported-symbol JSDoc coverage by backend/frontend area |
+| [`LOGGING_STANDARDS.md`](LOGGING_STANDARDS.md) | Contributors/agents | Canonical frontend/backend/python logging contract and compliance workflow |
 | [`RELEASE_NOTES_TEMPLATE.md`](RELEASE_NOTES_TEMPLATE.md) | Maintainers | Canonical release-notes format and command (`npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`) |
 
 ## Compatibility and Brand Tracking
@@ -65,3 +66,4 @@ Quick helper command:
 - `npm run route-map:verify` validates `docs/ROUTE_MAP.md` is up to date with backend/frontend route sources.
 - `npm run domain-readmes:verify` validates per-domain start-here READMEs are up to date.
 - `npm run jsdoc-coverage:verify` validates `docs/JSDOC_COVERAGE.md` is up to date with current exported-symbol scan results.
+- `npm run logging:compliance:verify` validates raw logging callsites against the enforced baseline contract.

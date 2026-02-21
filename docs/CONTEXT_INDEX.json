@@ -1,8 +1,8 @@
 {
   "metadata": {
     "id": "soundspan-agent-context-index",
-    "version": "2026-02-20.05",
-    "description": "Machine-readable index for startup context retrieval and split-doc drift checks, including changelog-sourced release notes, plain-English requirements, and feature/test/route/JSDoc discoverability policy alignment."
+    "version": "2026-02-21.01",
+    "description": "Machine-readable index for startup context retrieval and split-doc drift checks, including changelog-sourced release notes, logging-compliance policy wiring, and feature/test/route/JSDoc discoverability alignment."
   },
   "startupReadOrder": [
     "AGENTS.md",
@@ -237,6 +237,8 @@
     "domainReadmesVerify": "npm run domain-readmes:verify",
     "jsdocCoverageGenerate": "npm run jsdoc-coverage:generate",
     "jsdocCoverageVerify": "npm run jsdoc-coverage:verify",
+    "loggingComplianceGenerate": "npm run logging:compliance:generate",
+    "loggingComplianceVerify": "npm run logging:compliance:verify",
     "indexQueryStrictFresh": "node tools/index/indexer.mjs query \"<query>\" --strict-fresh",
     "releasePrepare": "npm run release:prepare -- --version <X.Y.Z>",
     "releaseVerify": "npm run release:verify -- --version <X.Y.Z>",
@@ -246,6 +248,7 @@
     "testMatrixFile": "cat docs/TEST_MATRIX.md",
     "routeMapFile": "cat docs/ROUTE_MAP.md",
     "jsdocCoverageFile": "cat docs/JSDOC_COVERAGE.md",
+    "loggingStandardsFile": "cat docs/LOGGING_STANDARDS.md",
     "routesReadmeFile": "cat backend/src/routes/README.md",
     "servicesReadmeFile": "cat backend/src/services/README.md",
     "frontendFeaturesReadmeFile": "cat frontend/features/README.md"

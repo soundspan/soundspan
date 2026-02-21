@@ -2105,6 +2105,181 @@ function checkJSDocCoverageContract(config) {
   }
 }
 
+function checkLoggingStandardsContract(config) {
+  const contractPath = "contracts.loggingStandards";
+  const contract = config?.contracts?.loggingStandards;
+  if (!contract || typeof contract !== "object") {
+    addFailure(`${contractPath} is required and must be an object.`);
+    return;
+  }
+
+  const requiredStrings = {
+    standardsFile: "docs/LOGGING_STANDARDS.md",
+    verifyScript: ".github/scripts/verify-logging-compliance.mjs",
+    baselineFile: ".github/policies/logging-compliance-baseline.json",
+    npmGenerateScriptName: "logging:compliance:generate",
+    npmGenerateScriptCommand:
+      "node .github/scripts/verify-logging-compliance.mjs --write-baseline",
+    npmVerifyScriptName: "logging:compliance:verify",
+    npmVerifyScriptCommand:
+      "node .github/scripts/verify-logging-compliance.mjs --check",
+    contextIndexGenerateCommandKey: "loggingComplianceGenerate",
+    contextIndexVerifyCommandKey: "loggingComplianceVerify",
+    contextIndexStandardsFileCommandKey: "loggingStandardsFile",
+  };
+
+  for (const [fieldName, expectedValue] of Object.entries(requiredStrings)) {
+    const actualValue = toNonEmptyString(contract[fieldName]);
+    if (!actualValue) {
+      addFailure(`${contractPath}.${fieldName} must be a non-empty string.`);
+      continue;
+    }
+    if (actualValue !== expectedValue) {
+      addFailure(
+        `${contractPath}.${fieldName} must equal "${expectedValue}" (found "${actualValue}").`,
+      );
+    }
+  }
+
+  const standardsFile = toNonEmptyString(contract.standardsFile);
+  const standardsContent = standardsFile ? readFileIfPresent(standardsFile) : null;
+  if (standardsContent !== null) {
+    const requiredSections = validateStringArray(
+      contract.requiredSections,
+      `${contractPath}.requiredSections`,
+    );
+    let cursor = 0;
+    for (const section of requiredSections) {
+      const index = standardsContent.indexOf(section, cursor);
+      if (index === -1) {
+        if (standardsContent.includes(section)) {
+          addFailure(
+            `${standardsFile} contains section out of order relative to ${contractPath}.requiredSections: ${section}`,
+          );
+        } else {
+          addFailure(`${standardsFile} is missing required section: ${section}`);
+        }
+        continue;
+      }
+      cursor = index + section.length;
+    }
+
+    const requiredSnippets = validateStringArray(
+      contract.requiredSnippets,
+      `${contractPath}.requiredSnippets`,
+    );
+    for (const snippet of requiredSnippets) {
+      if (!standardsContent.includes(snippet)) {
+        addFailure(
+          `${standardsFile} is missing required snippet from ${contractPath}.requiredSnippets: ${snippet}`,
+        );
+      }
+    }
+  }
+
+  const verifyScript = toNonEmptyString(contract.verifyScript);
+  const baselineFile = toNonEmptyString(contract.baselineFile);
+  if (verifyScript) {
+    readFileIfPresent(verifyScript);
+  }
+  if (baselineFile) {
+    readFileIfPresent(baselineFile);
+  }
+
+  if (verifyScript) {
+    const verifyResult = runCommandSafe("node", [verifyScript, "--check"]);
+    if (!verifyResult.ok) {
+      const details = verifyResult.stderr || verifyResult.stdout || "unknown failure";
+      addFailure(
+        `${contractPath} check failed. Run npm run logging:compliance:generate and review raw logging drift. Details: ${details}`,
+      );
+    }
+  }
+
+  const packageJson = readJsonIfPresent("package.json");
+  if (packageJson && typeof packageJson === "object") {
+    const scripts =
+      packageJson.scripts && typeof packageJson.scripts === "object"
+        ? packageJson.scripts
+        : null;
+    if (!scripts) {
+      addFailure("package.json scripts block is required for logging compliance wiring.");
+    } else {
+      const generateScriptName = toNonEmptyString(contract.npmGenerateScriptName);
+      const generateScriptCommand = toNonEmptyString(contract.npmGenerateScriptCommand);
+      const verifyScriptName = toNonEmptyString(contract.npmVerifyScriptName);
+      const verifyScriptCommand = toNonEmptyString(contract.npmVerifyScriptCommand);
+
+      if (generateScriptName && generateScriptCommand) {
+        const configuredGenerate = toNonEmptyString(scripts[generateScriptName]);
+        if (!configuredGenerate) {
+          addFailure(`package.json scripts must define "${generateScriptName}".`);
+        } else if (configuredGenerate !== generateScriptCommand) {
+          addFailure(
+            `package.json scripts["${generateScriptName}"] must equal "${generateScriptCommand}" (found "${configuredGenerate}").`,
+          );
+        }
+      }
+
+      if (verifyScriptName && verifyScriptCommand) {
+        const configuredVerify = toNonEmptyString(scripts[verifyScriptName]);
+        if (!configuredVerify) {
+          addFailure(`package.json scripts must define "${verifyScriptName}".`);
+        } else if (configuredVerify !== verifyScriptCommand) {
+          addFailure(
+            `package.json scripts["${verifyScriptName}"] must equal "${verifyScriptCommand}" (found "${configuredVerify}").`,
+          );
+        }
+      }
+    }
+  }
+
+  const contextIndex = readJsonIfPresent("docs/CONTEXT_INDEX.json");
+  if (contextIndex && typeof contextIndex === "object") {
+    const commands =
+      contextIndex.commands && typeof contextIndex.commands === "object"
+        ? contextIndex.commands
+        : null;
+    if (!commands) {
+      addFailure("docs/CONTEXT_INDEX.json commands block is required.");
+      return;
+    }
+
+    const generateCommandKey = toNonEmptyString(contract.contextIndexGenerateCommandKey);
+    const verifyCommandKey = toNonEmptyString(contract.contextIndexVerifyCommandKey);
+    const standardsFileCommandKey = toNonEmptyString(
+      contract.contextIndexStandardsFileCommandKey,
+    );
+
+    if (generateCommandKey) {
+      const generateCommand = toNonEmptyString(commands[generateCommandKey]);
+      if (generateCommand !== "npm run logging:compliance:generate") {
+        addFailure(
+          `docs/CONTEXT_INDEX.json.commands.${generateCommandKey} must equal "npm run logging:compliance:generate".`,
+        );
+      }
+    }
+
+    if (verifyCommandKey) {
+      const verifyCommand = toNonEmptyString(commands[verifyCommandKey]);
+      if (verifyCommand !== "npm run logging:compliance:verify") {
+        addFailure(
+          `docs/CONTEXT_INDEX.json.commands.${verifyCommandKey} must equal "npm run logging:compliance:verify".`,
+        );
+      }
+    }
+
+    if (standardsFileCommandKey) {
+      const standardsFileCommand = toNonEmptyString(commands[standardsFileCommandKey]);
+      if (standardsFileCommand !== "cat docs/LOGGING_STANDARDS.md") {
+        addFailure(
+          `docs/CONTEXT_INDEX.json.commands.${standardsFileCommandKey} must equal "cat docs/LOGGING_STANDARDS.md".`,
+        );
+      }
+    }
+  }
+}
+
 function checkRouteMapContract(config) {
   const contractPath = "contracts.routeMap";
   const contract = config?.contracts?.routeMap;
@@ -3913,6 +4088,7 @@ function runPolicyChecks(activeConfigPath = configPath) {
   checkRouteMapContract(config);
   checkDomainReadmesContract(config);
   checkJSDocCoverageContract(config);
+  checkLoggingStandardsContract(config);
   checkSessionArtifactsContract(config);
   checkRuleCatalogContract(config);
   checkOrchestratorSubagentContracts(config);

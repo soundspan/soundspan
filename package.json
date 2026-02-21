@@ -13,6 +13,8 @@
     "feature-index:verify": "node tools/docs/feature-index-check.mjs --strict",
     "jsdoc-coverage:generate": "node tools/docs/generate-jsdoc-coverage.mjs --write",
     "jsdoc-coverage:verify": "node tools/docs/generate-jsdoc-coverage.mjs --check",
+    "logging:compliance:generate": "node .github/scripts/verify-logging-compliance.mjs --write-baseline",
+    "logging:compliance:verify": "node .github/scripts/verify-logging-compliance.mjs --check",
     "route-map:generate": "node tools/docs/generate-route-map.mjs --write",
     "route-map:verify": "node tools/docs/generate-route-map.mjs --check",
     "domain-readmes:generate": "node tools/docs/generate-domain-readmes.mjs --write",

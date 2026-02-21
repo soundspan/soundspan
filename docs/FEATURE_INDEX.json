@@ -1,9 +1,9 @@
 {
   "metadata": {
     "id": "soundspan-feature-index",
-    "version": "2026-02-20.01",
+    "version": "2026-02-21.01",
     "description": "Canonical machine-readable feature map for rapid codebase navigation and targeted verification.",
-    "last_updated": "2026-02-20T01:12:28Z",
+    "last_updated": "2026-02-21T16:18:00Z",
     "update_expectation": "Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify impacted entries in this file."
   },
   "sources": {
@@ -487,6 +487,53 @@
       "docs": [
         "docs/INTEGRATIONS.md",
         "docs/OPENSUBSONIC_COMPATIBILITY.md",
+        "docs/TEST_MATRIX.md"
+      ]
+    },
+    {
+      "id": "logging-and-observability-governance",
+      "name": "Logging and Observability Governance",
+      "summary": "Shared frontend/backend/python logging helpers, standards documentation, and policy-backed raw-logging compliance enforcement.",
+      "update_expectation": "Update or verify when shared logger modules, logging governance policy, or compliance scripts change.",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": [],
+        "primary_files": [
+          "frontend/lib/logger.ts",
+          "frontend/components/providers/GlobalErrorBoundary.tsx",
+          "frontend/components/providers/AudioErrorBoundary.tsx",
+          "frontend/components/ServiceWorkerRegistration.tsx"
+        ]
+      },
+      "backend": {
+        "routes": [],
+        "services": [
+          "backend/src/utils/logger.ts",
+          "backend/src/services/segmented-streaming/trace.ts",
+          ".github/scripts/enforce-agent-policies.mjs",
+          ".github/scripts/verify-logging-compliance.mjs",
+          "services/common/logging_utils.py"
+        ]
+      },
+      "tests": {
+        "targeted_commands": [
+          "npm --prefix backend test -- --runInBand src/utils/__tests__/logger.test.ts",
+          "npm --prefix frontend run test:unit -- tests/unit/logger.test.ts",
+          "python3 -m py_compile services/common/logging_utils.py services/ytmusic-streamer/app.py services/tidal-downloader/app.py",
+          "npm run logging:compliance:verify",
+          "node .github/scripts/enforce-agent-policies.mjs"
+        ],
+        "primary_specs": [
+          "backend/src/utils/__tests__/logger.test.ts",
+          "frontend/tests/unit/logger.test.ts",
+          ".github/scripts/verify-logging-compliance.mjs"
+        ]
+      },
+      "docs": [
+        "docs/LOGGING_STANDARDS.md",
+        "docs/AGENT_RULES.md",
+        "docs/AGENT_CONTEXT.md",
+        "docs/CONTEXT_INDEX.json",
         "docs/TEST_MATRIX.md"
       ]
     }

@@ -14,14 +14,14 @@ Scope:
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
 | Backend routes | 38 | 54 | 1 | 53 | 1.9% |
 | Backend services | 73 | 89 | 59 | 30 | 66.3% |
-| Backend utils | 28 | 73 | 56 | 17 | 76.7% |
+| Backend utils | 28 | 75 | 56 | 19 | 74.7% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 70 | 70 | 12 | 58 | 17.1% |
 | Frontend features | 135 | 114 | 8 | 106 | 7.0% |
 | Frontend hooks | 25 | 82 | 55 | 27 | 67.1% |
-| Frontend lib | 43 | 52 | 17 | 35 | 32.7% |
+| Frontend lib | 44 | 53 | 17 | 36 | 32.1% |
 | Frontend other | 61 | 58 | 6 | 52 | 10.3% |
-| **Total** | **501** | **627** | **238** | **389** | **38.0%** |
+| **Total** | **502** | **630** | **238** | **392** | **37.8%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -113,6 +113,8 @@ Scope:
 | Backend utils | DependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:114 |
 | Backend utils | createDependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:192 |
 | Backend utils | EnvFileSyncSkippedError | backend/src/utils/envWriter.ts:5 |
+| Backend utils | createLogger | backend/src/utils/logger.ts:125 |
+| Backend utils | logErrorWithContext | backend/src/utils/logger.ts:171 |
 | Backend utils | createPlaylistLogger | backend/src/utils/playlistLogger.ts:282 |
 | Backend utils | logPlaylistEvent | backend/src/utils/playlistLogger.ts:287 |
 | Backend utils | SubsonicIdError | backend/src/utils/subsonicIds.ts:17 |
@@ -138,11 +140,11 @@ Scope:
 | Backend workers | processScan | backend/src/workers/processors/scanProcessor.ts:157 |
 | Backend workers | processValidation | backend/src/workers/processors/validationProcessor.ts:16 |
 | Backend workers | stopUnifiedEnrichmentWorker | backend/src/workers/unifiedEnrichment.ts:492 |
-| Frontend components | ActiveDownloadsTab | frontend/components/activity/ActiveDownloadsTab.tsx:20 |
-| Frontend components | HistoryTab | frontend/components/activity/HistoryTab.tsx:19 |
-| Frontend components | NotificationsTab | frontend/components/activity/NotificationsTab.tsx:30 |
+| Frontend components | ActiveDownloadsTab | frontend/components/activity/ActiveDownloadsTab.tsx:23 |
+| Frontend components | HistoryTab | frontend/components/activity/HistoryTab.tsx:22 |
+| Frontend components | NotificationsTab | frontend/components/activity/NotificationsTab.tsx:33 |
 | Frontend components | SocialTab | frontend/components/activity/SocialTab.tsx:30 |
-| Frontend components | DownloadNotifications | frontend/components/DownloadNotifications.tsx:19 |
+| Frontend components | DownloadNotifications | frontend/components/DownloadNotifications.tsx:20 |
 | Frontend components | EnrichmentFailuresModal | frontend/components/EnrichmentFailuresModal.tsx:19 |
 | Frontend components | ActivityPanelToggle | frontend/components/layout/ActivityPanel.tsx:367 |
 | Frontend components | ActivityPanel | frontend/components/layout/ActivityPanel.tsx:52 |
@@ -153,27 +155,27 @@ Scope:
 | Frontend components | resolveActivityTab | frontend/components/layout/activityPanelTabs.ts:80 |
 | Frontend components | AuthenticatedLayout | frontend/components/layout/AuthenticatedLayout.tsx:26 |
 | Frontend components | BottomNavigation | frontend/components/layout/BottomNavigation.tsx:36 |
-| Frontend components | MobileSidebar | frontend/components/layout/MobileSidebar.tsx:22 |
+| Frontend components | MobileSidebar | frontend/components/layout/MobileSidebar.tsx:23 |
 | Frontend components | PageHeader | frontend/components/layout/PageHeader.tsx:17 |
-| Frontend components | Sidebar | frontend/components/layout/Sidebar.tsx:29 |
+| Frontend components | Sidebar | frontend/components/layout/Sidebar.tsx:30 |
 | Frontend components | hasMyHistoryLink | frontend/components/layout/socialNavigation.ts:28 |
-| Frontend components | TopBar | frontend/components/layout/TopBar.tsx:33 |
-| Frontend components | TVLayout | frontend/components/layout/TVLayout.tsx:26 |
-| Frontend components | MoodMixer | frontend/components/MoodMixer.tsx:109 |
+| Frontend components | TopBar | frontend/components/layout/TopBar.tsx:34 |
+| Frontend components | TVLayout | frontend/components/layout/TVLayout.tsx:27 |
+| Frontend components | MoodMixer | frontend/components/MoodMixer.tsx:110 |
 | Frontend components | shouldAutoMatchVibeAtQueueEnd | frontend/components/player/autoMatchVibePlayback.ts:9 |
 | Frontend components | KeyboardShortcutsTooltip | frontend/components/player/KeyboardShortcutsTooltip.tsx:6 |
 | Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:22 |
-| Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:110 |
+| Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:111 |
 | Frontend components | PlayerModeWrapper | frontend/components/player/PlayerModeWrapper.tsx:6 |
 | Frontend components | SeekSlider | frontend/components/player/SeekSlider.tsx:29 |
 | Frontend components | SyncedLyrics | frontend/components/player/SyncedLyrics.tsx:79 |
 | Frontend components | TrackPreferenceButtons | frontend/components/player/TrackPreferenceButtons.tsx:51 |
 | Frontend components | EnhancedVibeOverlay | frontend/components/player/VibeOverlayEnhanced.tsx:183 |
-| Frontend components | PodcastPlayer | frontend/components/PodcastPlayer.tsx:44 |
+| Frontend components | PodcastPlayer | frontend/components/PodcastPlayer.tsx:45 |
 | Frontend components | ConditionalAudioProvider | frontend/components/providers/ConditionalAudioProvider.tsx:12 |
 | Frontend components | PWAInstallPrompt | frontend/components/PWAInstallPrompt.tsx:12 |
-| Frontend components | RemoveProgressButton | frontend/components/RemoveProgressButton.tsx:15 |
-| Frontend components | ServiceWorkerRegistration | frontend/components/ServiceWorkerRegistration.tsx:43 |
+| Frontend components | RemoveProgressButton | frontend/components/RemoveProgressButton.tsx:16 |
+| Frontend components | ServiceWorkerRegistration | frontend/components/ServiceWorkerRegistration.tsx:46 |
 | Frontend components | AudiobookCard | frontend/components/ui/AudiobookCard.tsx:21 |
 | Frontend components | ConfirmDialog | frontend/components/ui/ConfirmDialog.tsx:16 |
 | Frontend components | GalaxyBackground | frontend/components/ui/GalaxyBackground.tsx:17 |
@@ -184,9 +186,9 @@ Scope:
 | Frontend components | Input | frontend/components/ui/Input.tsx:10 |
 | Frontend components | LoadingScreen | frontend/components/ui/LoadingScreen.tsx:7 |
 | Frontend components | Modal | frontend/components/ui/Modal.tsx:17 |
-| Frontend components | MusicBrainzLookup | frontend/components/ui/MusicBrainzLookup.tsx:38 |
-| Frontend components | PlaylistSelector | frontend/components/ui/PlaylistSelector.tsx:16 |
-| Frontend components | ReleaseSelectionModal | frontend/components/ui/ReleaseSelectionModal.tsx:80 |
+| Frontend components | MusicBrainzLookup | frontend/components/ui/MusicBrainzLookup.tsx:39 |
+| Frontend components | PlaylistSelector | frontend/components/ui/PlaylistSelector.tsx:17 |
+| Frontend components | ReleaseSelectionModal | frontend/components/ui/ReleaseSelectionModal.tsx:81 |
 | Frontend components | RestartModal | frontend/components/ui/RestartModal.tsx:13 |
 | Frontend components | ArtistCardSkeleton | frontend/components/ui/Skeleton.tsx:17 |
 | Frontend components | AlbumCardSkeleton | frontend/components/ui/Skeleton.tsx:34 |
@@ -201,25 +203,25 @@ Scope:
 | Frontend features | SimilarAlbums | frontend/features/album/components/SimilarAlbums.tsx:14 |
 | Frontend features | useAlbumActions | frontend/features/album/hooks/useAlbumActions.ts:13 |
 | Frontend features | useAlbumData | frontend/features/album/hooks/useAlbumData.ts:10 |
-| Frontend features | useTidalGapFill | frontend/features/album/hooks/useTidalGapFill.ts:77 |
-| Frontend features | useYtMusicGapFill | frontend/features/album/hooks/useYtMusicGapFill.ts:77 |
+| Frontend features | useTidalGapFill | frontend/features/album/hooks/useTidalGapFill.ts:78 |
+| Frontend features | useYtMusicGapFill | frontend/features/album/hooks/useYtMusicGapFill.ts:78 |
 | Frontend features | ArtistActionBar | frontend/features/artist/components/ArtistActionBar.tsx:30 |
 | Frontend features | ArtistBio | frontend/features/artist/components/ArtistBio.tsx:12 |
 | Frontend features | ArtistHero | frontend/features/artist/components/ArtistHero.tsx:24 |
 | Frontend features | AvailableAlbums | frontend/features/artist/components/AvailableAlbums.tsx:194 |
 | Frontend features | Discography | frontend/features/artist/components/Discography.tsx:18 |
 | Frontend features | SimilarArtists | frontend/features/artist/components/SimilarArtists.tsx:14 |
-| Frontend features | useArtistActions | frontend/features/artist/hooks/useArtistActions.ts:9 |
+| Frontend features | useArtistActions | frontend/features/artist/hooks/useArtistActions.ts:10 |
 | Frontend features | useArtistData | frontend/features/artist/hooks/useArtistData.ts:9 |
-| Frontend features | useDownloadActions | frontend/features/artist/hooks/useDownloadActions.ts:7 |
-| Frontend features | useTidalTopTracks | frontend/features/artist/hooks/useTidalTopTracks.ts:53 |
-| Frontend features | useYtMusicTopTracks | frontend/features/artist/hooks/useYtMusicTopTracks.ts:50 |
+| Frontend features | useDownloadActions | frontend/features/artist/hooks/useDownloadActions.ts:8 |
+| Frontend features | useTidalTopTracks | frontend/features/artist/hooks/useTidalTopTracks.ts:54 |
+| Frontend features | useYtMusicTopTracks | frontend/features/artist/hooks/useYtMusicTopTracks.ts:51 |
 | Frontend features | AboutSection | frontend/features/audiobook/components/AboutSection.tsx:10 |
 | Frontend features | AudiobookActionBar | frontend/features/audiobook/components/AudiobookActionBar.tsx:18 |
 | Frontend features | AudiobookHero | frontend/features/audiobook/components/AudiobookHero.tsx:23 |
 | Frontend features | ChapterList | frontend/features/audiobook/components/ChapterList.tsx:12 |
 | Frontend features | PlayControls | frontend/features/audiobook/components/PlayControls.tsx:16 |
-| Frontend features | useAudiobookActions | frontend/features/audiobook/hooks/useAudiobookActions.ts:10 |
+| Frontend features | useAudiobookActions | frontend/features/audiobook/hooks/useAudiobookActions.ts:11 |
 | Frontend features | useAudiobookData | frontend/features/audiobook/hooks/useAudiobookData.ts:9 |
 | Frontend features | DiscoverActionBar | frontend/features/discover/components/DiscoverActionBar.tsx:31 |
 | Frontend features | DiscoverHero | frontend/features/discover/components/DiscoverHero.tsx:10 |
@@ -227,29 +229,29 @@ Scope:
 | Frontend features | HowItWorks | frontend/features/discover/components/HowItWorks.tsx:6 |
 | Frontend features | TrackList | frontend/features/discover/components/TrackList.tsx:38 |
 | Frontend features | UnavailableAlbums | frontend/features/discover/components/UnavailableAlbums.tsx:33 |
-| Frontend features | mapDiscoverTrackToPlaybackTrack | frontend/features/discover/hooks/useDiscoverActions.ts:22 |
-| Frontend features | useDiscoverActions | frontend/features/discover/hooks/useDiscoverActions.ts:48 |
-| Frontend features | useDiscoverData | frontend/features/discover/hooks/useDiscoverData.ts:19 |
-| Frontend features | useDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:107 |
-| Frontend features | getProviderSlotCount | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:32 |
-| Frontend features | applyDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:43 |
+| Frontend features | mapDiscoverTrackToPlaybackTrack | frontend/features/discover/hooks/useDiscoverActions.ts:23 |
+| Frontend features | useDiscoverActions | frontend/features/discover/hooks/useDiscoverActions.ts:49 |
+| Frontend features | useDiscoverData | frontend/features/discover/hooks/useDiscoverData.ts:20 |
+| Frontend features | useDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:108 |
+| Frontend features | getProviderSlotCount | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:33 |
+| Frontend features | applyDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:44 |
 | Frontend features | usePreviewPlayer | frontend/features/discover/hooks/usePreviewPlayer.ts:7 |
 | Frontend features | AudiobooksGrid | frontend/features/home/components/AudiobooksGrid.tsx:59 |
 | Frontend features | ContinueListening | frontend/features/home/components/ContinueListening.tsx:143 |
 | Frontend features | HomeHero | frontend/features/home/components/HomeHero.tsx:10 |
-| Frontend features | LibraryRadioStations | frontend/features/home/components/LibraryRadioStations.tsx:197 |
+| Frontend features | LibraryRadioStations | frontend/features/home/components/LibraryRadioStations.tsx:198 |
 | Frontend features | LibraryHeader | frontend/features/library/components/LibraryHeader.tsx:4 |
 | Frontend features | LibraryTabs | frontend/features/library/components/LibraryTabs.tsx:9 |
 | Frontend features | TracksList | frontend/features/library/components/TracksList.tsx:183 |
-| Frontend features | useLibraryActions | frontend/features/library/hooks/useLibraryActions.ts:23 |
+| Frontend features | useLibraryActions | frontend/features/library/hooks/useLibraryActions.ts:24 |
 | Frontend features | ContinueListening | frontend/features/podcast/components/ContinueListening.tsx:19 |
 | Frontend features | EpisodeList | frontend/features/podcast/components/EpisodeList.tsx:21 |
 | Frontend features | PodcastActionBar | frontend/features/podcast/components/PodcastActionBar.tsx:17 |
 | Frontend features | PodcastHero | frontend/features/podcast/components/PodcastHero.tsx:20 |
 | Frontend features | PreviewEpisodes | frontend/features/podcast/components/PreviewEpisodes.tsx:17 |
 | Frontend features | SimilarPodcasts | frontend/features/podcast/components/SimilarPodcasts.tsx:19 |
-| Frontend features | usePodcastActions | frontend/features/podcast/hooks/usePodcastActions.ts:43 |
-| Frontend features | usePodcastData | frontend/features/podcast/hooks/usePodcastData.ts:11 |
+| Frontend features | usePodcastActions | frontend/features/podcast/hooks/usePodcastActions.ts:44 |
+| Frontend features | usePodcastData | frontend/features/podcast/hooks/usePodcastData.ts:12 |
 | Frontend features | formatDate | frontend/features/podcast/utils.ts:1 |
 | Frontend features | getContrastColor | frontend/features/podcast/utils.ts:10 |
 | Frontend features | AliasResolutionBanner | frontend/features/search/components/AliasResolutionBanner.tsx:7 |
@@ -266,14 +268,12 @@ Scope:
 | Frontend features | TopResult | frontend/features/search/components/TopResult.tsx:12 |
 | Frontend features | TVSearchInput | frontend/features/search/components/TVSearchInput.tsx:12 |
 | Frontend features | useSearchData | frontend/features/search/hooks/useSearchData.ts:24 |
-| Frontend features | useSoulseekSearch | frontend/features/search/hooks/useSoulseekSearch.ts:19 |
+| Frontend features | useSoulseekSearch | frontend/features/search/hooks/useSoulseekSearch.ts:20 |
 | Frontend features | AccountSection | frontend/features/settings/components/sections/AccountSection.tsx:21 |
 | Frontend features | AIServicesSection | frontend/features/settings/components/sections/AIServicesSection.tsx:15 |
 | Frontend features | AudiobookshelfSection | frontend/features/settings/components/sections/AudiobookshelfSection.tsx:15 |
-| Frontend features | CacheSection | frontend/features/settings/components/sections/CacheSection.tsx:144 |
+| Frontend features | CacheSection | frontend/features/settings/components/sections/CacheSection.tsx:147 |
 | Frontend features | DownloadPreferencesSection | frontend/features/settings/components/sections/DownloadPreferencesSection.tsx:12 |
 | Frontend features | DownloadServicesSection | frontend/features/settings/components/sections/DownloadServicesSection.tsx:16 |
 | Frontend features | IntegrationsSection | frontend/features/settings/components/sections/IntegrationsSection.tsx:13 |
 | Frontend features | LibrarySafetySection | frontend/features/settings/components/sections/LibrarySafetySection.tsx:9 |
-| Frontend features | LidarrCard | frontend/features/settings/components/sections/LidarrSection.tsx:16 |
-| Frontend features | LinkDeviceSection | frontend/features/settings/components/sections/LinkDeviceSection.tsx:4 |

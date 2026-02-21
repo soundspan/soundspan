@@ -1,8 +1,8 @@
 {
   "metadata": {
     "id": "soundspan-agent-governance",
-    "version": "2026-02-20.05",
-    "description": "Executable governance checks for AGENTS policy and local-context hygiene, including changelog-sourced release notes workflow."
+    "version": "2026-02-21.01",
+    "description": "Executable governance checks for AGENTS policy and local-context hygiene, including changelog-sourced release notes workflow and logging compliance enforcement."
   },
   "contracts": {
     "documentationModel": {
@@ -62,6 +62,8 @@
         "domainReadmesVerify",
         "jsdocCoverageGenerate",
         "jsdocCoverageVerify",
+        "loggingComplianceGenerate",
+        "loggingComplianceVerify",
         "indexQueryStrictFresh",
         "releasePrepare",
         "releaseVerify",
@@ -71,6 +73,7 @@
         "testMatrixFile",
         "routeMapFile",
         "jsdocCoverageFile",
+        "loggingStandardsFile",
         "routesReadmeFile",
         "servicesReadmeFile",
         "frontendFeaturesReadmeFile"
@@ -413,6 +416,7 @@
         "rule_test_matrix_required",
         "rule_release_notes_template_required",
         "rule_release_notes_changelog_source_required",
+        "rule_logging_contract_required",
         "orch_hybrid_instruction_contract",
         "orch_scope_tightness",
         "orch_machine_payload_authoritative",
@@ -545,6 +549,34 @@
         "## Coverage Summary",
         "## Missing Exported Symbols (Top 250)"
       ]
+    },
+    "loggingStandards": {
+      "standardsFile": "docs/LOGGING_STANDARDS.md",
+      "verifyScript": ".github/scripts/verify-logging-compliance.mjs",
+      "baselineFile": ".github/policies/logging-compliance-baseline.json",
+      "npmGenerateScriptName": "logging:compliance:generate",
+      "npmGenerateScriptCommand": "node .github/scripts/verify-logging-compliance.mjs --write-baseline",
+      "npmVerifyScriptName": "logging:compliance:verify",
+      "npmVerifyScriptCommand": "node .github/scripts/verify-logging-compliance.mjs --check",
+      "contextIndexGenerateCommandKey": "loggingComplianceGenerate",
+      "contextIndexVerifyCommandKey": "loggingComplianceVerify",
+      "contextIndexStandardsFileCommandKey": "loggingStandardsFile",
+      "requiredSections": [
+        "# Logging Standards",
+        "## Shared Principles",
+        "## Frontend Contract",
+        "## Backend Contract",
+        "## Python Sidecar Contract",
+        "## Enforcement",
+        "## Migration to 100% Coverage"
+      ],
+      "requiredSnippets": [
+        "frontend/lib/logger.ts",
+        "backend/src/utils/logger.ts",
+        "services/common/logging_utils.py",
+        "Everything in the project should be logged appropriately",
+        "npm run logging:compliance:verify"
+      ]
     }
   },
   "checks": {
@@ -597,7 +629,9 @@
           "Route map generator: `npm run route-map:generate`",
           "Domain readmes generator: `npm run domain-readmes:generate`",
           "JSDoc coverage artifact: `docs/JSDOC_COVERAGE.md`",
-          "JSDoc coverage verify: `npm run jsdoc-coverage:verify`"
+          "JSDoc coverage verify: `npm run jsdoc-coverage:verify`",
+          "Logging standards source of truth: `docs/LOGGING_STANDARDS.md`",
+          "Logging compliance verify: `npm run logging:compliance:verify`"
         ]
       },
       {
@@ -663,6 +697,7 @@
           "## Policy-as-Code Enforcement",
           "node .github/scripts/enforce-agent-policies.mjs",
           "Session preflight command: `npm run agent:preflight`",
+          "Logging compliance command: `npm run logging:compliance:verify`",
           "When policy expectations change, update all relevant governance artifacts in the same change set:",
           "Always read full files before editing them.",
           "Legacy-test trust boundary: for code and tests authored before 2026-02-16 (inclusive), treat existing tests as potentially incomplete or incorrect until validated against current behavior/contracts; line-referential tests in that time range are advisory only until proven.",
@@ -699,10 +734,14 @@
           "Validate `.agents/SESSION_BRIEF.json` schema when present; stale brief age beyond policy threshold is a CI/local failure until refreshed via preflight.",
           "`rule_route_map_required`",
           "`rule_domain_readmes_required`",
+          "`rule_logging_contract_required`",
           "Treat `docs/ROUTE_MAP.md` as the canonical generated map for backend endpoints and frontend routes.",
           "Regenerate route map artifacts with `npm run route-map:generate` whenever backend route handlers, route mounts, or frontend app routes change.",
           "Maintain per-domain start-here READMEs in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md`.",
-          "Keep `docs/JSDOC_COVERAGE.md` current via `npm run jsdoc-coverage:verify` whenever exported-symbol surface changes."
+          "Keep `docs/JSDOC_COVERAGE.md` current via `npm run jsdoc-coverage:verify` whenever exported-symbol surface changes.",
+          "### Logging Standards Contract (Required)",
+          "Treat `docs/LOGGING_STANDARDS.md` as the canonical logging policy for frontend, backend, and Python sidecars.",
+          "Use shared logging helpers by default:"
         ]
       },
       {
@@ -742,7 +781,8 @@
           "required: `PLAN.md`",
           "Keep `docs/ROUTE_MAP.md` current as the generated backend/frontend route map (`npm run route-map:generate`).",
           "Keep per-domain start-here guides current in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md` (`npm run domain-readmes:generate`).",
-          "Keep `docs/JSDOC_COVERAGE.md` current for exported-symbol documentation drift checks (`npm run jsdoc-coverage:verify`)."
+          "Keep `docs/JSDOC_COVERAGE.md` current for exported-symbol documentation drift checks (`npm run jsdoc-coverage:verify`).",
+          "Keep `docs/LOGGING_STANDARDS.md` current for frontend/backend/python logging contract and compliance workflow."
         ]
       },
       {
@@ -769,6 +809,7 @@
           "[`TEST_MATRIX.md`](TEST_MATRIX.md)",
           "[`ROUTE_MAP.md`](ROUTE_MAP.md)",
           "[`JSDOC_COVERAGE.md`](JSDOC_COVERAGE.md)",
+          "[`LOGGING_STANDARDS.md`](LOGGING_STANDARDS.md)",
           "[`../backend/src/routes/README.md`](../backend/src/routes/README.md)",
           "[`../backend/src/services/README.md`](../backend/src/services/README.md)",
           "[`../frontend/features/README.md`](../frontend/features/README.md)"
@@ -806,7 +847,9 @@
           "\"domain-readmes:generate\"",
           "\"domain-readmes:verify\"",
           "\"jsdoc-coverage:generate\"",
-          "\"jsdoc-coverage:verify\""
+          "\"jsdoc-coverage:verify\"",
+          "\"logging:compliance:generate\"",
+          "\"logging:compliance:verify\""
         ]
       }
     ],
@@ -827,6 +870,7 @@
           "## Rule ID Catalog (Machine Cross-Reference)",
           "## Global Operating Agreements (All LLMs)",
           "## Policy-as-Code Enforcement",
+          "### Logging Standards Contract (Required)",
           "## LLM Continuity and Execution Discipline",
           "### CLI Worktree Parallelism (Required)",
           "### Orchestrator/Subagent Instruction Contract (Required)",

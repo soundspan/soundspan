@@ -130,6 +130,8 @@ Browser → Frontend (Next.js :3030) → Backend (Express.js :3006) → PostgreS
 - **Redis caching** uses key prefixes by domain (e.g., `search:library:`, `stream:info:`). Always set a TTL.
 - **Error handling:** Routes should catch errors and return appropriate HTTP status codes with `{ error: string }` JSON bodies.
 - **Environment variables** are read through `backend/src/config.ts` — never read `process.env` directly in route/service files.
+- **Logging:** Use `backend/src/utils/logger.ts` (`createLogger`, `withLogTiming`, `logErrorWithContext`) for backend runtime code; avoid raw `console.*` calls outside explicitly approved compatibility shims.
+- **Runtime logging expectation:** everything in project runtime code should be logged appropriately through shared logging helpers.
 
 ### Frontend
 
@@ -143,6 +145,7 @@ Browser → Frontend (Next.js :3030) → Backend (Express.js :3006) → PostgreS
 - **Icons:** Use Lucide React (`lucide-react`). Import individual icons.
 - **Toasts:** Use Sonner's `toast` function for user notifications.
 - **Audio playback** is managed through context providers in `frontend/lib/audio-*-context.tsx`. `HowlerAudioElement` now uses the runtime audio-engine abstraction (`frontend/lib/audio-engine/index.ts`), defaulting to Video.js for DASH segmented sources and allowing Howler only via explicit runtime rollback mode (`STREAMING_ENGINE_MODE=howler-rollback`).
+- **Logging:** Use `frontend/lib/logger.ts` (`createFrontendLogger`, `withFrontendLogTiming`) for frontend runtime logging; avoid direct `console.*` usage in runtime components/hooks.
 
 ### General
 
@@ -153,6 +156,7 @@ Browser → Frontend (Next.js :3030) → Backend (Express.js :3006) → PostgreS
 - **Branch strategy:** All PRs target `main`. Feature branches use `feature/[name]`.
 - **Docker:** The primary deployment method. All components have individual Dockerfiles and are orchestrated via docker-compose.
 - **Docker lock-step policy:** If any individual image Dockerfile or image build dependency is changed (for example `backend/Dockerfile`, `frontend/Dockerfile`, `services/*/Dockerfile`, related `requirements.txt`, `package*.json`, or image build workflow wiring), update the AIO root `Dockerfile` and relevant AIO workflow/docs in the same change set, or explicitly document why parity is intentionally not required.
+  - Current explicit exception: streaming sidecar Dockerfile/context changes for shared `services/common/*` logging helpers do not require AIO `Dockerfile` changes because the AIO image does not build or ship the TIDAL/YTMusic sidecars.
 
 ### Engineering Best Practices (Default)
 
@@ -164,6 +168,7 @@ Browser → Frontend (Next.js :3030) → Backend (Express.js :3006) → PostgreS
 - Fail clearly and safely: return actionable errors to operators/users, avoid swallowing root causes, and never leak secrets/tokens in logs.
 - Preserve compatibility by default: treat existing API/UI behavior as stable unless a change is explicitly intended and documented.
 - Keep observability practical: log with operation context/correlation IDs and include enough detail to debug production failures.
+- Logging coverage default: no silent runtime failure/retry/transition paths; add scoped logs as part of normal implementation.
 - Protect performance hot paths: avoid N+1 DB patterns, expensive per-item loops when batching is possible, and unbounded cache growth.
 - Keep tests deterministic: avoid timing flakiness, external-network dependencies in unit tests, and non-deterministic assertions.
 
@@ -253,6 +258,7 @@ For this repository, documentation updates are part of the definition of done fo
 - Keep `docs/TEST_MATRIX.md` current as the feature-to-targeted-test command map.
 - Keep `docs/ROUTE_MAP.md` current as the generated backend/frontend route map (`npm run route-map:generate`).
 - Keep `docs/JSDOC_COVERAGE.md` current for exported-symbol documentation drift checks (`npm run jsdoc-coverage:verify`).
+- Keep `docs/LOGGING_STANDARDS.md` current for frontend/backend/python logging contract and compliance workflow.
 - Keep per-domain start-here guides current in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md` (`npm run domain-readmes:generate`).
 - Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted `docs/FEATURE_INDEX.json` entries in the same change set.
 - In `CHANGELOG.md`, keep the **`Fixed`** section limited to regressions/bugs. Feature additions and behavior upgrades should be documented under **`Added`**/**`Changed`**.
