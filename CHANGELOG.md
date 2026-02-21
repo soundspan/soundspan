@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Direct-start track playback now performs proactive segmented handoff once prewarmed sessions become ready (with bounded retries/cooldown), instead of waiting for a playback-error-triggered recovery path.
 - Proactive direct-to-segmented promotion now logs explicit skip reasons and executes the handoff API path directly, making handoff behavior observable and deterministic per-track during startup warmup.
 - Manifest and segment token validation now tolerates in-flight session ID swaps during handoff while still enforcing user/track/quality/source scope, preventing intermittent 403 buffering stalls.
+- Heartbeat stall watchdog now remains active while playback is buffering (even when `isPlaying` briefly flips false), preventing spinner states from getting stuck without recovery/timeout handling.
 
 ## [1.1.2] - 2026-02-20
 

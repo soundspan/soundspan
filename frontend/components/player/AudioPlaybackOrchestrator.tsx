@@ -1831,12 +1831,12 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
     // Keep heartbeat active while buffering so stall timeouts can still fire.
     useEffect(() => {
-        if (isPlaying) {
+        if (isPlaying || isBuffering) {
             heartbeatRef.current?.start();
         } else {
             heartbeatRef.current?.stop();
         }
-    }, [isPlaying]);
+    }, [isPlaying, isBuffering]);
 
     // Prefetch lyrics in the background as soon as a track is loaded.
     useEffect(() => {
