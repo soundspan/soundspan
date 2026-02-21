@@ -1692,6 +1692,22 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     }
 
                     if (
+                        segmentedSession.engineHints?.preferDirectStartup === true
+                    ) {
+                        logSegmentedClientMetric("session.create_fallback_direct", {
+                            trackId: currentTrack.id,
+                            sourceType:
+                                segmentedSession.playbackProfile?.sourceType ??
+                                segmentedSession.engineHints?.sourceType ??
+                                segmentedTrackContext.sourceType,
+                            reason: "backend_prefer_direct_startup",
+                        });
+                        throw new Error(
+                            "Segmented asset is still warming; using direct startup path.",
+                        );
+                    }
+
+                    if (
                         isLosslessSegmentedSession(segmentedSession) &&
                         !supportsLosslessSegmentedPlayback()
                     ) {

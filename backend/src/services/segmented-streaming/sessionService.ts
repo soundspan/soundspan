@@ -94,6 +94,7 @@ export interface SegmentedSessionResponse {
         protocol: "dash";
         sourceType: SegmentedSessionSourceType;
         recommendedEngine: "videojs";
+        preferDirectStartup?: boolean;
     };
 }
 
@@ -230,6 +231,9 @@ class SegmentedSessionService {
                 sessionRecord.cacheKey,
                 sessionRecord.sessionId,
             );
+            const preferDirectStartup = segmentedSegmentService.hasInFlightBuild(
+                sessionRecord.cacheKey,
+            );
 
             logSegmentedStreamingTrace("session.local.create_success", {
                 trackId: track.id,
@@ -239,9 +243,12 @@ class SegmentedSessionService {
                 sourceAccessMs,
                 assetBuildMs,
                 persistMs,
+                preferDirectStartup,
                 totalMs: segmentedTraceDurationMs(startedAtMs),
             });
-            return this.toSessionResponse(sessionRecord);
+            return this.toSessionResponse(sessionRecord, {
+                preferDirectStartup,
+            });
         } catch (error) {
             logSegmentedStreamingTrace("session.local.create_error", {
                 trackId: input.trackId,
@@ -645,6 +652,9 @@ class SegmentedSessionService {
 
     private toSessionResponse(
         session: SegmentedSessionRecord,
+        options: {
+            preferDirectStartup?: boolean;
+        } = {},
     ): SegmentedSessionResponse {
         const sessionToken = this.issueSessionToken(session);
         const encodedSessionToken = encodeURIComponent(sessionToken);
@@ -664,6 +674,9 @@ class SegmentedSessionService {
                 protocol: "dash",
                 sourceType: session.sourceType,
                 recommendedEngine: "videojs",
+                ...(options.preferDirectStartup
+                    ? { preferDirectStartup: true }
+                    : {}),
             },
         };
     }

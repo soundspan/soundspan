@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Segmented fMP4 generation now auto-retries without unsupported ffmpeg DASH flags (`-ldash`, then `-streaming` when needed), preventing hard failures on older ffmpeg builds.
 - Segmented playback now fails over to direct stream when DASH startup stalls past the runtime timeout, preventing long spinner waits before first audio.
 - Backend startup now probes ffmpeg DASH muxer capabilities once and suppresses unsupported flags proactively to reduce repeated startup failures/noise.
+- Local segmented sessions now signal cold/in-flight asset generation so frontend starts on direct playback immediately while DASH assets continue warming in the background.
 
 ## [1.1.2] - 2026-02-20
 

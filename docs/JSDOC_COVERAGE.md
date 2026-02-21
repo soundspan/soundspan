@@ -109,7 +109,7 @@ Scope:
 | Backend services | normalizeCacheQuery | backend/src/services/search.ts:5 |
 | Backend services | SearchService | backend/src/services/search.ts:96 |
 | Backend services | SegmentedProviderAdapterError | backend/src/services/segmented-streaming/providerAdapters/adapterError.ts:1 |
-| Backend services | SegmentedSessionError | backend/src/services/segmented-streaming/sessionService.ts:118 |
+| Backend services | SegmentedSessionError | backend/src/services/segmented-streaming/sessionService.ts:119 |
 | Backend utils | DependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:114 |
 | Backend utils | createDependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:192 |
 | Backend utils | EnvFileSyncSkippedError | backend/src/utils/envWriter.ts:5 |

@@ -164,6 +164,7 @@ export interface SegmentedStreamingSessionResponse {
         protocol?: "dash";
         sourceType?: "local" | "tidal" | "ytmusic";
         recommendedEngine?: "videojs";
+        preferDirectStartup?: boolean;
     };
 }
 

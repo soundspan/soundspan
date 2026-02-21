@@ -10,6 +10,7 @@ const resolveSessionService = async () => {
     const mockRegisterSessionReference = jest.fn();
     const mockClearSessionReference = jest.fn();
     const mockFsAccess = jest.fn();
+    const mockHasInFlightBuild = jest.fn();
 
     jest.doMock("fs", () => ({
         promises: {
@@ -74,7 +75,8 @@ const resolveSessionService = async () => {
     jest.doMock("../segmentService", () => ({
         segmentedSegmentService: {
             getBuildFailure: jest.fn(),
-            hasInFlightBuild: jest.fn(),
+            hasInFlightBuild: (...args: unknown[]) =>
+                mockHasInFlightBuild(...args),
         },
     }));
 
@@ -117,6 +119,7 @@ const resolveSessionService = async () => {
             mockRegisterSessionReference,
             mockClearSessionReference,
             mockFsAccess,
+            mockHasInFlightBuild,
         },
     };
 };
@@ -156,6 +159,7 @@ describe("segmentedStreamingSessionService local quality handling", () => {
             manifestPath: "/tmp/segmented/cache-1/manifest.mpd",
             quality: "original",
         });
+        mocks.mockHasInFlightBuild.mockReturnValue(false);
 
         const session = await segmentedStreamingSessionService.createLocalSession({
             userId: "user-1",
@@ -177,5 +181,40 @@ describe("segmentedStreamingSessionService local quality handling", () => {
         );
         expect(mocks.mockRedisSetEx).toHaveBeenCalledTimes(1);
         expect(mocks.mockRegisterSessionReference).toHaveBeenCalledTimes(1);
+    });
+
+    it("marks local cold-start segmented sessions to prefer direct startup", async () => {
+        const { segmentedStreamingSessionService, mocks } =
+            await resolveSessionService();
+
+        mocks.mockUserSettingsFindUnique.mockResolvedValueOnce({
+            playbackQuality: "original",
+        });
+        mocks.mockTrackFindUnique.mockResolvedValueOnce({
+            id: "track-2",
+            filePath: "albums/track-2.flac",
+            fileModified: new Date("2026-02-20T00:00:00.000Z"),
+        });
+        mocks.mockFsAccess.mockResolvedValue(undefined);
+        mocks.mockManifestGetOrCreateLocalDashAsset.mockResolvedValueOnce({
+            cacheKey: "cache-2",
+            outputDir: "/tmp/segmented/cache-2",
+            manifestPath: "/tmp/segmented/cache-2/manifest.mpd",
+            quality: "original",
+        });
+        mocks.mockHasInFlightBuild.mockReturnValue(true);
+
+        const session = await segmentedStreamingSessionService.createLocalSession({
+            userId: "user-1",
+            trackId: "track-2",
+            desiredQuality: "original",
+        });
+
+        expect(session.engineHints).toMatchObject({
+            protocol: "dash",
+            sourceType: "local",
+            recommendedEngine: "videojs",
+            preferDirectStartup: true,
+        });
     });
 });
