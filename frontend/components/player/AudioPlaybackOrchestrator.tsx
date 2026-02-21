@@ -2274,11 +2274,16 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 Number.isFinite(durationSec) &&
                 durationSec > 0 &&
                 durationSec - currentPositionSec <= 0.75;
+            const hasPlayIntent =
+                playbackStateMachine.isPlaying ||
+                isPlaying ||
+                lastPlayingStateRef.current;
+            const isNonUserPause = !isUserInitiatedRef.current;
 
             const shouldAttemptUnexpectedPauseRecovery =
                 playbackType === "track" &&
-                !isUserInitiatedRef.current &&
-                lastPlayingStateRef.current &&
+                isNonUserPause &&
+                hasPlayIntent &&
                 !nearTrackEnd;
 
             if (shouldAttemptUnexpectedPauseRecovery) {
@@ -2295,6 +2300,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         (currentTrack
                             ? resolveDirectTrackSourceType(currentTrack)
                             : "unknown"),
+                    hasPlayIntent,
+                    nearTrackEnd,
+                    stateMachineState: playbackStateMachine.getState(),
+                    uiIsPlaying: isPlaying,
                 });
                 setIsBuffering(true);
                 playbackStateMachine.forceTransition("LOADING");
@@ -2322,6 +2331,24 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 );
                 isUserInitiatedRef.current = false;
                 return;
+            }
+            if (isNonUserPause && playbackType === "track") {
+                logSegmentedClientMetric("player.unexpected_pause", {
+                    reason: nearTrackEnd
+                        ? "pause_near_track_end"
+                        : "pause_without_play_intent",
+                    trackId: currentTrack?.id ?? null,
+                    sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
+                    sourceType:
+                        activeSegmentedSessionRef.current?.sourceType ??
+                        (currentTrack
+                            ? resolveDirectTrackSourceType(currentTrack)
+                            : "unknown"),
+                    hasPlayIntent,
+                    nearTrackEnd,
+                    stateMachineState: playbackStateMachine.getState(),
+                    uiIsPlaying: isPlaying,
+                });
             }
 
             // Transition state machine to READY (paused)
