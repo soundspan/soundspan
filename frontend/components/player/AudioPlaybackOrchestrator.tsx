@@ -1806,14 +1806,14 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         };
     }, [setIsBuffering, setIsPlaying]);
 
-    // Start/stop heartbeat based on playback state
+    // Keep heartbeat active while buffering so stall timeouts can still fire.
     useEffect(() => {
-        if (isPlaying && !isBuffering) {
+        if (isPlaying) {
             heartbeatRef.current?.start();
         } else {
             heartbeatRef.current?.stop();
         }
-    }, [isPlaying, isBuffering]);
+    }, [isPlaying]);
 
     // Prefetch lyrics in the background as soon as a track is loaded.
     useEffect(() => {

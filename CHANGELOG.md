@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Recovery after segmented playback disruption now keeps local player state authoritative for resume position and play/pause intent.
+- Heartbeat stall detection now stays active while buffering so stalled tracks do not get stuck in an indefinite spinner state.
 - Local `original` segmented sessions now chunk lossless sources as FLAC fMP4-DASH assets, with client capability checks that fall back to direct playback when lossless segmented playback is unsupported.
 - Segmented manifest-relative `.m4s` segment requests are now served through a compatibility route, preventing session stalls when clients request chunk URLs outside the `/segments/` path prefix.
 - Segmented fMP4 generation now auto-retries without unsupported ffmpeg DASH flags (`-ldash`, then `-streaming` when needed), preventing hard failures on older ffmpeg builds.
