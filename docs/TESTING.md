@@ -69,6 +69,7 @@ These scripts intentionally run outside Jest because they are operator diagnosti
 
 - `*.spec.ts` for E2E flows.
 - `predeploy/` subtree for release-focused validation paths.
+- `predeploy/media-contract.spec.ts` validates direct and segmented media contracts (`Range` + `206`, CORS headers, and content-type correctness; MP4 responses also get fast-start `moov` sanity checks).
 
 ### Frontend Node unit tests
 
