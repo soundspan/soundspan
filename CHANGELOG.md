@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heartbeat stall recovery now force-reconciles playback state-machine and UI playback/buffering flags after event-race transitions, preventing persistent spinning states when playback resumes.
 - Heartbeat buffer timeouts now attempt segmented handoff/transient reload recovery before hard-failing playback, reducing red-circle stopouts after brief segmented stalls.
 - Heartbeat unexpected-stop detection now emits explicit client telemetry and attempts segmented/transient recovery before pausing, reducing silent mid-track pauses without spinner indicators.
+- Non-user pause events that occur while play intent is active now emit `player.unexpected_pause` telemetry and trigger segmented/transient recovery attempts, reducing silent mid-track stopouts that bypass heartbeat stall detection.
 
 ## [1.1.2] - 2026-02-20
 

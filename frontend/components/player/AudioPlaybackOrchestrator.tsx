@@ -166,6 +166,7 @@ const SEGMENTED_CLIENT_SIGNAL_EVENTS = new Set<string>([
     "player.rebuffer_timeout",
     "player.rebuffer_recovered",
     "player.unexpected_stop",
+    "player.unexpected_pause",
     "player.playback_error",
     "session.handoff_failure",
     "session.handoff_proactive_failure",
@@ -2256,6 +2257,72 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         const handlePause = () => {
             if (isLoadingRef.current) return;
             if (seekReloadInProgressRef.current) return;
+            if (segmentedHandoffInProgressRef.current) {
+                // Pause can occur transiently while reloading source during handoff.
+                isUserInitiatedRef.current = false;
+                return;
+            }
+
+            const currentPositionSec = Math.max(
+                0,
+                typeof howlerEngine.getActualCurrentTime === "function"
+                    ? howlerEngine.getActualCurrentTime()
+                    : howlerEngine.getCurrentTime()
+            );
+            const durationSec = howlerEngine.getDuration();
+            const nearTrackEnd =
+                Number.isFinite(durationSec) &&
+                durationSec > 0 &&
+                durationSec - currentPositionSec <= 0.75;
+
+            const shouldAttemptUnexpectedPauseRecovery =
+                playbackType === "track" &&
+                !isUserInitiatedRef.current &&
+                lastPlayingStateRef.current &&
+                !nearTrackEnd;
+
+            if (shouldAttemptUnexpectedPauseRecovery) {
+                const pauseError = new Error(
+                    "Playback paused unexpectedly while track intent is playing"
+                );
+                const failedTrackId = currentTrack?.id ?? null;
+                logSegmentedClientMetric("player.unexpected_pause", {
+                    reason: "engine_pause_while_play_intent",
+                    trackId: failedTrackId,
+                    sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
+                    sourceType:
+                        activeSegmentedSessionRef.current?.sourceType ??
+                        (currentTrack
+                            ? resolveDirectTrackSourceType(currentTrack)
+                            : "unknown"),
+                });
+                setIsBuffering(true);
+                playbackStateMachine.forceTransition("LOADING");
+                void attemptSegmentedHandoffRecovery(pauseError).then(
+                    (didRecoverWithHandoff) => {
+                        if (didRecoverWithHandoff) {
+                            return;
+                        }
+
+                        const didScheduleTransientRecovery =
+                            attemptTransientTrackRecovery(
+                                failedTrackId,
+                                pauseError
+                            );
+                        if (didScheduleTransientRecovery) {
+                            playbackStateMachine.forceTransition("LOADING");
+                            setIsBuffering(true);
+                            return;
+                        }
+
+                        setIsPlaying(false);
+                        setIsBuffering(false);
+                        playbackStateMachine.forceTransition("READY");
+                    }
+                );
+                isUserInitiatedRef.current = false;
+                return;
+            }
 
             // Transition state machine to READY (paused)
             if (playbackStateMachine.isPlaying) {
