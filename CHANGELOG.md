@@ -9,43 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added segmented streaming session/DASH delivery architecture across backend and frontend, including Video.js-based segmented playback with direct-stream compatibility fallback.
-- Added segmented playback baseline capture tooling (`tools/streaming/capture-playback-baseline.mjs`) for reliability/latency before-vs-after reporting.
-- Added segmented streaming session lifecycle API routes: session create, manifest, segment, heartbeat, and handoff endpoints under `/api/streaming/v1/sessions`.
-- Added segmented client-signal ingestion (`POST /api/streaming/v1/client-metrics`) for live stall/rebuffer diagnostics from browser playback telemetry.
+- Added a new segmented streaming path across backend and frontend, with Video.js as the default segmented player.
+- Added backend segmented-streaming APIs for session create, manifest, segment delivery, heartbeat, and handoff under `/api/streaming/v1/sessions`.
+- Added playback diagnostics capture for segmented sessions (`POST /api/streaming/v1/client-metrics`) plus a baseline capture script for before/after startup comparisons.
 
 ### Changed
 
-- Segmented streaming engine control now uses runtime `STREAMING_ENGINE_MODE` injection (`videojs` default, explicit `howler-rollback` opt-in) so prebuilt images can roll back without rebuilds.
-- Segmented streaming cache location now supports `SEGMENTED_STREAMING_CACHE_PATH` and defaults to `TRANSCODE_CACHE_PATH` when unset.
-- Segmented startup fallback timeout is now runtime-configurable via `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` (clamped to 1500-15000ms, default 2500ms) through `/runtime-config`.
-- Segmented session creation now returns immediately and continues DASH asset generation in the background, with manifest/segment routes waiting for asset readiness instead of failing fast on startup races.
-- Segmented playback session quality now defaults to each user’s saved playback-quality setting when the frontend does not explicitly pass a quality value.
-- Next-track segmented playback now prewarms immediately and reuses prewarmed session manifests/tokens on track handoff.
-- Track startup now uses segmented delivery only when a usable prewarmed session already exists; otherwise playback starts direct immediately while segmented session prewarm continues asynchronously in the background.
-- Playback quality badge resolution is now centralized in a single shared resolver and applied consistently across Mini Player, Full Player, and Overlay Player.
-- Player orchestration component naming now reflects current runtime responsibility (`AudioPlaybackOrchestrator`), replacing the legacy `HowlerAudioElement` naming.
+- Streaming engine selection is now runtime-controlled with `STREAMING_ENGINE_MODE`: `videojs` by default, with non-default `howler-rollback` for rollback without rebuilding images.
+- Segmented cache storage now supports `SEGMENTED_STREAMING_CACHE_PATH` and defaults to `TRANSCODE_CACHE_PATH` when not set.
+- Segmented startup timeout is now runtime-configurable with `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` (1500-15000ms, default 2500ms) through `/runtime-config`.
+- Session creation now returns quickly while segment assets build in the background, and startup prefers direct playback unless a prewarmed segmented session is already ready.
+- Track transitions now prewarm upcoming segmented sessions and reuse prewarmed manifests/tokens when possible.
+- Playback quality now defaults to the user’s saved quality when the client does not pass one explicitly.
+- Playback quality badges now come from one shared resolver used by Mini Player, Full Player, and Overlay Player.
+- The player coordinator was renamed to `AudioPlaybackOrchestrator` to match its current role.
 
 ### Fixed
 
-- Recovery after segmented playback disruption now keeps local player state authoritative for resume position and play/pause intent.
-- Heartbeat stall detection now stays active while buffering so stalled tracks do not get stuck in an indefinite spinner state.
-- Local `original` segmented sessions now chunk lossless sources as FLAC fMP4-DASH assets, with client capability checks that fall back to direct playback when lossless segmented playback is unsupported.
-- Segmented manifest-relative `.m4s` segment requests are now served through a compatibility route, preventing session stalls when clients request chunk URLs outside the `/segments/` path prefix.
-- Segmented fMP4 generation now auto-retries without unsupported ffmpeg DASH flags (`-ldash`, then `-streaming` when needed), preventing hard failures on older ffmpeg builds.
-- Segmented playback now fails over to direct stream when DASH startup stalls past the runtime timeout, preventing long spinner waits before first audio.
-- Backend startup now probes ffmpeg DASH muxer capabilities once and suppresses unsupported flags proactively to reduce repeated startup failures/noise.
-- Local segmented sessions now signal cold/in-flight asset generation so frontend starts on direct playback immediately while DASH assets continue warming in the background.
-- Segmented handoff recovery now enforces a per-track cooldown to prevent rapid session churn/reseek loops during repeated transient playback errors.
-- Next-track segmented prewarm now performs bounded retries when assets are still warming, preventing repeated direct-only track transitions caused by one-shot prewarm skips.
-- Direct-start track playback now performs proactive segmented handoff once prewarmed sessions become ready (with bounded retries/cooldown), instead of waiting for a playback-error-triggered recovery path.
-- Proactive direct-to-segmented promotion now logs explicit skip reasons and executes the handoff API path directly, making handoff behavior observable and deterministic per-track during startup warmup.
-- Manifest and segment token validation now tolerates in-flight session ID swaps during handoff while still enforcing user/track/quality/source scope, preventing intermittent 403 buffering stalls.
-- Heartbeat stall recovery now force-reconciles playback state-machine and UI playback/buffering flags after event-race transitions, preventing persistent spinning states when playback resumes.
-- Heartbeat buffer timeouts now attempt segmented handoff/transient reload recovery before hard-failing playback, reducing red-circle stopouts after brief segmented stalls.
-- Heartbeat unexpected-stop detection now emits explicit client telemetry and attempts segmented/transient recovery before pausing, reducing silent mid-track pauses without spinner indicators.
-- Non-user pause events that occur while play intent is active now emit `player.unexpected_pause` telemetry and trigger segmented/transient recovery attempts, reducing silent mid-track stopouts that bypass heartbeat stall detection.
-- Unexpected-pause recovery now derives play intent from state machine + UI + last-known intent and records skip diagnostics, reducing race windows where silent non-user pauses could bypass recovery.
+- Fixed segmented-playback recovery so local player state stays authoritative for resume position and play/pause intent after disruptions.
+- Fixed long buffering/spinner stalls by keeping heartbeat checks active during buffering and failing over to direct playback when segmented startup exceeds the configured timeout.
+- Fixed repeated handoff/reseek churn with per-track cooldowns, bounded retries, and explicit handoff skip diagnostics.
+- Fixed token/session race cases during in-flight handoff so manifest/segment validation tolerates session ID swaps without producing intermittent 403 stalls.
+- Fixed compatibility issues across ffmpeg builds by probing supported DASH flags at startup and retrying generation without unsupported flags when needed.
+- Fixed local original-quality segmented output to generate lossless FLAC-in-fMP4 segments when supported, with automatic direct-play fallback when not supported by client/runtime.
+- Fixed client path compatibility for manifest-relative `.m4s` segment requests so chunk URLs continue working across route variations.
+- Fixed silent mid-track pauses by adding explicit unexpected-pause telemetry and running segmented/transient recovery attempts before hard stop.
 
 ## [1.1.2] - 2026-02-20
 
