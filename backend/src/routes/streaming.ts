@@ -474,6 +474,11 @@ router.post("/v1/sessions/:sessionId/heartbeat", requireAuth, async (req, res) =
 router.post("/v1/sessions/:sessionId/handoff", requireAuth, async (req, res) => {
     const startedAtMs = Date.now();
     let sourceType: string | undefined;
+    logSegmentedStreamingMetric("session.handoff", {
+        status: "start",
+        sessionId: req.params.sessionId,
+        latencyMs: segmentedMetricDurationMs(startedAtMs),
+    });
     try {
         const userId = req.user?.id;
         if (!userId) {

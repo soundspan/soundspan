@@ -263,6 +263,12 @@ interface SegmentedSessionPrewarmOptions {
     retryCount?: number;
 }
 
+interface StartupSegmentedSessionSnapshot {
+    trackId: string;
+    sourceType: "local" | "tidal" | "ytmusic";
+    session: SegmentedStreamingSessionResponse;
+}
+
 const buildSegmentedSessionKey = (context: SegmentedTrackContext): string =>
     `${context.sourceType}:${context.sessionTrackId}`;
 
@@ -423,6 +429,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         null
     );
     const segmentedProactiveHandoffLastSkipKeyRef = useRef<string | null>(null);
+    const startupSegmentedSessionRef =
+        useRef<StartupSegmentedSessionSnapshot | null>(null);
+    const startupSegmentedSessionInFlightRef = useRef<Set<string>>(new Set());
 
     // Heartbeat monitor for detecting stalled playback
     const heartbeatRef = useRef<HeartbeatMonitor | null>(null);
@@ -638,6 +647,86 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 });
         },
         [clearSegmentedPrewarmRetry],
+    );
+
+    const ensureStartupSegmentedSession = useCallback(
+        (
+            trackId: string,
+            context: SegmentedTrackContext,
+            trigger:
+                | "load_direct_startup"
+                | "proactive_missing"
+                | "prewarm_prefer_direct",
+        ): void => {
+            const existingStartupSession = startupSegmentedSessionRef.current;
+            if (
+                existingStartupSession &&
+                existingStartupSession.trackId === trackId &&
+                existingStartupSession.sourceType === context.sourceType &&
+                isSegmentedSessionUsable(existingStartupSession.session)
+            ) {
+                return;
+            }
+
+            const startupSessionKey = buildSegmentedSessionKey(context);
+            if (
+                startupSegmentedSessionInFlightRef.current.has(startupSessionKey)
+            ) {
+                return;
+            }
+
+            startupSegmentedSessionInFlightRef.current.add(startupSessionKey);
+            void api
+                .createSegmentedStreamingSession({
+                    trackId: context.sessionTrackId,
+                    sourceType: context.sourceType,
+                })
+                .then((session) => {
+                    if (!isSegmentedSessionUsable(session)) {
+                        return;
+                    }
+                    if (currentTrackRef.current?.id !== trackId) {
+                        return;
+                    }
+                    startupSegmentedSessionRef.current = {
+                        trackId,
+                        sourceType: context.sourceType,
+                        session,
+                    };
+                    logSegmentedClientMetric("session.startup_ready", {
+                        trackId,
+                        sourceType:
+                            session.playbackProfile?.sourceType ??
+                            session.engineHints?.sourceType ??
+                            context.sourceType,
+                        sessionId: session.sessionId,
+                        preferDirectStartup:
+                            session.engineHints?.preferDirectStartup === true,
+                        trigger,
+                    });
+                })
+                .catch((error) => {
+                    console.warn(
+                        "[AudioPlaybackOrchestrator] Startup segmented session request failed:",
+                        error,
+                    );
+                    logSegmentedClientMetric("session.startup_failure", {
+                        trackId,
+                        sourceType: context.sourceType,
+                        trigger,
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : String(error ?? "unknown"),
+                    });
+                })
+                .finally(() => {
+                    startupSegmentedSessionInFlightRef.current.delete(
+                        startupSessionKey,
+                    );
+                });
+        },
+        [],
     );
 
     const scheduleStartupPlaybackRecovery = useCallback(
@@ -1074,17 +1163,46 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             }
 
             const sessionKey = buildSegmentedSessionKey(segmentedTrackContext);
-            const prewarmedSession =
-                prewarmedSegmentedSessionRef.current.get(sessionKey);
+            const startupSessionSnapshot = startupSegmentedSessionRef.current;
+            const startupSession =
+                startupSessionSnapshot &&
+                startupSessionSnapshot.trackId === track.id &&
+                startupSessionSnapshot.sourceType === segmentedTrackContext.sourceType &&
+                isSegmentedSessionUsable(startupSessionSnapshot.session)
+                    ? startupSessionSnapshot.session
+                    : null;
+            if (
+                startupSessionSnapshot &&
+                startupSessionSnapshot.trackId === track.id &&
+                !startupSession
+            ) {
+                startupSegmentedSessionRef.current = null;
+            }
 
-            if (!prewarmedSession || !isSegmentedSessionUsable(prewarmedSession)) {
+            const prewarmedSessionCandidate =
+                prewarmedSegmentedSessionRef.current.get(sessionKey);
+            const prewarmedSession =
+                prewarmedSessionCandidate &&
+                isSegmentedSessionUsable(prewarmedSessionCandidate)
+                    ? prewarmedSessionCandidate
+                    : null;
+            if (prewarmedSessionCandidate && !prewarmedSession) {
                 prewarmedSegmentedSessionRef.current.delete(sessionKey);
+            }
+
+            const proactiveSession = startupSession ?? prewarmedSession;
+            if (!proactiveSession) {
                 prewarmSegmentedSession({
                     sessionKey,
                     context: segmentedTrackContext,
                     trackId: track.id,
                     reason: "startup_background",
                 });
+                ensureStartupSegmentedSession(
+                    track.id,
+                    segmentedTrackContext,
+                    "proactive_missing",
+                );
                 logProactiveSegmentedHandoffSkip(
                     track.id,
                     sourceType,
@@ -1180,18 +1298,21 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             logSegmentedClientMetric("session.handoff_proactive_attempt", {
                 trackId: track.id,
                 sourceType:
-                    prewarmedSession.playbackProfile?.sourceType ??
-                    prewarmedSession.engineHints?.sourceType ??
+                    proactiveSession.playbackProfile?.sourceType ??
+                    proactiveSession.engineHints?.sourceType ??
                     sourceType,
-                sessionId: prewarmedSession.sessionId,
+                sessionId: proactiveSession.sessionId,
+                sourceSessionKind: startupSession ? "startup" : "prewarm",
+                preferDirectStartup:
+                    proactiveSession.engineHints?.preferDirectStartup === true,
                 attempt: proactiveAttempt,
                 shouldPlay,
             });
 
             void api
                 .handoffSegmentedStreamingSession(
-                    prewarmedSession.sessionId,
-                    prewarmedSession.sessionToken,
+                    proactiveSession.sessionId,
+                    proactiveSession.sessionToken,
                     {
                         positionSec: currentPositionSec,
                         isPlaying: shouldPlay,
@@ -1237,7 +1358,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                             handoff.playbackProfile?.sourceType ??
                             handoff.engineHints?.sourceType ??
                             sourceType,
-                        previousSessionId: prewarmedSession.sessionId,
+                        previousSessionId: proactiveSession.sessionId,
                         sessionId: handoff.sessionId,
                         attempt: proactiveAttempt,
                         latencyMs: Math.max(0, Date.now() - handoffStartedAtMs),
@@ -1344,10 +1465,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     logSegmentedClientMetric("session.handoff_proactive_failure", {
                         trackId: track.id,
                         sourceType:
-                            prewarmedSession.playbackProfile?.sourceType ??
-                            prewarmedSession.engineHints?.sourceType ??
+                            proactiveSession.playbackProfile?.sourceType ??
+                            proactiveSession.engineHints?.sourceType ??
                             sourceType,
-                        sessionId: prewarmedSession.sessionId,
+                        sessionId: proactiveSession.sessionId,
                         attempt: proactiveAttempt,
                         error:
                             handoffError instanceof Error
@@ -1375,6 +1496,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         isPlaying,
         logProactiveSegmentedHandoffSkip,
         playbackType,
+        ensureStartupSegmentedSession,
         prewarmSegmentedSession,
         setCurrentTime,
         setIsBuffering,
@@ -1433,6 +1555,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
     useEffect(() => {
         currentTrackRef.current = currentTrack;
+        if (startupSegmentedSessionRef.current?.trackId !== currentTrack?.id) {
+            startupSegmentedSessionRef.current = null;
+        }
         if (currentTrack?.id !== segmentedProactiveHandoffAttemptedTrackIdRef.current) {
             segmentedProactiveHandoffAttemptedTrackIdRef.current = null;
             segmentedProactiveHandoffAttemptCountRef.current = 0;
@@ -1456,6 +1581,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffLastAttemptAtRef.current = 0;
             segmentedProactiveHandoffCompletedTrackIdRef.current = null;
             segmentedProactiveHandoffLastSkipKeyRef.current = null;
+            startupSegmentedSessionRef.current = null;
             if (currentTrack) {
                 setStreamProfile({
                     mode: "direct",
@@ -1482,6 +1608,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffLastAttemptAtRef.current = 0;
             segmentedProactiveHandoffCompletedTrackIdRef.current = null;
             segmentedProactiveHandoffLastSkipKeyRef.current = null;
+            startupSegmentedSessionRef.current = null;
         }
     }, [currentTrack, clearTransientTrackRecovery, setStreamProfile]);
 
@@ -1501,6 +1628,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffLastAttemptAtRef.current = 0;
             segmentedProactiveHandoffCompletedTrackIdRef.current = null;
             segmentedProactiveHandoffLastSkipKeyRef.current = null;
+            startupSegmentedSessionRef.current = null;
             setStreamProfile(null);
         }
     }, [playbackType, setStreamProfile]);
@@ -2252,6 +2380,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     segmentedProactiveHandoffLastAttemptAtRef.current = 0;
                     segmentedProactiveHandoffCompletedTrackIdRef.current = null;
                     segmentedProactiveHandoffLastSkipKeyRef.current = null;
+                    startupSegmentedSessionRef.current = null;
                     return;
                 }
 
@@ -2271,6 +2400,11 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         trackId: currentTrack.id,
                         reason: "startup_background",
                     });
+                    ensureStartupSegmentedSession(
+                        currentTrack.id,
+                        segmentedTrackContext,
+                        "load_direct_startup",
+                    );
                     logSegmentedClientMetric("session.create_skipped_direct", {
                         trackId: currentTrack.id,
                         sourceType: segmentedTrackContext.sourceType,
@@ -2289,6 +2423,16 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         trackId: currentTrack.id,
                         reason: "startup_background",
                     });
+                    startupSegmentedSessionRef.current = {
+                        trackId: currentTrack.id,
+                        sourceType: segmentedTrackContext.sourceType,
+                        session: segmentedSession,
+                    };
+                    ensureStartupSegmentedSession(
+                        currentTrack.id,
+                        segmentedTrackContext,
+                        "prewarm_prefer_direct",
+                    );
                     logSegmentedClientMetric("session.create_fallback_direct", {
                         trackId: currentTrack.id,
                         sourceType:
@@ -2349,6 +2493,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         segmentedTrackContext.sourceType,
                     manifestUrl: segmentedSession.manifestUrl,
                     expiresAt: segmentedSession.expiresAt,
+                };
+                startupSegmentedSessionRef.current = {
+                    trackId: currentTrack.id,
+                    sourceType:
+                        segmentedSession.engineHints?.sourceType ??
+                        segmentedTrackContext.sourceType,
+                    session: segmentedSession,
                 };
                 setStreamProfile({
                     mode: "dash",
@@ -2422,6 +2573,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     segmentedProactiveHandoffLastAttemptAtRef.current = 0;
                     segmentedProactiveHandoffCompletedTrackIdRef.current = null;
                     segmentedProactiveHandoffLastSkipKeyRef.current = null;
+                    startupSegmentedSessionRef.current = null;
                     if (playbackType === "track" && currentTrack) {
                         setStreamProfile({
                             mode: "direct",
@@ -2646,6 +2798,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         clearSegmentedStartupFallback,
         clearTransientTrackRecovery,
         prewarmSegmentedSession,
+        ensureStartupSegmentedSession,
     ]);
 
     // Preload next track for gapless playback (music only)
@@ -3293,6 +3446,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     useEffect(() => {
         const prewarmedSegmentedSessions = prewarmedSegmentedSessionRef.current;
         const segmentedPrewarmInFlight = segmentedPrewarmInFlightRef.current;
+        const startupSegmentedSessionInFlight =
+            startupSegmentedSessionInFlightRef.current;
         const segmentedPrewarmRetryTimeouts =
             segmentedPrewarmRetryTimeoutsRef.current;
         return () => {
@@ -3326,6 +3481,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             lastPreloadedTrackIdRef.current = null;
             prewarmedSegmentedSessions.clear();
             segmentedPrewarmInFlight.clear();
+            startupSegmentedSessionRef.current = null;
+            startupSegmentedSessionInFlight.clear();
             for (const timeout of segmentedPrewarmRetryTimeouts.values()) {
                 clearTimeout(timeout);
             }
