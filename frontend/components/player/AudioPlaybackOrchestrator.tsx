@@ -425,8 +425,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const pendingTrackErrorSkipRef = useRef<NodeJS.Timeout | null>(null);
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
     const currentTrackRef = useRef(currentTrack);
+    const currentTimeSnapshotRef = useRef<number>(currentTime);
     const queueLengthRef = useRef(queue.length);
     const playbackTypeRef = useRef(playbackType);
+    const activeEngineTrackIdRef = useRef<string | null>(null);
     const startupRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const startupRecoveryLoadListenerRef = useRef<(() => void) | null>(null);
     const startupRecoveryAttemptedTrackIdRef = useRef<string | null>(null);
@@ -484,6 +486,40 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             pendingTrackErrorSkipRef.current = null;
         }
         pendingTrackErrorTrackIdRef.current = null;
+    }, []);
+
+    const readTrustedTrackPositionSec = useCallback((trackId: string): number => {
+        const fallbackPosition = Math.max(0, currentTimeSnapshotRef.current || 0);
+        if (playbackTypeRef.current !== "track") {
+            return fallbackPosition;
+        }
+        if (currentTrackRef.current?.id !== trackId) {
+            return fallbackPosition;
+        }
+        if (isLoadingRef.current) {
+            return fallbackPosition;
+        }
+        if (activeEngineTrackIdRef.current !== trackId) {
+            return fallbackPosition;
+        }
+
+        const enginePosition = Math.max(
+            0,
+            typeof howlerEngine.getActualCurrentTime === "function"
+                ? howlerEngine.getActualCurrentTime()
+                : howlerEngine.getCurrentTime(),
+        );
+
+        if (!Number.isFinite(enginePosition)) {
+            return fallbackPosition;
+        }
+
+        // Guard against stale engine position bleed-through during source transitions.
+        if (Math.abs(enginePosition - fallbackPosition) > 15) {
+            return fallbackPosition;
+        }
+
+        return enginePosition;
     }, []);
 
     const clearStartupPlaybackRecovery = useCallback(() => {
@@ -955,11 +991,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedHandoffLastAttemptAtRef.current = now;
             const handoffStartedAtMs = Date.now();
 
-            const currentPositionSec = Math.max(
-                0,
-                typeof howlerEngine.getActualCurrentTime === "function"
-                    ? howlerEngine.getActualCurrentTime()
-                    : howlerEngine.getCurrentTime()
+            const currentPositionSec = readTrustedTrackPositionSec(
+                currentTrackSnapshot.id
             );
             const shouldPlay =
                 lastPlayingStateRef.current || howlerEngine.isPlaying() || isPlaying;
@@ -1047,7 +1080,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                     const recoveryDecision = resolveLocalAuthoritativeRecovery(
                         {
-                            positionSec: currentPositionSec,
+                            positionSec: readTrustedTrackPositionSec(
+                                currentTrackSnapshot.id
+                            ),
                             shouldPlay: lastPlayingStateRef.current,
                         },
                         {
@@ -1143,8 +1178,19 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 segmentedHandoffInProgressRef.current = false;
             }
         },
-        [isPlaying, setCurrentTime, setIsBuffering, setIsPlaying, setStreamProfile]
+        [
+            isPlaying,
+            readTrustedTrackPositionSec,
+            setCurrentTime,
+            setIsBuffering,
+            setIsPlaying,
+            setStreamProfile,
+        ]
     );
+
+    useEffect(() => {
+        currentTimeSnapshotRef.current = currentTime;
+    }, [currentTime]);
 
     useEffect(() => {
         if (playbackType !== "track") {
@@ -1183,6 +1229,24 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     track.id,
                     sourceType,
                     "already_promoted",
+                );
+                return;
+            }
+
+            if (isLoadingRef.current) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "load_in_progress",
+                );
+                return;
+            }
+
+            if (activeEngineTrackIdRef.current !== track.id) {
+                logProactiveSegmentedHandoffSkip(
+                    track.id,
+                    sourceType,
+                    "engine_track_not_ready",
                 );
                 return;
             }
@@ -1306,12 +1370,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedProactiveHandoffLastSkipKeyRef.current = null;
             const proactiveAttempt = segmentedProactiveHandoffAttemptCountRef.current;
             const handoffStartedAtMs = Date.now();
-            const currentPositionSec = Math.max(
-                0,
-                typeof howlerEngine.getActualCurrentTime === "function"
-                    ? howlerEngine.getActualCurrentTime()
-                    : howlerEngine.getCurrentTime(),
-            );
+            const currentPositionSec = readTrustedTrackPositionSec(track.id);
             const shouldPlay =
                 lastPlayingStateRef.current || howlerEngine.isPlaying() || isPlaying;
 
@@ -1405,7 +1464,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                         const recoveryDecision = resolveLocalAuthoritativeRecovery(
                             {
-                                positionSec: currentPositionSec,
+                                positionSec: readTrustedTrackPositionSec(track.id),
                                 shouldPlay: lastPlayingStateRef.current,
                             },
                             {
@@ -1521,6 +1580,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         isPlaying,
         logProactiveSegmentedHandoffSkip,
         playbackType,
+        readTrustedTrackPositionSec,
         ensureStartupSegmentedSession,
         prewarmSegmentedSession,
         setCurrentTime,
@@ -2430,6 +2490,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 loadTimeoutRef.current = null;
             }
             loadTimeoutRetryCountRef.current = 0;
+            activeEngineTrackIdRef.current = null;
             howlerEngine.stop();
             lastTrackIdRef.current = null;
             isLoadingRef.current = false;
@@ -2465,6 +2526,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         if (isLoadingRef.current) return;
 
         isLoadingRef.current = true;
+        activeEngineTrackIdRef.current = null;
         lastTrackIdRef.current = currentMediaId;
         loadIdRef.current += 1;
         const thisLoadId = loadIdRef.current;
@@ -2523,6 +2585,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         }
 
         if (streamUrl) {
+            setCurrentTime(Math.max(0, startTime));
             const wasHowlerPlayingBeforeLoad = howlerEngine.isPlaying();
             if (playbackType === "track" && currentTrack) {
                 setStreamProfile({
@@ -2839,6 +2902,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     }
                     loadTimeoutRetryCountRef.current = 0;
                     isLoadingRef.current = false;
+                    activeEngineTrackIdRef.current =
+                        playbackType === "track" && currentTrack
+                            ? currentTrack.id
+                            : null;
 
                     if (startTime > 0) {
                         howlerEngine.seek(startTime);
@@ -2876,6 +2943,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     }
                     loadTimeoutRetryCountRef.current = 0;
                     isLoadingRef.current = false;
+                    activeEngineTrackIdRef.current = null;
 
                     if (
                         usingSegmentedSource &&
@@ -2978,6 +3046,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     );
                     loadTimeoutRetryCountRef.current = 0;
                     isLoadingRef.current = false;
+                    activeEngineTrackIdRef.current = null;
                     lastTrackIdRef.current = null;
                     playbackStateMachine.forceTransition("ERROR", {
                         error: "Audio stream timed out while loading",
@@ -2999,6 +3068,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             }
             loadTimeoutRetryCountRef.current = 0;
             isLoadingRef.current = false;
+            activeEngineTrackIdRef.current = null;
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- canSeek/isPlaying/setIsPlaying intentionally excluded: adding them would re-trigger audio loading on play/pause or seek state changes, breaking playback
     }, [
