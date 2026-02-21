@@ -243,6 +243,7 @@ function supportsLosslessSegmentedPlayback(): boolean {
     );
 }
 
+const CURRENT_TIME_KEY = createMigratingStorageKey("current_time");
 const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey("current_time_track_id");
 const AUDIO_LOAD_TIMEOUT_MS = 20_000;
 const AUDIO_LOAD_TIMEOUT_RETRIES = 1;
@@ -2499,7 +2500,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             return;
         }
 
-        if (currentMediaId === lastTrackIdRef.current) {
+        const previousMediaId = lastTrackIdRef.current;
+
+        if (currentMediaId === previousMediaId) {
             // Skip if a seek operation is in progress - the seek handler will manage playback
             if (isSeekingRef.current) {
                 return;
@@ -2552,19 +2555,31 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             } else {
                 streamUrl = api.getStreamUrl(currentTrack.id);
             }
-            // Always start at 0 unless we're resuming the same track in-session.
-            let resumeTrackId: string | null = null;
-            if (typeof window !== "undefined") {
+            // Only restore persisted position on initial player boot.
+            // During active session track switches, always start from 0 to avoid
+            // cross-track stale time jumps during async context updates.
+            const allowPersistedResume = previousMediaId === null;
+            if (allowPersistedResume && typeof window !== "undefined") {
+                let resumeTrackId: string | null = null;
+                let persistedCurrentTime = 0;
                 try {
                     resumeTrackId = readMigratingStorageItem(CURRENT_TIME_TRACK_ID_KEY);
+                    const persistedRaw = readMigratingStorageItem(CURRENT_TIME_KEY);
+                    const parsed = Number.parseFloat(String(persistedRaw ?? "0"));
+                    persistedCurrentTime = Number.isFinite(parsed)
+                        ? Math.max(0, parsed)
+                        : 0;
                 } catch {
                     resumeTrackId = null;
+                    persistedCurrentTime = 0;
                 }
-            }
-            if (resumeTrackId === currentTrack.id && currentTime > 0) {
-                startTime = Math.max(0, currentTime);
-            } else {
-                startTime = 0;
+
+                if (
+                    resumeTrackId === currentTrack.id &&
+                    persistedCurrentTime > 0
+                ) {
+                    startTime = persistedCurrentTime;
+                }
             }
         } else if (playbackType === "audiobook" && currentAudiobook) {
             streamUrl = api.getAudiobookStreamUrl(currentAudiobook.id);

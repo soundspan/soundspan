@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed local original-quality segmented output to generate lossless FLAC-in-fMP4 segments when supported, with automatic direct-play fallback when not supported by client/runtime.
 - Fixed client path compatibility for manifest-relative `.m4s` segment requests so chunk URLs continue working across route variations.
 - Fixed silent mid-track pauses by adding explicit unexpected-pause telemetry and running segmented/transient recovery attempts before hard stop.
+- Fixed occasional wrong start offsets on newly selected tracks by preventing stale prior-track resume time from being applied during track switches.
 
 ## [1.1.2] - 2026-02-20
 
