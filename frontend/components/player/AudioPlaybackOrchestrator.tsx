@@ -233,6 +233,7 @@ const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
 const AUTO_MATCH_VIBE_RETRY_COOLDOWN_MS = 8000;
 const SEGMENTED_HEARTBEAT_INTERVAL_MS = 15_000;
 const SEGMENTED_HANDOFF_MAX_ATTEMPTS = 2;
+const SEGMENTED_HANDOFF_COOLDOWN_MS = 45_000;
 const SEGMENTED_PREWARM_EXPIRY_GUARD_MS = 8_000;
 const howlerEngine = createRuntimeAudioEngine();
 
@@ -399,6 +400,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         useRef<ActiveSegmentedSessionSnapshot | null>(null);
     const segmentedHandoffInProgressRef = useRef<boolean>(false);
     const segmentedHandoffAttemptRef = useRef<number>(0);
+    const segmentedHandoffLastAttemptAtRef = useRef<number>(0);
 
     // Heartbeat monitor for detecting stalled playback
     const heartbeatRef = useRef<HeartbeatMonitor | null>(null);
@@ -725,9 +727,25 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             if (segmentedHandoffAttemptRef.current >= SEGMENTED_HANDOFF_MAX_ATTEMPTS) {
                 return false;
             }
+            const now = Date.now();
+            if (
+                segmentedHandoffLastAttemptAtRef.current > 0 &&
+                now - segmentedHandoffLastAttemptAtRef.current <
+                    SEGMENTED_HANDOFF_COOLDOWN_MS
+            ) {
+                logSegmentedClientMetric("session.handoff_skipped", {
+                    trackId: currentTrackSnapshot.id,
+                    sourceType: segmentedTrackContext.sourceType,
+                    reason: "cooldown_active",
+                    cooldownMs: SEGMENTED_HANDOFF_COOLDOWN_MS,
+                    elapsedMs: now - segmentedHandoffLastAttemptAtRef.current,
+                });
+                return false;
+            }
 
             segmentedHandoffInProgressRef.current = true;
             segmentedHandoffAttemptRef.current += 1;
+            segmentedHandoffLastAttemptAtRef.current = now;
             const handoffStartedAtMs = Date.now();
 
             const currentPositionSec = Math.max(
@@ -981,6 +999,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         if (!resolveSegmentedTrackContext(currentTrack)) {
             activeSegmentedSessionRef.current = null;
             segmentedHandoffAttemptRef.current = 0;
+            segmentedHandoffLastAttemptAtRef.current = 0;
             segmentedHandoffInProgressRef.current = false;
             if (currentTrack) {
                 setStreamProfile({
@@ -1001,6 +1020,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         ) {
             activeSegmentedSessionRef.current = null;
             segmentedHandoffAttemptRef.current = 0;
+            segmentedHandoffLastAttemptAtRef.current = 0;
             segmentedHandoffInProgressRef.current = false;
         }
     }, [currentTrack, clearTransientTrackRecovery, setStreamProfile]);
@@ -1014,6 +1034,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         if (playbackType !== "track") {
             activeSegmentedSessionRef.current = null;
             segmentedHandoffAttemptRef.current = 0;
+            segmentedHandoffLastAttemptAtRef.current = 0;
             segmentedHandoffInProgressRef.current = false;
             setStreamProfile(null);
         }
@@ -1757,6 +1778,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 ) {
                     activeSegmentedSessionRef.current = null;
                     segmentedHandoffAttemptRef.current = 0;
+                    segmentedHandoffLastAttemptAtRef.current = 0;
                     return;
                 }
 
@@ -1918,6 +1940,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     format = directFormatForLoad;
                     activeSegmentedSessionRef.current = null;
                     segmentedHandoffAttemptRef.current = 0;
+                    segmentedHandoffLastAttemptAtRef.current = 0;
                     if (playbackType === "track" && currentTrack) {
                         setStreamProfile({
                             mode: "direct",
