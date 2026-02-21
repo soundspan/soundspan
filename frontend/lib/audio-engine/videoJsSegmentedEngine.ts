@@ -20,9 +20,105 @@ interface VideoJsVhsXhr {
   onRequest: (
     callback: (config: VideoJsRequestConfig) => VideoJsRequestConfig,
   ) => void;
+  onResponse?: (
+    callback: (
+      request: VideoJsResponseHookRequest,
+      error: unknown,
+      response: VideoJsResponseHookResponse,
+    ) => void,
+  ) => void;
   offRequest?: (
     callback: (config: VideoJsRequestConfig) => VideoJsRequestConfig,
   ) => void;
+  offResponse?: (
+    callback: (
+      request: VideoJsResponseHookRequest,
+      error: unknown,
+      response: VideoJsResponseHookResponse,
+    ) => void,
+  ) => void;
+}
+
+interface VideoJsResponseHookRequest {
+  uri?: string;
+  requestType?: string;
+  statusCode?: number;
+  requestTime?: number;
+  roundTripTime?: number;
+  bytesReceived?: number;
+  bandwidth?: number;
+}
+
+interface VideoJsResponseHookResponse {
+  statusCode?: number;
+  headers?: Record<string, string>;
+}
+
+interface VideoJsVhsStatsSnapshot {
+  bandwidth?: number;
+  throughput?: number;
+  systemBandwidth?: number;
+  statsBandwidth?: number;
+  mediaRequests?: number;
+  mediaRequestsErrored?: number;
+  mediaRequestsTimedout?: number;
+  mediaRequestsAborted?: number;
+  mediaTransferDurationMs?: number;
+  mediaBytesTransferred?: number;
+  mediaSecondsLoaded?: number;
+  statsTimestamp?: number;
+}
+
+interface VideoJsUsageEvent {
+  name?: string;
+  type?: string;
+  [key: string]: unknown;
+}
+
+interface VideoJsEventTarget {
+  on: (event: string, callback: (event: VideoJsUsageEvent) => void) => void;
+  off?: (event: string, callback: (event: VideoJsUsageEvent) => void) => void;
+}
+
+interface VideoJsQualityLevel {
+  id?: string;
+  bitrate?: number;
+  width?: number;
+  height?: number;
+  enabled?: boolean;
+}
+
+interface VideoJsQualityLevelEvent {
+  qualityLevel?: VideoJsQualityLevel;
+}
+
+interface VideoJsQualityLevelList {
+  length: number;
+  selectedIndex?: number;
+  on: (event: string, callback: (event: VideoJsQualityLevelEvent) => void) => void;
+  off?: (
+    event: string,
+    callback: (event: VideoJsQualityLevelEvent) => void,
+  ) => void;
+  [index: number]: VideoJsQualityLevel;
+}
+
+interface VideoJsPlayerWithQualityLevels {
+  qualityLevels?: () => VideoJsQualityLevelList | null | undefined;
+}
+
+interface VideoJsAudioModeController {
+  audioOnlyMode?: (value?: boolean) => boolean;
+  audioPosterMode?: (value?: boolean) => boolean;
+}
+
+interface VideoJsVhsInitializationOptions {
+  overrideNative: boolean;
+  withCredentials: boolean;
+  useBandwidthFromLocalStorage?: boolean;
+  maxPlaylistRetries?: number;
+  playlistExclusionDuration?: number;
+  enableLowInitialPlaylist?: boolean;
 }
 
 const clamp01 = (value: number): number => {
@@ -34,6 +130,69 @@ const clamp01 = (value: number): number => {
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
+
+const VHS_SEGMENT_SAMPLE_EVERY = 10;
+const VHS_USAGE_EVENT_MAX_PER_NAME = 4;
+const VHS_QUALITY_EVENT_MAX_PER_SOURCE = 16;
+const VHS_HIGH_SIGNAL_USAGE_EVENTS = new Set<string>([
+  "vhs-gap-skip",
+  "vhs-unknown-waiting",
+  "vhs-video-underflow",
+  "vhs-live-resync",
+  "vhs-rendition-excluded",
+  "vhs-error-reload",
+  "vhs-error-reload-canceled",
+]);
+const VHS_ABR_POLICY_MODE = "auto";
+const VHS_ABR_POLICY_MANUAL_PINNING = "disabled_client_side";
+const VHS_ABR_POLICY_SELECTION_AUTHORITY = "server_segmented_session_quality";
+const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
+const SEGMENTED_VHS_PROFILE_KEY = "SEGMENTED_VHS_PROFILE";
+type SegmentedVhsProfile = "balanced" | "legacy";
+const DEFAULT_SEGMENTED_VHS_PROFILE: SegmentedVhsProfile = "balanced";
+
+const readRuntimeSegmentedVhsProfile = (): string | undefined => {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  const runtimeConfig = (
+    window as Window & {
+      [SOUNDSPAN_RUNTIME_CONFIG_KEY]?: Record<string, unknown>;
+    }
+  )[SOUNDSPAN_RUNTIME_CONFIG_KEY];
+  const runtimeValue = runtimeConfig?.[SEGMENTED_VHS_PROFILE_KEY];
+  return typeof runtimeValue === "string" ? runtimeValue : undefined;
+};
+
+const resolveSegmentedVhsProfile = (): SegmentedVhsProfile => {
+  const runtimeValue = readRuntimeSegmentedVhsProfile();
+  const normalized = runtimeValue?.trim().toLowerCase();
+  if (normalized === "legacy" || normalized === "balanced") {
+    return normalized;
+  }
+  return DEFAULT_SEGMENTED_VHS_PROFILE;
+};
+
+const resolveVhsInitializationOptions = (
+  profile: SegmentedVhsProfile,
+): VideoJsVhsInitializationOptions => {
+  if (profile === "legacy") {
+    return {
+      overrideNative: true,
+      withCredentials: false,
+    };
+  }
+
+  return {
+    overrideNative: true,
+    withCredentials: false,
+    useBandwidthFromLocalStorage: true,
+    maxPlaylistRetries: 2,
+    playlistExclusionDuration: 30,
+    enableLowInitialPlaylist: false,
+  };
+};
 
 const resolveSource = (source: AudioEngineSource | string): AudioEngineSource => {
   if (typeof source === "string") {
@@ -129,11 +288,42 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   private playerRequestHook:
     | ((config: VideoJsRequestConfig) => VideoJsRequestConfig)
     | null = null;
+  private playerResponseHook:
+    | ((
+        request: VideoJsResponseHookRequest,
+        error: unknown,
+        response: VideoJsResponseHookResponse,
+      ) => void)
+    | null = null;
+  private segmentResponseCount = 0;
+  private usageEventCounts = new Map<string, number>();
+  private usageEventSourceKey: string | null = null;
+  private usagePlayerHandler: ((event: VideoJsUsageEvent) => void) | null = null;
+  private usageTechTarget: VideoJsEventTarget | null = null;
+  private usageTechHandler: ((event: VideoJsUsageEvent) => void) | null = null;
+  private qualityLevelList: VideoJsQualityLevelList | null = null;
+  private qualityLevelChangeHandler:
+    | ((event: VideoJsQualityLevelEvent) => void)
+    | null = null;
+  private qualityLevelAddHandler:
+    | ((event: VideoJsQualityLevelEvent) => void)
+    | null = null;
+  private qualityEventCount = 0;
+  private qualityPolicyLoggedSourceKey: string | null = null;
+  private readonly segmentedVhsProfile: SegmentedVhsProfile;
+  private readonly vhsInitializationOptions: VideoJsVhsInitializationOptions;
+  private audioModeStrategy: "audioOnlyMode" | "hiddenVideoFallback" =
+    "hiddenVideoFallback";
 
   constructor() {
     if (typeof window === "undefined" || typeof document === "undefined") {
       throw new Error("VideoJsSegmentedEngine requires a browser environment.");
     }
+
+    this.segmentedVhsProfile = resolveSegmentedVhsProfile();
+    this.vhsInitializationOptions = resolveVhsInitializationOptions(
+      this.segmentedVhsProfile,
+    );
 
     this.mediaElement = document.createElement("video");
     this.mediaElement.preload = "auto";
@@ -158,13 +348,16 @@ export class VideoJsSegmentedEngine implements AudioEngine {
         nativeAudioTracks: false,
         nativeVideoTracks: false,
         vhs: {
-          overrideNative: true,
-          withCredentials: false,
+          ...this.vhsInitializationOptions,
         },
       },
     });
 
+    this.configureAudioOnlyMode();
+    this.logVhsStartupConfig();
     this.installPlayerRequestHook();
+    this.installVhsUsageHooks();
+    this.installVhsQualityLevelHooks();
     this.bindPlayerEvents();
   }
 
@@ -190,6 +383,10 @@ export class VideoJsSegmentedEngine implements AudioEngine {
 
     this.lastSource = resolvedSource;
     this.lastLoadOptions = normalizedOptions;
+    this.resetUsageEventCountersIfNeeded(resolvedSource);
+    if (resolvedSource.protocol === "dash") {
+      this.emitVhsAbrPolicyTelemetry(resolvedSource);
+    }
     this.requestHeaders = normalizedOptions.requestHeaders;
     this.requestWithCredentials = normalizedOptions.withCredentials;
 
@@ -347,6 +544,9 @@ export class VideoJsSegmentedEngine implements AudioEngine {
 
   destroy(): void {
     this.removePlayerRequestHook();
+    this.removeTechUsageHook();
+    this.removePlayerUsageHook();
+    this.removeQualityLevelHooks();
 
     while (this.teardownCallbacks.length > 0) {
       const teardown = this.teardownCallbacks.pop();
@@ -359,6 +559,48 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     if (this.mediaElement.parentElement) {
       this.mediaElement.parentElement.removeChild(this.mediaElement);
     }
+  }
+
+  private logVhsStartupConfig(): void {
+    console.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.vhs_startup_config",
+      timestamp: new Date().toISOString(),
+      profile: this.segmentedVhsProfile,
+      audioModeStrategy: this.audioModeStrategy,
+      options: this.vhsInitializationOptions,
+    });
+  }
+
+  private configureAudioOnlyMode(): void {
+    const audioModePlayer = this.player as unknown as VideoJsAudioModeController;
+    const supportsAudioOnlyMode =
+      typeof audioModePlayer.audioOnlyMode === "function";
+    const supportsAudioPosterMode =
+      typeof audioModePlayer.audioPosterMode === "function";
+
+    if (supportsAudioPosterMode) {
+      audioModePlayer.audioPosterMode?.(false);
+    }
+    if (supportsAudioOnlyMode) {
+      audioModePlayer.audioOnlyMode?.(true);
+      this.audioModeStrategy = "audioOnlyMode";
+    } else {
+      this.audioModeStrategy = "hiddenVideoFallback";
+    }
+
+    console.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.videojs_audio_mode",
+      timestamp: new Date().toISOString(),
+      strategy: this.audioModeStrategy,
+      supportsAudioOnlyMode,
+      supportsAudioPosterMode,
+      audioOnlyModeEnabled: supportsAudioOnlyMode
+        ? audioModePlayer.audioOnlyMode?.()
+        : null,
+      audioPosterModeEnabled: supportsAudioPosterMode
+        ? audioModePlayer.audioPosterMode?.()
+        : null,
+    });
   }
 
   private installPlayerRequestHook(): void {
@@ -400,8 +642,20 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       };
 
       nextVhsXhr.onRequest(requestHook);
+      const responseHook = (
+        request: VideoJsResponseHookRequest,
+        error: unknown,
+        response: VideoJsResponseHookResponse,
+      ): void => {
+        this.captureVhsResponseTelemetry(request, error, response);
+      };
+
+      if (typeof nextVhsXhr.onResponse === "function") {
+        nextVhsXhr.onResponse(responseHook);
+      }
       this.playerVhsXhr = nextVhsXhr;
       this.playerRequestHook = requestHook;
+      this.playerResponseHook = responseHook;
     };
 
     // Official VHS hook point for per-player request interceptors.
@@ -419,9 +673,16 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     if (typeof this.playerVhsXhr.offRequest === "function") {
       this.playerVhsXhr.offRequest(this.playerRequestHook);
     }
+    if (
+      this.playerResponseHook &&
+      typeof this.playerVhsXhr.offResponse === "function"
+    ) {
+      this.playerVhsXhr.offResponse(this.playerResponseHook);
+    }
 
     this.playerVhsXhr = null;
     this.playerRequestHook = null;
+    this.playerResponseHook = null;
   }
 
   private getPlayerVhsXhr(): VideoJsVhsXhr | null {
@@ -432,6 +693,163 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     } | null;
 
     return tech?.vhs?.xhr ?? null;
+  }
+
+  private installVhsUsageHooks(): void {
+    const playerEventTarget = this.player as unknown as VideoJsEventTarget;
+    const playerUsageHandler = (event: VideoJsUsageEvent): void => {
+      this.captureVhsUsageTelemetry(event, "player");
+    };
+    playerEventTarget.on("usage", playerUsageHandler);
+    this.usagePlayerHandler = playerUsageHandler;
+    this.teardownCallbacks.push(() => {
+      this.removePlayerUsageHook();
+    });
+
+    const attachTechUsageHook = (): void => {
+      const nextTechTarget = this.getPlayerTechEventTarget();
+      if (!nextTechTarget) {
+        return;
+      }
+
+      if (this.usageTechTarget === nextTechTarget && this.usageTechHandler) {
+        return;
+      }
+
+      this.removeTechUsageHook();
+
+      const techUsageHandler = (event: VideoJsUsageEvent): void => {
+        this.captureVhsUsageTelemetry(event, "tech");
+      };
+
+      nextTechTarget.on("usage", techUsageHandler);
+      this.usageTechTarget = nextTechTarget;
+      this.usageTechHandler = techUsageHandler;
+    };
+
+    this.bindPlayerEvent("techchange", () => {
+      attachTechUsageHook();
+    });
+    this.bindPlayerEvent("loadedmetadata", () => {
+      attachTechUsageHook();
+    });
+    this.player.ready(() => {
+      attachTechUsageHook();
+    });
+  }
+
+  private getPlayerTechEventTarget(): VideoJsEventTarget | null {
+    const tech = this.player.tech(true) as unknown as VideoJsEventTarget | null;
+    if (!tech || typeof tech.on !== "function") {
+      return null;
+    }
+    return tech;
+  }
+
+  private removePlayerUsageHook(): void {
+    if (!this.usagePlayerHandler) {
+      return;
+    }
+
+    const playerEventTarget = this.player as unknown as VideoJsEventTarget;
+    if (typeof playerEventTarget.off === "function") {
+      playerEventTarget.off("usage", this.usagePlayerHandler);
+    }
+    this.usagePlayerHandler = null;
+  }
+
+  private removeTechUsageHook(): void {
+    if (!this.usageTechTarget || !this.usageTechHandler) {
+      return;
+    }
+
+    if (typeof this.usageTechTarget.off === "function") {
+      this.usageTechTarget.off("usage", this.usageTechHandler);
+    }
+    this.usageTechTarget = null;
+    this.usageTechHandler = null;
+  }
+
+  private installVhsQualityLevelHooks(): void {
+    const attachQualityLevelHooks = (): void => {
+      const nextQualityLevelList = this.getPlayerQualityLevelList();
+      if (!nextQualityLevelList) {
+        return;
+      }
+
+      if (
+        this.qualityLevelList === nextQualityLevelList &&
+        this.qualityLevelChangeHandler &&
+        this.qualityLevelAddHandler
+      ) {
+        return;
+      }
+
+      this.removeQualityLevelHooks();
+
+      const changeHandler = (event: VideoJsQualityLevelEvent): void => {
+        this.captureVhsQualityLevelTelemetry("change", event);
+      };
+      const addHandler = (event: VideoJsQualityLevelEvent): void => {
+        this.captureVhsQualityLevelTelemetry("addqualitylevel", event);
+      };
+
+      nextQualityLevelList.on("change", changeHandler);
+      nextQualityLevelList.on("addqualitylevel", addHandler);
+      this.qualityLevelList = nextQualityLevelList;
+      this.qualityLevelChangeHandler = changeHandler;
+      this.qualityLevelAddHandler = addHandler;
+
+      this.captureVhsQualityLevelTelemetry("snapshot");
+    };
+
+    this.bindPlayerEvent("loadedmetadata", () => {
+      attachQualityLevelHooks();
+    });
+    this.bindPlayerEvent("techchange", () => {
+      attachQualityLevelHooks();
+    });
+    this.player.ready(() => {
+      attachQualityLevelHooks();
+    });
+  }
+
+  private getPlayerQualityLevelList(): VideoJsQualityLevelList | null {
+    const playerWithQualityLevels =
+      this.player as unknown as VideoJsPlayerWithQualityLevels;
+
+    if (typeof playerWithQualityLevels.qualityLevels !== "function") {
+      return null;
+    }
+
+    const qualityLevels = playerWithQualityLevels.qualityLevels();
+    if (!qualityLevels || typeof qualityLevels.on !== "function") {
+      return null;
+    }
+    return qualityLevels;
+  }
+
+  private removeQualityLevelHooks(): void {
+    if (!this.qualityLevelList) {
+      return;
+    }
+
+    if (
+      this.qualityLevelChangeHandler &&
+      typeof this.qualityLevelList.off === "function"
+    ) {
+      this.qualityLevelList.off("change", this.qualityLevelChangeHandler);
+    }
+    if (
+      this.qualityLevelAddHandler &&
+      typeof this.qualityLevelList.off === "function"
+    ) {
+      this.qualityLevelList.off("addqualitylevel", this.qualityLevelAddHandler);
+    }
+
+    this.qualityLevelList = null;
+    this.qualityLevelChangeHandler = null;
+    this.qualityLevelAddHandler = null;
   }
 
   private bindPlayerEvents(): void {
@@ -506,6 +924,465 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       this.emit("loaderror", payload);
       this.emit("error", payload);
     });
+  }
+
+  private captureVhsResponseTelemetry(
+    request: VideoJsResponseHookRequest,
+    error: unknown,
+    response: VideoJsResponseHookResponse,
+  ): void {
+    if (this.lastSource?.protocol !== "dash") {
+      return;
+    }
+
+    const requestUri = request.uri ?? "";
+    const kind = this.classifyVhsRequestKind(requestUri, request.requestType);
+    const statusCode = this.resolveStatusCode(request, response);
+    const hasError = Boolean(error) || (isFiniteNumber(statusCode) && statusCode >= 400);
+
+    if (!this.shouldEmitVhsMetric(kind, hasError)) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    const requestStartedAtMs = isFiniteNumber(request.requestTime)
+      ? request.requestTime
+      : null;
+    const roundTripMs = isFiniteNumber(request.roundTripTime)
+      ? request.roundTripTime
+      : requestStartedAtMs !== null
+        ? Math.max(0, nowMs - requestStartedAtMs)
+        : null;
+    const bytesReceived = isFiniteNumber(request.bytesReceived)
+      ? request.bytesReceived
+      : null;
+    const estimatedBandwidthbps =
+      isFiniteNumber(request.bandwidth) && request.bandwidth > 0
+        ? request.bandwidth
+        : bytesReceived !== null &&
+            roundTripMs !== null &&
+            roundTripMs > 0
+          ? Math.floor((bytesReceived / roundTripMs) * 8000)
+          : null;
+    const source = this.lastSource;
+    const vhs = this.getVhsRuntimeStatsSnapshot();
+
+    const fields: Record<string, unknown> = {
+      kind,
+      requestType: request.requestType ?? null,
+      uri: this.sanitizeUri(requestUri),
+      statusCode,
+      hasError,
+      roundTripMs,
+      bytesReceived,
+      estimatedBandwidthbps,
+      sourceType: source?.sourceType ?? "unknown",
+      sessionId: source?.sessionId ?? null,
+      trackId: source?.trackId ?? null,
+      vhsBandwidth: vhs.bandwidth ?? null,
+      vhsThroughput: vhs.throughput ?? null,
+      vhsSystemBandwidth: vhs.systemBandwidth ?? null,
+      vhsStatsBandwidth: vhs.statsBandwidth ?? null,
+      vhsMediaRequests: vhs.mediaRequests ?? null,
+      vhsMediaRequestsErrored: vhs.mediaRequestsErrored ?? null,
+      vhsMediaRequestsTimedout: vhs.mediaRequestsTimedout ?? null,
+      vhsMediaRequestsAborted: vhs.mediaRequestsAborted ?? null,
+      vhsMediaTransferDurationMs: vhs.mediaTransferDurationMs ?? null,
+      vhsMediaBytesTransferred: vhs.mediaBytesTransferred ?? null,
+      vhsMediaSecondsLoaded: vhs.mediaSecondsLoaded ?? null,
+      vhsStatsTimestamp: vhs.statsTimestamp ?? null,
+      error:
+        error instanceof Error
+          ? error.message
+          : error
+            ? String(error)
+            : null,
+    };
+
+    console.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.vhs_response",
+      timestamp: new Date(nowMs).toISOString(),
+      ...fields,
+    });
+  }
+
+  private captureVhsUsageTelemetry(
+    event: VideoJsUsageEvent,
+    emitter: "player" | "tech",
+  ): void {
+    const source = this.lastSource;
+    if (!source || source.protocol !== "dash") {
+      return;
+    }
+
+    const usageName = this.resolveUsageEventName(event);
+    if (!usageName || !VHS_HIGH_SIGNAL_USAGE_EVENTS.has(usageName)) {
+      return;
+    }
+
+    this.resetUsageEventCountersIfNeeded(source);
+    const nextCount = (this.usageEventCounts.get(usageName) ?? 0) + 1;
+    this.usageEventCounts.set(usageName, nextCount);
+    if (nextCount > VHS_USAGE_EVENT_MAX_PER_NAME) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    const vhs = this.getVhsRuntimeStatsSnapshot();
+
+    console.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.vhs_usage",
+      timestamp: new Date(nowMs).toISOString(),
+      usageName,
+      usageEmitter: emitter,
+      occurrence: nextCount,
+      maxOccurrencesPerTrack: VHS_USAGE_EVENT_MAX_PER_NAME,
+      sourceType: source.sourceType ?? "unknown",
+      sessionId: source.sessionId ?? null,
+      trackId: source.trackId ?? null,
+      currentTimeSec: this.getCurrentTime(),
+      bufferedAheadSec: this.getBufferedAheadSec(),
+      isPlaying: this.isPlaying(),
+      isSeeking: this.isSeeking,
+      vhsBandwidth: vhs.bandwidth ?? null,
+      vhsThroughput: vhs.throughput ?? null,
+      vhsSystemBandwidth: vhs.systemBandwidth ?? null,
+      vhsStatsBandwidth: vhs.statsBandwidth ?? null,
+      vhsMediaRequests: vhs.mediaRequests ?? null,
+      vhsMediaRequestsErrored: vhs.mediaRequestsErrored ?? null,
+      vhsMediaRequestsTimedout: vhs.mediaRequestsTimedout ?? null,
+      vhsMediaRequestsAborted: vhs.mediaRequestsAborted ?? null,
+      vhsMediaTransferDurationMs: vhs.mediaTransferDurationMs ?? null,
+      vhsMediaBytesTransferred: vhs.mediaBytesTransferred ?? null,
+      vhsMediaSecondsLoaded: vhs.mediaSecondsLoaded ?? null,
+      vhsStatsTimestamp: vhs.statsTimestamp ?? null,
+    });
+  }
+
+  private captureVhsQualityLevelTelemetry(
+    reason: "change" | "addqualitylevel" | "snapshot",
+    event?: VideoJsQualityLevelEvent,
+  ): void {
+    const source = this.lastSource;
+    if (!source || source.protocol !== "dash") {
+      return;
+    }
+
+    this.resetUsageEventCountersIfNeeded(source);
+    this.emitVhsAbrPolicyTelemetry(source);
+
+    const nextCount = this.qualityEventCount + 1;
+    this.qualityEventCount = nextCount;
+    if (nextCount > VHS_QUALITY_EVENT_MAX_PER_SOURCE) {
+      return;
+    }
+
+    const snapshot = this.getQualityLevelsSnapshot();
+    const eventQualityLevel = event?.qualityLevel;
+    const nowMs = Date.now();
+    const vhs = this.getVhsRuntimeStatsSnapshot();
+
+    console.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.vhs_quality_levels",
+      timestamp: new Date(nowMs).toISOString(),
+      reason,
+      occurrence: nextCount,
+      maxOccurrencesPerTrack: VHS_QUALITY_EVENT_MAX_PER_SOURCE,
+      sourceType: source.sourceType ?? "unknown",
+      sessionId: source.sessionId ?? null,
+      trackId: source.trackId ?? null,
+      levelsCount: snapshot.levelsCount,
+      selectedIndex: snapshot.selectedIndex,
+      enabledLevelsCount: snapshot.enabledLevelsCount,
+      disabledLevelsCount: snapshot.disabledLevelsCount,
+      availableBitratesbps: snapshot.availableBitratesbps,
+      selectedBitratebps: snapshot.selectedBitratebps,
+      eventBitratebps: isFiniteNumber(eventQualityLevel?.bitrate)
+        ? eventQualityLevel?.bitrate
+        : null,
+      eventWidth: isFiniteNumber(eventQualityLevel?.width)
+        ? eventQualityLevel?.width
+        : null,
+      eventHeight: isFiniteNumber(eventQualityLevel?.height)
+        ? eventQualityLevel?.height
+        : null,
+      eventLevelId:
+        typeof eventQualityLevel?.id === "string" ? eventQualityLevel.id : null,
+      vhsBandwidth: vhs.bandwidth ?? null,
+      vhsThroughput: vhs.throughput ?? null,
+    });
+  }
+
+  private emitVhsAbrPolicyTelemetry(source: AudioEngineSource): void {
+    const sourceKey = this.getUsageEventSourceKey(source);
+    if (this.qualityPolicyLoggedSourceKey === sourceKey) {
+      return;
+    }
+    this.qualityPolicyLoggedSourceKey = sourceKey;
+
+    const snapshot = this.getQualityLevelsSnapshot();
+
+    console.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.vhs_quality_policy",
+      timestamp: new Date().toISOString(),
+      sourceType: source.sourceType ?? "unknown",
+      sessionId: source.sessionId ?? null,
+      trackId: source.trackId ?? null,
+      abrMode: VHS_ABR_POLICY_MODE,
+      manualPinning: VHS_ABR_POLICY_MANUAL_PINNING,
+      selectionAuthority: VHS_ABR_POLICY_SELECTION_AUTHORITY,
+      vhsProfile: this.segmentedVhsProfile,
+      audioModeStrategy: this.audioModeStrategy,
+      vhsStartupOptions: this.vhsInitializationOptions,
+      levelsCount: snapshot.levelsCount,
+      selectedIndex: snapshot.selectedIndex,
+      selectedBitratebps: snapshot.selectedBitratebps,
+      availableBitratesbps: snapshot.availableBitratesbps,
+    });
+  }
+
+  private getQualityLevelsSnapshot(): {
+    levelsCount: number;
+    selectedIndex: number | null;
+    enabledLevelsCount: number | null;
+    disabledLevelsCount: number | null;
+    availableBitratesbps: number[];
+    selectedBitratebps: number | null;
+  } {
+    const levels = this.qualityLevelList;
+    if (!levels) {
+      return {
+        levelsCount: 0,
+        selectedIndex: null,
+        enabledLevelsCount: null,
+        disabledLevelsCount: null,
+        availableBitratesbps: [],
+        selectedBitratebps: null,
+      };
+    }
+
+    const availableBitrates: number[] = [];
+    let enabledLevelsCount = 0;
+    let disabledLevelsCount = 0;
+    for (let index = 0; index < levels.length; index += 1) {
+      const level = levels[index];
+      if (isFiniteNumber(level?.bitrate)) {
+        availableBitrates.push(level.bitrate);
+      }
+      if (typeof level?.enabled === "boolean") {
+        if (level.enabled) {
+          enabledLevelsCount += 1;
+        } else {
+          disabledLevelsCount += 1;
+        }
+      }
+    }
+
+    const selectedIndex = isFiniteNumber(levels.selectedIndex)
+      ? levels.selectedIndex
+      : null;
+    const selectedLevel =
+      selectedIndex !== null && selectedIndex >= 0 && selectedIndex < levels.length
+        ? levels[selectedIndex]
+        : null;
+    const selectedBitrate = isFiniteNumber(selectedLevel?.bitrate)
+      ? selectedLevel?.bitrate
+      : null;
+
+    return {
+      levelsCount: levels.length,
+      selectedIndex,
+      enabledLevelsCount:
+        enabledLevelsCount > 0 || disabledLevelsCount > 0
+          ? enabledLevelsCount
+          : null,
+      disabledLevelsCount:
+        enabledLevelsCount > 0 || disabledLevelsCount > 0
+          ? disabledLevelsCount
+          : null,
+      availableBitratesbps: availableBitrates,
+      selectedBitratebps: selectedBitrate,
+    };
+  }
+
+  private resolveUsageEventName(event: VideoJsUsageEvent): string | null {
+    if (typeof event.name !== "string") {
+      return null;
+    }
+    const normalized = event.name.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private resetUsageEventCountersIfNeeded(source: AudioEngineSource): void {
+    const nextSourceKey = this.getUsageEventSourceKey(source);
+    if (this.usageEventSourceKey === nextSourceKey) {
+      return;
+    }
+
+    this.usageEventSourceKey = nextSourceKey;
+    this.usageEventCounts.clear();
+    this.qualityEventCount = 0;
+    this.qualityPolicyLoggedSourceKey = null;
+  }
+
+  private getUsageEventSourceKey(source: AudioEngineSource): string {
+    return [
+      source.protocol ?? "",
+      source.sourceType ?? "",
+      source.sessionId ?? "",
+      source.trackId ?? "",
+      source.url,
+    ].join("|");
+  }
+
+  private getBufferedAheadSec(): number | null {
+    const currentTimeSec = this.getCurrentTime();
+    const { buffered } = this.mediaElement;
+    if (!buffered || buffered.length === 0) {
+      return null;
+    }
+
+    for (let index = 0; index < buffered.length; index += 1) {
+      const rangeStart = buffered.start(index);
+      const rangeEnd = buffered.end(index);
+
+      if (currentTimeSec >= rangeStart && currentTimeSec <= rangeEnd) {
+        return Math.max(0, rangeEnd - currentTimeSec);
+      }
+      if (rangeStart > currentTimeSec) {
+        return Math.max(0, rangeStart - currentTimeSec);
+      }
+    }
+
+    return 0;
+  }
+
+  private classifyVhsRequestKind(uri: string, requestType?: string): string {
+    const normalizedRequestType = requestType?.trim().toLowerCase() ?? "";
+    if (normalizedRequestType.includes("manifest")) {
+      return "manifest";
+    }
+    if (normalizedRequestType.includes("segment")) {
+      return "segment";
+    }
+
+    const normalizedUri = uri.trim().toLowerCase();
+    if (normalizedUri.endsWith(".mpd")) {
+      return "manifest";
+    }
+    if (normalizedUri.includes("init-") || normalizedUri.includes("/init")) {
+      return "init";
+    }
+    if (
+      normalizedUri.endsWith(".m4s") ||
+      normalizedUri.includes("chunk-") ||
+      normalizedUri.includes("/segments/")
+    ) {
+      return "segment";
+    }
+    return "other";
+  }
+
+  private shouldEmitVhsMetric(kind: string, hasError: boolean): boolean {
+    if (hasError || kind === "manifest" || kind === "init") {
+      return true;
+    }
+
+    if (kind === "segment") {
+      this.segmentResponseCount += 1;
+      return this.segmentResponseCount % VHS_SEGMENT_SAMPLE_EVERY === 0;
+    }
+
+    return false;
+  }
+
+  private resolveStatusCode(
+    request: VideoJsResponseHookRequest,
+    response: VideoJsResponseHookResponse,
+  ): number | null {
+    if (isFiniteNumber(response.statusCode)) {
+      return response.statusCode;
+    }
+    if (isFiniteNumber(request.statusCode)) {
+      return request.statusCode;
+    }
+    return null;
+  }
+
+  private sanitizeUri(uri: string): string {
+    if (!uri) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(uri, window.location.origin);
+      parsed.searchParams.delete("st");
+      return parsed.pathname;
+    } catch {
+      const [pathOnly] = uri.split("?");
+      return pathOnly;
+    }
+  }
+
+  private getVhsRuntimeStatsSnapshot(): VideoJsVhsStatsSnapshot {
+    const tech = this.player.tech(true) as unknown as {
+      vhs?: {
+        bandwidth?: number;
+        throughput?: number;
+        systemBandwidth?: number;
+        stats?: {
+          bandwidth?: number;
+          mediaRequests?: number;
+          mediaRequestsErrored?: number;
+          mediaRequestsTimedout?: number;
+          mediaRequestsAborted?: number;
+          mediaTransferDuration?: number;
+          mediaBytesTransferred?: number;
+          mediaSecondsLoaded?: number;
+          timestamp?: number;
+        };
+      };
+    } | null;
+
+    const vhs = tech?.vhs;
+    if (!vhs) {
+      return {};
+    }
+
+    return {
+      bandwidth: isFiniteNumber(vhs.bandwidth) ? vhs.bandwidth : undefined,
+      throughput: isFiniteNumber(vhs.throughput) ? vhs.throughput : undefined,
+      systemBandwidth: isFiniteNumber(vhs.systemBandwidth)
+        ? vhs.systemBandwidth
+        : undefined,
+      statsBandwidth: isFiniteNumber(vhs.stats?.bandwidth)
+        ? vhs.stats?.bandwidth
+        : undefined,
+      mediaRequests: isFiniteNumber(vhs.stats?.mediaRequests)
+        ? vhs.stats?.mediaRequests
+        : undefined,
+      mediaRequestsErrored: isFiniteNumber(vhs.stats?.mediaRequestsErrored)
+        ? vhs.stats?.mediaRequestsErrored
+        : undefined,
+      mediaRequestsTimedout: isFiniteNumber(vhs.stats?.mediaRequestsTimedout)
+        ? vhs.stats?.mediaRequestsTimedout
+        : undefined,
+      mediaRequestsAborted: isFiniteNumber(vhs.stats?.mediaRequestsAborted)
+        ? vhs.stats?.mediaRequestsAborted
+        : undefined,
+      mediaTransferDurationMs: isFiniteNumber(vhs.stats?.mediaTransferDuration)
+        ? vhs.stats?.mediaTransferDuration
+        : undefined,
+      mediaBytesTransferred: isFiniteNumber(vhs.stats?.mediaBytesTransferred)
+        ? vhs.stats?.mediaBytesTransferred
+        : undefined,
+      mediaSecondsLoaded: isFiniteNumber(vhs.stats?.mediaSecondsLoaded)
+        ? vhs.stats?.mediaSecondsLoaded
+        : undefined,
+      statsTimestamp: isFiniteNumber(vhs.stats?.timestamp)
+        ? vhs.stats?.timestamp
+        : undefined,
+    };
   }
 
   private bindPlayerEvent(
