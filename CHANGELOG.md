@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Playback quality now defaults to the user’s saved quality when the client does not pass one explicitly.
 - Playback quality badges now come from one shared resolver used by Mini Player, Full Player, and Overlay Player.
 - The player coordinator was renamed to `AudioPlaybackOrchestrator` to match its current role.
+- Video.js segmented requests now use per-player VHS hooks (instead of a global hook) and explicitly disable native media tracks to keep DASH behavior consistent across browsers.
 
 ### Fixed
 

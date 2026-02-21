@@ -16,6 +16,15 @@ interface VideoJsRequestConfig {
   [key: string]: unknown;
 }
 
+interface VideoJsVhsXhr {
+  onRequest: (
+    callback: (config: VideoJsRequestConfig) => VideoJsRequestConfig,
+  ) => void;
+  offRequest?: (
+    callback: (config: VideoJsRequestConfig) => VideoJsRequestConfig,
+  ) => void;
+}
+
 const clamp01 = (value: number): number => {
   if (!Number.isFinite(value)) {
     return 1;
@@ -116,7 +125,10 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   private seekTarget: number | null = null;
   private requestHeaders: Record<string, string> | undefined;
   private requestWithCredentials: boolean | undefined;
-  private restoreBeforeRequestHook: (() => void) | null = null;
+  private playerVhsXhr: VideoJsVhsXhr | null = null;
+  private playerRequestHook:
+    | ((config: VideoJsRequestConfig) => VideoJsRequestConfig)
+    | null = null;
 
   constructor() {
     if (typeof window === "undefined" || typeof document === "undefined") {
@@ -143,6 +155,8 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       muted: false,
       fluid: false,
       html5: {
+        nativeAudioTracks: false,
+        nativeVideoTracks: false,
         vhs: {
           overrideNative: true,
           withCredentials: false,
@@ -150,7 +164,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       },
     });
 
-    this.installBeforeRequestHook();
+    this.installPlayerRequestHook();
     this.bindPlayerEvents();
   }
 
@@ -332,10 +346,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   }
 
   destroy(): void {
-    if (this.restoreBeforeRequestHook) {
-      this.restoreBeforeRequestHook();
-      this.restoreBeforeRequestHook = null;
-    }
+    this.removePlayerRequestHook();
 
     while (this.teardownCallbacks.length > 0) {
       const teardown = this.teardownCallbacks.pop();
@@ -350,50 +361,77 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     }
   }
 
-  private installBeforeRequestHook(): void {
-    const videoJsAny = videojs as unknown as {
-      Vhs?: {
-        xhr?: {
-          beforeRequest?: (config: VideoJsRequestConfig) => VideoJsRequestConfig;
+  private installPlayerRequestHook(): void {
+    const attachPerPlayerHook = (): void => {
+      const nextVhsXhr = this.getPlayerVhsXhr();
+      if (!nextVhsXhr) {
+        return;
+      }
+
+      if (this.playerRequestHook && this.playerVhsXhr === nextVhsXhr) {
+        return;
+      }
+
+      this.removePlayerRequestHook();
+
+      const requestHook = (
+        config: VideoJsRequestConfig,
+      ): VideoJsRequestConfig => {
+        const nextConfig: VideoJsRequestConfig = {
+          ...config,
         };
+
+        if (this.requestHeaders && Object.keys(this.requestHeaders).length > 0) {
+          const existingHeaders =
+            nextConfig.headers && typeof nextConfig.headers === "object"
+              ? nextConfig.headers
+              : {};
+          nextConfig.headers = {
+            ...existingHeaders,
+            ...this.requestHeaders,
+          };
+        }
+
+        if (typeof this.requestWithCredentials === "boolean") {
+          nextConfig.withCredentials = this.requestWithCredentials;
+        }
+
+        return nextConfig;
       };
+
+      nextVhsXhr.onRequest(requestHook);
+      this.playerVhsXhr = nextVhsXhr;
+      this.playerRequestHook = requestHook;
     };
-    const vhsXhr = videoJsAny.Vhs?.xhr;
-    if (!vhsXhr) {
+
+    // Official VHS hook point for per-player request interceptors.
+    this.bindPlayerEvent("xhr-hooks-ready", attachPerPlayerHook);
+    this.player.ready(() => {
+      attachPerPlayerHook();
+    });
+  }
+
+  private removePlayerRequestHook(): void {
+    if (!this.playerVhsXhr || !this.playerRequestHook) {
       return;
     }
 
-    const previousHook = vhsXhr.beforeRequest;
-    vhsXhr.beforeRequest = (config: VideoJsRequestConfig): VideoJsRequestConfig => {
-      const baseConfig =
-        typeof previousHook === "function"
-          ? previousHook(config) ?? config
-          : config;
-      const nextConfig: VideoJsRequestConfig = {
-        ...baseConfig,
+    if (typeof this.playerVhsXhr.offRequest === "function") {
+      this.playerVhsXhr.offRequest(this.playerRequestHook);
+    }
+
+    this.playerVhsXhr = null;
+    this.playerRequestHook = null;
+  }
+
+  private getPlayerVhsXhr(): VideoJsVhsXhr | null {
+    const tech = this.player.tech(true) as unknown as {
+      vhs?: {
+        xhr?: VideoJsVhsXhr;
       };
+    } | null;
 
-      if (this.requestHeaders && Object.keys(this.requestHeaders).length > 0) {
-        const existingHeaders =
-          nextConfig.headers && typeof nextConfig.headers === "object"
-            ? nextConfig.headers
-            : {};
-        nextConfig.headers = {
-          ...existingHeaders,
-          ...this.requestHeaders,
-        };
-      }
-
-      if (typeof this.requestWithCredentials === "boolean") {
-        nextConfig.withCredentials = this.requestWithCredentials;
-      }
-
-      return nextConfig;
-    };
-
-    this.restoreBeforeRequestHook = () => {
-      vhsXhr.beforeRequest = previousHook;
-    };
+    return tech?.vhs?.xhr ?? null;
   }
 
   private bindPlayerEvents(): void {
