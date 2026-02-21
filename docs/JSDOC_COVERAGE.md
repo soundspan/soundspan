@@ -19,9 +19,9 @@ Scope:
 | Frontend components | 70 | 70 | 12 | 58 | 17.1% |
 | Frontend features | 135 | 114 | 8 | 106 | 7.0% |
 | Frontend hooks | 25 | 82 | 55 | 27 | 67.1% |
-| Frontend lib | 40 | 46 | 13 | 33 | 28.3% |
+| Frontend lib | 41 | 48 | 13 | 35 | 27.1% |
 | Frontend other | 61 | 58 | 6 | 52 | 10.3% |
-| **Total** | **498** | **621** | **234** | **387** | **37.7%** |
+| **Total** | **499** | **623** | **234** | **389** | **37.6%** |
 
 ## Missing Exported Symbols (Top 250)
 

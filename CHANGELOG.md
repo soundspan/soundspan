@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local segmented sessions now signal cold/in-flight asset generation so frontend starts on direct playback immediately while DASH assets continue warming in the background.
 - Segmented handoff recovery now enforces a per-track cooldown to prevent rapid session churn/reseek loops during repeated transient playback errors.
 - Next-track segmented prewarm now performs bounded retries when assets are still warming, preventing repeated direct-only track transitions caused by one-shot prewarm skips.
+- Direct-start track playback now performs proactive segmented handoff once prewarmed sessions become ready (with bounded retries/cooldown), instead of waiting for a playback-error-triggered recovery path.
 
 ## [1.1.2] - 2026-02-20
 
