@@ -94,7 +94,8 @@ jobs:
             - name: Build and push image
               uses: docker/build-push-action@v5
               with:
-                  context: ./services/tidal-downloader
+                  context: .
+                  file: ./services/tidal-downloader/Dockerfile
                   push: true
                   tags: ${{ steps.tag-config.outputs.tags }}
                   labels: |

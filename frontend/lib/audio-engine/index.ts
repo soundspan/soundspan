@@ -10,6 +10,7 @@ import type {
   AudioEngineSource,
 } from "@/lib/audio-engine/types";
 import { VideoJsSegmentedEngine } from "@/lib/audio-engine/videoJsSegmentedEngine";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 type EngineKind = "howler" | "videojs";
 type AnyAudioEventHandler = (payload: unknown) => void;
@@ -274,7 +275,7 @@ class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         this.videoJsEngine = new VideoJsSegmentedEngine();
         this.bindEngineEvents("videojs", this.videoJsEngine);
       } catch (error) {
-        console.error(
+        sharedFrontendLogger.error(
           "[AudioEngine] Failed to initialize Video.js segmented engine, falling back to Howler.",
           error,
         );

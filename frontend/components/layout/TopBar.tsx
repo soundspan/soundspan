@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import { APP_VERSION } from "@/lib/version";
 import { BRAND_NAME } from "@/lib/brand";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface TopBarProps {
     isActivityPanelOpen?: boolean;
@@ -88,7 +89,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
             // Refresh notifications to show the scan started notification
             queryClient.invalidateQueries({ queryKey: ["notifications"] });
         } catch (error) {
-            console.error("Failed to trigger library scan:", error);
+            sharedFrontendLogger.error("Failed to trigger library scan:", error);
             // Scan errors will show in the activity panel via notifications
         }
     };
@@ -98,7 +99,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
             await logout();
             toast.success("Logged out successfully");
         } catch (error) {
-            console.error("Logout error:", error);
+            sharedFrontendLogger.error("Logout error:", error);
             toast.error("Failed to logout");
         }
     };

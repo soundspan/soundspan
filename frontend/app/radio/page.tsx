@@ -11,6 +11,7 @@ import { shuffleArray } from "@/utils/shuffle";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { cn } from "@/utils/cn";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface RadioStation {
     id: string;
@@ -303,7 +304,7 @@ export default function RadioPage() {
                 icon: <Shuffle className="w-4 h-4" />,
             });
         } catch (error) {
-            console.error("Failed to start radio:", error);
+            sharedFrontendLogger.error("Failed to start radio:", error);
             toast.error("Failed to start radio station");
         } finally {
             setLoadingStation(null);

@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
+
+const logger = createFrontendLogger("Hooks.useDownloadStatus");
 
 export interface DownloadJob {
     id: string;
@@ -110,8 +113,6 @@ export function useDownloadStatus(
                     pollTimeout = setTimeout(pollDownloads, 30000);
                 }
             } catch (error: unknown) {
-                console.error("Failed to poll download status:", error);
-
                 // Increment error count
                 errorCount++;
 
@@ -123,7 +124,11 @@ export function useDownloadStatus(
 
                 // Silently continue on rate limit errors - don't spam console
                 if (!(error instanceof Error) || error.message !== "Too Many Requests") {
-                    console.error("Download polling error:", error);
+                    logger.error("Download polling error", {
+                        errorCount,
+                        backoffDelay,
+                        error,
+                    });
                 }
 
                 // Retry with backoff

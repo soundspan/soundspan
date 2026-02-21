@@ -84,6 +84,8 @@ RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
 
 # Copy audio analyzer script
 COPY services/audio-analyzer/analyzer.py /app/audio-analyzer/
+# Shared sidecar logging helpers (used by analyzer services)
+COPY services/common /app/services/common
 
 # ============================================
 # CLAP ANALYZER SETUP (Vibe Similarity)
@@ -187,8 +189,10 @@ RUN npm ci && npm cache clean --force
 COPY frontend/ ./
 
 # Build Next.js (production)
+ARG NEXT_PUBLIC_LOG_LEVEL
 ARG NEXT_PUBLIC_BUILD_TYPE=nightly
 ARG NEXT_PUBLIC_APP_VERSION
+ENV NEXT_PUBLIC_LOG_LEVEL=$NEXT_PUBLIC_LOG_LEVEL
 ENV NEXT_PUBLIC_BUILD_TYPE=$NEXT_PUBLIC_BUILD_TYPE
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 RUN npm run build

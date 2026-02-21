@@ -13,9 +13,9 @@ in SystemSettings and are passed via request headers.
 
 import asyncio
 import json
-import logging
 import os
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional, Literal
@@ -24,6 +24,12 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+SERVICES_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICES_ROOT) not in sys.path:
+    sys.path.append(str(SERVICES_ROOT))
+
+from common.logging_utils import configure_service_logger
 
 # ── tiddl core imports ──────────────────────────────────────────────
 from tiddl.core.auth import AuthAPI, AuthClientError
@@ -34,11 +40,7 @@ from tiddl.core.utils.format import format_template
 from tiddl.core.metadata import add_track_metadata, Cover
 
 # ── Logging ─────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
-log = logging.getLogger("tidal-downloader")
+log = configure_service_logger("tidal-downloader")
 
 # ── FastAPI app ─────────────────────────────────────────────────────
 app = FastAPI(title="soundspan TIDAL Downloader & Streamer", version="2.0.0")

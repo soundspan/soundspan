@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Howler.js Audio Engine
  *
@@ -237,7 +238,7 @@ class HowlerEngine {
                 }
             },
             onloaderror: (id, error) => {
-                console.error(
+                sharedFrontendLogger.error(
                     "[HowlerEngine] Load error:",
                     error,
                     "Attempt:",
@@ -282,7 +283,7 @@ class HowlerEngine {
                 this.emit("loaderror", { error });
             },
             onplayerror: (id, error) => {
-                console.error("[HowlerEngine] Play error:", error);
+                sharedFrontendLogger.error("[HowlerEngine] Play error:", error);
                 // Clear playing state so UI shows play button
                 this.state.isPlaying = false;
                 this.userInitiatedPlay = false;
@@ -341,7 +342,7 @@ class HowlerEngine {
      */
     play(): void {
         if (!this.howl) {
-            console.warn("[HowlerEngine] No audio loaded");
+            sharedFrontendLogger.warn("[HowlerEngine] No audio loaded");
             return;
         }
 
@@ -502,7 +503,7 @@ class HowlerEngine {
                 this.isPreloading = false;
             },
             onloaderror: (id, error) => {
-                console.error("[HowlerEngine] Preload error:", error);
+                sharedFrontendLogger.error("[HowlerEngine] Preload error:", error);
                 this.cancelPreload();
             },
         });
@@ -656,7 +657,7 @@ class HowlerEngine {
             try {
                 callback(data);
             } catch (err) {
-                console.error(
+                sharedFrontendLogger.error(
                     `[HowlerEngine] Event listener error (${event}):`,
                     err
                 );
@@ -752,7 +753,7 @@ class HowlerEngine {
         });
 
         this.howl.on("playerror", (id, error) => {
-            console.error("[HowlerEngine] Play error:", error);
+            sharedFrontendLogger.error("[HowlerEngine] Play error:", error);
             this.state.isPlaying = false;
             this.userInitiatedPlay = false;
             this.stopTimeUpdates();
@@ -804,7 +805,7 @@ class HowlerEngine {
         if (ctx.state === "running") return;
 
         void ctx.resume().catch((err) => {
-            console.warn("[HowlerEngine] Failed to resume audio context:", err);
+            sharedFrontendLogger.warn("[HowlerEngine] Failed to resume audio context:", err);
         });
     }
 

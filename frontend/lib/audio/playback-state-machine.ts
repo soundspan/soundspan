@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Playback State Machine
  *
@@ -71,7 +72,7 @@ export class PlaybackStateMachine {
   transition(to: PlaybackState, options?: { error?: string; errorCode?: number }): boolean {
     if (!this.canTransition(to)) {
       if (this.debugEnabled) {
-        console.warn(
+        sharedFrontendLogger.warn(
           `[StateMachine] Invalid transition: ${this.context.state} → ${to}`
         );
       }
@@ -99,7 +100,7 @@ export class PlaybackStateMachine {
     };
 
     if (this.debugEnabled) {
-      console.log(`[StateMachine] ${from} → ${to}`, error ? `(${error})` : '');
+      sharedFrontendLogger.info(`[StateMachine] ${from} → ${to}`, error ? `(${error})` : '');
     }
 
     this.notify();
@@ -113,7 +114,7 @@ export class PlaybackStateMachine {
     const from = this.context.state;
 
     if (this.debugEnabled) {
-      console.log(`[StateMachine] FORCE: ${from} → ${to}`);
+      sharedFrontendLogger.info(`[StateMachine] FORCE: ${from} → ${to}`);
     }
 
     this.context = {
@@ -142,7 +143,7 @@ export class PlaybackStateMachine {
       try {
         fn(ctx);
       } catch (err) {
-        console.error('[StateMachine] Listener error:', err);
+        sharedFrontendLogger.error('[StateMachine] Listener error:', err);
       }
     });
   }

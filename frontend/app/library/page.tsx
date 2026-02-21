@@ -23,6 +23,7 @@ import { TracksList } from "@/features/library/components/TracksList";
 import { Shuffle, ListFilter } from "lucide-react";
 import { useListenTogether } from "@/lib/listen-together-context";
 import { useAuth } from "@/lib/auth-context";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export default function LibraryPage() {
     const router = useRouter();
@@ -297,7 +298,7 @@ export default function LibraryPage() {
             const formattedTracks = formatTracksForAudio(shuffledTracks);
             playTracks(formattedTracks, 0);
         } catch (error) {
-            console.error("Failed to shuffle library:", error);
+            sharedFrontendLogger.error("Failed to shuffle library:", error);
         }
     }, [formatTracksForAudio, playTracks]);
 
@@ -335,7 +336,7 @@ export default function LibraryPage() {
                 title: "",
             });
         } catch (error) {
-            console.error(`Failed to delete ${deleteConfirm.type}:`, error);
+            sharedFrontendLogger.error(`Failed to delete ${deleteConfirm.type}:`, error);
             // Keep dialog open on error so user can retry
         }
     }, [canDeleteFromLibrary, deleteConfirm, deleteArtist, deleteAlbum, deleteTrack, reloadData]);

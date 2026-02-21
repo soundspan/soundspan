@@ -23,6 +23,7 @@ import {
     shouldSkipPlaybackStatePoll,
 } from "@/lib/playback-state-cadence";
 import { resolveInitialAudioVolume } from "@/lib/audio-volume";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -38,7 +39,7 @@ function queueDebugEnabled(): boolean {
 
 function queueDebugLog(message: string, data?: Record<string, unknown>) {
     if (!queueDebugEnabled()) return;
-    console.log(`[QueueDebug] ${message}`, data || {});
+    sharedFrontendLogger.info(`[QueueDebug] ${message}`, data || {});
 }
 
 export type PlayerMode = "full" | "mini" | "overlay";
@@ -295,7 +296,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         }
                     })
                     .catch((err: unknown) => {
-                        console.error(
+                        sharedFrontendLogger.error(
                             "[AudioState] Failed to refresh audiobook progress:",
                             err
                         );
@@ -323,7 +324,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             }
                         })
                         .catch((err: unknown) => {
-                            console.error(
+                            sharedFrontendLogger.error(
                                 "[AudioState] Failed to refresh podcast progress:",
                                 err
                             );
@@ -486,7 +487,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             writeMigratingStorageItem(STORAGE_KEYS.VOLUME, volume.toString());
             writeMigratingStorageItem(STORAGE_KEYS.IS_MUTED, isMuted.toString());
         } catch (error) {
-            console.error("[AudioState] Failed to save state:", error);
+            sharedFrontendLogger.error("[AudioState] Failed to save state:", error);
         }
     }, [
         currentTrack,

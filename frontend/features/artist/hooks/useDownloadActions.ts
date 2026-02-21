@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useDownloadContext } from '@/lib/download-context';
 import { Artist, Album } from '../types';
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export function useDownloadActions() {
   const { addPendingDownload, isPendingByMbid } = useDownloadContext();
@@ -42,7 +43,7 @@ export function useDownloadActions() {
           id: `download-${artist.mbid}`,
         });
       } catch (error: unknown) {
-        console.error('Failed to download artist:', error);
+        sharedFrontendLogger.error('Failed to download artist:', error);
         toast.error(error instanceof Error ? error.message : 'Failed to download artist', {
           id: `download-${artist.mbid}`,
         });
@@ -87,7 +88,7 @@ export function useDownloadActions() {
           id: `download-${mbid}`,
         });
       } catch (error: unknown) {
-        console.error('Failed to download album:', error);
+        sharedFrontendLogger.error('Failed to download album:', error);
         toast.error(error instanceof Error ? error.message : 'Failed to download album', {
           id: `download-${mbid}`,
         });

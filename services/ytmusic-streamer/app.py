@@ -15,9 +15,9 @@ passing `user_id` as a query parameter to scope every request.
 
 import asyncio
 import json
-import logging
 import os
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional, Literal
@@ -27,6 +27,12 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ytmusicapi import YTMusic, OAuthCredentials
+
+SERVICES_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICES_ROOT) not in sys.path:
+    sys.path.append(str(SERVICES_ROOT))
+
+from common.logging_utils import configure_service_logger
 
 # ════════════════════════════════════════════════════════════════════
 # WORKAROUND REGISTRY — ytmusicapi issue #813  (OAuth + WEB_REMIX broken)
@@ -86,11 +92,7 @@ from ytmusicapi import YTMusic, OAuthCredentials
 # ════════════════════════════════════════════════════════════════════
 
 # ── Logging ─────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
-log = logging.getLogger("ytmusic-streamer")
+log = configure_service_logger("ytmusic-streamer")
 
 # ── FastAPI app ─────────────────────────────────────────────────────
 app = FastAPI(title="soundspan YouTube Music Streamer", version="1.0.0")

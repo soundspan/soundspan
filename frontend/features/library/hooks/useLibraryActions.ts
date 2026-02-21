@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { loadOwnedArtistTracksNewestFirst } from "@/lib/artistPlayback";
 import { Track } from "../types";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // Helper to convert library Track to audio context Track format
 const formatTrackForAudio = (track: Track) => ({
@@ -35,7 +36,7 @@ export function useLibraryActions() {
 
             playTracks(tracksWithAlbum, 0);
         } catch (error) {
-            console.error("Error playing artist:", error);
+            sharedFrontendLogger.error("Error playing artist:", error);
         }
     }, [playTracks]);
 
@@ -61,7 +62,7 @@ export function useLibraryActions() {
 
             playTracks(tracksWithAlbum, 0);
         } catch (error) {
-            console.error("Error playing album:", error);
+            sharedFrontendLogger.error("Error playing album:", error);
         }
     }, [playTracks]);
 
@@ -69,7 +70,7 @@ export function useLibraryActions() {
         try {
             addToQueue(formatTrackForAudio(track));
         } catch (error) {
-            console.error("Error adding track to queue:", error);
+            sharedFrontendLogger.error("Error adding track to queue:", error);
         }
     }, [addToQueue]);
 
@@ -77,7 +78,7 @@ export function useLibraryActions() {
         try {
             await api.addTrackToPlaylist(playlistId, trackId);
         } catch (error) {
-            console.error("Error adding track to playlist:", error);
+            sharedFrontendLogger.error("Error adding track to playlist:", error);
         }
     }, []);
 

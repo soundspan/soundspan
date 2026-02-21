@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useMixQuery } from "@/hooks/useQueries";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface MixTrack {
     id: string;
@@ -149,7 +150,7 @@ export default function MixPage() {
                 router.push(`/playlist/${result.id}`);
             }, 1000);
         } catch (error: unknown) {
-            console.error("Failed to save mix as playlist:", error);
+            sharedFrontendLogger.error("Failed to save mix as playlist:", error);
             const err = error as { status?: number; data?: { playlistId?: string } };
             if (err?.status === 409) {
                 toast.info("You've already saved this mix as a playlist.");

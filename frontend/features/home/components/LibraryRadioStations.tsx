@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { cn } from "@/utils/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface RadioStation {
     id: string;
@@ -217,7 +218,7 @@ export function LibraryRadioStations() {
                 setGenres(validGenres);
                 setDecades((decadesRes.decades || []).slice(0, 4));
             } catch (error) {
-                console.error("Failed to fetch radio data:", error);
+                sharedFrontendLogger.error("Failed to fetch radio data:", error);
             } finally {
                 setIsLoading(false);
             }
@@ -269,7 +270,7 @@ export function LibraryRadioStations() {
                 icon: <Shuffle className="w-4 h-4" />,
             });
         } catch (error) {
-            console.error("Failed to start radio:", error);
+            sharedFrontendLogger.error("Failed to start radio:", error);
             toast.error("Failed to start radio station");
         } finally {
             setLoadingStation(null);

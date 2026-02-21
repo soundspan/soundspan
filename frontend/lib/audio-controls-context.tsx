@@ -23,6 +23,7 @@ import { listenTogetherSocket } from "./listen-together-socket";
 import { getListenTogetherSessionSnapshot } from "./listen-together-session";
 import { toast } from "sonner";
 import { computePlayNowInsertion } from "./queue-utils";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -38,7 +39,7 @@ function queueDebugEnabled(): boolean {
 
 function queueDebugLog(message: string, data?: Record<string, unknown>) {
     if (!queueDebugEnabled()) return;
-    console.log(`[QueueDebug] ${message}`, data || {});
+    sharedFrontendLogger.info(`[QueueDebug] ${message}`, data || {});
 }
 
 function isListenTogetherLocalTrack(track: Track | null | undefined): track is Track {
@@ -1291,7 +1292,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             return { success: true, trackCount: response.tracks.length };
         } catch (error) {
-            console.error("[Vibe] Failed to get similar tracks:", error);
+            sharedFrontendLogger.error("[Vibe] Failed to get similar tracks:", error);
             if (error instanceof Error) {
                 toast.error(error.message);
             }

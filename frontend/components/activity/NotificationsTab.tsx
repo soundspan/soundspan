@@ -16,6 +16,9 @@ import {
     useNotifications,
     type Notification,
 } from "@/hooks/useNotifications";
+import { createFrontendLogger } from "@/lib/logger";
+
+const logger = createFrontendLogger("Activity.NotificationsTab");
 
 interface NotificationsTabProps {
     notifications?: Notification[];
@@ -70,10 +73,7 @@ export function NotificationsTab({
 
     // Log error if any
     if (error) {
-        console.error(
-            "[NotificationsTab] Error fetching notifications:",
-            error
-        );
+        logger.error("Error fetching notifications", { error });
     }
 
     const handleMarkAsRead = (id: string) => markAsRead(id);

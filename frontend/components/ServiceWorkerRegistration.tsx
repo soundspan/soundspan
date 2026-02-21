@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createFrontendLogger } from "@/lib/logger";
 import {
     createMigratingStorageKey,
     readMigratingStorageItem,
@@ -10,6 +11,7 @@ type BrowserServiceWorkerRegistration = globalThis.ServiceWorkerRegistration;
 
 const IS_PLAYING_KEY = createMigratingStorageKey("is_playing");
 const WAITING_WORKER_CHECK_INTERVAL_MS = 2000;
+const logger = createFrontendLogger("ServiceWorker");
 
 function isPlaybackActive(): boolean {
     return readMigratingStorageItem(IS_PLAYING_KEY) === "true";
@@ -29,8 +31,9 @@ function maybeActivateWaitingWorker(
     if (isPlaybackActive()) {
         if (!deferredLogRef.value) {
             deferredLogRef.value = true;
-            console.log(
-                `[SW] Update ready but deferred while playback is active (${context})`
+            logger.info(
+                "Update ready but deferred while playback is active",
+                { context }
             );
         }
         return;
@@ -52,7 +55,7 @@ export function ServiceWorkerRegistration() {
         const deferredLogRef = { value: false };
 
         const handleControllerChange = () => {
-            console.log("[SW] Service worker controller updated");
+            logger.info("Service worker controller updated");
         };
 
         const handleVisibilityChange = () => {
@@ -106,7 +109,9 @@ export function ServiceWorkerRegistration() {
 
                 registration.addEventListener("updatefound", updateFoundHandler);
 
-                console.log("[SW] Service Worker registered:", registration.scope);
+                logger.info("Service worker registered", {
+                    scope: registration.scope,
+                });
                 maybeActivateWaitingWorker(
                     registration,
                     "register",
@@ -123,7 +128,7 @@ export function ServiceWorkerRegistration() {
                 }, WAITING_WORKER_CHECK_INTERVAL_MS);
             })
             .catch((error) => {
-                console.error("[SW] Service Worker registration failed:", error);
+                logger.error("Service worker registration failed", error);
             });
 
         return () => {

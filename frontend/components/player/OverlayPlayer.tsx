@@ -49,6 +49,7 @@ import {
 } from "@/lib/storage-migration";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 const OVERLAY_ACTIVE_TAB_KEY = OVERLAY_ACTIVE_TAB_STORAGE_KEY;
 
@@ -983,7 +984,7 @@ export function OverlayPlayer() {
                 toast.error("Couldn't find matching tracks");
             }
         } catch (error) {
-            console.error("Failed to start vibe match:", error);
+            sharedFrontendLogger.error("Failed to start vibe match:", error);
             toast.error("Failed to match vibe");
         } finally {
             setIsVibeLoading(false);

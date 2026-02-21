@@ -8,6 +8,7 @@ import { useDownloadContext } from "@/lib/download-context";
 import { api } from "@/lib/api";
 import Link from "next/link";
 import Image from "next/image";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface ReleaseItem {
     id: number | string;
@@ -69,7 +70,7 @@ export default function ReleasesPage() {
             // Refresh to show updated status
             await fetchReleases();
         } catch (err) {
-            console.error("Download failed:", err);
+            sharedFrontendLogger.error("Download failed:", err);
         } finally {
             setDownloadingId(null);
         }

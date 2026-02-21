@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export default function GlobalError({
   error,
@@ -10,7 +11,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('Global error:', error);
+    sharedFrontendLogger.error('Global error:', error);
   }, [error]);
 
   return (

@@ -1,4 +1,5 @@
 import { resolveApiBaseUrl } from "./api-base-url";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 const AUTH_TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
@@ -416,7 +417,7 @@ class ApiClient {
             this.clearToken();
             return false;
         } catch (error) {
-            console.error("[API] Token refresh failed:", error);
+            sharedFrontendLogger.error("[API] Token refresh failed:", error);
             this.clearToken();
             return false;
         }
@@ -580,7 +581,7 @@ class ApiClient {
 
                 // Only log non-404 errors (404s are often expected)
                 if (!(silent404 && response.status === 404)) {
-                    console.error(`[API] Request failed: ${url}`, error);
+                    sharedFrontendLogger.error(`[API] Request failed: ${url}`, error);
                 }
 
                 // Handle 401 with token refresh (retry once)

@@ -47,6 +47,7 @@ import {
     useCallback,
 } from "react";
 import { toast } from "sonner";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 function getNextTrackInfo(
     queue: { id: string; filePath?: string; streamSource?: "local" | "tidal" | "youtube"; tidalTrackId?: number; youtubeVideoId?: string }[],
@@ -148,7 +149,7 @@ function logSegmentedClientMetric(
         return;
     }
 
-    console.info("[SegmentedStreaming][ClientMetric]", {
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
         event,
         timestamp: new Date().toISOString(),
         ...fields,
@@ -193,7 +194,7 @@ function podcastDebugEnabled(): boolean {
 
 function podcastDebugLog(message: string, data?: Record<string, unknown>) {
     if (!podcastDebugEnabled()) return;
-    console.log(`[PodcastDebug] ${message}`, data || {});
+    sharedFrontendLogger.info(`[PodcastDebug] ${message}`, data || {});
 }
 
 function isLikelyTransientStreamError(error: unknown): boolean {
@@ -685,7 +686,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     });
                 })
                 .catch((error) => {
-                    console.warn(
+                    sharedFrontendLogger.warn(
                         "[AudioPlaybackOrchestrator] Segmented prewarm failed:",
                         error,
                     );
@@ -763,7 +764,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     });
                 })
                 .catch((error) => {
-                    console.warn(
+                    sharedFrontendLogger.warn(
                         "[AudioPlaybackOrchestrator] Startup segmented session request failed:",
                         error,
                     );
@@ -821,7 +822,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 if (startupRecoveryAttemptedTrackIdRef.current === trackId) return;
                 startupRecoveryAttemptedTrackIdRef.current = trackId;
 
-                console.warn(
+                sharedFrontendLogger.warn(
                     "[AudioPlaybackOrchestrator] Startup playback watchdog triggered reload+retry"
                 );
 
@@ -931,7 +932,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 if (currentTrackRef.current?.id !== failedTrackId) return;
                 if (!lastPlayingStateRef.current) return;
 
-                console.warn(
+                sharedFrontendLogger.warn(
                     `[AudioPlaybackOrchestrator] Transient stream error recovery ${attemptNumber}/${TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS}: reload and retry current track`
                 );
                 howlerEngine.reload();
@@ -1148,13 +1149,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     }
                 );
 
-                console.warn(
+                sharedFrontendLogger.warn(
                     "[AudioPlaybackOrchestrator] Segmented handoff recovery succeeded after playback error:",
                     error
                 );
                 return true;
             } catch (handoffError) {
-                console.error(
+                sharedFrontendLogger.error(
                     "[AudioPlaybackOrchestrator] Segmented handoff recovery failed:",
                     handoffError
                 );
@@ -1620,7 +1621,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             const request = startVibeMode()
                 .then((result) => result.success && result.trackCount > 0)
                 .catch((error) => {
-                    console.error(
+                    sharedFrontendLogger.error(
                         "[AudioPlaybackOrchestrator] Auto Match Vibe request failed:",
                         error
                     );
@@ -1761,7 +1762,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     };
                 })
                 .catch((error) => {
-                    console.warn(
+                    sharedFrontendLogger.warn(
                         "[AudioPlaybackOrchestrator] Segmented heartbeat failed:",
                         error
                     );
@@ -1825,7 +1826,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         heartbeatRef.current = new HeartbeatMonitor({
             onStall: () => {
                 // Playback stalled - time not moving but Howler says playing
-                console.warn("[AudioPlaybackOrchestrator] Heartbeat detected stall");
+                sharedFrontendLogger.warn("[AudioPlaybackOrchestrator] Heartbeat detected stall");
                 logSegmentedClientMetric("player.rebuffer", {
                     reason: "heartbeat_stall",
                     trackId: currentTrackRef.current?.id ?? null,
@@ -1846,7 +1847,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             },
             onUnexpectedStop: () => {
                 // Howler stopped without us knowing
-                console.warn("[AudioPlaybackOrchestrator] Heartbeat detected unexpected stop");
+                sharedFrontendLogger.warn("[AudioPlaybackOrchestrator] Heartbeat detected unexpected stop");
                 logSegmentedClientMetric("player.unexpected_stop", {
                     reason: "heartbeat_unexpected_stop",
                     trackId: currentTrackRef.current?.id ?? null,
@@ -1901,7 +1902,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             },
             onBufferTimeout: () => {
                 // Been buffering too long - likely connection lost
-                console.error("[AudioPlaybackOrchestrator] Buffer timeout - connection may be lost");
+                sharedFrontendLogger.error("[AudioPlaybackOrchestrator] Buffer timeout - connection may be lost");
                 logSegmentedClientMetric("player.rebuffer_timeout", {
                     reason: "heartbeat_buffer_timeout",
                     trackId: currentTrackRef.current?.id ?? null,
@@ -1953,7 +1954,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             },
             onRecovery: () => {
                 // Recovered from stall
-                console.log("[AudioPlaybackOrchestrator] Recovered from stall");
+                sharedFrontendLogger.info("[AudioPlaybackOrchestrator] Recovered from stall");
                 logSegmentedClientMetric("player.rebuffer_recovered", {
                     reason: "heartbeat_recovery",
                     trackId: currentTrackRef.current?.id ?? null,
@@ -2070,7 +2071,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                 dispatchQueryEvent("audiobook-progress-updated");
             } catch (err) {
-                console.error(
+                sharedFrontendLogger.error(
                     "[AudioPlaybackOrchestrator] Failed to save audiobook progress:",
                     err
                 );
@@ -2104,7 +2105,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                 dispatchQueryEvent("podcast-progress-updated");
             } catch (err) {
-                console.error(
+                sharedFrontendLogger.error(
                     "[AudioPlaybackOrchestrator] Failed to save podcast progress:",
                     err
                 );
@@ -2218,7 +2219,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         };
 
         const handleError = async (data: { error: unknown }) => {
-            console.error("[AudioPlaybackOrchestrator] Playback error:", data.error);
+            sharedFrontendLogger.error("[AudioPlaybackOrchestrator] Playback error:", data.error);
 
             const errorMessage = data.error instanceof Error
                 ? data.error.message
@@ -2966,7 +2967,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         currentTrack &&
                         !getListenTogetherSessionSnapshot()?.groupId
                     ) {
-                        console.warn(
+                        sharedFrontendLogger.warn(
                             "[AudioPlaybackOrchestrator] Segmented loaderror detected; falling back to direct stream.",
                         );
                         isLoadingRef.current = true;
@@ -3020,7 +3021,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                             return;
                         }
 
-                        console.warn(
+                        sharedFrontendLogger.warn(
                             `[AudioPlaybackOrchestrator] Segmented startup exceeded ${fallbackTimeoutMs}ms; falling back to direct stream.`
                         );
                         howlerEngine.stop();
@@ -3040,7 +3041,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     const retryAttempt = loadTimeoutRetryCountRef.current + 1;
                     if (retryAttempt <= AUDIO_LOAD_TIMEOUT_RETRIES) {
                         loadTimeoutRetryCountRef.current = retryAttempt;
-                        console.warn(
+                        sharedFrontendLogger.warn(
                             `[AudioPlaybackOrchestrator] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms; retrying (${retryAttempt}/${AUDIO_LOAD_TIMEOUT_RETRIES})`
                         );
                         clearLoadListeners();
@@ -3062,7 +3063,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         return;
                     }
 
-                    console.error(
+                    sharedFrontendLogger.error(
                         `[AudioPlaybackOrchestrator] Audio load timed out after ${AUDIO_LOAD_TIMEOUT_MS}ms`
                     );
                     loadTimeoutRetryCountRef.current = 0;
@@ -3241,7 +3242,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                 return status.cached;
             } catch (err) {
-                console.error(
+                sharedFrontendLogger.error(
                     "[AudioPlaybackOrchestrator] Failed to check cache status:",
                     err
                 );
@@ -3424,14 +3425,14 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                             cachePollingRef.current = null;
                         }
 
-                        console.warn(
+                        sharedFrontendLogger.warn(
                             "[AudioPlaybackOrchestrator] Cache polling timeout"
                         );
                         setIsBuffering(false);
                         setTargetSeekPosition(null);
                     }
                 } catch (error) {
-                    console.error(
+                    sharedFrontendLogger.error(
                         "[AudioPlaybackOrchestrator] Cache polling error:",
                         error
                     );
@@ -3604,7 +3605,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                             return;
                         }
                     } catch (e) {
-                        console.warn(
+                        sharedFrontendLogger.warn(
                             "[AudioPlaybackOrchestrator] Could not check cache status:",
                             e
                         );
@@ -3649,7 +3650,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                             // We assume the browser is buffering or the stream doesn't support seeking.
                             // Pausing here would break playback if the seek just takes a while.
                         } catch (e) {
-                            console.error(
+                            sharedFrontendLogger.error(
                                 "[AudioPlaybackOrchestrator] Seek check error:",
                                 e
                             );

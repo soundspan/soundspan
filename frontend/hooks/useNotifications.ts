@@ -3,6 +3,9 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
+
+const logger = createFrontendLogger("Hooks.useNotifications");
 
 export interface Notification {
     id: string;
@@ -211,7 +214,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
                 (old) => old?.filter((d) => d.id !== id) || []
             );
         } catch (err: unknown) {
-            console.error("Failed to clear download:", err);
+            logger.error("Failed to clear download", { id, err });
         }
     }, [queryClient]);
 
@@ -220,7 +223,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
             await api.post("/notifications/downloads/clear-all");
             queryClient.setQueryData<DownloadHistoryItem[]>(["download-history"], []);
         } catch (err: unknown) {
-            console.error("Failed to clear all:", err);
+            logger.error("Failed to clear all download history", { err });
         }
     }, [queryClient]);
 
@@ -232,7 +235,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
                 (old) => old?.filter((d) => d.id !== id) || []
             );
         } catch (err: unknown) {
-            console.error("Failed to retry download:", err);
+            logger.error("Failed to retry download", { id, err });
         }
     }, [queryClient]);
 

@@ -1,15 +1,15 @@
-export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
-export type LogContext = Record<string, unknown>;
+export type FrontendLogLevel = "debug" | "info" | "warn" | "error" | "silent";
+export type FrontendLogContext = Record<string, unknown>;
 
-export interface Logger {
+export interface FrontendLogger {
     debug: (message: string, ...args: unknown[]) => void;
     info: (message: string, ...args: unknown[]) => void;
     warn: (message: string, ...args: unknown[]) => void;
     error: (message: string, ...args: unknown[]) => void;
-    child: (scope: string) => Logger;
+    child: (scope: string) => FrontendLogger;
 }
 
-const LOG_LEVELS: Record<LogLevel, number> = {
+const LOG_LEVELS: Record<FrontendLogLevel, number> = {
     debug: 0,
     info: 1,
     warn: 2,
@@ -17,18 +17,18 @@ const LOG_LEVELS: Record<LogLevel, number> = {
     silent: 4,
 };
 
-const DEFAULT_LOG_LEVEL: LogLevel =
-    process.env.NODE_ENV === "production" ? "warn" : "debug";
+const DEFAULT_LEVEL: FrontendLogLevel =
+    process.env.NODE_ENV === "production" ? "warn" : "info";
 
-const resolveLogLevel = (): LogLevel => {
-    const configured = process.env.LOG_LEVEL?.trim().toLowerCase();
+const resolveLogLevel = (): FrontendLogLevel => {
+    const configured = process.env.NEXT_PUBLIC_LOG_LEVEL?.trim().toLowerCase();
 
     if (!configured) {
-        return DEFAULT_LOG_LEVEL;
+        return DEFAULT_LEVEL;
     }
 
     if (configured in LOG_LEVELS) {
-        return configured as LogLevel;
+        return configured as FrontendLogLevel;
     }
 
     return "silent";
@@ -36,11 +36,11 @@ const resolveLogLevel = (): LogLevel => {
 
 const currentLevel = resolveLogLevel();
 
-function shouldLog(level: LogLevel): boolean {
+function shouldLog(level: FrontendLogLevel): boolean {
     return LOG_LEVELS[level] >= LOG_LEVELS[currentLevel];
 }
 
-function isLogContextCandidate(value: unknown): value is LogContext {
+function isContextCandidate(value: unknown): value is FrontendLogContext {
     return (
         typeof value === "object" &&
         value !== null &&
@@ -61,8 +61,8 @@ function normalizeError(error: unknown): unknown {
     };
 }
 
-function normalizeContext(context: LogContext): LogContext {
-    const output: LogContext = {};
+function normalizeContext(context: FrontendLogContext): FrontendLogContext {
+    const output: FrontendLogContext = {};
     for (const [key, value] of Object.entries(context)) {
         output[key] = normalizeError(value);
     }
@@ -70,7 +70,7 @@ function normalizeContext(context: LogContext): LogContext {
 }
 
 function splitArgs(args: unknown[]): {
-    context: LogContext | null;
+    context: FrontendLogContext | null;
     passthrough: unknown[];
 } {
     if (args.length === 0) {
@@ -78,7 +78,7 @@ function splitArgs(args: unknown[]): {
     }
 
     const [first, ...rest] = args;
-    if (!isLogContextCandidate(first)) {
+    if (!isContextCandidate(first)) {
         return {
             context: null,
             passthrough: args.map(normalizeError),
@@ -92,19 +92,19 @@ function splitArgs(args: unknown[]): {
 }
 
 function emit(
-    level: Exclude<LogLevel, "silent">,
-    message: string,
+    level: Exclude<FrontendLogLevel, "silent">,
     scope: string | null,
+    message: string,
     args: unknown[],
 ): void {
     if (!shouldLog(level)) {
         return;
     }
 
-    const { context, passthrough } = splitArgs(args);
     const prefix = scope
         ? `[${level.toUpperCase()}] [${scope}] ${message}`
         : `[${level.toUpperCase()}] ${message}`;
+    const { context, passthrough } = splitArgs(args);
 
     const method = level === "debug"
         ? console.debug
@@ -122,44 +122,44 @@ function emit(
     method(prefix, ...passthrough);
 }
 
-export function createLogger(scope?: string): Logger {
+export function createFrontendLogger(scope?: string): FrontendLogger {
     const scoped = scope?.trim() || null;
 
     return {
         debug: (message: string, ...args: unknown[]) =>
-            emit("debug", message, scoped, args),
+            emit("debug", scoped, message, args),
         info: (message: string, ...args: unknown[]) =>
-            emit("info", message, scoped, args),
+            emit("info", scoped, message, args),
         warn: (message: string, ...args: unknown[]) =>
-            emit("warn", message, scoped, args),
+            emit("warn", scoped, message, args),
         error: (message: string, ...args: unknown[]) =>
-            emit("error", message, scoped, args),
+            emit("error", scoped, message, args),
         child: (childScope: string) => {
             const trimmed = childScope.trim();
             const nextScope = scoped ? `${scoped}.${trimmed}` : trimmed;
-            return createLogger(nextScope);
+            return createFrontendLogger(nextScope);
         },
     };
 }
 
-export async function withLogTiming<T>(
-    loggerInstance: Logger,
+export async function withFrontendLogTiming<T>(
+    logger: FrontendLogger,
     operation: string,
     run: () => Promise<T> | T,
-    context: LogContext = {},
+    context: FrontendLogContext = {},
 ): Promise<T> {
     const startedAt = Date.now();
-    loggerInstance.debug(`${operation} started`, context);
+    logger.debug(`${operation} started`, context);
 
     try {
         const result = await run();
-        loggerInstance.debug(`${operation} completed`, {
+        logger.debug(`${operation} completed`, {
             ...context,
             durationMs: Date.now() - startedAt,
         });
         return result;
     } catch (error) {
-        loggerInstance.error(`${operation} failed`, {
+        logger.error(`${operation} failed`, {
             ...context,
             durationMs: Date.now() - startedAt,
             error,
@@ -168,16 +168,4 @@ export async function withLogTiming<T>(
     }
 }
 
-export function logErrorWithContext(
-    loggerInstance: Logger,
-    message: string,
-    error: unknown,
-    context: LogContext = {},
-): void {
-    loggerInstance.error(message, {
-        ...context,
-        error,
-    });
-}
-
-export const logger = createLogger();
+export const frontendLogger = createFrontendLogger("frontend");

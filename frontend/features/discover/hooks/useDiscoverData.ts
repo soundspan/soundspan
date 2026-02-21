@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import type { DiscoverPlaylist, DiscoverConfig } from "../types";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface BatchStatus {
   active: boolean;
@@ -49,7 +50,7 @@ export function useDiscoverData() {
         setConfig(configData);
       }
     } catch (error) {
-      console.error('Failed to load discover data:', error);
+      sharedFrontendLogger.error('Failed to load discover data:', error);
     }
   }, []);
 
@@ -77,7 +78,7 @@ export function useDiscoverData() {
 
       return status;
     } catch (error) {
-      console.error('Failed to check batch status:', error);
+      sharedFrontendLogger.error('Failed to check batch status:', error);
       setPendingGeneration(false);
       return null;
     }

@@ -7,6 +7,7 @@ import type {
   AudioEngineLoadOptions,
   AudioEngineSource,
 } from "@/lib/audio-engine/types";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 type AnyAudioEventHandler = (payload: unknown) => void;
 
@@ -562,7 +563,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   }
 
   private logVhsStartupConfig(): void {
-    console.info("[SegmentedStreaming][ClientMetric]", {
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.vhs_startup_config",
       timestamp: new Date().toISOString(),
       profile: this.segmentedVhsProfile,
@@ -588,7 +589,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       this.audioModeStrategy = "hiddenVideoFallback";
     }
 
-    console.info("[SegmentedStreaming][ClientMetric]", {
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.videojs_audio_mode",
       timestamp: new Date().toISOString(),
       strategy: this.audioModeStrategy,
@@ -999,7 +1000,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
             : null,
     };
 
-    console.info("[SegmentedStreaming][ClientMetric]", {
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.vhs_response",
       timestamp: new Date(nowMs).toISOString(),
       ...fields,
@@ -1030,7 +1031,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     const nowMs = Date.now();
     const vhs = this.getVhsRuntimeStatsSnapshot();
 
-    console.info("[SegmentedStreaming][ClientMetric]", {
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.vhs_usage",
       timestamp: new Date(nowMs).toISOString(),
       usageName,
@@ -1082,7 +1083,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     const nowMs = Date.now();
     const vhs = this.getVhsRuntimeStatsSnapshot();
 
-    console.info("[SegmentedStreaming][ClientMetric]", {
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.vhs_quality_levels",
       timestamp: new Date(nowMs).toISOString(),
       reason,
@@ -1122,7 +1123,7 @@ export class VideoJsSegmentedEngine implements AudioEngine {
 
     const snapshot = this.getQualityLevelsSnapshot();
 
-    console.info("[SegmentedStreaming][ClientMetric]", {
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.vhs_quality_policy",
       timestamp: new Date().toISOString(),
       sourceType: source.sourceType ?? "unknown",

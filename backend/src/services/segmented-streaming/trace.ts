@@ -1,4 +1,7 @@
+import { createLogger } from "../../utils/logger";
+
 const TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
+const traceLogger = createLogger("SegmentedStreaming.Trace");
 
 const isTruthy = (value: string | undefined): boolean => {
     const normalized = value?.trim().toLowerCase();
@@ -38,7 +41,7 @@ export const logSegmentedStreamingTrace = (
         return;
     }
 
-    console.info("[SegmentedStreaming][Trace] " + event, {
+    traceLogger.info(event, {
         timestamp: new Date().toISOString(),
         ...fields,
     });

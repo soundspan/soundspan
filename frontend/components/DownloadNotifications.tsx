@@ -15,6 +15,7 @@ import { cn } from "@/utils/cn";
 import { useDownloadContext } from "@/lib/download-context";
 import { api } from "@/lib/api";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export function DownloadNotifications() {
     const { downloadStatus } = useDownloadContext();
@@ -134,7 +135,7 @@ export function DownloadNotifications() {
                     api
                         .deleteDownload(id)
                         .catch((error) =>
-                            console.error(`Failed to delete job ${id}`, error)
+                            sharedFrontendLogger.error(`Failed to delete job ${id}`, error)
                         )
                 )
             );
@@ -143,7 +144,7 @@ export function DownloadNotifications() {
             setIsOpen(false);
         } catch (error) {
             setIsClearing(false);
-            console.error("Failed to clear downloads:", error);
+            sharedFrontendLogger.error("Failed to clear downloads:", error);
         }
     };
 
@@ -401,7 +402,7 @@ function DownloadJobItem({
             // Then delete from backend
             await api.deleteDownload(job.id);
         } catch (error) {
-            console.error("Failed to delete download:", error);
+            sharedFrontendLogger.error("Failed to delete download:", error);
             setIsDeleting(false);
         }
     };

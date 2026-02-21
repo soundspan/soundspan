@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * useYtMusicGapFill — enriches unowned album tracks with YouTube Music
  * streaming data (streamSource + youtubeVideoId).
@@ -164,7 +165,7 @@ export function useYtMusicGapFill(
                 _matchCache.set(album.id, newMatches);
                 setMatches(newMatches);
             } catch (err) {
-                console.error("[YTMusic Gap-Fill] Batch match failed:", err);
+                sharedFrontendLogger.error("[YTMusic Gap-Fill] Batch match failed:", err);
             }
 
             if (!cancelled) setLoading(false);

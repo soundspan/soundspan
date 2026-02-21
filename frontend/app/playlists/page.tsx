@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // soundspan brand blue for play buttons
 const BRAND_PLAY = "#60a5fa";
@@ -312,7 +313,7 @@ export default function PlaylistsPage() {
                 playTracks(tracks, 0);
             }
         } catch (error) {
-            console.error("Failed to play playlist:", error);
+            sharedFrontendLogger.error("Failed to play playlist:", error);
         }
     };
 
@@ -326,7 +327,7 @@ export default function PlaylistsPage() {
             // Invalidate and refetch playlists
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
         } catch (error) {
-            console.error("Failed to toggle playlist visibility:", error);
+            sharedFrontendLogger.error("Failed to toggle playlist visibility:", error);
         }
     };
 

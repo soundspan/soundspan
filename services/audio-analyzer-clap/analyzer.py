@@ -24,7 +24,6 @@ import sys
 import signal
 import json
 import time
-import logging
 import gc
 import threading
 import uuid
@@ -34,6 +33,20 @@ import traceback
 import numpy as np
 import librosa
 import requests
+
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_POTENTIAL_PROJECT_ROOTS = (
+    _CURRENT_DIR,
+    os.path.dirname(_CURRENT_DIR),
+    os.path.dirname(os.path.dirname(_CURRENT_DIR)),
+)
+for _root in _POTENTIAL_PROJECT_ROOTS:
+    if os.path.isdir(os.path.join(_root, "services", "common")):
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        break
+
+from services.common.logging_utils import configure_service_logger
 
 # CPU thread limiting must be set before importing torch
 THREADS_PER_WORKER = int(os.getenv('THREADS_PER_WORKER', '1'))
@@ -58,11 +71,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('clap-analyzer')
+logger = configure_service_logger('clap-analyzer')
 
 # Configuration from environment
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')

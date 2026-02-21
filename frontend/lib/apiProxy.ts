@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 const getEnv = (): Record<string, string | undefined> => {
     return (globalThis as { process?: { env?: Record<string, string | undefined> } })
         .process?.env ?? {};
@@ -35,9 +36,9 @@ const logProxyError = (
 ): void => {
     if (isProxyDebugEnabled()) {
         if (details !== undefined) {
-            console.error(summary, details);
+            sharedFrontendLogger.error(summary, details);
         } else {
-            console.error(summary);
+            sharedFrontendLogger.error(summary);
         }
         return;
     }
@@ -48,7 +49,7 @@ const logProxyError = (
         return;
     }
     lastProxyLogByKey.set(key, now);
-    console.error(summary);
+    sharedFrontendLogger.error(summary);
 };
 
 const extractNetworkCode = (error: unknown): string => {

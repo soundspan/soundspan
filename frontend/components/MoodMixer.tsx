@@ -21,6 +21,7 @@ import {
     Guitar,
 } from "lucide-react";
 import { toast } from "sonner";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface MoodMixerProps {
     isOpen: boolean;
@@ -131,7 +132,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
             const data = await api.getMoodBucketPresets();
             setPresets(data);
         } catch (error) {
-            console.error("Failed to load mood presets:", error);
+            sharedFrontendLogger.error("Failed to load mood presets:", error);
             toast.error("Failed to load mood presets");
         } finally {
             setLoading(false);
@@ -188,7 +189,7 @@ export function MoodMixer({ isOpen, onClose }: MoodMixerProps) {
                 });
             }
         } catch (error: unknown) {
-            console.error("Failed to generate mood mix:", error);
+            sharedFrontendLogger.error("Failed to generate mood mix:", error);
             const errorMessage =
                 error instanceof Error
                     ? error.message

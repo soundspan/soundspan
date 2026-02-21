@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "./api";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface User {
     id: string;
@@ -137,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 router.push("/");
             }
         } catch (error: unknown) {
-            console.error("[AUTH] Login failed:", error instanceof Error ? error.message : error);
+            sharedFrontendLogger.error("[AUTH] Login failed:", error instanceof Error ? error.message : error);
             throw error;
         }
     }, [router]);

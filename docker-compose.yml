@@ -111,6 +111,8 @@ services:
                 # Prefer relative /api requests (Next.js rewrites will proxy to backend).
                 # If you need a custom API URL, set NEXT_PUBLIC_API_URL explicitly.
                 NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+                # Browser-visible frontend logger level (build-time): debug|info|warn|error|silent.
+                NEXT_PUBLIC_LOG_LEVEL: ${NEXT_PUBLIC_LOG_LEVEL:-}
                 # Build type: "nightly" for dev builds, unset/empty for tagged releases
                 NEXT_PUBLIC_BUILD_TYPE: ${NEXT_PUBLIC_BUILD_TYPE:-nightly}
         environment:
@@ -245,7 +247,8 @@ services:
     # tidal_data can be RWO (ReadWriteOnce).
     tidal-downloader:
         build:
-            context: ./services/tidal-downloader
+            context: .
+            dockerfile: services/tidal-downloader/Dockerfile
         container_name: ${SOUNDSPAN_TIDAL_CONTAINER_NAME:-soundspan_tidal_downloader}
         environment:
             - TIDDL_PATH=/data/.tiddl
@@ -288,7 +291,8 @@ services:
     #   - Users need YouTube Music Premium for full track playback
     ytmusic-streamer:
         build:
-            context: ./services/ytmusic-streamer
+            context: .
+            dockerfile: services/ytmusic-streamer/Dockerfile
         container_name: ${SOUNDSPAN_YTMUSIC_CONTAINER_NAME:-soundspan_ytmusic_streamer}
         environment:
             DATA_PATH: /data
@@ -326,7 +330,8 @@ services:
     # Audio Analyzer - Extracts BPM, key, mood, and other audio features
     audio-analyzer:
         build:
-            context: ./services/audio-analyzer
+            context: .
+            dockerfile: services/audio-analyzer/Dockerfile
         container_name: ${SOUNDSPAN_AUDIO_ANALYZER_CONTAINER_NAME:-soundspan_audio_analyzer}
         environment:
             REDIS_URL: redis://redis:6379
@@ -381,7 +386,8 @@ services:
     # CLAP Audio Analyzer - Generates embeddings for similarity search
     audio-analyzer-clap:
         build:
-            context: ./services/audio-analyzer-clap
+            context: .
+            dockerfile: services/audio-analyzer-clap/Dockerfile
         container_name: ${SOUNDSPAN_CLAP_CONTAINER_NAME:-soundspan_audio_analyzer_clap}
         environment:
             REDIS_URL: redis://redis:6379

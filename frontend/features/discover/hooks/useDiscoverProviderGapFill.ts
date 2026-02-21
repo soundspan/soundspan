@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { DiscoverTrack } from "../types";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface TidalMatch {
     id: number;
@@ -200,7 +201,7 @@ export function useDiscoverProviderGapFill(
         };
 
         matchProviders().catch((error) => {
-            console.error("[DiscoverGapFill] Provider matching failed:", error);
+            sharedFrontendLogger.error("[DiscoverGapFill] Provider matching failed:", error);
             if (!cancelled) {
                 setMatchState({
                     key: tracksKey,

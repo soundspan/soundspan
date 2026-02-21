@@ -6,6 +6,7 @@ import { SystemSettings } from "../../types";
 import { api } from "@/lib/api";
 import { enrichmentApi } from "@/lib/enrichmentApi";
 import { useFeatures } from "@/lib/features-context";
+import { createFrontendLogger } from "@/lib/logger";
 import {
     useQueryClient,
     useQuery,
@@ -25,6 +26,8 @@ import {
     Waves,
 } from "lucide-react";
 import { EnrichmentFailuresModal } from "@/components/EnrichmentFailuresModal";
+
+const logger = createFrontendLogger("Settings.CacheSection");
 
 interface CacheSectionProps {
     settings: SystemSettings;
@@ -360,7 +363,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     refetchProgress();
                 }
             } catch (err) {
-                console.error("Failed to check enrichment status:", err);
+                logger.error("Failed to check enrichment status", {
+                    error: err,
+                });
             }
         };
 
@@ -393,7 +398,9 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             refetchProgress();
             // Don't set syncing to false here - let the polling effect handle it
         } catch (err) {
-            console.error("Sync error:", err);
+            logger.error("Library sync and enrichment start failed", {
+                error: err,
+            });
             setError("Failed to sync");
             setSyncing(false); // Only stop on error
         }
@@ -410,7 +417,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             refreshNotifications();
             refetchProgress();
         } catch (err) {
-            console.error("Full enrichment error:", err);
+            logger.error("Failed to start full enrichment", { error: err });
             setError("Failed to start full enrichment");
         } finally {
             setReEnriching(false);
@@ -432,7 +439,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 queryKey: ["mixes"],
             });
         } catch (err) {
-            console.error("Backfill mood buckets error:", err);
+            logger.error("Failed to backfill mood buckets", { error: err });
             setError("Failed to backfill mood buckets");
         } finally {
             setBackfillingMoodBuckets(false);
@@ -447,7 +454,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             refreshNotifications();
             refetchProgress();
         } catch (err) {
-            console.error("Reset artists error:", err);
+            logger.error("Failed to reset artist enrichment", { error: err });
             setError("Failed to reset artist enrichment");
         } finally {
             setResettingArtists(false);
@@ -462,7 +469,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             refreshNotifications();
             refetchProgress();
         } catch (err) {
-            console.error("Reset mood tags error:", err);
+            logger.error("Failed to reset mood tags", { error: err });
             setError("Failed to reset mood tags");
         } finally {
             setResettingMoodTags(false);
@@ -477,7 +484,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             refreshNotifications();
             refetchProgress();
         } catch (err) {
-            console.error("Reset audio analysis error:", err);
+            logger.error("Failed to reset audio analysis", { error: err });
             setError("Failed to reset audio analysis");
         } finally {
             setResettingAudio(false);
@@ -492,7 +499,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             refreshNotifications();
             refetchProgress();
         } catch (err) {
-            console.error("Reset vibe embeddings error:", err);
+            logger.error("Failed to reset vibe embeddings", { error: err });
             setError("Failed to reset vibe embeddings");
         } finally {
             setResettingVibe(false);
@@ -521,7 +528,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             setCleanupResult(result);
             refreshNotifications();
         } catch (err) {
-            console.error("Stale job cleanup error:", err);
+            logger.error("Failed to clean up stale jobs", { error: err });
             setError("Failed to cleanup stale jobs");
         } finally {
             setCleaningStaleJobs(false);
@@ -537,7 +544,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             setRetryResult({ reset: result.reset });
             refetchProgress();
         } catch (err) {
-            console.error("Retry failed analysis error:", err);
+            logger.error("Failed to retry analysis", { error: err });
             setError("Failed to retry analysis");
         } finally {
             setRetryingFailed(false);
@@ -549,7 +556,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             await enrichmentApi.pause();
             queryClient.invalidateQueries({ queryKey: ["enrichment-status"] });
         } catch (err) {
-            console.error("Pause error:", err);
+            logger.error("Failed to pause enrichment", { error: err });
             setError("Failed to pause enrichment");
         }
     };
@@ -559,7 +566,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
             await enrichmentApi.resume();
             queryClient.invalidateQueries({ queryKey: ["enrichment-status"] });
         } catch (err) {
-            console.error("Resume error:", err);
+            logger.error("Failed to resume enrichment", { error: err });
             setError("Failed to resume enrichment");
         }
     };
@@ -572,7 +579,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                 queryKey: ["enrichment-progress"],
             });
         } catch (err) {
-            console.error("Stop error:", err);
+            logger.error("Failed to stop enrichment", { error: err });
             setError("Failed to stop enrichment");
         }
     };

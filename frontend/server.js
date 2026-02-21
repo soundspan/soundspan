@@ -19,6 +19,44 @@ const handle = app.getRequestHandler();
 let isStartupComplete = false;
 let isDraining = false;
 
+function serializeLogArg(arg) {
+    if (arg instanceof Error) {
+        return `${arg.name}: ${arg.message}`;
+    }
+    if (typeof arg === "string") {
+        return arg;
+    }
+    try {
+        return JSON.stringify(arg);
+    } catch {
+        return String(arg);
+    }
+}
+
+function emitServerLog(level, message, ...args) {
+    const payload = args.length > 0
+        ? `${message} ${args.map(serializeLogArg).join(" ")}`
+        : message;
+    const line = `[${level}] [frontend.server] ${payload}\n`;
+    if (level === "ERROR" || level === "WARN") {
+        process.stderr.write(line);
+        return;
+    }
+    process.stdout.write(line);
+}
+
+const serverLogger = {
+    info(message, ...args) {
+        emitServerLog("INFO", message, ...args);
+    },
+    warn(message, ...args) {
+        emitServerLog("WARN", message, ...args);
+    },
+    error(message, ...args) {
+        emitServerLog("ERROR", message, ...args);
+    },
+};
+
 function getPathname(reqUrl) {
     try {
         return new URL(reqUrl || "/", "http://localhost").pathname;
@@ -53,7 +91,10 @@ const listenTogetherSocketProxy = createProxyMiddleware({
     proxyTimeout: 120000,
     onError: (err, req, res) => {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error(`[listen-together-proxy] ${req.method} ${req.url} failed:`, errorMessage);
+        serverLogger.error(
+            `[listen-together-proxy] ${req.method} ${req.url} failed:`,
+            errorMessage
+        );
         if (!res.headersSent) {
             res.writeHead(503, { "Content-Type": "application/json" });
             res.end(
@@ -75,7 +116,10 @@ const subsonicRestProxy = createProxyMiddleware({
     proxyTimeout: 120000,
     onError: (err, req, res) => {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error(`[subsonic-rest-proxy] ${req.method} ${req.url} failed:`, errorMessage);
+        serverLogger.error(
+            `[subsonic-rest-proxy] ${req.method} ${req.url} failed:`,
+            errorMessage
+        );
         if (!res.headersSent) {
             res.writeHead(503, { "Content-Type": "application/json" });
             res.end(
@@ -150,25 +194,29 @@ app.prepare().then(() => {
 
     server.listen(port, hostname, () => {
         isStartupComplete = true;
-        console.log(`> Frontend ready on http://${hostname}:${port}`);
-        console.log(`> Listen Together socket proxy enabled: ${LISTEN_TOGETHER_SOCKET_PATH} -> ${backendUrl}`);
-        console.log(`> Subsonic REST proxy enabled: ${SUBSONIC_REST_PATH} -> ${backendUrl}`);
+        serverLogger.info(`> Frontend ready on http://${hostname}:${port}`);
+        serverLogger.info(
+            `> Listen Together socket proxy enabled: ${LISTEN_TOGETHER_SOCKET_PATH} -> ${backendUrl}`
+        );
+        serverLogger.info(
+            `> Subsonic REST proxy enabled: ${SUBSONIC_REST_PATH} -> ${backendUrl}`
+        );
     });
 
     const gracefulShutdown = (signal) => {
         isDraining = true;
-        console.log(`> ${signal} received, draining frontend server...`);
+        serverLogger.info(`> ${signal} received, draining frontend server...`);
 
         server.close((err) => {
             if (err) {
-                console.error("> Frontend shutdown error:", err);
+                serverLogger.error("> Frontend shutdown error:", err);
                 process.exit(1);
             }
             process.exit(0);
         });
 
         setTimeout(() => {
-            console.error("> Frontend shutdown timeout exceeded; forcing exit");
+            serverLogger.error("> Frontend shutdown timeout exceeded; forcing exit");
             process.exit(1);
         }, 10000).unref();
     };

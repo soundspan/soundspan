@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { createFrontendLogger } from "@/lib/logger";
 import { UserSettings } from "../types";
 import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
+
+const logger = createFrontendLogger("Settings.useSettingsData");
 
 const defaultSettings: UserSettings = {
     displayName: "",
@@ -40,7 +43,7 @@ export function useSettingsData() {
             });
             setLoadError(false);
         } catch (error) {
-            console.error("Failed to load settings:", error);
+            logger.error("Failed to load user settings", { error });
             setLoadError(true);
         } finally {
             if (!isBackground) {
@@ -94,7 +97,7 @@ export function useSettingsData() {
             setSettings(newSettings);
             // No toast - caller shows inline status
         } catch (error) {
-            console.error("Failed to save settings:", error);
+            logger.error("Failed to save user settings", { error });
             throw error; // Re-throw so caller can show inline error
         } finally {
             setIsSaving(false);

@@ -6,6 +6,20 @@
 import os
 import sys
 
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_POTENTIAL_PROJECT_ROOTS = (
+    _CURRENT_DIR,
+    os.path.dirname(_CURRENT_DIR),
+    os.path.dirname(os.path.dirname(_CURRENT_DIR)),
+)
+for _root in _POTENTIAL_PROJECT_ROOTS:
+    if os.path.isdir(os.path.join(_root, "services", "common")):
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        break
+
+from services.common.logging_utils import configure_service_logger
+
 # Get thread configuration from environment (default to 1 for safety)
 THREADS_PER_WORKER = int(os.getenv('THREADS_PER_WORKER', '1'))
 
@@ -22,15 +36,20 @@ os.environ['OPENBLAS_NUM_THREADS'] = str(THREADS_PER_WORKER)
 os.environ['MKL_NUM_THREADS'] = str(THREADS_PER_WORKER)
 os.environ['NUMEXPR_MAX_THREADS'] = str(THREADS_PER_WORKER)
 
+logger = configure_service_logger('audio-analyzer')
+
 # Log thread configuration on startup
-print("=" * 80, file=sys.stderr)
-print("AUDIO ANALYZER THREAD CONFIGURATION", file=sys.stderr)
-print("=" * 80, file=sys.stderr)
-print(f"TF_NUM_INTRAOP_THREADS: {THREADS_PER_WORKER}", file=sys.stderr)
-print(f"TF_NUM_INTEROP_THREADS: 1", file=sys.stderr)
-print(f"OpenMP/BLAS threads: {THREADS_PER_WORKER}", file=sys.stderr)
-print(f"Expected CPU usage: ~{THREADS_PER_WORKER * 100 + 100}% per worker", file=sys.stderr)
-print("=" * 80, file=sys.stderr)
+logger.info("=" * 80)
+logger.info("AUDIO ANALYZER THREAD CONFIGURATION")
+logger.info("=" * 80)
+logger.info("TF_NUM_INTRAOP_THREADS: %s", THREADS_PER_WORKER)
+logger.info("TF_NUM_INTEROP_THREADS: 1")
+logger.info("OpenMP/BLAS threads: %s", THREADS_PER_WORKER)
+logger.info(
+    "Expected CPU usage: ~%s%% per worker",
+    THREADS_PER_WORKER * 100 + 100,
+)
+logger.info("=" * 80)
 
 """
 Essentia Audio Analyzer Service - Enhanced Vibe Matching
@@ -54,7 +73,6 @@ It connects to Redis for job queue and PostgreSQL for storing results.
 # NOW safe to import other dependencies
 import json
 import time
-import logging
 import gc
 import uuid
 from datetime import datetime
@@ -86,13 +104,6 @@ except RuntimeError:
 import redis
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('audio-analyzer')
 
 # Essentia imports (will fail gracefully if not installed for testing)
 ESSENTIA_AVAILABLE = False
@@ -2033,12 +2044,12 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == '--test':
         # Test mode: analyze a single file
         if len(sys.argv) < 3:
-            print("Usage: analyzer.py --test <audio_file>")
+            logger.error("Usage: analyzer.py --test <audio_file>")
             sys.exit(1)
         
         analyzer = AudioAnalyzer()
         result = analyzer.analyze(sys.argv[2])
-        print(json.dumps(result, indent=2))
+        logger.info("Test analysis result:\n%s", json.dumps(result, indent=2))
         return
     
     # Normal worker mode

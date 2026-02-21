@@ -3,6 +3,7 @@ import { useAudio } from "@/lib/audio-context";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { DiscoverPlaylist } from "../types";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface PlaybackQueueTrack {
     id: string;
@@ -55,7 +56,7 @@ export function useDiscoverActions(
 
     const handleGenerate = useCallback(async () => {
         if (isGenerating) {
-            console.warn("Generation already in progress, ignoring request");
+            sharedFrontendLogger.warn("Generation already in progress, ignoring request");
             toast.warning("Generation already in progress...");
             return;
         }
@@ -74,7 +75,7 @@ export function useDiscoverActions(
             
             toast.success("Generation started! Refreshing recommendations...");
         } catch (error: unknown) {
-            console.error("Generation failed:", error);
+            sharedFrontendLogger.error("Generation failed:", error);
             // Clear pending state on error
             setPendingGeneration?.(false);
             const err = error as Error & { status?: number };

@@ -12,6 +12,7 @@ import { useTVNavigation } from "@/hooks/useTVNavigation";
 import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { RefreshCw, SkipBack, SkipForward, Shuffle, Repeat } from "lucide-react";
 import { BRAND_NAME } from "@/lib/brand";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 const tvNavigation = [
     { name: "Home", href: "/" },
@@ -109,7 +110,7 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
         try {
             await api.scanLibrary();
         } catch (error) {
-            console.error("Sync failed:", error);
+            sharedFrontendLogger.error("Sync failed:", error);
         } finally {
             setIsSyncing(false);
         }

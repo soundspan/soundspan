@@ -1,5 +1,6 @@
 "use client";
 
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Listen Together context — the bridge between server-authoritative group
  * state (via Socket.IO) and the local audio player.
@@ -693,7 +694,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 pendingReconnectAudioRecoveryRef.current = true;
             },
             onReconnectError: (err) => {
-                console.error("[ListenTogether] Reconnect error:", err.message);
+                sharedFrontendLogger.error("[ListenTogether] Reconnect error:", err.message);
             },
             onReconnectFailed: () => {
                 setError("Listen Together reconnect failed. Check route/proxy health and try rejoining.");
@@ -703,7 +704,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 setIsConnected(false);
             },
             onError: (err) => {
-                console.error("[ListenTogether] Socket error:", err.message);
+                sharedFrontendLogger.error("[ListenTogether] Socket error:", err.message);
                 const isRouteSensitiveError =
                     err.message.includes("xhr poll error") ||
                     err.message.includes("websocket error") ||
@@ -776,7 +777,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
                 // Ensure snapshot has required structure before using it
                 if (!groupSnapshot.playback || !Array.isArray(groupSnapshot.members)) {
-                    console.warn("[ListenTogether] Received malformed group snapshot, ignoring");
+                    sharedFrontendLogger.warn("[ListenTogether] Received malformed group snapshot, ignoring");
                     setActiveGroup(null);
                     lastAppliedVersionRef.current = 0;
                     setIsLoading(false);
@@ -792,7 +793,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 }
             } catch (err) {
                 if (!mounted) return;
-                console.error("[ListenTogether] Failed to fetch active group:", err);
+                sharedFrontendLogger.error("[ListenTogether] Failed to fetch active group:", err);
                 setIsLoading(false);
             }
         })();

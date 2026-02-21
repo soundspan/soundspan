@@ -34,6 +34,7 @@ import {
     Loader2,
     Radio,
 } from "lucide-react";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Track {
     id: string;
@@ -130,7 +131,7 @@ export default function PlaylistDetailPage() {
             audio.volume = 0.5;
             audio.onended = () => setPlayingPreviewId(null);
             audio.onerror = (e) => {
-                console.error("Deezer preview playback failed:", e);
+                sharedFrontendLogger.error("Deezer preview playback failed:", e);
                 setPlayingPreviewId(null);
                 toast.error("Preview playback failed");
             };
@@ -138,7 +139,7 @@ export default function PlaylistDetailPage() {
 
             await audio.play();
         } catch (err) {
-            console.error("Failed to play Deezer preview:", err);
+            sharedFrontendLogger.error("Failed to play Deezer preview:", err);
             setPlayingPreviewId(null);
             toast.error("No preview available");
         }
@@ -170,7 +171,7 @@ export default function PlaylistDetailPage() {
                 toast.error(result.message || "Track not found on Soulseek");
             }
         } catch (error) {
-            console.error("Failed to retry download:", error);
+            sharedFrontendLogger.error("Failed to retry download:", error);
             toast.error("Failed to retry download");
         } finally {
             setRetryingTrackId(null);
@@ -187,7 +188,7 @@ export default function PlaylistDetailPage() {
                 queryKey: ["playlist", playlistId],
             });
         } catch (error) {
-            console.error("Failed to remove pending track:", error);
+            sharedFrontendLogger.error("Failed to remove pending track:", error);
         } finally {
             setRemovingTrackId(null);
         }
@@ -225,7 +226,7 @@ export default function PlaylistDetailPage() {
                 router.push("/playlists");
             }
         } catch (error) {
-            console.error("Failed to toggle playlist visibility:", error);
+            sharedFrontendLogger.error("Failed to toggle playlist visibility:", error);
         } finally {
             setIsHiding(false);
         }
@@ -253,7 +254,7 @@ export default function PlaylistDetailPage() {
             await api.removeTrackFromPlaylist(playlistId, trackId);
             // Track disappearing from list is feedback enough
         } catch (error) {
-            console.error("Failed to remove track:", error);
+            sharedFrontendLogger.error("Failed to remove track:", error);
         }
     };
 
@@ -268,7 +269,7 @@ export default function PlaylistDetailPage() {
 
             router.push("/playlists");
         } catch (error) {
-            console.error("Failed to delete playlist:", error);
+            sharedFrontendLogger.error("Failed to delete playlist:", error);
         }
     };
 
@@ -376,7 +377,7 @@ export default function PlaylistDetailPage() {
                 toast.error("No radio tracks found for this playlist");
             }
         } catch (error) {
-            console.error("Failed to start playlist radio:", error);
+            sharedFrontendLogger.error("Failed to start playlist radio:", error);
             toast.error("Failed to start playlist radio");
         }
     };

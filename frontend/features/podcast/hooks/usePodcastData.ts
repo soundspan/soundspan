@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { Podcast, PodcastPreview, SimilarPodcast, Episode } from "../types";
 import { subscribeQueryEvent } from "@/lib/query-events";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export function usePodcastData() {
   const params = useParams();
@@ -56,7 +57,7 @@ export function usePodcastData() {
         const similar = await api.getSimilarPodcasts(podcastId);
         setSimilarPodcasts(similar);
       } catch (error) {
-        console.error("Failed to load similar podcasts:", error);
+        sharedFrontendLogger.error("Failed to load similar podcasts:", error);
       }
     }
 
@@ -79,7 +80,7 @@ export function usePodcastData() {
           router.replace(`/podcasts/${preview.subscribedPodcastId}`);
         }
       } catch (error) {
-        console.error("Failed to load preview:", error);
+        sharedFrontendLogger.error("Failed to load preview:", error);
         setPreviewLoadState('error');
       }
     }

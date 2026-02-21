@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Performance monitoring hook - catches long tasks and reports them
  * Add this once to your root layout to monitor all performance issues
@@ -13,7 +14,7 @@ export function usePerformanceMonitor(enabled = true) {
         const longTaskObserver = new PerformanceObserver((list) => {
             for (const entry of list.getEntries()) {
                 if (entry.duration > 50) {
-                    console.warn(
+                    sharedFrontendLogger.warn(
                         `[LONG TASK] ${entry.duration.toFixed(1)}ms`,
                         entry.name,
                         entry
@@ -26,7 +27,7 @@ export function usePerformanceMonitor(enabled = true) {
             longTaskObserver.observe({ entryTypes: ['longtask'] });
         } catch {
             // longtask not supported in all browsers
-            console.log('[PERF] Long task monitoring not supported');
+            sharedFrontendLogger.info('[PERF] Long task monitoring not supported');
         }
 
         // Monitor layout shifts
@@ -34,7 +35,7 @@ export function usePerformanceMonitor(enabled = true) {
             for (const entry of list.getEntries()) {
                 const layoutEntry = entry as PerformanceEntry & { value: number; hadRecentInput: boolean };
                 if (layoutEntry.value > 0.1) {
-                    console.warn(
+                    sharedFrontendLogger.warn(
                         `[LAYOUT SHIFT] Score: ${layoutEntry.value.toFixed(3)}`,
                         layoutEntry.hadRecentInput ? '(user input)' : '(unexpected)',
                         entry
@@ -70,18 +71,18 @@ export function usePerformanceMonitor(enabled = true) {
                 const duration = performance.now() - start;
 
                 if (duration > 500) {
-                    console.warn(`[SLOW FETCH] ${duration.toFixed(0)}ms - ${url}`);
+                    sharedFrontendLogger.warn(`[SLOW FETCH] ${duration.toFixed(0)}ms - ${url}`);
                 }
 
                 return result;
             } catch (e) {
                 const duration = performance.now() - start;
-                console.error(`[FETCH ERROR] ${duration.toFixed(0)}ms - ${url}`, e);
+                sharedFrontendLogger.error(`[FETCH ERROR] ${duration.toFixed(0)}ms - ${url}`, e);
                 throw e;
             }
         };
 
-        console.log('[PERF] Performance monitoring enabled');
+        sharedFrontendLogger.info('[PERF] Performance monitoring enabled');
 
         return () => {
             longTaskObserver.disconnect();

@@ -24,6 +24,7 @@ import {
     PLAYBACK_PROGRESS_SAVE_INTERVAL_MS,
 } from "@/lib/playback-state-cadence";
 import { resolveHydratedPlaybackIntent } from "@/lib/playback-intent";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export interface PlaybackStreamProfile {
     mode: "direct" | "dash";
@@ -320,7 +321,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                 );
             }
         } catch (error) {
-            console.error("[AudioPlayback] Failed to save currentTime:", error);
+            sharedFrontendLogger.error("[AudioPlayback] Failed to save currentTime:", error);
         }
     }, [
         currentTime,
@@ -393,7 +394,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             } catch (err) {
                 // Ignore auth/state sync failures to avoid disrupting playback.
                 if (err instanceof Error && err.message !== "Not authenticated") {
-                    console.warn("[AudioPlayback] Failed to save playback progress:", err);
+                    sharedFrontendLogger.warn("[AudioPlayback] Failed to save playback progress:", err);
                 }
             }
         },

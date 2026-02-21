@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY services/audio-analyzer-clap/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Create models directory
@@ -45,7 +45,8 @@ RUN --mount=type=secret,id=hf_token \
 RUN python -c "import laion_clap; model = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-base'); model.load_ckpt('/app/models/music_audioset_epoch_15_esc_90.14.pt'); print('CLAP model verified successfully')"
 
 # Copy application code
-COPY analyzer.py .
+COPY services/audio-analyzer-clap/analyzer.py /app/analyzer.py
+COPY services/common /app/services/common
 
 # Create non-root user
 RUN useradd -m -u 1000 analyzer && \

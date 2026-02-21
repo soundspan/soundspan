@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 const playbackEngine = createRuntimeAudioEngine();
 
@@ -59,7 +60,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 await previewAudioRef.current.play();
             } catch (err: unknown) {
                 if (isAbortError(err)) return;
-                console.error("Preview error:", err);
+                sharedFrontendLogger.error("Preview error:", err);
             }
             setPreviewPlaying(true);
             return;
@@ -133,7 +134,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 showNoPreviewToast(track.id);
                 return;
             }
-            console.error("Failed to play preview:", error);
+            sharedFrontendLogger.error("Failed to play preview:", error);
             toast.error("Failed to play preview");
             setPreviewPlaying(false);
             setPreviewTrack(null);

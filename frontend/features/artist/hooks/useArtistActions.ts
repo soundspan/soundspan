@@ -5,6 +5,7 @@ import { Artist, Album, Track } from '../types';
 import { shuffleArray } from '@/utils/shuffle';
 import { loadOwnedArtistTracksNewestFirst } from '@/lib/artistPlayback';
 import { toast } from "sonner";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export function useArtistActions() {
   // Use controls-only hook to avoid re-renders from playback state changes
@@ -37,7 +38,7 @@ export function useArtistActions() {
         // Play tracks in order (newest album first, track 1 to end, then next album)
         playTracks(allTracks);
       } catch (error) {
-        console.error('Failed to play artist:', error);
+        sharedFrontendLogger.error('Failed to play artist:', error);
       }
     },
     [playTracks]
@@ -71,7 +72,7 @@ export function useArtistActions() {
 
         playTracks(shuffledTracks);
       } catch (error) {
-        console.error('Failed to shuffle play artist:', error);
+        sharedFrontendLogger.error('Failed to shuffle play artist:', error);
       }
     },
     [playTracks]
@@ -95,7 +96,7 @@ export function useArtistActions() {
 
         playTrackFromContext(formattedTrack);
       } catch (error) {
-        console.error('Failed to play track:', error);
+        sharedFrontendLogger.error('Failed to play track:', error);
       }
     },
     [playTrackFromContext]
@@ -138,7 +139,7 @@ export function useArtistActions() {
             : `Added ${allTracks.length} tracks to queue`
         );
       } catch (error) {
-        console.error('Failed to add artist to queue:', error);
+        sharedFrontendLogger.error('Failed to add artist to queue:', error);
         toast.error("Failed to add tracks to queue");
       }
     },

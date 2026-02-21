@@ -10,6 +10,7 @@ import {
     useCallback,
 } from "react";
 import { api } from "./api";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface FeaturesState {
     musicCNN: boolean;
@@ -37,7 +38,7 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
                 loading: false,
             });
         } catch (error) {
-            console.error("Failed to fetch features:", error);
+            sharedFrontendLogger.error("Failed to fetch features:", error);
             setState((prev) =>
                 prev.loading
                     ? {

@@ -18,6 +18,7 @@ import { DiscoverSettings } from "@/features/discover/components/DiscoverSetting
 import { TrackList } from "@/features/discover/components/TrackList";
 import { UnavailableAlbums } from "@/features/discover/components/UnavailableAlbums";
 import { HowItWorks } from "@/features/discover/components/HowItWorks";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export default function DiscoverWeeklyPage() {
     // Use split hooks to avoid re-renders from currentTime updates
@@ -76,7 +77,7 @@ export default function DiscoverWeeklyPage() {
             toast.success(`Added ${displayPlaylist.tracks.length} tracks to playlist`);
             setShowPlaylistSelector(false);
         } catch (error) {
-            console.error("Failed to add tracks to playlist:", error);
+            sharedFrontendLogger.error("Failed to add tracks to playlist:", error);
             toast.error("Failed to add some tracks to playlist");
         } finally {
             setIsAddingToPlaylist(false);

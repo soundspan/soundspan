@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import Image from "next/image";
 import { dispatchQueryEvent } from "@/lib/query-events";
 import { BRAND_NAME } from "@/lib/brand";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export default function SyncPage() {
     useRouter();
@@ -50,7 +51,7 @@ export default function SyncPage() {
                                 setMessage("Syncing audiobooks...");
                                 await api.post("/audiobooks/sync");
                             } catch (audiobookError) {
-                                console.error("Audiobook sync failed:", audiobookError);
+                                sharedFrontendLogger.error("Audiobook sync failed:", audiobookError);
                                 // Don't fail the whole flow if audiobook sync fails
                             }
 
@@ -104,11 +105,11 @@ export default function SyncPage() {
                             }
                         }
                     } catch (pollError) {
-                        console.error("Error polling scan status:", pollError);
+                        sharedFrontendLogger.error("Error polling scan status:", pollError);
                     }
                 }, 1000); // Poll every second
             } catch (err: unknown) {
-                console.error("Sync error:", err);
+                sharedFrontendLogger.error("Sync error:", err);
                 if (!mounted) return;
                 setError(
                     "Failed to start sync. You can skip and start manually later."
