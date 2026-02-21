@@ -165,6 +165,7 @@ const SEGMENTED_CLIENT_SIGNAL_EVENTS = new Set<string>([
     "player.rebuffer",
     "player.rebuffer_timeout",
     "player.rebuffer_recovered",
+    "player.unexpected_stop",
     "player.playback_error",
     "session.handoff_failure",
     "session.handoff_proactive_failure",
@@ -1787,11 +1788,57 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             onUnexpectedStop: () => {
                 // Howler stopped without us knowing
                 console.warn("[AudioPlaybackOrchestrator] Heartbeat detected unexpected stop");
-                if (playbackStateMachine.isPlaying) {
-                    // Sync React state to actual state
-                    setIsPlaying(false);
-                    playbackStateMachine.forceTransition("READY");
+                logSegmentedClientMetric("player.unexpected_stop", {
+                    reason: "heartbeat_unexpected_stop",
+                    trackId: currentTrackRef.current?.id ?? null,
+                    sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
+                    sourceType: activeSegmentedSessionRef.current?.sourceType ?? "direct",
+                });
+
+                if (!lastPlayingStateRef.current) {
+                    if (playbackStateMachine.isPlaying) {
+                        // User intent is paused; align machine state only.
+                        playbackStateMachine.forceTransition("READY");
+                    }
+                    return;
                 }
+
+                if (playbackTypeRef.current !== "track") {
+                    setIsPlaying(false);
+                    setIsBuffering(false);
+                    playbackStateMachine.forceTransition("READY");
+                    return;
+                }
+
+                const stopError = new Error(
+                    "Playback stopped unexpectedly during heartbeat monitoring"
+                );
+                const failedTrackId = currentTrackRef.current?.id ?? null;
+                setIsBuffering(true);
+                playbackStateMachine.forceTransition("LOADING");
+
+                void attemptSegmentedHandoffRecovery(stopError).then(
+                    (didRecoverWithHandoff) => {
+                        if (didRecoverWithHandoff) {
+                            return;
+                        }
+
+                        const didScheduleTransientRecovery =
+                            attemptTransientTrackRecovery(
+                                failedTrackId,
+                                stopError
+                            );
+                        if (didScheduleTransientRecovery) {
+                            playbackStateMachine.forceTransition("LOADING");
+                            setIsBuffering(true);
+                            return;
+                        }
+
+                        setIsPlaying(false);
+                        setIsBuffering(false);
+                        playbackStateMachine.forceTransition("READY");
+                    }
+                );
             },
             onBufferTimeout: () => {
                 // Been buffering too long - likely connection lost
