@@ -8,9 +8,11 @@ const wait = async (durationMs: number): Promise<void> => {
 
 const createMockFfmpegProcess = () => {
     const processEmitter = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
         stderr: EventEmitter;
         kill: jest.Mock;
     };
+    processEmitter.stdout = new EventEmitter();
     processEmitter.stderr = new EventEmitter();
     processEmitter.kill = jest.fn();
     return processEmitter;
@@ -142,6 +144,51 @@ describe("segmentedSegmentService", () => {
         expect(ffmpegArgs).toContain("chunk-$RepresentationID$-$Number%05d$.m4s");
         expect(ffmpegArgs).not.toContain("-b:a");
         expect(ffmpegArgs).not.toContain("320k");
+
+        ffmpegProcess.emit("close", 0);
+        await wait(0);
+    });
+
+    it("uses startup DASH capability probe to skip unsupported ffmpeg flags", async () => {
+        const { segmentedSegmentService, mocks } = await resolveSegmentService();
+        const probeProcess = createMockFfmpegProcess();
+        const ffmpegProcess = createMockFfmpegProcess();
+
+        mocks.mockSpawn
+            .mockReturnValueOnce(probeProcess)
+            .mockReturnValueOnce(ffmpegProcess);
+
+        const probePromise = segmentedSegmentService.initializeDashCapabilityProbe();
+        probeProcess.stdout.emit(
+            "data",
+            Buffer.from(
+                "Muxer dash [Dynamic Adaptive Streaming over HTTP]:\n  -streaming         E.......... Enable streaming\n",
+            ),
+        );
+        probeProcess.emit("close", 0);
+        await probePromise;
+
+        mocks.mockBuildDashCacheKey.mockReturnValue("cache-probed");
+        mocks.mockGetDashAssetPaths.mockReturnValue({
+            cacheKey: "cache-probed",
+            outputDir: "/tmp/cache-probed",
+            manifestPath: "/tmp/cache-probed/manifest.mpd",
+        });
+        mocks.mockHasDashManifest.mockResolvedValueOnce(false).mockResolvedValue(true);
+        mocks.mockEnsureDashAssetDirectory.mockResolvedValue(undefined);
+
+        await segmentedSegmentService.ensureLocalDashSegments({
+            trackId: "track-probed",
+            sourcePath: "/music/track-probed.flac",
+            sourceModified: new Date("2026-02-20T00:00:00.000Z"),
+            quality: "original",
+        });
+        await wait(0);
+
+        const ffmpegArgs = mocks.mockSpawn.mock.calls[1][1] as string[];
+        expect(ffmpegArgs).not.toContain("-ldash");
+        expect(ffmpegArgs).toContain("-streaming");
+        expect(ffmpegArgs).toContain("1");
 
         ffmpegProcess.emit("close", 0);
         await wait(0);

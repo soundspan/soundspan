@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Segmented streaming engine control now uses runtime `STREAMING_ENGINE_MODE` injection (`videojs` default, explicit `howler-rollback` opt-in) so prebuilt images can roll back without rebuilds.
 - Segmented streaming cache location now supports `SEGMENTED_STREAMING_CACHE_PATH` and defaults to `TRANSCODE_CACHE_PATH` when unset.
+- Segmented startup fallback timeout is now runtime-configurable via `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` (clamped to 1500-15000ms, default 5000ms) through `/runtime-config`.
 - Segmented session creation now returns immediately and continues DASH asset generation in the background, with manifest/segment routes waiting for asset readiness instead of failing fast on startup races.
 - Segmented playback session quality now defaults to each user’s saved playback-quality setting when the frontend does not explicitly pass a quality value.
 - Next-track segmented playback now prewarms immediately and reuses prewarmed session manifests/tokens on track handoff.
@@ -29,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local `original` segmented sessions now chunk lossless sources as FLAC fMP4-DASH assets, with client capability checks that fall back to direct playback when lossless segmented playback is unsupported.
 - Segmented manifest-relative `.m4s` segment requests are now served through a compatibility route, preventing session stalls when clients request chunk URLs outside the `/segments/` path prefix.
 - Segmented fMP4 generation now auto-retries without unsupported ffmpeg DASH flags (`-ldash`, then `-streaming` when needed), preventing hard failures on older ffmpeg builds.
+- Segmented playback now fails over to direct stream when DASH startup stalls past the runtime timeout, preventing long spinner waits before first audio.
+- Backend startup now probes ffmpeg DASH muxer capabilities once and suppresses unsupported flags proactively to reduce repeated startup failures/noise.
 
 ## [1.1.2] - 2026-02-20
 

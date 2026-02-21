@@ -12,6 +12,7 @@ import {
 } from "./trace";
 
 const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
+const DASH_CAPABILITY_PROBE_TIMEOUT_MS = 4_000;
 const BUILD_FAILURE_RETENTION_MS = 60_000;
 
 const DASH_QUALITY_BITRATES: Record<SegmentedDashQuality, number> = {
@@ -27,6 +28,10 @@ const LOSSLESS_FILE_EXTENSION_REGEX =
 const DASH_UNRECOGNIZED_OPTION_PATTERNS = {
     "-ldash": /Unrecognized option 'ldash'\./i,
     "-streaming": /Unrecognized option 'streaming'\./i,
+} as const;
+const DASH_HELP_OPTION_PATTERNS = {
+    "-ldash": /(^|\n)\s*-ldash\b/im,
+    "-streaming": /(^|\n)\s*-streaming\b/im,
 } as const;
 
 type DashSegmentContainer = "fmp4" | "webm";
@@ -112,6 +117,16 @@ class SegmentedSegmentService {
         string,
         { error: Error; failedAtMs: number }
     >();
+    private readonly unsupportedDashFlags = new Set<DashCompatibilityFlag>();
+    private dashCapabilityProbePromise: Promise<void> | null = null;
+
+    async initializeDashCapabilityProbe(): Promise<void> {
+        if (!this.dashCapabilityProbePromise) {
+            this.dashCapabilityProbePromise = this.probeDashMuxerCapabilities();
+        }
+
+        await this.dashCapabilityProbePromise;
+    }
 
     async ensureLocalDashSegments(
         input: EnsureLocalDashSegmentsInput,
@@ -234,6 +249,103 @@ class SegmentedSegmentService {
         }
     }
 
+    private async probeDashMuxerCapabilities(): Promise<void> {
+        const probeStartedAtMs = Date.now();
+        try {
+            const probeOutput = await this.runDashCapabilityProbeCommand();
+            const discoveredUnsupported: DashCompatibilityFlag[] = [];
+            const flags = Object.keys(
+                DASH_HELP_OPTION_PATTERNS,
+            ) as DashCompatibilityFlag[];
+            for (const flag of flags) {
+                if (!DASH_HELP_OPTION_PATTERNS[flag].test(probeOutput)) {
+                    this.unsupportedDashFlags.add(flag);
+                    discoveredUnsupported.push(flag);
+                }
+            }
+
+            logger.info(
+                "[SegmentedStreaming] FFmpeg DASH capability probe completed",
+                {
+                    unsupportedFlags: discoveredUnsupported,
+                    supportedFlags: flags.filter(
+                        (flag) => !discoveredUnsupported.includes(flag),
+                    ),
+                    probeMs: segmentedTraceDurationMs(probeStartedAtMs),
+                },
+            );
+        } catch (error) {
+            logger.warn(
+                "[SegmentedStreaming] FFmpeg DASH capability probe failed; runtime fallback will be used",
+                error,
+            );
+        }
+    }
+
+    private async runDashCapabilityProbeCommand(): Promise<string> {
+        return await new Promise<string>((resolve, reject) => {
+            const ffmpegProc = spawn(
+                ffmpegPath.path,
+                ["-hide_banner", "-h", "muxer=dash"],
+                {
+                    stdio: ["ignore", "pipe", "pipe"],
+                },
+            );
+
+            let combinedOutput = "";
+            const timeoutId = setTimeout(() => {
+                ffmpegProc.kill("SIGKILL");
+                reject(
+                    new Error(
+                        `FFmpeg DASH capability probe timed out after ${DASH_CAPABILITY_PROBE_TIMEOUT_MS}ms`,
+                    ),
+                );
+            }, DASH_CAPABILITY_PROBE_TIMEOUT_MS);
+
+            ffmpegProc.stdout.on("data", (chunk: Buffer) => {
+                combinedOutput += chunk.toString("utf8");
+            });
+            ffmpegProc.stderr.on("data", (chunk: Buffer) => {
+                combinedOutput += chunk.toString("utf8");
+            });
+
+            ffmpegProc.on("error", (error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+            });
+
+            ffmpegProc.on("close", (code) => {
+                clearTimeout(timeoutId);
+                if (code === 0) {
+                    resolve(combinedOutput);
+                    return;
+                }
+
+                reject(
+                    new Error(
+                        `FFmpeg DASH capability probe failed with exit code ${code}: ${combinedOutput.trim() || "no output"}`,
+                    ),
+                );
+            });
+        });
+    }
+
+    private resolveDashMuxerArgs(
+        segmentContainer: DashSegmentContainer,
+    ): string[] {
+        if (segmentContainer === "webm") {
+            return ["-dash_segment_type", "webm"];
+        }
+
+        let dashArgs = ["-streaming", "1", "-ldash", "1"];
+        const unsupportedFlags = Array.from(this.unsupportedDashFlags.values());
+        for (const flag of unsupportedFlags) {
+            dashArgs = removeDashFlagWithValue(dashArgs, flag);
+        }
+
+        return dashArgs;
+    }
+
     private async generateDashAsset(params: {
         trackId: string;
         sourcePath: string;
@@ -272,9 +384,7 @@ class SegmentedSegmentService {
                 : []),
             "-f",
             "dash",
-            ...(encodingPlan.segmentContainer === "fmp4"
-                ? ["-streaming", "1", "-ldash", "1"]
-                : ["-dash_segment_type", "webm"]),
+            ...this.resolveDashMuxerArgs(encodingPlan.segmentContainer),
             "-seg_duration",
             DASH_SEGMENT_DURATION_SEC,
             "-use_template",
@@ -369,6 +479,7 @@ class SegmentedSegmentService {
                 }
 
                 attemptedFallbackFlags.add(unsupportedFlag);
+                this.unsupportedDashFlags.add(unsupportedFlag);
                 ffmpegArgs = removeDashFlagWithValue(ffmpegArgs, unsupportedFlag);
                 logSegmentedStreamingTrace("asset.generate.ffmpeg_retry_without_flag", {
                     trackId: params.trackId,

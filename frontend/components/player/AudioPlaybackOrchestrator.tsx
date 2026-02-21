@@ -217,6 +217,12 @@ const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey("current_time_track_
 const AUDIO_LOAD_TIMEOUT_MS = 20_000;
 const AUDIO_LOAD_TIMEOUT_RETRIES = 1;
 const AUDIO_LOAD_RETRY_DELAY_MS = 350;
+const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_DEFAULT_MS = 5_000;
+const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MIN_MS = 1_500;
+const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MAX_MS = 15_000;
+const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
+const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_KEY =
+    "SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS";
 const TRACK_ERROR_SKIP_DELAY_MS = 1200;
 const TRANSIENT_TRACK_ERROR_RECOVERY_DELAY_MS = 450;
 const TRANSIENT_TRACK_ERROR_RECOVERY_WINDOW_MS = 15_000;
@@ -251,6 +257,35 @@ const isSegmentedSessionUsable = (
     }
 
     return expiresAtMs - Date.now() > SEGMENTED_PREWARM_EXPIRY_GUARD_MS;
+};
+
+const clampSegmentedStartupFallbackTimeoutMs = (value: number): number =>
+    Math.min(
+        SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MAX_MS,
+        Math.max(SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MIN_MS, value),
+    );
+
+const resolveSegmentedStartupFallbackTimeoutMs = (): number => {
+    if (typeof window === "undefined") {
+        return SEGMENTED_STARTUP_FALLBACK_TIMEOUT_DEFAULT_MS;
+    }
+
+    const runtimeConfig = (
+        window as Window & {
+            [SOUNDSPAN_RUNTIME_CONFIG_KEY]?: Record<string, unknown>;
+        }
+    )[SOUNDSPAN_RUNTIME_CONFIG_KEY];
+    const runtimeValue = runtimeConfig?.[SEGMENTED_STARTUP_FALLBACK_TIMEOUT_KEY];
+    const parsedRuntimeValue =
+        typeof runtimeValue === "number"
+            ? runtimeValue
+            : Number.parseInt(String(runtimeValue ?? ""), 10);
+
+    if (!Number.isFinite(parsedRuntimeValue)) {
+        return SEGMENTED_STARTUP_FALLBACK_TIMEOUT_DEFAULT_MS;
+    }
+
+    return clampSegmentedStartupFallbackTimeoutMs(parsedRuntimeValue);
 };
 
 /**
@@ -312,6 +347,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const seekCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const cacheStatusPollingRef = useRef<NodeJS.Timeout | null>(null);
     const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const segmentedStartupFallbackTimeoutRef = useRef<NodeJS.Timeout | null>(
+        null
+    );
     const loadTimeoutRetryCountRef = useRef<number>(0);
     const seekReloadListenerRef = useRef<(() => void) | null>(null);
     const seekReloadInProgressRef = useRef<boolean>(false);
@@ -357,6 +395,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
     // Heartbeat monitor for detecting stalled playback
     const heartbeatRef = useRef<HeartbeatMonitor | null>(null);
+
+    const clearSegmentedStartupFallback = useCallback(() => {
+        if (segmentedStartupFallbackTimeoutRef.current) {
+            clearTimeout(segmentedStartupFallbackTimeoutRef.current);
+            segmentedStartupFallbackTimeoutRef.current = null;
+        }
+    }, []);
 
     const clearPendingTrackErrorSkip = useCallback(() => {
         if (pendingTrackErrorSkipRef.current) {
@@ -1448,6 +1493,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             clearPendingTrackErrorSkip();
             clearStartupPlaybackRecovery();
             clearTransientTrackRecovery(true);
+            clearSegmentedStartupFallback();
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);
                 loadTimeoutRef.current = null;
@@ -1583,6 +1629,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             let sourceForLoad: string | AudioEngineSource = streamUrl;
             let sourceRequestHeaders: Record<string, string> | undefined;
             let sourceResolved = false;
+            const directSourceForLoad = streamUrl;
+            const directFormatForLoad = format;
+            let usingSegmentedSource = false;
 
             const resolveSourceForLoad = async (): Promise<void> => {
                 if (sourceResolved) {
@@ -1673,6 +1722,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         protocol: "dash",
                         mimeType: "application/dash+xml",
                     };
+                    usingSegmentedSource = true;
                     format = "mp4";
 
                     sourceRequestHeaders = {
@@ -1731,6 +1781,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     });
                     activeSegmentedSessionRef.current = null;
                     segmentedHandoffAttemptRef.current = 0;
+                    usingSegmentedSource = false;
                     setStreamProfile({
                         mode: "direct",
                         sourceType: resolveDirectTrackSourceType(currentTrack),
@@ -1751,8 +1802,14 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 }
             };
 
-            const startLoadAttempt = async () => {
+            const startLoadAttempt = async (
+                options: {
+                    forceDirect?: boolean;
+                    fallbackReason?: string;
+                } = {},
+            ) => {
                 clearLoadListeners();
+                clearSegmentedStartupFallback();
 
                 if (loadTimeoutRef.current) {
                     clearTimeout(loadTimeoutRef.current);
@@ -1763,6 +1820,30 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                 if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
                     return;
+                }
+
+                if (options.forceDirect) {
+                    sourceForLoad = directSourceForLoad;
+                    sourceRequestHeaders = undefined;
+                    usingSegmentedSource = false;
+                    format = directFormatForLoad;
+                    activeSegmentedSessionRef.current = null;
+                    segmentedHandoffAttemptRef.current = 0;
+                    if (playbackType === "track" && currentTrack) {
+                        setStreamProfile({
+                            mode: "direct",
+                            sourceType: resolveDirectTrackSourceType(currentTrack),
+                            codec: null,
+                            bitrateKbps: null,
+                        });
+                        logSegmentedClientMetric("session.create_fallback_direct", {
+                            trackId: currentTrack.id,
+                            sourceType: resolveDirectTrackSourceType(currentTrack),
+                            reason:
+                                options.fallbackReason ??
+                                "segmented_startup_timeout",
+                        });
+                    }
                 }
 
                 if (typeof sourceForLoad === "string") {
@@ -1791,6 +1872,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 const handleLoaded = () => {
                     if (loadIdRef.current !== thisLoadId) return;
 
+                    clearSegmentedStartupFallback();
                     if (loadTimeoutRef.current) {
                         clearTimeout(loadTimeoutRef.current);
                         loadTimeoutRef.current = null;
@@ -1827,6 +1909,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 };
 
                 const handleLoadError = () => {
+                    clearSegmentedStartupFallback();
                     if (loadTimeoutRef.current) {
                         clearTimeout(loadTimeoutRef.current);
                         loadTimeoutRef.current = null;
@@ -1853,6 +1936,34 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
                 howlerEngine.on("load", handleLoaded);
                 howlerEngine.on("loaderror", handleLoadError);
+
+                if (
+                    usingSegmentedSource &&
+                    playbackType === "track" &&
+                    currentTrack &&
+                    !getListenTogetherSessionSnapshot()?.groupId
+                ) {
+                    const fallbackTimeoutMs =
+                        resolveSegmentedStartupFallbackTimeoutMs();
+                    segmentedStartupFallbackTimeoutRef.current = setTimeout(() => {
+                        if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
+                            return;
+                        }
+                        if (!usingSegmentedSource) {
+                            return;
+                        }
+
+                        console.warn(
+                            `[AudioPlaybackOrchestrator] Segmented startup exceeded ${fallbackTimeoutMs}ms; falling back to direct stream.`
+                        );
+                        howlerEngine.stop();
+                        playbackStateMachine.forceTransition("LOADING");
+                        void startLoadAttempt({
+                            forceDirect: true,
+                            fallbackReason: "segmented_startup_timeout",
+                        });
+                    }, fallbackTimeoutMs);
+                }
 
                 loadTimeoutRef.current = setTimeout(() => {
                     if (loadIdRef.current !== thisLoadId || !isLoadingRef.current) {
@@ -1903,6 +2014,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
             void startLoadAttempt();
         } else {
+            clearSegmentedStartupFallback();
             if (loadTimeoutRef.current) {
                 clearTimeout(loadTimeoutRef.current);
                 loadTimeoutRef.current = null;
@@ -1920,6 +2032,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         setStreamProfile,
         clearPendingTrackErrorSkip,
         clearStartupPlaybackRecovery,
+        clearSegmentedStartupFallback,
         clearTransientTrackRecovery,
     ]);
 
@@ -2550,6 +2663,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             if (seekCheckTimeoutRef.current) {
                 clearTimeout(seekCheckTimeoutRef.current);
             }
+            clearSegmentedStartupFallback();
             if (seekReloadListenerRef.current) {
                 howlerEngine.off("load", seekReloadListenerRef.current);
                 seekReloadListenerRef.current = null;
@@ -2559,7 +2673,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 seekDebounceRef.current = null;
             }
         };
-    }, []);
+    }, [clearSegmentedStartupFallback]);
 
     // Periodic progress saving for audiobooks and podcasts
     useEffect(() => {
@@ -2615,6 +2729,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 clearTimeout(loadTimeoutRef.current);
                 loadTimeoutRef.current = null;
             }
+            clearSegmentedStartupFallback();
             clearPendingTrackErrorSkip();
             clearStartupPlaybackRecovery();
             clearTransientTrackRecovery(true);
@@ -2637,6 +2752,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             segmentedPrewarmInFlight.clear();
         };
     }, [
+        clearSegmentedStartupFallback,
         clearPendingTrackErrorSkip,
         clearStartupPlaybackRecovery,
         clearTransientTrackRecovery,

@@ -110,6 +110,7 @@ Status labels:
 | --- | --- | --- | --- | --- |
 | `BACKEND_URL` | `frontend` (and `audio-analyzer-clap-local` in local profile) | Optional (required when default route is not correct) | split stack: `http://backend:3006`; local CLAP: `http://host.docker.internal:3007` | Server-side URL used by frontend proxy/SSR and local CLAP callback target. |
 | `STREAMING_ENGINE_MODE` | `frontend`, `soundspan` (AIO) | Optional | defaults to `videojs` when unset/invalid | Runtime (non-build-time) audio engine mode: `videojs` (default segmented), `react-all-player` (future compatibility), `howler-rollback` (explicit rollback only). |
+| `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` | `frontend`, `soundspan` (AIO) | Optional | `5000` (runtime clamp: `1500-15000`) | Runtime timeout for falling back from segmented startup to direct playback when DASH startup stalls. |
 | `NEXT_PUBLIC_API_URL` | `frontend` (build-time) | Optional (build-time only) | empty | Explicit browser API base URL. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_API_PATH_MODE` | `frontend` (build-time) | Optional (build-time only) | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional (build-time only) | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |
