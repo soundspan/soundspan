@@ -1917,6 +1917,24 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     loadTimeoutRetryCountRef.current = 0;
                     isLoadingRef.current = false;
 
+                    if (
+                        usingSegmentedSource &&
+                        playbackType === "track" &&
+                        currentTrack &&
+                        !getListenTogetherSessionSnapshot()?.groupId
+                    ) {
+                        console.warn(
+                            "[AudioPlaybackOrchestrator] Segmented loaderror detected; falling back to direct stream.",
+                        );
+                        isLoadingRef.current = true;
+                        playbackStateMachine.forceTransition("LOADING");
+                        void startLoadAttempt({
+                            forceDirect: true,
+                            fallbackReason: "segmented_load_error",
+                        });
+                        return;
+                    }
+
                     // Show a descriptive toast for YouTube-sourced tracks that fail to load
                     if (
                         playbackType === "track" &&
