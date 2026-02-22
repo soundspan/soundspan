@@ -56,6 +56,10 @@ import {
     TRACK_DISLIKE_ENTITY_TYPE,
     type ResolvedTrackPreference,
 } from "../services/trackPreference";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "./routeErrorResponse";
 
 const router = Router();
 
@@ -537,7 +541,7 @@ router.get("/delete-policy", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get library delete policy error:", error);
-        return res.status(500).json({ error: "Failed to determine delete policy" });
+        return sendInternalRouteError(res, "Failed to determine delete policy");
     }
 });
 
@@ -613,7 +617,7 @@ router.post("/scan", async (req, res) => {
         });
     } catch (error) {
         logger.error("Scan trigger error:", error);
-        res.status(500).json({ error: "Failed to start scan" });
+        sendInternalRouteError(res, "Failed to start scan");
     }
 });
 
@@ -623,7 +627,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
         const job = await scanQueue.getJob(req.params.jobId);
 
         if (!job) {
-            return res.status(404).json({ error: "Job not found" });
+            return sendRouteError(res, 404, "Job not found");
         }
 
         const state = await job.getState();
@@ -637,7 +641,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get scan status error:", error);
-        res.status(500).json({ error: "Failed to get job status" });
+        sendInternalRouteError(res, "Failed to get job status");
     }
 });
 
@@ -652,7 +656,7 @@ router.post("/organize", async (req, res) => {
         res.json({ message: "Organization started in background" });
     } catch (error) {
         logger.error("Organization trigger error:", error);
-        res.status(500).json({ error: "Failed to start organization" });
+        sendInternalRouteError(res, "Failed to start organization");
     }
 });
 
@@ -841,7 +845,7 @@ router.get("/recently-listened", async (req, res) => {
         res.json({ items: results });
     } catch (error) {
         logger.error("Get recently listened error:", error);
-        res.status(500).json({ error: "Failed to fetch recently listened" });
+        sendInternalRouteError(res, "Failed to fetch recently listened");
     }
 });
 
@@ -912,7 +916,7 @@ router.get("/recently-added", async (req, res) => {
         res.json({ artists: artistsWithImages });
     } catch (error) {
         logger.error("Get recently added error:", error);
-        res.status(500).json({ error: "Failed to fetch recently added" });
+        sendInternalRouteError(res, "Failed to fetch recently added");
     }
 });
 
@@ -1067,7 +1071,7 @@ router.get("/artist-counts/status", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ArtistCounts] Status check error:", error?.message);
-        res.status(500).json({ error: "Failed to check status" });
+        sendInternalRouteError(res, "Failed to check status");
     }
 });
 
@@ -1094,7 +1098,7 @@ router.post("/artist-counts/backfill", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ArtistCounts] Backfill trigger error:", error?.message);
-        res.status(500).json({ error: "Failed to start backfill" });
+        sendInternalRouteError(res, "Failed to start backfill");
     }
 });
 
@@ -1112,7 +1116,7 @@ router.get("/image-backfill/status", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ImageBackfill] Status check error:", error?.message);
-        res.status(500).json({ error: "Failed to check status" });
+        sendInternalRouteError(res, "Failed to check status");
     }
 });
 
@@ -1137,7 +1141,7 @@ router.post("/image-backfill/start", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ImageBackfill] Backfill trigger error:", error?.message);
-        res.status(500).json({ error: "Failed to start image backfill" });
+        sendInternalRouteError(res, "Failed to start image backfill");
     }
 });
 
@@ -1186,7 +1190,7 @@ router.post("/backfill-genres", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[Backfill] Genre backfill error:", error?.message);
-        res.status(500).json({ error: "Failed to backfill genres" });
+        sendInternalRouteError(res, "Failed to backfill genres");
     }
 });
 
@@ -1250,7 +1254,7 @@ router.get("/artists/:id", async (req, res) => {
         });
 
         if (!artist) {
-            return res.status(404).json({ error: "Artist not found" });
+            return sendRouteError(res, 404, "Artist not found");
         }
 
         // For enriched artists with ownedAlbums, skip expensive MusicBrainz calls.
@@ -1915,7 +1919,7 @@ router.get("/artists/:id", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get artist error:", error);
-        res.status(500).json({ error: "Failed to fetch artist" });
+        sendInternalRouteError(res, "Failed to fetch artist");
     }
 });
 
@@ -2060,7 +2064,7 @@ router.get("/albums/:id", async (req, res) => {
               });
 
         if (!album) {
-            return res.status(404).json({ error: "Album not found" });
+            return sendRouteError(res, 404, "Album not found");
         }
 
         // Check ownership with O(1) indexed lookup (separate query is faster than fetching all ownedAlbums)
@@ -2086,7 +2090,7 @@ router.get("/albums/:id", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get album error:", error);
-        res.status(500).json({ error: "Failed to fetch album" });
+        sendInternalRouteError(res, "Failed to fetch album");
     }
 });
 
@@ -2154,7 +2158,7 @@ router.get("/tracks", async (req, res) => {
         res.json({ tracks, total, offset, limit });
     } catch (error) {
         logger.error("Get tracks error:", error);
-        res.status(500).json({ error: "Failed to fetch tracks" });
+        sendInternalRouteError(res, "Failed to fetch tracks");
     }
 });
 
@@ -2241,7 +2245,7 @@ router.get("/tracks/shuffle", async (req, res) => {
         res.json({ tracks, total: totalTracks });
     } catch (error) {
         logger.error("Shuffle tracks error:", error);
-        res.status(500).json({ error: "Failed to shuffle tracks" });
+        sendInternalRouteError(res, "Failed to shuffle tracks");
     }
 });
 
@@ -2352,7 +2356,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                             error
                         );
                     }
-                    return res.status(404).json({ error: "Cover art not found" });
+                    return sendRouteError(res, 404, "Cover art not found");
                 }
 
                 // Serve the file directly
@@ -2436,7 +2440,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     );
                 }
 
-                return res.status(404).json({ error: "Cover art not found" });
+                return sendRouteError(res, 404, "Cover art not found");
             }
 
             // Check if this is an audiobook cover (prefixed with "audiobook__")
@@ -2518,7 +2522,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         const normalizedCoverUrl = normalizeExternalImageUrl(coverUrl);
         if (!normalizedCoverUrl) {
             logger.warn(`[COVER-ART] Blocked invalid cover URL: ${coverUrl}`);
-            return res.status(400).json({ error: "Invalid cover art URL" });
+            return sendRouteError(res, 400, "Invalid cover art URL");
         }
         coverUrl = normalizedCoverUrl;
 
@@ -2597,7 +2601,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 logger.warn(
                     `[COVER-ART] Blocked invalid cover URL: ${imageResult.url}`
                 );
-                return res.status(400).json({ error: "Invalid cover art URL" });
+                return sendRouteError(res, 400, "Invalid cover art URL");
             }
 
             if (imageResult.status === "not_found") {
@@ -2614,13 +2618,13 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     logger.warn("[COVER-ART] Redis cache write error:", cacheError);
                 }
 
-                return res.status(404).json({ error: "Cover art not found" });
+                return sendRouteError(res, 404, "Cover art not found");
             }
 
             logger.error(
                 `[COVER-ART] Failed to fetch: ${imageResult.url} (${imageResult.message || "fetch error"})`
             );
-            return res.status(502).json({ error: "Failed to fetch cover art" });
+            return sendRouteError(res, 502, "Failed to fetch cover art");
         }
 
         logger.debug(`[COVER-ART] Successfully fetched, caching...`);
@@ -2661,7 +2665,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         res.send(imageBuffer);
     } catch (error) {
         logger.error("Get cover art error:", error);
-        res.status(500).json({ error: "Failed to fetch cover art" });
+        sendInternalRouteError(res, "Failed to fetch cover art");
     }
 });
 
@@ -2672,7 +2676,7 @@ router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
         const { mbid } = req.params;
 
         if (!mbid || mbid.startsWith("temp-")) {
-            return res.status(400).json({ error: "Valid MBID required" });
+            return sendRouteError(res, 400, "Valid MBID required");
         }
 
         // Fetch from Cover Art Archive (this uses caching internally)
@@ -2687,7 +2691,7 @@ router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
         res.json({ coverUrl });
     } catch (error) {
         logger.error("Get album cover error:", error);
-        res.status(500).json({ error: "Failed to fetch cover art" });
+        sendInternalRouteError(res, "Failed to fetch cover art");
     }
 });
 
@@ -2697,7 +2701,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         const { url } = req.query;
 
         if (!url) {
-            return res.status(400).json({ error: "URL parameter required" });
+            return sendRouteError(res, 400, "URL parameter required");
         }
 
         const rawImageUrl = Array.isArray(url) ? url[0] : url;
@@ -2708,7 +2712,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         const normalizedImageUrl = normalizeExternalImageUrl(imageUrl);
         if (!normalizedImageUrl) {
             logger.warn(`[COLORS] Blocked invalid image URL: ${imageUrl}`);
-            return res.status(400).json({ error: "Invalid image URL" });
+            return sendRouteError(res, 400, "Invalid image URL");
         }
 
         // Handle placeholder images - return default fallback colors
@@ -2767,13 +2771,13 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
                 logger.error(
                     `[COLORS] Failed to fetch image: ${imageResult.url} (404)`
                 );
-                return res.status(404).json({ error: "Image not found" });
+                return sendRouteError(res, 404, "Image not found");
             }
 
             logger.error(
                 `[COLORS] Failed to fetch image: ${imageResult.url} (${imageResult.message || "fetch error"})`
             );
-            return res.status(504).json({ error: "Image fetch failed" });
+            return sendRouteError(res, 504, "Image fetch failed");
         }
 
         const imageBuffer = imageResult.buffer;
@@ -2798,7 +2802,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         res.json(colors);
     } catch (error) {
         logger.error("Extract colors error:", error);
-        res.status(500).json({ error: "Failed to extract colors" });
+        sendInternalRouteError(res, "Failed to extract colors");
     }
 });
 
@@ -2811,7 +2815,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
         if (!userId) {
             logger.debug("[STREAM] No userId in session - unauthorized");
-            return res.status(401).json({ error: "Unauthorized" });
+            return sendRouteError(res, 401, "Unauthorized");
         }
 
         const track = await prisma.track.findUnique({
@@ -2820,7 +2824,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
         if (!track) {
             logger.debug("[STREAM] Track not found");
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         // Log play start - only if this is a new playback session
@@ -2964,10 +2968,10 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
         // No file path available
         logger.debug("[STREAM] Track has no file path - unavailable");
-        return res.status(404).json({ error: "Track not available" });
+        return sendRouteError(res, 404, "Track not available");
     } catch (error) {
         logger.error("Stream track error:", error);
-        res.status(500).json({ error: "Failed to stream track" });
+        sendInternalRouteError(res, "Failed to stream track");
     }
 });
 
@@ -2976,7 +2980,7 @@ router.get("/tracks/:id/preference", async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
+            return sendRouteError(res, 401, "Authentication required");
         }
 
         const trackId = req.params.id;
@@ -2985,7 +2989,7 @@ router.get("/tracks/:id/preference", async (req, res) => {
             select: { id: true },
         });
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         const [likedEntry, dislikedEntry] = await Promise.all([
@@ -3022,7 +3026,7 @@ router.get("/tracks/:id/preference", async (req, res) => {
         res.json(formatTrackPreferenceResponse(trackId, preference));
     } catch (error) {
         logger.error("Get track preference error:", error);
-        res.status(500).json({ error: "Failed to fetch track preference" });
+        sendInternalRouteError(res, "Failed to fetch track preference");
     }
 });
 
@@ -3031,7 +3035,7 @@ router.post("/albums/:id/preference", async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
+            return sendRouteError(res, 401, "Authentication required");
         }
 
         const requestedAlbumId = req.params.id;
@@ -3054,7 +3058,7 @@ router.post("/albums/:id/preference", async (req, res) => {
             },
         });
         if (!album) {
-            return res.status(404).json({ error: "Album not found" });
+            return sendRouteError(res, 404, "Album not found");
         }
 
         const albumTracks = await prisma.track.findMany({
@@ -3099,7 +3103,7 @@ router.post("/albums/:id/preference", async (req, res) => {
         );
     } catch (error) {
         logger.error("Set album preference error:", error);
-        res.status(500).json({ error: "Failed to set album preference" });
+        sendInternalRouteError(res, "Failed to set album preference");
     }
 });
 
@@ -3108,7 +3112,7 @@ router.post("/tracks/:id/preference", async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
+            return sendRouteError(res, 401, "Authentication required");
         }
 
         const trackId = req.params.id;
@@ -3127,7 +3131,7 @@ router.post("/tracks/:id/preference", async (req, res) => {
             select: { id: true },
         });
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         const now = new Date();
@@ -3205,7 +3209,7 @@ router.post("/tracks/:id/preference", async (req, res) => {
         res.json(formatTrackPreferenceResponse(trackId, preference));
     } catch (error) {
         logger.error("Set track preference error:", error);
-        res.status(500).json({ error: "Failed to set track preference" });
+        sendInternalRouteError(res, "Failed to set track preference");
     }
 });
 
@@ -3229,7 +3233,7 @@ router.get("/tracks/:id", async (req, res) => {
         });
 
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         // Transform to match frontend Track interface: artist at top level
@@ -3251,7 +3255,7 @@ router.get("/tracks/:id", async (req, res) => {
         res.json(formattedTrack);
     } catch (error) {
         logger.error("Get track error:", error);
-        res.status(500).json({ error: "Failed to fetch track" });
+        sendInternalRouteError(res, "Failed to fetch track");
     }
 });
 
@@ -3271,7 +3275,7 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
         });
 
         if (!track?.filePath) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         const cacheKey = buildAudioInfoCacheKey(
@@ -3294,7 +3298,7 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
         );
 
         if (!fs.existsSync(absolutePath)) {
-            return res.status(404).json({ error: "File not found on disk" });
+            return sendRouteError(res, 404, "File not found on disk");
         }
 
         const { parseFile } = await import("music-metadata");
@@ -3319,7 +3323,7 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
         res.json(payload);
     } catch (error) {
         logger.error("Get audio info error:", error);
-        res.status(500).json({ error: "Failed to read audio metadata" });
+        sendInternalRouteError(res, "Failed to read audio metadata");
     }
 });
 
@@ -3345,7 +3349,7 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
         });
 
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         // Delete file from filesystem if path is available
@@ -3376,7 +3380,7 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
         res.json({ message: "Track deleted successfully" });
     } catch (error) {
         logger.error("Delete track error:", error);
-        res.status(500).json({ error: "Failed to delete track" });
+        sendInternalRouteError(res, "Failed to delete track");
     }
 });
 
@@ -3403,7 +3407,7 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
         });
 
         if (!album) {
-            return res.status(404).json({ error: "Album not found" });
+            return sendRouteError(res, 404, "Album not found");
         }
 
         // Delete all track files
@@ -3463,7 +3467,7 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
         });
     } catch (error) {
         logger.error("Delete album error:", error);
-        res.status(500).json({ error: "Failed to delete album" });
+        sendInternalRouteError(res, "Failed to delete album");
     }
 });
 
@@ -3489,7 +3493,7 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
         });
 
         if (!artist) {
-            return res.status(404).json({ error: "Artist not found" });
+            return sendRouteError(res, 404, "Artist not found");
         }
 
         // Delete all track files and collect actual artist folders from file paths
@@ -3749,7 +3753,7 @@ router.get("/genres", async (req, res) => {
         res.json({ genres });
     } catch (error) {
         logger.error("Genres endpoint error:", error);
-        res.status(500).json({ error: "Failed to get genres" });
+        sendInternalRouteError(res, "Failed to get genres");
     }
 });
 
@@ -3793,7 +3797,7 @@ router.get("/decades", async (req, res) => {
         res.json({ decades });
     } catch (error) {
         logger.error("Decades endpoint error:", error);
-        res.status(500).json({ error: "Failed to get decades" });
+        sendInternalRouteError(res, "Failed to get decades");
     }
 });
 
@@ -3821,7 +3825,7 @@ router.get("/radio", async (req, res) => {
         const userId = req.user?.id;
 
         if (!radioType) {
-            return res.status(400).json({ error: "Radio type is required" });
+            return sendRouteError(res, 400, "Radio type is required");
         }
 
         let trackIds: string[] = [];
@@ -4486,7 +4490,7 @@ router.get("/radio", async (req, res) => {
                 })) as any; // Cast to any to include all Track fields
 
                 if (!sourceTrack) {
-                    return res.status(404).json({ error: "Track not found" });
+                    return sendRouteError(res, 404, "Track not found");
                 }
 
                 const sourceHasReliableEnhancedAnalysis =
@@ -5327,7 +5331,7 @@ router.get("/radio", async (req, res) => {
         res.json(response);
     } catch (error) {
         logger.error("Radio endpoint error:", error);
-        res.status(500).json({ error: "Failed to get radio tracks" });
+        sendInternalRouteError(res, "Failed to get radio tracks");
     }
 });
 

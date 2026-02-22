@@ -37,6 +37,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/podcasts.ts` | `/api/podcasts` |
 | `backend/src/routes/recommendations.ts` | `/api/recommendations` |
 | `backend/src/routes/releases.ts` | `/api/releases` |
+| `backend/src/routes/routeErrorResponse.ts` | (not found in `backend/src/index.ts` mounts) |
 | `backend/src/routes/search.ts` | `/api/search` |
 | `backend/src/routes/settings.ts` | `/api/settings` |
 | `backend/src/routes/social.ts` | `/api/social` |

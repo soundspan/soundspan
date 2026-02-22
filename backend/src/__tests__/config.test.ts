@@ -132,6 +132,35 @@ describe("config module", () => {
         expect(prodModule.config.allowedOrigins).toEqual([]);
     });
 
+    it("preserves malformed numeric env coercion behavior", async () => {
+        const { config } = await loadConfigModule({
+            PORT: "not-a-number",
+            TRANSCODE_CACHE_MAX_GB: "invalid-size",
+        });
+
+        expect(Number.isNaN(config.port)).toBe(true);
+        expect(Number.isNaN(config.music.transcodeCacheMaxGb)).toBe(true);
+    });
+
+    it("treats only literal true as an enabled feature flag", async () => {
+        const { config } = await loadConfigModule({
+            LIDARR_ENABLED: "TRUE",
+            LIDARR_URL: "http://lidarr:8686",
+            LIDARR_API_KEY: "ignored",
+        });
+
+        expect(config.lidarr).toBeUndefined();
+    });
+
+    it("keeps explicit empty allowed-origins input without fallback", async () => {
+        const { config } = await loadConfigModule({
+            NODE_ENV: "production",
+            ALLOWED_ORIGINS: "",
+        });
+
+        expect(config.allowedOrigins).toEqual([""]);
+    });
+
     it("logs validation errors and exits for invalid environment variables", async () => {
         const exitSpy = jest
             .spyOn(process, "exit")

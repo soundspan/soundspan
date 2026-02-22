@@ -12,16 +12,16 @@ Scope:
 | --- | --- | --- | --- | --- | --- |
 | Backend middleware | 4 | 7 | 7 | 0 | 100.0% |
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
-| Backend routes | 38 | 54 | 1 | 53 | 1.9% |
+| Backend routes | 39 | 54 | 1 | 53 | 1.9% |
 | Backend services | 73 | 89 | 59 | 30 | 66.3% |
-| Backend utils | 28 | 75 | 56 | 19 | 74.7% |
+| Backend utils | 29 | 78 | 56 | 22 | 71.8% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
-| Frontend components | 70 | 70 | 12 | 58 | 17.1% |
+| Frontend components | 71 | 71 | 12 | 59 | 16.9% |
 | Frontend features | 135 | 114 | 8 | 106 | 7.0% |
-| Frontend hooks | 25 | 82 | 55 | 27 | 67.1% |
-| Frontend lib | 44 | 53 | 17 | 36 | 32.1% |
+| Frontend hooks | 26 | 86 | 58 | 28 | 67.4% |
+| Frontend lib | 46 | 56 | 17 | 39 | 30.4% |
 | Frontend other | 61 | 58 | 6 | 52 | 10.3% |
-| **Total** | **502** | **630** | **238** | **392** | **37.8%** |
+| **Total** | **508** | **641** | **241** | **400** | **37.6%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -112,6 +112,9 @@ Scope:
 | Backend services | SegmentedSessionError | backend/src/services/segmented-streaming/sessionService.ts:119 |
 | Backend utils | DependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:114 |
 | Backend utils | createDependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:192 |
+| Backend utils | parseEnvInt | backend/src/utils/envParsers.ts:1 |
+| Backend utils | parseEnvCsv | backend/src/utils/envParsers.ts:13 |
+| Backend utils | isEnvFlagEnabled | backend/src/utils/envParsers.ts:9 |
 | Backend utils | EnvFileSyncSkippedError | backend/src/utils/envWriter.ts:5 |
 | Backend utils | createLogger | backend/src/utils/logger.ts:125 |
 | Backend utils | logErrorWithContext | backend/src/utils/logger.ts:171 |
@@ -146,7 +149,7 @@ Scope:
 | Frontend components | SocialTab | frontend/components/activity/SocialTab.tsx:30 |
 | Frontend components | DownloadNotifications | frontend/components/DownloadNotifications.tsx:20 |
 | Frontend components | EnrichmentFailuresModal | frontend/components/EnrichmentFailuresModal.tsx:19 |
-| Frontend components | ActivityPanelToggle | frontend/components/layout/ActivityPanel.tsx:367 |
+| Frontend components | ActivityPanelToggle | frontend/components/layout/ActivityPanel.tsx:371 |
 | Frontend components | ActivityPanel | frontend/components/layout/ActivityPanel.tsx:52 |
 | Frontend components | getActivityPanelBadgeState | frontend/components/layout/activityPanelTabs.ts:24 |
 | Frontend components | getActivityTabBadge | frontend/components/layout/activityPanelTabs.ts:46 |
@@ -164,8 +167,9 @@ Scope:
 | Frontend components | MoodMixer | frontend/components/MoodMixer.tsx:110 |
 | Frontend components | shouldAutoMatchVibeAtQueueEnd | frontend/components/player/autoMatchVibePlayback.ts:9 |
 | Frontend components | KeyboardShortcutsTooltip | frontend/components/player/KeyboardShortcutsTooltip.tsx:6 |
-| Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:22 |
-| Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:111 |
+| Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:23 |
+| Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:100 |
+| Frontend components | PlaybackQualityBadge | frontend/components/player/PlaybackQualityBadge.tsx:37 |
 | Frontend components | PlayerModeWrapper | frontend/components/player/PlayerModeWrapper.tsx:6 |
 | Frontend components | SeekSlider | frontend/components/player/SeekSlider.tsx:29 |
 | Frontend components | SyncedLyrics | frontend/components/player/SyncedLyrics.tsx:79 |
@@ -273,7 +277,3 @@ Scope:
 | Frontend features | AIServicesSection | frontend/features/settings/components/sections/AIServicesSection.tsx:15 |
 | Frontend features | AudiobookshelfSection | frontend/features/settings/components/sections/AudiobookshelfSection.tsx:15 |
 | Frontend features | CacheSection | frontend/features/settings/components/sections/CacheSection.tsx:147 |
-| Frontend features | DownloadPreferencesSection | frontend/features/settings/components/sections/DownloadPreferencesSection.tsx:12 |
-| Frontend features | DownloadServicesSection | frontend/features/settings/components/sections/DownloadServicesSection.tsx:16 |
-| Frontend features | IntegrationsSection | frontend/features/settings/components/sections/IntegrationsSection.tsx:13 |
-| Frontend features | LibrarySafetySection | frontend/features/settings/components/sections/LibrarySafetySection.tsx:9 |
