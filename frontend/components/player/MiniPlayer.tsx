@@ -18,6 +18,7 @@ import { cn } from "@/utils/cn";
 import { clampTime } from "@/utils/formatTime";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { PlaybackQualityBadge } from "@/components/player/PlaybackQualityBadge";
 
 export function MiniPlayer() {
     const {
@@ -145,19 +146,10 @@ export function MiniPlayer() {
                                         {subtitle}
                                     </p>
                                     {qualityBadge ? (
-                                        <span
-                                            className={cn(
-                                                "max-w-[45vw] flex-shrink-0 overflow-hidden text-ellipsis whitespace-nowrap rounded px-1 py-0.5 text-[9px] font-bold leading-none",
-                                                qualityBadge.variant === "tidal"
-                                                    ? "bg-[#00BFFF]/20 text-[#00BFFF]"
-                                                    : qualityBadge.variant === "youtube"
-                                                        ? "bg-red-500/20 text-red-400"
-                                                        : "bg-emerald-500/20 text-emerald-400"
-                                            )}
-                                            title={qualityBadge.label}
-                                        >
-                                            {qualityBadge.label}
-                                        </span>
+                                        <PlaybackQualityBadge
+                                            badge={qualityBadge}
+                                            size="mini"
+                                        />
                                     ) : null}
                                     <SyncBadge compact />
                                 </div>

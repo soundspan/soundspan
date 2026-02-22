@@ -28,6 +28,7 @@ const state = {
     isMobile: true,
     isTablet: false,
     playerMode: "mini" as string,
+    qualityBadge: null as { variant: "tidal" | "youtube" | "local"; label: string } | null,
 };
 
 // Stub icon component
@@ -103,6 +104,7 @@ mock.module("@/hooks/useStreamBitrate", {
             codec: null,
             tidalQuality: null,
             localQuality: null,
+            qualityBadge: state.qualityBadge,
         }),
         formatLocalQualityBadge: () => null,
         formatYtQualityBadge: () => null,
@@ -168,6 +170,7 @@ beforeEach(() => {
     state.isMobile = true;
     state.isTablet = false;
     state.playerMode = "mini";
+    state.qualityBadge = null;
 });
 
 test("MiniPlayer renders Next Track button", async () => {
@@ -215,4 +218,23 @@ test("MiniPlayer does not render thumbs for audiobook playback", async () => {
     assert.match(html, /Test Audiobook|Playback controls/, "Should render MiniPlayer for audiobook");
     // But should NOT render TrackPreferenceButtons for audiobooks
     assert.doesNotMatch(html, /track-pref-buttons/, "Should not render thumbs for audiobook");
+});
+
+test("MiniPlayer renders playback quality badge label with shared badge component", async () => {
+    state.qualityBadge = { variant: "tidal", label: "TIDAL · FLAC · 24/96kHz" };
+
+    const { MiniPlayer } = await import("../../components/player/MiniPlayer.tsx");
+
+    const html = renderToStaticMarkup(React.createElement(MiniPlayer));
+
+    assert.match(
+        html,
+        /TIDAL · FLAC · 24\/96kHz/,
+        "Should render shared quality badge label text"
+    );
+    assert.match(
+        html,
+        /bg-\[#00BFFF\]\/20 text-\[#00BFFF\]/,
+        "Should apply tidal badge style classes"
+    );
 });

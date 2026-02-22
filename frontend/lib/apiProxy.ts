@@ -1,4 +1,5 @@
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { normalizeApiBaseUrlInput } from "./api-base-url";
 const getEnv = (): Record<string, string | undefined> => {
     return (globalThis as { process?: { env?: Record<string, string | undefined> } })
         .process?.env ?? {};
@@ -6,10 +7,10 @@ const getEnv = (): Record<string, string | undefined> => {
 
 const getBackendUrl = (): string => {
     const env = getEnv();
-    const base =
-        env?.BACKEND_URL ||
-        "http://127.0.0.1:3006";
-    return base.replace(/\/$/, "");
+    return (
+        normalizeApiBaseUrlInput(env?.BACKEND_URL) ??
+        "http://127.0.0.1:3006"
+    );
 };
 
 const getProxyTimeoutMs = (): number => {

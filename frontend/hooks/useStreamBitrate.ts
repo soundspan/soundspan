@@ -220,8 +220,10 @@ export interface PlaybackQualityBadge {
     label: string;
 }
 
+export type PlaybackStreamSource = "local" | "tidal" | "youtube";
+
 export function resolvePlaybackQualityBadge(input: {
-    streamSource?: "local" | "tidal" | "youtube";
+    streamSource?: PlaybackStreamSource;
     tidalQuality: TidalStreamQuality | null;
     localQuality: LocalTrackQuality | null;
     codec: string | null;
@@ -250,6 +252,18 @@ export function resolvePlaybackQualityBadge(input: {
         variant: "local",
         label: localLabel,
     };
+}
+
+export function resolvePlaybackQualityBadgeFromStreamSource(
+    streamSource: PlaybackStreamSource | undefined,
+): PlaybackQualityBadge | null {
+    return resolvePlaybackQualityBadge({
+        streamSource,
+        tidalQuality: null,
+        localQuality: null,
+        codec: null,
+        bitrate: null,
+    });
 }
 
 /**

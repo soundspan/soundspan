@@ -22,6 +22,7 @@ import {
     parsePlaybackStateSaveTimestamp,
     shouldSkipPlaybackStatePoll,
 } from "@/lib/playback-state-cadence";
+import { clampNonNegativePlaybackTime } from "@/lib/audio-playback-normalization";
 import { resolveInitialAudioVolume } from "@/lib/audio-volume";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
@@ -406,7 +407,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         typeof serverState.currentTime === "number" &&
                         Number.isFinite(serverState.currentTime)
                     ) {
-                            const safeCurrentTime = Math.max(0, serverState.currentTime);
+                            const safeCurrentTime = clampNonNegativePlaybackTime(
+                                serverState.currentTime
+                            );
                             try {
                             writeMigratingStorageItem(
                                 STORAGE_KEYS.CURRENT_TIME,

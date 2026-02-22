@@ -24,6 +24,11 @@ import { getListenTogetherSessionSnapshot } from "./listen-together-session";
 import { toast } from "sonner";
 import { computePlayNowInsertion } from "./queue-utils";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { clampAudioVolume } from "@/lib/audio-volume";
+import {
+    clampPlaybackTimeToUpperBound,
+    resolvePlaybackTimeUpperBound,
+} from "@/lib/audio-playback-normalization";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -483,9 +488,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     : state.playbackType === "audiobook"
                     ? state.currentAudiobook?.duration || 0
                     : state.currentTrack?.duration || 0;
-            const clampedTarget = mediaDuration > 0
-                ? Math.min(Math.max(targetSec, 0), mediaDuration)
-                : Math.max(targetSec, 0);
+            const clampedTarget = clampPlaybackTimeToUpperBound(
+                targetSec,
+                mediaDuration
+            );
 
             playbackState.lockSeek(clampedTarget);
             playbackState.setCurrentTime(clampedTarget);
@@ -1082,14 +1088,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     : state.playbackType === "audiobook"
                     ? state.currentAudiobook?.duration || 0
                     : state.currentTrack?.duration || 0;
-            const maxDuration =
-                mediaDuration > 0 && playbackState.duration > 0
-                    ? Math.min(mediaDuration, playbackState.duration)
-                    : mediaDuration || playbackState.duration || 0;
-            const clampedTime =
-                maxDuration > 0
-                    ? Math.min(Math.max(time, 0), maxDuration)
-                    : Math.max(time, 0);
+            const maxDuration = resolvePlaybackTimeUpperBound(
+                mediaDuration,
+                playbackState.duration
+            );
+            const clampedTime = clampPlaybackTimeToUpperBound(
+                time,
+                maxDuration
+            );
 
             // Lock seek to prevent stale timeupdate events from overwriting optimistic update
             // This is especially important for podcasts where seeking may require audio reload
@@ -1190,7 +1196,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const setVolumeControl = useCallback(
         (newVolume: number) => {
-            const clampedVolume = Math.max(0, Math.min(1, newVolume));
+            const clampedVolume = clampAudioVolume(newVolume);
             state.setVolume(clampedVolume);
             if (clampedVolume > 0) {
                 state.setIsMuted(false);

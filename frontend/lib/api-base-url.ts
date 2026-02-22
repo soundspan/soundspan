@@ -20,13 +20,13 @@ export interface ResolveApiBaseUrlOptions {
     browserLocation?: BrowserLocationLike;
 }
 
-const normalizeBaseUrl = (value?: string): string | null => {
+export const normalizeApiBaseUrlInput = (value?: string): string | null => {
     const trimmed = value?.trim();
     if (!trimmed) return null;
     return trimmed.replace(/\/+$/, "");
 };
 
-const parseApiPathMode = (value?: string): ApiPathMode => {
+export const resolveApiPathMode = (value?: string): ApiPathMode => {
     const normalized = value?.trim().toLowerCase();
     if (
         normalized === "auto" ||
@@ -50,16 +50,19 @@ export const resolveApiBaseUrl = (
 ): string => {
     if (options.isServer) {
         return (
-            normalizeBaseUrl(options.backendUrl) ?? DEFAULT_SERVER_BACKEND_URL
+            normalizeApiBaseUrlInput(options.backendUrl) ??
+            DEFAULT_SERVER_BACKEND_URL
         );
     }
 
-    const mode = parseApiPathMode(options.apiPathMode);
+    const mode = resolveApiPathMode(options.apiPathMode);
     if (mode === "proxy") {
         return "";
     }
 
-    const configuredApiUrl = normalizeBaseUrl(options.configuredApiUrl);
+    const configuredApiUrl = normalizeApiBaseUrlInput(
+        options.configuredApiUrl
+    );
     if (mode === "direct") {
         if (configuredApiUrl) {
             return configuredApiUrl;

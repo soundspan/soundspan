@@ -85,6 +85,10 @@ export function ActivityPanel({
         [downloadStatus.activeDownloads]
     );
     const pollingEnabled = isOpen;
+    const pollingOptions = useMemo(
+        () => ({ enabled: pollingEnabled }),
+        [pollingEnabled]
+    );
     const {
         notifications,
         unreadCount,
@@ -93,12 +97,12 @@ export function ActivityPanel({
         markAsRead,
         clearNotification,
         clearAll,
-    } = useNotifications({ enabled: pollingEnabled });
+    } = useNotifications(pollingOptions);
     const {
         users: socialUsers,
         isLoading: isSocialLoading,
         error: socialError,
-    } = useSocialPresence({ enabled: pollingEnabled });
+    } = useSocialPresence(pollingOptions);
     const refetchActiveDownloads = useCallback(async () => {
         window.dispatchEvent(new CustomEvent("download-status-changed"));
     }, []);

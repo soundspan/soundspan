@@ -32,6 +32,7 @@ import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { SeekSlider } from "./SeekSlider";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
+import { PlaybackQualityBadge } from "./PlaybackQualityBadge";
 
 /**
  * FullPlayer - UI-only component for desktop bottom player
@@ -268,19 +269,10 @@ export function FullPlayer() {
                             {/* Quality & status badges */}
                             <div className="flex items-center gap-1.5 flex-wrap mt-1">
                             {qualityBadge ? (
-                                <span
-                                    className={cn(
-                                        "inline-flex max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-bold px-1.5 py-0.5 rounded",
-                                        qualityBadge.variant === "tidal"
-                                            ? "bg-[#00BFFF]/20 text-[#00BFFF]"
-                                            : qualityBadge.variant === "youtube"
-                                                ? "bg-red-500/20 text-red-400"
-                                                : "bg-emerald-500/20 text-emerald-400"
-                                    )}
-                                    title={qualityBadge.label}
-                                >
-                                    {qualityBadge.label}
-                                </span>
+                                <PlaybackQualityBadge
+                                    badge={qualityBadge}
+                                    size="full"
+                                />
                             ) : null}
                             {/* Vibe match score when in vibe mode */}
                             {vibeMode && vibeMatchScore !== null && (

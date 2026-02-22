@@ -24,6 +24,7 @@ import {
     PLAYBACK_PROGRESS_SAVE_INTERVAL_MS,
 } from "@/lib/playback-state-cadence";
 import { resolveHydratedPlaybackIntent } from "@/lib/playback-intent";
+import { clampNonNegativePlaybackTime } from "@/lib/audio-playback-normalization";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export interface PlaybackStreamProfile {
@@ -384,7 +385,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                     currentIndex: adjustedIndex,
                     isShuffle: state.isShuffle,
                     isPlaying,
-                    currentTime: Math.max(0, currentTimeRef.current),
+                    currentTime: clampNonNegativePlaybackTime(
+                        currentTimeRef.current
+                    ),
                 });
                 lastServerProgressSaveRef.current = now;
                 writeMigratingStorageItem(

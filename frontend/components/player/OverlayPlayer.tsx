@@ -3,7 +3,7 @@
 import { useAudio } from "@/lib/audio-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useLyrics } from "@/hooks/useLyrics";
-import { resolvePlaybackQualityBadge } from "@/hooks/useStreamBitrate";
+import { resolvePlaybackQualityBadgeFromStreamSource } from "@/hooks/useStreamBitrate";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Image from "next/image";
@@ -97,17 +97,6 @@ interface RelatedStreamMatch {
     duration?: number;
 }
 
-const resolveOverlayQualityBadge = (
-    streamSource: "tidal" | "youtube" | undefined,
-) =>
-    resolvePlaybackQualityBadge({
-        streamSource,
-        tidalQuality: null,
-        localQuality: null,
-        codec: null,
-        bitrate: null,
-    });
-
 export function OverlayPlayer() {
     const {
         currentTrack,
@@ -180,7 +169,7 @@ export function OverlayPlayer() {
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
     const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(500);
     const currentTrackQualityBadge = useMemo(
-        () => resolveOverlayQualityBadge(currentTrack?.streamSource),
+        () => resolvePlaybackQualityBadgeFromStreamSource(currentTrack?.streamSource),
         [currentTrack?.streamSource],
     );
     const canSkip = playbackType === "track";
@@ -1755,7 +1744,7 @@ export function OverlayPlayer() {
                                                             const isCurrentTrack = queueIndex === currentIndex;
                                                             const isPlayedTrack = queueIndex < currentIndex;
                                                             const queueTrackQualityBadge =
-                                                                resolveOverlayQualityBadge(
+                                                                resolvePlaybackQualityBadgeFromStreamSource(
                                                                     track.streamSource,
                                                                 );
                                                             return (

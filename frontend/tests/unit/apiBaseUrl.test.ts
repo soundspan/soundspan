@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveApiBaseUrl } from "../../lib/api-base-url.ts";
+import {
+    normalizeApiBaseUrlInput,
+    resolveApiBaseUrl,
+    resolveApiPathMode,
+} from "../../lib/api-base-url.ts";
 
 test("resolveApiBaseUrl auto mode uses proxy path on canonical frontend ports", () => {
     const result = resolveApiBaseUrl({
@@ -99,4 +103,26 @@ test("resolveApiBaseUrl server mode uses BACKEND_URL and strips trailing slash",
         backendUrl: "http://127.0.0.1:3007/",
     });
     assert.equal(result, "http://127.0.0.1:3007");
+});
+
+test("resolveApiPathMode trims and lowercases mode values", () => {
+    assert.equal(resolveApiPathMode(" PROXY "), "proxy");
+    assert.equal(resolveApiPathMode(" DiReCt "), "direct");
+});
+
+test("resolveApiPathMode falls back to auto for empty or invalid values", () => {
+    assert.equal(resolveApiPathMode(""), "auto");
+    assert.equal(resolveApiPathMode("bogus"), "auto");
+});
+
+test("normalizeApiBaseUrlInput trims and removes all trailing slashes", () => {
+    assert.equal(
+        normalizeApiBaseUrlInput(" https://api.example.com/// "),
+        "https://api.example.com"
+    );
+});
+
+test("normalizeApiBaseUrlInput returns null for missing or whitespace input", () => {
+    assert.equal(normalizeApiBaseUrlInput(undefined), null);
+    assert.equal(normalizeApiBaseUrlInput("   "), null);
 });
