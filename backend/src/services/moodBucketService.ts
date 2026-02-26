@@ -10,6 +10,7 @@ import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { shuffleArray } from "../utils/shuffle";
 import { applyArtistCap } from "./programmaticPlaylistArtistCap";
+import { separateArtists } from "../utils/separateArtists";
 
 // Mood configuration with scoring rules
 // Primary = uses ML mood predictions (enhanced mode)
@@ -561,16 +562,19 @@ export class MoodBucketService {
             .map((id) => tracks.find((t) => t.id === id))
             .filter((track) => track !== undefined);
 
-        const selectedTracks = applyArtistCap(orderedTracks, {
-            maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
-            targetCount: limit,
-            preserveInputOrder: true,
-            fallback: {
-                enabled: true,
-                maxRelaxedPerArtist: this.MAX_RELAXED_TRACKS_PER_ARTIST,
-                refillFromExcludedAfterMaxRelaxation: true,
-            },
-        });
+        const selectedTracks = separateArtists(
+            applyArtistCap(orderedTracks, {
+                maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
+                targetCount: limit,
+                preserveInputOrder: true,
+                fallback: {
+                    enabled: true,
+                    maxRelaxedPerArtist: this.MAX_RELAXED_TRACKS_PER_ARTIST,
+                    refillFromExcludedAfterMaxRelaxation: true,
+                },
+            }),
+            (t) => t.album.artist.id
+        );
 
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)

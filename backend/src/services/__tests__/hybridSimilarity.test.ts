@@ -28,6 +28,7 @@ function buildSimilarTrack(overrides: Partial<SimilarTrack> = {}): SimilarTrack 
     return {
         id: "track-2",
         title: "Candidate Track",
+        duration: 240,
         distance: 0.12,
         similarity: 0.88,
         albumId: "album-1",
@@ -35,6 +36,10 @@ function buildSimilarTrack(overrides: Partial<SimilarTrack> = {}): SimilarTrack 
         albumCoverUrl: "https://covers/album-1.jpg",
         artistId: "artist-1",
         artistName: "Artist One",
+        energy: null,
+        valence: null,
+        danceability: null,
+        arousal: null,
         ...overrides,
     };
 }
@@ -241,5 +246,65 @@ describe("hybridSimilarity service", () => {
         expect(result).toHaveLength(limit);
         expect(Math.max(...Object.values(artistCounts))).toBeLessThanOrEqual(2);
         expect(artistCounts["artist-a"]).toBe(2);
+    });
+
+    it("handles candidates with missing artistId using unknown track fallback keys", async () => {
+        const sourceTrackId = "source-track-missing-artist";
+        mockGetFeatures.mockResolvedValueOnce({
+            vibeEmbeddings: true,
+            musicCNN: true,
+        });
+        mockQueryRaw.mockResolvedValueOnce([
+            buildSimilarTrack({
+                id: "missing-artist-1",
+                artistId: "" as unknown as string,
+                artistName: "Unknown Artist 1",
+            }),
+            buildSimilarTrack({
+                id: "missing-artist-2",
+                artistId: "" as unknown as string,
+                artistName: "Unknown Artist 2",
+            }),
+            buildSimilarTrack({
+                id: "artist-b-1",
+                artistId: "artist-b",
+                artistName: "Artist B",
+            }),
+        ]);
+
+        const result = await findSimilarTracks(sourceTrackId, 3);
+
+        expect(result).toHaveLength(3);
+        expect(result.map((track) => track.id)).toEqual([
+            "missing-artist-1",
+            "missing-artist-2",
+            "artist-b-1",
+        ]);
+    });
+
+    it("uses unknown artist fallback keys during overflow rebalancing", async () => {
+        const sourceTrackId = "source-track-missing-artist-overflow";
+        const limit = 6;
+        mockGetFeatures.mockResolvedValueOnce({
+            vibeEmbeddings: true,
+            musicCNN: true,
+        });
+        mockQueryRaw.mockResolvedValueOnce([
+            buildSimilarTrack({ id: "artist-a-1", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "artist-a-2", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "artist-a-3", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({ id: "artist-a-4", artistId: "artist-a", artistName: "Artist A" }),
+            buildSimilarTrack({
+                id: "missing-artist-overflow",
+                artistId: "" as unknown as string,
+                artistName: "Unknown Artist",
+            }),
+            buildSimilarTrack({ id: "artist-b-1", artistId: "artist-b", artistName: "Artist B" }),
+        ]);
+
+        const result = await findSimilarTracks(sourceTrackId, limit);
+
+        expect(result).toHaveLength(limit);
+        expect(result.map((track) => track.id)).toContain("missing-artist-overflow");
     });
 });

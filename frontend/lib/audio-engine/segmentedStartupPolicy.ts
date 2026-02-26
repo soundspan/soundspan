@@ -1,7 +1,7 @@
 export type SegmentedPrewarmReason = "startup_background" | "next_track";
 
 const SEGMENTED_STARTUP_PREWARM_MAX_RETRIES = 12;
-const SEGMENTED_NEXT_TRACK_PREWARM_MAX_RETRIES = 5;
+const SEGMENTED_NEXT_TRACK_PREWARM_MAX_RETRIES = 2;
 
 interface ProactiveSegmentedHandoffEligibilityInput {
     playbackType: string;

@@ -220,10 +220,10 @@ test("Queue page Next Up tracks render TrackOverflowMenu trigger", async () => {
 
     const html = renderToStaticMarkup(React.createElement(QueuePage));
 
-    // Should have overflow menu triggers for each Next Up track (2 tracks after currentIndex)
+    // Should have overflow menu triggers for Now Playing + each Next Up track (1 + 2)
     const triggerMatches = html.match(/aria-haspopup="menu"/g);
     assert.ok(triggerMatches, "Should render overflow menu triggers");
-    assert.equal(triggerMatches!.length, 2, "Should have one trigger per Next Up track");
+    assert.equal(triggerMatches!.length, 3, "Should have trigger for Now Playing + each Next Up track");
 });
 
 test("Queue page replaces standalone Remove button with overflow menu", async () => {

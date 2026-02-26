@@ -143,14 +143,14 @@ const TrackRow = memo(
 
                 {/* Actions + Duration */}
                 <div className="flex items-center gap-1">
-                    <span className="text-xs text-gray-500 w-10 text-right">
+                    <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
                         {formatTime(track.duration)}
                     </span>
                     <TrackPreferenceButtons
                         trackId={track.id}
                         mode="both"
-                        buttonSizeClassName="h-10 w-10"
-                        iconSizeClassName="h-5 w-5"
+                        buttonSizeClassName="h-8 w-8"
+                        iconSizeClassName="h-4 w-4"
                     />
                     <TrackOverflowMenu
                         track={overflowTrack}

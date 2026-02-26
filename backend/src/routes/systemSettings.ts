@@ -263,8 +263,6 @@ router.post("/", async (req, res) => {
                 OPENAI_API_KEY: data.openaiApiKey || null,
                 AUDIOBOOKSHELF_URL: data.audiobookshelfUrl || null,
                 AUDIOBOOKSHELF_API_KEY: data.audiobookshelfApiKey || null,
-                SOULSEEK_USERNAME: data.soulseekUsername || null,
-                SOULSEEK_PASSWORD: data.soulseekPassword || null,
             });
             logger.debug(".env file synchronized with database settings");
         } catch (envError) {

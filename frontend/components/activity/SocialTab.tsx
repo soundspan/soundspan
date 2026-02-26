@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Music2, Users, Radio } from "lucide-react";
+import { Music2, Users } from "lucide-react";
 import { cn } from "@/utils/cn";
 import {
     useSocialPresence,
@@ -169,11 +169,11 @@ export function SocialTab({
                                         </span>
                                         {user.isInListenTogetherGroup && (
                                             <span
-                                                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[#3b82f6] bg-[#3b82f6]/10 border border-[#3b82f6]/25 rounded px-1.5 py-0.5"
+                                                className="inline-flex items-center justify-center font-bold rounded text-[9px] px-1 py-0.5 leading-none bg-[#2323FF]/20 text-[#5b5bff]"
                                                 title="In a Listen Together session"
+                                                aria-label="In a Listen Together session"
                                             >
-                                                <Radio className="w-3 h-3" />
-                                                Listen Together
+                                                <Users className="w-2.5 h-2.5" />
                                             </span>
                                         )}
                                     </div>

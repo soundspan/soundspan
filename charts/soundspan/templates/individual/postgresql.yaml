@@ -38,24 +38,52 @@ spec:
             - name: postgres
               containerPort: {{ .Values.postgresql.port }}
               protocol: TCP
+          {{- $postgresqlEnv := .Values.postgresql.env | default (dict) }}
+          {{- $postgresqlExplicitEnvKeys := dict "POSTGRES_USER" true "POSTGRES_PASSWORD" true "POSTGRES_DB" true "PGDATA" true }}
           env:
+            {{- if hasKey $postgresqlEnv "POSTGRES_USER" }}
+            - name: POSTGRES_USER
+              value: {{ index $postgresqlEnv "POSTGRES_USER" | quote }}
+            {{- else }}
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_USER
+            {{- end }}
+            {{- if hasKey $postgresqlEnv "POSTGRES_PASSWORD" }}
+            - name: POSTGRES_PASSWORD
+              value: {{ index $postgresqlEnv "POSTGRES_PASSWORD" | quote }}
+            {{- else }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_PASSWORD
+            {{- end }}
+            {{- if hasKey $postgresqlEnv "POSTGRES_DB" }}
+            - name: POSTGRES_DB
+              value: {{ index $postgresqlEnv "POSTGRES_DB" | quote }}
+            {{- else }}
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_DB
+            {{- end }}
+            {{- if hasKey $postgresqlEnv "PGDATA" }}
+            - name: PGDATA
+              value: {{ index $postgresqlEnv "PGDATA" | quote }}
+            {{- else }}
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+            {{- end }}
+            {{- range $key := keys $postgresqlEnv | sortAlpha }}
+            {{- if not (hasKey $postgresqlExplicitEnvKeys $key) }}
+            - name: {{ $key }}
+              value: {{ index $postgresqlEnv $key | quote }}
+            {{- end }}
+            {{- end }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
           {{- $postgresqlEnvFrom := .Values.postgresql.envFrom | default (list) }}

@@ -17,8 +17,8 @@ const logger = createFrontendLogger("AudioErrorBoundary");
 
 /**
  * Error boundary specifically for audio-related errors.
- * Catches errors in the audio provider hierarchy and allows the rest of the app to continue.
- * Falls through gracefully without breaking the entire application.
+ * Catches errors in the audio provider hierarchy.
+ * Renders explicit fallback content when provided.
  */
 export class AudioErrorBoundary extends Component<Props, State> {
     constructor(props: Props) {
@@ -44,7 +44,7 @@ export class AudioErrorBoundary extends Component<Props, State> {
                 return this.props.fallback;
             }
 
-            return this.props.children;
+            return null;
         }
 
         return this.props.children;

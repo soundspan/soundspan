@@ -40,6 +40,13 @@ jest.mock("../lastfm", () => ({
     lastFmService,
 }));
 
+const mockDeezerGetAlbumCover = jest.fn();
+jest.mock("../deezer", () => ({
+    deezerService: {
+        getAlbumCover: (...args: any[]) => mockDeezerGetAlbumCover(...args),
+    },
+}));
+
 import { ImageProviderService } from "../imageProvider";
 
 describe("image provider service behavior", () => {
@@ -236,17 +243,8 @@ describe("image provider service behavior", () => {
             }
         );
 
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                data: [
-                    {
-                        title: 'Album "One"',
-                        artist: { name: "Artist A" },
-                        cover_xl: "https://deezer/album-xl.jpg",
-                    },
-                ],
-            },
-        });
+        // getAlbumCoverFromDeezer now delegates to deezerService.getAlbumCover()
+        mockDeezerGetAlbumCover.mockResolvedValueOnce("https://deezer/album-xl.jpg");
         await expect(
             (service as any).getAlbumCoverFromDeezer(
                 "Ａrtist A",
@@ -258,25 +256,12 @@ describe("image provider service behavior", () => {
             source: "deezer",
             size: "xl",
         });
+        expect(mockDeezerGetAlbumCover).toHaveBeenCalledWith("Ａrtist A", 'Album “One”');
 
-        mockAxiosGet.mockResolvedValueOnce({
-            data: {
-                data: [
-                    {
-                        title: "Fallback Album",
-                        artist: { name: "Fallback Artist" },
-                        cover: "https://deezer/fallback-cover.jpg",
-                    },
-                ],
-            },
-        });
+        mockDeezerGetAlbumCover.mockResolvedValueOnce(null);
         await expect(
             (service as any).getAlbumCoverFromDeezer("No Match", "No Match", 3000)
-        ).resolves.toEqual({
-            url: "https://deezer/fallback-cover.jpg",
-            source: "deezer",
-            size: "xl",
-        });
+        ).resolves.toBeNull();
     });
 
     it("maps fanart artist/album responses and handles missing API key", async () => {

@@ -159,13 +159,13 @@ export class HeartbeatMonitor {
 
       if (this.staleCount >= this.config.staleThreshold) {
         if (!isActuallyPlaying) {
-          // Howler stopped but we didn't get an event
+          // Engine stopped but we didn't get an expected event
           if (this.debugEnabled) {
             sharedFrontendLogger.info('[Heartbeat] Unexpected stop detected');
           }
           this.callbacks.onUnexpectedStop();
         } else if (!this.isStalled) {
-          // Howler says playing but time isn't moving - network stall
+          // Engine says playing but time isn't moving - likely a network stall
           this.isStalled = true;
           if (this.debugEnabled) {
             sharedFrontendLogger.info('[Heartbeat] Stall detected');

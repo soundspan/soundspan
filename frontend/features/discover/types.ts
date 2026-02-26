@@ -2,6 +2,7 @@ export interface DiscoverTrack {
   id: string;
   title: string;
   artist: string;
+  artistId?: string | null;
   album: string;
   albumId: string;
   sourceType?: "local" | "tidal" | "youtube";

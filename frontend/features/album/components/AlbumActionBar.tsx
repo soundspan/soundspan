@@ -9,7 +9,6 @@ import {
     Loader2,
     Search,
     ThumbsUp,
-    ThumbsDown,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import type { Album } from "../types";
@@ -31,7 +30,6 @@ interface AlbumActionBarProps {
     onDownloadAlbum: () => void;
     onAddToPlaylist: () => void;
     onThumbsUpAlbum?: () => void;
-    onThumbsDownAlbum?: () => void;
     isPendingDownload: boolean;
     isApplyingAlbumPreference?: boolean;
     isPlaying?: boolean;
@@ -51,7 +49,6 @@ export function AlbumActionBar({
     onDownloadAlbum,
     onAddToPlaylist,
     onThumbsUpAlbum,
-    onThumbsDownAlbum,
     isPendingDownload,
     isApplyingAlbumPreference = false,
     isPlaying = false,
@@ -69,8 +66,7 @@ export function AlbumActionBar({
     const lockMessage = "Listen Together is active. Play, shuffle, and download are disabled here.";
     const canShowAddAllToQueue = Boolean(onAddAllToQueue);
     const canShowAddToPlaylist = isOwned;
-    const canShowAlbumPreference =
-        isOwned && (Boolean(onThumbsUpAlbum) || Boolean(onThumbsDownAlbum));
+    const canShowAlbumPreference = isOwned && Boolean(onThumbsUpAlbum);
     const hasActionControls =
         isInListenTogetherGroup
             ? hasLockedControls ||
@@ -249,25 +245,6 @@ export function AlbumActionBar({
 
                     {canShowAlbumPreference && (
                         <div className="flex items-center gap-1.5">
-                            {onThumbsDownAlbum && (
-                                <button
-                                    onClick={onThumbsDownAlbum}
-                                    disabled={isApplyingAlbumPreference}
-                                    className={cn(
-                                        "h-8 w-8 rounded-full flex items-center justify-center transition-colors",
-                                        isApplyingAlbumPreference ?
-                                            "cursor-not-allowed text-white/35"
-                                        :   "text-white/60 hover:bg-white/10 hover:text-white"
-                                    )}
-                                    title="Thumbs down every track on this album"
-                                >
-                                    {isApplyingAlbumPreference ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                        <ThumbsDown className="h-4 w-4" />
-                                    )}
-                                </button>
-                            )}
                             {onThumbsUpAlbum && (
                                 <button
                                     onClick={onThumbsUpAlbum}
@@ -278,7 +255,7 @@ export function AlbumActionBar({
                                             "cursor-not-allowed text-white/35"
                                         :   "text-white/60 hover:bg-white/10 hover:text-white"
                                     )}
-                                    title="Thumbs up every track on this album"
+                                    title="Like every track on this album"
                                 >
                                     {isApplyingAlbumPreference ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />

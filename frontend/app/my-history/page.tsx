@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { History, ListPlus, Plus, Play, Music2 } from "lucide-react";
+import { History, Music2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
@@ -64,7 +65,7 @@ function toAudioTrack(track: PlayHistoryTrack) {
         album: {
             id: track.album?.id,
             title: track.album?.title || "Unknown Album",
-            coverArt: track.album?.coverArt || track.album?.coverUrl || null,
+            coverArt: track.album?.coverArt || track.album?.coverUrl || undefined,
         },
     };
 }
@@ -83,16 +84,12 @@ function formatPlayedAt(isoDate: string): string {
 export default function MyHistoryPage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
-    const { playTracks, addToQueue } = useAudioControls();
+    const { playTracks } = useAudioControls();
     const { currentTrack } = useAudioState();
     const { toast } = useToast();
     const [history, setHistory] = useState<PlayHistoryEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
-    const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
-    const [isSavingToPlaylist, setIsSavingToPlaylist] = useState(false);
-
     useEffect(() => {
         if (!isAuthenticated) {
             router.push("/login");
@@ -125,30 +122,6 @@ export default function MyHistoryPage() {
         if (audioTracks.length === 0) return;
         playTracks(audioTracks, index);
         toast.success("Playing from history");
-    };
-
-    const handleAddToQueue = (track: PlayHistoryTrack) => {
-        addToQueue(toAudioTrack(track));
-        toast.success("Added to queue");
-    };
-
-    const handleOpenPlaylistSelector = (trackId: string) => {
-        setSelectedTrackId(trackId);
-        setShowPlaylistSelector(true);
-    };
-
-    const handleAddToPlaylist = async (playlistId: string) => {
-        if (!selectedTrackId) return;
-        try {
-            setIsSavingToPlaylist(true);
-            await api.addTrackToPlaylist(playlistId, selectedTrackId);
-            toast.success("Added to playlist");
-        } catch (err) {
-            sharedFrontendLogger.error("Failed to add track to playlist:", err);
-            toast.error("Failed to add track to playlist");
-        } finally {
-            setIsSavingToPlaylist(false);
-        }
     };
 
     if (!isAuthenticated) {
@@ -264,44 +237,17 @@ export default function MyHistoryPage() {
                                                 </p>
                                             </div>
 
-                                            <div className="text-xs text-gray-500 w-10 text-right">
-                                                {formatTime(track.duration)}
-                                            </div>
-
-                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        handlePlayFromHistory(index);
-                                                    }}
-                                                    className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10"
-                                                    aria-label="Play now"
-                                                    title="Play now"
-                                                >
-                                                    <Play className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        handleAddToQueue(track);
-                                                    }}
-                                                    className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10"
-                                                    aria-label="Add to queue"
-                                                    title="Add to queue"
-                                                >
-                                                    <ListPlus className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        handleOpenPlaylistSelector(track.id);
-                                                    }}
-                                                    className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10"
-                                                    aria-label="Add to playlist"
-                                                    title="Add to playlist"
-                                                >
-                                                    <Plus className="w-4 h-4" />
-                                                </button>
+                                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                                    {formatTime(track.duration)}
+                                                </span>
+                                                <TrackPreferenceButtons
+                                                    trackId={track.id}
+                                                    mode="up-only"
+                                                    buttonSizeClassName="h-8 w-8"
+                                                    iconSizeClassName="h-4 w-4"
+                                                />
+                                                <TrackOverflowMenu track={toAudioTrack(track)} />
                                             </div>
                                         </div>
                                     );
@@ -312,16 +258,6 @@ export default function MyHistoryPage() {
                 )}
             </div>
 
-            <PlaylistSelector
-                isOpen={showPlaylistSelector}
-                onClose={() => {
-                    setShowPlaylistSelector(false);
-                    setSelectedTrackId(null);
-                }}
-                onSelectPlaylist={handleAddToPlaylist}
-                isLoading={isSavingToPlaylist}
-                loadingMessage="Adding to playlist..."
-            />
         </div>
     );
 }

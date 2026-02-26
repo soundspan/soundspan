@@ -36,6 +36,7 @@ interface TrackOverflowMenuProps {
     /** Styling */
     className?: string;
     triggerClassName?: string;
+    menuClassName?: string;
     /** Listen Together guard */
     isInListenTogetherGroup?: boolean;
 }
@@ -53,6 +54,7 @@ export function TrackOverflowMenu({
     extraItemsAfter,
     className,
     triggerClassName,
+    menuClassName,
     isInListenTogetherGroup = false,
 }: TrackOverflowMenuProps) {
     const [isOpen, setIsOpen] = useState(false);
@@ -194,13 +196,17 @@ export function TrackOverflowMenu({
         async (e: React.MouseEvent) => {
             e.stopPropagation();
             closeMenu();
-            if (!track.artist?.id) return;
+            const artistId = track.artist?.id;
+            if (!artistId) return;
             try {
-                const response = await api.getRadioTracks("artist", track.artist.id);
+                const response = await api.getRadioTracks("artist", artistId);
                 if (response.tracks && response.tracks.length > 0) {
-                    controls.playTracks(response.tracks, 0);
+                    const filtered = response.tracks.filter(
+                        (t: { id: string }) => t.id !== track.id
+                    );
+                    controls.playTracks([track, ...filtered], 0);
                     toast.success(
-                        `Playing ${track.artist.name} Radio (${response.tracks.length} tracks)`
+                        `Playing ${track.artist.name} Radio (${filtered.length} tracks)`
                     );
                 } else {
                     toast.error("Not enough similar music in your library for artist radio");
@@ -239,7 +245,7 @@ export function TrackOverflowMenu({
 
                 {isOpen && (
                     <div
-                        className="absolute right-0 top-full z-30 mt-1 min-w-[180px] rounded-md border border-white/10 bg-[#111111] p-1 shadow-xl"
+                        className={cn("absolute right-0 top-full z-30 mt-1 min-w-[180px] rounded-md border border-white/10 bg-[#111111] p-1 shadow-xl", menuClassName)}
                         role="menu"
                         onClick={(e) => e.stopPropagation()}
                     >
@@ -289,7 +295,7 @@ export function TrackOverflowMenu({
                             />
                         )}
 
-                        {showMatchVibe && track.id && playbackType === "track" && (
+                        {showMatchVibe && track.id && (
                             <MenuButton
                                 onClick={handleMatchVibe}
                                 icon={<AudioWaveform className="h-4 w-4" />}

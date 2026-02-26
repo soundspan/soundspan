@@ -5,8 +5,13 @@ import type {
   AudioEngineEventPayloadMap,
   AudioEngineEventType,
   AudioEngineLoadOptions,
+  AudioEngineManifestStallPayload,
+  AudioEngineRepresentationFailoverResult,
   AudioEngineSource,
 } from "@/lib/audio-engine/types";
+import {
+  resolveSegmentRepresentationIdFromUri,
+} from "@/lib/audio-engine/segmentedRepresentationPolicy";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 type AnyAudioEventHandler = (payload: unknown) => void;
@@ -86,7 +91,7 @@ interface VideoJsQualityLevel {
   bitrate?: number;
   width?: number;
   height?: number;
-  enabled?: boolean;
+  enabled?: boolean | ((value?: boolean) => boolean);
 }
 
 interface VideoJsQualityLevelEvent {
@@ -142,6 +147,45 @@ interface VideoJsVhsManifestController {
 }
 
 type VhsRequestKind = "manifest" | "init" | "segment" | "other";
+type VhsBufferControlPreset =
+  | "steady_state"
+  | "startup_low_latency"
+  | "vod_full_track";
+type DashLiveState = "live" | "vod" | "unknown";
+type DashStartupReconciliationTrigger =
+  | "loadedmetadata"
+  | "durationchange"
+  | "timeupdate";
+
+interface VideoJsDashLiveDelaySettings {
+  streaming?: {
+    delay?: {
+      liveDelay?: number;
+    };
+  };
+}
+
+interface VideoJsDashMediaPlayer {
+  updateSettings?: (settings: VideoJsDashLiveDelaySettings) => void;
+}
+
+interface VideoJsDashRuntimeTech {
+  dash?: {
+    mediaPlayer?: VideoJsDashMediaPlayer;
+    mediaPlayer_?: VideoJsDashMediaPlayer;
+  };
+  mediaPlayer?: VideoJsDashMediaPlayer;
+}
+
+interface VideoJsVhsPlaylistSnapshot {
+  endList?: boolean;
+}
+
+interface VideoJsVhsRuntimeTech {
+  playlists?: {
+    media?: () => VideoJsVhsPlaylistSnapshot | null | undefined;
+  };
+}
 
 const clamp01 = (value: number): number => {
   if (!Number.isFinite(value)) {
@@ -170,6 +214,8 @@ const VHS_ABR_POLICY_MANUAL_PINNING = "disabled_client_side";
 const VHS_ABR_POLICY_SELECTION_AUTHORITY = "server_segmented_session_quality";
 const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
 const SEGMENTED_VHS_PROFILE_KEY = "SEGMENTED_VHS_PROFILE";
+const SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC_KEY =
+  "SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC";
 const SEGMENTED_VHS_GOAL_BUFFER_SEC_KEY = "SEGMENTED_VHS_GOAL_BUFFER_SEC";
 const SEGMENTED_VHS_MAX_GOAL_BUFFER_SEC_KEY = "SEGMENTED_VHS_MAX_GOAL_BUFFER_SEC";
 const SEGMENTED_VHS_BUFFER_LOW_WATER_LINE_SEC_KEY =
@@ -182,6 +228,17 @@ const DEFAULT_SEGMENTED_VHS_GOAL_BUFFER_SEC = 180;
 const DEFAULT_SEGMENTED_VHS_MAX_GOAL_BUFFER_SEC = 600;
 const DEFAULT_SEGMENTED_VHS_BUFFER_LOW_WATER_LINE_SEC = 15;
 const DEFAULT_SEGMENTED_VHS_MAX_BUFFER_LOW_WATER_LINE_SEC = 120;
+const DEFAULT_SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC = 0.2;
+const LOW_LATENCY_STARTUP_BUFFER_MULTIPLIER = 2;
+const DASH_VOD_FULL_TRACK_BUFFER_PADDING_SEC = 15;
+const DASH_VOD_FULL_TRACK_BUFFER_MAX_SEC = 3_600;
+const DASHJS_LIVE_DELAY_TARGET_SEC = 1.5;
+const DASH_UNKNOWN_LIVE_STATE_FALLBACK_MAX_MS = 6_000;
+const DASH_UNKNOWN_LIVE_STATE_PROGRESS_SAMPLE_MIN_TIME_SEC = 1;
+const DASH_UNKNOWN_LIVE_STATE_PROGRESS_SAMPLE_THRESHOLD = 3;
+const DASH_MANIFEST_SEGMENT_STALL_TIMEOUT_MS = 4_000;
+const MANIFEST_STALL_REASON_PLAYLIST_REFRESH_TIMEOUT =
+  "playlist_refresh_timeout";
 
 const readRuntimeSegmentedVhsProfile = (): string | undefined => {
   if (typeof window === "undefined") {
@@ -228,6 +285,31 @@ const readRuntimeNonNegativeNumber = (
   return fallback;
 };
 
+const readRuntimePositiveNumber = (
+  key: string,
+  fallback: number,
+): number => {
+  const value = readRuntimeNonNegativeNumber(key, fallback);
+  return value > 0 ? value : fallback;
+};
+
+const hasRuntimeConfigValue = (key: string): boolean => {
+  const runtimeValue = readRuntimeConfigValue(key);
+  if (runtimeValue === undefined || runtimeValue === null) {
+    return false;
+  }
+  if (typeof runtimeValue === "string") {
+    return runtimeValue.trim().length > 0;
+  }
+  return true;
+};
+
+const hasRuntimeVhsBufferControlOverride = (): boolean =>
+  hasRuntimeConfigValue(SEGMENTED_VHS_GOAL_BUFFER_SEC_KEY) ||
+  hasRuntimeConfigValue(SEGMENTED_VHS_MAX_GOAL_BUFFER_SEC_KEY) ||
+  hasRuntimeConfigValue(SEGMENTED_VHS_BUFFER_LOW_WATER_LINE_SEC_KEY) ||
+  hasRuntimeConfigValue(SEGMENTED_VHS_MAX_BUFFER_LOW_WATER_LINE_SEC_KEY);
+
 const resolveUnsafeVhsBufferControls = (): Required<VideoJsVhsUnsafeBufferControls> => {
   const goalBufferSec = readRuntimeNonNegativeNumber(
     SEGMENTED_VHS_GOAL_BUFFER_SEC_KEY,
@@ -259,6 +341,23 @@ const resolveUnsafeVhsBufferControls = (): Required<VideoJsVhsUnsafeBufferContro
     MAX_BUFFER_LOW_WATER_LINE: maxBufferLowWaterLineSec,
   };
 };
+
+const resolveLowLatencyStartupVhsBufferControls =
+  (): Required<VideoJsVhsUnsafeBufferControls> => {
+    const fragmentDurationSec = readRuntimePositiveNumber(
+      SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC_KEY,
+      DEFAULT_SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC,
+    );
+    const startupGoalBufferSec =
+      fragmentDurationSec * LOW_LATENCY_STARTUP_BUFFER_MULTIPLIER;
+
+    return {
+      GOAL_BUFFER_LENGTH: startupGoalBufferSec,
+      MAX_GOAL_BUFFER_LENGTH: startupGoalBufferSec,
+      BUFFER_LOW_WATER_LINE: fragmentDurationSec,
+      MAX_BUFFER_LOW_WATER_LINE: startupGoalBufferSec,
+    };
+  };
 
 const resolveSegmentedVhsProfile = (): SegmentedVhsProfile => {
   const runtimeValue = readRuntimeSegmentedVhsProfile();
@@ -406,10 +505,28 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   private qualityLevelAddHandler:
     | ((event: VideoJsQualityLevelEvent) => void)
     | null = null;
+  private readonly representationQuarantineUntilMs = new Map<string, number>();
+  private readonly representationQuarantineTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private representationQuarantineResetPending = false;
   private qualityEventCount = 0;
   private qualityPolicyLoggedSourceKey: string | null = null;
   private readonly segmentedVhsProfile: SegmentedVhsProfile;
   private readonly vhsInitializationOptions: VideoJsVhsInitializationOptions;
+  private readonly runtimeVhsBufferControlsOverridden: boolean;
+  private activeVhsBufferControlPreset: VhsBufferControlPreset | null = null;
+  private vodFullTrackBufferAppliedForSourceKey: string | null = null;
+  private startupBufferTuningPendingForSourceKey: string | null = null;
+  private dashJsLiveDelayEvaluatedForSourceKey: string | null = null;
+  private dashUnknownLiveStateSourceKey: string | null = null;
+  private dashUnknownLiveStateObservedAtMs: number | null = null;
+  private dashUnknownLiveStateProgressSampleCount = 0;
+  private manifestStallDetectionSourceKey: string | null = null;
+  private manifestStallDetectionSegmentSeen = false;
+  private manifestStallDetectionEventEmitted = false;
+  private manifestStallDetectionTimer: ReturnType<typeof setTimeout> | null = null;
   private audioModeStrategy: "audioOnlyMode" | "hiddenVideoFallback" =
     "hiddenVideoFallback";
 
@@ -422,7 +539,9 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     this.vhsInitializationOptions = resolveVhsInitializationOptions(
       this.segmentedVhsProfile,
     );
-    this.applyUnsafeVhsBufferControls();
+    this.runtimeVhsBufferControlsOverridden =
+      hasRuntimeVhsBufferControlOverride();
+    this.applyVhsBufferControls("steady_state", "engine_init");
 
     this.mediaElement = document.createElement("video");
     this.mediaElement.preload = "auto";
@@ -460,7 +579,12 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     this.bindPlayerEvents();
   }
 
-  private applyUnsafeVhsBufferControls(): void {
+  private applyVhsBufferControls(
+    preset: VhsBufferControlPreset,
+    reason: string,
+    overrideControls?: Required<VideoJsVhsUnsafeBufferControls>,
+    additionalMetricFields: Record<string, unknown> = {},
+  ): void {
     const vhsGlobal = (
       videojs as typeof videojs & {
         Vhs?: VideoJsVhsUnsafeBufferControls;
@@ -471,7 +595,26 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       return;
     }
 
-    const controls = resolveUnsafeVhsBufferControls();
+    const controls =
+      overrideControls ??
+      (preset === "startup_low_latency"
+        ? resolveLowLatencyStartupVhsBufferControls()
+        : resolveUnsafeVhsBufferControls());
+    const controlsAlreadyApplied = Object.entries(controls).every(([key, value]) => {
+      if (!isFiniteNumber(value)) {
+        return true;
+      }
+      const controlKey = key as keyof VideoJsVhsUnsafeBufferControls;
+      return vhsGlobal[controlKey] === value;
+    });
+
+    if (
+      this.activeVhsBufferControlPreset === preset &&
+      controlsAlreadyApplied
+    ) {
+      return;
+    }
+
     const applied: Record<string, number> = {};
     for (const [key, value] of Object.entries(controls)) {
       if (!isFiniteNumber(value)) {
@@ -490,10 +633,15 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       return;
     }
 
+    this.activeVhsBufferControlPreset = preset;
+
     sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.vhs_buffer_controls_applied",
       timestamp: new Date().toISOString(),
+      preset,
+      reason,
       controls: applied,
+      ...additionalMetricFields,
     });
   }
 
@@ -517,14 +665,33 @@ export class VideoJsSegmentedEngine implements AudioEngine {
           }
         : optionsOrAutoplay;
 
+    this.removePlayerRequestHook();
+    this.resetManifestStallDetection(resolvedSource);
     this.lastSource = resolvedSource;
     this.lastLoadOptions = normalizedOptions;
     this.resetUsageEventCountersIfNeeded(resolvedSource);
+    this.vodFullTrackBufferAppliedForSourceKey = null;
     if (resolvedSource.protocol === "dash") {
       this.emitVhsAbrPolicyTelemetry(resolvedSource);
+      // DASH startup uses steady-state buffer controls to avoid ultra-low
+      // startup targets that can amplify early rebuffer loops on cold starts.
+      // Keep startup reconciliation enabled for balanced profile so live-delay
+      // tuning still applies when live state is discovered.
+      this.startupBufferTuningPendingForSourceKey =
+        this.segmentedVhsProfile === "balanced"
+          ? this.getUsageEventSourceKey(resolvedSource)
+          : null;
+      this.applyVhsBufferControls("steady_state", "dash_startup");
+    } else {
+      this.startupBufferTuningPendingForSourceKey = null;
+      this.applyVhsBufferControls("steady_state", "non_dash_source");
     }
+    this.resetDashUnknownLiveStateTracking();
+    this.dashJsLiveDelayEvaluatedForSourceKey = null;
     this.requestHeaders = normalizedOptions.requestHeaders;
     this.requestWithCredentials = normalizedOptions.withCredentials;
+    this.resetRepresentationQuarantineState();
+    this.representationQuarantineResetPending = true;
 
     const withCredentials = normalizedOptions.withCredentials === true;
     this.mediaElement.crossOrigin = withCredentials ? "use-credentials" : "anonymous";
@@ -542,7 +709,9 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       src: resolvedSource.url,
       type: resolveMimeType(resolvedSource, normalizedOptions),
     });
+    this.attachPlayerRequestHookIfAvailable();
     this.player.load();
+    this.attachPlayerRequestHookIfAvailable();
 
     if (normalizedOptions.autoplay) {
       void this.play();
@@ -728,6 +897,96 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     );
   }
 
+  quarantineRepresentation(
+    representationId: string,
+    cooldownMs: number,
+  ): AudioEngineRepresentationFailoverResult | null {
+    const normalizedRepresentationId =
+      this.normalizeRepresentationId(representationId);
+    if (!normalizedRepresentationId) {
+      return null;
+    }
+
+    const levels = this.qualityLevelList;
+    if (!levels || levels.length <= 0) {
+      return null;
+    }
+    let representationExists = false;
+    for (let index = 0; index < levels.length; index += 1) {
+      if (
+        this.resolveQualityLevelRepresentationId(levels[index]) ===
+        normalizedRepresentationId
+      ) {
+        representationExists = true;
+        break;
+      }
+    }
+    if (!representationExists) {
+      return null;
+    }
+
+    const nowMs = Date.now();
+    const selectedBefore = this.getSelectedRepresentationId(levels);
+    const safeCooldownMs =
+      isFiniteNumber(cooldownMs) && cooldownMs > 0 ? Math.floor(cooldownMs) : 0;
+    this.representationQuarantineUntilMs.set(
+      normalizedRepresentationId,
+      nowMs + safeCooldownMs,
+    );
+    this.scheduleRepresentationReenable(normalizedRepresentationId, safeCooldownMs);
+    const snapshot = this.reconcileRepresentationQuarantine(nowMs);
+    const selectedAfter = snapshot.selectedRepresentationId;
+    const didSwitchRepresentation =
+      selectedBefore === normalizedRepresentationId &&
+      selectedAfter !== null &&
+      selectedAfter !== selectedBefore;
+
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.representation_quarantined",
+      timestamp: new Date(nowMs).toISOString(),
+      trackId: this.lastSource?.trackId ?? null,
+      sessionId: this.lastSource?.sessionId ?? null,
+      sourceType: this.lastSource?.sourceType ?? "unknown",
+      quarantinedRepresentationId: normalizedRepresentationId,
+      selectedRepresentationIdBefore: selectedBefore,
+      selectedRepresentationIdAfter: selectedAfter,
+      didSwitchRepresentation,
+      enabledRepresentationCount: snapshot.enabledRepresentationCount,
+      totalRepresentationCount: snapshot.totalRepresentationCount,
+      allRepresentationsUnhealthy: snapshot.allRepresentationsUnhealthy,
+      cooldownMs: safeCooldownMs,
+    });
+
+    return {
+      quarantinedRepresentationId: normalizedRepresentationId,
+      selectedRepresentationId: selectedAfter,
+      enabledRepresentationCount: snapshot.enabledRepresentationCount,
+      totalRepresentationCount: snapshot.totalRepresentationCount,
+      allRepresentationsUnhealthy: snapshot.allRepresentationsUnhealthy,
+      didSwitchRepresentation,
+    };
+  }
+
+  private resetRepresentationQuarantineState(): void {
+    this.representationQuarantineUntilMs.clear();
+    this.representationQuarantineTimers.forEach((timer) => {
+      clearTimeout(timer);
+    });
+    this.representationQuarantineTimers.clear();
+  }
+
+  clearRepresentationQuarantine(): void {
+    this.resetRepresentationQuarantineState();
+    this.representationQuarantineResetPending = false;
+    const levels = this.qualityLevelList;
+    if (!levels) {
+      return;
+    }
+    for (let index = 0; index < levels.length; index += 1) {
+      this.setQualityLevelEnabled(levels[index], true);
+    }
+  }
+
   getActualCurrentTime(): number {
     return this.getCurrentTime();
   }
@@ -741,6 +1000,8 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   }
 
   destroy(): void {
+    this.clearRepresentationQuarantine();
+    this.resetManifestStallDetection();
     this.removePlayerRequestHook();
     this.removeTechUsageHook();
     this.removePlayerUsageHook();
@@ -760,12 +1021,21 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   }
 
   private logVhsStartupConfig(): void {
+    const startupFragmentDurationSec = readRuntimePositiveNumber(
+      SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC_KEY,
+      DEFAULT_SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC,
+    );
     sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
       event: "player.vhs_startup_config",
       timestamp: new Date().toISOString(),
       profile: this.segmentedVhsProfile,
       audioModeStrategy: this.audioModeStrategy,
       options: this.vhsInitializationOptions,
+      runtimeVhsBufferControlsOverridden:
+        this.runtimeVhsBufferControlsOverridden,
+      startupFragmentDurationSec,
+      startupGoalBufferSec:
+        startupFragmentDurationSec * LOW_LATENCY_STARTUP_BUFFER_MULTIPLIER,
     });
   }
 
@@ -802,65 +1072,73 @@ export class VideoJsSegmentedEngine implements AudioEngine {
   }
 
   private installPlayerRequestHook(): void {
-    const attachPerPlayerHook = (): void => {
-      const nextVhsXhr = this.getPlayerVhsXhr();
-      if (!nextVhsXhr) {
-        return;
-      }
+    // Official VHS hook point for per-player request interceptors.
+    this.bindPlayerEvent("xhr-hooks-ready", () => {
+      this.attachPlayerRequestHookIfAvailable();
+    });
+    this.bindPlayerEvent("techchange", () => {
+      this.attachPlayerRequestHookIfAvailable();
+    });
+    this.bindPlayerEvent("loadstart", () => {
+      this.attachPlayerRequestHookIfAvailable();
+    });
+    this.player.ready(() => {
+      this.attachPlayerRequestHookIfAvailable();
+    });
+  }
 
-      if (this.playerRequestHook && this.playerVhsXhr === nextVhsXhr) {
-        return;
-      }
+  private attachPlayerRequestHookIfAvailable(): void {
+    const nextVhsXhr = this.getPlayerVhsXhr();
+    if (!nextVhsXhr) {
+      return;
+    }
 
-      this.removePlayerRequestHook();
+    if (this.playerRequestHook && this.playerVhsXhr === nextVhsXhr) {
+      return;
+    }
 
-      const requestHook = (
-        config: VideoJsRequestConfig,
-      ): VideoJsRequestConfig => {
-        const nextConfig: VideoJsRequestConfig = {
-          ...config,
+    this.removePlayerRequestHook();
+
+    const requestHook = (
+      config: VideoJsRequestConfig,
+    ): VideoJsRequestConfig => {
+      const nextConfig: VideoJsRequestConfig = {
+        ...config,
+      };
+
+      if (this.requestHeaders && Object.keys(this.requestHeaders).length > 0) {
+        const existingHeaders =
+          nextConfig.headers && typeof nextConfig.headers === "object"
+            ? nextConfig.headers
+            : {};
+        nextConfig.headers = {
+          ...existingHeaders,
+          ...this.requestHeaders,
         };
-
-        if (this.requestHeaders && Object.keys(this.requestHeaders).length > 0) {
-          const existingHeaders =
-            nextConfig.headers && typeof nextConfig.headers === "object"
-              ? nextConfig.headers
-              : {};
-          nextConfig.headers = {
-            ...existingHeaders,
-            ...this.requestHeaders,
-          };
-        }
-
-        if (typeof this.requestWithCredentials === "boolean") {
-          nextConfig.withCredentials = this.requestWithCredentials;
-        }
-
-        return nextConfig;
-      };
-
-      nextVhsXhr.onRequest(requestHook);
-      const responseHook = (
-        request: VideoJsResponseHookRequest,
-        error: unknown,
-        response: VideoJsResponseHookResponse,
-      ): void => {
-        this.captureVhsResponseTelemetry(request, error, response);
-      };
-
-      if (typeof nextVhsXhr.onResponse === "function") {
-        nextVhsXhr.onResponse(responseHook);
       }
-      this.playerVhsXhr = nextVhsXhr;
-      this.playerRequestHook = requestHook;
-      this.playerResponseHook = responseHook;
+
+      if (typeof this.requestWithCredentials === "boolean") {
+        nextConfig.withCredentials = this.requestWithCredentials;
+      }
+
+      return nextConfig;
     };
 
-    // Official VHS hook point for per-player request interceptors.
-    this.bindPlayerEvent("xhr-hooks-ready", attachPerPlayerHook);
-    this.player.ready(() => {
-      attachPerPlayerHook();
-    });
+    nextVhsXhr.onRequest(requestHook);
+    const responseHook = (
+      request: VideoJsResponseHookRequest,
+      error: unknown,
+      response: VideoJsResponseHookResponse,
+    ): void => {
+      this.captureVhsResponseTelemetry(request, error, response);
+    };
+
+    if (typeof nextVhsXhr.onResponse === "function") {
+      nextVhsXhr.onResponse(responseHook);
+    }
+    this.playerVhsXhr = nextVhsXhr;
+    this.playerRequestHook = requestHook;
+    this.playerResponseHook = responseHook;
   }
 
   private removePlayerRequestHook(): void {
@@ -997,6 +1275,11 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       this.qualityLevelList = nextQualityLevelList;
       this.qualityLevelChangeHandler = changeHandler;
       this.qualityLevelAddHandler = addHandler;
+      if (this.representationQuarantineResetPending) {
+        this.clearRepresentationQuarantine();
+      } else {
+        this.reconcileRepresentationQuarantine();
+      }
 
       this.captureVhsQualityLevelTelemetry("snapshot");
     };
@@ -1050,8 +1333,433 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     this.qualityLevelAddHandler = null;
   }
 
+  private reconcileRepresentationQuarantine(
+    nowMs: number = Date.now(),
+  ): {
+    selectedRepresentationId: string | null;
+    enabledRepresentationCount: number;
+    totalRepresentationCount: number;
+    allRepresentationsUnhealthy: boolean;
+  } {
+    this.pruneExpiredRepresentationQuarantine(nowMs);
+
+    const levels = this.qualityLevelList;
+    if (!levels || levels.length <= 0) {
+      return {
+        selectedRepresentationId: null,
+        enabledRepresentationCount: 0,
+        totalRepresentationCount: 0,
+        allRepresentationsUnhealthy: false,
+      };
+    }
+
+    const allRepresentationIds = new Set<string>();
+    const healthyRepresentationIds = new Set<string>();
+    const quarantinedRepresentationIds = new Set<string>();
+
+    for (let index = 0; index < levels.length; index += 1) {
+      const levelRepresentationId = this.resolveQualityLevelRepresentationId(
+        levels[index],
+      );
+      if (!levelRepresentationId) {
+        continue;
+      }
+      allRepresentationIds.add(levelRepresentationId);
+      const quarantineUntilMs =
+        this.representationQuarantineUntilMs.get(levelRepresentationId) ?? 0;
+      if (quarantineUntilMs > nowMs) {
+        quarantinedRepresentationIds.add(levelRepresentationId);
+      } else {
+        healthyRepresentationIds.add(levelRepresentationId);
+      }
+    }
+
+    const totalRepresentationCount = allRepresentationIds.size;
+    const allRepresentationsUnhealthy =
+      totalRepresentationCount > 0 &&
+      healthyRepresentationIds.size === 0 &&
+      quarantinedRepresentationIds.size > 0;
+    const enabledRepresentationCount = allRepresentationsUnhealthy
+      ? totalRepresentationCount
+      : healthyRepresentationIds.size;
+
+    for (let index = 0; index < levels.length; index += 1) {
+      const level = levels[index];
+      const levelRepresentationId = this.resolveQualityLevelRepresentationId(level);
+      if (!levelRepresentationId) {
+        continue;
+      }
+      const shouldEnable =
+        allRepresentationsUnhealthy ||
+        !quarantinedRepresentationIds.has(levelRepresentationId);
+      const didApply = this.setQualityLevelEnabled(level, shouldEnable);
+      if (!didApply && !shouldEnable) {
+        sharedFrontendLogger.warn(
+          "[VideoJsSegmentedEngine] Quarantine disable failed for representation",
+          { representationId: levelRepresentationId, shouldEnable },
+        );
+      }
+    }
+
+    return {
+      selectedRepresentationId: this.getSelectedRepresentationId(levels),
+      enabledRepresentationCount,
+      totalRepresentationCount,
+      allRepresentationsUnhealthy,
+    };
+  }
+
+  private pruneExpiredRepresentationQuarantine(nowMs: number): void {
+    const idsToClear: string[] = [];
+    this.representationQuarantineUntilMs.forEach((untilMs, representationId) => {
+      if (untilMs > nowMs) {
+        return;
+      }
+      idsToClear.push(representationId);
+    });
+
+    if (idsToClear.length === 0) {
+      return;
+    }
+
+    for (const representationId of idsToClear) {
+      this.representationQuarantineUntilMs.delete(representationId);
+      const timeout = this.representationQuarantineTimers.get(representationId);
+      if (timeout) {
+        clearTimeout(timeout);
+        this.representationQuarantineTimers.delete(representationId);
+      }
+    }
+  }
+
+  private scheduleRepresentationReenable(
+    representationId: string,
+    cooldownMs: number,
+  ): void {
+    const existingTimeout =
+      this.representationQuarantineTimers.get(representationId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.representationQuarantineTimers.delete(representationId);
+    }
+
+    if (cooldownMs <= 0) {
+      this.reconcileRepresentationQuarantine();
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      this.representationQuarantineTimers.delete(representationId);
+      const nowMs = Date.now();
+      const hadRepresentation =
+        this.representationQuarantineUntilMs.delete(representationId);
+      const snapshot = this.reconcileRepresentationQuarantine(nowMs);
+      if (!hadRepresentation) {
+        return;
+      }
+      sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
+        event: "player.representation_reenabled",
+        timestamp: new Date(nowMs).toISOString(),
+        trackId: this.lastSource?.trackId ?? null,
+        sessionId: this.lastSource?.sessionId ?? null,
+        sourceType: this.lastSource?.sourceType ?? "unknown",
+        representationId,
+        enabledRepresentationCount: snapshot.enabledRepresentationCount,
+        totalRepresentationCount: snapshot.totalRepresentationCount,
+      });
+    }, cooldownMs);
+    this.representationQuarantineTimers.set(representationId, timeout);
+  }
+
+  private normalizeRepresentationId(value: string): string | null {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private resolveQualityLevelRepresentationId(
+    level: VideoJsQualityLevel | null | undefined,
+  ): string | null {
+    if (!level || typeof level.id !== "string") {
+      return null;
+    }
+    return this.normalizeRepresentationId(level.id);
+  }
+
+  private getSelectedRepresentationId(
+    levels: VideoJsQualityLevelList | null | undefined,
+  ): string | null {
+    if (!levels || !isFiniteNumber(levels.selectedIndex)) {
+      return null;
+    }
+    const index = levels.selectedIndex;
+    if (index < 0 || index >= levels.length) {
+      return null;
+    }
+    return this.resolveQualityLevelRepresentationId(levels[index]);
+  }
+
+  private setQualityLevelEnabled(
+    level: VideoJsQualityLevel,
+    shouldEnable: boolean,
+  ): boolean {
+    const levelId = this.resolveQualityLevelRepresentationId(level);
+    if (typeof level.enabled === "function") {
+      try {
+        level.enabled(shouldEnable);
+        return true;
+      } catch (err) {
+        sharedFrontendLogger.warn(
+          "[VideoJsSegmentedEngine] setQualityLevelEnabled failed",
+          { shouldEnable, levelId, err },
+        );
+        return false;
+      }
+    }
+
+    if (typeof level.enabled === "boolean") {
+      try {
+        level.enabled = shouldEnable;
+        return true;
+      } catch (err) {
+        sharedFrontendLogger.warn(
+          "[VideoJsSegmentedEngine] setQualityLevelEnabled failed",
+          { shouldEnable, levelId, err },
+        );
+        return false;
+      }
+    }
+
+    try {
+      (
+        level as unknown as {
+          enabled?: boolean;
+        }
+      ).enabled = shouldEnable;
+      return true;
+    } catch (err) {
+      sharedFrontendLogger.warn(
+        "[VideoJsSegmentedEngine] setQualityLevelEnabled failed",
+        { shouldEnable, levelId, err },
+      );
+      return false;
+    }
+  }
+
+  private resetDashUnknownLiveStateTracking(): void {
+    this.dashUnknownLiveStateSourceKey = null;
+    this.dashUnknownLiveStateObservedAtMs = null;
+    this.dashUnknownLiveStateProgressSampleCount = 0;
+  }
+
+  private maybeApplyVodFullTrackBufferControls(
+    sourceKey: string,
+    reason: string,
+  ): void {
+    if (this.runtimeVhsBufferControlsOverridden) {
+      return;
+    }
+    if (this.vodFullTrackBufferAppliedForSourceKey === sourceKey) {
+      return;
+    }
+
+    const durationSec = this.player.duration();
+    if (!isFiniteNumber(durationSec) || durationSec <= 0) {
+      return;
+    }
+
+    const goalBufferSec = Math.max(
+      DEFAULT_SEGMENTED_VHS_GOAL_BUFFER_SEC,
+      Math.min(
+        DASH_VOD_FULL_TRACK_BUFFER_MAX_SEC,
+        Math.ceil(durationSec + DASH_VOD_FULL_TRACK_BUFFER_PADDING_SEC),
+      ),
+    );
+    const maxGoalBufferSec = goalBufferSec;
+    const bufferLowWaterLineSec = Math.min(
+      goalBufferSec,
+      DEFAULT_SEGMENTED_VHS_BUFFER_LOW_WATER_LINE_SEC,
+    );
+    const maxBufferLowWaterLineSec = Math.min(
+      goalBufferSec,
+      Math.max(
+        bufferLowWaterLineSec,
+        DEFAULT_SEGMENTED_VHS_MAX_BUFFER_LOW_WATER_LINE_SEC,
+      ),
+    );
+
+    this.applyVhsBufferControls(
+      "vod_full_track",
+      reason,
+      {
+        GOAL_BUFFER_LENGTH: goalBufferSec,
+        MAX_GOAL_BUFFER_LENGTH: maxGoalBufferSec,
+        BUFFER_LOW_WATER_LINE: bufferLowWaterLineSec,
+        MAX_BUFFER_LOW_WATER_LINE: maxBufferLowWaterLineSec,
+      },
+      {
+        trackDurationSec: durationSec,
+        fullTrackBufferPaddingSec: DASH_VOD_FULL_TRACK_BUFFER_PADDING_SEC,
+        fullTrackBufferCapSec: DASH_VOD_FULL_TRACK_BUFFER_MAX_SEC,
+      },
+    );
+    this.vodFullTrackBufferAppliedForSourceKey = sourceKey;
+  }
+
+  private reconcileDashStartupLatencyTuning(
+    trigger: DashStartupReconciliationTrigger,
+  ): void {
+    const source = this.lastSource;
+    if (!source || source.protocol !== "dash") {
+      this.startupBufferTuningPendingForSourceKey = null;
+      this.resetDashUnknownLiveStateTracking();
+      return;
+    }
+
+    const sourceKey = this.getUsageEventSourceKey(source);
+    if (this.startupBufferTuningPendingForSourceKey !== sourceKey) {
+      this.resetDashUnknownLiveStateTracking();
+      return;
+    }
+
+    const liveState = this.resolveDashLiveState();
+    if (liveState === "unknown") {
+      const nowMs = Date.now();
+      if (this.dashUnknownLiveStateSourceKey !== sourceKey) {
+        this.dashUnknownLiveStateSourceKey = sourceKey;
+        this.dashUnknownLiveStateObservedAtMs = nowMs;
+        this.dashUnknownLiveStateProgressSampleCount = 0;
+      }
+      if (trigger === "timeupdate") {
+        const currentTimeSec = this.getCurrentTime();
+        if (
+          isFiniteNumber(currentTimeSec) &&
+          currentTimeSec >= DASH_UNKNOWN_LIVE_STATE_PROGRESS_SAMPLE_MIN_TIME_SEC
+        ) {
+          this.dashUnknownLiveStateProgressSampleCount += 1;
+        }
+      }
+
+      const observedAtMs = this.dashUnknownLiveStateObservedAtMs ?? nowMs;
+      const unknownElapsedMs = Math.max(0, nowMs - observedAtMs);
+      const shouldFallbackToSteadyState =
+        this.dashUnknownLiveStateProgressSampleCount >=
+          DASH_UNKNOWN_LIVE_STATE_PROGRESS_SAMPLE_THRESHOLD ||
+        unknownElapsedMs >= DASH_UNKNOWN_LIVE_STATE_FALLBACK_MAX_MS;
+      if (!shouldFallbackToSteadyState) {
+        return;
+      }
+
+      this.startupBufferTuningPendingForSourceKey = null;
+      this.resetDashUnknownLiveStateTracking();
+      this.applyVhsBufferControls(
+        "steady_state",
+        "dash_vod_unknown_live_state_fallback",
+      );
+      return;
+    }
+
+    this.resetDashUnknownLiveStateTracking();
+    this.startupBufferTuningPendingForSourceKey = null;
+
+    if (liveState === "live") {
+      this.maybeApplyDashJsLowLiveDelayTarget(sourceKey);
+      return;
+    }
+
+    this.maybeApplyVodFullTrackBufferControls(sourceKey, "dash_vod_full_track");
+    if (this.vodFullTrackBufferAppliedForSourceKey !== sourceKey) {
+      this.applyVhsBufferControls("steady_state", "dash_vod_after_startup");
+    }
+  }
+
+  private resolveDashLiveState(): DashLiveState {
+    const vhsState = this.resolveDashLiveStateFromVhsPlaylist();
+    if (vhsState !== null) {
+      return vhsState;
+    }
+
+    const durationSec = this.player.duration();
+    if (durationSec === Number.POSITIVE_INFINITY) {
+      return "live";
+    }
+    if (isFiniteNumber(durationSec) && durationSec > 0) {
+      return "vod";
+    }
+    return "unknown";
+  }
+
+  private resolveDashLiveStateFromVhsPlaylist(): DashLiveState | null {
+    const tech = this.player.tech(true) as unknown as {
+      vhs?: VideoJsVhsRuntimeTech;
+    } | null;
+
+    const mediaPlaylist = tech?.vhs?.playlists?.media?.();
+    if (!mediaPlaylist || typeof mediaPlaylist.endList !== "boolean") {
+      return null;
+    }
+    return mediaPlaylist.endList ? "vod" : "live";
+  }
+
+  private maybeApplyDashJsLowLiveDelayTarget(sourceKey: string): void {
+    if (this.dashJsLiveDelayEvaluatedForSourceKey === sourceKey) {
+      return;
+    }
+    this.dashJsLiveDelayEvaluatedForSourceKey = sourceKey;
+
+    const mediaPlayer = this.getDashJsMediaPlayer();
+    if (!mediaPlayer || typeof mediaPlayer.updateSettings !== "function") {
+      sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
+        event: "player.dashjs_live_delay_target_unavailable",
+        timestamp: new Date().toISOString(),
+        targetLiveDelaySec: DASHJS_LIVE_DELAY_TARGET_SEC,
+        reason: "dashjs_runtime_not_detected",
+      });
+      return;
+    }
+
+    try {
+      mediaPlayer.updateSettings({
+        streaming: {
+          delay: {
+            liveDelay: DASHJS_LIVE_DELAY_TARGET_SEC,
+          },
+        },
+      });
+      sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
+        event: "player.dashjs_live_delay_target_applied",
+        timestamp: new Date().toISOString(),
+        targetLiveDelaySec: DASHJS_LIVE_DELAY_TARGET_SEC,
+      });
+    } catch (error) {
+      sharedFrontendLogger.warn(
+        "[VideoJsSegmentedEngine] Failed to apply dash.js live delay target.",
+        error,
+      );
+    }
+  }
+
+  private getDashJsMediaPlayer(): VideoJsDashMediaPlayer | null {
+    const tech = this.player.tech(true) as unknown as VideoJsDashRuntimeTech | null;
+    if (!tech) {
+      return null;
+    }
+
+    const candidates = [
+      tech.dash?.mediaPlayer,
+      tech.dash?.mediaPlayer_,
+      tech.mediaPlayer,
+    ];
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate.updateSettings === "function") {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
   private bindPlayerEvents(): void {
     this.bindPlayerEvent("loadedmetadata", () => {
+      this.reconcileDashStartupLatencyTuning("loadedmetadata");
       const pendingSeek = this.seekTarget;
       if (pendingSeek !== null) {
         this.player.currentTime(pendingSeek);
@@ -1064,7 +1772,12 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       });
     });
 
+    this.bindPlayerEvent("durationchange", () => {
+      this.reconcileDashStartupLatencyTuning("durationchange");
+    });
+
     this.bindPlayerEvent("timeupdate", () => {
+      this.reconcileDashStartupLatencyTuning("timeupdate");
       const timeSec = this.getCurrentTime();
       if (this.seekTarget !== null && Math.abs(timeSec - this.seekTarget) < 0.25) {
         this.seekTarget = null;
@@ -1129,7 +1842,8 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     error: unknown,
     response: VideoJsResponseHookResponse,
   ): void {
-    if (this.lastSource?.protocol !== "dash") {
+    const source = this.lastSource;
+    if (!source || source.protocol !== "dash") {
       return;
     }
 
@@ -1137,6 +1851,17 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     const kind = this.classifyVhsRequestKind(requestUri, request.requestType);
     const statusCode = this.resolveStatusCode(request, response);
     const hasError = Boolean(error) || (isFiniteNumber(statusCode) && statusCode >= 400);
+    const representationId = resolveSegmentRepresentationIdFromUri(requestUri);
+    const sourceKey = this.getUsageEventSourceKey(source);
+    const sanitizedUri = this.sanitizeUri(requestUri);
+
+    this.updateManifestStallDetectionState(
+      kind,
+      hasError,
+      source,
+      sourceKey,
+      sanitizedUri,
+    );
 
     if (!this.shouldEmitVhsMetric(kind, hasError)) {
       return;
@@ -1162,28 +1887,21 @@ export class VideoJsSegmentedEngine implements AudioEngine {
             roundTripMs > 0
           ? Math.floor((bytesReceived / roundTripMs) * 8000)
           : null;
-    const source = this.lastSource;
     const vhs = this.getVhsRuntimeStatsSnapshot();
-
-    const normalizedSourceType =
-      source?.sourceType === "local" ||
-      source?.sourceType === "tidal" ||
-      source?.sourceType === "ytmusic"
-        ? source.sourceType
-        : "unknown";
-    const sanitizedUri = this.sanitizeUri(requestUri);
+    const normalizedSourceType = this.resolveNormalizedSourceType(source);
     const fields: Record<string, unknown> = {
       kind,
       requestType: request.requestType ?? null,
       uri: sanitizedUri,
+      representationId,
       statusCode,
       hasError,
       roundTripMs,
       bytesReceived,
       estimatedBandwidthbps,
       sourceType: normalizedSourceType,
-      sessionId: source?.sessionId ?? null,
-      trackId: source?.trackId ?? null,
+      sessionId: source.sessionId ?? null,
+      trackId: source.trackId ?? null,
       vhsBandwidth: vhs.bandwidth ?? null,
       vhsThroughput: vhs.throughput ?? null,
       vhsSystemBandwidth: vhs.systemBandwidth ?? null,
@@ -1207,13 +1925,14 @@ export class VideoJsSegmentedEngine implements AudioEngine {
     this.emit("vhsresponse", {
       kind,
       uri: sanitizedUri,
+      representationId,
       statusCode,
       hasError,
       roundTripMs,
       bytesReceived,
       sourceType: normalizedSourceType,
-      sessionId: source?.sessionId ?? null,
-      trackId: source?.trackId ?? null,
+      sessionId: source.sessionId ?? null,
+      trackId: source.trackId ?? null,
       timestampMs: nowMs,
     });
 
@@ -1502,6 +2221,109 @@ export class VideoJsSegmentedEngine implements AudioEngine {
       return "segment";
     }
     return "other";
+  }
+
+  private resetManifestStallDetection(nextSource?: AudioEngineSource): void {
+    this.clearManifestStallDetectionTimer();
+    this.manifestStallDetectionSourceKey = nextSource
+      ? this.getUsageEventSourceKey(nextSource)
+      : null;
+    this.manifestStallDetectionSegmentSeen = false;
+    this.manifestStallDetectionEventEmitted = false;
+  }
+
+  private clearManifestStallDetectionTimer(): void {
+    if (!this.manifestStallDetectionTimer) {
+      return;
+    }
+    clearTimeout(this.manifestStallDetectionTimer);
+    this.manifestStallDetectionTimer = null;
+  }
+
+  private updateManifestStallDetectionState(
+    kind: VhsRequestKind,
+    hasError: boolean,
+    source: AudioEngineSource,
+    sourceKey: string,
+    manifestUri: string,
+  ): void {
+    if (this.manifestStallDetectionSourceKey !== sourceKey) {
+      return;
+    }
+
+    if (kind === "segment") {
+      this.manifestStallDetectionSegmentSeen = true;
+      this.clearManifestStallDetectionTimer();
+      return;
+    }
+
+    if (
+      kind !== "manifest" ||
+      hasError ||
+      this.manifestStallDetectionSegmentSeen ||
+      this.manifestStallDetectionEventEmitted
+    ) {
+      return;
+    }
+
+    this.clearManifestStallDetectionTimer();
+    this.manifestStallDetectionTimer = setTimeout(() => {
+      this.manifestStallDetectionTimer = null;
+
+      if (this.manifestStallDetectionSourceKey !== sourceKey) {
+        return;
+      }
+      if (
+        this.manifestStallDetectionSegmentSeen ||
+        this.manifestStallDetectionEventEmitted
+      ) {
+        return;
+      }
+
+      this.manifestStallDetectionEventEmitted = true;
+      this.emitManifestStall(source, manifestUri);
+    }, DASH_MANIFEST_SEGMENT_STALL_TIMEOUT_MS);
+  }
+
+  private emitManifestStall(
+    source: AudioEngineSource,
+    manifestUri: string,
+  ): void {
+    const nowMs = Date.now();
+    const sourceType = this.resolveNormalizedSourceType(source);
+    const payload: AudioEngineManifestStallPayload = {
+      trackId: source.trackId ?? null,
+      sessionId: source.sessionId ?? null,
+      reason: MANIFEST_STALL_REASON_PLAYLIST_REFRESH_TIMEOUT,
+      timeoutMs: DASH_MANIFEST_SEGMENT_STALL_TIMEOUT_MS,
+      manifestUri: manifestUri || null,
+      sourceType,
+      timestampMs: nowMs,
+    };
+
+    this.emit("manifeststall", payload);
+    this.emit("manifest-stall", payload);
+
+    sharedFrontendLogger.info("[SegmentedStreaming][ClientMetric]", {
+      event: "player.manifest_stall",
+      timestamp: new Date(nowMs).toISOString(),
+      reason: payload.reason,
+      timeoutMs: payload.timeoutMs,
+      manifestUri: payload.manifestUri,
+      sourceType: payload.sourceType,
+      sessionId: payload.sessionId,
+      trackId: payload.trackId,
+    });
+  }
+
+  private resolveNormalizedSourceType(
+    source: AudioEngineSource | null | undefined,
+  ): "local" | "tidal" | "ytmusic" | "unknown" {
+    return source?.sourceType === "local" ||
+      source?.sourceType === "tidal" ||
+      source?.sourceType === "ytmusic"
+      ? source.sourceType
+      : "unknown";
   }
 
   private shouldEmitVhsMetric(kind: VhsRequestKind, hasError: boolean): boolean {

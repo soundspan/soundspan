@@ -22,8 +22,14 @@ interface SeekSliderProps {
     className?: string;
     /** Whether to show the drag handle on hover/drag */
     showHandle?: boolean;
+    /** Show the drag handle even when not hovered */
+    alwaysShowHandle?: boolean;
     /** Variant styling */
     variant?: "default" | "minimal" | "overlay";
+    /** Optional class overrides for the drag handle */
+    handleClassName?: string;
+    /** Extra padding classes for an invisible hit zone around the track (e.g. "pb-5") */
+    hitZoneClassName?: string;
 }
 
 export function SeekSlider({
@@ -36,7 +42,10 @@ export function SeekSlider({
     downloadProgress,
     className,
     showHandle = true,
+    alwaysShowHandle = false,
     variant = "default",
+    handleClassName,
+    hitZoneClassName,
 }: SeekSliderProps) {
     const [isDragging, setIsDragging] = useState(false);
     const [previewProgress, setPreviewProgress] = useState<number | null>(null);
@@ -227,7 +236,15 @@ export function SeekSlider({
 
     const styles = getVariantStyles();
 
-    return (
+    const interactionProps = {
+        onTouchStart: handleTouchStart,
+        onTouchMove: handleTouchMove,
+        onTouchEnd: handleTouchEnd,
+        onMouseDown: handleMouseDown,
+        onClick: handleClick,
+    };
+
+    const track = (
         <div
             ref={sliderRef}
             className={cn(
@@ -238,11 +255,7 @@ export function SeekSlider({
                 isDragging && "h-2", // Expand when dragging
                 className
             )}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onMouseDown={handleMouseDown}
-            onClick={handleClick}
+            {...(!hitZoneClassName ? interactionProps : {})}
             title={getTooltipText()}
         >
             <div
@@ -259,7 +272,10 @@ export function SeekSlider({
                             "absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full transition-opacity shadow-lg shadow-white/50",
                             isDragging
                                 ? "opacity-100 scale-125"
-                                : "opacity-0 group-hover:opacity-100"
+                                : alwaysShowHandle
+                                ? "opacity-100"
+                                : "opacity-0 group-hover:opacity-100",
+                            handleClassName
                         )}
                     />
                 )}
@@ -271,6 +287,21 @@ export function SeekSlider({
                     {Math.floor((displayProgress / 100) * duration)}s
                 </div>
             )}
+        </div>
+    );
+
+    if (!hitZoneClassName) return track;
+
+    /* Wrap the visual track in a larger invisible hit zone. The ref stays on the
+       narrow track so getBoundingClientRect calculations stay correct, but all
+       pointer events are captured by the wider wrapper. */
+    return (
+        <div
+            className={cn(hitZoneClassName, isActive ? "cursor-pointer" : "cursor-not-allowed")}
+            {...interactionProps}
+            title={getTooltipText()}
+        >
+            {track}
         </div>
     );
 }

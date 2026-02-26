@@ -2,9 +2,9 @@ import type { AudioEngineSourceType } from "@soundspan/media-metadata-contract";
 
 export type StreamingEngineMode =
   | "videojs"
-  | "howler-rollback";
+  | "howler";
 
-export const DEFAULT_STREAMING_ENGINE_MODE: StreamingEngineMode = "videojs";
+export const DEFAULT_STREAMING_ENGINE_MODE: StreamingEngineMode = "howler";
 
 export type StreamingProtocolMode = "dash" | "hls" | "direct";
 
@@ -57,6 +57,7 @@ export interface AudioEngineBufferingPayload {
 export interface AudioEngineVhsResponsePayload {
   kind: "manifest" | "init" | "segment" | "other";
   uri: string;
+  representationId: string | null;
   statusCode: number | null;
   hasError: boolean;
   roundTripMs: number | null;
@@ -65,6 +66,25 @@ export interface AudioEngineVhsResponsePayload {
   sessionId: string | null;
   trackId: string | null;
   timestampMs: number;
+}
+
+export interface AudioEngineManifestStallPayload {
+  trackId: string | null;
+  sessionId: string | null;
+  reason: string;
+  timeoutMs: number;
+  manifestUri: string | null;
+  sourceType: AudioEngineSourceType | "unknown";
+  timestampMs: number;
+}
+
+export interface AudioEngineRepresentationFailoverResult {
+  quarantinedRepresentationId: string;
+  selectedRepresentationId: string | null;
+  enabledRepresentationCount: number;
+  totalRepresentationCount: number;
+  allRepresentationsUnhealthy: boolean;
+  didSwitchRepresentation: boolean;
 }
 
 export interface AudioEngineEventPayloadMap {
@@ -81,6 +101,8 @@ export interface AudioEngineEventPayloadMap {
   playerror: AudioEngineErrorPayload;
   error: AudioEngineErrorPayload;
   vhsresponse: AudioEngineVhsResponsePayload;
+  manifeststall: AudioEngineManifestStallPayload;
+  "manifest-stall": AudioEngineManifestStallPayload;
 }
 
 export type AudioEngineEventType = keyof AudioEngineEventPayloadMap;
@@ -122,6 +144,11 @@ export interface AudioEngine {
   ): void | Promise<void>;
   reload?(): void | Promise<void>;
   refreshManifest?(): void | Promise<void>;
+  quarantineRepresentation?(
+    representationId: string,
+    cooldownMs: number,
+  ): AudioEngineRepresentationFailoverResult | null;
+  clearRepresentationQuarantine?(): void;
   getActualCurrentTime?(): number;
   isCurrentlySeeking?(): boolean;
   getSeekTarget?(): number | null;

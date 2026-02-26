@@ -369,6 +369,46 @@ Notes:
 - `global.envFrom` is also injected into every container.
 - Service-specific `*.envFrom` entries are appended after global sources.
 
+### Environment Variable Precedence and Overrides
+
+All service `*.env` maps support pass-through overrides, including keys that the chart also sets by default.
+
+For chart-managed containers, precedence is:
+- Service `*.env` key/value pairs
+- Chart default/generated values (including secret refs and computed URLs)
+- `envFrom` sources (`global.env` ConfigMap, `global.envFrom`, then service `*.envFrom`)
+
+Practical implications:
+- If you set a key in a service `*.env` map, that value is rendered directly into the Pod `env` list and takes precedence over chart defaults for that key.
+- If a key is not set in service `*.env`, the chart falls back to its default/generated behavior.
+- `envFrom` remains additive and cannot override keys already present in explicit `env` entries.
+
+This applies to:
+- `aio.env`
+- `backend.env`
+- `backendWorker.env`
+- `frontend.env`
+- `audioAnalyzer.env`
+- `audioAnalyzerClap.env`
+- `tidalSidecar.env`
+- `ytmusicStreamer.env`
+- `postgresql.env`
+- `redis.env`
+
+Example runtime override for iOS Howler lock-screen compatibility:
+
+```yaml
+# Individual mode frontend
+frontend:
+  env:
+    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
+
+# AIO mode
+aio:
+  env:
+    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
+```
+
 ### Global Pod Labels, Annotations, and Scheduling Defaults
 
 Use `global.*` to avoid repeating pod metadata and scheduling config on each service:

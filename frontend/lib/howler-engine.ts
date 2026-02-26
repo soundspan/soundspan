@@ -9,6 +9,10 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { Howl, HowlOptions, Howler } from "howler";
 import { DEFAULT_AUDIO_VOLUME, clampAudioVolume } from "@/lib/audio-volume";
 
+const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
+const HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_KEY =
+    "HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED";
+
 interface ExtendedHowlOptions extends HowlOptions {
     xhr?: {
         method?: string;
@@ -47,6 +51,48 @@ interface HowlerEngineState {
     isMuted: boolean;
 }
 
+interface NavigatorAudioSession {
+    type?: string;
+}
+
+const readRuntimeConfigValue = (key: string): unknown => {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+
+    const runtimeConfig = (
+        window as Window & {
+            [SOUNDSPAN_RUNTIME_CONFIG_KEY]?: Record<string, unknown>;
+        }
+    )[SOUNDSPAN_RUNTIME_CONFIG_KEY];
+    return runtimeConfig?.[key];
+};
+
+const resolveRuntimeConfigBoolean = (key: string): boolean => {
+    const runtimeValue = readRuntimeConfigValue(key);
+    if (typeof runtimeValue === "boolean") {
+        return runtimeValue;
+    }
+
+    return String(runtimeValue ?? "").trim().toLowerCase() === "true";
+};
+
+const isHowlerIosLockscreenWorkaroundsEnabled = (): boolean =>
+    resolveRuntimeConfigBoolean(HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_KEY);
+
+const isIosDevice = (): boolean => {
+    if (typeof navigator === "undefined") {
+        return false;
+    }
+
+    const userAgent = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    return (
+        /iPad|iPhone|iPod/i.test(userAgent) ||
+        (platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
+    );
+};
+
 class HowlerEngine {
     private howl: Howl | null = null;
     private timeUpdateInterval: NodeJS.Timeout | null = null;
@@ -74,6 +120,7 @@ class HowlerEngine {
     private cleanupTimeoutId: NodeJS.Timeout | null = null; // Track cleanup timeout to prevent race conditions
     private playRetryTimeoutId: NodeJS.Timeout | null = null; // Delayed retry for play/start failures
     private pendingCleanupHowls: Set<Howl> = new Set(); // Track Howls being cleaned up
+    private iosAudioSessionConfigured: boolean = false;
 
     // Seek state management - prevents stale timeupdate events during seeks
     private isSeeking: boolean = false;
@@ -101,6 +148,7 @@ class HowlerEngine {
             "timeupdate",
         ];
         events.forEach((event) => this.eventListeners.set(event, new Set()));
+        this.applyHowlerGlobalPlaybackConfig();
     }
 
     /**
@@ -283,25 +331,7 @@ class HowlerEngine {
                 this.emit("loaderror", { error });
             },
             onplayerror: (id, error) => {
-                sharedFrontendLogger.error("[HowlerEngine] Play error:", error);
-                // Clear playing state so UI shows play button
-                this.state.isPlaying = false;
-                this.userInitiatedPlay = false;
-                this.stopTimeUpdates();
-
-                const sourceAtError = this.state.currentSrc;
-                const canRetryPlay =
-                    Boolean(sourceAtError) &&
-                    this.playRetryCount < this.maxPlayRetries;
-
-                if (canRetryPlay) {
-                    this.playRetryCount += 1;
-                    this.schedulePlayRetry(sourceAtError);
-                }
-
-                this.emit("playerror", { error });
-                // Keep retries conservative: a single delayed retry avoids startup
-                // dead-plays without creating endless retry loops on real failures.
+                this.handlePlayError(error);
             },
             onplay: () => {
                 this.state.isPlaying = true;
@@ -355,10 +385,12 @@ class HowlerEngine {
 
         // Mark as user-initiated for autoplay recovery
         this.userInitiatedPlay = true;
+        this.applyHowlerGlobalPlaybackConfig();
 
         // Some browsers keep WebAudio suspended on first interaction in edge cases.
         // Attempt a best-effort resume before/around play().
         this.resumeAudioContextIfNeeded();
+        this.configureIosAudioSessionForPlayback();
 
         // Ensure volume is set correctly before playing
         const targetVolume = this.state.isMuted ? 0 : this.state.volume;
@@ -753,22 +785,49 @@ class HowlerEngine {
         });
 
         this.howl.on("playerror", (id, error) => {
-            sharedFrontendLogger.error("[HowlerEngine] Play error:", error);
-            this.state.isPlaying = false;
-            this.userInitiatedPlay = false;
-            this.stopTimeUpdates();
+            this.handlePlayError(error);
+        });
+    }
 
-            const sourceAtError = this.state.currentSrc;
-            const canRetryPlay =
-                Boolean(sourceAtError) &&
-                this.playRetryCount < this.maxPlayRetries;
+    private handlePlayError(error: unknown): void {
+        sharedFrontendLogger.error("[HowlerEngine] Play error:", error);
+        this.state.isPlaying = false;
+        this.userInitiatedPlay = false;
+        this.stopTimeUpdates();
 
-            if (canRetryPlay) {
-                this.playRetryCount += 1;
-                this.schedulePlayRetry(sourceAtError);
-            }
+        const sourceAtError = this.state.currentSrc;
+        if (sourceAtError) {
+            this.scheduleUnlockRetry(sourceAtError);
+        }
 
-            this.emit("playerror", { error });
+        const canRetryPlay =
+            Boolean(sourceAtError) && this.playRetryCount < this.maxPlayRetries;
+
+        if (canRetryPlay) {
+            this.playRetryCount += 1;
+            this.schedulePlayRetry(sourceAtError);
+        }
+
+        this.emit("playerror", { error });
+    }
+
+    private scheduleUnlockRetry(source: string): void {
+        if (!this.howl || !this.isIosLockscreenWorkaroundEnabled()) {
+            return;
+        }
+
+        const howlAtError = this.howl;
+        howlAtError.once("unlock", () => {
+            if (!this.howl || this.howl !== howlAtError) return;
+            if (this.state.currentSrc !== source) return;
+            if (this.howl.playing()) return;
+
+            this.applyHowlerGlobalPlaybackConfig();
+            this.resumeAudioContextIfNeeded();
+            this.configureIosAudioSessionForPlayback();
+            const targetVolume = this.state.isMuted ? 0 : this.state.volume;
+            this.howl.volume(targetVolume);
+            this.howl.play();
         });
     }
 
@@ -783,7 +842,9 @@ class HowlerEngine {
             if (this.state.currentSrc !== source) return;
             if (this.howl.playing()) return;
 
+            this.applyHowlerGlobalPlaybackConfig();
             this.resumeAudioContextIfNeeded();
+            this.configureIosAudioSessionForPlayback();
             const targetVolume = this.state.isMuted ? 0 : this.state.volume;
             this.howl.volume(targetVolume);
             this.howl.play();
@@ -807,6 +868,45 @@ class HowlerEngine {
         void ctx.resume().catch((err) => {
             sharedFrontendLogger.warn("[HowlerEngine] Failed to resume audio context:", err);
         });
+    }
+
+    private isIosLockscreenWorkaroundEnabled(): boolean {
+        return isIosDevice() && isHowlerIosLockscreenWorkaroundsEnabled();
+    }
+
+    private applyHowlerGlobalPlaybackConfig(): void {
+        if (!this.isIosLockscreenWorkaroundEnabled()) {
+            return;
+        }
+
+        Howler.autoUnlock = true;
+        Howler.autoSuspend = false;
+    }
+
+    private configureIosAudioSessionForPlayback(): void {
+        if (!this.isIosLockscreenWorkaroundEnabled()) {
+            return;
+        }
+        if (this.iosAudioSessionConfigured || typeof navigator === "undefined") {
+            return;
+        }
+
+        const audioSession = (
+            navigator as Navigator & { audioSession?: NavigatorAudioSession }
+        ).audioSession;
+        if (!audioSession) {
+            return;
+        }
+
+        try {
+            audioSession.type = "playback";
+            this.iosAudioSessionConfigured = true;
+        } catch (err) {
+            sharedFrontendLogger.warn(
+                "[HowlerEngine] Failed to set navigator.audioSession.type=playback:",
+                err
+            );
+        }
     }
 
     private buildXhrOptions(

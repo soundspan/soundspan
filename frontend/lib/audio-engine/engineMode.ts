@@ -37,8 +37,8 @@ export const resolveStreamingEngineMode = (
   return parseStreamingEngineModeInternal(value ?? readRuntimeEngineMode());
 };
 
-export const isHowlerRollbackModeEnabled = (
+export const isHowlerModeEnabled = (
   value?: StreamingEngineMode | string,
 ): boolean => {
-  return resolveStreamingEngineMode(value) === "howler-rollback";
+  return resolveStreamingEngineMode(value) === "howler";
 };

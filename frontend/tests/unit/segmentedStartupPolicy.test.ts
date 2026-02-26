@@ -7,7 +7,7 @@ import {
 
 test("resolveSegmentedPrewarmMaxRetries returns larger budget for startup background", () => {
     assert.equal(resolveSegmentedPrewarmMaxRetries("startup_background"), 12);
-    assert.equal(resolveSegmentedPrewarmMaxRetries("next_track"), 5);
+    assert.equal(resolveSegmentedPrewarmMaxRetries("next_track"), 2);
 });
 
 test("resolveProactiveSegmentedHandoffEligibility allows eligible direct-track promotion", () => {

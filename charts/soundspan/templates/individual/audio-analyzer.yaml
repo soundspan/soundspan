@@ -36,7 +36,7 @@ spec:
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
           {{- $audioAnalyzerEnv := .Values.audioAnalyzer.env | default (dict) }}
-          {{- $audioAnalyzerReservedEnv := dict
+          {{- $audioAnalyzerExplicitEnvKeys := dict
             "POSTGRES_USER" true
             "POSTGRES_PASSWORD" true
             "POSTGRES_DB" true
@@ -46,31 +46,66 @@ spec:
             "TZ" true
           }}
           env:
+            {{- if hasKey $audioAnalyzerEnv "POSTGRES_USER" }}
+            - name: POSTGRES_USER
+              value: {{ index $audioAnalyzerEnv "POSTGRES_USER" | quote }}
+            {{- else }}
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_USER
+            {{- end }}
+            {{- if hasKey $audioAnalyzerEnv "POSTGRES_PASSWORD" }}
+            - name: POSTGRES_PASSWORD
+              value: {{ index $audioAnalyzerEnv "POSTGRES_PASSWORD" | quote }}
+            {{- else }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_PASSWORD
+            {{- end }}
+            {{- if hasKey $audioAnalyzerEnv "POSTGRES_DB" }}
+            - name: POSTGRES_DB
+              value: {{ index $audioAnalyzerEnv "POSTGRES_DB" | quote }}
+            {{- else }}
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_DB
+            {{- end }}
+            {{- if hasKey $audioAnalyzerEnv "DATABASE_URL" }}
+            - name: DATABASE_URL
+              value: {{ index $audioAnalyzerEnv "DATABASE_URL" | quote }}
+            {{- else }}
             - name: DATABASE_URL
               value: {{ include "soundspan.databaseUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $audioAnalyzerEnv "REDIS_URL" }}
+            - name: REDIS_URL
+              value: {{ index $audioAnalyzerEnv "REDIS_URL" | quote }}
+            {{- else }}
             - name: REDIS_URL
               value: {{ include "soundspan.redisUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $audioAnalyzerEnv "MUSIC_PATH" }}
+            - name: MUSIC_PATH
+              value: {{ index $audioAnalyzerEnv "MUSIC_PATH" | quote }}
+            {{- else }}
             - name: MUSIC_PATH
               value: /music
+            {{- end }}
+            {{- if hasKey $audioAnalyzerEnv "TZ" }}
+            - name: TZ
+              value: {{ index $audioAnalyzerEnv "TZ" | quote }}
+            {{- else }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
+            {{- end }}
             {{- range $key := keys $audioAnalyzerEnv | sortAlpha }}
-            {{- if not (hasKey $audioAnalyzerReservedEnv $key) }}
+            {{- if not (hasKey $audioAnalyzerExplicitEnvKeys $key) }}
             - name: {{ $key }}
               value: {{ index $audioAnalyzerEnv $key | quote }}
             {{- end }}

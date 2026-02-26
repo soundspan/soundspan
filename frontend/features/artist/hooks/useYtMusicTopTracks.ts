@@ -55,12 +55,21 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
     const [ytMusicAvailable, setYtMusicAvailable] = useState(
         _ytStatusCache?.available ?? false
     );
+    const [isStatusResolved, setIsStatusResolved] = useState(
+        _ytStatusCache !== null
+    );
+
+    // Discovery artists only have mbid, not id — use either as a stable key.
+    const artistKey = artist?.id || artist?.mbid || null;
 
     // Check YTMusic availability (uses global cache)
     useEffect(() => {
         let cancelled = false;
         getYtMusicAvailable().then((available) => {
-            if (!cancelled) setYtMusicAvailable(available);
+            if (!cancelled) {
+                setYtMusicAvailable(available);
+                setIsStatusResolved(true);
+            }
         });
         return () => {
             cancelled = true;
@@ -79,23 +88,23 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
                     !t.album?.title ||
                     t.album.title === "Unknown Album")
         );
-    }, [artist?.topTracks, artist?.id, ytMusicAvailable]);
+    }, [artist?.topTracks, artistKey, ytMusicAvailable]);
 
     // Match unowned tracks against YTMusic (single batch call)
     useEffect(() => {
-        if (!unownedTracks.length || !artist?.id) return;
-        if (matchedArtistIdRef.current === artist.id) return;
+        if (!unownedTracks.length || !artistKey) return;
+        if (matchedArtistIdRef.current === artistKey) return;
 
         // Check global cache first — instant on revisit
-        const cached = _artistMatchCache.get(artist.id);
+        const cached = _artistMatchCache.get(artistKey);
         if (cached) {
-            matchedArtistIdRef.current = artist.id;
+            matchedArtistIdRef.current = artistKey;
             setMatches(cached);
             return;
         }
 
         let cancelled = false;
-        matchedArtistIdRef.current = artist.id;
+        matchedArtistIdRef.current = artistKey;
         setLoading(true);
 
         const matchTracks = async () => {
@@ -122,10 +131,14 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
                     }
                 });
 
-                _artistMatchCache.set(artist.id, newMatches);
+                _artistMatchCache.set(artistKey!, newMatches);
                 setMatches(newMatches);
             } catch (err) {
                 sharedFrontendLogger.error("[YTMusic TopTracks] Batch match failed:", err);
+                if (!cancelled) {
+                    _artistMatchCache.set(artistKey!, {});
+                    setMatches({});
+                }
             }
 
             if (!cancelled) setLoading(false);
@@ -136,7 +149,7 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
         return () => {
             cancelled = true;
         };
-    }, [unownedTracks, artist?.id, artist?.name]);
+    }, [unownedTracks, artistKey, artist?.name]);
 
     // Produce enriched top-tracks with streamSource + youtubeVideoId
     // Preserve any existing TIDAL enrichment — don't overwrite
@@ -161,9 +174,16 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
         });
     }, [artist?.topTracks, matches]);
 
+    const hasQueuedMatchWork =
+        !!artistKey &&
+        unownedTracks.length > 0 &&
+        !loading &&
+        !_artistMatchCache.has(artistKey);
+
     return {
         enrichedTopTracks,
-        isMatching: loading,
+        isMatching: loading || hasQueuedMatchWork,
+        isStatusResolved,
         ytMusicAvailable,
         matchCount: Object.keys(matches).length,
     };

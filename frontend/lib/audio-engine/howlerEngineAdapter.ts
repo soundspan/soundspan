@@ -13,7 +13,7 @@ import {
   type AudioEngineSource,
   type StreamingEngineMode,
 } from "@/lib/audio-engine/types";
-import { isHowlerRollbackModeEnabled } from "@/lib/audio-engine/engineMode";
+import { isHowlerModeEnabled } from "@/lib/audio-engine/engineMode";
 
 const MIME_TYPE_FORMAT_MAP: Record<string, string> = {
   "audio/aac": "aac",
@@ -83,7 +83,7 @@ export interface HowlerEngineAdapterOptions {
   engine?: HowlerEngineLike;
 }
 
-export interface CreateHowlerRollbackEngineOptions
+export interface CreateHowlerEngineOptions
   extends HowlerEngineAdapterOptions {
   mode?: StreamingEngineMode | string;
 }
@@ -472,14 +472,14 @@ export class HowlerEngineAdapter implements AudioEngine {
 }
 
 /**
- * Creates a Howler adapter only when explicit rollback mode is enabled.
+ * Creates a Howler adapter only when explicit howler mode is enabled.
  */
-export const createHowlerRollbackEngine = (
-  options: CreateHowlerRollbackEngineOptions = {},
+export const createHowlerEngine = (
+  options: CreateHowlerEngineOptions = {},
 ): HowlerEngineAdapter => {
-  if (!isHowlerRollbackModeEnabled(options.mode)) {
+  if (!isHowlerModeEnabled(options.mode)) {
     throw new Error(
-      "Howler rollback is disabled by default. Set STREAMING_ENGINE_MODE=howler-rollback to enable it.",
+      "Howler is the primary direct engine. This adapter only initializes when STREAMING_ENGINE_MODE=howler.",
     );
   }
 

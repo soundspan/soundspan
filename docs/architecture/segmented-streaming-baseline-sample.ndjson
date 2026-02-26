@@ -1,0 +1,7 @@
+{"event":"player.startup_timeline","totalToAudibleMs":840,"outcome":"success","sessionId":"s-001"}
+{"fields":{"event":"player.startup_timeline","totalToAudibleMs":1290,"outcome":"startup_timeout"},"sessionId":"s-002"}
+{"data":{"event":"player.startup_timeline","metrics":{"totalToAudibleMs":910},"outcome":"success"},"sessionId":"s-003"}
+{"payload":{"eventName":"session.startup_retry_exhausted","sessionId":"s-004"}}
+{"event":"player.startup_timeline","fields":{"totalToAudibleMs":1710,"outcome":"success"},"sessionId":"s-005"}
+{"event":"player.startup_timeline","payload":{"totalToAudibleMs":"980","outcome":"success"},"sessionId":"s-006"}
+{"type":"session.startup_retry_exhausted","details":{"reason":"max_attempts"},"sessionId":"s-007"}

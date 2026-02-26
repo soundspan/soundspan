@@ -103,6 +103,28 @@ test("renders unavailable state when initial fetch fails", async () => {
     assert.match(html, /Social status unavailable/);
 });
 
+test("renders loading spinner when query is still loading and no users are present", async () => {
+    state.isLoading = true;
+
+    const { SocialTab } = await import(
+        "../../components/activity/SocialTab.tsx"
+    );
+    const html = renderToStaticMarkup(React.createElement(SocialTab));
+
+    assert.match(html, /animate-spin/);
+    assert.doesNotMatch(html, /No one online/);
+});
+
+test("renders empty state when there are no users and no request error", async () => {
+    const { SocialTab } = await import(
+        "../../components/activity/SocialTab.tsx"
+    );
+    const html = renderToStaticMarkup(React.createElement(SocialTab));
+
+    assert.match(html, /No one online/);
+    assert.match(html, /Users sharing presence will appear here/);
+});
+
 test("keeps rendering social users when a refetch error occurs", async () => {
     state.users = [
         {
@@ -124,6 +146,45 @@ test("keeps rendering social users when a refetch error occurs", async () => {
 
     assert.match(html, /Listener/);
     assert.doesNotMatch(html, /Social status unavailable/);
+});
+
+test("renders paused track details with cover art, listen-together badge, and plain text track metadata without ids", async () => {
+    state.users = [
+        {
+            id: "u-1",
+            username: "listener_user",
+            displayName: "Listener",
+            isInListenTogetherGroup: true,
+            listeningStatus: "paused",
+            listeningTrack: {
+                id: "track-1",
+                title: "Song One",
+                duration: 180,
+                artistName: "Artist One",
+                artistId: null,
+                albumTitle: "Album One",
+                albumId: null,
+                coverArt: "cover-1",
+            },
+            lastHeartbeatAt: "2026-02-18T13:00:00.000Z",
+        },
+    ];
+
+    const { SocialTab } = await import(
+        "../../components/activity/SocialTab.tsx"
+    );
+    const html = renderToStaticMarkup(React.createElement(SocialTab));
+
+    assert.match(html, /1 online/);
+    assert.match(html, /Live/);
+    assert.match(html, /Paused/);
+    assert.match(html, /In a Listen Together session/);
+    assert.match(html, /src=\"\/api\/cover\/cover-1\?size=32\"/);
+    assert.match(html, /@listener_user/);
+    assert.match(html, />Song One</);
+    assert.match(html, />Artist One</);
+    assert.doesNotMatch(html, /href=\"\/album\//);
+    assert.doesNotMatch(html, /href=\"\/artist\//);
 });
 
 test("renders playing state with song and artist links when ids are present", async () => {
@@ -190,4 +251,72 @@ test("renders idle users as not currently playing", async () => {
     assert.match(html, /Not currently playing/);
     assert.doesNotMatch(html, /href=\"\/album\/album-1\"/);
     assert.doesNotMatch(html, /href=\"\/artist\/artist-1\"/);
+});
+
+test("formats last seen timestamps for now, minutes, hours, today, and invalid dates", async () => {
+    const originalNow = Date.now;
+    Date.now = () => Date.parse("2026-02-20T12:00:00.000Z");
+
+    state.users = [
+        {
+            id: "u-now",
+            username: "now",
+            displayName: "Now",
+            isInListenTogetherGroup: false,
+            listeningStatus: "idle",
+            listeningTrack: null,
+            lastHeartbeatAt: "2026-02-20T11:59:40.000Z",
+        },
+        {
+            id: "u-mins",
+            username: "mins",
+            displayName: "Mins",
+            isInListenTogetherGroup: false,
+            listeningStatus: "idle",
+            listeningTrack: null,
+            lastHeartbeatAt: "2026-02-20T11:55:00.000Z",
+        },
+        {
+            id: "u-hours",
+            username: "hours",
+            displayName: "Hours",
+            isInListenTogetherGroup: false,
+            listeningStatus: "idle",
+            listeningTrack: null,
+            lastHeartbeatAt: "2026-02-20T10:00:00.000Z",
+        },
+        {
+            id: "u-today",
+            username: "today",
+            displayName: "Today",
+            isInListenTogetherGroup: false,
+            listeningStatus: "idle",
+            listeningTrack: null,
+            lastHeartbeatAt: "2026-02-19T12:00:00.000Z",
+        },
+        {
+            id: "u-invalid",
+            username: "invalid",
+            displayName: "Invalid",
+            isInListenTogetherGroup: false,
+            listeningStatus: "idle",
+            listeningTrack: null,
+            lastHeartbeatAt: "not-a-date",
+        },
+    ];
+
+    try {
+        const { SocialTab } = await import(
+            "../../components/activity/SocialTab.tsx"
+        );
+        const html = renderToStaticMarkup(React.createElement(SocialTab));
+
+        assert.match(html, />now</);
+        assert.match(html, />5m</);
+        assert.match(html, />2h</);
+        assert.match(html, />today</);
+        assert.match(html, />online</);
+    } finally {
+        Date.now = originalNow;
+    }
 });

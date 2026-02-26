@@ -189,6 +189,22 @@ class CoverArtService {
             // Ignore cache failures for negative lookups
         }
     }
+
+    /**
+     * Clear a stale NOT_FOUND cache entry for a release group, allowing
+     * on-demand retry with improved matching logic.
+     */
+    async clearNotFoundCache(rgMbid: string): Promise<void> {
+        const cacheKey = `caa:${rgMbid.trim()}`;
+        try {
+            const cached = await redisClient.get(cacheKey);
+            if (cached === "NOT_FOUND") {
+                await redisClient.del(cacheKey);
+            }
+        } catch {
+            // Ignore cache errors
+        }
+    }
 }
 
 export const coverArtService = new CoverArtService();

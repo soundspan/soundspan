@@ -37,7 +37,7 @@ spec:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
           {{- $audioAnalyzerClapEnv := .Values.audioAnalyzerClap.env | default (dict) }}
           {{- $audioAnalyzerClapDefaultBackendURL := printf "http://%s-backend:%v" (include "soundspan.fullname" .) .Values.backend.port }}
-          {{- $audioAnalyzerClapReservedEnv := dict
+          {{- $audioAnalyzerClapExplicitEnvKeys := dict
             "POSTGRES_USER" true
             "POSTGRES_PASSWORD" true
             "POSTGRES_DB" true
@@ -49,38 +49,78 @@ spec:
             "TZ" true
           }}
           env:
+            {{- if hasKey $audioAnalyzerClapEnv "POSTGRES_USER" }}
+            - name: POSTGRES_USER
+              value: {{ index $audioAnalyzerClapEnv "POSTGRES_USER" | quote }}
+            {{- else }}
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_USER
+            {{- end }}
+            {{- if hasKey $audioAnalyzerClapEnv "POSTGRES_PASSWORD" }}
+            - name: POSTGRES_PASSWORD
+              value: {{ index $audioAnalyzerClapEnv "POSTGRES_PASSWORD" | quote }}
+            {{- else }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_PASSWORD
+            {{- end }}
+            {{- if hasKey $audioAnalyzerClapEnv "POSTGRES_DB" }}
+            - name: POSTGRES_DB
+              value: {{ index $audioAnalyzerClapEnv "POSTGRES_DB" | quote }}
+            {{- else }}
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_DB
+            {{- end }}
+            {{- if hasKey $audioAnalyzerClapEnv "DATABASE_URL" }}
+            - name: DATABASE_URL
+              value: {{ index $audioAnalyzerClapEnv "DATABASE_URL" | quote }}
+            {{- else }}
             - name: DATABASE_URL
               value: {{ include "soundspan.databaseUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $audioAnalyzerClapEnv "REDIS_URL" }}
+            - name: REDIS_URL
+              value: {{ index $audioAnalyzerClapEnv "REDIS_URL" | quote }}
+            {{- else }}
             - name: REDIS_URL
               value: {{ include "soundspan.redisUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $audioAnalyzerClapEnv "MUSIC_PATH" }}
+            - name: MUSIC_PATH
+              value: {{ index $audioAnalyzerClapEnv "MUSIC_PATH" | quote }}
+            {{- else }}
             - name: MUSIC_PATH
               value: /music
+            {{- end }}
             - name: BACKEND_URL
               value: {{ if hasKey $audioAnalyzerClapEnv "BACKEND_URL" }}{{ index $audioAnalyzerClapEnv "BACKEND_URL" | quote }}{{ else }}{{ $audioAnalyzerClapDefaultBackendURL | quote }}{{ end }}
+            {{- if hasKey $audioAnalyzerClapEnv "INTERNAL_API_SECRET" }}
+            - name: INTERNAL_API_SECRET
+              value: {{ index $audioAnalyzerClapEnv "INTERNAL_API_SECRET" | quote }}
+            {{- else }}
             - name: INTERNAL_API_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: INTERNAL_API_SECRET
+            {{- end }}
+            {{- if hasKey $audioAnalyzerClapEnv "TZ" }}
+            - name: TZ
+              value: {{ index $audioAnalyzerClapEnv "TZ" | quote }}
+            {{- else }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
+            {{- end }}
             {{- range $key := keys $audioAnalyzerClapEnv | sortAlpha }}
-            {{- if not (hasKey $audioAnalyzerClapReservedEnv $key) }}
+            {{- if not (hasKey $audioAnalyzerClapExplicitEnvKeys $key) }}
             - name: {{ $key }}
               value: {{ index $audioAnalyzerClapEnv $key | quote }}
             {{- end }}

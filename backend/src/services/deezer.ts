@@ -76,6 +76,109 @@ class DeezerService {
             .replace(/[^a-z0-9]/g, "");
     }
 
+    private normalizeAlbumIdentity(name: string): string {
+        return name
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/['’`]/g, "")
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+    }
+
+    private buildAlbumTitleVariants(albumName: string): string[] {
+        const variants = new Set<string>();
+        const addVariant = (value: string) => {
+            const trimmed = value.replace(/\s+/g, " ").trim();
+            if (trimmed.length > 0) {
+                variants.add(trimmed);
+            }
+        };
+
+        const base = albumName.trim();
+        addVariant(base);
+
+        const withoutBracketedDescriptors = base.replace(
+            /\s*[\(\[][^\)\]]*[\)\]]\s*/g,
+            " "
+        );
+        addVariant(withoutBracketedDescriptors);
+
+        const withoutCommonDescriptors = withoutBracketedDescriptors.replace(
+            /\b(deluxe|edition|version|remaster(?:ed)?|expanded|bonus tracks?)\b/gi,
+            " "
+        );
+        addVariant(withoutCommonDescriptors);
+
+        return Array.from(variants);
+    }
+
+    private escapeDeezerQueryPhrase(value: string): string {
+        return value.replace(/"/g, '\\"');
+    }
+
+    private buildAlbumSearchQueries(
+        artistName: string,
+        albumName: string
+    ): string[] {
+        const queries = new Set<string>();
+        const titleVariants = this.buildAlbumTitleVariants(albumName);
+        const escapedArtist = this.escapeDeezerQueryPhrase(artistName);
+
+        for (const titleVariant of titleVariants) {
+            const escapedTitle = this.escapeDeezerQueryPhrase(titleVariant);
+            queries.add(`artist:"${escapedArtist}" album:"${escapedTitle}"`);
+            queries.add(`${artistName} ${titleVariant}`.trim());
+        }
+
+        return Array.from(queries);
+    }
+
+    private scoreAlbumCandidate(
+        album: any,
+        normalizedArtistName: string,
+        normalizedAlbumVariants: Set<string>
+    ): number {
+        const normalizedCandidateArtist = this.normalizeArtistIdentity(
+            String(album?.artist?.name || "")
+        );
+        const normalizedCandidateTitle = this.normalizeAlbumIdentity(
+            String(album?.title || "")
+        );
+
+        if (!normalizedCandidateArtist || !normalizedCandidateTitle) {
+            return Number.NEGATIVE_INFINITY;
+        }
+
+        let score = 0;
+        if (normalizedCandidateArtist === normalizedArtistName) {
+            score += 100;
+        } else if (
+            normalizedArtistName.length > 0 &&
+            (normalizedCandidateArtist.includes(normalizedArtistName) ||
+                normalizedArtistName.includes(normalizedCandidateArtist))
+        ) {
+            score += 25;
+        }
+
+        if (normalizedAlbumVariants.has(normalizedCandidateTitle)) {
+            score += 100;
+        } else {
+            for (const albumVariant of normalizedAlbumVariants) {
+                if (
+                    albumVariant.length > 0 &&
+                    (normalizedCandidateTitle.includes(albumVariant) ||
+                        albumVariant.includes(normalizedCandidateTitle))
+                ) {
+                    score += 40;
+                    break;
+                }
+            }
+        }
+
+        return score;
+    }
+
     /**
      * Get cached value from Redis
      */
@@ -176,21 +279,56 @@ class DeezerService {
         if (cached) return cached === "null" ? null : cached;
 
         try {
-            const response = await axios.get(`${DEEZER_API}/search/album`, {
-                params: { q: `artist:"${artistName}" album:"${albumName}"`, limit: 5 },
-                timeout: 5000,
-            });
+            const normalizedArtistName = this.normalizeArtistIdentity(artistName);
+            const normalizedAlbumVariants = new Set(
+                this.buildAlbumTitleVariants(albumName)
+                    .map((variant) => this.normalizeAlbumIdentity(variant))
+                    .filter((variant) => variant.length > 0)
+            );
 
-            // Find the best match
-            const albums = response.data?.data || [];
-            let bestMatch = albums[0];
+            const searchQueries = this.buildAlbumSearchQueries(
+                artistName,
+                albumName
+            );
+            let bestMatch: any = null;
+            let bestMatchScore = Number.NEGATIVE_INFINITY;
+            let lastError: Error | null = null;
 
-            for (const album of albums) {
-                if (album.artist?.name?.toLowerCase() === artistName.toLowerCase() &&
-                    album.title?.toLowerCase() === albumName.toLowerCase()) {
-                    bestMatch = album;
-                    break;
+            for (const query of searchQueries) {
+                try {
+                    const response = await axios.get(`${DEEZER_API}/search/album`, {
+                        params: { q: query, limit: 10 },
+                        timeout: 5000,
+                    });
+
+                    const albums = response.data?.data || [];
+                    for (const album of albums) {
+                        const score = this.scoreAlbumCandidate(
+                            album,
+                            normalizedArtistName,
+                            normalizedAlbumVariants
+                        );
+                        if (score > bestMatchScore) {
+                            bestMatchScore = score;
+                            bestMatch = album;
+                        }
+                    }
+
+                    // Exact artist + normalized title match found.
+                    if (bestMatchScore >= 200) {
+                        break;
+                    }
+                } catch (error: any) {
+                    lastError =
+                        error instanceof Error ? error : new Error(String(error));
                 }
+            }
+
+            if (!bestMatch && lastError) {
+                logger.error(
+                    `Deezer album cover error for ${artistName} - ${albumName}:`,
+                    lastError.message
+                );
             }
 
             const coverUrl = bestMatch?.cover_xl || bestMatch?.cover_big || bestMatch?.cover_medium || null;

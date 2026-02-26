@@ -620,28 +620,17 @@ class LastFmService {
 
     async enrichSimilarArtists(similar: SimilarArtist[], limit = 6) {
         const capped = similar.slice(0, limit);
-        const enrichCount = Math.min(3, capped.length);
 
-        const [enriched, fast] = await Promise.all([
-            Promise.all(
-                capped.slice(0, enrichCount).map((s) =>
-                    this.buildArtistSearchResult(
-                        { name: s.name, mbid: s.mbid, listeners: 0, url: s.url, image: [] },
-                        true
-                    )
+        const enriched = await Promise.all(
+            capped.map((s) =>
+                this.buildArtistSearchResult(
+                    { name: s.name, mbid: s.mbid, listeners: 0, url: s.url, image: [] },
+                    true
                 )
-            ),
-            Promise.all(
-                capped.slice(enrichCount).map((s) =>
-                    this.buildArtistSearchResult(
-                        { name: s.name, mbid: s.mbid, listeners: 0, url: s.url, image: [] },
-                        false
-                    )
-                )
-            ),
-        ]);
+            )
+        );
 
-        return [...enriched, ...fast].filter(Boolean);
+        return enriched.filter(Boolean);
     }
 
     private async buildArtistSearchResult(artist: any, enrich: boolean) {

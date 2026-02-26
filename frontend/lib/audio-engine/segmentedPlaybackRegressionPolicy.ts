@@ -29,11 +29,54 @@ export interface BufferingRecoveryDecisionInput {
     engineIsPlaying: boolean;
 }
 
+export interface HeartbeatGuardedRefreshDecisionInput {
+    consecutiveFailureCount: number;
+    failureThreshold: number;
+    lastRefreshAtMs: number;
+    refreshCooldownMs: number;
+    nowMs?: number;
+}
+
+export type HeartbeatGuardedRefreshReason =
+    | "below_threshold"
+    | "cooldown_active"
+    | "trigger_refresh";
+
+export interface HeartbeatGuardedRefreshDecision {
+    shouldTriggerRefresh: boolean;
+    reason: HeartbeatGuardedRefreshReason;
+    consecutiveFailureCount: number;
+    remainingCooldownMs: number;
+}
+
 export interface StartupGuardedRecoveryPositionInput {
     targetTrackId: string;
     trustedPositionSec: number;
     startupStabilityTrackId: string | null;
     startupFirstProgressAtMs: number | null;
+}
+
+export interface CorrelatedRecoveryResumeInput {
+    requestedResumeAtSec: number;
+    expectedTrackId: string;
+    activeTrackId: string | null;
+    expectedLoadId: number;
+    activeLoadId: number;
+    expectedSessionId?: string | null;
+    activeSessionTrackId?: string | null;
+    activeSessionId?: string | null;
+}
+
+export type CorrelatedRecoveryResumeMismatchReason =
+    | "none"
+    | "track_mismatch"
+    | "load_mismatch"
+    | "session_mismatch";
+
+export interface CorrelatedRecoveryResumeDecision {
+    resumeAtSec: number;
+    matched: boolean;
+    mismatchReason: CorrelatedRecoveryResumeMismatchReason;
 }
 
 export type BufferingRecoveryAction =
@@ -114,6 +157,56 @@ export function resolveStartupGuardedRecoveryPositionSec(
 }
 
 /**
+ * Enforce resume/handoff correlation so stale offsets cannot bleed into a
+ * newer track/load/session transition.
+ */
+export function resolveCorrelatedRecoveryResumeDecision(
+    input: CorrelatedRecoveryResumeInput,
+): CorrelatedRecoveryResumeDecision {
+    const requestedResumeAtSec =
+        Number.isFinite(input.requestedResumeAtSec) &&
+        typeof input.requestedResumeAtSec === "number"
+            ? Math.max(0, input.requestedResumeAtSec)
+            : 0;
+
+    if (input.activeTrackId !== input.expectedTrackId) {
+        return {
+            resumeAtSec: 0,
+            matched: false,
+            mismatchReason: "track_mismatch",
+        };
+    }
+
+    if (input.activeLoadId !== input.expectedLoadId) {
+        return {
+            resumeAtSec: 0,
+            matched: false,
+            mismatchReason: "load_mismatch",
+        };
+    }
+
+    const expectedSessionId = input.expectedSessionId ?? null;
+    if (expectedSessionId !== null) {
+        if (
+            input.activeSessionTrackId !== input.expectedTrackId ||
+            input.activeSessionId !== expectedSessionId
+        ) {
+            return {
+                resumeAtSec: 0,
+                matched: false,
+                mismatchReason: "session_mismatch",
+            };
+        }
+    }
+
+    return {
+        resumeAtSec: requestedResumeAtSec,
+        matched: true,
+        mismatchReason: "none",
+    };
+}
+
+/**
  * Decide whether the active load should run segmented startup timeout retry logic.
  * This keeps retry behavior deterministic when load attempts race.
  */
@@ -164,6 +257,62 @@ export function resolveBufferingRecoveryAction(
         return "force_playing";
     }
     return "noop";
+}
+
+/**
+ * Gate heartbeat-driven session refreshes to avoid retry storms while still
+ * recovering after sustained heartbeat failures.
+ */
+export function resolveHeartbeatGuardedRefreshDecision(
+    input: HeartbeatGuardedRefreshDecisionInput,
+): HeartbeatGuardedRefreshDecision {
+    const consecutiveFailureCount =
+        Number.isFinite(input.consecutiveFailureCount)
+            ? Math.max(0, Math.floor(input.consecutiveFailureCount))
+            : 0;
+    const failureThreshold =
+        Number.isFinite(input.failureThreshold)
+            ? Math.max(1, Math.floor(input.failureThreshold))
+            : 1;
+
+    if (consecutiveFailureCount < failureThreshold) {
+        return {
+            shouldTriggerRefresh: false,
+            reason: "below_threshold",
+            consecutiveFailureCount,
+            remainingCooldownMs: 0,
+        };
+    }
+
+    const nowMs =
+        typeof input.nowMs === "number" && Number.isFinite(input.nowMs)
+            ? input.nowMs
+            : Date.now();
+    const lastRefreshAtMs = Number.isFinite(input.lastRefreshAtMs)
+        ? Math.max(0, input.lastRefreshAtMs)
+        : 0;
+    const refreshCooldownMs = Number.isFinite(input.refreshCooldownMs)
+        ? Math.max(0, input.refreshCooldownMs)
+        : 0;
+    const elapsedMs = Math.max(0, nowMs - lastRefreshAtMs);
+    const remainingCooldownMs =
+        lastRefreshAtMs > 0 ? Math.max(0, refreshCooldownMs - elapsedMs) : 0;
+
+    if (remainingCooldownMs > 0) {
+        return {
+            shouldTriggerRefresh: false,
+            reason: "cooldown_active",
+            consecutiveFailureCount,
+            remainingCooldownMs,
+        };
+    }
+
+    return {
+        shouldTriggerRefresh: true,
+        reason: "trigger_refresh",
+        consecutiveFailureCount,
+        remainingCooldownMs: 0,
+    };
 }
 
 /**

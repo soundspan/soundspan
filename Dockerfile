@@ -506,15 +506,27 @@ ENVEOF
 # Normalize runtime streaming engine mode (consumed by frontend /runtime-config route).
 ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
 case "$ENGINE_MODE" in
-    ""|"videojs"|"react-all-player"|"howler-rollback")
+    ""|"videojs"|"howler")
         ;;
     *)
-        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected videojs|react-all-player|howler-rollback. Falling back to default (videojs)."
+        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected howler|videojs (videojs is experimental). Using primary default (howler)."
         ENGINE_MODE=""
         ;;
 esac
 
-echo "Frontend runtime STREAMING_ENGINE_MODE: ${ENGINE_MODE:-videojs (default)}"
+echo "Frontend runtime STREAMING_ENGINE_MODE: ${ENGINE_MODE:-howler (primary default)}"
+
+HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_VALUE="${HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED:-}"
+case "$HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_VALUE" in
+    ""|"true"|"false")
+        ;;
+    *)
+        echo "WARN: Invalid HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED '$HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_VALUE'; expected true|false. Falling back to default (false)."
+        HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_VALUE=""
+        ;;
+esac
+
+echo "Frontend runtime HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: ${HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_VALUE:-false (default)}"
 
 echo "Starting soundspan..."
 exec env \
@@ -524,6 +536,7 @@ exec env \
     SETTINGS_ENCRYPTION_KEY="$SETTINGS_ENCRYPTION_KEY" \
     INTERNAL_API_SECRET="$INTERNAL_API_SECRET" \
     STREAMING_ENGINE_MODE="$ENGINE_MODE" \
+    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED="$HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_VALUE" \
     /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
 EOF
 

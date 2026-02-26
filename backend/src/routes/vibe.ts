@@ -171,11 +171,24 @@ router.get("/similar/:trackId", requireAuth, async (req, res) => {
             });
         }
 
+        // Fetch source track audio features for vibe match comparison
+        const sourceTrack = await prisma.track.findUnique({
+            where: { id: trackId },
+            select: { energy: true, valence: true, danceability: true, arousal: true },
+        });
+
         res.json({
             sourceTrackId: trackId,
+            sourceFeatures: sourceTrack ? {
+                energy: sourceTrack.energy,
+                valence: sourceTrack.valence,
+                danceability: sourceTrack.danceability,
+                arousal: sourceTrack.arousal,
+            } : null,
             tracks: weightedTracks.map((t) => ({
                 id: t.id,
                 title: t.title,
+                duration: t.duration,
                 distance: t.distance,
                 similarity: t.similarity,
                 album: {
@@ -186,6 +199,12 @@ router.get("/similar/:trackId", requireAuth, async (req, res) => {
                 artist: {
                     id: t.artistId,
                     name: t.artistName,
+                },
+                audioFeatures: {
+                    energy: t.energy,
+                    valence: t.valence,
+                    danceability: t.danceability,
+                    arousal: t.arousal,
                 },
             })),
         });

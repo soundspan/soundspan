@@ -88,7 +88,7 @@
     {
       "id": "album-and-artist",
       "name": "Album and Artist Surfaces",
-      "summary": "Album and artist detail pages, action bars, popular tracks, and related track actions.",
+      "summary": "Album and artist detail pages, action bars, popular tracks, related track actions, and provider gap-fill loading UX.",
       "update_expectation": "Update or verify when album/artist page behavior, track actions, or navigation links change.",
       "frontend": {
         "feature_dirs": [
@@ -101,6 +101,8 @@
         ],
         "primary_files": [
           "frontend/features/album/components/TrackList.tsx",
+          "frontend/features/album/hooks/useTidalGapFill.ts",
+          "frontend/features/album/hooks/useYtMusicGapFill.ts",
           "frontend/features/artist/components/PopularTracks.tsx",
           "frontend/features/artist/components/ArtistActionBar.tsx"
         ]
@@ -278,7 +280,7 @@
     {
       "id": "search-and-browse",
       "name": "Search and Browse",
-      "summary": "Library search, browse flows, and result surfaces across local and integration-backed sources.",
+      "summary": "Library search, browse flows, and result surfaces across local and integration-backed sources. Deezer album cover search uses multi-variant title matching with fuzzy scoring-based candidate selection.",
       "update_expectation": "Update or verify when search relevance, filters, or browse result contracts change.",
       "frontend": {
         "feature_dirs": [
@@ -311,7 +313,8 @@
         "primary_specs": [
           "backend/src/routes/__tests__/searchRuntime.test.ts",
           "backend/src/routes/__tests__/browseRuntime.test.ts",
-          "backend/src/services/__tests__/searchService.test.ts"
+          "backend/src/services/__tests__/searchService.test.ts",
+          "backend/src/services/__tests__/deezerService.test.ts"
         ]
       },
       "docs": [
@@ -382,6 +385,11 @@
         "primary_files": [
           "frontend/components/ui/TrackOverflowMenu.tsx",
           "frontend/lib/audio-controls-context.tsx",
+          "frontend/lib/audio-playback-context.tsx",
+          "frontend/lib/audio-playback-persistence-guards.ts",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+          "frontend/lib/audio-engine/videoJsSegmentedEngine.ts",
+          "frontend/lib/audio-engine/segmentedRepresentationPolicy.ts",
           "frontend/components/player/FullPlayer.tsx",
           "frontend/components/player/OverlayPlayer.tsx",
           "frontend/components/player/MiniPlayer.tsx"
@@ -406,7 +414,12 @@
           "frontend/tests/component/trackOverflowMenu.component.test.ts",
           "frontend/tests/component/queuePageOverflowMenu.component.test.ts",
           "frontend/tests/component/miniPlayerEnhancements.component.test.ts",
+          "frontend/tests/component/audioPlaybackTimeGuard.component.test.ts",
           "frontend/tests/unit/playNextQueueControl.test.ts",
+          "frontend/tests/unit/audioPlaybackPersistence.test.ts",
+          "frontend/tests/unit/prewarmValidationTimeout.test.ts",
+          "frontend/tests/unit/segmentedRepresentationPolicy.test.ts",
+          "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
           "backend/src/routes/__tests__/playlistsRuntime.test.ts"
         ]
       },
@@ -420,7 +433,7 @@
     {
       "id": "social-and-listen-together",
       "name": "Social Presence and Listen Together",
-      "summary": "Presence, social history, and synchronized listen-together sessions.",
+      "summary": "Presence, social history, and synchronized listen-together sessions. The ListenTogetherSocket class includes transient-conflict retry with exponential backoff for seek() and reportReady() operations.",
       "update_expectation": "Update or verify when social presence, listen-together sync, or related contracts change.",
       "frontend": {
         "feature_dirs": [],
@@ -430,7 +443,8 @@
         ],
         "primary_files": [
           "frontend/components/layout/ActivityPanel.tsx",
-          "frontend/components/layout/socialNavigation.ts"
+          "frontend/components/layout/socialNavigation.ts",
+          "frontend/lib/listen-together-socket.ts"
         ]
       },
       "backend": {
@@ -453,7 +467,8 @@
         "primary_specs": [
           "backend/src/routes/__tests__/listenTogetherRuntime.test.ts",
           "backend/src/routes/__tests__/socialCompat.test.ts",
-          "frontend/tests/component/activityPanel.component.test.ts"
+          "frontend/tests/component/activityPanel.component.test.ts",
+          "frontend/tests/component/listenTogetherSocketRetry.component.test.ts"
         ]
       },
       "docs": [

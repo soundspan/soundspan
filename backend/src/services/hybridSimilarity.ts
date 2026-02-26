@@ -1,10 +1,12 @@
 import { prisma } from "../utils/db";
 import { featureDetection } from "./featureDetection";
 import { logger } from "../utils/logger";
+import { separateArtistsPreservingOrder } from "../utils/separateArtists";
 
 export interface SimilarTrack {
     id: string;
     title: string;
+    duration: number;
     distance: number;
     similarity: number;
     albumId: string;
@@ -12,6 +14,11 @@ export interface SimilarTrack {
     albumCoverUrl: string | null;
     artistId: string;
     artistName: string;
+    // Audio features for vibe match visualization
+    energy: number | null;
+    valence: number | null;
+    danceability: number | null;
+    arousal: number | null;
 }
 
 const WEIGHTS = {
@@ -85,7 +92,10 @@ function applyArtistDiversityCap(
         }
     }
 
-    return selected.slice(0, limit);
+    return separateArtistsPreservingOrder(
+        selected,
+        (t) => t.artistId || `unknown:${t.id}`,
+    ).slice(0, limit);
 }
 
 export async function findSimilarTracks(
@@ -142,6 +152,7 @@ async function findSimilarHybrid(
         SELECT
             t.id,
             t.title,
+            t.duration,
             c.clap_sim as distance,
             (
                 ${WEIGHTS.clap} * c.clap_sim +
@@ -157,7 +168,11 @@ async function findSimilarHybrid(
             a.title as "albumTitle",
             a."coverUrl" as "albumCoverUrl",
             ar.id as "artistId",
-            ar.name as "artistName"
+            ar.name as "artistName",
+            t.energy,
+            t.valence,
+            t.danceability,
+            t.arousal
         FROM clap_candidates c
         JOIN "Track" t ON c.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
@@ -182,13 +197,18 @@ async function findSimilarClapOnly(
         SELECT
             t.id,
             t.title,
+            t.duration,
             te.embedding <=> (SELECT embedding FROM source) as distance,
             1 - (te.embedding <=> (SELECT embedding FROM source)) as similarity,
             a.id as "albumId",
             a.title as "albumTitle",
             a."coverUrl" as "albumCoverUrl",
             ar.id as "artistId",
-            ar.name as "artistName"
+            ar.name as "artistName",
+            t.energy,
+            t.valence,
+            t.danceability,
+            t.arousal
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
@@ -215,6 +235,7 @@ async function findSimilarFeaturesOnly(
         SELECT
             t.id,
             t.title,
+            t.duration,
             0 as distance,
             (
                 ${FEATURES_ONLY_WEIGHTS.energy} * (1 - ABS(COALESCE(t.energy, 0.5) - COALESCE(s.energy, 0.5))) +
@@ -229,7 +250,11 @@ async function findSimilarFeaturesOnly(
             a.title as "albumTitle",
             a."coverUrl" as "albumCoverUrl",
             ar.id as "artistId",
-            ar.name as "artistName"
+            ar.name as "artistName",
+            t.energy,
+            t.valence,
+            t.danceability,
+            t.arousal
         FROM "Track" t
         JOIN "Album" a ON t."albumId" = a.id
         JOIN "Artist" ar ON a."artistId" = ar.id

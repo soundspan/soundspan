@@ -18,6 +18,7 @@ jest.mock("../../utils/redis", () => ({
     redisClient: {
         get: jest.fn(),
         setEx: jest.fn(),
+        del: jest.fn(),
     },
 }));
 
@@ -46,6 +47,7 @@ jest.mock("../musicbrainz", () => ({
 const mockAxiosGet = axios.get as jest.Mock;
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
+const mockRedisDel = redisClient.del as jest.Mock;
 const mockRateLimiterExecute = rateLimiter.execute as jest.Mock;
 const mockGetAlbumCover = imageProviderService.getAlbumCover as jest.Mock;
 const mockGetReleaseGroup = musicBrainzService.getReleaseGroup as jest.Mock;
@@ -55,6 +57,7 @@ describe("coverArtService", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockRedisGet.mockResolvedValue(null);
+        mockRedisDel.mockResolvedValue(1);
         mockRateLimiterExecute.mockImplementation(
             async (_bucket: string, requestFn: () => Promise<unknown>) =>
                 requestFn()
@@ -179,5 +182,33 @@ describe("coverArtService", () => {
             30 * 24 * 60 * 60,
             "NOT_FOUND"
         );
+    });
+
+    it("clears stale NOT_FOUND cache entries but keeps non-NOT_FOUND values", async () => {
+        mockRedisGet
+            .mockResolvedValueOnce("NOT_FOUND")
+            .mockResolvedValueOnce("https://cached.example/cover.jpg");
+
+        await expect(
+            coverArtService.clearNotFoundCache(" mbid-clear-me ")
+        ).resolves.toBeUndefined();
+        await expect(
+            coverArtService.clearNotFoundCache("mbid-keep-value")
+        ).resolves.toBeUndefined();
+
+        expect(mockRedisGet).toHaveBeenNthCalledWith(1, "caa:mbid-clear-me");
+        expect(mockRedisGet).toHaveBeenNthCalledWith(2, "caa:mbid-keep-value");
+        expect(mockRedisDel).toHaveBeenCalledTimes(1);
+        expect(mockRedisDel).toHaveBeenCalledWith("caa:mbid-clear-me");
+    });
+
+    it("ignores redis errors while clearing stale NOT_FOUND cache entries", async () => {
+        mockRedisGet.mockRejectedValueOnce(new Error("redis unavailable"));
+
+        await expect(
+            coverArtService.clearNotFoundCache("mbid-cache-error")
+        ).resolves.toBeUndefined();
+
+        expect(mockRedisDel).not.toHaveBeenCalled();
     });
 });

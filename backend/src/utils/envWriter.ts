@@ -2,6 +2,16 @@ import fs from "fs";
 import { logger } from "./logger";
 import path from "path";
 
+const STALE_ENV_SYNC_KEYS = [
+    "SOULSEEK_USERNAME",
+    "SOULSEEK_PASSWORD",
+    "SLSKD_SOULSEEK_USERNAME",
+    "SLSKD_SOULSEEK_PASSWORD",
+    "MULLVAD_PRIVATE_KEY",
+    "MULLVAD_ADDRESSES",
+    "MULLVAD_SERVER_CITY",
+] as const;
+
 export class EnvFileSyncSkippedError extends Error {
     constructor(message: string) {
         super(message);
@@ -75,6 +85,11 @@ export async function writeEnvFile(
         logger.debug("No existing .env file, creating new one");
     }
 
+    // Remove env keys that are no longer consumed at runtime.
+    STALE_ENV_SYNC_KEYS.forEach((key) => {
+        existingVars.delete(key);
+    });
+
     // Update with new values
     Object.entries(variables).forEach(([key, value]) => {
         if (value !== null && value !== undefined) {
@@ -98,12 +113,6 @@ export async function writeEnvFile(
         "Fanart.tv": ["FANART_API_KEY"],
         OpenAI: ["OPENAI_API_KEY"],
         Audiobookshelf: ["AUDIOBOOKSHELF_URL", "AUDIOBOOKSHELF_API_KEY"],
-        Soulseek: ["SLSKD_SOULSEEK_USERNAME", "SLSKD_SOULSEEK_PASSWORD"],
-        "VPN (Mullvad)": [
-            "MULLVAD_PRIVATE_KEY",
-            "MULLVAD_ADDRESSES",
-            "MULLVAD_SERVER_CITY",
-        ],
         "Docker Paths": ["MUSIC_PATH", "DOWNLOAD_PATH"],
         Security: ["SETTINGS_ENCRYPTION_KEY"],
     };

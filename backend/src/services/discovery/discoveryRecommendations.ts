@@ -7,6 +7,7 @@ import {
     resolveTrackPreference,
     TRACK_DISLIKE_ENTITY_TYPE,
 } from "../trackPreference";
+import { separateArtists } from "../../utils/separateArtists";
 
 type RecommendationTier = "high" | "medium" | "explore" | "wildcard";
 
@@ -560,7 +561,10 @@ export class DiscoveryRecommendationsService {
             }
         }
 
-        return selected.slice(0, targetCount);
+        return separateArtists(
+            selected.slice(0, targetCount),
+            (t) => t.artistId
+        );
     }
 
     async generatePlaylist(userId: string): Promise<GenerateResult> {

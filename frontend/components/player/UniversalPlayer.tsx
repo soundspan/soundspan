@@ -59,30 +59,23 @@ export function UniversalPlayer() {
                     </AnimatePresence>
                 </LayoutGroup>
             ) : (
-                /* Desktop: full player by default, overlay when requested */
-                <AnimatePresence initial={false} mode="sync">
-                    {playerMode === "overlay" && hasMedia ? (
-                        <motion.div
-                            key="desktop-overlay-player"
-                            initial={{ opacity: 0, y: 18, scale: 0.995 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 22, scale: 0.998 }}
-                            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                        >
-                            <OverlayPlayer />
-                        </motion.div>
-                    ) : (
-                        <motion.div
-                            key="desktop-full-player"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 8 }}
-                            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-                        >
-                            <FullPlayer />
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                /* Desktop: FullPlayer always visible, overlay layers on top */
+                <>
+                    <FullPlayer />
+                    <AnimatePresence initial={false}>
+                        {playerMode === "overlay" && hasMedia && (
+                            <motion.div
+                                key="desktop-overlay-player"
+                                initial={{ opacity: 0, y: 18, scale: 0.995 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: 22, scale: 0.998 }}
+                                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                            >
+                                <OverlayPlayer />
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </>
             )}
         </>
     );

@@ -13,7 +13,7 @@ describe("listenTogetherStateStore", () => {
         ttlSeconds?: string;
         getValue?: string | null;
         getError?: string;
-        setError?: string;
+        evalError?: string;
         delError?: string;
     }) {
         process.env = { ...originalEnv };
@@ -45,11 +45,11 @@ describe("listenTogetherStateStore", () => {
                 }
                 return options?.getValue ?? null;
             }),
-            set: jest.fn().mockImplementation(async () => {
-                if (options?.setError) {
-                    throw new Error(options.setError);
+            eval: jest.fn().mockImplementation(async () => {
+                if (options?.evalError) {
+                    throw new Error(options.evalError);
                 }
-                return "OK";
+                return 1;
             }),
             del: jest.fn().mockImplementation(async () => {
                 if (options?.delError) {
@@ -108,7 +108,7 @@ describe("listenTogetherStateStore", () => {
     it("returns a valid snapshot and uses configured key prefix + ttl", async () => {
         const snapshot = {
             id: "group-1",
-            playback: { playing: true },
+            playback: { playing: true, stateVersion: 12, serverTime: 34_567 },
             members: [{ id: "u1" }],
         };
         const { listenTogetherStateStore, redisClient } = loadStateStore({
@@ -123,11 +123,14 @@ describe("listenTogetherStateStore", () => {
         await listenTogetherStateStore.setSnapshot("group-1", snapshot);
 
         expect(redisClient.get).toHaveBeenCalledWith("test-prefix:group-1");
-        expect(redisClient.set).toHaveBeenCalledWith(
+        expect(redisClient.eval).toHaveBeenCalledWith(
+            expect.any(String),
+            1,
             "test-prefix:group-1",
             JSON.stringify(snapshot),
-            "EX",
-            123
+            "123",
+            "12",
+            "34567"
         );
     });
 
@@ -159,7 +162,7 @@ describe("listenTogetherStateStore", () => {
     it("swallows redis errors for get/set/delete and logs warnings", async () => {
         const { listenTogetherStateStore, logger } = loadStateStore({
             getError: "redis-get-down",
-            setError: "redis-set-down",
+            evalError: "redis-set-down",
             delError: "redis-del-down",
         });
         const snapshot = { id: "group-1", playback: {}, members: [] };
@@ -185,6 +188,33 @@ describe("listenTogetherStateStore", () => {
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining("Failed to delete snapshot"),
             expect.any(Error)
+        );
+    });
+
+    it("passes stateVersion/serverTime ordering values to compare-and-set writes", async () => {
+        const { listenTogetherStateStore, redisClient } = loadStateStore({
+            keyPrefix: "ordering-prefix",
+            ttlSeconds: "42",
+        });
+        const snapshot = {
+            id: "group-1",
+            playback: {
+                stateVersion: 99,
+                serverTime: 123_456_789,
+            },
+            members: [],
+        };
+
+        await listenTogetherStateStore.setSnapshot("group-1", snapshot);
+
+        expect(redisClient.eval).toHaveBeenCalledWith(
+            expect.any(String),
+            1,
+            "ordering-prefix:group-1",
+            JSON.stringify(snapshot),
+            "42",
+            "99",
+            "123456789"
         );
     });
 

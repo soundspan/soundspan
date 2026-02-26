@@ -114,8 +114,7 @@ mock.module("@/hooks/useTrackPreference", {
         useTrackPreference: () => ({
             signal: null,
             isSaving: false,
-            toggleThumbsUp: async () => undefined,
-            toggleThumbsDown: async () => undefined,
+            toggleLike: async () => undefined,
         }),
     },
 });

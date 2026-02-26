@@ -81,7 +81,7 @@ spec:
               protocol: TCP
           {{- $backendEnv := .Values.backend.env | default (dict) }}
           {{- $backendHasPostgresSecretEnv := or .Values.postgresql.enabled (not .Values.postgresql.external.url) }}
-          {{- $backendReservedEnv := dict
+          {{- $backendExplicitEnvKeys := dict
             "NODE_ENV" true
             "PORT" true
             "TZ" true
@@ -101,6 +101,10 @@ spec:
             "READINESS_DEPENDENCY_CHECK_INTERVAL_MS" true
             "READINESS_DEPENDENCY_CHECK_TIMEOUT_MS" true
             "MUSIC_PATH" true
+            "TRANSCODE_CACHE_PATH" true
+            "POSTGRES_USER" true
+            "POSTGRES_PASSWORD" true
+            "POSTGRES_DB" true
             "DATABASE_URL" true
             "REDIS_URL" true
             "REDIS_FLUSH_ON_STARTUP" true
@@ -109,168 +113,334 @@ spec:
             "INTERNAL_API_SECRET" true
             "TIDAL_SIDECAR_URL" true
             "YTMUSIC_STREAMER_URL" true
+            "ALLOWED_ORIGINS" true
+            "LOG_LEVEL" true
+            "DOCS_PUBLIC" true
+            "LIDARR_ENABLED" true
+            "LIDARR_URL" true
+            "LIDARR_API_KEY" true
+            "AUDIOBOOKSHELF_URL" true
+            "AUDIOBOOKSHELF_TOKEN" true
+            "LASTFM_API_KEY" true
+            "FANART_API_KEY" true
+            "OPENAI_API_KEY" true
           }}
-          {{- if not (hasKey $backendEnv "TRANSCODE_CACHE_PATH") }}
-          {{- $_ := set $backendReservedEnv "TRANSCODE_CACHE_PATH" true }}
-          {{- end }}
-          {{- if $backendHasPostgresSecretEnv }}
-          {{- $_ := set $backendReservedEnv "POSTGRES_USER" true }}
-          {{- $_ := set $backendReservedEnv "POSTGRES_PASSWORD" true }}
-          {{- $_ := set $backendReservedEnv "POSTGRES_DB" true }}
-          {{- end }}
-          {{- if .Values.config.allowedOrigins }}
-          {{- $_ := set $backendReservedEnv "ALLOWED_ORIGINS" true }}
-          {{- end }}
-          {{- if .Values.config.logLevel }}
-          {{- $_ := set $backendReservedEnv "LOG_LEVEL" true }}
-          {{- end }}
-          {{- if .Values.config.docsPublic }}
-          {{- $_ := set $backendReservedEnv "DOCS_PUBLIC" true }}
-          {{- end }}
-          {{- if .Values.config.lidarrEnabled }}
-          {{- $_ := set $backendReservedEnv "LIDARR_ENABLED" true }}
-          {{- $_ := set $backendReservedEnv "LIDARR_URL" true }}
-          {{- $_ := set $backendReservedEnv "LIDARR_API_KEY" true }}
-          {{- end }}
-          {{- if .Values.config.audiobookshelfUrl }}
-          {{- $_ := set $backendReservedEnv "AUDIOBOOKSHELF_URL" true }}
-          {{- $_ := set $backendReservedEnv "AUDIOBOOKSHELF_TOKEN" true }}
-          {{- end }}
-          {{- if .Values.config.lastfmApiKey }}
-          {{- $_ := set $backendReservedEnv "LASTFM_API_KEY" true }}
-          {{- end }}
-          {{- if .Values.config.fanartApiKey }}
-          {{- $_ := set $backendReservedEnv "FANART_API_KEY" true }}
-          {{- end }}
-          {{- if .Values.config.openaiApiKey }}
-          {{- $_ := set $backendReservedEnv "OPENAI_API_KEY" true }}
-          {{- end }}
           env:
+            {{- if hasKey $backendEnv "NODE_ENV" }}
+            - name: NODE_ENV
+              value: {{ index $backendEnv "NODE_ENV" | quote }}
+            {{- else }}
             - name: NODE_ENV
               value: {{ .Values.config.nodeEnv | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "PORT" }}
+            - name: PORT
+              value: {{ index $backendEnv "PORT" | quote }}
+            {{- else }}
             - name: PORT
               value: {{ .Values.backend.port | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "TZ" }}
+            - name: TZ
+              value: {{ index $backendEnv "TZ" | quote }}
+            {{- else }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "BACKEND_PROCESS_ROLE" }}
+            - name: BACKEND_PROCESS_ROLE
+              value: {{ index $backendEnv "BACKEND_PROCESS_ROLE" | quote }}
+            {{- else }}
             - name: BACKEND_PROCESS_ROLE
               value: {{ (default (ternary "api" "all" $backendWorkerEnabled) .Values.backend.processRole) | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED" }}
+            - name: LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED
+              value: {{ index $backendEnv "LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED
               value: {{ $ltRedisAdapterEnabled | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_STATE_SYNC_ENABLED" }}
+            - name: LISTEN_TOGETHER_STATE_SYNC_ENABLED
+              value: {{ index $backendEnv "LISTEN_TOGETHER_STATE_SYNC_ENABLED" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_STATE_SYNC_ENABLED
               value: {{ $ltStateSyncEnabled | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_STATE_STORE_ENABLED" }}
+            - name: LISTEN_TOGETHER_STATE_STORE_ENABLED
+              value: {{ index $backendEnv "LISTEN_TOGETHER_STATE_STORE_ENABLED" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_STATE_STORE_ENABLED
               value: {{ $ltStateStoreEnabled | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS" }}
+            - name: LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS
+              value: {{ index $backendEnv "LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS
               value: {{ .Values.config.listenTogetherStateStoreTtlSeconds | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX" }}
+            - name: LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX
+              value: {{ index $backendEnv "LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_STATE_STORE_KEY_PREFIX
               value: {{ .Values.config.listenTogetherStateStoreKeyPrefix | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_MUTATION_LOCK_ENABLED" }}
+            - name: LISTEN_TOGETHER_MUTATION_LOCK_ENABLED
+              value: {{ index $backendEnv "LISTEN_TOGETHER_MUTATION_LOCK_ENABLED" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_MUTATION_LOCK_ENABLED
               value: {{ $ltMutationLockEnabled | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS" }}
+            - name: LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS
+              value: {{ index $backendEnv "LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS
               value: {{ .Values.config.listenTogetherMutationLockTtlMs | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_MUTATION_LOCK_PREFIX" }}
+            - name: LISTEN_TOGETHER_MUTATION_LOCK_PREFIX
+              value: {{ index $backendEnv "LISTEN_TOGETHER_MUTATION_LOCK_PREFIX" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_MUTATION_LOCK_PREFIX
               value: {{ .Values.config.listenTogetherMutationLockPrefix | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_RECONNECT_SLO_MS" }}
+            - name: LISTEN_TOGETHER_RECONNECT_SLO_MS
+              value: {{ index $backendEnv "LISTEN_TOGETHER_RECONNECT_SLO_MS" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_RECONNECT_SLO_MS
               value: {{ .Values.config.listenTogetherReconnectSloMs | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LISTEN_TOGETHER_ALLOW_POLLING" }}
+            - name: LISTEN_TOGETHER_ALLOW_POLLING
+              value: {{ index $backendEnv "LISTEN_TOGETHER_ALLOW_POLLING" | quote }}
+            {{- else }}
             - name: LISTEN_TOGETHER_ALLOW_POLLING
               value: {{ $ltAllowPolling | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD" }}
+            - name: SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD
+              value: {{ index $backendEnv "SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD" | quote }}
+            {{- else }}
             - name: SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD
               value: {{ .Values.config.schedulerClaimSkipWarnThreshold | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "READINESS_REQUIRE_DEPENDENCIES" }}
+            - name: READINESS_REQUIRE_DEPENDENCIES
+              value: {{ index $backendEnv "READINESS_REQUIRE_DEPENDENCIES" | quote }}
+            {{- else }}
             - name: READINESS_REQUIRE_DEPENDENCIES
               value: {{ $readinessRequireDependencies | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "READINESS_DEPENDENCY_CHECK_INTERVAL_MS" }}
+            - name: READINESS_DEPENDENCY_CHECK_INTERVAL_MS
+              value: {{ index $backendEnv "READINESS_DEPENDENCY_CHECK_INTERVAL_MS" | quote }}
+            {{- else }}
             - name: READINESS_DEPENDENCY_CHECK_INTERVAL_MS
               value: {{ .Values.config.readinessDependencyCheckIntervalMs | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "READINESS_DEPENDENCY_CHECK_TIMEOUT_MS" }}
+            - name: READINESS_DEPENDENCY_CHECK_TIMEOUT_MS
+              value: {{ index $backendEnv "READINESS_DEPENDENCY_CHECK_TIMEOUT_MS" | quote }}
+            {{- else }}
             - name: READINESS_DEPENDENCY_CHECK_TIMEOUT_MS
               value: {{ .Values.config.readinessDependencyCheckTimeoutMs | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "MUSIC_PATH" }}
+            - name: MUSIC_PATH
+              value: {{ index $backendEnv "MUSIC_PATH" | quote }}
+            {{- else }}
             - name: MUSIC_PATH
               value: /music
-            {{- if not (hasKey $backendEnv "TRANSCODE_CACHE_PATH") }}
+            {{- end }}
+            {{- if hasKey $backendEnv "TRANSCODE_CACHE_PATH" }}
+            - name: TRANSCODE_CACHE_PATH
+              value: {{ index $backendEnv "TRANSCODE_CACHE_PATH" | quote }}
+            {{- else }}
             - name: TRANSCODE_CACHE_PATH
               value: /music/.soundspan/transcodes
             {{- end }}
             # Secret-backed env vars
-            {{- if $backendHasPostgresSecretEnv }}
+            {{- if hasKey $backendEnv "POSTGRES_USER" }}
+            - name: POSTGRES_USER
+              value: {{ index $backendEnv "POSTGRES_USER" | quote }}
+            {{- else if $backendHasPostgresSecretEnv }}
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_USER
+            {{- end }}
+            {{- if hasKey $backendEnv "POSTGRES_PASSWORD" }}
+            - name: POSTGRES_PASSWORD
+              value: {{ index $backendEnv "POSTGRES_PASSWORD" | quote }}
+            {{- else if $backendHasPostgresSecretEnv }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_PASSWORD
+            {{- end }}
+            {{- if hasKey $backendEnv "POSTGRES_DB" }}
+            - name: POSTGRES_DB
+              value: {{ index $backendEnv "POSTGRES_DB" | quote }}
+            {{- else if $backendHasPostgresSecretEnv }}
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: POSTGRES_DB
             {{- end }}
+            {{- if hasKey $backendEnv "DATABASE_URL" }}
+            - name: DATABASE_URL
+              value: {{ index $backendEnv "DATABASE_URL" | quote }}
+            {{- else }}
             - name: DATABASE_URL
               value: {{ include "soundspan.databaseUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "REDIS_URL" }}
+            - name: REDIS_URL
+              value: {{ index $backendEnv "REDIS_URL" | quote }}
+            {{- else }}
             - name: REDIS_URL
               value: {{ include "soundspan.redisUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "REDIS_FLUSH_ON_STARTUP" }}
+            - name: REDIS_FLUSH_ON_STARTUP
+              value: {{ index $backendEnv "REDIS_FLUSH_ON_STARTUP" | quote }}
+            {{- else }}
             - name: REDIS_FLUSH_ON_STARTUP
               value: {{ .Values.config.redisFlushOnStartup | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "SESSION_SECRET" }}
+            - name: SESSION_SECRET
+              value: {{ index $backendEnv "SESSION_SECRET" | quote }}
+            {{- else }}
             - name: SESSION_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: SESSION_SECRET
+            {{- end }}
+            {{- if hasKey $backendEnv "SETTINGS_ENCRYPTION_KEY" }}
+            - name: SETTINGS_ENCRYPTION_KEY
+              value: {{ index $backendEnv "SETTINGS_ENCRYPTION_KEY" | quote }}
+            {{- else }}
             - name: SETTINGS_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: SETTINGS_ENCRYPTION_KEY
+            {{- end }}
+            {{- if hasKey $backendEnv "INTERNAL_API_SECRET" }}
+            - name: INTERNAL_API_SECRET
+              value: {{ index $backendEnv "INTERNAL_API_SECRET" | quote }}
+            {{- else }}
             - name: INTERNAL_API_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: INTERNAL_API_SECRET
+            {{- end }}
+            {{- if hasKey $backendEnv "TIDAL_SIDECAR_URL" }}
+            - name: TIDAL_SIDECAR_URL
+              value: {{ index $backendEnv "TIDAL_SIDECAR_URL" | quote }}
+            {{- else }}
             - name: TIDAL_SIDECAR_URL
               value: {{ include "soundspan.tidalSidecarUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "YTMUSIC_STREAMER_URL" }}
+            - name: YTMUSIC_STREAMER_URL
+              value: {{ index $backendEnv "YTMUSIC_STREAMER_URL" | quote }}
+            {{- else }}
             - name: YTMUSIC_STREAMER_URL
               value: {{ include "soundspan.ytmusicStreamerUrl" . | quote }}
-            {{- if .Values.config.allowedOrigins }}
+            {{- end }}
+            {{- if hasKey $backendEnv "ALLOWED_ORIGINS" }}
+            - name: ALLOWED_ORIGINS
+              value: {{ index $backendEnv "ALLOWED_ORIGINS" | quote }}
+            {{- else if .Values.config.allowedOrigins }}
             - name: ALLOWED_ORIGINS
               value: {{ .Values.config.allowedOrigins | quote }}
             {{- end }}
-            {{- if .Values.config.logLevel }}
+            {{- if hasKey $backendEnv "LOG_LEVEL" }}
+            - name: LOG_LEVEL
+              value: {{ index $backendEnv "LOG_LEVEL" | quote }}
+            {{- else if .Values.config.logLevel }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
             {{- end }}
-            {{- if .Values.config.docsPublic }}
+            {{- if hasKey $backendEnv "DOCS_PUBLIC" }}
+            - name: DOCS_PUBLIC
+              value: {{ index $backendEnv "DOCS_PUBLIC" | quote }}
+            {{- else if .Values.config.docsPublic }}
             - name: DOCS_PUBLIC
               value: "true"
             {{- end }}
-            {{- if .Values.config.lidarrEnabled }}
+            {{- if hasKey $backendEnv "LIDARR_ENABLED" }}
+            - name: LIDARR_ENABLED
+              value: {{ index $backendEnv "LIDARR_ENABLED" | quote }}
+            {{- else if .Values.config.lidarrEnabled }}
             - name: LIDARR_ENABLED
               value: "true"
+            {{- end }}
+            {{- if hasKey $backendEnv "LIDARR_URL" }}
+            - name: LIDARR_URL
+              value: {{ index $backendEnv "LIDARR_URL" | quote }}
+            {{- else if .Values.config.lidarrEnabled }}
             - name: LIDARR_URL
               value: {{ .Values.config.lidarrUrl | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "LIDARR_API_KEY" }}
+            - name: LIDARR_API_KEY
+              value: {{ index $backendEnv "LIDARR_API_KEY" | quote }}
+            {{- else if .Values.config.lidarrEnabled }}
             - name: LIDARR_API_KEY
               value: {{ .Values.config.lidarrApiKey | quote }}
             {{- end }}
-            {{- if .Values.config.audiobookshelfUrl }}
+            {{- if hasKey $backendEnv "AUDIOBOOKSHELF_URL" }}
+            - name: AUDIOBOOKSHELF_URL
+              value: {{ index $backendEnv "AUDIOBOOKSHELF_URL" | quote }}
+            {{- else if .Values.config.audiobookshelfUrl }}
             - name: AUDIOBOOKSHELF_URL
               value: {{ .Values.config.audiobookshelfUrl | quote }}
+            {{- end }}
+            {{- if hasKey $backendEnv "AUDIOBOOKSHELF_TOKEN" }}
+            - name: AUDIOBOOKSHELF_TOKEN
+              value: {{ index $backendEnv "AUDIOBOOKSHELF_TOKEN" | quote }}
+            {{- else if .Values.config.audiobookshelfUrl }}
             - name: AUDIOBOOKSHELF_TOKEN
               value: {{ .Values.config.audiobookshelfToken | quote }}
             {{- end }}
-            {{- if .Values.config.lastfmApiKey }}
+            {{- if hasKey $backendEnv "LASTFM_API_KEY" }}
+            - name: LASTFM_API_KEY
+              value: {{ index $backendEnv "LASTFM_API_KEY" | quote }}
+            {{- else if .Values.config.lastfmApiKey }}
             - name: LASTFM_API_KEY
               value: {{ .Values.config.lastfmApiKey | quote }}
             {{- end }}
-            {{- if .Values.config.fanartApiKey }}
+            {{- if hasKey $backendEnv "FANART_API_KEY" }}
+            - name: FANART_API_KEY
+              value: {{ index $backendEnv "FANART_API_KEY" | quote }}
+            {{- else if .Values.config.fanartApiKey }}
             - name: FANART_API_KEY
               value: {{ .Values.config.fanartApiKey | quote }}
             {{- end }}
-            {{- if .Values.config.openaiApiKey }}
+            {{- if hasKey $backendEnv "OPENAI_API_KEY" }}
+            - name: OPENAI_API_KEY
+              value: {{ index $backendEnv "OPENAI_API_KEY" | quote }}
+            {{- else if .Values.config.openaiApiKey }}
             - name: OPENAI_API_KEY
               value: {{ .Values.config.openaiApiKey | quote }}
             {{- end }}
             {{- range $key := keys $backendEnv | sortAlpha }}
-            {{- if not (hasKey $backendReservedEnv $key) }}
+            {{- if not (hasKey $backendExplicitEnvKeys $key) }}
             - name: {{ $key }}
               value: {{ index $backendEnv $key | quote }}
             {{- end }}

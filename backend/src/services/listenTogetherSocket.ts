@@ -72,6 +72,14 @@ function sendAck(ack: unknown, res: unknown): void {
     }
 }
 
+type TransientConflictAckPayload = {
+    error: string;
+    code: "CONFLICT";
+    transient: true;
+    retryable: true;
+    retryAfterMs: number;
+};
+
 // ---------------------------------------------------------------------------
 // Socket.IO setup
 // ---------------------------------------------------------------------------
@@ -111,12 +119,17 @@ const LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS =
 const LISTEN_TOGETHER_MUTATION_LOCK_PREFIX =
     process.env.LISTEN_TOGETHER_MUTATION_LOCK_PREFIX ||
     "listen-together:mutation-lock";
+const LISTEN_TOGETHER_CONFLICT_RETRY_AFTER_MS = Math.min(
+    500,
+    Math.max(75, Math.floor(LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS / 10))
+);
 const LISTEN_TOGETHER_OBSERVABILITY_LOG_EVERY = 25;
 const pendingDisconnectCleanupTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
 >();
 const recentDisconnectAtMs = new Map<string, number>();
+const pendingGroupSnapshotWrites = new Map<string, Promise<void>>();
 const listenTogetherObservabilityCounters = {
     reconnectSamples: 0,
     reconnectBreaches: 0,
@@ -168,13 +181,77 @@ function recordGroupConflict(
     maybeLogListenTogetherObservability("conflict");
 }
 
+function buildTransientConflictAck(message: string): TransientConflictAckPayload {
+    return {
+        error: message,
+        code: "CONFLICT",
+        transient: true,
+        retryable: true,
+        retryAfterMs: LISTEN_TOGETHER_CONFLICT_RETRY_AFTER_MS,
+    };
+}
+
+function enqueueGroupSnapshotWrite(
+    groupId: string,
+    write: () => Promise<void>
+): Promise<void> {
+    const previous = pendingGroupSnapshotWrites.get(groupId) ?? Promise.resolve();
+    let queued: Promise<void>;
+    queued = previous
+        .then(() => undefined, () => undefined)
+        .then(write)
+        .catch(() => undefined)
+        .finally(() => {
+            if (pendingGroupSnapshotWrites.get(groupId) === queued) {
+                pendingGroupSnapshotWrites.delete(groupId);
+            }
+        });
+    pendingGroupSnapshotWrites.set(groupId, queued);
+    return queued;
+}
+
+async function flushGroupSnapshotWrites(groupId: string): Promise<void> {
+    const pending = pendingGroupSnapshotWrites.get(groupId);
+    if (!pending) return;
+    await pending;
+}
+
+function queuePersistAndPublishSnapshot(
+    groupId: string,
+    snapshot?: GroupSnapshot
+): Promise<void> {
+    const resolvedSnapshot = snapshot ?? groupManager.snapshotById(groupId);
+    if (!resolvedSnapshot) {
+        return Promise.resolve();
+    }
+
+    return enqueueGroupSnapshotWrite(groupId, async () => {
+        await listenTogetherStateStore.setSnapshot(groupId, resolvedSnapshot);
+        await listenTogetherClusterSync.publishSnapshot(groupId, resolvedSnapshot);
+    });
+}
+
+function queueEndedSnapshotSync(groupId: string): Promise<void> {
+    const snapshot = groupManager.snapshotById(groupId);
+    return enqueueGroupSnapshotWrite(groupId, async () => {
+        await listenTogetherStateStore.deleteSnapshot(groupId);
+        if (snapshot) {
+            await listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
+        }
+    });
+}
+
 async function withGroupMutationLock<T>(
     groupId: string,
     operationName: string,
     operation: () => Promise<T>
 ): Promise<T> {
     if (!LISTEN_TOGETHER_MUTATION_LOCK_ENABLED || !mutationLockRedisClient) {
-        return operation();
+        try {
+            return await operation();
+        } finally {
+            await flushGroupSnapshotWrites(groupId);
+        }
     }
 
     const lockKey = `${LISTEN_TOGETHER_MUTATION_LOCK_PREFIX}:${groupId}`;
@@ -193,11 +270,11 @@ async function withGroupMutationLock<T>(
             "NX"
         );
 
-            if (acquired !== "OK") {
-                throw new GroupError(
-                    "CONFLICT",
-                    "Another group update is in progress. Please retry."
-                );
+        if (acquired !== "OK") {
+            throw new GroupError(
+                "CONFLICT",
+                "Another group update is in progress. Please retry."
+            );
         }
     } catch (err) {
         if (err instanceof GroupError) {
@@ -225,6 +302,7 @@ async function withGroupMutationLock<T>(
 
         return await operation();
     } finally {
+        await flushGroupSnapshotWrites(groupId);
         try {
             await mutationLockRedisClient.eval(
                 "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
@@ -475,64 +553,35 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
     const callbacks: ManagerCallbacks = {
         onGroupState(groupId: string, snapshot: GroupSnapshot) {
             ns.to(groupId).emit("group:state", snapshot);
-            void listenTogetherStateStore.setSnapshot(groupId, snapshot);
-            void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
+            void queuePersistAndPublishSnapshot(groupId, snapshot);
         },
         onPlaybackDelta(groupId: string, delta: PlaybackDelta) {
             ns.to(groupId).emit("group:playback-delta", delta);
-            const snapshot = groupManager.snapshotById(groupId);
-            if (snapshot) {
-                void listenTogetherStateStore.setSnapshot(groupId, snapshot);
-                void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-            }
+            void queuePersistAndPublishSnapshot(groupId);
         },
         onQueueDelta(groupId: string, delta: QueueDelta) {
             ns.to(groupId).emit("group:queue-delta", delta);
-            const snapshot = groupManager.snapshotById(groupId);
-            if (snapshot) {
-                void listenTogetherStateStore.setSnapshot(groupId, snapshot);
-                void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-            }
+            void queuePersistAndPublishSnapshot(groupId);
         },
         onWaiting(groupId: string, data) {
             ns.to(groupId).emit("group:waiting", data);
-            const snapshot = groupManager.snapshotById(groupId);
-            if (snapshot) {
-                void listenTogetherStateStore.setSnapshot(groupId, snapshot);
-                void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-            }
+            void queuePersistAndPublishSnapshot(groupId);
         },
         onPlayAt(groupId: string, data) {
             ns.to(groupId).emit("group:play-at", data);
-            const snapshot = groupManager.snapshotById(groupId);
-            if (snapshot) {
-                void listenTogetherStateStore.setSnapshot(groupId, snapshot);
-                void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-            }
+            void queuePersistAndPublishSnapshot(groupId);
         },
         onMemberJoined(groupId: string, member) {
             ns.to(groupId).emit("group:member-joined", member);
-            const snapshot = groupManager.snapshotById(groupId);
-            if (snapshot) {
-                void listenTogetherStateStore.setSnapshot(groupId, snapshot);
-                void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-            }
+            void queuePersistAndPublishSnapshot(groupId);
         },
         onMemberLeft(groupId: string, data) {
             ns.to(groupId).emit("group:member-left", data);
-            const snapshot = groupManager.snapshotById(groupId);
-            if (snapshot) {
-                void listenTogetherStateStore.setSnapshot(groupId, snapshot);
-                void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-            }
+            void queuePersistAndPublishSnapshot(groupId);
         },
         onGroupEnded(groupId: string, reason: string) {
             ns.to(groupId).emit("group:ended", { reason });
-            void listenTogetherStateStore.deleteSnapshot(groupId);
-            const snapshot = groupManager.snapshotById(groupId);
-            if (snapshot) {
-                void listenTogetherClusterSync.publishSnapshot(groupId, snapshot);
-            }
+            void queueEndedSnapshotSync(groupId);
         },
     };
 
@@ -652,6 +701,8 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                             `playback:${data.action}`,
                             message
                         );
+                        sendAck(ack, buildTransientConflictAck(message));
+                        return;
                     }
                     sendAck(ack, { error: message });
                 }
@@ -686,6 +737,28 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                                 groupManager.modifyQueue(groupId, userId, {
                                     action: "add",
                                     items,
+                                });
+                            }
+                        );
+                        break;
+                    }
+                    case "insert-next": {
+                        if (!Array.isArray(data.trackIds) || data.trackIds.length === 0) {
+                            sendAck(ack, { error: "trackIds required" });
+                            return;
+                        }
+                        const insertItems = await validateLocalTracks(data.trackIds);
+                        if (insertItems.length === 0) {
+                            sendAck(ack, { error: "No valid local tracks found" });
+                            return;
+                        }
+                        await withGroupMutationLock(
+                            groupId,
+                            "queue:insert-next",
+                            async () => {
+                                groupManager.modifyQueue(groupId, userId, {
+                                    action: "insert-next",
+                                    items: insertItems,
                                 });
                             }
                         );
@@ -780,6 +853,8 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                         "ready",
                         err.message
                     );
+                    sendAck(ack, buildTransientConflictAck(err.message));
+                    return;
                 }
                 sendAck(ack, { error: "Ready report failed" });
             }
@@ -857,6 +932,7 @@ export function shutdownListenTogetherSocket(): void {
     }
     pendingDisconnectCleanupTimers.clear();
     recentDisconnectAtMs.clear();
+    pendingGroupSnapshotWrites.clear();
 
     if (io) {
         io.close();

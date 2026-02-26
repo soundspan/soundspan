@@ -2,7 +2,7 @@
   "metadata": {
     "id": "soundspan-logging-compliance-baseline",
     "version": "2026-02-21.01",
-    "generated_at": "2026-02-23T18:28:52.701Z",
+    "generated_at": "2026-02-25T13:49:29.035Z",
     "description": "Tracked raw logging callsites that are allowed temporarily while log-standard migration reaches 100% coverage."
   },
   "rules": [

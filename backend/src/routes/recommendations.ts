@@ -470,35 +470,45 @@ router.get("/albums", async (req, res) => {
     }
 });
 
-// GET /recommendations/tracks?seedTrackId=
+// GET /recommendations/tracks?seedTrackId=&artist=&title=
+// seedTrackId resolves via the Track table.  When the track isn't in the
+// DB (e.g. synthetic Last.fm / gap-fill IDs), the endpoint falls back to
+// the artist + title query params for a direct Last.fm similarity lookup.
 router.get("/tracks", async (req, res) => {
     try {
-        const { seedTrackId } = req.query;
+        const { seedTrackId, artist: artistParam, title: titleParam } = req.query;
 
-        if (!seedTrackId) {
-            return res.status(400).json({ error: "seedTrackId required" });
+        if (!seedTrackId && !artistParam) {
+            return res.status(400).json({ error: "seedTrackId or artist+title required" });
         }
 
         // Get seed track
-        const seedTrack = await prisma.track.findUnique({
-            where: { id: seedTrackId as string },
-            include: {
-                album: {
-                    include: {
-                        artist: true,
-                    },
-                },
-            },
-        });
+        const seedTrack = seedTrackId
+            ? await prisma.track.findUnique({
+                  where: { id: seedTrackId as string },
+                  include: {
+                      album: {
+                          include: {
+                              artist: true,
+                          },
+                      },
+                  },
+              })
+            : null;
 
-        if (!seedTrack) {
-            return res.status(404).json({ error: "Track not found" });
+        const seedArtistName = seedTrack?.album.artist.name
+            || (typeof artistParam === "string" ? artistParam.trim() : "");
+        const seedTitle = seedTrack?.title
+            || (typeof titleParam === "string" ? titleParam.trim() : "");
+
+        if (!seedArtistName || !seedTitle) {
+            return res.status(400).json({ error: "Could not resolve seed artist and title" });
         }
 
         // Use Last.fm to get similar tracks
         const similarTracksFromLastFm = await lastFmService.getSimilarTracks(
-            seedTrack.album.artist.name,
-            seedTrack.title,
+            seedArtistName,
+            seedTitle,
             20
         );
         const lfmTracks = (similarTracksFromLastFm as LastFmTrackLike[])
@@ -512,18 +522,38 @@ router.get("/tracks", async (req, res) => {
 
         // Fallback for tracks/artists with sparse Last.fm similarity data.
         if (lfmTracks.length === 0) {
-            const sameArtistTracks = await prisma.track.findMany({
-                where: {
-                    id: { not: seedTrack.id },
-                    album: {
-                        artistId: seedTrack.album.artist.id,
+            let sameArtistTracks: any[] = [];
+            if (seedTrack) {
+                sameArtistTracks = await prisma.track.findMany({
+                    where: {
+                        id: { not: seedTrack.id },
+                        album: {
+                            artistId: seedTrack.album.artist.id,
+                        },
                     },
-                },
-                include: {
-                    album: { include: { artist: true } },
-                },
-                take: 20,
-            });
+                    include: {
+                        album: { include: { artist: true } },
+                    },
+                    take: 20,
+                });
+            } else if (seedArtistName) {
+                sameArtistTracks = await prisma.track.findMany({
+                    where: {
+                        album: {
+                            artist: {
+                                OR: [
+                                    { name: { equals: seedArtistName, mode: "insensitive" } },
+                                    { normalizedName: normalizeArtistName(seedArtistName) },
+                                ],
+                            },
+                        },
+                    },
+                    include: {
+                        album: { include: { artist: true } },
+                    },
+                    take: 20,
+                });
+            }
 
             const fallbackRecommendations = sameArtistTracks.map((track) => ({
                 ...track,
@@ -535,10 +565,10 @@ router.get("/tracks", async (req, res) => {
 
             return res.json({
                 seedTrack: {
-                    id: seedTrack.id,
-                    title: seedTrack.title,
-                    artist: seedTrack.album.artist.name,
-                    album: seedTrack.album.title,
+                    id: seedTrack?.id || null,
+                    title: seedTitle,
+                    artist: seedArtistName,
+                    album: seedTrack?.album.title || null,
                 },
                 recommendations: fallbackRecommendations,
             });
@@ -686,10 +716,10 @@ router.get("/tracks", async (req, res) => {
 
         res.json({
             seedTrack: {
-                id: seedTrack.id,
-                title: seedTrack.title,
-                artist: seedTrack.album.artist.name,
-                album: seedTrack.album.title,
+                id: seedTrack?.id || null,
+                title: seedTitle,
+                artist: seedArtistName,
+                album: seedTrack?.album.title || null,
             },
             recommendations,
         });

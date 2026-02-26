@@ -45,7 +45,7 @@ export default function DiscoverWeeklyPage() {
         setPendingGeneration,
         isGenerating,
     } = useDiscoverData();
-    const { tracks: providerEnrichedTracks, providerCounts } =
+    const { tracks: providerEnrichedTracks, providerCounts, isMatching } =
         useDiscoverProviderGapFill(playlist?.tracks);
     const displayPlaylist = playlist
         ? { ...playlist, tracks: providerEnrichedTracks }
@@ -53,6 +53,7 @@ export default function DiscoverWeeklyPage() {
     const {
         handleGenerate,
         handlePlayPlaylist,
+        handleShufflePlaylist,
         handlePlayTrack,
         handleTogglePlay,
     } = useDiscoverActions(
@@ -151,6 +152,7 @@ export default function DiscoverWeeklyPage() {
                 onGenerate={handleGenerate}
                 onToggleSettings={() => setShowSettings(!showSettings)}
                 onAddToPlaylist={handleAddAllToPlaylist}
+                onShuffle={handleShufflePlaylist}
                 isGenerating={isGenerating}
                 batchStatus={batchStatus}
             />
@@ -180,6 +182,7 @@ export default function DiscoverWeeklyPage() {
                                     </p>
                                     <TrackList
                                         tracks={displayPlaylist?.tracks || []}
+                                        isMatching={isMatching}
                                         currentTrack={currentTrack}
                                         isPlaying={isPlaying}
                                         onPlayTrack={handlePlayTrack}

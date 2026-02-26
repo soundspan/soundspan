@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, Pause, RefreshCw, Settings, Loader2, Plus } from "lucide-react";
+import { Play, Pause, RefreshCw, Settings, Loader2, Plus, Shuffle } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
@@ -24,6 +24,7 @@ interface DiscoverActionBarProps {
     onGenerate: () => void;
     onToggleSettings: () => void;
     onAddToPlaylist?: () => void;
+    onShuffle?: () => void;
     isGenerating: boolean;
     batchStatus?: BatchStatus | null;
 }
@@ -37,6 +38,7 @@ export function DiscoverActionBar({
     onGenerate,
     onToggleSettings,
     onAddToPlaylist,
+    onShuffle,
     isGenerating,
     batchStatus,
 }: DiscoverActionBarProps) {
@@ -91,36 +93,57 @@ export function DiscoverActionBar({
                     </button>
                 )}
 
-                {/* Generate Button */}
+                {/* Regenerate Button (icon only) */}
                 <button
                     onClick={onGenerate}
                     disabled={isGenerating || !config?.enabled}
                     className={cn(
-                        "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all",
+                        "h-8 w-8 rounded-full flex items-center justify-center transition-all",
                         isGenerating || !config?.enabled
-                            ? "bg-white/5 text-white/50 cursor-not-allowed"
-                            : "bg-[#1a1acc]/20 hover:bg-[#1a1acc]/30 text-white border border-[#2323FF]/30"
+                            ? "text-white/30 cursor-not-allowed"
+                            : "text-white/60 hover:text-white hover:bg-white/10"
                     )}
+                    title={isGenerating ? (getStatusText() || "Generating...") : playlist ? "Regenerate" : "Generate"}
                 >
                     {isGenerating ? (
-                        <>
-                            <GradientSpinner size="sm" />
-                            <span className="hidden sm:inline">{getStatusText()}</span>
-                            <span className="sm:hidden">
-                                {batchStatus?.completed || 0}/{batchStatus?.total || "?"}
-                            </span>
-                        </>
+                        <GradientSpinner size="sm" />
                     ) : (
-                        <>
-                            <RefreshCw className="w-4 h-4" />
-                            <span className="hidden sm:inline">
-                                {playlist ? "Regenerate" : "Generate"}
-                            </span>
-                        </>
+                        <RefreshCw className="w-5 h-5" />
                     )}
                 </button>
 
-                {/* Settings Button */}
+                {/* Shuffle Button */}
+                {playlist && playlist.tracks.length > 0 && onShuffle && (
+                    <button
+                        onClick={onShuffle}
+                        disabled={isGenerating}
+                        className={cn(
+                            "h-8 w-8 rounded-full flex items-center justify-center transition-all",
+                            isGenerating
+                                ? "text-white/30 cursor-not-allowed"
+                                : "text-white/60 hover:text-white hover:bg-white/10"
+                        )}
+                        title="Shuffle all"
+                    >
+                        <Shuffle className="w-5 h-5" />
+                    </button>
+                )}
+
+                {/* Add to Playlist Button */}
+                {playlist && playlist.tracks.length > 0 && onAddToPlaylist && (
+                    <button
+                        onClick={onAddToPlaylist}
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                        title="Add all to playlist"
+                    >
+                        <Plus className="w-5 h-5" />
+                    </button>
+                )}
+
+                {/* Spacer to push Settings to far right */}
+                <div className="flex-1" />
+
+                {/* Settings Button (far right) */}
                 <button
                     onClick={onToggleSettings}
                     disabled={isGenerating}
@@ -134,17 +157,6 @@ export function DiscoverActionBar({
                 >
                     <Settings className="w-5 h-5" />
                 </button>
-
-                {/* Add to Playlist Button */}
-                {playlist && playlist.tracks.length > 0 && onAddToPlaylist && (
-                    <button
-                        onClick={onAddToPlaylist}
-                        className="h-8 w-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
-                        title="Add all to playlist"
-                    >
-                        <Plus className="w-5 h-5" />
-                    </button>
-                )}
             </div>
         </div>
     );

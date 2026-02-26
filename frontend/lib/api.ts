@@ -200,6 +200,8 @@ export interface SegmentedStreamingSessionResponse {
     playbackProfile?: {
         protocol?: "dash";
         sourceType?: SegmentedStreamingSourceType;
+        quality?: "original" | "high" | "medium" | "low";
+        manifestProfile?: "startup_single" | "steady_state_dual";
         codec?: string;
         bitrateKbps?: number;
     };
@@ -215,6 +217,9 @@ export interface CreateSegmentedStreamingSessionInput {
     trackId: string;
     sourceType?: SegmentedStreamingSourceType;
     desiredQuality?: "original" | "high" | "medium" | "low";
+    manifestProfile?: "startup_single" | "steady_state_dual";
+    startupLoadId?: number;
+    startupCorrelationId?: string;
 }
 
 export interface SegmentedStreamingHeartbeatResponse {
@@ -236,7 +241,7 @@ export interface SegmentedStreamingHandoffResponse
     shouldPlay: boolean;
 }
 
-export interface SegmentedStreamingClientMetricInput {
+export interface PlaybackClientMetricInput {
     event: string;
     fields?: Record<string, unknown>;
 }
@@ -1056,6 +1061,17 @@ class ApiClient {
     async createSegmentedStreamingSession(
         input: CreateSegmentedStreamingSessionInput,
     ): Promise<SegmentedStreamingSessionResponse> {
+        const headers: Record<string, string> = {};
+        if (typeof input.startupLoadId === "number" && Number.isFinite(input.startupLoadId)) {
+            headers["x-segmented-startup-load-id"] = String(input.startupLoadId);
+        }
+        if (
+            typeof input.startupCorrelationId === "string" &&
+            input.startupCorrelationId.trim().length > 0
+        ) {
+            headers["x-segmented-startup-correlation-id"] =
+                input.startupCorrelationId.trim();
+        }
         const session = await this.request<SegmentedStreamingSessionResponse>(
             "/streaming/v1/sessions",
             {
@@ -1064,7 +1080,9 @@ class ApiClient {
                     trackId: input.trackId,
                     sourceType: input.sourceType,
                     desiredQuality: input.desiredQuality,
+                    manifestProfile: input.manifestProfile,
                 }),
+                headers,
             },
         );
 
@@ -1117,8 +1135,8 @@ class ApiClient {
         };
     }
 
-    async reportSegmentedStreamingClientMetric(
-        input: SegmentedStreamingClientMetricInput,
+    async reportPlaybackClientMetric(
+        input: PlaybackClientMetricInput,
     ): Promise<void> {
         await this.request<void>("/streaming/v1/client-metrics", {
             method: "POST",
@@ -1242,9 +1260,12 @@ class ApiClient {
         );
     }
 
-    async getSimilarTracks(seedTrackId: string, limit = 20) {
+    async getSimilarTracks(seedTrackId: string, limit = 20, artist?: string, title?: string) {
+        const params = new URLSearchParams({ seedTrackId, limit: String(limit) });
+        if (artist) params.set("artist", artist);
+        if (title) params.set("title", title);
         return this.request<{ recommendations: ApiData[] }>(
-            `/recommendations/tracks?seedTrackId=${seedTrackId}&limit=${limit}`
+            `/recommendations/tracks?${params.toString()}`
         );
     }
 
@@ -2553,6 +2574,12 @@ class ApiClient {
     async getVibeSimilarTracks(trackId: string, limit = 20) {
         return this.request<{
             sourceTrackId: string;
+            sourceFeatures: {
+                energy: number | null;
+                valence: number | null;
+                danceability: number | null;
+                arousal: number | null;
+            } | null;
             tracks: Array<{
                 id: string;
                 title: string;
@@ -2567,6 +2594,12 @@ class ApiClient {
                 artist: {
                     id: string;
                     name: string;
+                };
+                audioFeatures: {
+                    energy: number | null;
+                    valence: number | null;
+                    danceability: number | null;
+                    arousal: number | null;
                 };
             }>;
         }>(`/vibe/similar/${trackId}?limit=${limit}`);

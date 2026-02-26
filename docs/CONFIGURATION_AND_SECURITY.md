@@ -172,14 +172,14 @@ Never commit `.env` files or credentials.
 | --- | --- | --- |
 | `SESSION_SECRET` | Session encryption (32+ chars) | Yes |
 | `SETTINGS_ENCRYPTION_KEY` | Encryption of stored credentials | Yes |
-| `SOULSEEK_USERNAME` | Soulseek login | If using Soulseek |
-| `SOULSEEK_PASSWORD` | Soulseek password | If using Soulseek |
 | `LIDARR_API_KEY` | Lidarr integration | If using Lidarr |
 | `OPENAI_API_KEY` | AI features | Optional |
 | `LASTFM_API_KEY` | Artist recommendations | Optional |
 | `FANART_API_KEY` | Artist images | Optional |
 | `YTMUSIC_STREAMER_URL` | YouTube Music sidecar URL | If using YouTube Music |
 | `TIDAL_SIDECAR_URL` | TIDAL sidecar URL | If using TIDAL |
+
+Soulseek credentials are configured via System Settings and stored encrypted in the database.
 
 ## Authentication and Session Security
 

@@ -29,6 +29,7 @@ interface TrackListProps {
     previewPlaying: boolean;
     onPreview: (track: Track, e: React.MouseEvent) => void;
     isInListenTogetherGroup?: boolean;
+    isProviderMatching?: boolean;
 }
 
 interface TrackRowProps {
@@ -43,6 +44,7 @@ interface TrackRowProps {
     onPreview: (track: Track, e: React.MouseEvent) => void;
     isInListenTogetherGroup: boolean;
     isInQueue: boolean;
+    isProviderMatching: boolean;
 }
 
 
@@ -60,19 +62,25 @@ const TrackRow = memo(
         onPreview,
         isInListenTogetherGroup,
         isInQueue,
+        isProviderMatching,
     }: TrackRowProps) {
         const isYouTubeTrack = track.streamSource === "youtube";
         const isTidalTrack = track.streamSource === "tidal" && !!track.tidalTrackId;
         const hasLocalFile =
             typeof track.filePath === "string" &&
             track.filePath.trim().length > 0;
+        const isAwaitingProviderMatch =
+            isProviderMatching &&
+            !hasLocalFile &&
+            !isTidalTrack &&
+            !isYouTubeTrack;
         const isLocalLibraryTrack =
             !isTidalTrack &&
             !isYouTubeTrack &&
             (isOwned || hasLocalFile || Boolean(track.album?.id));
         const blockedByListenTogether = isInListenTogetherGroup && !isLocalLibraryTrack;
         const isPlayable = (isOwned || isTidalTrack || isYouTubeTrack) && !blockedByListenTogether;
-        const isPreviewOnly = !isPlayable;
+        const isPreviewOnly = !isPlayable && !isAwaitingProviderMatch;
 
         const handlePreview = useCallback(
             (e: React.MouseEvent) => {
@@ -93,6 +101,10 @@ const TrackRow = memo(
                     return;
                 }
 
+                if (isAwaitingProviderMatch) {
+                    return;
+                }
+
                 if (isPreviewOnly) {
                     onPreview(track, e);
                 } else {
@@ -100,7 +112,15 @@ const TrackRow = memo(
                     onPlayTrack(track, index);
                 }
             },
-            [blockedByListenTogether, isPreviewOnly, track, index, onPlayTrack, onPreview]
+            [
+                blockedByListenTogether,
+                isAwaitingProviderMatch,
+                isPreviewOnly,
+                track,
+                index,
+                onPlayTrack,
+                onPreview,
+            ]
         );
 
         // Build the track object for the overflow menu
@@ -142,6 +162,9 @@ const TrackRow = memo(
                             toast.error("Listen Together only supports local library tracks");
                             return;
                         }
+                        if (isAwaitingProviderMatch) {
+                            return;
+                        }
                         if (isPreviewOnly) {
                             onPreview(track, e as unknown as React.MouseEvent);
                         } else {
@@ -179,6 +202,11 @@ const TrackRow = memo(
                         </span>
                         {isTidalTrack && <TidalBadge />}
                         {isYouTubeTrack && <YouTubeBadge />}
+                        {isAwaitingProviderMatch && (
+                            <span className="shrink-0 text-[10px] bg-gray-500/20 text-gray-300 px-1.5 py-0.5 rounded border border-gray-500/30 font-medium animate-pulse">
+                                LOADING
+                            </span>
+                        )}
                         {isPreviewOnly && (
                             <span className="shrink-0 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 font-medium">
                                 PREVIEW
@@ -228,25 +256,23 @@ const TrackRow = memo(
                     </button>
                 )}
 
-                <div className="text-xs md:text-sm text-gray-400 w-10 md:w-12 text-right tabular-nums">
-                    {track.duration ? formatTime(track.duration) : ""}
-                </div>
-
-                <div className="flex w-[64px] flex-shrink-0 items-center justify-end md:w-[104px]">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                        {track.duration ? formatTime(track.duration) : ""}
+                    </span>
                     <TrackPreferenceButtons
                         trackId={track.id}
-                        buttonSizeClassName="h-8 w-8 md:h-10 md:w-10"
-                        iconSizeClassName="h-4 w-4 md:h-5 md:w-5"
+                        buttonSizeClassName="h-8 w-8"
+                        iconSizeClassName="h-4 w-4"
                     />
+                    {(isPlayable || blockedByListenTogether) && (
+                        <TrackOverflowMenu
+                            track={overflowTrack}
+                            showGoToAlbum={false}
+                            isInListenTogetherGroup={isInListenTogetherGroup}
+                        />
+                    )}
                 </div>
-
-                {(isPlayable || blockedByListenTogether) && (
-                    <TrackOverflowMenu
-                        track={overflowTrack}
-                        showGoToAlbum={false}
-                        isInListenTogetherGroup={isInListenTogetherGroup}
-                    />
-                )}
             </div>
         );
     },
@@ -259,6 +285,7 @@ const TrackRow = memo(
             prevProps.isInQueue === nextProps.isInQueue &&
             prevProps.index === nextProps.index &&
             prevProps.isOwned === nextProps.isOwned &&
+            prevProps.isProviderMatching === nextProps.isProviderMatching &&
             prevProps.isInListenTogetherGroup ===
                 nextProps.isInListenTogetherGroup
         );
@@ -276,6 +303,7 @@ export const TrackList = memo(function TrackList({
     previewPlaying,
     onPreview,
     isInListenTogetherGroup = false,
+    isProviderMatching = false,
 }: TrackListProps) {
     const isOwned = source === "library";
     const queuedTrackIds = useQueuedTrackIds();
@@ -327,6 +355,7 @@ export const TrackList = memo(function TrackList({
                                     onPreview={onPreview}
                                     isInListenTogetherGroup={isInListenTogetherGroup}
                                     isInQueue={isInQueue}
+                                    isProviderMatching={isProviderMatching}
                                 />
                             </React.Fragment>
                         );

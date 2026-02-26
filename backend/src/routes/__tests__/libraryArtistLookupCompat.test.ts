@@ -26,6 +26,9 @@ jest.mock("../../utils/db", () => ({
         artist: {
             findFirst: jest.fn(),
         },
+        play: {
+            groupBy: jest.fn(),
+        },
     },
     Prisma: {
         SortOrder: {
@@ -65,7 +68,9 @@ jest.mock("../../workers/organizeSingles", () => ({
 }));
 
 jest.mock("../../services/lastfm", () => ({
-    lastFmService: {},
+    lastFmService: {
+        getArtistTopTracks: jest.fn(),
+    },
 }));
 
 jest.mock("../../services/fanart", () => ({
@@ -73,7 +78,13 @@ jest.mock("../../services/fanart", () => ({
 }));
 
 jest.mock("../../services/deezer", () => ({
-    deezerService: {},
+    deezerService: {
+        getAlbumCover: jest.fn(),
+    },
+}));
+
+jest.mock("../../services/imageProvider", () => ({
+    imageProviderService: {},
 }));
 
 jest.mock("../../services/musicbrainz", () => ({
@@ -93,7 +104,9 @@ jest.mock("../../services/audioStreaming", () => ({
 }));
 
 jest.mock("../../services/dataCache", () => ({
-    dataCacheService: {},
+    dataCacheService: {
+        getArtistImage: jest.fn(),
+    },
 }));
 
 jest.mock("../../services/artistCountsService", () => ({
@@ -142,8 +155,16 @@ jest.mock("../../services/imageProxy", () => ({
 
 import router from "../library";
 import { prisma } from "../../utils/db";
+import { lastFmService } from "../../services/lastfm";
+import { deezerService } from "../../services/deezer";
+import { dataCacheService } from "../../services/dataCache";
 
 const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
+const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
+const mockLastFmGetArtistTopTracks =
+    lastFmService.getArtistTopTracks as jest.Mock;
+const mockDeezerGetAlbumCover = deezerService.getAlbumCover as jest.Mock;
+const mockDataCacheGetArtistImage = dataCacheService.getArtistImage as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 0) {
     const layer = (router as any).stack.find(
@@ -190,6 +211,10 @@ describe("library artist lookup compatibility", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockArtistFindFirst.mockResolvedValue(createMockArtist());
+        mockPlayGroupBy.mockResolvedValue([]);
+        mockLastFmGetArtistTopTracks.mockResolvedValue([]);
+        mockDeezerGetAlbumCover.mockResolvedValue(null);
+        mockDataCacheGetArtistImage.mockResolvedValue(null);
     });
 
     it.each([
@@ -303,5 +328,148 @@ describe("library artist lookup compatibility", () => {
                 discographyComplete: true,
             })
         );
+    });
+
+    it("hydrates unmatched Last.fm top tracks and skips Deezer lookup for unknown albums", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce(createMockArtist());
+        mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
+            {
+                name: "Unmatched With Cover",
+                playcount: "12",
+                listeners: "34",
+                duration: "250000",
+                url: "https://last.fm/track/1",
+                album: { "#text": "Rare EP" },
+            },
+            {
+                name: "Unmatched Unknown Album",
+                playcount: "7",
+                listeners: "11",
+                duration: "210000",
+                url: "https://last.fm/track/2",
+                album: {},
+            },
+        ]);
+        mockDeezerGetAlbumCover.mockResolvedValueOnce(
+            "https://cdn.deezer.com/rare-ep.jpg"
+        );
+
+        const req = {
+            params: { id: "artist-local-id-123" },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "true",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockLastFmGetArtistTopTracks).toHaveBeenCalledWith(
+            "mbid-artist-1",
+            "AC/DC",
+            10
+        );
+        expect(mockDeezerGetAlbumCover).toHaveBeenCalledTimes(1);
+        expect(mockDeezerGetAlbumCover).toHaveBeenCalledWith("AC/DC", "Rare EP");
+        expect(res.body.topTracks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    title: "Unmatched With Cover",
+                    album: expect.objectContaining({
+                        title: "Rare EP",
+                        coverArt: "https://cdn.deezer.com/rare-ep.jpg",
+                    }),
+                }),
+                expect.objectContaining({
+                    title: "Unmatched Unknown Album",
+                    album: expect.objectContaining({
+                        title: "Unknown Album",
+                        coverArt: null,
+                    }),
+                }),
+            ])
+        );
+    });
+
+    it("continues top-track hydration when a Deezer cover lookup rejects", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce(createMockArtist());
+        mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
+            {
+                name: "Rejected Cover Lookup",
+                playcount: "5",
+                listeners: "9",
+                duration: "180000",
+                url: "https://last.fm/track/rejected",
+                album: { "#text": "Broken Cover Album" },
+            },
+        ]);
+        mockDeezerGetAlbumCover.mockRejectedValueOnce(new Error("deezer timeout"));
+
+        const req = {
+            params: { id: "artist-local-id-123" },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "true",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.topTracks).toEqual([
+            expect.objectContaining({
+                title: "Rejected Cover Lookup",
+                album: expect.objectContaining({
+                    title: "Broken Cover Album",
+                    coverArt: null,
+                }),
+            }),
+        ]);
+    });
+
+    it("skips Deezer batch lookups when Last.fm contributes no non-unknown unowned albums", async () => {
+        mockArtistFindFirst.mockResolvedValueOnce(createMockArtist());
+        mockLastFmGetArtistTopTracks.mockResolvedValueOnce([
+            {
+                name: "Unknown Album Track",
+                playcount: "3",
+                listeners: "6",
+                duration: "160000",
+                url: "https://last.fm/track/unknown",
+                album: {},
+            },
+        ]);
+
+        const req = {
+            params: { id: "artist-local-id-123" },
+            query: {
+                includeDiscography: "false",
+                includeTopTracks: "true",
+                includeSimilarArtists: "false",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await artistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockDeezerGetAlbumCover).not.toHaveBeenCalled();
+        expect(res.body.topTracks).toEqual([
+            expect.objectContaining({
+                title: "Unknown Album Track",
+                album: expect.objectContaining({
+                    title: "Unknown Album",
+                    coverArt: null,
+                }),
+            }),
+        ]);
     });
 });

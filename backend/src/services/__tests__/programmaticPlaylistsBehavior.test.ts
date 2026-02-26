@@ -1,4 +1,5 @@
 import { ProgrammaticMix, ProgrammaticPlaylistService } from "../programmaticPlaylists";
+import * as programmaticPlaylistArtistCap from "../programmaticPlaylistArtistCap";
 import { prisma } from "../../utils/db";
 import { lastFmService } from "../lastfm";
 import { moodBucketService } from "../moodBucketService";
@@ -342,6 +343,213 @@ describe("ProgrammaticPlaylistService behavior coverage", () => {
         expect(mix!.trackIds).toHaveLength(20);
         expect(mix!.trackIds.some((id) => id.startsWith("top-fallback-"))).toBe(true);
         expect(trackFindCalls).toBe(2);
+    });
+
+    it("handles missing artist ids in diversify helpers via unknown fallback keys", async () => {
+        const applyArtistCapSpy = jest
+            .spyOn(programmaticPlaylistArtistCap, "applyArtistCap")
+            .mockImplementation((tracks: any[]) => tracks as any);
+        const missingArtistTrack = makeTrack("missing-artist-1", "seed-artist", {
+            album: {
+                coverUrl: "missing-artist-1.jpg",
+                artist: {
+                    id: undefined as any,
+                },
+            },
+        });
+        const secondMissingArtistTrack = makeTrack(
+            "missing-artist-2",
+            "seed-artist",
+            {
+                album: {
+                    coverUrl: "missing-artist-2.jpg",
+                    artist: {
+                        id: undefined as any,
+                    },
+                },
+            }
+        );
+        const noAlbumTrack = {
+            ...makeTrack("missing-artist-no-album", "seed-artist"),
+            album: undefined,
+        } as unknown as TrackLike;
+        const validArtistTrack = makeTrack("valid-artist", "valid-artist");
+
+        const diversified = (service as any).diversifyTracks(
+            [missingArtistTrack],
+            1,
+            "seed-diversify-missing"
+        );
+        expect(diversified.map((track: TrackLike) => track.id)).toEqual([
+            "missing-artist-1",
+        ]);
+        const diversifiedNoAlbum = (service as any).diversifyTracks(
+            [noAlbumTrack],
+            1,
+            "seed-diversify-no-album"
+        );
+        expect(diversifiedNoAlbum.map((track: TrackLike) => track.id)).toEqual([
+            "missing-artist-no-album",
+        ]);
+
+        const uniqueFirst = (service as any).diversifyTracksUniqueFirst(
+            [missingArtistTrack],
+            1,
+            "seed-unique-first-missing"
+        );
+        expect(uniqueFirst.map((track: TrackLike) => track.id)).toEqual([
+            "missing-artist-1",
+        ]);
+
+        const uniqueSecondPass = (service as any).diversifyTracksUniqueFirst(
+            [missingArtistTrack, secondMissingArtistTrack],
+            2,
+            "seed-unique-second-pass-missing"
+        );
+        expect(uniqueSecondPass).toHaveLength(2);
+        const uniqueSecondPassNoAlbum = (service as any).diversifyTracksUniqueFirst(
+            [noAlbumTrack, validArtistTrack],
+            2,
+            "seed-unique-second-pass-no-album"
+        );
+        expect(uniqueSecondPassNoAlbum).toHaveLength(2);
+
+        const earlyBackfill = await (service as any).backfillFromLibraryForDiversity(
+            [validArtistTrack, missingArtistTrack],
+            1,
+            "seed-backfill-early"
+        );
+        expect(earlyBackfill).toHaveLength(2);
+
+        (mockPrisma.track.findMany as jest.Mock).mockResolvedValueOnce(
+            makeTracks(12, "backfill-missing", {
+                artistGroups: 6,
+                overrides: (index) => ({
+                    album: {
+                        coverUrl: `backfill-missing-${index}.jpg`,
+                        artist: {
+                            id:
+                                index % 2 === 0 ?
+                                    (undefined as any)
+                                :   `backfill-artist-${index}`,
+                        },
+                    },
+                }),
+            })
+        );
+        const fullBackfill = await (service as any).backfillFromLibraryForDiversity(
+            [missingArtistTrack],
+            6,
+            "seed-backfill-full"
+        );
+        expect(fullBackfill.length).toBeGreaterThan(0);
+        expect(mockPrisma.track.findMany).toHaveBeenCalled();
+        applyArtistCapSpy.mockRestore();
+    });
+
+    it("generateTopTracksMix handles ranked and fallback tracks without artist ids", async () => {
+        const playStats = Array.from({ length: 10 }, (_, i) => ({
+            trackId: `missing-top-${i + 1}`,
+            _count: { trackId: 20 - i },
+        }));
+        const rankedLookupTracks = [
+            makeTrack("missing-top-1", "ranked-a", {
+                album: {
+                    coverUrl: "missing-top-1.jpg",
+                    artist: { id: undefined as any },
+                },
+            }),
+            makeTrack("missing-top-2", "ranked-b", {
+                album: {
+                    coverUrl: "missing-top-2.jpg",
+                    artist: { id: undefined as any },
+                },
+            }),
+            makeTrack("missing-top-3", "ranked-c", {
+                album: {
+                    coverUrl: "missing-top-3.jpg",
+                    artist: { id: undefined as any },
+                },
+            }),
+        ];
+        const fallbackTracks = makeTracks(30, "missing-top-fallback", {
+            artistGroups: 30,
+            overrides: (index) => ({
+                album: {
+                    coverUrl: `missing-top-fallback-${index}.jpg`,
+                    artist: {
+                        id:
+                            index % 3 === 0 ?
+                                (undefined as any)
+                            :   `missing-top-fallback-artist-${index}`,
+                    },
+                },
+            }),
+        });
+        let trackFindCalls = 0;
+
+        (mockPrisma.play.groupBy as jest.Mock).mockResolvedValue(playStats);
+        (mockPrisma.track.findMany as jest.Mock).mockImplementation(async () => {
+            trackFindCalls += 1;
+            return trackFindCalls === 1 ? rankedLookupTracks : fallbackTracks;
+        });
+
+        const mix = await service.generateTopTracksMix("user-1");
+
+        expect(mix).not.toBeNull();
+        expect(mix!.trackIds.slice(0, 3)).toEqual([
+            "missing-top-1",
+            "missing-top-2",
+            "missing-top-3",
+        ]);
+        expect(mix!.trackIds).toHaveLength(20);
+        expect(trackFindCalls).toBe(2);
+    });
+
+    it("forces diversify unknown-artist fallback branches with isolated artist-cap passthrough mocks", () => {
+        jest.resetModules();
+        jest.isolateModules(() => {
+            const applyArtistCapMock = jest.fn((tracks: any[], options?: any) => {
+                if (options?.maxPerArtist === 1) {
+                    return tracks.slice(0, 1);
+                }
+                return tracks;
+            });
+
+            jest.doMock("../programmaticPlaylistArtistCap", () => ({
+                applyArtistCap: applyArtistCapMock,
+            }));
+
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const isolated = require("../programmaticPlaylists");
+            const IsolatedService = isolated.ProgrammaticPlaylistService;
+            const isolatedService = new IsolatedService();
+            const unknownArtistTracks = [
+                {
+                    id: "iso-track-1",
+                    album: { artist: { id: null } },
+                },
+                {
+                    id: "iso-track-2",
+                    album: {},
+                },
+            ];
+
+            const diversified = (isolatedService as any).diversifyTracks(
+                unknownArtistTracks,
+                2,
+                "iso-diversify"
+            );
+            expect(diversified).toHaveLength(2);
+
+            const uniqueFirst = (isolatedService as any).diversifyTracksUniqueFirst(
+                unknownArtistTracks,
+                2,
+                "iso-unique"
+            );
+            expect(uniqueFirst).toHaveLength(2);
+            expect(applyArtistCapMock).toHaveBeenCalled();
+        });
     });
 
     it("generateDayMix returns null on non-scheduled weekdays", async () => {

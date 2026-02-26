@@ -85,12 +85,18 @@ export function useTidalGapFill(
     const [tidalAvailable, setTidalAvailable] = useState(
         _tidalStatusCache?.available ?? false
     );
+    const [isStatusResolved, setIsStatusResolved] = useState(
+        _tidalStatusCache !== null
+    );
 
     // Check TIDAL availability (uses global cache)
     useEffect(() => {
         let cancelled = false;
         getTidalAvailable().then((available) => {
-            if (!cancelled) setTidalAvailable(available);
+            if (!cancelled) {
+                setTidalAvailable(available);
+                setIsStatusResolved(true);
+            }
         });
         return () => {
             cancelled = true;
@@ -156,6 +162,10 @@ export function useTidalGapFill(
                 setMatches(newMatches);
             } catch (err) {
                 sharedFrontendLogger.error("[TIDAL GapFill] Batch match failed:", err);
+                if (!cancelled) {
+                    _albumMatchCache.set(album.id, {});
+                    setMatches({});
+                }
             }
 
             if (!cancelled) setLoading(false);
@@ -188,9 +198,16 @@ export function useTidalGapFill(
         });
     }, [album?.tracks, matches]);
 
+    const hasQueuedMatchWork =
+        !!album?.id &&
+        unownedTracks.length > 0 &&
+        !loading &&
+        !_albumMatchCache.has(album.id);
+
     return {
         enrichedTracks,
-        isMatching: loading,
+        isMatching: loading || hasQueuedMatchWork,
+        isStatusResolved,
         tidalAvailable,
         matchCount: Object.keys(matches).length,
     };

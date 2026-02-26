@@ -2,32 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getNextTrackPreferenceSignal } from "../../hooks/trackPreferenceSignals.ts";
 
-test("thumbs up toggles to clear when already active", () => {
-    assert.equal(getNextTrackPreferenceSignal("clear", "thumbs_up"), "thumbs_up");
-    assert.equal(
-        getNextTrackPreferenceSignal("thumbs_up", "thumbs_up"),
-        "clear"
-    );
+test("like toggle sets thumbs_up for clear or thumbs_down state", () => {
+    assert.equal(getNextTrackPreferenceSignal("clear"), "thumbs_up");
+    assert.equal(getNextTrackPreferenceSignal("thumbs_down"), "thumbs_up");
 });
 
-test("thumbs down toggles to clear when already active", () => {
-    assert.equal(
-        getNextTrackPreferenceSignal("clear", "thumbs_down"),
-        "thumbs_down"
-    );
-    assert.equal(
-        getNextTrackPreferenceSignal("thumbs_down", "thumbs_down"),
-        "clear"
-    );
-});
-
-test("switching between up and down replaces prior state", () => {
-    assert.equal(
-        getNextTrackPreferenceSignal("thumbs_down", "thumbs_up"),
-        "thumbs_up"
-    );
-    assert.equal(
-        getNextTrackPreferenceSignal("thumbs_up", "thumbs_down"),
-        "thumbs_down"
-    );
+test("like toggle clears when thumbs_up is already active", () => {
+    assert.equal(getNextTrackPreferenceSignal("thumbs_up"), "clear");
 });

@@ -42,16 +42,31 @@ spec:
               containerPort: {{ .Values.tidalSidecar.port }}
               protocol: TCP
           {{- $tidalEnv := .Values.tidalSidecar.env | default (dict) }}
-          {{- $tidalReservedEnv := dict "TIDDL_PATH" true "MUSIC_PATH" true "TZ" true }}
+          {{- $tidalExplicitEnvKeys := dict "TIDDL_PATH" true "MUSIC_PATH" true "TZ" true }}
           env:
+            {{- if hasKey $tidalEnv "TIDDL_PATH" }}
+            - name: TIDDL_PATH
+              value: {{ index $tidalEnv "TIDDL_PATH" | quote }}
+            {{- else }}
             - name: TIDDL_PATH
               value: /data/.tiddl
+            {{- end }}
+            {{- if hasKey $tidalEnv "MUSIC_PATH" }}
+            - name: MUSIC_PATH
+              value: {{ index $tidalEnv "MUSIC_PATH" | quote }}
+            {{- else }}
             - name: MUSIC_PATH
               value: /music
+            {{- end }}
+            {{- if hasKey $tidalEnv "TZ" }}
+            - name: TZ
+              value: {{ index $tidalEnv "TZ" | quote }}
+            {{- else }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
+            {{- end }}
             {{- range $key := keys $tidalEnv | sortAlpha }}
-            {{- if not (hasKey $tidalReservedEnv $key) }}
+            {{- if not (hasKey $tidalExplicitEnvKeys $key) }}
             - name: {{ $key }}
               value: {{ index $tidalEnv $key | quote }}
             {{- end }}

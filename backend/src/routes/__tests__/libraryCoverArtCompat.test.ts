@@ -99,6 +99,7 @@ jest.mock("../../services/musicbrainz", () => ({
 jest.mock("../../services/coverArt", () => ({
     coverArtService: {
         getCoverArt: jest.fn(),
+        clearNotFoundCache: jest.fn(),
     },
 }));
 
@@ -222,6 +223,8 @@ const mockImageProviderGetAlbumCover =
     imageProviderService.getAlbumCover as jest.Mock;
 const mockDownloadAndStoreImage = downloadAndStoreImage as jest.Mock;
 const mockCoverArtGetCoverArt = coverArtService.getCoverArt as jest.Mock;
+const mockCoverArtClearNotFoundCache =
+    coverArtService.clearNotFoundCache as jest.Mock;
 const mockGetSystemSettings = getSystemSettings as jest.Mock;
 const mockIsBackfillNeeded = isBackfillNeeded as jest.Mock;
 const mockGetBackfillProgress = getBackfillProgress as jest.Mock;
@@ -297,6 +300,7 @@ describe("library cover-art proxy compatibility", () => {
         mockRedisGet.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(null);
         mockCoverArtGetCoverArt.mockResolvedValue(null);
+        mockCoverArtClearNotFoundCache.mockResolvedValue(undefined);
         mockImageProviderGetAlbumCover.mockResolvedValue(null);
     });
 
@@ -487,6 +491,7 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest
             .spyOn(fs, "existsSync")
             .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
             .mockReturnValueOnce(true);
         mockAlbumFindUnique.mockResolvedValue({
             id: "album-123",
@@ -508,6 +513,37 @@ describe("library cover-art proxy compatibility", () => {
         expect(mockDownloadAndStoreImage).not.toHaveBeenCalled();
         expect(res.redirect).toHaveBeenCalledWith(
             "/api/library/cover-art?url=native%3Aalbums%2Falbum-123.jpg"
+        );
+        existsSpy.mockRestore();
+    });
+
+    it("canonicalizes already-healed native query-url covers and persists the canonical path", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockImplementation((candidate) =>
+            String(candidate) === "/tmp/covers/albums/legacy-healed.jpg"
+        );
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "missing-path",
+            title: "Legacy Album",
+            coverUrl: "native:legacy-healed.jpg",
+            artist: { name: "Legacy Artist" },
+        });
+
+        const req = {
+            query: { url: "native:missing-path.jpg" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockDeezerCover).not.toHaveBeenCalled();
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "missing-path" },
+            data: { coverUrl: "native:albums/legacy-healed.jpg" },
+        });
+        expect(res.redirect).toHaveBeenCalledWith(
+            "/api/library/cover-art?url=native%3Aalbums%2Flegacy-healed.jpg"
         );
         existsSpy.mockRestore();
     });
@@ -808,6 +844,124 @@ describe("library cover-art proxy compatibility", () => {
         existsSpy.mockRestore();
     });
 
+    it("serves canonicalized legacy native query and id paths and backfills album cover urls", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockImplementation((candidate) =>
+            String(candidate).startsWith("/tmp/covers/albums/")
+        );
+
+        const queryReq = {
+            query: { url: "native:legacy-query.jpg" },
+            params: {},
+            headers: {},
+        } as any;
+        const queryRes = createRes();
+        await coverArtHandler(queryReq, queryRes);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(queryRes.sendFile).toHaveBeenCalledWith(
+            "/tmp/covers/albums/legacy-query.jpg",
+            expect.any(Object)
+        );
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "legacy-query" },
+            data: { coverUrl: "native:albums/legacy-query.jpg" },
+        });
+
+        const idReq = {
+            query: {},
+            params: { id: "native:legacy-id.jpg" },
+            headers: {},
+        } as any;
+        const idRes = createRes();
+        await coverArtHandler(idReq, idRes);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(idRes.sendFile).toHaveBeenCalledWith(
+            "/tmp/covers/albums/legacy-id.jpg",
+            expect.any(Object)
+        );
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "legacy-id" },
+            data: { coverUrl: "native:albums/legacy-id.jpg" },
+        });
+
+        existsSpy.mockRestore();
+    });
+
+    it("still serves canonicalized native paths when async backfill persistence fails", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockImplementation((candidate) =>
+            String(candidate).startsWith("/tmp/covers/albums/")
+        );
+        mockAlbumUpdate.mockRejectedValue(new Error("persist failed"));
+
+        const queryReq = {
+            query: { url: "native:legacy-fail-query.jpg" },
+            params: {},
+            headers: {},
+        } as any;
+        const queryRes = createRes();
+        await coverArtHandler(queryReq, queryRes);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const idReq = {
+            query: {},
+            params: { id: "native:legacy-fail-id.jpg" },
+            headers: {},
+        } as any;
+        const idRes = createRes();
+        await coverArtHandler(idReq, idRes);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(queryRes.sendFile).toHaveBeenCalledWith(
+            "/tmp/covers/albums/legacy-fail-query.jpg",
+            expect.any(Object)
+        );
+        expect(idRes.sendFile).toHaveBeenCalledWith(
+            "/tmp/covers/albums/legacy-fail-id.jpg",
+            expect.any(Object)
+        );
+        existsSpy.mockRestore();
+    });
+
+    it("serves canonicalized native folder paths without attempting album backfill", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockImplementation((candidate) =>
+            String(candidate) === "/tmp/covers/albums/nested/"
+        );
+
+        const queryReq = {
+            query: { url: "native:nested/" },
+            params: {},
+            headers: {},
+        } as any;
+        const queryRes = createRes();
+        await coverArtHandler(queryReq, queryRes);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const idReq = {
+            query: {},
+            params: { id: "native:nested/" },
+            headers: {},
+        } as any;
+        const idRes = createRes();
+        await coverArtHandler(idReq, idRes);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(queryRes.sendFile).toHaveBeenCalledWith(
+            "/tmp/covers/albums/nested/",
+            expect.any(Object),
+        );
+        expect(idRes.sendFile).toHaveBeenCalledWith(
+            "/tmp/covers/albums/nested/",
+            expect.any(Object),
+        );
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "nested" },
+            data: { coverUrl: "native:albums/nested/" },
+        });
+
+        existsSpy.mockRestore();
+    });
+
     it("handles audiobook id covers and invalid id formats", async () => {
         const fetchMock = jest.fn().mockResolvedValue({
             ok: true,
@@ -830,15 +984,261 @@ describe("library cover-art proxy compatibility", () => {
         expect(audiobookRes.statusCode).toBe(200);
         expect(audiobookRes.send).toHaveBeenCalledWith(expect.any(Buffer));
 
+        // Unknown IDs are now treated as album IDs for on-demand cover lookup
         const invalidReq = {
             query: {},
             params: { id: "not-a-valid-cover-id" },
             headers: {},
         } as any;
         const invalidRes = createRes();
+        mockAlbumFindUnique.mockResolvedValueOnce(null);
         await coverArtHandler(invalidReq, invalidRes);
-        expect(invalidRes.statusCode).toBe(400);
-        expect(invalidRes.body).toEqual({ error: "Invalid cover ID format" });
+        expect(invalidRes.statusCode).toBe(404);
+        expect(invalidRes.body).toEqual({ error: "Album not found" });
+    });
+
+    it("redirects on-demand album ids to native cover proxy urls when coverUrl already exists", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-native",
+            title: "Native Album",
+            rgMbid: null,
+            coverUrl: "native:albums/album-native.jpg",
+            artist: { name: "Native Artist" },
+        });
+
+        const req = {
+            query: {},
+            params: { id: "album-native" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.redirect).toHaveBeenCalledWith(
+            "/api/library/cover-art?url=native%3Aalbums%2Falbum-native.jpg"
+        );
+        expect(mockCoverArtClearNotFoundCache).not.toHaveBeenCalled();
+        expect(mockDeezerCover).not.toHaveBeenCalled();
+    });
+
+    it("redirects on-demand album ids directly when a remote coverUrl already exists", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-remote",
+            title: "Remote Album",
+            rgMbid: null,
+            coverUrl: "https://images.example/album-remote.jpg",
+            artist: { name: "Remote Artist" },
+        });
+
+        const req = {
+            query: {},
+            params: { id: "album-remote" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.redirect).toHaveBeenCalledWith(
+            "https://images.example/album-remote.jpg"
+        );
+        expect(mockCoverArtClearNotFoundCache).not.toHaveBeenCalled();
+        expect(mockDeezerCover).not.toHaveBeenCalled();
+    });
+
+    it("streams cover-art directly when id path already encodes an absolute cover URL", async () => {
+        mockFetchExternalImage.mockResolvedValueOnce({
+            ok: true,
+            buffer: Buffer.from("id-direct-cover"),
+            contentType: "image/jpeg",
+            etag: "id-direct-etag",
+            url: "https://images.example/direct-id.jpg",
+        });
+
+        const req = {
+            query: {},
+            params: { id: encodeURIComponent("https://images.example/direct-id.jpg") },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockAlbumFindUnique).not.toHaveBeenCalled();
+        expect(mockFetchExternalImage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                url: "https://images.example/direct-id.jpg",
+            }),
+        );
+        expect(res.statusCode).toBe(200);
+        expect(res.send).toHaveBeenCalledWith(Buffer.from("id-direct-cover"));
+    });
+
+    it("continues graceful fallback when stale native album metadata cannot self-heal", async () => {
+        const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(false);
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-stale-native",
+            title: "Stale Native Album",
+            rgMbid: null,
+            coverUrl: "native:albums/stale-native.jpg",
+            artist: { name: "Stale Artist" },
+        });
+        mockDeezerCover.mockResolvedValueOnce("https://cdn.deezer.com/stale-native.jpg");
+        mockDownloadAndStoreImage.mockResolvedValueOnce(
+            "native:albums/album-stale-native.jpg",
+        );
+
+        const req = {
+            query: { url: "native:albums/album-stale-native.jpg" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockDeezerCover).toHaveBeenCalledWith(
+            "Stale Artist",
+            "Stale Native Album",
+        );
+        expect(res.statusCode).toBe(404);
+        expect(res.redirect).not.toHaveBeenCalled();
+        existsSpy.mockRestore();
+    });
+
+    it("uses Deezer on-demand lookup when rgMbid is temporary and persists the fetched cover", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-temp-rg",
+            title: "Temporary RG Album",
+            rgMbid: "temp-rg-123",
+            coverUrl: null,
+            artist: { name: "Temp Artist" },
+        });
+        mockDeezerCover.mockResolvedValueOnce("https://cdn.deezer.com/temp-rg.jpg");
+        mockFetchExternalImage.mockResolvedValueOnce({
+            ok: true,
+            buffer: Buffer.from("temp-cover"),
+            contentType: "image/jpeg",
+            etag: "temp-rg-etag",
+            url: "https://cdn.deezer.com/temp-rg.jpg",
+        });
+
+        const req = {
+            query: {},
+            params: { id: "album-temp-rg" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(mockCoverArtClearNotFoundCache).not.toHaveBeenCalled();
+        expect(mockCoverArtGetCoverArt).not.toHaveBeenCalled();
+        expect(mockDeezerCover).toHaveBeenCalledWith(
+            "Temp Artist",
+            "Temporary RG Album"
+        );
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "album-temp-rg" },
+            data: { coverUrl: "https://cdn.deezer.com/temp-rg.jpg" },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.send).toHaveBeenCalledWith(Buffer.from("temp-cover"));
+    });
+
+    it("skips Deezer on-demand fallback when cover-art service already returns a cover", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-caa-hit",
+            title: "CAA Hit Album",
+            rgMbid: "rg-caa-hit",
+            coverUrl: null,
+            artist: { name: "CAA Artist" },
+        });
+        mockCoverArtGetCoverArt.mockResolvedValueOnce(
+            "https://coverartarchive.org/release-group/rg-caa-hit/front.jpg",
+        );
+        mockFetchExternalImage.mockResolvedValueOnce({
+            ok: true,
+            buffer: Buffer.from("caa-hit"),
+            contentType: "image/jpeg",
+            etag: "caa-hit-etag",
+            url: "https://coverartarchive.org/release-group/rg-caa-hit/front.jpg",
+        });
+
+        const req = {
+            query: {},
+            params: { id: "album-caa-hit" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(mockCoverArtClearNotFoundCache).toHaveBeenCalledWith("rg-caa-hit");
+        expect(mockDeezerCover).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(200);
+        expect(res.send).toHaveBeenCalledWith(Buffer.from("caa-hit"));
+    });
+
+    it("returns 404 when on-demand cover lookup warnings are raised for both CAA and Deezer failures", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-on-demand-errors",
+            title: "On Demand Errors",
+            rgMbid: "rg-on-demand-errors",
+            coverUrl: null,
+            artist: { name: "Error Artist" },
+        });
+        mockCoverArtGetCoverArt.mockRejectedValueOnce(new Error("caa timeout"));
+        mockDeezerCover.mockRejectedValueOnce(new Error("deezer timeout"));
+
+        const req = {
+            query: {},
+            params: { id: "album-on-demand-errors" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Cover art not found" });
+    });
+
+    it("still streams on-demand covers when persistence fails after discovery", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-on-demand-persist-fail",
+            title: "Persist Fail Album",
+            rgMbid: "temp-rg-persist-fail",
+            coverUrl: null,
+            artist: { name: "Persist Fail Artist" },
+        });
+        mockDeezerCover.mockResolvedValueOnce(
+            "https://cdn.deezer.com/persist-fail.jpg"
+        );
+        mockAlbumUpdate.mockRejectedValueOnce(new Error("persist failure"));
+        mockFetchExternalImage.mockResolvedValueOnce({
+            ok: true,
+            buffer: Buffer.from("persist-fail-bytes"),
+            contentType: "image/jpeg",
+            etag: "persist-fail-etag",
+            url: "https://cdn.deezer.com/persist-fail.jpg",
+        });
+
+        const req = {
+            query: {},
+            params: { id: "album-on-demand-persist-fail" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(res.statusCode).toBe(200);
+        expect(res.send).toHaveBeenCalledWith(Buffer.from("persist-fail-bytes"));
     });
 
     it("returns 404 when audiobook id cover fetch fails", async () => {
@@ -875,6 +1275,32 @@ describe("library cover-art proxy compatibility", () => {
         expect(audiobookRes.body).toEqual({
             error: "Audiobook cover art not found",
         });
+    });
+
+    it("clears stale NOT_FOUND MBID cache before on-demand cover retries", async () => {
+        mockAlbumFindUnique.mockResolvedValueOnce({
+            id: "album-rg-clear",
+            title: "Retry Album",
+            rgMbid: "rg-clear-1",
+            coverUrl: null,
+            artist: { name: "Retry Artist" },
+        });
+        mockCoverArtGetCoverArt.mockResolvedValueOnce(null);
+        mockDeezerCover.mockResolvedValueOnce(null);
+
+        const req = {
+            query: {},
+            params: { id: "album-rg-clear" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockCoverArtClearNotFoundCache).toHaveBeenCalledWith("rg-clear-1");
+        expect(mockCoverArtGetCoverArt).toHaveBeenCalledWith("rg-clear-1");
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Cover art not found" });
     });
 
     it("serves cached image bytes and handles cache read/write failures", async () => {

@@ -30,6 +30,10 @@ Status labels:
 - `Required (production)`: technically has a fallback, but must be explicitly set in real deployments.
 - `Optional`: safe default exists, or feature is disabled when unset.
 
+Experimental feature note:
+
+- Segmented-streaming variables are documented separately in [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md).
+
 ## Container Map
 
 | Container / Service | File | Purpose |

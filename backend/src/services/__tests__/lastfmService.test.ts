@@ -1005,7 +1005,7 @@ describe("lastFmService", () => {
         ).toBeNull();
     });
 
-    it("caps and enriches only first three similar artists", async () => {
+    it("enriches all similar artists and filters nulls", async () => {
         const buildArtistSearchResultSpy = jest
             .spyOn(lastFmService as any, "buildArtistSearchResult")
             .mockImplementation(async (...args: unknown[]) => {
@@ -1031,12 +1031,12 @@ describe("lastFmService", () => {
         expect(buildArtistSearchResultSpy).toHaveBeenCalledTimes(5);
         expect(
             buildArtistSearchResultSpy.mock.calls.map((call) => call[1])
-        ).toEqual([true, true, true, false, false]);
+        ).toEqual([true, true, true, true, true]);
         expect(results).toEqual([
             { id: "A", enrich: true },
             { id: "B", enrich: true },
             { id: "C", enrich: true },
-            { id: "E", enrich: false },
+            { id: "E", enrich: true },
         ]);
     });
 

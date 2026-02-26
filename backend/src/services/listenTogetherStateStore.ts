@@ -27,6 +27,51 @@ function isLikelyGroupSnapshot(value: unknown): value is GroupSnapshot {
     return true;
 }
 
+function snapshotOrdering(snapshot: GroupSnapshot): {
+    stateVersion: number;
+    serverTime: number;
+} {
+    const incomingStateVersion = Number(snapshot.playback?.stateVersion);
+    const incomingServerTime = Number(snapshot.playback?.serverTime);
+
+    return {
+        stateVersion:
+            Number.isFinite(incomingStateVersion) && incomingStateVersion >= 0
+                ? incomingStateVersion
+                : 0,
+        serverTime:
+            Number.isFinite(incomingServerTime) && incomingServerTime >= 0
+                ? incomingServerTime
+                : 0,
+    };
+}
+
+const SET_IF_FRESHER_SCRIPT = `
+local key = KEYS[1]
+local incomingRaw = ARGV[1]
+local ttlSeconds = tonumber(ARGV[2])
+local incomingStateVersion = tonumber(ARGV[3]) or 0
+local incomingServerTime = tonumber(ARGV[4]) or 0
+
+local existingRaw = redis.call('get', key)
+if existingRaw then
+  local ok, existing = pcall(cjson.decode, existingRaw)
+  if ok and existing and existing.playback then
+    local existingStateVersion = tonumber(existing.playback.stateVersion) or 0
+    local existingServerTime = tonumber(existing.playback.serverTime) or 0
+    if incomingStateVersion < existingStateVersion then
+      return 0
+    end
+    if incomingStateVersion == existingStateVersion and incomingServerTime < existingServerTime then
+      return 0
+    end
+  end
+end
+
+redis.call('set', key, incomingRaw, 'EX', ttlSeconds)
+return 1
+`;
+
 class ListenTogetherStateStore {
     private client: ReturnType<typeof createIORedisClient> | null = null;
 
@@ -82,11 +127,15 @@ class ListenTogetherStateStore {
         }
 
         try {
-            await this.ensureClient().set(
+            const ordering = snapshotOrdering(snapshot);
+            await this.ensureClient().eval(
+                SET_IF_FRESHER_SCRIPT,
+                1,
                 this.key(groupId),
                 JSON.stringify(snapshot),
-                "EX",
-                LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS
+                `${LISTEN_TOGETHER_STATE_STORE_TTL_SECONDS}`,
+                `${ordering.stateVersion}`,
+                `${ordering.serverTime}`
             );
         } catch (err) {
             logger.warn(
@@ -119,4 +168,3 @@ class ListenTogetherStateStore {
 }
 
 export const listenTogetherStateStore = new ListenTogetherStateStore();
-

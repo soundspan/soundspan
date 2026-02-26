@@ -9,6 +9,64 @@ export function shouldAttemptSegmentedRecoveryOnUnexpectedPause(
     );
 }
 
+export type SegmentedHandoffRecoveryStartupSkipReason =
+    | "eligible"
+    | "startup_stabilizing_no_progress"
+    | "startup_stabilizing";
+
+export interface SegmentedHandoffRecoveryStartupEligibilityInput {
+    startupProgressAtMs: number | null;
+    minimumStablePlaybackMs: number;
+    nowMs?: number;
+}
+
+export interface SegmentedHandoffRecoveryStartupEligibility {
+    eligible: boolean;
+    reason: SegmentedHandoffRecoveryStartupSkipReason;
+    stableForMs: number | null;
+    minimumStablePlaybackMs: number;
+}
+
+export function resolveSegmentedHandoffRecoveryStartupEligibility(
+    input: SegmentedHandoffRecoveryStartupEligibilityInput,
+): SegmentedHandoffRecoveryStartupEligibility {
+    const minimumStablePlaybackMs = Math.max(0, input.minimumStablePlaybackMs);
+    const startupProgressAtMs = input.startupProgressAtMs;
+
+    if (
+        typeof startupProgressAtMs !== "number" ||
+        !Number.isFinite(startupProgressAtMs)
+    ) {
+        return {
+            eligible: false,
+            reason: "startup_stabilizing_no_progress",
+            stableForMs: null,
+            minimumStablePlaybackMs,
+        };
+    }
+
+    const nowMs =
+        typeof input.nowMs === "number" && Number.isFinite(input.nowMs)
+            ? input.nowMs
+            : Date.now();
+    const stableForMs = Math.max(0, nowMs - startupProgressAtMs);
+    if (stableForMs < minimumStablePlaybackMs) {
+        return {
+            eligible: false,
+            reason: "startup_stabilizing",
+            stableForMs,
+            minimumStablePlaybackMs,
+        };
+    }
+
+    return {
+        eligible: true,
+        reason: "eligible",
+        stableForMs,
+        minimumStablePlaybackMs,
+    };
+}
+
 export type SegmentedStartupRecoveryStage =
     | "session_create"
     | "manifest_readiness"

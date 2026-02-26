@@ -25,6 +25,8 @@ import {
     Save,
 } from "lucide-react";
 import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { formatTime } from "@/utils/formatTime";
 
 export default function QueuePage() {
     const router = useRouter();
@@ -172,7 +174,7 @@ export default function QueuePage() {
                             Now Playing
                         </h2>
                         <Card>
-                            <div className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-[#2323FF]">
+                            <div className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-[#2323FF] group">
                                 <div className="relative flex-shrink-0 w-16 h-16">
                                     {currentTrack.album?.coverArt ? (
                                         <Image
@@ -207,14 +209,22 @@ export default function QueuePage() {
                                         {currentTrack.album?.title}
                                     </p>
                                 </div>
-                                <div className="text-sm text-gray-500">
-                                    {currentTrack.duration
-                                        ? `${Math.floor(
-                                              currentTrack.duration / 60
-                                          )}:${(currentTrack.duration % 60)
-                                              .toString()
-                                              .padStart(2, "0")}`
-                                        : ""}
+                                <div className="flex items-center gap-1">
+                                    <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                        {formatTime(currentTrack.duration)}
+                                    </span>
+                                    <TrackPreferenceButtons
+                                        trackId={currentTrack.id}
+                                        mode="up-only"
+                                        buttonSizeClassName="h-8 w-8"
+                                        iconSizeClassName="h-4 w-4"
+                                    />
+                                    <TrackOverflowMenu
+                                        track={currentTrack}
+                                        showPlayNext={false}
+                                        showAddToQueue={false}
+                                        isInListenTogetherGroup={isInGroup}
+                                    />
                                 </div>
                             </div>
                         </Card>
@@ -279,17 +289,6 @@ export default function QueuePage() {
                                                 </p>
                                             </div>
 
-                                            {/* Duration */}
-                                            <div className="text-sm text-gray-500">
-                                                {track.duration
-                                                    ? `${Math.floor(
-                                                          track.duration / 60
-                                                      )}:${(track.duration % 60)
-                                                          .toString()
-                                                          .padStart(2, "0")}`
-                                                    : ""}
-                                            </div>
-
                                             {/* Actions */}
                                             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 {!isInGroup && (
@@ -336,23 +335,34 @@ export default function QueuePage() {
                                                     <Play className="w-4 h-4" />
                                                 </button>
                                             </div>
-                                            <TrackOverflowMenu
-                                                track={track}
-                                                showPlayNext={false}
-                                                showAddToQueue={false}
-                                                isInListenTogetherGroup={isInGroup}
-                                                extraItemsAfter={
-                                                    <TrackMenuButton
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleRemoveTrack(queueIndex);
-                                                        }}
-                                                        icon={<X className="h-4 w-4" />}
-                                                        label="Remove from queue"
-                                                        className="text-red-400 hover:text-red-300"
-                                                    />
-                                                }
-                                            />
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                                    {formatTime(track.duration)}
+                                                </span>
+                                                <TrackPreferenceButtons
+                                                    trackId={track.id}
+                                                    mode="up-only"
+                                                    buttonSizeClassName="h-8 w-8"
+                                                    iconSizeClassName="h-4 w-4"
+                                                />
+                                                <TrackOverflowMenu
+                                                    track={track}
+                                                    showPlayNext={false}
+                                                    showAddToQueue={false}
+                                                    isInListenTogetherGroup={isInGroup}
+                                                    extraItemsAfter={
+                                                        <TrackMenuButton
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveTrack(queueIndex);
+                                                            }}
+                                                            icon={<X className="h-4 w-4" />}
+                                                            label="Remove from queue"
+                                                            className="text-red-400 hover:text-red-300"
+                                                        />
+                                                    }
+                                                />
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -405,15 +415,22 @@ export default function QueuePage() {
                                             </p>
                                         </div>
 
-                                        {/* Duration */}
-                                        <div className="text-sm text-gray-500">
-                                            {track.duration
-                                                ? `${Math.floor(
-                                                      track.duration / 60
-                                                  )}:${(track.duration % 60)
-                                                      .toString()
-                                                      .padStart(2, "0")}`
-                                                : ""}
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                                {formatTime(track.duration)}
+                                            </span>
+                                            <TrackPreferenceButtons
+                                                trackId={track.id}
+                                                mode="up-only"
+                                                buttonSizeClassName="h-8 w-8"
+                                                iconSizeClassName="h-4 w-4"
+                                            />
+                                            <TrackOverflowMenu
+                                                track={track}
+                                                showPlayNext={false}
+                                                showAddToQueue={false}
+                                                isInListenTogetherGroup={isInGroup}
+                                            />
                                         </div>
                                     </div>
                                 ))}

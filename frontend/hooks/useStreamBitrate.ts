@@ -277,10 +277,61 @@ export function formatYtQualityBadge(codec?: string | null, bitrate?: number | n
     const codecLabel = normalizeCodecLabel(codec);
     const bitrateLabel = bitrate && bitrate > 0 ? `${bitrate} kbps` : null;
 
-    if (codecLabel && bitrateLabel) return `YT MUSIC · ${codecLabel} · ${bitrateLabel}`;
-    if (codecLabel) return `YT MUSIC · ${codecLabel}`;
-    if (bitrateLabel) return `YT MUSIC · ${bitrateLabel}`;
-    return "YT MUSIC";
+    if (codecLabel && bitrateLabel) return `YOUTUBE · ${codecLabel} · ${bitrateLabel}`;
+    if (codecLabel) return `YOUTUBE · ${codecLabel}`;
+    if (bitrateLabel) return `YOUTUBE · ${bitrateLabel}`;
+    return "YOUTUBE";
+}
+
+export interface PlaybackQualityBadge {
+    variant: "tidal" | "youtube" | "local";
+    label: string;
+}
+
+export type PlaybackStreamSource = "local" | "tidal" | "youtube";
+
+export function resolvePlaybackQualityBadge(input: {
+    streamSource?: PlaybackStreamSource;
+    tidalQuality: TidalStreamQuality | null;
+    localQuality: LocalTrackQuality | null;
+    codec: string | null;
+    bitrate: number | null;
+}): PlaybackQualityBadge | null {
+    if (input.streamSource === "tidal") {
+        return {
+            variant: "tidal",
+            label: formatTidalQualityBadge(input.tidalQuality) || "TIDAL",
+        };
+    }
+
+    if (input.streamSource === "youtube") {
+        return {
+            variant: "youtube",
+            label: formatYtQualityBadge(input.codec, input.bitrate),
+        };
+    }
+
+    const localLabel = formatLocalQualityBadge(input.localQuality);
+    if (!localLabel) {
+        return null;
+    }
+
+    return {
+        variant: "local",
+        label: localLabel,
+    };
+}
+
+export function resolvePlaybackQualityBadgeFromStreamSource(
+    streamSource: PlaybackStreamSource | undefined,
+): PlaybackQualityBadge | null {
+    return resolvePlaybackQualityBadge({
+        streamSource,
+        tidalQuality: null,
+        localQuality: null,
+        codec: null,
+        bitrate: null,
+    });
 }
 
 export interface PlaybackQualityBadge {

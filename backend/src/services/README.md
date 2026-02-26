@@ -56,10 +56,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/musicScanner.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |
-| `backend/src/services/openai.ts` | Core |
 | `backend/src/services/podcastCache.ts` | Core |
 | `backend/src/services/podcastDownload.ts` | Core |
-| `backend/src/services/podcastindex.ts` | Core |
 | `backend/src/services/programmaticPlaylistArtistCap.ts` | Core |
 | `backend/src/services/programmaticPlaylists.ts` | Core |
 | `backend/src/services/rateLimiter.ts` | Core |

@@ -69,7 +69,8 @@ These scripts intentionally run outside Jest because they are operator diagnosti
 
 - `*.spec.ts` for E2E flows.
 - `predeploy/` subtree for release-focused validation paths.
-- `predeploy/media-contract.spec.ts` validates direct and segmented media contracts (`Range` + `206`, CORS headers, and content-type correctness; MP4 responses also get fast-start `moov` sanity checks).
+- `predeploy/media-contract.spec.ts` validates media contract behavior (`Range` + `206`, CORS headers, content-type correctness; MP4 responses also get fast-start `moov` sanity checks).
+- Segmented-specific rollout and validation guidance is documented separately in [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md).
 
 ### Frontend Node unit tests
 

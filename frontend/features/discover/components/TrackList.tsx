@@ -8,6 +8,9 @@ import { formatTime } from "@/utils/formatTime";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { TidalBadge } from "@/components/ui/TidalBadge";
+import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
+import type { ReactNode } from "react";
 
 const tierColors: Record<string, string> = {
     high: "text-green-400",
@@ -29,14 +32,52 @@ const tierLabels: Record<string, string> = {
 
 interface TrackListProps {
     tracks: DiscoverTrack[];
+    isMatching: boolean;
     currentTrack?: { id: string } | null;
     isPlaying: boolean;
     onPlayTrack: (index: number) => void;
     onTogglePlay: () => void;
 }
 
+function getSourceBadge(
+    track: DiscoverTrack,
+    isMatching: boolean,
+    extraClassName?: string,
+): ReactNode {
+    if (track.sourceType === "tidal") {
+        return <TidalBadge className={extraClassName} />;
+    }
+
+    if (track.sourceType === "youtube") {
+        return <YouTubeBadge className={extraClassName} />;
+    }
+
+    let label: string;
+    let badgeClassName: string;
+
+    if (!track.available) {
+        if (isMatching) {
+            label = "LOADING";
+            badgeClassName = "bg-gray-500/20 text-gray-300 border border-gray-400/30 animate-pulse";
+        } else {
+            label = "PREVIEW";
+            badgeClassName = "bg-blue-500/20 text-blue-400 border border-blue-500/30";
+        }
+    } else {
+        label = "Local";
+        badgeClassName = "bg-emerald-500/20 text-emerald-400";
+    }
+
+    return (
+        <span className={cn("shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded", badgeClassName, extraClassName)}>
+            {label}
+        </span>
+    );
+}
+
 export function TrackList({
     tracks,
+    isMatching,
     currentTrack,
     isPlaying,
     onPlayTrack,
@@ -61,6 +102,7 @@ export function TrackList({
                 {tracks.map((track, index) => {
                     const isTrackPlaying = currentTrack?.id === track.id;
                     const isInQueue = queuedTrackIds.has(track.id);
+                    const sourceBadge = getSourceBadge(track, isMatching);
                     return (
                         <div
                             key={track.id}
@@ -97,10 +139,10 @@ export function TrackList({
                             {/* Title + Artist */}
                             <div className="flex items-center gap-3 min-w-0">
                                 <div className="w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
-                                    {track.coverUrl ? (
+                                    {(track.coverUrl || track.albumId) ? (
                                         <Image
                                             src={api.getCoverArtUrl(
-                                                track.coverUrl,
+                                                track.coverUrl || track.albumId,
                                                 80
                                             )}
                                             alt={track.album}
@@ -144,22 +186,7 @@ export function TrackList({
                                         </Link>
                                     </p>
                                     <div className="md:hidden mt-1">
-                                        <span
-                                            className={cn(
-                                                "px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide",
-                                                track.sourceType === "tidal"
-                                                    ? "bg-[#00BFFF]/20 text-[#00BFFF]"
-                                                    : track.sourceType === "youtube"
-                                                      ? "bg-red-500/20 text-red-400"
-                                                      : "bg-emerald-500/20 text-emerald-400"
-                                            )}
-                                        >
-                                            {track.sourceType === "tidal"
-                                                ? "TIDAL"
-                                                : track.sourceType === "youtube"
-                                                  ? "YT Music"
-                                                  : "Local"}
-                                        </span>
+                                        {sourceBadge}
                                     </div>
                                 </div>
                             </div>
@@ -182,40 +209,25 @@ export function TrackList({
                             </div>
 
                             <div className="hidden md:flex items-center justify-center">
-                                <span
-                                    className={cn(
-                                        "px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide",
-                                        track.sourceType === "tidal"
-                                            ? "bg-[#00BFFF]/20 text-[#00BFFF]"
-                                            : track.sourceType === "youtube"
-                                              ? "bg-red-500/20 text-red-400"
-                                              : "bg-emerald-500/20 text-emerald-400"
-                                    )}
-                                >
-                                    {track.sourceType === "tidal"
-                                        ? "TIDAL"
-                                        : track.sourceType === "youtube"
-                                          ? "YT Music"
-                                          : "Local"}
-                                </span>
+                                {sourceBadge}
                             </div>
 
                             <div className="flex items-center justify-end gap-1">
+                                <span className="hidden sm:inline text-xs text-gray-500 w-10 text-right tabular-nums">
+                                    {formatTime(track.duration)}
+                                </span>
                                 <TrackPreferenceButtons
                                     trackId={track.id}
                                     mode="up-only"
-                                    buttonSizeClassName="h-10 w-10"
-                                    iconSizeClassName="h-5 w-5"
+                                    buttonSizeClassName="h-8 w-8"
+                                    iconSizeClassName="h-4 w-4"
                                 />
-                                <span className="hidden sm:inline text-sm text-gray-400 w-10 text-right">
-                                    {formatTime(track.duration)}
-                                </span>
                                 <TrackOverflowMenu
                                     track={{
                                         id: track.id,
                                         title: track.title,
-                                        artist: { name: track.artist },
-                                        album: { title: track.album, id: track.albumId, coverArt: track.coverUrl ?? undefined },
+                                        artist: { name: track.artist, id: track.artistId ?? undefined },
+                                        album: { title: track.album, id: track.albumId, coverArt: track.coverUrl ?? track.albumId ?? undefined },
                                         duration: track.duration,
                                         streamSource: track.streamSource,
                                     }}

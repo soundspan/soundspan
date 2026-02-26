@@ -27,81 +27,62 @@ interface ProviderMatchState {
     isMatching: boolean;
 }
 
-const MAX_PROVIDER_SLOTS = 8;
-const PROVIDER_SHARE = 0.3;
-
-export function getProviderSlotCount(totalTracks: number): number {
-    if (totalTracks < 4) return 0;
-    return Math.min(MAX_PROVIDER_SLOTS, Math.floor(totalTracks * PROVIDER_SHARE));
-}
-
 function getTracksKey(tracks: DiscoverTrack[]): string {
     return tracks
         .map((track) => `${track.id}:${track.similarity}:${track.duration}`)
         .join("|");
 }
 
+function toLocalTrack(track: DiscoverTrack): DiscoverTrack {
+    return {
+        ...track,
+        sourceType: "local",
+        streamSource: undefined,
+        tidalTrackId: undefined,
+        youtubeVideoId: undefined,
+    };
+}
+
 export function applyDiscoverProviderGapFill(
     sourceTracks: DiscoverTrack[],
+    gapIndices: number[],
     tidalMatches: Array<TidalMatch | null>,
     ytMatches: Array<YtMatch | null>
 ): DiscoverTrack[] {
-    const providerSlots = getProviderSlotCount(sourceTracks.length);
-    const candidateIndices = sourceTracks
-        .map((track, index) => ({
-            index,
-            similarity: track.similarity || 0,
-        }))
-        .sort((left, right) => right.similarity - left.similarity)
-        .map((entry) => entry.index);
-
-    const assigned = new Set<number>();
-    for (const index of candidateIndices) {
-        if (assigned.size >= providerSlots) break;
-        if (!tidalMatches[index] && !ytMatches[index]) continue;
-        assigned.add(index);
-    }
+    const gapSet = new Set(gapIndices);
+    let matchIdx = 0;
 
     return sourceTracks.map((track, index) => {
-        if (!assigned.has(index)) {
-            return {
-                ...track,
-                sourceType: "local" as const,
-                streamSource: undefined,
-                tidalTrackId: undefined,
-                youtubeVideoId: undefined,
-            };
+        // Already available locally — keep as-is
+        if (!gapSet.has(index)) {
+            return toLocalTrack(track);
         }
 
-        const tidalMatch = tidalMatches[index];
+        const tidalMatch = tidalMatches[matchIdx];
+        const ytMatch = ytMatches[matchIdx];
+        matchIdx++;
+
         if (tidalMatch) {
             return {
                 ...track,
-                sourceType: "tidal" as const,
-                streamSource: "tidal" as const,
+                sourceType: "tidal",
+                streamSource: "tidal",
                 tidalTrackId: tidalMatch.id,
                 youtubeVideoId: undefined,
             };
         }
 
-        const ytMatch = ytMatches[index];
         if (ytMatch) {
             return {
                 ...track,
-                sourceType: "youtube" as const,
-                streamSource: "youtube" as const,
+                sourceType: "youtube",
+                streamSource: "youtube",
                 youtubeVideoId: ytMatch.videoId,
                 tidalTrackId: undefined,
             };
         }
 
-        return {
-            ...track,
-            sourceType: "local" as const,
-            streamSource: undefined,
-            tidalTrackId: undefined,
-            youtubeVideoId: undefined,
-        };
+        return toLocalTrack(track);
     });
 }
 
@@ -125,11 +106,11 @@ export function useDiscoverProviderGapFill(
         let cancelled = false;
 
         const matchProviders = async () => {
-            setMatchState((prev) => ({
-                ...prev,
+            setMatchState({
                 key: tracksKey,
+                tracks: sourceTracks,
                 isMatching: true,
-            }));
+            });
 
             const [tidalStatus, ytStatus] = await Promise.all([
                 api.getTidalStreamingStatus().catch(() => null),
@@ -147,30 +128,35 @@ export function useDiscoverProviderGapFill(
                 !!ytStatus?.available &&
                 !!ytStatus?.authenticated;
 
-            if (!tidalAvailable && !ytAvailable) {
+            // Only gap-fill tracks that aren't locally available
+            const gapIndices: number[] = [];
+            for (let i = 0; i < sourceTracks.length; i++) {
+                if (!sourceTracks[i].available) {
+                    gapIndices.push(i);
+                }
+            }
+
+            if ((!tidalAvailable && !ytAvailable) || gapIndices.length === 0) {
                 setMatchState({
                     key: tracksKey,
-                    tracks: sourceTracks.map((track) => ({
-                        ...track,
-                        sourceType: "local",
-                        streamSource: undefined,
-                        tidalTrackId: undefined,
-                        youtubeVideoId: undefined,
-                    })),
+                    tracks: sourceTracks.map(toLocalTrack),
                     isMatching: false,
                 });
                 return;
             }
 
-            const payload = sourceTracks.map((track) => ({
-                artist: track.artist,
-                title: track.title,
-                albumTitle: track.album,
-                duration:
-                    typeof track.duration === "number" && track.duration > 0
-                        ? track.duration
-                        : undefined,
-            }));
+            const payload = gapIndices.map((i) => {
+                const track = sourceTracks[i];
+                return {
+                    artist: track.artist,
+                    title: track.title,
+                    albumTitle: track.album,
+                    duration:
+                        typeof track.duration === "number" && track.duration > 0
+                            ? track.duration
+                            : undefined,
+                };
+            });
 
             const [tidalMatchesResponse, ytMatchesResponse] = await Promise.all([
                 tidalAvailable
@@ -189,6 +175,7 @@ export function useDiscoverProviderGapFill(
             const ytMatches = ytMatchesResponse.matches as Array<YtMatch | null>;
             const nextTracks = applyDiscoverProviderGapFill(
                 sourceTracks,
+                gapIndices,
                 tidalMatches,
                 ytMatches
             );
@@ -225,7 +212,9 @@ export function useDiscoverProviderGapFill(
                   : sourceTracks,
         [matchState.key, matchState.tracks, sourceTracks, tracksKey]
     );
-    const isMatching = matchState.key === tracksKey && matchState.isMatching;
+    const isMatching =
+        sourceTracks.length > 0 &&
+        (matchState.key !== tracksKey || matchState.isMatching);
 
     const providerCounts = useMemo(() => {
         const counts = {

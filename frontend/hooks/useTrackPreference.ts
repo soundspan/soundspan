@@ -68,13 +68,8 @@ export function useTrackPreference(trackId?: string | null) {
         return preferenceMutation.mutateAsync(nextSignal);
     };
 
-    const toggleThumbsUp = async () => {
-        const nextSignal = getNextTrackPreferenceSignal(signal, "thumbs_up");
-        return setSignal(nextSignal);
-    };
-
-    const toggleThumbsDown = async () => {
-        const nextSignal = getNextTrackPreferenceSignal(signal, "thumbs_down");
+    const toggleLike = async () => {
+        const nextSignal = getNextTrackPreferenceSignal(signal);
         return setSignal(nextSignal);
     };
 
@@ -86,7 +81,6 @@ export function useTrackPreference(trackId?: string | null) {
         isSaving: preferenceMutation.isPending,
         error: preferenceQuery.error || preferenceMutation.error || null,
         setSignal,
-        toggleThumbsUp,
-        toggleThumbsDown,
+        toggleLike,
     };
 }

@@ -2,9 +2,11 @@ import {
     segmentedSegmentService,
     type EnsureLocalDashSegmentsInput,
     type LocalDashSegmentAsset,
+    type SegmentedDashManifestProfile,
 } from "./segmentService";
 
 export type SegmentedManifestQuality = "original" | "high" | "medium" | "low";
+export type SegmentedManifestProfile = SegmentedDashManifestProfile;
 
 export interface LocalDashAssetRequest extends EnsureLocalDashSegmentsInput {}
 

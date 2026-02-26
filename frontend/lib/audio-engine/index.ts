@@ -7,6 +7,7 @@ import type {
   AudioEngineEventHandler,
   AudioEngineEventType,
   AudioEngineLoadOptions,
+  AudioEngineRepresentationFailoverResult,
   AudioEngineSource,
 } from "@/lib/audio-engine/types";
 import { VideoJsSegmentedEngine } from "@/lib/audio-engine/videoJsSegmentedEngine";
@@ -63,6 +64,11 @@ interface RuntimeAudioEngine extends AudioEngine {
   preload(source: AudioEngineSource | string, format?: string): void;
   reload(): void;
   refreshManifest(): void;
+  quarantineRepresentation(
+    representationId: string,
+    cooldownMs: number,
+  ): AudioEngineRepresentationFailoverResult | null;
+  clearRepresentationQuarantine(): void;
   getActualCurrentTime(): number;
   isCurrentlySeeking(): boolean;
   getSeekTarget(): number | null;
@@ -248,6 +254,25 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     }
   }
 
+  quarantineRepresentation(
+    representationId: string,
+    cooldownMs: number,
+  ): AudioEngineRepresentationFailoverResult | null {
+    const activeEngine = this.getActiveEngine();
+    if (typeof activeEngine.quarantineRepresentation !== "function") {
+      return null;
+    }
+    return activeEngine.quarantineRepresentation(representationId, cooldownMs);
+  }
+
+  clearRepresentationQuarantine(): void {
+    const activeEngine = this.getActiveEngine();
+    if (typeof activeEngine.clearRepresentationQuarantine !== "function") {
+      return;
+    }
+    activeEngine.clearRepresentationQuarantine();
+  }
+
   getActualCurrentTime(): number {
     const activeEngine = this.getActiveEngine();
     if (typeof activeEngine.getActualCurrentTime === "function") {
@@ -295,7 +320,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 
   private resolvePreferredEngineKind(source: AudioEngineSource): EngineKind {
     const mode = this.resolveMode();
-    if (mode === "howler-rollback") {
+    if (mode === "howler") {
       return "howler";
     }
 
@@ -318,7 +343,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         this.applyOutputState(this.videoJsEngine);
       } catch (error) {
         sharedFrontendLogger.error(
-          "[AudioEngine] Failed to initialize Video.js segmented engine, falling back to Howler.",
+          "[AudioEngine] Failed to initialize Video.js segmented engine; continuing with primary Howler engine.",
           error,
         );
         return this.howlerEngine;

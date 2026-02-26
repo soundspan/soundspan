@@ -25,8 +25,8 @@ services:
     environment:
       - TZ=${TZ:-UTC}
       - SESSION_SECRET=${SESSION_SECRET:-}
-      # Runtime streaming-engine selector. Keep unset for default segmented engine (videojs).
-      # Set to howler-rollback only for incident rollback.
+      # Runtime streaming-engine selector. Keep unset for primary howler (direct).
+      # Set to videojs (segmented, experimental) only for explicit evaluation.
       - STREAMING_ENGINE_MODE=${STREAMING_ENGINE_MODE:-}
       # Preserve Redis streams/groups across restarts unless explicitly overridden
       - REDIS_FLUSH_ON_STARTUP=${REDIS_FLUSH_ON_STARTUP:-false}

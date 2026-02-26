@@ -48,12 +48,12 @@ const icon =
 
 mock.module("lucide-react", {
     namedExports: {
+        Heart: icon("heart"),
         Loader2: icon("loader-2"),
         Music: icon("music"),
         Pause: icon("pause"),
         Play: icon("play"),
         Shuffle: icon("shuffle"),
-        ThumbsUp: icon("thumbs-up"),
     },
 });
 
@@ -133,7 +133,7 @@ mock.module("@/components/player/TrackPreferenceButtons", {
         }) =>
             React.createElement("button", {
                 type: "button",
-                title: "Thumbs up",
+                title: "Like",
                 "data-testid": "liked-track-thumb",
                 "data-track-id": props.trackId,
                 "data-mode": props.mode,
@@ -221,7 +221,7 @@ test("renders empty-state copy and disables Play All and Shuffle when there are 
     const html = renderWithQueryClient(MyLikedPlaylistPage);
 
     assert.match(html, /No liked tracks yet/);
-    assert.match(html, /Tap thumbs up on any song to add it here\./);
+    assert.match(html, /Tap the heart on any song to add it here\./);
     assert.match(html, /<span>Play All<\/span>/);
 
     const disabledButtons = html.match(/<button[^>]*\bdisabled\b[^>]*>/g) ?? [];
@@ -237,7 +237,7 @@ test("renders empty-state copy and disables Play All and Shuffle when there are 
     );
 });
 
-test("shows Pause primary action and active thumbs-up controls when a liked track is currently playing", async () => {
+test("shows Pause primary action and active like controls when a liked track is currently playing", async () => {
     state.likedData = {
         playlist: {
             id: "my-liked",

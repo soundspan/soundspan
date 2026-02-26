@@ -71,9 +71,17 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         detailsLoading,
         reloadAlbum,
     } = useAlbumData(id);
-    const { enrichedTracks: tidalEnrichedTracks } = useTidalGapFill(rawAlbum, source);
+    const {
+        enrichedTracks: tidalEnrichedTracks,
+        isMatching: isTidalMatching,
+        isStatusResolved: isTidalStatusResolved,
+    } = useTidalGapFill(rawAlbum, source);
     const tidalAlbum = rawAlbum ? { ...rawAlbum, tracks: tidalEnrichedTracks || rawAlbum.tracks } : rawAlbum;
-    const { enrichedTracks } = useYtMusicGapFill(tidalAlbum, source);
+    const {
+        enrichedTracks,
+        isMatching: isYtMatching,
+        isStatusResolved: isYtStatusResolved,
+    } = useYtMusicGapFill(tidalAlbum, source);
     const {
         playAlbum,
         shufflePlay,
@@ -88,6 +96,11 @@ export default function AlbumPage({ params }: AlbumPageProps) {
 
     // Use enriched tracks (with TIDAL + YT Music gap-fill) when available
     const album = rawAlbum ? { ...rawAlbum, tracks: enrichedTracks || rawAlbum.tracks } : rawAlbum;
+    const isProviderMatching =
+        !isTidalStatusResolved ||
+        !isYtStatusResolved ||
+        isTidalMatching ||
+        isYtMatching;
     const hasTracks = Boolean(album?.tracks && album.tracks.length > 0);
     const showTrackPlaceholder = detailsLoading && !hasTracks;
 
@@ -197,10 +210,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     }}
                     onDownloadAlbum={() => downloadAlbum(album)}
                     onAddToPlaylist={handleAddAlbumToPlaylist}
-                    onThumbsDownAlbum={() => {
-                        if (!hasTracks) return;
-                        void setAlbumPreference(album, "thumbs_down");
-                    }}
                     onThumbsUpAlbum={() => {
                         if (!hasTracks) return;
                         void setAlbumPreference(album, "thumbs_up");
@@ -258,6 +267,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                                 )
                             }
                             isInListenTogetherGroup={isInGroup}
+                            isProviderMatching={isProviderMatching}
                         />
                     )}
                     {showTrackPlaceholder && <AlbumTracksSkeleton />}

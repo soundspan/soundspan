@@ -119,6 +119,12 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(groupManager.has("g-dirty")).toBe(false);
     });
 
+    it("treats removing unknown groups as a no-op", () => {
+        groupManager.setCallbacks(createCallbacks());
+        expect(() => groupManager.remove("g-missing")).not.toThrow();
+        expect(groupManager.has("g-missing")).toBe(false);
+    });
+
     it("handles member joins/leaves including host transfer and auto-disband", () => {
         const callbacks = createCallbacks();
         groupManager.setCallbacks(callbacks);
@@ -265,6 +271,10 @@ describe("listenTogetherManager runtime behavior", () => {
 
         const waiting = groupManager.setTrack("g-ready", "host", 1, true);
         expect(waiting.waiting).toBe(true);
+        expect(waiting.snapshot.readyDeadlineMs).toEqual(expect.any(Number));
+        expect(groupManager.get("g-ready")?.readyDeadlineMs).toEqual(
+            expect.any(Number)
+        );
         expect(() => groupManager.setTrack("g-ready", "host", 0, true)).toThrow(
             GroupError
         );
@@ -272,12 +282,383 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(groupManager.reportReady("g-ready", "host")).toBe(false);
         expect(groupManager.reportReady("g-ready", "guest")).toBe(true);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
+        expect(groupManager.snapshotById("g-ready")?.readyDeadlineMs).toBeNull();
 
         // Trigger timeout path on a new waiting gate.
         callbacks.onPlayAt.mockClear();
         groupManager.setTrack("g-ready", "host", 0, true);
         await jest.advanceTimersByTimeAsync(8_000);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats play/pause/seek as no-ops while waiting and keeps track-change conflicts", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-ready-block", {
+            name: "Ready Block",
+            joinCode: "RDBK",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-ready-block", "guest", "Guest");
+        groupManager.addSocket("g-ready-block", "host", "host-socket");
+        groupManager.addSocket("g-ready-block", "guest", "guest-socket");
+
+        const waiting = groupManager.setTrack("g-ready-block", "host", 1, true);
+        expect(waiting.waiting).toBe(true);
+        expect(waiting.snapshot.syncState).toBe("waiting");
+
+        const stateVersionBefore = waiting.snapshot.playback.stateVersion;
+        const playDelta = groupManager.play("g-ready-block", "host");
+        const pauseDelta = groupManager.pause("g-ready-block", "host");
+        const seekDelta = groupManager.seek("g-ready-block", "host", 2_000);
+
+        expect(playDelta.stateVersion).toBe(stateVersionBefore);
+        expect(pauseDelta.stateVersion).toBe(stateVersionBefore);
+        expect(seekDelta.stateVersion).toBe(stateVersionBefore);
+        expect(callbacks.onPlaybackDelta).not.toHaveBeenCalled();
+
+        expect(() => groupManager.next("g-ready-block", "host")).toThrow(
+            "Track change already in progress"
+        );
+        expect(() =>
+            groupManager.setTrack("g-ready-block", "host", 0, true)
+        ).toThrow("Track change already in progress");
+
+        expect(groupManager.snapshotById("g-ready-block")?.syncState).toBe(
+            "waiting"
+        );
+        expect(groupManager.snapshotById("g-ready-block")?.playback.positionMs).toBe(
+            0
+        );
+    });
+
+    it("re-arms ready-gate timeout when applying an external waiting snapshot", async () => {
+        jest.useFakeTimers();
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-ready-rearm", {
+            name: "Ready Rearm",
+            joinCode: "RDRM",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-ready-rearm", "guest", "Guest");
+        groupManager.addSocket("g-ready-rearm", "host", "host-socket");
+        groupManager.addSocket("g-ready-rearm", "guest", "guest-socket");
+
+        const waiting = groupManager.setTrack("g-ready-rearm", "host", 1, true);
+        expect(waiting.waiting).toBe(true);
+        expect(waiting.snapshot.syncState).toBe("waiting");
+        expect(waiting.snapshot.readyDeadlineMs).toEqual(expect.any(Number));
+
+        callbacks.onPlayAt.mockClear();
+        groupManager.applyExternalSnapshot(waiting.snapshot);
+
+        await jest.advanceTimersByTimeAsync(8_000);
+
+        expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
+        expect(groupManager.snapshotById("g-ready-rearm")?.syncState).toBe(
+            "playing"
+        );
+        expect(groupManager.snapshotById("g-ready-rearm")?.readyDeadlineMs).toBeNull();
+    });
+
+    it("hydrates external snapshots for unknown groups and clears ready-gate state for non-waiting sync", () => {
+        groupManager.setCallbacks(createCallbacks());
+        const clearReadyGateStateSpy = jest.spyOn(
+            groupManager as any,
+            "clearReadyGateState",
+        );
+        groupManager.create("g-external-new", {
+            name: "External New",
+            joinCode: "EXT",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            currentIndex: 1,
+            createdAt: new Date(),
+        });
+        const baseSnapshot = groupManager.snapshotById("g-external-new");
+        expect(baseSnapshot).toBeDefined();
+        groupManager.remove("g-external-new");
+
+        groupManager.applyExternalSnapshot({
+            ...(baseSnapshot as GroupSnapshot),
+            syncState: "playing",
+            readyDeadlineMs: Date.now() + 2_000,
+        });
+
+        const hydrated = groupManager.snapshotById("g-external-new");
+        expect(hydrated).toBeDefined();
+        expect(hydrated?.syncState).toBe("playing");
+        expect(hydrated?.readyDeadlineMs).toBeNull();
+        expect(clearReadyGateStateSpy).toHaveBeenCalled();
+        clearReadyGateStateSpy.mockRestore();
+    });
+
+    it("force-plays immediately when an external waiting snapshot has an expired deadline", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-ready-expired", {
+            name: "Ready Expired",
+            joinCode: "RDEXP",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-ready-expired", "guest", "Guest");
+        groupManager.addSocket("g-ready-expired", "host", "host-socket");
+        groupManager.addSocket("g-ready-expired", "guest", "guest-socket");
+
+        const baseSnapshot = groupManager.snapshotById("g-ready-expired");
+        expect(baseSnapshot).toBeDefined();
+
+        callbacks.onPlayAt.mockClear();
+        groupManager.applyExternalSnapshot({
+            ...baseSnapshot!,
+            syncState: "waiting",
+            readyDeadlineMs: Date.now() - 1_000,
+            playback: {
+                ...baseSnapshot!.playback,
+                isPlaying: false,
+                stateVersion: baseSnapshot!.playback.stateVersion + 1,
+                serverTime: baseSnapshot!.playback.serverTime + 1_000,
+            },
+        });
+
+        expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
+        expect(groupManager.snapshotById("g-ready-expired")?.syncState).toBe(
+            "playing"
+        );
+        expect(groupManager.snapshotById("g-ready-expired")?.readyDeadlineMs).toBeNull();
+    });
+
+    it("keeps ready-gate timers referenced when timer handles expose ref/unref", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-ref-timer", {
+            name: "Ref Timer",
+            joinCode: "RFT",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-ref-timer", "guest", "Guest");
+        groupManager.addSocket("g-ref-timer", "host", "host-socket");
+        groupManager.addSocket("g-ref-timer", "guest", "guest-socket");
+
+        const refSpy = jest.fn();
+        const unrefSpy = jest.fn();
+        const setTimeoutSpy = jest
+            .spyOn(global, "setTimeout")
+            .mockImplementation(((
+                _handler: (...args: any[]) => void,
+            ) =>
+                ({
+                    ref: refSpy,
+                    unref: unrefSpy,
+                }) as unknown as NodeJS.Timeout) as typeof setTimeout);
+        const clearTimeoutSpy = jest
+            .spyOn(global, "clearTimeout")
+            .mockImplementation((() => undefined) as typeof clearTimeout);
+
+        const waiting = groupManager.setTrack("g-ref-timer", "host", 1, true);
+
+        expect(waiting.waiting).toBe(true);
+        expect(refSpy).toHaveBeenCalledTimes(1);
+        expect(unrefSpy).not.toHaveBeenCalled();
+
+        setTimeoutSpy.mockRestore();
+        clearTimeoutSpy.mockRestore();
+    });
+
+    it("handles timer handles without ref/unref and does not force-play non-waiting groups", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-no-unref", {
+            name: "No Unref",
+            joinCode: "NUR",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1")],
+            createdAt: new Date(),
+        });
+
+        const group = groupManager.get("g-no-unref");
+        expect(group).toBeDefined();
+        if (!group) {
+            return;
+        }
+
+        let scheduledCallback: (() => void) | null = null;
+        const setTimeoutSpy = jest
+            .spyOn(global, "setTimeout")
+            .mockImplementation(((
+                handler: (...args: any[]) => void,
+            ) => {
+                scheduledCallback = () => handler();
+                return 1 as unknown as NodeJS.Timeout;
+            }) as typeof setTimeout);
+        const clearTimeoutSpy = jest
+            .spyOn(global, "clearTimeout")
+            .mockImplementation((() => undefined) as typeof clearTimeout);
+
+        group.syncState = "playing";
+        (groupManager as any).armReadyGateTimer(group, Date.now());
+        expect(typeof scheduledCallback).toBe("function");
+        if (scheduledCallback) {
+            (scheduledCallback as () => void)();
+        }
+
+        expect(callbacks.onPlayAt).not.toHaveBeenCalled();
+
+        setTimeoutSpy.mockRestore();
+        clearTimeoutSpy.mockRestore();
+    });
+
+    it("defaults waiting snapshots without a deadline to a new ready-gate timeout window", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-ready-default-deadline", {
+            name: "Ready Default Deadline",
+            joinCode: "RDD",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-ready-default-deadline", "guest", "Guest");
+        groupManager.addSocket("g-ready-default-deadline", "host", "host-socket");
+        groupManager.addSocket("g-ready-default-deadline", "guest", "guest-socket");
+
+        const before = groupManager.snapshotById("g-ready-default-deadline");
+        expect(before).toBeDefined();
+
+        const now = Date.now();
+        groupManager.applyExternalSnapshot({
+            ...before!,
+            syncState: "waiting",
+            readyDeadlineMs: null,
+            playback: {
+                ...before!.playback,
+                stateVersion: before!.playback.stateVersion + 1,
+                serverTime: before!.playback.serverTime + 1_000,
+                isPlaying: false,
+            },
+        });
+
+        const after = groupManager.snapshotById("g-ready-default-deadline");
+        expect(after?.syncState).toBe("waiting");
+        expect(after?.readyDeadlineMs).toEqual(expect.any(Number));
+        expect((after?.readyDeadlineMs ?? 0) - now).toBeGreaterThanOrEqual(7_900);
+        expect((after?.readyDeadlineMs ?? 0) - now).toBeLessThanOrEqual(8_100);
+    });
+
+    it("preserves existing waiting deadline when stale external playback snapshots are ignored", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-ready-preserve-deadline", {
+            name: "Ready Preserve Deadline",
+            joinCode: "RPD",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-ready-preserve-deadline", "guest", "Guest");
+        groupManager.addSocket("g-ready-preserve-deadline", "host", "host-socket");
+        groupManager.addSocket("g-ready-preserve-deadline", "guest", "guest-socket");
+
+        const waiting = groupManager.setTrack(
+            "g-ready-preserve-deadline",
+            "host",
+            1,
+            true
+        );
+        const existingDeadline = waiting.snapshot.readyDeadlineMs;
+        expect(existingDeadline).toEqual(expect.any(Number));
+
+        groupManager.applyExternalSnapshot({
+            ...waiting.snapshot,
+            syncState: "playing",
+            playback: {
+                ...waiting.snapshot.playback,
+                stateVersion: waiting.snapshot.playback.stateVersion,
+                serverTime: waiting.snapshot.playback.serverTime - 1_000,
+            },
+        });
+
+        const after = groupManager.snapshotById("g-ready-preserve-deadline");
+        expect(after?.syncState).toBe("waiting");
+        expect(after?.readyDeadlineMs).toBe(existingDeadline);
+    });
+
+    it("recomputes waiting deadline when stale external snapshots keep waiting state but local deadline is missing", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-ready-recompute-deadline", {
+            name: "Ready Recompute Deadline",
+            joinCode: "RRD",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-ready-recompute-deadline", "guest", "Guest");
+        groupManager.addSocket("g-ready-recompute-deadline", "host", "host-socket");
+        groupManager.addSocket("g-ready-recompute-deadline", "guest", "guest-socket");
+
+        const waiting = groupManager.setTrack(
+            "g-ready-recompute-deadline",
+            "host",
+            1,
+            true
+        );
+        const localGroup = groupManager.get("g-ready-recompute-deadline");
+        expect(localGroup).toBeDefined();
+        localGroup!.readyDeadlineMs = null;
+
+        const now = Date.now();
+        groupManager.applyExternalSnapshot({
+            ...waiting.snapshot,
+            syncState: "playing",
+            playback: {
+                ...waiting.snapshot.playback,
+                stateVersion: waiting.snapshot.playback.stateVersion,
+                serverTime: waiting.snapshot.playback.serverTime - 1_000,
+            },
+        });
+
+        const after = groupManager.snapshotById("g-ready-recompute-deadline");
+        expect(after?.syncState).toBe("waiting");
+        expect(after?.readyDeadlineMs).toEqual(expect.any(Number));
+        expect((after?.readyDeadlineMs ?? 0) - now).toBeGreaterThanOrEqual(7_900);
+        expect((after?.readyDeadlineMs ?? 0) - now).toBeLessThanOrEqual(8_100);
     });
 
     it("applies queue actions for add/remove/clear and rejects invalid actions", () => {
@@ -323,6 +704,59 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(clearDelta.queue).toEqual([]);
         expect(groupManager.get("g-queue")?.syncState).toBe("idle");
         expect(callbacks.onQueueDelta).toHaveBeenCalled();
+    });
+
+    it("inserts tracks after the current track via insert-next action", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-insert", {
+            name: "Insert",
+            joinCode: "INS",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("A"), track("B"), track("C")],
+            createdAt: new Date(),
+        });
+
+        // currentIndex defaults to 0 (track A), so insert-next should place after A
+        const delta = groupManager.modifyQueue("g-insert", "host", {
+            action: "insert-next",
+            items: [track("X")],
+        });
+        expect(delta.queue.map((t) => t.id)).toEqual(["A", "X", "B", "C"]);
+
+        // Advance to track X (index 1), then insert-next should place after X
+        groupManager.modifyQueue("g-insert", "host", {
+            action: "insert-next",
+            items: [track("Y")],
+        });
+        // currentIndex is still 0, so Y goes after index 0 (after A), before X
+        expect(
+            groupManager.get("g-insert")?.playback.queue.map((t) => t.id)
+        ).toEqual(["A", "Y", "X", "B", "C"]);
+    });
+
+    it("initializes queue when insert-next is used on an empty queue", () => {
+        groupManager.create("g-insert-empty", {
+            name: "InsertEmpty",
+            joinCode: "INE",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [],
+            createdAt: new Date(),
+        });
+
+        const delta = groupManager.modifyQueue("g-insert-empty", "host", {
+            action: "insert-next",
+            items: [track("1")],
+        });
+        expect(delta.queue.length).toBe(1);
+        expect(delta.currentIndex).toBe(0);
+        expect(groupManager.get("g-insert-empty")?.syncState).toBe("paused");
     });
 
     it("supports end-group permissions and force-end behavior", () => {

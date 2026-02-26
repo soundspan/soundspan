@@ -6,6 +6,7 @@ import type {
     AudioEngineEventHandler,
     AudioEngineEventType,
     AudioEngineLoadOptions,
+    AudioEngineRepresentationFailoverResult,
     AudioEngineSource,
 } from "../../lib/audio-engine/types.ts";
 
@@ -16,8 +17,15 @@ class FakeAudioEngine implements AudioEngine {
     }> = [];
     public readonly setVolumeCalls: number[] = [];
     public readonly setMutedCalls: boolean[] = [];
+    public readonly quarantineRepresentationCalls: Array<{
+        representationId: string;
+        cooldownMs: number;
+    }> = [];
     public stopCalls = 0;
     public destroyCalls = 0;
+    public clearRepresentationQuarantineCalls = 0;
+    public quarantineRepresentationResult: AudioEngineRepresentationFailoverResult | null =
+        null;
     private currentTime = 0;
     private duration = 0;
     private playing = false;
@@ -71,6 +79,21 @@ class FakeAudioEngine implements AudioEngine {
 
     isPlaying(): boolean {
         return this.playing;
+    }
+
+    quarantineRepresentation(
+        representationId: string,
+        cooldownMs: number
+    ): AudioEngineRepresentationFailoverResult | null {
+        this.quarantineRepresentationCalls.push({
+            representationId,
+            cooldownMs,
+        });
+        return this.quarantineRepresentationResult;
+    }
+
+    clearRepresentationQuarantine(): void {
+        this.clearRepresentationQuarantineCalls += 1;
     }
 
     on<T extends AudioEngineEventType>(
@@ -177,4 +200,118 @@ test("falls back to Howler event stream when Video.js initialization fails", () 
 
     assert.equal(howlerEngine.loadCalls.length, 1);
     assert.equal(lastTimeUpdate, 12.34);
+});
+
+test("forwards representation quarantine to active DASH engine", () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    videoJsEngine.quarantineRepresentationResult = {
+        quarantinedRepresentationId: "0",
+        selectedRepresentationId: "1",
+        enabledRepresentationCount: 2,
+        totalRepresentationCount: 3,
+        allRepresentationsUnhealthy: false,
+        didSwitchRepresentation: true,
+    };
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => videoJsEngine,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load({
+        url: "https://example.test/segmented.mpd",
+        protocol: "dash",
+        mimeType: "application/dash+xml",
+    });
+    const result = runtimeEngine.quarantineRepresentation("0", 20_000);
+    runtimeEngine.clearRepresentationQuarantine();
+
+    assert.deepEqual(videoJsEngine.quarantineRepresentationCalls, [
+        {
+            representationId: "0",
+            cooldownMs: 20_000,
+        },
+    ]);
+    assert.equal(howlerEngine.quarantineRepresentationCalls.length, 0);
+    assert.equal(videoJsEngine.clearRepresentationQuarantineCalls, 1);
+    assert.deepEqual(result, videoJsEngine.quarantineRepresentationResult);
+});
+
+test("falls back safely when active engine does not expose segmented helpers", () => {
+    let currentTime = 0;
+    const howlerEngine = {
+        load: (_source: AudioEngineSource | string, _options?: AudioEngineLoadOptions) =>
+            undefined,
+        play: () => undefined,
+        pause: () => undefined,
+        stop: () => undefined,
+        seek: (timeSec: number) => {
+            currentTime = timeSec;
+        },
+        setVolume: (_value: number) => undefined,
+        setMuted: (_value: boolean) => undefined,
+        getCurrentTime: () => currentTime,
+        getDuration: () => 0,
+        isPlaying: () => false,
+        on: (_event: AudioEngineEventType, _handler: (payload: unknown) => void) =>
+            undefined,
+        off: (_event: AudioEngineEventType, _handler: (payload: unknown) => void) =>
+            undefined,
+    } as AudioEngine;
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => new FakeAudioEngine(),
+        resolveMode: () => "howler",
+    });
+
+    howlerEngine.seek(9.75);
+
+    assert.equal(runtimeEngine.quarantineRepresentation("rep-1", 5_000), null);
+    runtimeEngine.clearRepresentationQuarantine();
+    assert.equal(runtimeEngine.getActualCurrentTime(), 9.75);
+    assert.equal(runtimeEngine.isCurrentlySeeking(), false);
+    assert.equal(runtimeEngine.getSeekTarget(), null);
+});
+
+test("uses safe helper fallbacks when active DASH engine lacks optional helper APIs", () => {
+    const howlerEngine = new FakeAudioEngine();
+    let activeTimeSec = 0;
+    const minimalVideoJsEngine = {
+        load: (_source: AudioEngineSource | string, _options?: AudioEngineLoadOptions) =>
+            undefined,
+        play: () => undefined,
+        pause: () => undefined,
+        stop: () => undefined,
+        seek: (timeSec: number) => {
+            activeTimeSec = timeSec;
+        },
+        setVolume: (_value: number) => undefined,
+        setMuted: (_value: boolean) => undefined,
+        getCurrentTime: () => activeTimeSec,
+        getDuration: () => 0,
+        isPlaying: () => false,
+        on: (_event: AudioEngineEventType, _handler: (payload: unknown) => void) =>
+            undefined,
+        off: (_event: AudioEngineEventType, _handler: (payload: unknown) => void) =>
+            undefined,
+    } as AudioEngine;
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => minimalVideoJsEngine,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load({
+        url: "https://example.test/live.mpd",
+        protocol: "dash",
+        mimeType: "application/dash+xml",
+    });
+    runtimeEngine.seek(3.5);
+
+    assert.equal(runtimeEngine.quarantineRepresentation("rep-1", 1_000), null);
+    runtimeEngine.clearRepresentationQuarantine();
+    assert.equal(runtimeEngine.getActualCurrentTime(), 3.5);
+    assert.equal(runtimeEngine.isCurrentlySeeking(), false);
+    assert.equal(runtimeEngine.getSeekTarget(), null);
 });

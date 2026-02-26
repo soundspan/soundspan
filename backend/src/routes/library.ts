@@ -52,6 +52,7 @@ import {
     getDecadeFromYear,
 } from "../utils/dateFilters";
 import { shuffleArray } from "../utils/shuffle";
+import { separateArtists } from "../utils/separateArtists";
 import {
     applyTrackPreferenceOrderBias,
     applyTrackPreferenceSimilarityBias,
@@ -500,6 +501,36 @@ const getAlbumIdFromNativeCoverPath = (nativePath: string): string | null => {
 const getNativeCoverCachePath = (nativePath: string): string =>
     path.join(config.music.transcodeCachePath, "../covers", nativePath);
 
+const getNativeCoverPathCandidates = (nativePath: string): string[] => {
+    const trimmedNativePath = nativePath.replace(/^\/+/, "").trim();
+    const candidates = new Set<string>();
+
+    if (trimmedNativePath.length > 0) {
+        candidates.add(trimmedNativePath);
+        if (!trimmedNativePath.startsWith("albums/")) {
+            candidates.add(`albums/${trimmedNativePath}`);
+        }
+    }
+
+    return Array.from(candidates);
+};
+
+const resolveNativeCoverCacheHit = (
+    nativePath: string
+): { resolvedNativePath: string; cachePath: string } | null => {
+    const candidates = getNativeCoverPathCandidates(nativePath);
+    for (const candidate of candidates) {
+        const candidateCachePath = getNativeCoverCachePath(candidate);
+        if (fs.existsSync(candidateCachePath)) {
+            return {
+                resolvedNativePath: candidate,
+                cachePath: candidateCachePath,
+            };
+        }
+    }
+    return null;
+};
+
 const buildNativeCoverProxyRedirectPath = (nativeCoverUrl: string): string =>
     `/api/library/cover-art?url=${encodeURIComponent(nativeCoverUrl)}`;
 
@@ -563,10 +594,16 @@ const tryHealMissingNativeAlbumCover = async (
             existingNativeCover.startsWith("native:")
         ) {
             const existingNativePath = existingNativeCover.replace("native:", "");
-            const existingNativeFilePath =
-                getNativeCoverCachePath(existingNativePath);
-            if (fs.existsSync(existingNativeFilePath)) {
-                return buildNativeCoverProxyRedirectPath(existingNativeCover);
+            const nativeCacheHit = resolveNativeCoverCacheHit(existingNativePath);
+            if (nativeCacheHit) {
+                const canonicalNativeCoverUrl =
+                    `native:${nativeCacheHit.resolvedNativePath}`;
+                if (canonicalNativeCoverUrl !== existingNativeCover) {
+                    await persistHealedAlbumCover(album.id, canonicalNativeCoverUrl);
+                }
+                return buildNativeCoverProxyRedirectPath(
+                    canonicalNativeCoverUrl
+                );
             }
         }
 
@@ -1760,6 +1797,13 @@ router.get("/artists/:id", async (req, res) => {
                 // For each Last.fm track, try to match with library track or add as unowned
                 const combinedTracks: any[] = [];
 
+                // Collect unowned tracks that need Deezer cover lookups
+                const unownedEntries: Array<{
+                    index: number;
+                    lfmTrack: (typeof lastfmTopTracks)[number];
+                    albumTitle: string;
+                }> = [];
+
                 for (const lfmTrack of lastfmTopTracks) {
                     // O(1) lookup instead of O(n) find
                     const key = lfmTrack.name.toLowerCase();
@@ -1783,7 +1827,10 @@ router.get("/artists/:id", async (req, res) => {
                             },
                         });
                     } else {
-                        // Track NOT in library - add as preview-only track
+                        const albumTitle =
+                            lfmTrack.album?.["#text"] || "Unknown Album";
+                        // Push placeholder; coverArt will be filled after batch lookup
+                        const idx = combinedTracks.length;
                         combinedTracks.push({
                             id: `lastfm-${artist.mbid || artist.name}-${
                                 lfmTrack.name
@@ -1800,13 +1847,36 @@ router.get("/artists/:id", async (req, res) => {
                                 : 0,
                             url: lfmTrack.url,
                             album: {
-                                title:
-                                    lfmTrack.album?.["#text"] ||
-                                    "Unknown Album",
+                                title: albumTitle,
+                                coverArt: null,
                             },
                             userPlayCount: 0,
                             // NO album.id - this indicates track is not in library
                         });
+                        if (albumTitle !== "Unknown Album") {
+                            unownedEntries.push({
+                                index: idx,
+                                lfmTrack,
+                                albumTitle,
+                            });
+                        }
+                    }
+                }
+
+                // Fetch Deezer covers for unowned tracks in parallel (cached 24h)
+                if (unownedEntries.length > 0) {
+                    const covers = await Promise.all(
+                        unownedEntries.map((entry) =>
+                            deezerService
+                                .getAlbumCover(artist.name, entry.albumTitle)
+                                .catch(() => null)
+                        )
+                    );
+                    for (let i = 0; i < unownedEntries.length; i++) {
+                        if (covers[i]) {
+                            combinedTracks[unownedEntries[i].index].album.coverArt =
+                                covers[i];
+                        }
                     }
                 }
 
@@ -2671,20 +2741,11 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
             if (decodedUrl.startsWith("native:")) {
                 const nativePath = decodedUrl.replace("native:", "");
 
-                const coverCachePath = path.join(
-                    config.music.transcodeCachePath,
-                    "../covers",
-                    nativePath
-                );
-
-                logger.debug(
-                    `[COVER-ART] Serving native cover: ${coverCachePath}`
-                );
-
-                // Check if file exists
-                if (!fs.existsSync(coverCachePath)) {
+                const nativeCacheHit = resolveNativeCoverCacheHit(nativePath);
+                if (!nativeCacheHit) {
+                    const missingCoverCachePath = getNativeCoverCachePath(nativePath);
                     logger.warn(
-                        `[COVER-ART] Native cover not found: ${coverCachePath}, trying Deezer fallback`
+                        `[COVER-ART] Native cover not found: ${missingCoverCachePath}, trying Deezer fallback`
                     );
                     try {
                         const deezerCover =
@@ -2701,6 +2762,32 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     return sendRouteError(res, 404, "Cover art not found");
                 }
 
+                const canonicalNativePath = nativeCacheHit.resolvedNativePath;
+                if (canonicalNativePath !== nativePath) {
+                    const canonicalNativeCoverUrl = `native:${canonicalNativePath}`;
+                    const canonicalAlbumId =
+                        getAlbumIdFromNativeCoverPath(canonicalNativePath);
+                    /* istanbul ignore else -- native cache hit candidates always normalize to file-name ids */
+                    if (canonicalAlbumId) {
+                        void persistHealedAlbumCover(
+                            canonicalAlbumId,
+                            canonicalNativeCoverUrl
+                        ).catch((error) => {
+                            logger.warn(
+                                `[COVER-ART] Failed to backfill canonical native path for album ${canonicalAlbumId}:`,
+                                error
+                            );
+                        });
+                    }
+                    logger.debug(
+                        `[COVER-ART] Resolved legacy native cover path ${nativePath} -> ${canonicalNativePath}`
+                    );
+                }
+
+                logger.debug(
+                    `[COVER-ART] Serving native cover: ${nativeCacheHit.cachePath}`
+                );
+
                 // Serve the file directly
                 const requestOrigin = req.headers.origin;
                 const headers: Record<string, string> = {
@@ -2715,7 +2802,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     headers["Access-Control-Allow-Origin"] = "*";
                 }
 
-                return res.sendFile(coverCachePath, {
+                return res.sendFile(nativeCacheHit.cachePath, {
                     headers,
                 });
             }
@@ -2736,14 +2823,31 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
             if (decodedId.startsWith("native:")) {
                 const nativePath = decodedId.replace("native:", "");
 
-                const coverCachePath = path.join(
-                    config.music.transcodeCachePath,
-                    "../covers",
-                    nativePath
-                );
+                const nativeCacheHit = resolveNativeCoverCacheHit(nativePath);
+                if (nativeCacheHit) {
+                    const canonicalNativePath = nativeCacheHit.resolvedNativePath;
+                    if (canonicalNativePath !== nativePath) {
+                        const canonicalNativeCoverUrl =
+                            `native:${canonicalNativePath}`;
+                        const canonicalAlbumId =
+                            getAlbumIdFromNativeCoverPath(canonicalNativePath);
+                        /* istanbul ignore else -- native cache hit candidates always normalize to file-name ids */
+                        if (canonicalAlbumId) {
+                            void persistHealedAlbumCover(
+                                canonicalAlbumId,
+                                canonicalNativeCoverUrl
+                            ).catch((error) => {
+                                logger.warn(
+                                    `[COVER-ART] Failed to backfill canonical native path for album ${canonicalAlbumId}:`,
+                                    error
+                                );
+                            });
+                        }
+                        logger.debug(
+                            `[COVER-ART] Resolved legacy native cover path ${nativePath} -> ${canonicalNativePath}`
+                        );
+                    }
 
-                // Check if file exists
-                if (fs.existsSync(coverCachePath)) {
                     // Serve the file directly
                     const requestOrigin = req.headers.origin;
                     const headers: Record<string, string> = {
@@ -2758,14 +2862,15 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                         headers["Access-Control-Allow-Origin"] = "*";
                     }
 
-                    return res.sendFile(coverCachePath, {
+                    return res.sendFile(nativeCacheHit.cachePath, {
                         headers,
                     });
                 }
 
                 // Native cover file missing - try to find album and fetch from Deezer
+                const missingCoverCachePath = getNativeCoverCachePath(nativePath);
                 logger.warn(
-                    `[COVER-ART] Native cover not found: ${coverCachePath}, trying Deezer fallback`
+                    `[COVER-ART] Native cover not found: ${missingCoverCachePath}, trying Deezer fallback`
                 );
 
                 try {
@@ -2854,10 +2959,72 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
             ) {
                 coverUrl = decodedId;
             } else {
-                // Invalid cover ID format
-                return res
-                    .status(400)
-                    .json({ error: "Invalid cover ID format" });
+                // Treat as album ID — on-demand cover art fetch for albums with null coverUrl
+                const album = await prisma.album.findUnique({
+                    where: { id: decodedId },
+                    select: {
+                        id: true,
+                        title: true,
+                        rgMbid: true,
+                        coverUrl: true,
+                        artist: { select: { name: true } },
+                    },
+                });
+
+                if (!album) {
+                    return sendRouteError(res, 404, "Album not found");
+                }
+
+                // If album already has a cover URL, redirect to it
+                if (album.coverUrl) {
+                    const redirectUrl = album.coverUrl.startsWith("native:")
+                        ? `/api/library/cover-art?url=${encodeURIComponent(album.coverUrl)}`
+                        : album.coverUrl;
+                    return res.redirect(redirectUrl);
+                }
+
+                // On-demand fetch: try to find cover art now
+                let fetchedCoverUrl: string | null = null;
+                const validRgMbid =
+                    typeof album.rgMbid === "string" &&
+                    album.rgMbid.length > 0 &&
+                    !album.rgMbid.startsWith("temp-")
+                        ? album.rgMbid
+                        : null;
+
+                // Clear stale NOT_FOUND cache so retry uses improved matching
+                if (validRgMbid) {
+                    await coverArtService.clearNotFoundCache(validRgMbid);
+                    try {
+                        fetchedCoverUrl = await coverArtService.getCoverArt(validRgMbid);
+                    } catch (err) {
+                        logger.warn(`[COVER-ART] On-demand CAA fetch failed for ${validRgMbid}:`, err);
+                    }
+                }
+
+                if (!fetchedCoverUrl && album.artist) {
+                    try {
+                        fetchedCoverUrl = await deezerService.getAlbumCover(
+                            album.artist.name,
+                            album.title
+                        );
+                    } catch (err) {
+                        logger.warn(
+                            `[COVER-ART] On-demand Deezer fetch failed for ${album.artist.name} - ${album.title}:`,
+                            err
+                        );
+                    }
+                }
+
+                if (fetchedCoverUrl) {
+                    // Persist the discovered cover URL
+                    void persistHealedAlbumCover(album.id, fetchedCoverUrl).catch((err) => {
+                        logger.warn(`[COVER-ART] Failed to persist on-demand cover for album ${album.id}:`, err);
+                    });
+                    coverUrl = fetchedCoverUrl;
+                } else {
+                    return sendRouteError(res, 404, "Cover art not found");
+                }
             }
         }
 
@@ -5695,7 +5862,10 @@ router.get("/radio", async (req, res) => {
 
         // Keep deterministic ordering for vibe/liked queues. Shuffle all other radio queues.
         const finalTracks =
-            preserveInputOrder ? transformedTracks : shuffleArray(transformedTracks);
+            preserveInputOrder ? transformedTracks : separateArtists(
+                shuffleArray(transformedTracks),
+                (t: any) => t.artist?.id ?? `unknown:${t.id}`
+            );
 
         // Include source features if this was a vibe request
         const response: any = { tracks: finalTracks };

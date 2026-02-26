@@ -100,8 +100,11 @@ export default function ArtistPage() {
 
     // Enrich unowned top tracks with TIDAL streaming, then YT Music for remaining gaps
     const artistWithTopTracks = artist?.topTracks?.length ? artist : null;
-    const { enrichedTopTracks: tidalEnrichedTopTracks } =
-        useTidalTopTracks(artistWithTopTracks);
+    const {
+        enrichedTopTracks: tidalEnrichedTopTracks,
+        isMatching: isTidalMatching,
+        isStatusResolved: isTidalStatusResolved,
+    } = useTidalTopTracks(artistWithTopTracks);
     const tidalArtist =
         artistWithTopTracks ?
             {
@@ -110,7 +113,16 @@ export default function ArtistPage() {
                     tidalEnrichedTopTracks || artistWithTopTracks.topTracks,
             }
         :   null;
-    const { enrichedTopTracks } = useYtMusicTopTracks(tidalArtist);
+    const {
+        enrichedTopTracks,
+        isMatching: isYtMatching,
+        isStatusResolved: isYtStatusResolved,
+    } = useYtMusicTopTracks(tidalArtist);
+    const isProviderMatching =
+        !isTidalStatusResolved ||
+        !isYtStatusResolved ||
+        isTidalMatching ||
+        isYtMatching;
 
     // Separate owned and available albums
     const ownedAlbums = albums.filter((a) => a.owned);
@@ -342,6 +354,7 @@ export default function ArtistPage() {
                                 handlePreview(track, artist.name, e)
                             }
                             isInListenTogetherGroup={isInGroup}
+                            isProviderMatching={isProviderMatching}
                             popularHref={`/artist/${artist.id}/popular`}
                             onAddAllToQueue={handleAddAllPopularToQueue}
                         />

@@ -67,6 +67,8 @@ export interface GroupState {
     readyUserIds: Set<string>;
     /** Timer handle for the ready-gate timeout. */
     readyTimeout: ReturnType<typeof setTimeout> | null;
+    /** Absolute ready-gate deadline (`Date.now()` ms), if waiting. */
+    readyDeadlineMs: number | null;
     lastActivity: number; // Date.now()
     createdAt: Date;
     /** True when in-memory state has diverged from DB and needs persisting. */
@@ -83,6 +85,7 @@ export interface GroupSnapshot {
     isActive: boolean;
     hostUserId: string;
     syncState: GroupSyncState;
+    readyDeadlineMs?: number | null;
     playback: {
         queue: SyncQueueItem[];
         currentIndex: number;
@@ -120,6 +123,7 @@ export interface QueueDelta {
 
 export type QueueAction =
     | { action: "add"; items: SyncQueueItem[] }
+    | { action: "insert-next"; items: SyncQueueItem[] }
     | { action: "remove"; index: number }
     | { action: "reorder"; fromIndex: number; toIndex: number }
     | { action: "clear" };
@@ -279,6 +283,7 @@ class GroupManager {
             members,
             readyUserIds: new Set(),
             readyTimeout: null,
+            readyDeadlineMs: null,
             lastActivity: now,
             createdAt: opts.createdAt,
             dirty: false,
@@ -347,6 +352,7 @@ class GroupManager {
             members,
             readyUserIds: new Set(),
             readyTimeout: null,
+            readyDeadlineMs: null,
             lastActivity: now,
             createdAt: opts.createdAt,
             dirty: false,
@@ -367,7 +373,7 @@ class GroupManager {
     /** Remove group from memory (after DB cleanup). */
     remove(groupId: string): void {
         const group = this.groups.get(groupId);
-        if (group?.readyTimeout) clearTimeout(group.readyTimeout);
+        if (group) this.clearReadyGateTimer(group);
         this.groups.delete(groupId);
     }
 
@@ -539,6 +545,8 @@ class GroupManager {
     play(groupId: string, userId: string): PlaybackDelta {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
+        const waitingDelta = this.playbackDeltaIfWaiting(group);
+        if (waitingDelta) return waitingDelta;
 
         const pb = group.playback;
         if (pb.queue.length === 0) throw new GroupError("INVALID", "Queue is empty");
@@ -558,6 +566,8 @@ class GroupManager {
     pause(groupId: string, userId: string): PlaybackDelta {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
+        const waitingDelta = this.playbackDeltaIfWaiting(group);
+        if (waitingDelta) return waitingDelta;
 
         const pb = group.playback;
         // Freeze position
@@ -577,6 +587,8 @@ class GroupManager {
     seek(groupId: string, userId: string, positionMs: number): PlaybackDelta {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
+        const waitingDelta = this.playbackDeltaIfWaiting(group);
+        if (waitingDelta) return waitingDelta;
 
         const pb = group.playback;
         const track = pb.queue[pb.currentIndex];
@@ -606,12 +618,7 @@ class GroupManager {
     ): { snapshot: GroupSnapshot; waiting: boolean } {
         const group = this.requireGroup(groupId);
         this.requireControl(group, userId);
-        if (group.syncState === "waiting") {
-            throw new GroupError(
-                "CONFLICT",
-                "Track change already in progress"
-            );
-        }
+        this.ensureNoPendingTrackChange(group);
 
         const pb = group.playback;
         if (pb.queue.length === 0) throw new GroupError("INVALID", "Queue is empty");
@@ -631,6 +638,7 @@ class GroupManager {
 
         // If only one person is connected or track didn't change, skip the gate
         if (connectedCount <= 1 || !trackChanged) {
+            this.clearReadyGateState(group);
             if (autoPlay) {
                 pb.isPlaying = true;
                 pb.lastPositionUpdate = Date.now();
@@ -643,19 +651,7 @@ class GroupManager {
         }
 
         // Enter ready gate
-        group.syncState = "waiting";
-        group.readyUserIds.clear();
-
-        // Clear any existing timeout
-        if (group.readyTimeout) clearTimeout(group.readyTimeout);
-
-        // Set timeout: if not everyone is ready in time, start anyway
-        group.readyTimeout = setTimeout(() => {
-            group.readyTimeout = null;
-            if (group.syncState === "waiting") {
-                this.forcePlay(group);
-            }
-        }, READY_GATE_TIMEOUT_MS);
+        this.enterReadyGate(group);
 
         this.callbacks?.onWaiting(groupId, {
             trackId: currentTrackId(pb),
@@ -714,6 +710,16 @@ class GroupManager {
             case "add": {
                 pb.queue.push(...action.items);
                 // If queue was empty and we just added tracks, set up the first track
+                if (pb.queue.length === action.items.length) {
+                    pb.currentIndex = 0;
+                    group.syncState = "paused";
+                }
+                break;
+            }
+            case "insert-next": {
+                const insertAt = pb.currentIndex + 1;
+                pb.queue.splice(insertAt, 0, ...action.items);
+                // If queue was empty before, set up the first track
                 if (pb.queue.length === action.items.length) {
                     pb.currentIndex = 0;
                     group.syncState = "paused";
@@ -807,6 +813,8 @@ class GroupManager {
             isActive: true,
             hostUserId: group.hostUserId,
             syncState: group.syncState,
+            readyDeadlineMs:
+                group.syncState === "waiting" ? group.readyDeadlineMs : null,
             playback: {
                 queue: pb.queue,
                 currentIndex: pb.currentIndex,
@@ -844,6 +852,11 @@ class GroupManager {
     applyExternalSnapshot(snapshot: GroupSnapshot): void {
         const existing = this.groups.get(snapshot.id);
         const now = Date.now();
+        const existingReadyDeadlineMs = existing?.readyDeadlineMs ?? null;
+        if (existing) {
+            // Timers close over old group objects; drop and re-arm on replacement.
+            this.clearReadyGateTimer(existing);
+        }
 
         const incomingQueue = Array.isArray(snapshot.playback?.queue)
             ? snapshot.playback.queue
@@ -856,6 +869,11 @@ class GroupManager {
         const incomingServerTime = Math.max(0, snapshot.playback?.serverTime ?? now);
         const incomingStateVersion = Math.max(0, snapshot.playback?.stateVersion ?? 0);
         const incomingIsPlaying = Boolean(snapshot.playback?.isPlaying);
+        const incomingReadyDeadlineMs =
+            typeof snapshot.readyDeadlineMs === "number" &&
+            Number.isFinite(snapshot.readyDeadlineMs)
+                ? Math.max(0, snapshot.readyDeadlineMs)
+                : null;
         const applyIncomingPlayback = shouldApplyIncomingPlayback(
             existing,
             incomingStateVersion,
@@ -904,6 +922,12 @@ class GroupManager {
             applyIncomingPlayback || !existing
                 ? snapshot.syncState
                 : existing.syncState;
+        const readyDeadlineMs =
+            syncState === "waiting"
+                ? applyIncomingPlayback || !existing
+                    ? incomingReadyDeadlineMs ?? now + READY_GATE_TIMEOUT_MS
+                    : existingReadyDeadlineMs ?? now + READY_GATE_TIMEOUT_MS
+                : null;
 
         const group: GroupState = {
             id: snapshot.id,
@@ -916,13 +940,20 @@ class GroupManager {
             playback,
             members,
             readyUserIds: new Set<string>(),
-            readyTimeout: existing?.readyTimeout ?? null,
+            readyTimeout: null,
+            readyDeadlineMs,
             lastActivity: now,
             createdAt: existing?.createdAt ?? new Date(),
             dirty: false,
         };
 
         this.groups.set(snapshot.id, group);
+        /* istanbul ignore next -- branch mapping can attribute non-waiting path to the same source line */
+        if (group.syncState === "waiting") {
+            this.rearmReadyGateFromDeadline(group, readyDeadlineMs ?? now);
+        } else {
+            this.clearReadyGateState(group);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -983,11 +1014,77 @@ class GroupManager {
         return true;
     }
 
-    private forcePlay(group: GroupState): void {
+    private clearReadyGateTimer(group: GroupState): void {
         if (group.readyTimeout) {
             clearTimeout(group.readyTimeout);
-            group.readyTimeout = null;
         }
+        group.readyTimeout = null;
+        group.readyDeadlineMs = null;
+    }
+
+    private clearReadyGateState(group: GroupState): void {
+        this.clearReadyGateTimer(group);
+        group.readyUserIds.clear();
+    }
+
+    private ensureNoPendingTrackChange(group: GroupState): void {
+        if (group.syncState === "waiting") {
+            throw new GroupError(
+                "CONFLICT",
+                "Track change already in progress"
+            );
+        }
+    }
+
+    private playbackDeltaIfWaiting(group: GroupState): PlaybackDelta | null {
+        // Keep ready-gate deterministic: ignore non-track controls while waiting.
+        if (group.syncState !== "waiting") return null;
+        return this.playbackDelta(group);
+    }
+
+    private armReadyGateTimer(
+        group: GroupState,
+        deadlineMs: number
+    ): void {
+        this.clearReadyGateTimer(group);
+
+        const now = Date.now();
+        const safeDeadlineMs = Math.max(now, deadlineMs);
+        const waitMs = Math.max(0, safeDeadlineMs - now);
+        group.readyDeadlineMs = safeDeadlineMs;
+        const readyTimeout = setTimeout(() => {
+            group.readyTimeout = null;
+            group.readyDeadlineMs = null;
+            if (group.syncState === "waiting") {
+                this.forcePlay(group);
+            }
+        }, waitMs);
+        group.readyTimeout = readyTimeout;
+        // Keep the gate timer referenced so process liveness cannot skip waiting-state resolution.
+        if (typeof readyTimeout.ref === "function") {
+            readyTimeout.ref();
+        }
+    }
+
+    private enterReadyGate(group: GroupState): void {
+        group.syncState = "waiting";
+        group.readyUserIds.clear();
+        this.armReadyGateTimer(group, Date.now() + READY_GATE_TIMEOUT_MS);
+    }
+
+    private rearmReadyGateFromDeadline(
+        group: GroupState,
+        deadlineMs: number
+    ): void {
+        if (deadlineMs <= Date.now()) {
+            this.forcePlay(group);
+            return;
+        }
+        this.armReadyGateTimer(group, deadlineMs);
+    }
+
+    private forcePlay(group: GroupState): void {
+        this.clearReadyGateState(group);
 
         const pb = group.playback;
         pb.isPlaying = true;
@@ -995,7 +1092,6 @@ class GroupManager {
         pb.lastPositionUpdate = Date.now();
         pb.stateVersion++;
         group.syncState = "playing";
-        group.readyUserIds.clear();
         group.dirty = true;
 
         this.callbacks?.onPlayAt(group.id, {
@@ -1009,10 +1105,7 @@ class GroupManager {
     }
 
     private endGroupInternal(group: GroupState, reason: string): void {
-        if (group.readyTimeout) {
-            clearTimeout(group.readyTimeout);
-            group.readyTimeout = null;
-        }
+        this.clearReadyGateState(group);
 
         group.playback.isPlaying = false;
         group.syncState = "idle";

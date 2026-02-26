@@ -33,6 +33,12 @@ jest.mock("../../utils/db", () => ({
         similarArtist: {
             findMany: jest.fn(),
         },
+        likedTrack: {
+            findMany: jest.fn(),
+        },
+        dislikedEntity: {
+            findMany: jest.fn(),
+        },
     },
     Prisma: {
         SortOrder: {
@@ -83,6 +89,10 @@ jest.mock("../../services/deezer", () => ({
     deezerService: {},
 }));
 
+jest.mock("../../services/imageProvider", () => ({
+    imageProviderService: {},
+}));
+
 jest.mock("../../services/musicbrainz", () => ({
     musicBrainzService: {},
 }));
@@ -131,6 +141,21 @@ jest.mock("../../utils/shuffle", () => ({
     shuffleArray: jest.fn((arr: unknown[]) => arr),
 }));
 
+jest.mock("../../services/trackPreference", () => ({
+    applyTrackPreferenceOrderBias: jest.fn((trackIds: string[]) => trackIds),
+    applyTrackPreferenceSimilarityBias: jest.fn((score: number) => score),
+    normalizeTrackPreferenceSignal: jest.fn(() => null),
+    resolveTrackPreference: jest.fn(async () => ({
+        signal: null,
+        state: "neutral",
+        score: 0,
+        likedAt: null,
+        dislikedAt: null,
+        updatedAt: null,
+    })),
+    TRACK_DISLIKE_ENTITY_TYPE: "track",
+}));
+
 jest.mock("../../utils/colorExtractor", () => ({
     extractColorsFromImage: jest.fn(async () => ({
         vibrant: "#000000",
@@ -154,6 +179,8 @@ const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
 const mockTrackFindMany = prisma.track.findMany as jest.Mock;
 const mockOwnedAlbumFindMany = prisma.ownedAlbum.findMany as jest.Mock;
 const mockSimilarArtistFindMany = prisma.similarArtist.findMany as jest.Mock;
+const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
+const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 
 function getGetHandler(path: string, stackIndex = 0) {
     const layer = (router as any).stack.find(
@@ -186,6 +213,8 @@ describe("library vibe radio reliability compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockLikedTrackFindMany.mockResolvedValue([]);
+        mockDislikedEntityFindMany.mockResolvedValue([]);
     });
 
     it("treats legacy enhanced analysis as standard and requests analysisVersion", async () => {
@@ -319,6 +348,128 @@ describe("library vibe radio reliability compatibility", () => {
         );
     });
 
+    it("keeps reliable enhanced analysis mode when source analysisVersion has trusted prefix", async () => {
+        const sourceTrack = {
+            id: "source-track-enhanced",
+            title: "Enhanced Source",
+            analysisStatus: "completed",
+            analysisMode: "enhanced",
+            analysisVersion: "2.1b6-enhanced-v3-2026-02-01",
+            bpm: 128,
+            energy: 0.8,
+            valence: 0.62,
+            arousal: 0.71,
+            danceability: 0.69,
+            danceabilityMl: 0.7,
+            keyScale: "major",
+            instrumentalness: 0.12,
+            moodHappy: 0.64,
+            moodSad: 0.2,
+            moodRelaxed: 0.22,
+            moodAggressive: 0.32,
+            moodParty: 0.66,
+            moodAcoustic: 0.15,
+            moodElectronic: 0.58,
+            moodTags: ["energetic"],
+            lastfmTags: ["dance"],
+            essentiaGenres: ["dance"],
+            trackGenres: [{ genre: { name: "Dance" } }],
+            album: {
+                id: "album-enhanced",
+                title: "Enhanced Album",
+                artistId: "artist-enhanced",
+                genres: ["dance"],
+                artist: { id: "artist-enhanced", name: "Enhanced Artist" },
+            },
+        };
+
+        const analyzedCandidate = {
+            id: "candidate-enhanced",
+            bpm: 128,
+            energy: 0.79,
+            valence: 0.61,
+            arousal: 0.7,
+            danceability: 0.7,
+            danceabilityMl: 0.71,
+            keyScale: "major",
+            moodTags: ["energetic"],
+            lastfmTags: ["dance"],
+            essentiaGenres: ["dance"],
+            instrumentalness: 0.1,
+            moodHappy: 0.65,
+            moodSad: 0.19,
+            moodRelaxed: 0.21,
+            moodAggressive: 0.31,
+            moodParty: 0.67,
+            moodAcoustic: 0.14,
+            moodElectronic: 0.57,
+            analysisMode: "enhanced",
+            analysisVersion: "2.1b6-enhanced-v3-2026-02-01",
+        };
+
+        const hydratedCandidate = {
+            id: "candidate-enhanced",
+            title: "Enhanced Candidate",
+            duration: 200,
+            trackNo: 4,
+            filePath: "/music/enhanced-candidate.flac",
+            analysisMode: "enhanced",
+            analysisVersion: "2.1b6-enhanced-v3-2026-02-01",
+            bpm: 128,
+            energy: 0.79,
+            valence: 0.61,
+            arousal: 0.7,
+            danceability: 0.7,
+            instrumentalness: 0.1,
+            keyScale: "major",
+            moodHappy: 0.65,
+            moodSad: 0.19,
+            moodRelaxed: 0.21,
+            moodAggressive: 0.31,
+            moodParty: 0.67,
+            moodAcoustic: 0.14,
+            moodElectronic: 0.57,
+            album: {
+                id: "album-candidate-enhanced",
+                title: "Enhanced Candidate Album",
+                coverUrl: null,
+                artist: { id: "artist-candidate", name: "Candidate Artist" },
+            },
+            trackGenres: [],
+        };
+
+        mockTrackFindUnique.mockResolvedValueOnce(sourceTrack);
+        mockTrackFindMany
+            .mockResolvedValueOnce([analyzedCandidate])
+            .mockResolvedValueOnce([hydratedCandidate]);
+        mockOwnedAlbumFindMany.mockResolvedValue([]);
+        mockSimilarArtistFindMany.mockResolvedValue([]);
+
+        const req = {
+            query: { type: "vibe", value: "source-track-enhanced", limit: "1" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await radioHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                tracks: [
+                    expect.objectContaining({
+                        id: "candidate-enhanced",
+                        title: "Enhanced Candidate",
+                    }),
+                ],
+                sourceFeatures: expect.objectContaining({
+                    analysisMode: "enhanced",
+                    bpm: 128,
+                }),
+            })
+        );
+    });
+
     it("returns 404 when the vibe source track does not exist", async () => {
         mockTrackFindUnique.mockResolvedValueOnce(null);
 
@@ -435,6 +586,76 @@ describe("library vibe radio reliability compatibility", () => {
                 }),
             })
         );
+    });
+
+    it("uses shuffled non-vibe radio ordering and tolerates tracks without artist ids", async () => {
+        mockTrackFindMany
+            .mockResolvedValueOnce([{ id: "all-track-1" }, { id: "all-track-2" }])
+            .mockResolvedValueOnce([
+                {
+                    id: "all-track-1",
+                    title: "All Track",
+                    duration: 201,
+                    trackNo: 1,
+                    filePath: "/music/all-track-1.flac",
+                    album: {
+                        id: "album-all-1",
+                        title: "All Album",
+                        coverUrl: null,
+                        artist: {
+                            id: null,
+                            name: "Unknown Artist",
+                        },
+                    },
+                    trackGenres: [],
+                },
+                {
+                    id: "all-track-2",
+                    title: "All Track Two",
+                    duration: 199,
+                    trackNo: 2,
+                    filePath: "/music/all-track-2.flac",
+                    album: {
+                        id: "album-all-2",
+                        title: "All Album Two",
+                        coverUrl: null,
+                        artist: {
+                            id: "known-artist-2",
+                            name: "Known Artist",
+                        },
+                    },
+                    trackGenres: [],
+                },
+            ]);
+
+        const req = {
+            query: { type: "all", limit: "2" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await radioHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            tracks: [
+                expect.objectContaining({
+                    id: "all-track-1",
+                    artist: expect.objectContaining({
+                        id: null,
+                        name: "Unknown Artist",
+                    }),
+                }),
+                expect.objectContaining({
+                    id: "all-track-2",
+                    artist: expect.objectContaining({
+                        id: "known-artist-2",
+                        name: "Known Artist",
+                    }),
+                }),
+            ],
+        });
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(2);
     });
 
     it("returns 500 when radio processing throws", async () => {

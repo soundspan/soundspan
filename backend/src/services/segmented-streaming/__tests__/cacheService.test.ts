@@ -130,6 +130,32 @@ describe("segmentedStreamingCacheService cache base path", () => {
     });
 });
 
+describe("segmentedStreamingCacheService dash asset removal", () => {
+    it("removes the computed DASH output directory recursively", async () => {
+        const cacheRoot = await fsPromises.mkdtemp(
+            path.join(os.tmpdir(), "segmented-cache-remove-"),
+        );
+        process.env.SEGMENTED_STREAMING_CACHE_PATH = cacheRoot;
+
+        const cacheService = await resolveCacheService();
+        const cacheKey = "cache-remove";
+        const paths = cacheService.getDashAssetPaths(cacheKey);
+
+        await fsPromises.mkdir(path.join(paths.outputDir, "nested"), {
+            recursive: true,
+        });
+        await fsPromises.writeFile(
+            path.join(paths.outputDir, "nested", "chunk-00001.m4s"),
+            Buffer.from("segment"),
+        );
+
+        await cacheService.removeDashAsset(cacheKey);
+
+        expect(await pathExists(paths.outputDir)).toBe(false);
+        await fsPromises.rm(cacheRoot, { recursive: true, force: true });
+    });
+});
+
 describe("segmentedStreamingCacheService cache key versioning", () => {
     it("changes DASH cache keys when schema version changes", async () => {
         delete process.env.SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION;

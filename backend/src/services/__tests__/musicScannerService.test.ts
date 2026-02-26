@@ -671,6 +671,26 @@ describe("MusicScannerService helper methods", () => {
         ).resolves.toBe(false);
     });
 
+    it("logs primary-artist normalization when extracted artist differs", async () => {
+        const scanner = new MusicScannerService() as any;
+        mockExtractPrimaryArtist.mockReturnValueOnce("Primary Artist");
+        mockPrisma.downloadJob.findMany.mockResolvedValueOnce([]);
+        mockPrisma.discoveryAlbum.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
+        mockPrisma.album.findFirst.mockResolvedValueOnce(null);
+
+        await expect(
+            scanner.isDiscoveryDownload(
+                "Primary Artist feat. Guest",
+                "Normalization Album"
+            )
+        ).resolves.toBe(false);
+        expect(mockLogger.debug).toHaveBeenCalledWith(
+            expect.stringContaining("Primary artist:")
+        );
+    });
+
     it("recursively finds audio files and filters unsupported extensions", async () => {
         const scanner = new MusicScannerService() as any;
         mockReaddir.mockImplementation(async (dir: string) => {
@@ -700,6 +720,32 @@ describe("MusicScannerService helper methods", () => {
         const files = await scanner.findAudioFiles("/music");
         expect(files.sort()).toEqual(
             ["/music/Artist/Track.mp3", "/music/Artist/Sub/Song.flac", "/music/Artist/Sub/Demo.wav"].sort()
+        );
+    });
+
+    it("skips hidden directories while recursively scanning audio files", async () => {
+        const scanner = new MusicScannerService() as any;
+        mockReaddir.mockImplementation(async (dir: string) => {
+            if (dir === "/music") {
+                return [
+                    makeDirent(".hidden", "dir"),
+                    makeDirent("Artist", "dir"),
+                ];
+            }
+            if (dir === "/music/Artist") {
+                return [makeDirent("Visible.mp3", "file")];
+            }
+            if (dir === "/music/.hidden") {
+                return [makeDirent("Secret.flac", "file")];
+            }
+            return [];
+        });
+
+        const files = await scanner.findAudioFiles("/music");
+        expect(files).toEqual(["/music/Artist/Visible.mp3"]);
+        expect(mockReaddir).not.toHaveBeenCalledWith(
+            "/music/.hidden",
+            expect.any(Object)
         );
     });
 });
@@ -784,6 +830,35 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
             expect.objectContaining({
                 data: expect.objectContaining({
                     name: "Sublime",
+                }),
+            })
+        );
+    });
+
+    it("uses grandparent folder name directly when parser does not recognize it", async () => {
+        const scanner = new MusicScannerService() as any;
+
+        mockParseArtistFromPath.mockReturnValue("");
+        mockNormalizeArtistName.mockImplementation((name: string) =>
+            name.trim().toLowerCase()
+        );
+        mockPrisma.artist.create.mockResolvedValueOnce({
+            id: "artist-direct-grandparent",
+            name: "Grandparent Artist",
+            normalizedName: "grandparent artist",
+            mbid: "temp-grandparent",
+        });
+
+        await scanner.processAudioFile(
+            "/music/Grandparent Artist/Unparseable Album/01 Track.flac",
+            "Grandparent Artist/Unparseable Album/01 Track.flac",
+            "/music"
+        );
+
+        expect(mockPrisma.artist.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    name: "Grandparent Artist",
                 }),
             })
         );
@@ -1227,6 +1302,49 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         expect(mockPrisma.artist.create).not.toHaveBeenCalled();
     });
 
+    it("rethrows MBID consolidation update failures that are not unique conflicts", async () => {
+        const scanner = new MusicScannerService() as any;
+        const updateFailure = new Error("update failed");
+        (updateFailure as Error & { code: string }).code = "P5000";
+
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Track Title",
+                track: { no: 1 },
+                disk: { no: 1 },
+                albumartist: "Artist Temp",
+                artist: "Artist Temp",
+                album: "Album Name",
+                year: 2024,
+                musicbrainz_artistid: ["mbid-non-unique-failure"],
+            },
+            format: {
+                duration: 222.3,
+                codec: "audio/flac",
+            },
+        } as any);
+        mockPrisma.artist.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "temp-artist",
+                name: "Temp Artist",
+                normalizedName: "artist temp",
+                mbid: "temp-old",
+            });
+        mockPrisma.artist.findMany.mockResolvedValueOnce([]);
+        mockPrisma.artist.findUnique.mockResolvedValueOnce(null);
+        mockPrisma.artist.update.mockRejectedValueOnce(updateFailure);
+
+        await expect(
+            scanner.processAudioFile(
+                "/music/ArtistTemp/Track.flac",
+                "ArtistTemp/Track.flac",
+                "/music"
+            )
+        ).rejects.toThrow("update failed");
+        expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
+    });
+
     it("rethrows artist create failures when no canonical MBID row exists", async () => {
         const scanner = new MusicScannerService() as any;
         const conflict = new Error("conflict");
@@ -1266,6 +1384,40 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         ).rejects.toThrow("conflict");
 
         expect(mockPrisma.artist.create).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
+    });
+
+    it("rethrows artist create failures when unique conflict occurs without an MBID", async () => {
+        const scanner = new MusicScannerService() as any;
+        const conflict = new Error("mbidless conflict");
+        (conflict as Error & { code: string }).code = "P2002";
+
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Track Title",
+                track: { no: 1 },
+                disk: { no: 1 },
+                albumartist: "No MBID Artist",
+                artist: "No MBID Artist",
+                album: "Album Name",
+                year: 2024,
+            },
+            format: {
+                duration: 222.3,
+                codec: "audio/flac",
+            },
+        } as any);
+        mockPrisma.artist.findFirst.mockResolvedValueOnce(null);
+        mockPrisma.artist.findMany.mockResolvedValueOnce([]);
+        mockPrisma.artist.create.mockRejectedValueOnce(conflict);
+
+        await expect(
+            scanner.processAudioFile(
+                "/music/NoMBID/Track.flac",
+                "NoMBID/Track.flac",
+                "/music"
+            )
+        ).rejects.toThrow("mbidless conflict");
         expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
     });
 

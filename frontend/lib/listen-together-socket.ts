@@ -145,8 +145,35 @@ const LISTEN_TOGETHER_ALLOW_POLLING =
     process.env.NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING === "true";
 const LISTEN_TOGETHER_SOCKET_TRANSPORTS: Array<"websocket" | "polling"> =
     LISTEN_TOGETHER_ALLOW_POLLING ? ["websocket", "polling"] : ["websocket"];
+const TRANSIENT_CONFLICT_MAX_RETRIES = 3;
+const TRANSIENT_CONFLICT_BASE_DELAY_MS = 60;
+const TRANSIENT_CONFLICT_MAX_DELAY_MS = 300;
+const TRANSIENT_CONFLICT_JITTER_FACTOR = 0.35;
 
-class ListenTogetherSocket {
+interface ListenTogetherAckResponse {
+    ok?: boolean;
+    error?: string;
+    code?: string;
+    transient?: boolean;
+    retryable?: boolean;
+    retryAfterMs?: number;
+}
+
+interface EmitRetryPolicy {
+    maxRetries: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
+    jitterFactor: number;
+}
+
+const TRANSIENT_CONFLICT_RETRY_POLICY: EmitRetryPolicy = {
+    maxRetries: TRANSIENT_CONFLICT_MAX_RETRIES,
+    baseDelayMs: TRANSIENT_CONFLICT_BASE_DELAY_MS,
+    maxDelayMs: TRANSIENT_CONFLICT_MAX_DELAY_MS,
+    jitterFactor: TRANSIENT_CONFLICT_JITTER_FACTOR,
+};
+
+export class ListenTogetherSocket {
     private socket: Socket | null = null;
     private callbacks: ListenTogetherSocketCallbacks | null = null;
     private currentGroupId: string | null = null;
@@ -471,23 +498,27 @@ class ListenTogetherSocket {
     }
 
     seek(positionMs: number): Promise<void> {
-        return this.emit("playback", { action: "seek", positionMs });
+        return this.emit("playback", { action: "seek", positionMs }, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
     next(): Promise<void> {
-        return this.emit("playback", { action: "next" });
+        return this.emit("playback", { action: "next" }, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
     previous(): Promise<void> {
-        return this.emit("playback", { action: "previous" });
+        return this.emit("playback", { action: "previous" }, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
     setTrack(index: number): Promise<void> {
-        return this.emit("playback", { action: "set-track", index });
+        return this.emit("playback", { action: "set-track", index }, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
     addToQueue(trackIds: string[]): Promise<void> {
         return this.emit("queue", { action: "add", trackIds });
+    }
+
+    insertNext(trackIds: string[]): Promise<void> {
+        return this.emit("queue", { action: "insert-next", trackIds });
     }
 
     removeFromQueue(index: number): Promise<void> {
@@ -503,7 +534,7 @@ class ListenTogetherSocket {
     }
 
     reportReady(): Promise<void> {
-        return this.emit("ready");
+        return this.emit("ready", undefined, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
     /** Measure round-trip time. Returns server's Date.now(). */
@@ -524,15 +555,42 @@ class ListenTogetherSocket {
     // Internal
     // -----------------------------------------------------------------------
 
-    private emit(event: string, data?: unknown): Promise<void> {
+    private async emit(
+        event: string,
+        data?: unknown,
+        retryPolicy?: EmitRetryPolicy
+    ): Promise<void> {
+        let retries = 0;
+
+        while (true) {
+            const response = await this.emitOnce(event, data);
+            if (!response?.error) {
+                return;
+            }
+
+            if (
+                !retryPolicy ||
+                !this.isTransientConflictAck(response) ||
+                retries >= retryPolicy.maxRetries
+            ) {
+                throw this.createAckError(response);
+            }
+
+            const waitMs = this.computeRetryDelayMs(retries, retryPolicy, response.retryAfterMs);
+            retries += 1;
+            await this.delay(waitMs);
+        }
+    }
+
+    private emitOnce(event: string, data?: unknown): Promise<ListenTogetherAckResponse> {
         return new Promise((resolve, reject) => {
             if (!this.socket?.connected) {
                 reject(new Error("Not connected"));
                 return;
             }
-            const onAck = (res: { ok?: boolean; error?: string }) => {
-                if (res?.error) reject(new Error(res.error));
-                else resolve();
+
+            const onAck = (res: ListenTogetherAckResponse) => {
+                resolve(res ?? {});
             };
 
             if (data === undefined) {
@@ -541,6 +599,69 @@ class ListenTogetherSocket {
                 this.socket.emit(event, data, onAck);
             }
         });
+    }
+
+    private isTransientConflictAck(response: ListenTogetherAckResponse): boolean {
+        return (
+            response.code === "CONFLICT" &&
+            response.transient === true &&
+            response.retryable === true
+        );
+    }
+
+    private createAckError(response: ListenTogetherAckResponse): Error {
+        const err = new Error(response.error || "Listen Together request failed");
+        const ackError = err as Error & {
+            code?: string;
+            transient?: boolean;
+            retryable?: boolean;
+            retryAfterMs?: number;
+        };
+        if (response.code) {
+            ackError.code = response.code;
+        }
+        if (response.transient === true) {
+            ackError.transient = true;
+        }
+        if (response.retryable === true) {
+            ackError.retryable = true;
+        }
+        if (
+            typeof response.retryAfterMs === "number" &&
+            Number.isFinite(response.retryAfterMs)
+        ) {
+            ackError.retryAfterMs = response.retryAfterMs;
+        }
+        return err;
+    }
+
+    private computeRetryDelayMs(
+        retryAttempt: number,
+        policy: EmitRetryPolicy,
+        retryAfterMs?: number
+    ): number {
+        const exponentialDelay = Math.min(
+            policy.maxDelayMs,
+            policy.baseDelayMs * 2 ** retryAttempt
+        );
+        const serverHintDelay =
+            typeof retryAfterMs === "number" &&
+            Number.isFinite(retryAfterMs) &&
+            retryAfterMs > 0
+                ? Math.min(policy.maxDelayMs, retryAfterMs)
+                : 0;
+        const baselineDelay = Math.max(exponentialDelay, serverHintDelay);
+        const jitterWindow = Math.max(
+            1,
+            Math.floor(baselineDelay * policy.jitterFactor)
+        );
+        const jitter = Math.floor(Math.random() * (jitterWindow + 1));
+
+        return Math.min(policy.maxDelayMs, baselineDelay + jitter);
+    }
+
+    private async delay(ms: number): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, ms));
     }
 }
 

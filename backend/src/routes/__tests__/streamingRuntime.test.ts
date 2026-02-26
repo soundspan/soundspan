@@ -31,6 +31,7 @@ const mockHeartbeatSession = jest.fn();
 const mockCreateHandoffSession = jest.fn();
 const mockWaitForManifestReady = jest.fn();
 const mockWaitForSegmentReady = jest.fn();
+const mockSchedulePlaybackErrorRepair = jest.fn();
 const mockGetRuntimeDrainState = jest.fn();
 
 jest.mock("../../utils/runtimeLifecycle", () => ({
@@ -53,6 +54,8 @@ jest.mock("../../services/segmented-streaming/sessionService", () => ({
             mockWaitForManifestReady(...args),
         waitForSegmentReady: (...args: unknown[]) =>
             mockWaitForSegmentReady(...args),
+        schedulePlaybackErrorRepair: (...args: unknown[]) =>
+            mockSchedulePlaybackErrorRepair(...args),
     },
 }));
 
@@ -60,6 +63,7 @@ import router from "../streaming";
 import {
     SegmentedSessionError,
 } from "../../services/segmented-streaming/sessionService";
+import { logger } from "../../utils/logger";
 
 function getHandler(method: "get" | "post", path: string) {
     const layer = (router as any).stack.find(
@@ -76,12 +80,15 @@ function createResponse() {
     const res: any = {
         statusCode: 200,
         body: undefined as unknown,
+        headersSent: false,
+        writableEnded: false,
         headers: new Map<string, string>(),
         status: jest.fn(function (code: number) {
             res.statusCode = code;
             return res;
         }),
         json: jest.fn(function (payload: unknown) {
+            res.headersSent = true;
             res.body = payload;
             return res;
         }),
@@ -92,12 +99,32 @@ function createResponse() {
             res.headers.set(name, value);
             return res;
         }),
-        sendFile: jest.fn(function (filePath: string) {
+        end: jest.fn(function () {
+            res.headersSent = true;
+            res.writableEnded = true;
+            return res;
+        }),
+        sendFile: jest.fn(function (
+            filePath: string,
+            callback?: (error?: NodeJS.ErrnoException) => void,
+        ) {
             res.body = { filePath };
+            callback?.();
             return res;
         }),
     };
     return res;
+}
+
+function findSegmentedMetricLogCall(
+    event: "session.create" | "manifest.fetch" | "segment.fetch",
+    status: "success" | "error" | "reject",
+): [string, Record<string, unknown>] | undefined {
+    return (logger.info as jest.Mock).mock.calls.find(
+        (call: unknown[]) =>
+            call[0] === `[SegmentedStreaming][Metric] ${event}` &&
+            (call[1] as { status?: unknown } | undefined)?.status === status,
+    ) as [string, Record<string, unknown>] | undefined;
 }
 
 describe("streaming route runtime", () => {
@@ -124,6 +151,7 @@ describe("streaming route runtime", () => {
         mockCreateHandoffSession.mockReset();
         mockWaitForManifestReady.mockReset();
         mockWaitForSegmentReady.mockReset();
+        mockSchedulePlaybackErrorRepair.mockReset();
         mockGetRuntimeDrainState.mockReset();
         mockWaitForManifestReady.mockResolvedValue(undefined);
         mockWaitForSegmentReady.mockResolvedValue("/tmp/assets/chunk-0-00001.m4s");
@@ -159,7 +187,15 @@ describe("streaming route runtime", () => {
         expect(res.body).toEqual({
             error: "Streaming service is draining",
             code: "STREAMING_DRAINING",
+            startupHint: {
+                stage: "session_create",
+                state: "waiting",
+                transient: true,
+                reason: "runtime_draining",
+                retryAfterMs: 1000,
+            },
         });
+        expect(res.headers.get("Retry-After")).toBe("1");
         expect(mockCreateLocalSession).not.toHaveBeenCalled();
     });
 
@@ -168,6 +204,13 @@ describe("streaming route runtime", () => {
             sessionId: "session-1",
             manifestUrl: "/api/streaming/v1/sessions/session-1/manifest.mpd",
             expiresAt: "2099-01-01T00:00:00.000Z",
+            playbackProfile: {
+                protocol: "dash",
+                sourceType: "local",
+                quality: "high",
+                codec: "aac",
+                bitrateKbps: 320,
+            },
             engineHints: {
                 protocol: "dash",
                 sourceType: "local",
@@ -178,6 +221,10 @@ describe("streaming route runtime", () => {
         const req = {
             user: { id: "user-1" },
             body: { trackId: "track-1", desiredQuality: "high" },
+            headers: {
+                "x-segmented-startup-load-id": "42",
+                "x-segmented-startup-correlation-id": "corr-track-1-42",
+            },
         } as any;
         const res = createResponse();
 
@@ -194,6 +241,59 @@ describe("streaming route runtime", () => {
                 sessionId: "session-1",
             }),
         );
+        const metricCall = findSegmentedMetricLogCall("session.create", "success");
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                startupLoadId: 42,
+                startupCorrelationId: "corr-track-1-42",
+                quality: "high",
+                requestedQuality: "high",
+                qualitySource: "request",
+            }),
+        );
+    });
+
+    it("logs default quality metadata when desiredQuality is omitted", async () => {
+        mockCreateLocalSession.mockResolvedValueOnce({
+            sessionId: "session-default-quality",
+            manifestUrl:
+                "/api/streaming/v1/sessions/session-default-quality/manifest.mpd",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            playbackProfile: {
+                protocol: "dash",
+                sourceType: "local",
+                codec: "aac",
+                bitrateKbps: 192,
+            },
+            engineHints: {
+                protocol: "dash",
+                sourceType: "local",
+                recommendedEngine: "videojs",
+            },
+        });
+
+        const req = {
+            user: { id: "user-1" },
+            body: { trackId: "track-default-quality" },
+        } as any;
+        const res = createResponse();
+
+        await postSession(req, res);
+
+        expect(mockCreateLocalSession).toHaveBeenCalledWith({
+            userId: "user-1",
+            trackId: "track-default-quality",
+            desiredQuality: undefined,
+        });
+        const metricCall = findSegmentedMetricLogCall("session.create", "success");
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                quality: "unknown",
+                requestedQuality: null,
+                qualitySource: "user_settings_or_default",
+            }),
+        );
+        expect(res.statusCode).toBe(201);
     });
 
     it("rejects segmented session creation for non-local source types", async () => {
@@ -226,6 +326,13 @@ describe("streaming route runtime", () => {
         expect(res.body).toEqual({
             error: "Track not found",
             code: "TRACK_NOT_FOUND",
+            startupHint: {
+                stage: "session_create",
+                state: "failed",
+                transient: false,
+                reason: "track_not_found",
+                retryAfterMs: null,
+            },
         });
     });
 
@@ -248,6 +355,10 @@ describe("streaming route runtime", () => {
             user: { id: "user-1" },
             params: { sessionId: "session-1" },
             query: { st: "token-1" },
+            headers: {
+                "x-segmented-startup-load-id": "7",
+                "x-segmented-startup-correlation-id": "corr-track-1-7",
+            },
         } as any;
         const res = createResponse();
 
@@ -258,7 +369,17 @@ describe("streaming route runtime", () => {
             allowSessionIdMismatch: true,
         });
         expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
-        expect(res.sendFile).toHaveBeenCalledWith("/tmp/manifest.mpd");
+        expect(res.sendFile).toHaveBeenCalledWith(
+            "/tmp/manifest.mpd",
+            expect.any(Function),
+        );
+        const metricCall = findSegmentedMetricLogCall("manifest.fetch", "success");
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                startupLoadId: 7,
+                startupCorrelationId: "corr-track-1-7",
+            }),
+        );
     });
 
     it("returns token validation errors for manifest access", async () => {
@@ -296,7 +417,15 @@ describe("streaming route runtime", () => {
         expect(res.body).toEqual({
             error: "Session token is required",
             code: "STREAMING_SESSION_TOKEN_REQUIRED",
+            startupHint: {
+                stage: "manifest",
+                state: "blocked",
+                transient: false,
+                reason: "session_token_required",
+                retryAfterMs: null,
+            },
         });
+        expect(res.headers.get("Retry-After")).toBeUndefined();
         expect(mockWaitForManifestReady).not.toHaveBeenCalled();
     });
 
@@ -312,7 +441,16 @@ describe("streaming route runtime", () => {
         await getManifest(req, res);
 
         expect(res.statusCode).toBe(404);
-        expect(res.body).toEqual({ error: "Streaming session not found" });
+        expect(res.body).toEqual({
+            error: "Streaming session not found",
+            startupHint: {
+                stage: "manifest",
+                state: "failed",
+                transient: false,
+                reason: "session_not_found",
+                retryAfterMs: null,
+            },
+        });
     });
 
     it("still serves manifest while draining for existing sessions", async () => {
@@ -346,7 +484,63 @@ describe("streaming route runtime", () => {
             allowSessionIdMismatch: true,
         });
         expect(mockWaitForManifestReady).toHaveBeenCalledWith(session);
-        expect(res.sendFile).toHaveBeenCalledWith("/tmp/manifest.mpd");
+        expect(res.sendFile).toHaveBeenCalledWith(
+            "/tmp/manifest.mpd",
+            expect.any(Function),
+        );
+    });
+
+    it("maps manifest sendFile callback ENOENT errors after readiness checks", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+
+        const req = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+        res.sendFile.mockImplementationOnce(
+            (_filePath: string, callback?: (error?: NodeJS.ErrnoException) => void) => {
+                const error = Object.assign(new Error("manifest missing"), {
+                    code: "ENOENT",
+                }) as NodeJS.ErrnoException;
+                callback?.(error);
+                return res;
+            },
+        );
+
+        await getManifest(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({
+            error: "Manifest not found",
+            startupHint: {
+                stage: "manifest",
+                state: "failed",
+                transient: false,
+                reason: "manifest_not_found",
+                retryAfterMs: null,
+            },
+        });
+        const metricCall = findSegmentedMetricLogCall("manifest.fetch", "error");
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                sessionId: "session-1",
+                errorCode: "ENOENT",
+            }),
+        );
     });
 
     it("records heartbeat for authorized users", async () => {
@@ -488,6 +682,84 @@ describe("streaming route runtime", () => {
 
         expect(res.statusCode).toBe(202);
         expect(res.body).toEqual({ accepted: true });
+        expect(mockSchedulePlaybackErrorRepair).not.toHaveBeenCalled();
+    });
+
+    it("queues cache repair when player playback errors are reported", async () => {
+        const req = {
+            user: { id: "user-1" },
+            body: {
+                event: "player.playback_error",
+                fields: {
+                    sessionId: "session-9",
+                    sourceType: "local",
+                    trackId: "track-9",
+                },
+            },
+        } as any;
+        const res = createResponse();
+
+        await postClientMetric(req, res);
+
+        expect(res.statusCode).toBe(202);
+        expect(mockSchedulePlaybackErrorRepair).toHaveBeenCalledWith({
+            userId: "user-1",
+            sessionId: "session-9",
+            trackId: "track-9",
+            sourceType: "local",
+        });
+    });
+
+    it("queues cache repair when quarantined segments are reported", async () => {
+        const req = {
+            user: { id: "user-1" },
+            body: {
+                event: "player.segment_quarantined",
+                fields: {
+                    sessionId: "session-10",
+                    sourceType: "local",
+                    trackId: "track-10",
+                    chunkName: "chunk-0-00069.m4s",
+                },
+            },
+        } as any;
+        const res = createResponse();
+
+        await postClientMetric(req, res);
+
+        expect(res.statusCode).toBe(202);
+        expect(mockSchedulePlaybackErrorRepair).toHaveBeenCalledWith({
+            userId: "user-1",
+            sessionId: "session-10",
+            trackId: "track-10",
+            sourceType: "local",
+        });
+    });
+
+    it("queues cache repair when prewarm validation failures are reported", async () => {
+        const req = {
+            user: { id: "user-1" },
+            body: {
+                event: "session.prewarm_validation_failed",
+                fields: {
+                    sessionId: "session-11",
+                    sourceType: "local",
+                    trackId: "track-11",
+                    failedChunkName: "chunk-0-00001.m4s",
+                },
+            },
+        } as any;
+        const res = createResponse();
+
+        await postClientMetric(req, res);
+
+        expect(res.statusCode).toBe(202);
+        expect(mockSchedulePlaybackErrorRepair).toHaveBeenCalledWith({
+            userId: "user-1",
+            sessionId: "session-11",
+            trackId: "track-11",
+            sourceType: "local",
+        });
     });
 
     it("returns 400 for invalid segmented client signal payloads", async () => {
@@ -530,6 +802,10 @@ describe("streaming route runtime", () => {
                 segmentName: "chunk-0-00001.m4s",
             },
             query: { st: "token-1" },
+            headers: {
+                "x-segmented-startup-load-id": "13",
+                "x-segmented-startup-correlation-id": "corr-track-1-13",
+            },
         } as any;
         const res = createResponse();
 
@@ -542,7 +818,360 @@ describe("streaming route runtime", () => {
             session,
             "chunk-0-00001.m4s",
         );
-        expect(res.sendFile).toHaveBeenCalledWith("/tmp/assets/chunk-0-00001.m4s");
+        expect(res.sendFile).toHaveBeenCalledWith(
+            "/tmp/assets/chunk-0-00001.m4s",
+            expect.any(Function),
+        );
+        const metricCall = findSegmentedMetricLogCall("segment.fetch", "success");
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                startupLoadId: 13,
+                startupCorrelationId: "corr-track-1-13",
+            }),
+        );
+    });
+
+    it("serves fallback representation segments for authorized users", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        mockWaitForSegmentReady.mockResolvedValueOnce("/tmp/assets/chunk-1-00001.m4s");
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-1-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+
+        await getSegment(req, res);
+
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-1", {
+            allowSessionIdMismatch: true,
+        });
+        expect(mockWaitForSegmentReady).toHaveBeenCalledWith(
+            session,
+            "chunk-1-00001.m4s",
+        );
+        expect(res.type).toHaveBeenCalledWith("video/iso.segment");
+        expect(res.sendFile).toHaveBeenCalledWith(
+            "/tmp/assets/chunk-1-00001.m4s",
+            expect.any(Function),
+        );
+    });
+
+    it("maps segment sendFile callback ENOENT errors after readiness checks", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+        res.sendFile.mockImplementationOnce(
+            (_filePath: string, callback?: (error?: NodeJS.ErrnoException) => void) => {
+                const error = Object.assign(new Error("segment missing"), {
+                    code: "ENOENT",
+                }) as NodeJS.ErrnoException;
+                callback?.(error);
+                return res;
+            },
+        );
+
+        await getSegment(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({
+            error: "Segment not found",
+            startupHint: {
+                stage: "segment",
+                state: "failed",
+                transient: false,
+                reason: "segment_not_found",
+                retryAfterMs: null,
+            },
+        });
+        const metricCall = findSegmentedMetricLogCall("segment.fetch", "error");
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+                errorCode: "ENOENT",
+            }),
+        );
+    });
+
+    it("logs segment sendFile callback errors after headers are sent without forcing stream termination", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+        res.sendFile.mockImplementationOnce(
+            (_filePath: string, callback?: (error?: NodeJS.ErrnoException) => void) => {
+                res.headersSent = true;
+                const error = Object.assign(new Error("client aborted"), {
+                    code: "EPIPE",
+                }) as NodeJS.ErrnoException;
+                callback?.(error);
+                return res;
+            },
+        );
+
+        await getSegment(req, res);
+
+        expect(res.status).not.toHaveBeenCalled();
+        expect(res.json).not.toHaveBeenCalled();
+        expect(res.end).not.toHaveBeenCalled();
+        const metricCall = findSegmentedMetricLogCall("segment.fetch", "error");
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                errorCode: "EPIPE",
+            }),
+        );
+        expect(logger.error).toHaveBeenCalledWith(
+            "[SegmentedStreaming] segment sendFile failed after headers were sent:",
+            expect.any(Error),
+        );
+    });
+
+    it("does not call res.end when segment sendFile fails after writable stream already ended", async () => {
+        const session = {
+            sessionId: "session-ended",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-ended",
+            manifestPath: "/tmp/manifest-ended.mpd",
+            assetDir: "/tmp/assets-ended",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        mockWaitForSegmentReady.mockResolvedValueOnce(
+            "/tmp/assets-ended/chunk-0-00001.m4s",
+        );
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-ended",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-ended" },
+        } as any;
+        const res = createResponse();
+        res.sendFile.mockImplementationOnce(
+            (_filePath: string, callback?: (error?: NodeJS.ErrnoException) => void) => {
+                res.headersSent = true;
+                res.writableEnded = true;
+                const error = Object.assign(new Error("already ended"), {
+                    code: "ECONNRESET",
+                }) as NodeJS.ErrnoException;
+                callback?.(error);
+                return res;
+            },
+        );
+
+        await getSegment(req, res);
+
+        expect(res.end).not.toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalledWith(
+            "[SegmentedStreaming] segment sendFile failed after headers were sent:",
+            expect.any(Error),
+        );
+    });
+
+    it("returns transient startup hint while segment assets are still preparing", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        mockWaitForSegmentReady.mockImplementationOnce(() => {
+            throw new SegmentedSessionError(
+                "Segment is still being prepared",
+                503,
+                "STREAMING_ASSET_NOT_READY",
+            );
+        });
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+
+        await getSegment(req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(res.body).toEqual({
+            error: "Segment is still being prepared",
+            code: "STREAMING_ASSET_NOT_READY",
+            startupHint: {
+                stage: "segment",
+                state: "waiting",
+                transient: true,
+                reason: "asset_not_ready",
+                retryAfterMs: 1000,
+            },
+        });
+        expect(res.headers.get("Retry-After")).toBe("1");
+    });
+
+    it("returns transient startup hint while segment asset build failures are being retried", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        mockWaitForSegmentReady.mockImplementationOnce(() => {
+            throw new SegmentedSessionError(
+                "Streaming segment build failed: spawn EAGAIN",
+                502,
+                "STREAMING_ASSET_BUILD_FAILED",
+            );
+        });
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+
+        await getSegment(req, res);
+
+        expect(res.statusCode).toBe(502);
+        expect(res.body).toEqual({
+            error: "Streaming segment build failed: spawn EAGAIN",
+            code: "STREAMING_ASSET_BUILD_FAILED",
+            startupHint: {
+                stage: "segment",
+                state: "waiting",
+                transient: true,
+                reason: "asset_build_failed",
+                retryAfterMs: 1000,
+            },
+        });
+        expect(res.headers.get("Retry-After")).toBe("1");
+    });
+
+    it("returns non-transient startup hint for permanent segment asset build failures", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        mockWaitForSegmentReady.mockImplementationOnce(() => {
+            throw new SegmentedSessionError(
+                "Streaming segment build failed: invalid data found when processing input",
+                502,
+                "STREAMING_ASSET_BUILD_FAILED",
+            );
+        });
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+
+        await getSegment(req, res);
+
+        expect(res.statusCode).toBe(502);
+        expect(res.body).toEqual({
+            error: "Streaming segment build failed: invalid data found when processing input",
+            code: "STREAMING_ASSET_BUILD_FAILED",
+            startupHint: {
+                stage: "segment",
+                state: "failed",
+                transient: false,
+                reason: "asset_build_failed",
+                retryAfterMs: null,
+            },
+        });
+        expect(res.headers.get("Retry-After")).toBeUndefined();
     });
 
     it("maps invalid segment name errors", async () => {
@@ -580,6 +1209,13 @@ describe("streaming route runtime", () => {
         expect(res.body).toEqual({
             error: "Invalid segment file name",
             code: "INVALID_SEGMENT_NAME",
+            startupHint: {
+                stage: "segment",
+                state: "failed",
+                transient: false,
+                reason: "invalid_segment_name",
+                retryAfterMs: null,
+            },
         });
     });
 
@@ -619,7 +1255,10 @@ describe("streaming route runtime", () => {
             session,
             "chunk-0-00002.m4s",
         );
-        expect(res.sendFile).toHaveBeenCalledWith("/tmp/assets/chunk-0-00002.m4s");
+        expect(res.sendFile).toHaveBeenCalledWith(
+            "/tmp/assets/chunk-0-00002.m4s",
+            expect.any(Function),
+        );
         expect(res.type).toHaveBeenCalledWith("video/iso.segment");
     });
 
@@ -660,6 +1299,696 @@ describe("streaming route runtime", () => {
             "chunk-0-00002.webm",
         );
         expect(res.type).toHaveBeenCalledWith("video/webm");
-        expect(res.sendFile).toHaveBeenCalledWith("/tmp/assets/chunk-0-00002.webm");
+        expect(res.sendFile).toHaveBeenCalledWith(
+            "/tmp/assets/chunk-0-00002.webm",
+            expect.any(Function),
+        );
+    });
+
+    it("accepts session tokens from header strings and header arrays", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValue(session);
+
+        const stringHeaderReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: {},
+            headers: { "x-streaming-session-token": "  token-header  " },
+        } as any;
+        const stringHeaderRes = createResponse();
+        await getManifest(stringHeaderReq, stringHeaderRes);
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-header", {
+            allowSessionIdMismatch: true,
+        });
+
+        mockValidateSessionToken.mockClear();
+        const arrayHeaderReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: {},
+            headers: {
+                "x-streaming-session-token": ["token-array", "ignored-token"],
+                "x-segmented-startup-load-id": ["19", "20"],
+                "x-segmented-startup-correlation-id": ["corr-array"],
+            },
+        } as any;
+        const arrayHeaderRes = createResponse();
+        await getManifest(arrayHeaderReq, arrayHeaderRes);
+        expect(mockValidateSessionToken).toHaveBeenCalledWith(session, "token-array", {
+            allowSessionIdMismatch: true,
+        });
+        const metricCall = (logger.info as jest.Mock).mock.calls.find(
+            (call: unknown[]) =>
+                call[0] === "[SegmentedStreaming][Metric] manifest.fetch" &&
+                (call[1] as Record<string, unknown>)?.status === "success" &&
+                (call[1] as Record<string, unknown>)?.startupLoadId === 19,
+        ) as [string, Record<string, unknown>] | undefined;
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                startupLoadId: 19,
+                startupCorrelationId: "corr-array",
+            }),
+        );
+    });
+
+    it("maps plain-object segmented errors and computes fallback startup hints", async () => {
+        mockCreateLocalSession.mockRejectedValueOnce({
+            message: "Rate limit reached",
+            statusCode: 429,
+            code: "SYNTH_RATE_LIMIT",
+        });
+
+        const req = {
+            user: { id: "user-1" },
+            body: { trackId: "track-1" },
+        } as any;
+        const res = createResponse();
+
+        await postSession(req, res);
+
+        expect(res.statusCode).toBe(429);
+        expect(res.body).toEqual({
+            error: "Rate limit reached",
+            code: "SYNTH_RATE_LIMIT",
+            startupHint: {
+                stage: "session_create",
+                state: "waiting",
+                transient: true,
+                reason: "synth_rate_limit",
+                retryAfterMs: 1000,
+            },
+        });
+        expect(res.headers.get("Retry-After")).toBe("1");
+    });
+
+    it("falls back to status-based startup reasons when segmented error codes normalize to empty", async () => {
+        mockCreateLocalSession
+            .mockRejectedValueOnce({
+                message: "Rejected",
+                statusCode: 400,
+                code: "***",
+            })
+            .mockRejectedValueOnce({
+                message: "Unavailable",
+                statusCode: 503,
+                code: "***",
+            });
+
+        const rejectedReq = {
+            user: { id: "user-1" },
+            body: { trackId: "track-rejected" },
+        } as any;
+        const rejectedRes = createResponse();
+        await postSession(rejectedReq, rejectedRes);
+        expect(rejectedRes.statusCode).toBe(400);
+        expect(rejectedRes.body).toEqual({
+            error: "Rejected",
+            code: "***",
+            startupHint: {
+                stage: "session_create",
+                state: "failed",
+                transient: false,
+                reason: "startup_rejected",
+                retryAfterMs: null,
+            },
+        });
+
+        const unavailableReq = {
+            user: { id: "user-1" },
+            body: { trackId: "track-unavailable" },
+        } as any;
+        const unavailableRes = createResponse();
+        await postSession(unavailableReq, unavailableRes);
+        expect(unavailableRes.statusCode).toBe(503);
+        expect(unavailableRes.body).toEqual({
+            error: "Unavailable",
+            code: "***",
+            startupHint: {
+                stage: "session_create",
+                state: "waiting",
+                transient: true,
+                reason: "startup_unavailable",
+                retryAfterMs: 1000,
+            },
+        });
+        expect(unavailableRes.headers.get("Retry-After")).toBe("1");
+    });
+
+    it("returns startup unauthorized hints when manifest access has no authenticated user", async () => {
+        const req = {
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+
+        await getManifest(req, res);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body).toEqual({
+            error: "Unauthorized",
+            startupHint: {
+                stage: "manifest",
+                state: "blocked",
+                transient: false,
+                reason: "unauthorized",
+                retryAfterMs: null,
+            },
+        });
+    });
+
+    it("returns startup failure when manifest sendFile reports non-ENOENT errors", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        const req = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+        res.sendFile.mockImplementationOnce(
+            (_filePath: string, callback?: (error?: NodeJS.ErrnoException) => void) => {
+                const error = Object.assign(new Error("manifest fs failure"), {
+                    code: "EIO",
+                }) as NodeJS.ErrnoException;
+                callback?.(error);
+                return res;
+            },
+        );
+
+        await getManifest(req, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({
+            error: "Failed to load manifest",
+            startupHint: {
+                stage: "manifest",
+                state: "failed",
+                transient: false,
+                reason: "manifest_load_failed",
+                retryAfterMs: null,
+            },
+        });
+    });
+
+    it("maps segmented session errors raised by manifest sendFile callback", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValueOnce(session);
+        const req = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+        res.sendFile.mockImplementationOnce(
+            (_filePath: string, callback?: (error?: NodeJS.ErrnoException) => void) => {
+                callback?.(
+                    new SegmentedSessionError(
+                        "Manifest token expired",
+                        403,
+                        "STREAMING_SESSION_TOKEN_EXPIRED",
+                    ) as unknown as NodeJS.ErrnoException,
+                );
+                return res;
+            },
+        );
+
+        await getManifest(req, res);
+
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({
+            error: "Manifest token expired",
+            code: "STREAMING_SESSION_TOKEN_EXPIRED",
+            startupHint: {
+                stage: "manifest",
+                state: "blocked",
+                transient: false,
+                reason: "session_token_expired",
+                retryAfterMs: null,
+            },
+        });
+    });
+
+    it("maps manifest readiness ENOENT and unknown failures in the catch path", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValue(session);
+
+        mockWaitForManifestReady.mockRejectedValueOnce(
+            Object.assign(new Error("manifest missing"), { code: "ENOENT" }),
+        );
+        const enoentReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+        } as any;
+        const enoentRes = createResponse();
+        await getManifest(enoentReq, enoentRes);
+        expect(enoentRes.statusCode).toBe(404);
+        expect(enoentRes.body).toEqual({
+            error: "Manifest not found",
+            startupHint: {
+                stage: "manifest",
+                state: "failed",
+                transient: false,
+                reason: "manifest_not_found",
+                retryAfterMs: null,
+            },
+        });
+
+        mockWaitForManifestReady.mockRejectedValueOnce(
+            new Error("manifest load exploded"),
+        );
+        const genericReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+        } as any;
+        const genericRes = createResponse();
+        await getManifest(genericReq, genericRes);
+        expect(genericRes.statusCode).toBe(500);
+        expect(genericRes.body).toEqual({
+            error: "Failed to load manifest",
+            startupHint: {
+                stage: "manifest",
+                state: "failed",
+                transient: false,
+                reason: "manifest_load_failed",
+                retryAfterMs: null,
+            },
+        });
+    });
+
+    it("returns segment not-found and generic startup hints when segment readiness fails before sendFile", async () => {
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValue(session);
+
+        mockWaitForSegmentReady.mockRejectedValueOnce(
+            Object.assign(new Error("segment missing"), { code: "ENOENT" }),
+        );
+        const missingReq = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const missingRes = createResponse();
+        await getSegment(missingReq, missingRes);
+        expect(missingRes.statusCode).toBe(404);
+        expect(missingRes.body).toEqual({
+            error: "Segment not found",
+            startupHint: {
+                stage: "segment",
+                state: "failed",
+                transient: false,
+                reason: "segment_not_found",
+                retryAfterMs: null,
+            },
+        });
+
+        mockWaitForSegmentReady.mockRejectedValueOnce(
+            new Error("segment prep crashed"),
+        );
+        const genericReq = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "session-1",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const genericRes = createResponse();
+        await getSegment(genericReq, genericRes);
+        expect(genericRes.statusCode).toBe(500);
+        expect(genericRes.body).toEqual({
+            error: "Failed to load segment",
+            startupHint: {
+                stage: "segment",
+                state: "failed",
+                transient: false,
+                reason: "segment_load_failed",
+                retryAfterMs: null,
+            },
+        });
+    });
+
+    it("returns segment session-not-found startup payload and logs reject trace context", async () => {
+        mockGetAuthorizedSession.mockResolvedValueOnce(null);
+
+        const req = {
+            user: { id: "user-1" },
+            params: {
+                sessionId: "missing-session",
+                segmentName: "chunk-0-00001.m4s",
+            },
+            query: { st: "token-1" },
+        } as any;
+        const res = createResponse();
+
+        await getSegment(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({
+            error: "Streaming session not found",
+            startupHint: {
+                stage: "segment",
+                state: "failed",
+                transient: false,
+                reason: "session_not_found",
+                retryAfterMs: null,
+            },
+        });
+    });
+
+    it("handles unauthorized and failure paths for heartbeat/handoff/client-metrics routes", async () => {
+        const unauthorizedHeartbeatReq = {
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+            body: { positionSec: 1 },
+        } as any;
+        const unauthorizedHeartbeatRes = createResponse();
+        await postHeartbeat(unauthorizedHeartbeatReq, unauthorizedHeartbeatRes);
+        expect(unauthorizedHeartbeatRes.statusCode).toBe(401);
+        expect(unauthorizedHeartbeatRes.body).toEqual({ error: "Unauthorized" });
+
+        const unauthorizedHandoffReq = {
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+            body: { positionSec: 1 },
+        } as any;
+        const unauthorizedHandoffRes = createResponse();
+        await postHandoff(unauthorizedHandoffReq, unauthorizedHandoffRes);
+        expect(unauthorizedHandoffRes.statusCode).toBe(401);
+        expect(unauthorizedHandoffRes.body).toEqual({ error: "Unauthorized" });
+
+        const unauthorizedMetricReq = {
+            body: { event: "player.rebuffer", fields: {} },
+        } as any;
+        const unauthorizedMetricRes = createResponse();
+        await postClientMetric(unauthorizedMetricReq, unauthorizedMetricRes);
+        expect(unauthorizedMetricRes.statusCode).toBe(401);
+        expect(unauthorizedMetricRes.body).toEqual({ error: "Unauthorized" });
+
+        const session = {
+            sessionId: "session-1",
+            userId: "user-1",
+            trackId: "track-1",
+            quality: "medium",
+            sourceType: "local",
+            cacheKey: "cache-1",
+            manifestPath: "/tmp/manifest.mpd",
+            assetDir: "/tmp/assets",
+            createdAt: "2099-01-01T00:00:00.000Z",
+            expiresAt: "2099-01-01T00:05:00.000Z",
+        };
+        mockGetAuthorizedSession.mockResolvedValue(session);
+        mockHeartbeatSession.mockRejectedValueOnce(
+            new SegmentedSessionError(
+                "Heartbeat rejected",
+                409,
+                "HEARTBEAT_REJECTED",
+            ),
+        );
+        const heartbeatRejectReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+            body: { positionSec: 3 },
+        } as any;
+        const heartbeatRejectRes = createResponse();
+        await postHeartbeat(heartbeatRejectReq, heartbeatRejectRes);
+        expect(heartbeatRejectRes.statusCode).toBe(409);
+        expect(heartbeatRejectRes.body).toEqual({
+            error: "Heartbeat rejected",
+            code: "HEARTBEAT_REJECTED",
+        });
+
+        mockHeartbeatSession.mockRejectedValueOnce(new Error("heartbeat crashed"));
+        const heartbeatErrorReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+            body: { positionSec: 3 },
+        } as any;
+        const heartbeatErrorRes = createResponse();
+        await postHeartbeat(heartbeatErrorReq, heartbeatErrorRes);
+        expect(heartbeatErrorRes.statusCode).toBe(500);
+        expect(heartbeatErrorRes.body).toEqual({
+            error: "Failed to process streaming heartbeat",
+        });
+
+        mockCreateHandoffSession.mockRejectedValueOnce(
+            new SegmentedSessionError("Handoff blocked", 403, "HANDOFF_BLOCKED"),
+        );
+        const handoffRejectReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+            body: { positionSec: 10 },
+        } as any;
+        const handoffRejectRes = createResponse();
+        await postHandoff(handoffRejectReq, handoffRejectRes);
+        expect(handoffRejectRes.statusCode).toBe(403);
+        expect(handoffRejectRes.body).toEqual({
+            error: "Handoff blocked",
+            code: "HANDOFF_BLOCKED",
+        });
+
+        mockCreateHandoffSession.mockRejectedValueOnce(new Error("handoff failed"));
+        const handoffErrorReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+            body: { positionSec: 10 },
+        } as any;
+        const handoffErrorRes = createResponse();
+        await postHandoff(handoffErrorReq, handoffErrorRes);
+        expect(handoffErrorRes.statusCode).toBe(500);
+        expect(handoffErrorRes.body).toEqual({
+            error: "Failed to process streaming handoff",
+        });
+    });
+
+    it("returns handoff validation errors and session-not-found responses for heartbeat/handoff", async () => {
+        const invalidHandoffReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "session-1" },
+            query: { st: "token-1" },
+            body: { positionSec: -1 },
+        } as any;
+        const invalidHandoffRes = createResponse();
+        await postHandoff(invalidHandoffReq, invalidHandoffRes);
+        expect(invalidHandoffRes.statusCode).toBe(400);
+        expect(invalidHandoffRes.body).toEqual(
+            expect.objectContaining({
+                error: "Invalid request body",
+            }),
+        );
+
+        mockGetAuthorizedSession.mockResolvedValueOnce(null);
+        const heartbeatMissingReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "missing-session" },
+            query: { st: "token-1" },
+            body: { positionSec: 1 },
+        } as any;
+        const heartbeatMissingRes = createResponse();
+        await postHeartbeat(heartbeatMissingReq, heartbeatMissingRes);
+        expect(heartbeatMissingRes.statusCode).toBe(404);
+        expect(heartbeatMissingRes.body).toEqual({
+            error: "Streaming session not found",
+        });
+
+        mockGetAuthorizedSession.mockResolvedValueOnce(null);
+        const handoffMissingReq = {
+            user: { id: "user-1" },
+            params: { sessionId: "missing-session" },
+            query: { st: "token-1" },
+            body: { positionSec: 1 },
+        } as any;
+        const handoffMissingRes = createResponse();
+        await postHandoff(handoffMissingReq, handoffMissingRes);
+        expect(handoffMissingRes.statusCode).toBe(404);
+        expect(handoffMissingRes.body).toEqual({
+            error: "Streaming session not found",
+        });
+    });
+
+    it("captures startup timeline fields and handles client-metric ingestion failures", async () => {
+        const req = {
+            user: { id: "user-1" },
+            body: {
+                event: "player.startup_timeline",
+                fields: {
+                    sessionId: "session-33",
+                    sourceType: "local",
+                    trackId: "track-33",
+                    outcome: "success",
+                    initSource: "cache",
+                    firstChunkName: "chunk-0-00001.m4s",
+                    startupCorrelationId: "corr-33",
+                    cmcdObjectType: "video",
+                    loadId: 33,
+                    startupRetryCount: 2,
+                    createLatencyMs: 25,
+                    createToManifestMs: 40,
+                    manifestToFirstChunkMs: 55,
+                    firstChunkToAudibleMs: 65,
+                    totalToAudibleMs: 120,
+                    retryBudgetMax: 5,
+                    retryBudgetRemaining: 2,
+                    startupRecoveryWindowMs: 8000,
+                    startupSessionResetsUsed: 1,
+                    startupSessionResetsMax: 2,
+                    invalidNumeric: "123",
+                },
+            },
+        } as any;
+        const res = createResponse();
+
+        await postClientMetric(req, res);
+
+        expect(res.statusCode).toBe(202);
+        const metricCall = (logger.info as jest.Mock).mock.calls.find(
+            (call: unknown[]) =>
+                call[0] === "[SegmentedStreaming][Metric] client.signal" &&
+                (call[1] as Record<string, unknown>)?.event ===
+                    "player.startup_timeline",
+        ) as [string, Record<string, unknown>] | undefined;
+        expect(metricCall?.[1]).toEqual(
+            expect.objectContaining({
+                outcome: "success",
+                initSource: "cache",
+                firstChunkName: "chunk-0-00001.m4s",
+                startupCorrelationId: "corr-33",
+                cmcdObjectType: "video",
+                loadId: 33,
+                startupRetryCount: 2,
+                createLatencyMs: 25,
+                createToManifestMs: 40,
+                manifestToFirstChunkMs: 55,
+                firstChunkToAudibleMs: 65,
+                totalToAudibleMs: 120,
+                retryBudgetMax: 5,
+                retryBudgetRemaining: 2,
+                startupRecoveryWindowMs: 8000,
+                startupSessionResetsUsed: 1,
+                startupSessionResetsMax: 2,
+            }),
+        );
+        expect(metricCall?.[1]).not.toHaveProperty("invalidNumeric");
+
+        mockSchedulePlaybackErrorRepair.mockImplementationOnce(() => {
+            throw new Error("repair queue unavailable");
+        });
+        const failingReq = {
+            user: { id: "user-1" },
+            body: {
+                event: "player.playback_error",
+                fields: {
+                    sessionId: "session-err",
+                    sourceType: "local",
+                    trackId: "track-err",
+                },
+            },
+        } as any;
+        const failingRes = createResponse();
+        await postClientMetric(failingReq, failingRes);
+
+        expect(failingRes.statusCode).toBe(500);
+        expect(failingRes.body).toEqual({ error: "Failed to ingest client signal" });
+    });
+
+    it("handles unauthorized session create and unknown session-create errors", async () => {
+        const unauthorizedReq = {
+            body: { trackId: "track-1" },
+        } as any;
+        const unauthorizedRes = createResponse();
+        await postSession(unauthorizedReq, unauthorizedRes);
+        expect(unauthorizedRes.statusCode).toBe(401);
+        expect(unauthorizedRes.body).toEqual({
+            error: "Unauthorized",
+            startupHint: {
+                stage: "session_create",
+                state: "blocked",
+                transient: false,
+                reason: "unauthorized",
+                retryAfterMs: null,
+            },
+        });
+
+        mockCreateLocalSession.mockRejectedValueOnce(new Error("session create blew up"));
+        const errorReq = {
+            user: { id: "user-1" },
+            body: { trackId: "track-1" },
+        } as any;
+        const errorRes = createResponse();
+        await postSession(errorReq, errorRes);
+        expect(errorRes.statusCode).toBe(500);
+        expect(errorRes.body).toEqual({
+            error: "Failed to create segmented streaming session",
+            startupHint: {
+                stage: "session_create",
+                state: "failed",
+                transient: false,
+                reason: "session_create_failed",
+                retryAfterMs: null,
+            },
+        });
     });
 });

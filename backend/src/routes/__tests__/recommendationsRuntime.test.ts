@@ -560,15 +560,15 @@ describe("recommendations routes runtime", () => {
         ]);
     });
 
-    it("returns 404 for missing seed track in /tracks", async () => {
+    it("returns 400 for missing seed track without artist/title fallback in /tracks", async () => {
         mockTrackFindUnique.mockResolvedValue(null);
         const req = { query: { seedTrackId: "missing" } } as any;
         const res = createRes();
 
         await getTrackRecommendations(req, res);
 
-        expect(res.statusCode).toBe(404);
-        expect(res.body).toEqual({ error: "Track not found" });
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Could not resolve seed artist and title" });
     });
 
     it("falls back to title matching when artist-matched candidates are missing", async () => {

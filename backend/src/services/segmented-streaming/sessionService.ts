@@ -9,9 +9,13 @@ import { logger } from "../../utils/logger";
 import {
     segmentedManifestService,
     type SegmentedManifestQuality,
+    type SegmentedManifestProfile,
 } from "./manifestService";
 import { segmentedStreamingCacheService } from "./cacheService";
-import { segmentedSegmentService } from "./segmentService";
+import {
+    LOSSLESS_FILE_EXTENSION_REGEX,
+    segmentedSegmentService,
+} from "./segmentService";
 import {
     logSegmentedStreamingTrace,
     segmentedTraceDurationMs,
@@ -26,21 +30,16 @@ const SESSION_TOKEN_TYPE = "segmented-streaming-session-v1";
 const SESSION_TOKEN_SECRET =
     process.env.JWT_SECRET || process.env.SESSION_SECRET || config.sessionSecret;
 export const SEGMENTED_SESSION_TOKEN_QUERY_PARAM = "st";
-const ASSET_READY_POLL_INTERVAL_MS = 75;
+const ASSET_READY_POLL_INITIAL_INTERVAL_MS = 25;
+const ASSET_READY_POLL_MAX_INTERVAL_MS = 200;
+const ASSET_READY_POLL_BACKOFF_MULTIPLIER = 1.5;
+const ASSET_READY_POLL_JITTER_FACTOR = 0.2;
+const ASSET_READY_POLL_MIN_REMAINING_WINDOW_SAMPLES = 6;
 const ASSET_READY_TIMEOUT_MS = 20_000;
-const ASSET_CROSS_POD_GRACE_MS = 2_500;
-const STARTUP_MIN_TIMELINE_SEGMENTS = 2;
-const STARTUP_INIT_SEGMENT_CANDIDATES = ["init-0.m4s", "init-0.webm"] as const;
-const STARTUP_FIRST_CHUNK_CANDIDATES = [
-    "chunk-0-00001.m4s",
-    "chunk-0-00001.webm",
-] as const;
-const STARTUP_SECOND_CHUNK_CANDIDATES = [
-    "chunk-0-00002.m4s",
-    "chunk-0-00002.webm",
-] as const;
-const LOSSLESS_FILE_EXTENSION_REGEX =
-    /\.(flac|wav|aiff|aif|alac|ape|wv|tta|dff|dsf)$/i;
+const ASSET_CROSS_POD_GRACE_MS = 5_000;
+const READINESS_MICROCACHE_TTL_MS = 1_500;
+const STARTUP_MIN_TIMELINE_SEGMENTS = 3;
+const STARTUP_SEGMENT_EXTENSIONS = ["m4s", "webm"] as const;
 
 const SEGMENTED_QUALITY_VALUES = [
     "original",
@@ -48,17 +47,26 @@ const SEGMENTED_QUALITY_VALUES = [
     "medium",
     "low",
 ] as const;
+const SEGMENTED_SESSION_MANIFEST_PROFILE_VALUES = [
+    "startup_single",
+    "steady_state_dual",
+] as const;
 const SEGMENTED_SOURCE_TYPE_VALUES: ReadonlyArray<SegmentedStreamingSourceType> = [
     "local",
 ];
+const DEFAULT_SEGMENTED_SESSION_MANIFEST_PROFILE: SegmentedSessionManifestProfile =
+    "steady_state_dual";
 
 export type SegmentedSessionQuality = (typeof SEGMENTED_QUALITY_VALUES)[number];
+export type SegmentedSessionManifestProfile =
+    (typeof SEGMENTED_SESSION_MANIFEST_PROFILE_VALUES)[number];
 export type SegmentedSessionSourceType = SegmentedStreamingSourceType;
 
 export interface CreateLocalSegmentedSessionInput {
     userId: string;
     trackId: string;
     desiredQuality?: SegmentedSessionQuality;
+    manifestProfile?: SegmentedSessionManifestProfile;
 }
 
 export interface SegmentedSessionRecord {
@@ -67,6 +75,7 @@ export interface SegmentedSessionRecord {
     trackId: string;
     cacheKey: string;
     quality: SegmentedSessionQuality;
+    manifestProfile: SegmentedSessionManifestProfile;
     sourceType: SegmentedSessionSourceType;
     playbackCodec?: "aac" | "flac";
     playbackBitrateKbps?: number | null;
@@ -87,6 +96,8 @@ export interface SegmentedSessionResponse {
     playbackProfile: {
         protocol: "dash";
         sourceType: SegmentedSessionSourceType;
+        quality: SegmentedSessionQuality;
+        manifestProfile: SegmentedSessionManifestProfile;
         codec: "aac" | "flac";
         bitrateKbps: number | null;
     };
@@ -140,8 +151,17 @@ interface ValidateSessionTokenOptions {
     allowSessionIdMismatch?: boolean;
 }
 
+interface ReadinessPollBackoffState {
+    nextBaseDelayMs: number;
+}
+
 class SegmentedSessionService {
     private readonly inMemorySessions = new Map<string, SegmentedSessionRecord>();
+    private readonly manifestReadyInFlight = new Map<string, Promise<void>>();
+    private readonly segmentReadyInFlight = new Map<string, Promise<void>>();
+    private readonly segmentReadyMicrocache = new Map<string, number>();
+    private readonly playbackErrorRepairInFlight = new Map<string, Promise<void>>();
+    private readonly playbackErrorRepairQueued = new Set<string>();
 
     async createLocalSession(
         input: CreateLocalSegmentedSessionInput,
@@ -155,6 +175,9 @@ class SegmentedSessionService {
         const quality = await this.resolveQualityForUser(
             input.userId,
             input.desiredQuality,
+        );
+        const manifestProfile = this.resolveManifestProfileForRequest(
+            input.manifestProfile,
         );
 
         try {
@@ -205,6 +228,7 @@ class SegmentedSessionService {
                 sourcePath,
                 sourceModified: track.fileModified,
                 quality: quality as SegmentedManifestQuality,
+                manifestProfile: manifestProfile as SegmentedManifestProfile,
             });
             assetBuildMs = segmentedTraceDurationMs(assetBuildStartedAtMs);
 
@@ -220,6 +244,7 @@ class SegmentedSessionService {
                 trackId: track.id,
                 cacheKey: asset.cacheKey,
                 quality,
+                manifestProfile,
                 sourceType: "local",
                 ...resolveSessionPlaybackProfile({
                     quality,
@@ -240,13 +265,14 @@ class SegmentedSessionService {
                 sessionRecord.cacheKey,
                 sessionRecord.sessionId,
             );
-            const assetBuildInFlight = segmentedSegmentService.hasInFlightBuild(
+            const assetBuildInFlight = await this.hasAssetBuildInFlight(
                 sessionRecord.cacheKey,
             );
 
             logSegmentedStreamingTrace("session.local.create_success", {
                 trackId: track.id,
                 quality,
+                manifestProfile,
                 cacheKey: sessionRecord.cacheKey,
                 trackLookupMs,
                 sourceAccessMs,
@@ -262,6 +288,7 @@ class SegmentedSessionService {
             logSegmentedStreamingTrace("session.local.create_error", {
                 trackId: input.trackId,
                 quality,
+                manifestProfile,
                 phase,
                 trackLookupMs,
                 sourceAccessMs,
@@ -428,6 +455,7 @@ class SegmentedSessionService {
             userId: session.userId,
             trackId: session.trackId,
             desiredQuality: session.quality,
+            manifestProfile: "steady_state_dual",
         });
 
         return {
@@ -436,6 +464,47 @@ class SegmentedSessionService {
             resumeAtSec,
             shouldPlay,
         };
+    }
+
+    schedulePlaybackErrorRepair(input: {
+        userId: string;
+        sessionId: string | null | undefined;
+        trackId?: string | null | undefined;
+        sourceType?: string | null | undefined;
+    }): void {
+        const sessionId = input.sessionId?.trim();
+        if (!sessionId) {
+            return;
+        }
+        if (input.sourceType && input.sourceType !== "local") {
+            return;
+        }
+
+        const existingRepair = this.playbackErrorRepairInFlight.get(sessionId);
+        if (existingRepair) {
+            if (this.playbackErrorRepairQueued.has(sessionId)) {
+                return;
+            }
+            this.playbackErrorRepairQueued.add(sessionId);
+            const chainedRepair = existingRepair.finally(() => {
+                this.playbackErrorRepairQueued.delete(sessionId);
+                this.playbackErrorRepairInFlight.delete(sessionId);
+                this.schedulePlaybackErrorRepair(input);
+            });
+            this.playbackErrorRepairInFlight.set(sessionId, chainedRepair);
+            return;
+        }
+
+        const repairPromise = this.repairPlaybackErrorSessionCache({
+            userId: input.userId,
+            sessionId,
+            trackId: input.trackId?.trim() || undefined,
+        }).finally(() => {
+            if (this.playbackErrorRepairInFlight.get(sessionId) === repairPromise) {
+                this.playbackErrorRepairInFlight.delete(sessionId);
+            }
+        });
+        this.playbackErrorRepairInFlight.set(sessionId, repairPromise);
     }
 
     resolveSegmentPath(
@@ -464,8 +533,34 @@ class SegmentedSessionService {
     }
 
     async waitForManifestReady(session: SegmentedSessionRecord): Promise<void> {
-        await this.waitForAssetFile(session, session.manifestPath, "manifest");
-        await this.waitForStartupWindowReady(session);
+        await this.coalesceInFlightByKey(
+            this.manifestReadyInFlight,
+            session.sessionId,
+            async () => {
+                // Each readiness phase gets its own explicit timeout window.
+                // This avoids squeezing startup-window polling behind a late
+                // manifest while keeping per-phase behavior deterministic.
+                const manifestReadinessDeadlineAtMs =
+                    Date.now() + ASSET_READY_TIMEOUT_MS;
+                await this.waitForAssetFile(
+                    session,
+                    session.manifestPath,
+                    "manifest",
+                    manifestReadinessDeadlineAtMs,
+                );
+                const startupWindowReadinessDeadlineAtMs =
+                    Date.now() + ASSET_READY_TIMEOUT_MS;
+                await this.waitForStartupWindowReady(
+                    session,
+                    startupWindowReadinessDeadlineAtMs,
+                );
+            },
+            {
+                sessionId: session.sessionId,
+                cacheKey: session.cacheKey,
+                readinessType: "manifest",
+            },
+        );
     }
 
     async waitForSegmentReady(
@@ -473,8 +568,101 @@ class SegmentedSessionService {
         segmentName: string,
     ): Promise<string> {
         const segmentPath = this.resolveSegmentPath(session, segmentName);
-        await this.waitForAssetFile(session, segmentPath, "segment");
+        const segmentReadinessKey = `${session.sessionId}:${segmentName}`;
+
+        if (
+            this.hasReadinessMicrocacheHit(
+                this.segmentReadyMicrocache,
+                segmentReadinessKey,
+            )
+        ) {
+            logSegmentedStreamingTrace("session.readiness.microcache_hit", {
+                sessionId: session.sessionId,
+                cacheKey: session.cacheKey,
+                readinessType: "segment",
+                segmentName,
+            });
+            return segmentPath;
+        }
+
+        await this.coalesceInFlightByKey(
+            this.segmentReadyInFlight,
+            segmentReadinessKey,
+            async () => {
+                if (
+                    this.hasReadinessMicrocacheHit(
+                        this.segmentReadyMicrocache,
+                        segmentReadinessKey,
+                    )
+                ) {
+                    return;
+                }
+
+                await this.waitForAssetFile(session, segmentPath, "segment");
+                this.markReadinessMicrocacheHit(
+                    this.segmentReadyMicrocache,
+                    segmentReadinessKey,
+                );
+            },
+            {
+                sessionId: session.sessionId,
+                cacheKey: session.cacheKey,
+                readinessType: "segment",
+                segmentName,
+            },
+        );
         return segmentPath;
+    }
+
+    private async coalesceInFlightByKey(
+        inFlightMap: Map<string, Promise<void>>,
+        key: string,
+        waitFactory: () => Promise<void>,
+        traceFields: Record<string, unknown> = {},
+    ): Promise<void> {
+        const existingPromise = inFlightMap.get(key);
+        if (existingPromise) {
+            logSegmentedStreamingTrace("session.readiness.coalesced_wait", {
+                ...traceFields,
+            });
+            await existingPromise;
+            return;
+        }
+
+        const inFlightPromise = Promise.resolve()
+            .then(waitFactory)
+            .finally(() => {
+                if (inFlightMap.get(key) === inFlightPromise) {
+                    inFlightMap.delete(key);
+                }
+            });
+
+        inFlightMap.set(key, inFlightPromise);
+        await inFlightPromise;
+    }
+
+    private hasReadinessMicrocacheHit(
+        microcache: Map<string, number>,
+        key: string,
+    ): boolean {
+        const expiresAtMs = microcache.get(key);
+        if (expiresAtMs === undefined) {
+            return false;
+        }
+
+        if (expiresAtMs <= Date.now()) {
+            microcache.delete(key);
+            return false;
+        }
+
+        return true;
+    }
+
+    private markReadinessMicrocacheHit(
+        microcache: Map<string, number>,
+        key: string,
+    ): void {
+        microcache.set(key, Date.now() + READINESS_MICROCACHE_TTL_MS);
     }
 
     private async persistSession(session: SegmentedSessionRecord): Promise<void> {
@@ -557,6 +745,8 @@ class SegmentedSessionService {
             playbackProfile: {
                 protocol: "dash",
                 sourceType: session.sourceType,
+                quality: session.quality,
+                manifestProfile: session.manifestProfile,
                 codec:
                     session.playbackCodec ??
                     qualityToPlaybackCodec(session.quality, session.sourceType),
@@ -654,20 +844,56 @@ class SegmentedSessionService {
         return "medium";
     }
 
+    private resolveManifestProfileForRequest(
+        manifestProfile: string | null | undefined,
+    ): SegmentedSessionManifestProfile {
+        return (
+            normalizeManifestProfile(manifestProfile) ??
+            DEFAULT_SEGMENTED_SESSION_MANIFEST_PROFILE
+        );
+    }
+
+    private async hasAssetBuildInFlight(cacheKey: string): Promise<boolean> {
+        try {
+            const buildStatus =
+                await segmentedSegmentService.getBuildInFlightStatus(cacheKey);
+            return buildStatus.inFlight;
+        } catch (error) {
+            logger.warn(
+                "[SegmentedStreaming] Failed to read distributed build in-flight status; falling back to local guard",
+                {
+                    cacheKey,
+                    error,
+                },
+            );
+            return segmentedSegmentService.hasInFlightBuild(cacheKey);
+        }
+    }
+
+    private isCacheKnownInvalid(cacheKey: string): boolean {
+        return segmentedSegmentService.isCacheMarkedInvalid(cacheKey);
+    }
+
     private async waitForAssetFile(
         session: SegmentedSessionRecord,
         assetPath: string,
         assetType: "manifest" | "segment",
+        deadlineAtMsInput?: number,
     ): Promise<void> {
         if (await pathExists(assetPath)) {
             return;
         }
 
-        const deadlineAtMs = Date.now() + ASSET_READY_TIMEOUT_MS;
-        const crossPodGraceDeadlineAtMs = Date.now() + ASSET_CROSS_POD_GRACE_MS;
+        const deadlineAtMs = resolveReadinessDeadlineAtMs(deadlineAtMsInput);
+        const crossPodGraceDeadlineAtMs = Math.min(
+            deadlineAtMs,
+            Date.now() + ASSET_CROSS_POD_GRACE_MS,
+        );
+        const pollBackoffState = createReadinessPollBackoffState();
         let selfHealAttempted = false;
+        let lastInFlightBuild = false;
 
-        while (Date.now() < deadlineAtMs) {
+        while (true) {
             const buildFailure = segmentedSegmentService.getBuildFailure(
                 session.cacheKey,
             );
@@ -683,7 +909,19 @@ class SegmentedSessionService {
                 return;
             }
 
-            if (!segmentedSegmentService.hasInFlightBuild(session.cacheKey)) {
+            if (Date.now() >= deadlineAtMs) {
+                break;
+            }
+
+            const hasInFlightBuild = await this.hasAssetBuildInFlight(
+                session.cacheKey,
+            );
+            if (hasInFlightBuild !== lastInFlightBuild) {
+                resetReadinessPollBackoffState(pollBackoffState);
+                lastInFlightBuild = hasInFlightBuild;
+            }
+
+            if (!hasInFlightBuild) {
                 if (!selfHealAttempted) {
                     selfHealAttempted = true;
                     const selfHealTriggered = await this.trySelfHealMissingAsset(
@@ -691,13 +929,20 @@ class SegmentedSessionService {
                         assetType,
                     );
                     if (selfHealTriggered) {
-                        await wait(ASSET_READY_POLL_INTERVAL_MS);
+                        resetReadinessPollBackoffState(pollBackoffState);
+                        await waitForNextReadinessPoll(
+                            pollBackoffState,
+                            deadlineAtMs,
+                        );
                         continue;
                     }
                 }
 
                 if (Date.now() < crossPodGraceDeadlineAtMs) {
-                    await wait(ASSET_READY_POLL_INTERVAL_MS);
+                    await waitForNextReadinessPoll(
+                        pollBackoffState,
+                        deadlineAtMs,
+                    );
                     continue;
                 }
 
@@ -712,7 +957,7 @@ class SegmentedSessionService {
                 );
             }
 
-            await wait(ASSET_READY_POLL_INTERVAL_MS);
+            await waitForNextReadinessPoll(pollBackoffState, deadlineAtMs);
         }
 
         throw new SegmentedSessionError(
@@ -726,15 +971,21 @@ class SegmentedSessionService {
 
     private async waitForStartupWindowReady(
         session: SegmentedSessionRecord,
+        deadlineAtMsInput?: number,
     ): Promise<void> {
         if (await this.hasStartupWindowReady(session)) {
             return;
         }
 
-        const deadlineAtMs = Date.now() + ASSET_READY_TIMEOUT_MS;
-        const crossPodGraceDeadlineAtMs = Date.now() + ASSET_CROSS_POD_GRACE_MS;
+        const deadlineAtMs = resolveReadinessDeadlineAtMs(deadlineAtMsInput);
+        const crossPodGraceDeadlineAtMs = Math.min(
+            deadlineAtMs,
+            Date.now() + ASSET_CROSS_POD_GRACE_MS,
+        );
+        const pollBackoffState = createReadinessPollBackoffState();
         let selfHealAttempted = false;
-        while (Date.now() < deadlineAtMs) {
+        let lastInFlightBuild = false;
+        while (true) {
             const buildFailure = segmentedSegmentService.getBuildFailure(
                 session.cacheKey,
             );
@@ -750,7 +1001,19 @@ class SegmentedSessionService {
                 return;
             }
 
-            if (!segmentedSegmentService.hasInFlightBuild(session.cacheKey)) {
+            if (Date.now() >= deadlineAtMs) {
+                break;
+            }
+
+            const hasInFlightBuild = await this.hasAssetBuildInFlight(
+                session.cacheKey,
+            );
+            if (hasInFlightBuild !== lastInFlightBuild) {
+                resetReadinessPollBackoffState(pollBackoffState);
+                lastInFlightBuild = hasInFlightBuild;
+            }
+
+            if (!hasInFlightBuild) {
                 if (!selfHealAttempted) {
                     selfHealAttempted = true;
                     const selfHealTriggered = await this.trySelfHealMissingAsset(
@@ -758,22 +1021,25 @@ class SegmentedSessionService {
                         "startup_window",
                     );
                     if (selfHealTriggered) {
-                        await wait(ASSET_READY_POLL_INTERVAL_MS);
+                        resetReadinessPollBackoffState(pollBackoffState);
+                        await waitForNextReadinessPoll(
+                            pollBackoffState,
+                            deadlineAtMs,
+                        );
                         continue;
                     }
                 }
 
                 if (Date.now() < crossPodGraceDeadlineAtMs) {
-                    await wait(ASSET_READY_POLL_INTERVAL_MS);
+                    await waitForNextReadinessPoll(
+                        pollBackoffState,
+                        deadlineAtMs,
+                    );
                     continue;
                 }
-
-                // Compatibility fallback for pre-existing cache layouts where
-                // startup segment naming differs from current templates.
-                return;
             }
 
-            await wait(ASSET_READY_POLL_INTERVAL_MS);
+            await waitForNextReadinessPoll(pollBackoffState, deadlineAtMs);
         }
 
         throw new SegmentedSessionError(
@@ -786,65 +1052,78 @@ class SegmentedSessionService {
     private async hasStartupWindowReady(
         session: SegmentedSessionRecord,
     ): Promise<boolean> {
-        const hasStartupSegments = await this.hasStartupSegmentFilesReady(session);
-        if (!hasStartupSegments) {
+        const startupReadiness = await this.readManifestStartupReadiness(session);
+        if (!startupReadiness) {
             return false;
         }
 
-        return await this.hasManifestStartupTimelineReady(session);
+        if (
+            startupReadiness.startupSegmentCount <
+            STARTUP_MIN_TIMELINE_SEGMENTS
+        ) {
+            return false;
+        }
+
+        return this.hasStartupSegmentFilesReady(
+            session,
+            startupReadiness.startupRepresentationId,
+        );
     }
 
     private async hasStartupSegmentFilesReady(
         session: SegmentedSessionRecord,
+        startupRepresentationId: string,
     ): Promise<boolean> {
+        const startupSegmentCandidates =
+            buildStartupSegmentCandidatesForRepresentation(
+                session.assetDir,
+                startupRepresentationId,
+            );
         const hasInit = await this.anyPathExists(
-            STARTUP_INIT_SEGMENT_CANDIDATES.map((segmentName) =>
-                path.resolve(session.assetDir, segmentName),
-            ),
+            startupSegmentCandidates.initSegmentPaths,
         );
         if (!hasInit) {
             return false;
         }
 
         const hasFirstChunk = await this.anyPathExists(
-            STARTUP_FIRST_CHUNK_CANDIDATES.map((segmentName) =>
-                path.resolve(session.assetDir, segmentName),
-            ),
+            startupSegmentCandidates.firstChunkPaths,
         );
         if (!hasFirstChunk) {
             return false;
         }
 
         const hasSecondChunk = await this.anyPathExists(
-            STARTUP_SECOND_CHUNK_CANDIDATES.map((segmentName) =>
-                path.resolve(session.assetDir, segmentName),
-            ),
+            startupSegmentCandidates.secondChunkPaths,
         );
         if (!hasSecondChunk) {
+            return false;
+        }
+
+        const hasThirdChunk = await this.anyPathExists(
+            startupSegmentCandidates.thirdChunkPaths,
+        );
+        if (!hasThirdChunk) {
             return false;
         }
 
         return true;
     }
 
-    private async hasManifestStartupTimelineReady(
+    private async readManifestStartupReadiness(
         session: SegmentedSessionRecord,
-    ): Promise<boolean> {
+    ): Promise<{
+        startupRepresentationId: string;
+        startupSegmentCount: number;
+    } | null> {
         try {
             const manifestContents = await fsPromises.readFile(
                 session.manifestPath,
                 "utf8",
             );
-            const timelineCounts = countManifestTimelineSegments(manifestContents);
-            if (timelineCounts.length === 0) {
-                return false;
-            }
-
-            return timelineCounts.every(
-                (segmentCount) => segmentCount >= STARTUP_MIN_TIMELINE_SEGMENTS,
-            );
+            return extractManifestStartupReadiness(manifestContents);
         } catch {
-            return false;
+            return null;
         }
     }
 
@@ -884,6 +1163,8 @@ class SegmentedSessionService {
                 sourcePath,
                 sourceModified: track.fileModified,
                 quality: session.quality as SegmentedManifestQuality,
+                manifestProfile:
+                    session.manifestProfile as SegmentedManifestProfile,
             });
 
             logSegmentedStreamingTrace("session.asset.self_heal_triggered", {
@@ -904,6 +1185,86 @@ class SegmentedSessionService {
             return false;
         }
     }
+
+    private async repairPlaybackErrorSessionCache(params: {
+        userId: string;
+        sessionId: string;
+        trackId?: string;
+    }): Promise<void> {
+        const startedAtMs = Date.now();
+        try {
+            const session = await this.getAuthorizedSession(
+                params.sessionId,
+                params.userId,
+            );
+            if (!session) {
+                logSegmentedStreamingTrace("session.asset.playback_error_repair_skipped", {
+                    sessionId: params.sessionId,
+                    reason: "session_not_found",
+                    totalMs: segmentedTraceDurationMs(startedAtMs),
+                });
+                return;
+            }
+
+            if (params.trackId && params.trackId !== session.trackId) {
+                logSegmentedStreamingTrace("session.asset.playback_error_repair_skipped", {
+                    sessionId: session.sessionId,
+                    trackId: session.trackId,
+                    requestedTrackId: params.trackId,
+                    cacheKey: session.cacheKey,
+                    reason: "track_id_mismatch",
+                    totalMs: segmentedTraceDurationMs(startedAtMs),
+                });
+                return;
+            }
+
+            const track = await prisma.track.findUnique({
+                where: { id: session.trackId },
+                select: {
+                    id: true,
+                    filePath: true,
+                    fileModified: true,
+                },
+            });
+            if (!track?.filePath || !track.fileModified) {
+                logSegmentedStreamingTrace("session.asset.playback_error_repair_skipped", {
+                    sessionId: session.sessionId,
+                    trackId: session.trackId,
+                    cacheKey: session.cacheKey,
+                    reason: "track_source_unavailable",
+                    totalMs: segmentedTraceDurationMs(startedAtMs),
+                });
+                return;
+            }
+
+            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
+            const sourcePath = path.join(config.music.musicPath, normalizedFilePath);
+            await fsPromises.access(sourcePath);
+            await segmentedSegmentService.forceRegenerateDashSegments({
+                trackId: track.id,
+                sourcePath,
+                sourceModified: track.fileModified,
+                quality: session.quality as SegmentedManifestQuality,
+                manifestProfile:
+                    session.manifestProfile as SegmentedManifestProfile,
+            });
+
+            logSegmentedStreamingTrace("session.asset.playback_error_repair_queued", {
+                sessionId: session.sessionId,
+                trackId: session.trackId,
+                cacheKey: session.cacheKey,
+                quality: session.quality,
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
+        } catch (error) {
+            logSegmentedStreamingTrace("session.asset.playback_error_repair_error", {
+                sessionId: params.sessionId,
+                trackId: params.trackId,
+                ...toSegmentedTraceErrorFields(error),
+                totalMs: segmentedTraceDurationMs(startedAtMs),
+            });
+        }
+    }
 }
 
 const normalizeQuality = (
@@ -916,6 +1277,16 @@ const normalizeQuality = (
         normalized === "medium" ||
         normalized === "low"
     ) {
+        return normalized;
+    }
+    return null;
+};
+
+const normalizeManifestProfile = (
+    manifestProfile: string | null | undefined,
+): SegmentedSessionManifestProfile | null => {
+    const normalized = manifestProfile?.trim().toLowerCase();
+    if (normalized === "startup_single" || normalized === "steady_state_dual") {
         return normalized;
     }
     return null;
@@ -972,6 +1343,8 @@ const parseSessionRecord = (payload: string): SegmentedSessionRecord | null => {
             typeof parsed.trackId !== "string" ||
             typeof parsed.cacheKey !== "string" ||
             !isSegmentedSessionQuality(parsed.quality) ||
+            (parsed.manifestProfile !== undefined &&
+                !isSegmentedSessionManifestProfile(parsed.manifestProfile)) ||
             !isSegmentedSessionSourceType(parsed.sourceType) ||
             (parsed.playbackCodec !== undefined &&
                 parsed.playbackCodec !== "aac" &&
@@ -991,7 +1364,12 @@ const parseSessionRecord = (payload: string): SegmentedSessionRecord | null => {
         ) {
             return null;
         }
-        return parsed;
+        return {
+            ...parsed,
+            manifestProfile:
+                parsed.manifestProfile ??
+                DEFAULT_SEGMENTED_SESSION_MANIFEST_PROFILE,
+        };
     } catch {
         return null;
     }
@@ -1009,6 +1387,11 @@ const isSegmentedSessionSourceType = (
     value: unknown,
 ): value is SegmentedSessionSourceType =>
     value === "local";
+
+const isSegmentedSessionManifestProfile = (
+    value: unknown,
+): value is SegmentedSessionManifestProfile =>
+    value === "startup_single" || value === "steady_state_dual";
 
 const isNonNegativeFiniteNumber = (value: unknown): value is number =>
     typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -1066,10 +1449,122 @@ const countManifestTimelineSegments = (manifest: string): number[] => {
     return segmentCounts;
 };
 
+const extractManifestStartupReadiness = (manifest: string): {
+    startupRepresentationId: string;
+    startupSegmentCount: number;
+} | null => {
+    const startupTimelineSegmentCounts = countManifestTimelineSegments(manifest);
+    if (startupTimelineSegmentCounts.length === 0) {
+        return null;
+    }
+
+    const startupRepresentationMatch = manifest.match(
+        /<Representation\b[^>]*\bid=(?:"([^"]+)"|'([^']+)')/i,
+    );
+    const matchedRepresentationId = startupRepresentationMatch
+        ? (startupRepresentationMatch[1] ?? startupRepresentationMatch[2] ?? "")
+            .trim()
+        : "";
+
+    return {
+        startupRepresentationId: matchedRepresentationId || "0",
+        startupSegmentCount: startupTimelineSegmentCounts[0] ?? 0,
+    };
+};
+
+const buildStartupSegmentCandidatesForRepresentation = (
+    assetDir: string,
+    representationId: string,
+): {
+    initSegmentPaths: string[];
+    firstChunkPaths: string[];
+    secondChunkPaths: string[];
+    thirdChunkPaths: string[];
+} => {
+    const representationToken = representationId.trim() || "0";
+    return {
+        initSegmentPaths: STARTUP_SEGMENT_EXTENSIONS.map((extension) =>
+            path.resolve(assetDir, `init-${representationToken}.${extension}`),
+        ),
+        firstChunkPaths: STARTUP_SEGMENT_EXTENSIONS.map((extension) =>
+            path.resolve(assetDir, `chunk-${representationToken}-00001.${extension}`),
+        ),
+        secondChunkPaths: STARTUP_SEGMENT_EXTENSIONS.map((extension) =>
+            path.resolve(assetDir, `chunk-${representationToken}-00002.${extension}`),
+        ),
+        thirdChunkPaths: STARTUP_SEGMENT_EXTENSIONS.map((extension) =>
+            path.resolve(assetDir, `chunk-${representationToken}-00003.${extension}`),
+        ),
+    };
+};
+
 const wait = async (durationMs: number): Promise<void> => {
     await new Promise<void>((resolve) => {
         setTimeout(resolve, durationMs);
     });
+};
+
+const resolveReadinessDeadlineAtMs = (
+    deadlineAtMsInput?: number,
+): number => {
+    if (
+        typeof deadlineAtMsInput === "number" &&
+        Number.isFinite(deadlineAtMsInput)
+    ) {
+        return deadlineAtMsInput;
+    }
+    return Date.now() + ASSET_READY_TIMEOUT_MS;
+};
+
+const createReadinessPollBackoffState = (): ReadinessPollBackoffState => ({
+    nextBaseDelayMs: ASSET_READY_POLL_INITIAL_INTERVAL_MS,
+});
+
+const resetReadinessPollBackoffState = (
+    state: ReadinessPollBackoffState,
+): void => {
+    state.nextBaseDelayMs = ASSET_READY_POLL_INITIAL_INTERVAL_MS;
+};
+
+const computeNextReadinessPollDelayMs = (
+    state: ReadinessPollBackoffState,
+): number => {
+    const jitterScale =
+        1 + (Math.random() * 2 - 1) * ASSET_READY_POLL_JITTER_FACTOR;
+    const jitteredDelayMs = Math.round(state.nextBaseDelayMs * jitterScale);
+    const nextDelayMs = Math.max(
+        1,
+        Math.min(ASSET_READY_POLL_MAX_INTERVAL_MS, jitteredDelayMs),
+    );
+
+    state.nextBaseDelayMs = Math.min(
+        ASSET_READY_POLL_MAX_INTERVAL_MS,
+        Math.ceil(
+            state.nextBaseDelayMs * ASSET_READY_POLL_BACKOFF_MULTIPLIER,
+        ),
+    );
+    return nextDelayMs;
+};
+
+const waitForNextReadinessPoll = async (
+    state: ReadinessPollBackoffState,
+    deadlineAtMs: number,
+): Promise<void> => {
+    const remainingMs = deadlineAtMs - Date.now();
+    if (remainingMs <= 0) {
+        return;
+    }
+
+    const maxDelayForRemainingBudgetMs = Math.max(
+        1,
+        Math.ceil(remainingMs / ASSET_READY_POLL_MIN_REMAINING_WINDOW_SAMPLES),
+    );
+    const nextDelayMs = Math.min(
+        computeNextReadinessPollDelayMs(state),
+        maxDelayForRemainingBudgetMs,
+        remainingMs,
+    );
+    await wait(nextDelayMs);
 };
 
 const pathExists = async (candidatePath: string): Promise<boolean> => {

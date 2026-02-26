@@ -97,6 +97,14 @@ class SegmentedStreamingCacheService {
         return paths;
     }
 
+    async removeDashAsset(cacheKey: string): Promise<void> {
+        const paths = this.getDashAssetPaths(cacheKey);
+        await fsPromises.rm(paths.outputDir, {
+            recursive: true,
+            force: true,
+        });
+    }
+
     async hasDashManifest(cacheKey: string): Promise<boolean> {
         try {
             const paths = this.getDashAssetPaths(cacheKey);

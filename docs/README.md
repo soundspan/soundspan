@@ -31,6 +31,12 @@ This index is the central navigation page for all project documentation under `d
 | [`OPENSUBSONIC_COMPATIBILITY.md`](OPENSUBSONIC_COMPATIBILITY.md) | Supported `/rest` compatibility contract, known gaps, and validation evidence |
 | [`BRAND_POLICY.md`](BRAND_POLICY.md) | Brand usage rules, naming constraints, and attribution guidance for soundspan |
 
+## Experimental Docs
+
+| Document | Purpose |
+| --- | --- |
+| [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md) | Segmented-streaming guidance kept separate from standard deployment/config docs while the feature remains experimental |
+
 ## Suggested Reading Paths
 
 ### New users

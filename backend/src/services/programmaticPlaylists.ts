@@ -9,6 +9,7 @@ import {
     getDecadeFromYear,
 } from "../utils/dateFilters";
 import { applyArtistCap, type ArtistCapTrack } from "./programmaticPlaylistArtistCap";
+import { separateArtists } from "../utils/separateArtists";
 export {
     applyArtistCap,
     type ArtistCapTrack,
@@ -326,17 +327,20 @@ export class ProgrammaticPlaylistService {
         seedKey: string,
         preserveInputOrder = false
     ): T[] {
-        return applyArtistCap(tracks, {
-            maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
-            targetCount,
-            preserveInputOrder,
-            rng: createSeededRng(getSeededRandom(seedKey)),
-            fallback: {
-                enabled: true,
-                maxRelaxedPerArtist: this.MAX_RELAXED_TRACKS_PER_ARTIST,
-                refillFromExcludedAfterMaxRelaxation: true,
-            },
-        });
+        return separateArtists(
+            applyArtistCap(tracks, {
+                maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
+                targetCount,
+                preserveInputOrder,
+                rng: createSeededRng(getSeededRandom(seedKey)),
+                fallback: {
+                    enabled: true,
+                    maxRelaxedPerArtist: this.MAX_RELAXED_TRACKS_PER_ARTIST,
+                    refillFromExcludedAfterMaxRelaxation: true,
+                },
+            }),
+            (t) => t.album?.artist?.id ?? `unknown:${t.id}`
+        );
     }
 
     private diversifyTracksUniqueFirst<T extends ArtistCapTrack>(
@@ -352,7 +356,10 @@ export class ProgrammaticPlaylistService {
         });
 
         if (firstPass.length >= targetCount) {
-            return firstPass;
+            return separateArtists(
+                firstPass,
+                (t) => t.album?.artist?.id ?? `unknown:${t.id}`
+            );
         }
 
         const selectedIds = new Set(firstPass.map((track) => track.id));
@@ -361,12 +368,15 @@ export class ProgrammaticPlaylistService {
             `${seedKey}-second-pass`
         );
 
-        return applyArtistCap([...firstPass, ...remainingTracks], {
-            maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
-            targetCount,
-            preserveInputOrder: true,
-            fallback: { enabled: false },
-        });
+        return separateArtists(
+            applyArtistCap([...firstPass, ...remainingTracks], {
+                maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
+                targetCount,
+                preserveInputOrder: true,
+                fallback: { enabled: false },
+            }),
+            (t) => t.album?.artist?.id ?? `unknown:${t.id}`
+        );
     }
 
     private getUniqueArtistCount<T extends ArtistCapTrack>(tracks: T[]): number {
@@ -392,7 +402,10 @@ export class ProgrammaticPlaylistService {
             selectedTracks.length >= targetCount &&
             uniqueArtistCount >= minimumUniqueArtists
         ) {
-            return selectedTracks;
+            return separateArtists(
+                selectedTracks,
+                (t) => t.album?.artist?.id ?? `unknown:${t.id}`
+            );
         }
 
         logger.debug(
@@ -423,13 +436,16 @@ export class ProgrammaticPlaylistService {
             selectedTracks.length >= targetCount &&
             uniqueArtistCount < minimumUniqueArtists;
 
-        return applyArtistCap([...selectedTracks, ...shuffledFallback], {
-            maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
-            targetCount,
-            preserveInputOrder: !needsUniqueRebalance,
-            rng: createSeededRng(getSeededRandom(`${seedKey}-library-rebalance`)),
-            fallback: { enabled: false },
-        });
+        return separateArtists(
+            applyArtistCap([...selectedTracks, ...shuffledFallback], {
+                maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
+                targetCount,
+                preserveInputOrder: !needsUniqueRebalance,
+                rng: createSeededRng(getSeededRandom(`${seedKey}-library-rebalance`)),
+                fallback: { enabled: false },
+            }),
+            (t) => t.album?.artist?.id ?? `unknown:${t.id}`
+        );
     }
 
     /**
@@ -980,12 +996,15 @@ export class ProgrammaticPlaylistService {
             .filter((t) => t !== undefined);
 
         // Keep ranked top tracks first with a strict cap before any fallback fill.
-        const strictTopTracks = applyArtistCap(orderedTracks, {
-            maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
-            targetCount: this.TRACK_LIMIT,
-            preserveInputOrder: true,
-            fallback: { enabled: false },
-        });
+        const strictTopTracks = separateArtists(
+            applyArtistCap(orderedTracks, {
+                maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
+                targetCount: this.TRACK_LIMIT,
+                preserveInputOrder: true,
+                fallback: { enabled: false },
+            }),
+            (t) => t.album?.artist?.id ?? `unknown:${t.id}`
+        );
 
         let selectedTracks = strictTopTracks;
         if (selectedTracks.length < this.TRACK_LIMIT) {
@@ -1013,14 +1032,17 @@ export class ProgrammaticPlaylistService {
                 `${seedKey}-library-fallback`
             );
 
-            selectedTracks = applyArtistCap(
-                [...strictTopTracks, ...shuffledFallback],
-                {
-                    maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
-                    targetCount: this.TRACK_LIMIT,
-                    preserveInputOrder: true,
-                    fallback: { enabled: false },
-                }
+            selectedTracks = separateArtists(
+                applyArtistCap(
+                    [...strictTopTracks, ...shuffledFallback],
+                    {
+                        maxPerArtist: this.MAX_TRACKS_PER_ARTIST,
+                        targetCount: this.TRACK_LIMIT,
+                        preserveInputOrder: true,
+                        fallback: { enabled: false },
+                    }
+                ),
+                (t) => t.album?.artist?.id ?? `unknown:${t.id}`
             );
         }
 

@@ -467,6 +467,9 @@ export class MusicScannerService {
                 const fullPath = path.join(dir, entry.name);
 
                 if (entry.isDirectory()) {
+                    if (entry.name.startsWith(".")) {
+                        continue;
+                    }
                     await walk(fullPath);
                 } else if (entry.isFile()) {
                     const ext = path.extname(entry.name).toLowerCase();

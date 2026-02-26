@@ -86,12 +86,18 @@ export function useYtMusicGapFill(
         // Optimistically use cached value to avoid flash
         _ytStatusCache?.available ?? false
     );
+    const [isStatusResolved, setIsStatusResolved] = useState(
+        _ytStatusCache !== null
+    );
 
     // Check YTMusic status once (uses global cache)
     useEffect(() => {
         let cancelled = false;
         getYtMusicAvailable().then((available) => {
-            if (!cancelled) setYtMusicAvailable(available);
+            if (!cancelled) {
+                setYtMusicAvailable(available);
+                setIsStatusResolved(true);
+            }
         });
         return () => {
             cancelled = true;
@@ -166,6 +172,10 @@ export function useYtMusicGapFill(
                 setMatches(newMatches);
             } catch (err) {
                 sharedFrontendLogger.error("[YTMusic Gap-Fill] Batch match failed:", err);
+                if (!cancelled) {
+                    _matchCache.set(album.id, {});
+                    setMatches({});
+                }
             }
 
             if (!cancelled) setLoading(false);
@@ -207,9 +217,16 @@ export function useYtMusicGapFill(
         setMatches({});
     }, []);
 
+    const hasQueuedMatchWork =
+        !!album?.id &&
+        unownedTracks.length > 0 &&
+        !loading &&
+        !_matchCache.has(album.id);
+
     return {
         enrichedTracks,
-        isMatching: loading,
+        isMatching: loading || hasQueuedMatchWork,
+        isStatusResolved,
         ytMusicAvailable,
         matchCount: Object.keys(matches).length,
         reset,

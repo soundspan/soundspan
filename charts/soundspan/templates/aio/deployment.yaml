@@ -49,100 +49,148 @@ spec:
               containerPort: 3030
               protocol: TCP
           {{- $aioEnv := .Values.aio.env | default (dict) }}
-          {{- $aioReservedEnv := dict
+          {{- $aioExplicitEnvKeys := dict
             "TZ" true
             "SESSION_SECRET" true
             "SETTINGS_ENCRYPTION_KEY" true
+            "ALLOWED_ORIGINS" true
+            "LOG_LEVEL" true
+            "DOCS_PUBLIC" true
             "TIDAL_SIDECAR_URL" true
             "YTMUSIC_STREAMER_URL" true
+            "LIDARR_ENABLED" true
+            "LIDARR_URL" true
+            "LIDARR_API_KEY" true
+            "AUDIOBOOKSHELF_URL" true
+            "AUDIOBOOKSHELF_TOKEN" true
+            "LASTFM_API_KEY" true
+            "FANART_API_KEY" true
+            "OPENAI_API_KEY" true
           }}
-          {{- if .Values.config.allowedOrigins }}
-          {{- $_ := set $aioReservedEnv "ALLOWED_ORIGINS" true }}
-          {{- end }}
-          {{- if .Values.config.logLevel }}
-          {{- $_ := set $aioReservedEnv "LOG_LEVEL" true }}
-          {{- end }}
-          {{- if .Values.config.docsPublic }}
-          {{- $_ := set $aioReservedEnv "DOCS_PUBLIC" true }}
-          {{- end }}
-          {{- if .Values.config.lidarrEnabled }}
-          {{- $_ := set $aioReservedEnv "LIDARR_ENABLED" true }}
-          {{- $_ := set $aioReservedEnv "LIDARR_URL" true }}
-          {{- $_ := set $aioReservedEnv "LIDARR_API_KEY" true }}
-          {{- end }}
-          {{- if .Values.config.audiobookshelfUrl }}
-          {{- $_ := set $aioReservedEnv "AUDIOBOOKSHELF_URL" true }}
-          {{- $_ := set $aioReservedEnv "AUDIOBOOKSHELF_TOKEN" true }}
-          {{- end }}
-          {{- if .Values.config.lastfmApiKey }}
-          {{- $_ := set $aioReservedEnv "LASTFM_API_KEY" true }}
-          {{- end }}
-          {{- if .Values.config.fanartApiKey }}
-          {{- $_ := set $aioReservedEnv "FANART_API_KEY" true }}
-          {{- end }}
-          {{- if .Values.config.openaiApiKey }}
-          {{- $_ := set $aioReservedEnv "OPENAI_API_KEY" true }}
-          {{- end }}
           env:
+            {{- if hasKey $aioEnv "TZ" }}
+            - name: TZ
+              value: {{ index $aioEnv "TZ" | quote }}
+            {{- else }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "SESSION_SECRET" }}
+            - name: SESSION_SECRET
+              value: {{ index $aioEnv "SESSION_SECRET" | quote }}
+            {{- else }}
             - name: SESSION_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: SESSION_SECRET
+            {{- end }}
+            {{- if hasKey $aioEnv "SETTINGS_ENCRYPTION_KEY" }}
+            - name: SETTINGS_ENCRYPTION_KEY
+              value: {{ index $aioEnv "SETTINGS_ENCRYPTION_KEY" | quote }}
+            {{- else }}
             - name: SETTINGS_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "soundspan.secretName" . }}
                   key: SETTINGS_ENCRYPTION_KEY
-            {{- if .Values.config.allowedOrigins }}
+            {{- end }}
+            {{- if hasKey $aioEnv "ALLOWED_ORIGINS" }}
+            - name: ALLOWED_ORIGINS
+              value: {{ index $aioEnv "ALLOWED_ORIGINS" | quote }}
+            {{- else if .Values.config.allowedOrigins }}
             - name: ALLOWED_ORIGINS
               value: {{ .Values.config.allowedOrigins | quote }}
             {{- end }}
-            {{- if .Values.config.logLevel }}
+            {{- if hasKey $aioEnv "LOG_LEVEL" }}
+            - name: LOG_LEVEL
+              value: {{ index $aioEnv "LOG_LEVEL" | quote }}
+            {{- else if .Values.config.logLevel }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
             {{- end }}
-            {{- if .Values.config.docsPublic }}
+            {{- if hasKey $aioEnv "DOCS_PUBLIC" }}
+            - name: DOCS_PUBLIC
+              value: {{ index $aioEnv "DOCS_PUBLIC" | quote }}
+            {{- else if .Values.config.docsPublic }}
             - name: DOCS_PUBLIC
               value: "true"
             {{- end }}
             # Audio analysis
             {{- range $key := keys $aioEnv | sortAlpha }}
-            {{- if not (hasKey $aioReservedEnv $key) }}
+            {{- if not (hasKey $aioExplicitEnvKeys $key) }}
             - name: {{ $key }}
               value: {{ index $aioEnv $key | quote }}
             {{- end }}
             {{- end }}
             # Streaming sidecar URLs
+            {{- if hasKey $aioEnv "TIDAL_SIDECAR_URL" }}
+            - name: TIDAL_SIDECAR_URL
+              value: {{ index $aioEnv "TIDAL_SIDECAR_URL" | quote }}
+            {{- else }}
             - name: TIDAL_SIDECAR_URL
               value: {{ include "soundspan.tidalSidecarUrl" . | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "YTMUSIC_STREAMER_URL" }}
+            - name: YTMUSIC_STREAMER_URL
+              value: {{ index $aioEnv "YTMUSIC_STREAMER_URL" | quote }}
+            {{- else }}
             - name: YTMUSIC_STREAMER_URL
               value: {{ include "soundspan.ytmusicStreamerUrl" . | quote }}
-            {{- if .Values.config.lidarrEnabled }}
+            {{- end }}
+            {{- if hasKey $aioEnv "LIDARR_ENABLED" }}
+            - name: LIDARR_ENABLED
+              value: {{ index $aioEnv "LIDARR_ENABLED" | quote }}
+            {{- else if .Values.config.lidarrEnabled }}
             - name: LIDARR_ENABLED
               value: "true"
+            {{- end }}
+            {{- if hasKey $aioEnv "LIDARR_URL" }}
+            - name: LIDARR_URL
+              value: {{ index $aioEnv "LIDARR_URL" | quote }}
+            {{- else if .Values.config.lidarrEnabled }}
             - name: LIDARR_URL
               value: {{ .Values.config.lidarrUrl | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "LIDARR_API_KEY" }}
+            - name: LIDARR_API_KEY
+              value: {{ index $aioEnv "LIDARR_API_KEY" | quote }}
+            {{- else if .Values.config.lidarrEnabled }}
             - name: LIDARR_API_KEY
               value: {{ .Values.config.lidarrApiKey | quote }}
             {{- end }}
-            {{- if .Values.config.audiobookshelfUrl }}
+            {{- if hasKey $aioEnv "AUDIOBOOKSHELF_URL" }}
+            - name: AUDIOBOOKSHELF_URL
+              value: {{ index $aioEnv "AUDIOBOOKSHELF_URL" | quote }}
+            {{- else if .Values.config.audiobookshelfUrl }}
             - name: AUDIOBOOKSHELF_URL
               value: {{ .Values.config.audiobookshelfUrl | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "AUDIOBOOKSHELF_TOKEN" }}
+            - name: AUDIOBOOKSHELF_TOKEN
+              value: {{ index $aioEnv "AUDIOBOOKSHELF_TOKEN" | quote }}
+            {{- else if .Values.config.audiobookshelfUrl }}
             - name: AUDIOBOOKSHELF_TOKEN
               value: {{ .Values.config.audiobookshelfToken | quote }}
             {{- end }}
-            {{- if .Values.config.lastfmApiKey }}
+            {{- if hasKey $aioEnv "LASTFM_API_KEY" }}
+            - name: LASTFM_API_KEY
+              value: {{ index $aioEnv "LASTFM_API_KEY" | quote }}
+            {{- else if .Values.config.lastfmApiKey }}
             - name: LASTFM_API_KEY
               value: {{ .Values.config.lastfmApiKey | quote }}
             {{- end }}
-            {{- if .Values.config.fanartApiKey }}
+            {{- if hasKey $aioEnv "FANART_API_KEY" }}
+            - name: FANART_API_KEY
+              value: {{ index $aioEnv "FANART_API_KEY" | quote }}
+            {{- else if .Values.config.fanartApiKey }}
             - name: FANART_API_KEY
               value: {{ .Values.config.fanartApiKey | quote }}
             {{- end }}
-            {{- if .Values.config.openaiApiKey }}
+            {{- if hasKey $aioEnv "OPENAI_API_KEY" }}
+            - name: OPENAI_API_KEY
+              value: {{ index $aioEnv "OPENAI_API_KEY" | quote }}
+            {{- else if .Values.config.openaiApiKey }}
             - name: OPENAI_API_KEY
               value: {{ .Values.config.openaiApiKey | quote }}
             {{- end }}

@@ -226,46 +226,16 @@ export class ImageProviderService {
     private async getAlbumCoverFromDeezer(
         artistName: string,
         albumTitle: string,
-        timeout: number
+        _timeout: number
     ): Promise<ImageResult | null> {
-        const normalizedArtist = this.normalizeLookupValue(artistName);
-        const normalizedAlbum = this.normalizeLookupValue(albumTitle);
-        const response = await rateLimiter.execute("deezer", () =>
-            axios.get(`${this.DEEZER_API_URL}/search/album`, {
-                params: {
-                    q: `artist:"${normalizedArtist}" album:"${normalizedAlbum}"`,
-                    limit: 5,
-                },
-                timeout,
-            })
-        );
-
-        if (response.data.data && response.data.data.length > 0) {
-            // Try to find exact match first
-            let album = response.data.data.find(
-                (a: any) =>
-                    this.normalizeLookupValue(a.title).toLowerCase() ===
-                        normalizedAlbum.toLowerCase() &&
-                    this.normalizeLookupValue(a.artist.name).toLowerCase() ===
-                        normalizedArtist.toLowerCase()
-            );
-
-            // Fall back to first result
-            if (!album) {
-                album = response.data.data[0];
-            }
-
-            // Deezer provides: cover, cover_small, cover_medium, cover_big, cover_xl
-            const coverUrl = album.cover_xl || album.cover_big || album.cover;
-            if (coverUrl) {
-                return {
-                    url: coverUrl,
-                    source: "deezer",
-                    size: "xl",
-                };
-            }
+        // Delegate to deezerService which has better matching logic:
+        // title variant generation, multi-query search with scoring, and 24h Redis caching.
+        // Dynamic import to avoid circular dependency (imageProvider ← coverArt ← deezer).
+        const { deezerService } = await import("./deezer");
+        const coverUrl = await deezerService.getAlbumCover(artistName, albumTitle);
+        if (coverUrl) {
+            return { url: coverUrl, source: "deezer", size: "xl" };
         }
-
         return null;
     }
 

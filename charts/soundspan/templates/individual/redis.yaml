@@ -41,6 +41,14 @@ spec:
             - name: redis
               containerPort: {{ .Values.redis.port }}
               protocol: TCP
+          {{- $redisEnv := .Values.redis.env | default (dict) }}
+          {{- if gt (len $redisEnv) 0 }}
+          env:
+            {{- range $key := keys $redisEnv | sortAlpha }}
+            - name: {{ $key }}
+              value: {{ index $redisEnv $key | quote }}
+            {{- end }}
+          {{- end }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
           {{- $redisEnvFrom := .Values.redis.envFrom | default (list) }}

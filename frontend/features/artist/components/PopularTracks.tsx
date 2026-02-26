@@ -9,6 +9,7 @@ import type { ColorPalette } from "@/hooks/useImageColor";
 import { formatTime } from "@/utils/formatTime";
 import { formatNumber } from "@/utils/formatNumber";
 import { TidalBadge } from "@/components/ui/TidalBadge";
+import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { toast } from "sonner";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
@@ -24,6 +25,7 @@ interface PopularTracksProps {
     previewPlaying: boolean;
     onPreview: (track: Track, e: React.MouseEvent) => void;
     isInListenTogetherGroup?: boolean;
+    isProviderMatching?: boolean;
     popularHref?: string;
     onAddAllToQueue?: () => void;
 }
@@ -38,6 +40,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
     previewPlaying,
     onPreview,
     isInListenTogetherGroup = false,
+    isProviderMatching = false,
     popularHref,
     onAddAllToQueue,
 }) => {
@@ -83,10 +86,20 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                         track.streamSource === "youtube" &&
                         !!track.youtubeVideoId;
                     const isTidalTrack = track.streamSource === "tidal" && !!track.tidalTrackId;
-                    const isPreviewOnly = isUnowned && !isTidalTrack && !isYtMusic;
                     const hasLocalFile =
                         typeof track.filePath === "string" &&
                         track.filePath.trim().length > 0;
+                    const isAwaitingProviderMatch =
+                        isProviderMatching &&
+                        isUnowned &&
+                        !hasLocalFile &&
+                        !isTidalTrack &&
+                        !isYtMusic;
+                    const isPreviewOnly =
+                        isUnowned &&
+                        !isTidalTrack &&
+                        !isYtMusic &&
+                        !isAwaitingProviderMatch;
                     const isLocalLibraryTrack =
                         !isTidalTrack &&
                         !isYtMusic &&
@@ -116,6 +129,9 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                 if (blockedByListenTogether) {
                                     e.preventDefault();
                                     toast.error("Listen Together only supports local library tracks");
+                                    return;
+                                }
+                                if (isAwaitingProviderMatch) {
                                     return;
                                 }
                                 if (isPreviewOnly) {
@@ -176,9 +192,10 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                             {track.displayTitle ?? track.title}
                                         </span>
                                         {isTidalTrack && <TidalBadge />}
-                                        {isYtMusic && (
-                                            <span className="shrink-0 text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-medium">
-                                                YT MUSIC
+                                        {isYtMusic && <YouTubeBadge />}
+                                        {isAwaitingProviderMatch && (
+                                            <span className="shrink-0 text-[10px] bg-gray-500/20 text-gray-300 px-1.5 py-0.5 rounded font-medium border border-gray-500/30 animate-pulse">
+                                                LOADING
                                             </span>
                                         )}
                                         {isPreviewOnly && (
@@ -215,7 +232,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                             </div>
 
                             {/* Duration + Preview + Overflow */}
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1">
                                 {isPreviewOnly && !blockedByListenTogether && (
                                     <button
                                         onClick={(e) => {
@@ -232,15 +249,15 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                                     </button>
                                 )}
                                 {track.duration > 0 && (
-                                    <span className="text-sm text-gray-400 w-10 text-right">
+                                    <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
                                         {formatTime(track.duration)}
                                     </span>
                                 )}
                                 <TrackPreferenceButtons
                                     trackId={track.id}
                                     mode="both"
-                                    buttonSizeClassName="h-10 w-10"
-                                    iconSizeClassName="h-5 w-5"
+                                    buttonSizeClassName="h-8 w-8"
+                                    iconSizeClassName="h-4 w-4"
                                 />
                                 <TrackOverflowMenu
                                     track={{

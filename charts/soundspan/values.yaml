@@ -112,6 +112,8 @@ aio:
     AUDIO_ANALYSIS_BATCH_SIZE: "10"
     AUDIO_BRPOP_TIMEOUT: "30"
     AUDIO_MODEL_IDLE_TIMEOUT: "300"
+    # Frontend runtime knob (optional): enables iOS Howler lock-screen workarounds
+    # HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
   # -- Additional environment variable sources for AIO container.
   # Example:
   # envFrom:
@@ -287,8 +289,10 @@ frontend:
   # Frontend runtime knobs (effective without image rebuild), for example:
   # env:
   #   BACKEND_URL: http://my-release-backend:3006
-  #   STREAMING_ENGINE_MODE: videojs
+  #   STREAMING_ENGINE_MODE: howler   # primary mode; videojs is segmented experimental mode
   #   SEGMENTED_VHS_PROFILE: balanced
+  #   HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
+  #   SEGMENTED_SESSION_PREWARM_ENABLED: "true"
   #   SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: "5000"
   #
   # NOTE: `NEXT_PUBLIC_*` browser vars in published frontend images are
@@ -335,6 +339,11 @@ postgresql:
     host: postgres.example.com
     port: 5432
     url: ""
+  # -- Environment variables for PostgreSQL container.
+  # Example:
+  # env:
+  #   PGDATA: /var/lib/postgresql/data/pgdata
+  env: {}
   # -- Additional environment variable sources for PostgreSQL container.
   # Example:
   # envFrom:
@@ -361,6 +370,11 @@ redis:
     host: valkey
     port: 6379
     url: ""
+  # -- Environment variables for Redis container.
+  # Example:
+  # env:
+  #   REDIS_PASSWORD: supersecret
+  env: {}
   # -- Additional environment variable sources for Redis container.
   # Example:
   # envFrom:
@@ -587,6 +601,8 @@ secrets:
 # -- Common environment variables applied to backend (both modes)
 config:
   nodeEnv: production
+  # Can be overridden by setting LOG_LEVEL in a workload-specific env map
+  # (for example aio.env, backend.env, or backendWorker.env).
   logLevel: warn
   allowedOrigins: ""
   timezone: UTC
@@ -686,4 +702,3 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-

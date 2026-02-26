@@ -2,13 +2,14 @@ import { useCallback } from "react";
 import { useAudio } from "@/lib/audio-context";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { shuffleArray } from "@/utils/shuffle";
 import { DiscoverPlaylist } from "../types";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface PlaybackQueueTrack {
     id: string;
     title: string;
-    artist: { name: string };
+    artist: { name: string; id?: string };
     album: {
         id: string;
         title: string;
@@ -26,7 +27,7 @@ export function mapDiscoverTrackToPlaybackTrack(
     return {
         id: track.id,
         title: track.title,
-        artist: { name: track.artist },
+        artist: { name: track.artist, id: track.artistId ?? undefined },
         album: {
             id: track.albumId,
             title: track.album,
@@ -101,6 +102,16 @@ export function useDiscoverActions(
         playTracks(formattedTracks, 0);
     }, [playlist, playTracks]);
 
+    const handleShufflePlaylist = useCallback(() => {
+        if (!playlist || playlist.tracks.length === 0) return;
+
+        const formattedTracks = playlist.tracks.map(
+            mapDiscoverTrackToPlaybackTrack
+        );
+
+        playTracks(shuffleArray(formattedTracks), 0);
+    }, [playlist, playTracks]);
+
     const handlePlayTrack = useCallback(
         (index: number) => {
             if (!playlist || playlist.tracks.length === 0) return;
@@ -126,6 +137,7 @@ export function useDiscoverActions(
     return {
         handleGenerate,
         handlePlayPlaylist,
+        handleShufflePlaylist,
         handlePlayTrack,
         handleTogglePlay,
     };

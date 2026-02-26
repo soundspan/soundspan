@@ -847,7 +847,7 @@ export default function PlaylistDetailPage() {
 
                                             {/* Duration + Actions */}
                                             <div className="flex items-center justify-end gap-1">
-                                                <span className="hidden sm:inline text-sm text-gray-400 w-12 text-right">
+                                                <span className="hidden sm:inline text-xs text-gray-500 w-10 text-right tabular-nums">
                                                     {formatTime(
                                                         playlistItem.track
                                                             .duration
