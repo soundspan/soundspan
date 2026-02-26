@@ -84,6 +84,8 @@ RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
 
 # Copy audio analyzer script
 COPY services/audio-analyzer/analyzer.py /app/audio-analyzer/
+# Shared sidecar logging helpers (used by analyzer services)
+COPY services/common /app/services/common
 
 # ============================================
 # CLAP ANALYZER SETUP (Vibe Similarity)
@@ -154,6 +156,11 @@ RUN chmod +x /app/wait-for-db.sh && \
 # ============================================
 # BACKEND BUILD
 # ============================================
+WORKDIR /app
+
+# Provide shared local package used by backend/frontend file: dependencies.
+COPY packages/media-metadata-contract /app/packages/media-metadata-contract
+
 WORKDIR /app/backend
 
 # Copy backend package files and install dependencies
@@ -187,8 +194,10 @@ RUN npm ci && npm cache clean --force
 COPY frontend/ ./
 
 # Build Next.js (production)
+ARG NEXT_PUBLIC_LOG_LEVEL
 ARG NEXT_PUBLIC_BUILD_TYPE=nightly
 ARG NEXT_PUBLIC_APP_VERSION
+ENV NEXT_PUBLIC_LOG_LEVEL=$NEXT_PUBLIC_LOG_LEVEL
 ENV NEXT_PUBLIC_BUILD_TYPE=$NEXT_PUBLIC_BUILD_TYPE
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 RUN npm run build
@@ -494,6 +503,19 @@ SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 INTERNAL_API_SECRET=$INTERNAL_API_SECRET
 ENVEOF
 
+# Normalize runtime streaming engine mode (consumed by frontend /runtime-config route).
+ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
+case "$ENGINE_MODE" in
+    ""|"videojs"|"react-all-player"|"howler-rollback")
+        ;;
+    *)
+        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected videojs|react-all-player|howler-rollback. Falling back to default (videojs)."
+        ENGINE_MODE=""
+        ;;
+esac
+
+echo "Frontend runtime STREAMING_ENGINE_MODE: ${ENGINE_MODE:-videojs (default)}"
+
 echo "Starting soundspan..."
 exec env \
     NODE_ENV=production \
@@ -501,6 +523,7 @@ exec env \
     SESSION_SECRET="$SESSION_SECRET" \
     SETTINGS_ENCRYPTION_KEY="$SETTINGS_ENCRYPTION_KEY" \
     INTERNAL_API_SECRET="$INTERNAL_API_SECRET" \
+    STREAMING_ENGINE_MODE="$ENGINE_MODE" \
     /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
 EOF
 

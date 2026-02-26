@@ -18,6 +18,8 @@ services:
         build:
             context: ./backend
             dockerfile: Dockerfile
+            additional_contexts:
+                media-metadata-contract: ./packages/media-metadata-contract
         environment:
             # Database
             DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
@@ -107,10 +109,14 @@ services:
         build:
             context: ./frontend
             dockerfile: Dockerfile
+            additional_contexts:
+                media-metadata-contract: ./packages/media-metadata-contract
             args:
                 # Prefer relative /api requests (Next.js rewrites will proxy to backend).
                 # If you need a custom API URL, set NEXT_PUBLIC_API_URL explicitly.
                 NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+                # Browser-visible frontend logger level (build-time): debug|info|warn|error|silent.
+                NEXT_PUBLIC_LOG_LEVEL: ${NEXT_PUBLIC_LOG_LEVEL:-}
                 # Build type: "nightly" for dev builds, unset/empty for tagged releases
                 NEXT_PUBLIC_BUILD_TYPE: ${NEXT_PUBLIC_BUILD_TYPE:-nightly}
         environment:
@@ -118,6 +124,9 @@ services:
             # Used by next.config.ts rewrites() inside the container.
             # IMPORTANT: "localhost" inside a container refers to itself, not the host.
             BACKEND_URL: ${BACKEND_URL:-http://backend:3006}
+            # Runtime streaming-engine selector injected via /runtime-config.js.
+            # Keep unset for default segmented engine (videojs). Set to howler-rollback only for incident rollback.
+            STREAMING_ENGINE_MODE: ${STREAMING_ENGINE_MODE:-}
             # Exposed to the browser; leave empty by default so the app uses /api via rewrites.
             NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
             NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING: ${NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING:-false}
@@ -141,6 +150,8 @@ services:
         build:
             context: ./backend
             dockerfile: Dockerfile
+            additional_contexts:
+                media-metadata-contract: ./packages/media-metadata-contract
             target: worker-runtime
         environment:
             DATABASE_URL: postgresql://${POSTGRES_USER:-soundspan}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-soundspan}
@@ -242,7 +253,8 @@ services:
     # tidal_data can be RWO (ReadWriteOnce).
     tidal-downloader:
         build:
-            context: ./services/tidal-downloader
+            context: .
+            dockerfile: services/tidal-downloader/Dockerfile
         container_name: ${SOUNDSPAN_TIDAL_CONTAINER_NAME:-soundspan_tidal_downloader}
         environment:
             - TIDDL_PATH=/data/.tiddl
@@ -285,7 +297,8 @@ services:
     #   - Users need YouTube Music Premium for full track playback
     ytmusic-streamer:
         build:
-            context: ./services/ytmusic-streamer
+            context: .
+            dockerfile: services/ytmusic-streamer/Dockerfile
         container_name: ${SOUNDSPAN_YTMUSIC_CONTAINER_NAME:-soundspan_ytmusic_streamer}
         environment:
             DATA_PATH: /data
@@ -301,6 +314,10 @@ services:
             YTMUSIC_EXTRACT_DELAY_MAX: ${YTMUSIC_EXTRACT_DELAY_MAX:-2.0}
             # Search result cache TTL in seconds (0 to disable)
             YTMUSIC_SEARCH_CACHE_TTL: ${YTMUSIC_SEARCH_CACHE_TTL:-300}
+            # Search mode: auto (default), tv, native
+            # auto prefers native ytmusicapi search and falls back to TV per-user
+            # when #813 invalid-argument responses occur.
+            YTMUSIC_SEARCH_MODE: ${YTMUSIC_SEARCH_MODE:-auto}
         volumes:
             - ytmusic_data:/data
         restart: unless-stopped
@@ -323,7 +340,8 @@ services:
     # Audio Analyzer - Extracts BPM, key, mood, and other audio features
     audio-analyzer:
         build:
-            context: ./services/audio-analyzer
+            context: .
+            dockerfile: services/audio-analyzer/Dockerfile
         container_name: ${SOUNDSPAN_AUDIO_ANALYZER_CONTAINER_NAME:-soundspan_audio_analyzer}
         environment:
             REDIS_URL: redis://redis:6379
@@ -378,7 +396,8 @@ services:
     # CLAP Audio Analyzer - Generates embeddings for similarity search
     audio-analyzer-clap:
         build:
-            context: ./services/audio-analyzer-clap
+            context: .
+            dockerfile: services/audio-analyzer-clap/Dockerfile
         container_name: ${SOUNDSPAN_CLAP_CONTAINER_NAME:-soundspan_audio_analyzer_clap}
         environment:
             REDIS_URL: redis://redis:6379

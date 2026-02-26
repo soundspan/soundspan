@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { useDownloadContext } from "@/lib/download-context";
 import { useListenTogether } from "@/lib/listen-together-context";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // Custom hooks
 import { useAlbumData } from "@/features/album/hooks/useAlbumData";
@@ -163,7 +164,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
             setIsBulkAdd(false);
             setShowPlaylistSelector(false);
         } catch (error) {
-            console.error("Failed to add track(s) to playlist:", error);
+            sharedFrontendLogger.error("Failed to add track(s) to playlist:", error);
         } finally {
             setIsAddingToPlaylist(false);
         }

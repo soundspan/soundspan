@@ -16,6 +16,7 @@ import Image from "next/image";
 import { MobileSidebar } from "./MobileSidebar";
 import { SIDEBAR_NAVIGATION } from "./socialNavigation";
 import { BRAND_NAME } from "@/lib/brand";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Playlist {
     id: string;
@@ -52,7 +53,7 @@ export function Sidebar() {
             // No toast - notification will appear in the activity panel
             window.dispatchEvent(new CustomEvent("notifications-changed"));
         } catch (error) {
-            console.error("Failed to trigger library scan:", error);
+            sharedFrontendLogger.error("Failed to trigger library scan:", error);
             toast.error("Failed to start scan. Please try again.");
         } finally {
             // Keep syncing for a bit to show the animation
@@ -74,7 +75,7 @@ export function Sidebar() {
                 const data = await api.getPlaylists();
                 setPlaylists(data);
             } catch (error) {
-                console.error("Failed to load playlists:", error);
+                sharedFrontendLogger.error("Failed to load playlists:", error);
                 hasLoadedPlaylists.current = false; // Allow retry on error
             } finally {
                 if (loadingTimeout) clearTimeout(loadingTimeout);
@@ -91,7 +92,7 @@ export function Sidebar() {
                 const data = await api.getPlaylists();
                 setPlaylists(data);
             } catch (error) {
-                console.error("Failed to reload playlists:", error);
+                sharedFrontendLogger.error("Failed to reload playlists:", error);
             }
         };
 

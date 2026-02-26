@@ -3,12 +3,18 @@ FROM node:20-slim AS deps
 
 WORKDIR /app
 
+# Inject monorepo contract package into /packages so file:../packages/* links resolve.
+COPY --from=media-metadata-contract . /packages/media-metadata-contract
+
 # Copy package files
 COPY package*.json ./
 
 # Install dependencies
 RUN npm ci && \
     npm cache clean --force
+
+# Build local contract package expected by frontend imports.
+RUN npx tsc -p /packages/media-metadata-contract/tsconfig.json
 
 # Stage 2: Builder
 FROM node:20-slim AS builder
@@ -18,6 +24,7 @@ WORKDIR /app
 # Copy dependencies
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package*.json ./
+COPY --from=deps /packages/media-metadata-contract /packages/media-metadata-contract
 
 # Copy source code
 COPY . .
@@ -25,10 +32,12 @@ COPY . .
 # Accept build args for environment variables
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_API_PATH_MODE=auto
+ARG NEXT_PUBLIC_LOG_LEVEL
 ARG NEXT_PUBLIC_BUILD_TYPE=nightly
 ARG NEXT_PUBLIC_APP_VERSION
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_PATH_MODE=$NEXT_PUBLIC_API_PATH_MODE
+ENV NEXT_PUBLIC_LOG_LEVEL=$NEXT_PUBLIC_LOG_LEVEL
 ENV NEXT_PUBLIC_BUILD_TYPE=$NEXT_PUBLIC_BUILD_TYPE
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 
@@ -52,6 +61,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/server.js ./server.js
+COPY --from=builder /packages/media-metadata-contract /packages/media-metadata-contract
 
 # Copy healthcheck and entrypoint scripts
 COPY healthcheck.js ./

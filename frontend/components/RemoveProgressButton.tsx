@@ -6,6 +6,7 @@ import { useToast } from "@/lib/toast-context";
 import { RotateCcw } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface RemoveProgressButtonProps {
     audiobookId: string;
@@ -28,7 +29,7 @@ export function RemoveProgressButton({
             toast.success("Progress removed");
             onProgressRemoved?.();
         } catch (error) {
-            console.error("Failed to remove progress:", error);
+            sharedFrontendLogger.error("Failed to remove progress:", error);
             toast.error("Failed to remove progress");
         } finally {
             setIsRemoving(false);

@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // Types
 interface PlaylistPreview {
@@ -83,7 +84,7 @@ export default function BrowsePlaylistsPage() {
             setPlaylists(response.playlists);
             setGenres(response.genres);
         } catch (error) {
-            console.error("Failed to fetch browse content:", error);
+            sharedFrontendLogger.error("Failed to fetch browse content:", error);
             setLoadError(
                 "Couldn't load playlists. Check your connection and try again."
             );
@@ -126,7 +127,7 @@ export default function BrowsePlaylistsPage() {
             );
             setPlaylists(response.playlists);
         } catch (error) {
-            console.error("Search failed:", error);
+            sharedFrontendLogger.error("Search failed:", error);
             toast.error("Failed to search playlists");
         } finally {
             setIsSearching(false);
@@ -182,7 +183,7 @@ export default function BrowsePlaylistsPage() {
             }>(`/browse/genres/${genre.id}/playlists?limit=50`);
             setGenrePlaylists(response.playlists);
         } catch (error) {
-            console.error("Failed to fetch genre playlists:", error);
+            sharedFrontendLogger.error("Failed to fetch genre playlists:", error);
             toast.error("Failed to load genre playlists");
         } finally {
             setIsLoading(false);

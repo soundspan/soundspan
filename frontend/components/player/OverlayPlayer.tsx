@@ -3,6 +3,7 @@
 import { useAudio } from "@/lib/audio-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import { useLyrics } from "@/hooks/useLyrics";
+import { resolvePlaybackQualityBadgeFromStreamSource } from "@/hooks/useStreamBitrate";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Image from "next/image";
@@ -48,6 +49,7 @@ import {
 } from "@/lib/storage-migration";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 const OVERLAY_ACTIVE_TAB_KEY = OVERLAY_ACTIVE_TAB_STORAGE_KEY;
 
@@ -166,6 +168,10 @@ export function OverlayPlayer() {
     const [matchingRelatedTrackKey, setMatchingRelatedTrackKey] = useState<string | null>(null);
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
     const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(500);
+    const currentTrackQualityBadge = useMemo(
+        () => resolvePlaybackQualityBadgeFromStreamSource(currentTrack?.streamSource),
+        [currentTrack?.streamSource],
+    );
     const canSkip = playbackType === "track";
     const preferenceTrackId = canSkip ? currentTrack?.id : undefined;
     const isDesktopOverlayLayout = canSkip && !isMobileOrTablet;
@@ -382,29 +388,68 @@ export function OverlayPlayer() {
 
     const scrollQueueToCurrentTrack = useCallback(
         (behavior: ScrollBehavior) => {
-        const listElement = queueListRef.current;
-        if (!listElement || queueTracks.length === 0) return;
+            const listElement = queueListRef.current;
+            if (!listElement || queueTracks.length === 0) return false;
 
-        const targetIndex =
-            currentIndex >= 0 && currentIndex < queueTracks.length
-                ? currentIndex
-                : 0;
-        const target = listElement.querySelector<HTMLElement>(
-            `[data-queue-index="${targetIndex}"]`
-        );
-        if (!target) return;
+            const targetIndex =
+                currentIndex >= 0 && currentIndex < queueTracks.length
+                    ? currentIndex
+                    : 0;
+            const target = listElement.querySelector<HTMLElement>(
+                `[data-queue-index="${targetIndex}"]`
+            );
+            if (!target) return false;
 
-        const targetTop =
-            target.offsetTop -
-            listElement.clientHeight / 2 +
-            target.clientHeight / 2;
+            const targetTop =
+                target.offsetTop -
+                listElement.clientHeight / 2 +
+                target.clientHeight / 2;
 
-        listElement.scrollTo({
-            top: Math.max(0, targetTop),
-            behavior,
-        });
+            listElement.scrollTo({
+                top: Math.max(0, targetTop),
+                behavior,
+            });
+
+            return true;
         },
         [currentIndex, queueTracks.length]
+    );
+
+    const scheduleQueueCentering = useCallback(
+        (behavior: ScrollBehavior, options?: { waitForQueueLayout?: boolean }) => {
+            const maxAttempts = 8;
+            let attempts = 0;
+            let frameA = 0;
+            let frameB = 0;
+            let settleTimeout: number | null = null;
+
+            const runCenterAttempt = () => {
+                attempts += 1;
+                const centered = scrollQueueToCurrentTrack(behavior);
+                if (!centered && attempts < maxAttempts) {
+                    frameA = window.requestAnimationFrame(() => {
+                        frameB = window.requestAnimationFrame(runCenterAttempt);
+                    });
+                }
+            };
+
+            frameA = window.requestAnimationFrame(() => {
+                frameB = window.requestAnimationFrame(runCenterAttempt);
+            });
+
+            if (options?.waitForQueueLayout) {
+                settleTimeout = window.setTimeout(() => {
+                    scrollQueueToCurrentTrack("auto");
+                }, 240);
+            }
+
+            return () => {
+                if (frameA) window.cancelAnimationFrame(frameA);
+                if (frameB) window.cancelAnimationFrame(frameB);
+                if (settleTimeout !== null) window.clearTimeout(settleTimeout);
+            };
+        },
+        [scrollQueueToCurrentTrack]
     );
 
     useEffect(() => {
@@ -515,24 +560,14 @@ export function OverlayPlayer() {
         const behavior: ScrollBehavior =
             becameVisible || shouldReduceMotion ? "auto" : "smooth";
 
-        let frameA = 0;
-        let frameB = 0;
-
-        frameA = window.requestAnimationFrame(() => {
-            frameB = window.requestAnimationFrame(() => {
-                scrollQueueToCurrentTrack(behavior);
-            });
+        return scheduleQueueCentering(behavior, {
+            waitForQueueLayout: becameVisible,
         });
-
-        return () => {
-            if (frameA) window.cancelAnimationFrame(frameA);
-            if (frameB) window.cancelAnimationFrame(frameB);
-        };
     }, [
         isQueueTabVisible,
         queueTracks.length,
         currentIndex,
-        scrollQueueToCurrentTrack,
+        scheduleQueueCentering,
         shouldReduceMotion,
     ]);
 
@@ -967,7 +1002,7 @@ export function OverlayPlayer() {
                 toast.error("Couldn't find matching tracks");
             }
         } catch (error) {
-            console.error("Failed to start vibe match:", error);
+            sharedFrontendLogger.error("Failed to start vibe match:", error);
             toast.error("Failed to match vibe");
         } finally {
             setIsVibeLoading(false);
@@ -1186,10 +1221,12 @@ export function OverlayPlayer() {
                                             {title}
                                         </h1>
                                     )}
-                                    {!isMobileOrTablet && currentTrack?.streamSource === "tidal" && (
+                                    {!isMobileOrTablet &&
+                                        currentTrackQualityBadge?.variant === "tidal" && (
                                         <TidalBadge />
                                     )}
-                                    {!isMobileOrTablet && currentTrack?.streamSource === "youtube" && (
+                                    {!isMobileOrTablet &&
+                                        currentTrackQualityBadge?.variant === "youtube" && (
                                         <YouTubeBadge />
                                     )}
                                 </div>
@@ -1209,12 +1246,14 @@ export function OverlayPlayer() {
                                         {subtitle}
                                     </p>
                                 )}
-                                {isMobileOrTablet && currentTrack?.streamSource === "tidal" && (
+                                {isMobileOrTablet &&
+                                    currentTrackQualityBadge?.variant === "tidal" && (
                                     <div className="mt-1 flex justify-center landscape:justify-start">
                                         <TidalBadge />
                                     </div>
                                 )}
-                                {isMobileOrTablet && currentTrack?.streamSource === "youtube" && (
+                                {isMobileOrTablet &&
+                                    currentTrackQualityBadge?.variant === "youtube" && (
                                     <div className="mt-1 flex justify-center landscape:justify-start">
                                         <YouTubeBadge />
                                     </div>
@@ -1246,13 +1285,16 @@ export function OverlayPlayer() {
 
                             {canSkip ? (
                                 <>
-                                    <div className="mb-3 flex items-center justify-center gap-3">
-                                        <TrackPreferenceButtons
-                                            trackId={preferenceTrackId}
-                                            className="gap-5"
-                                            buttonSizeClassName="h-11 w-11"
-                                            iconSizeClassName="h-6 w-6"
-                                        />
+                                    <div className="mb-3 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+                                        <div className="flex min-w-0 items-center justify-end">
+                                            <TrackPreferenceButtons
+                                                trackId={preferenceTrackId}
+                                                className="gap-5"
+                                                buttonSizeClassName="h-11 w-11"
+                                                iconSizeClassName="h-6 w-6"
+                                            />
+                                        </div>
+
                                         <button
                                             onClick={() => setIsPlaylistSelectorOpen(true)}
                                             className="flex h-11 w-11 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -1261,41 +1303,44 @@ export function OverlayPlayer() {
                                         >
                                             <Plus className="h-6 w-6" />
                                         </button>
-                                        {currentTrack?.artist?.id && playbackType === "track" && (
-                                            <button
-                                                onClick={handleStartRadio}
-                                                disabled={isRadioLoading}
-                                                className="flex h-11 w-11 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                                                title="Start artist radio"
-                                                aria-label="Start Radio"
-                                            >
-                                                {isRadioLoading ? (
-                                                    <Loader2 className="h-6 w-6 animate-spin" />
-                                                ) : (
-                                                    <Radio className="h-6 w-6" />
-                                                )}
-                                            </button>
-                                        )}
-                                        {!featuresLoading && vibeEmbeddings && (
-                                            <button
-                                                onClick={handleVibeToggle}
-                                                disabled={isVibeLoading}
-                                                className={cn(
-                                                    "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
-                                                    vibeMode
-                                                        ? "text-[#60a5fa] bg-white/[0.05]"
-                                                        : "text-gray-400 hover:text-white hover:bg-white/10"
-                                                )}
-                                                title={vibeMode ? "Turn off vibe mode" : "Match this vibe"}
-                                                aria-label="Match Vibe"
-                                            >
-                                                {isVibeLoading ? (
-                                                    <Loader2 className="h-6 w-6 animate-spin" />
-                                                ) : (
-                                                    <AudioWaveform className="h-6 w-6" />
-                                                )}
-                                            </button>
-                                        )}
+
+                                        <div className="flex min-w-0 items-center justify-start gap-3">
+                                            {currentTrack?.artist?.id && playbackType === "track" && (
+                                                <button
+                                                    onClick={handleStartRadio}
+                                                    disabled={isRadioLoading}
+                                                    className="flex h-11 w-11 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                                    title="Start artist radio"
+                                                    aria-label="Start Radio"
+                                                >
+                                                    {isRadioLoading ? (
+                                                        <Loader2 className="h-6 w-6 animate-spin" />
+                                                    ) : (
+                                                        <Radio className="h-6 w-6" />
+                                                    )}
+                                                </button>
+                                            )}
+                                            {!featuresLoading && vibeEmbeddings && (
+                                                <button
+                                                    onClick={handleVibeToggle}
+                                                    disabled={isVibeLoading}
+                                                    className={cn(
+                                                        "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
+                                                        vibeMode
+                                                            ? "text-[#60a5fa] bg-white/[0.05]"
+                                                            : "text-gray-400 hover:text-white hover:bg-white/10"
+                                                    )}
+                                                    title={vibeMode ? "Turn off vibe mode" : "Match this vibe"}
+                                                    aria-label="Match Vibe"
+                                                >
+                                                    {isVibeLoading ? (
+                                                        <Loader2 className="h-6 w-6 animate-spin" />
+                                                    ) : (
+                                                        <AudioWaveform className="h-6 w-6" />
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div
@@ -1555,10 +1600,10 @@ export function OverlayPlayer() {
                                                     <p className="min-w-0 truncate text-xs text-gray-400">
                                                         {subtitle}
                                                     </p>
-                                                    {currentTrack?.streamSource === "tidal" && (
+                                                    {currentTrackQualityBadge?.variant === "tidal" && (
                                                         <TidalBadge className="text-[9px] px-1 py-0.5 leading-none" />
                                                     )}
-                                                    {currentTrack?.streamSource === "youtube" && (
+                                                    {currentTrackQualityBadge?.variant === "youtube" && (
                                                         <YouTubeBadge className="text-[9px] px-1 py-0.5 leading-none" />
                                                     )}
                                                 </div>
@@ -1733,6 +1778,10 @@ export function OverlayPlayer() {
                                                         {queueTracks.map((track, queueIndex) => {
                                                             const isCurrentTrack = queueIndex === currentIndex;
                                                             const isPlayedTrack = queueIndex < currentIndex;
+                                                            const queueTrackQualityBadge =
+                                                                resolvePlaybackQualityBadgeFromStreamSource(
+                                                                    track.streamSource,
+                                                                );
                                                             return (
                                                                 <div
                                                                     key={`${track.id}-${queueIndex}`}
@@ -1803,10 +1852,10 @@ export function OverlayPlayer() {
                                                                                 >
                                                                                     {track.displayTitle ?? track.title}
                                                                                 </p>
-                                                                                {track.streamSource === "tidal" && (
+                                                                                {queueTrackQualityBadge?.variant === "tidal" && (
                                                                                     <TidalBadge className="text-[9px] px-1 py-0.5 leading-none" />
                                                                                 )}
-                                                                                {track.streamSource === "youtube" && (
+                                                                                {queueTrackQualityBadge?.variant === "youtube" && (
                                                                                     <YouTubeBadge
                                                                                         className="text-[9px] px-1 py-0.5 leading-none"
                                                                                     />

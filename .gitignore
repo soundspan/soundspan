@@ -141,6 +141,7 @@ frontend/test-*.tsx
 **/.vibe/
 .agent/
 .agent/**
+.agents
 .agents/
 .agents/**
 .claudeignore

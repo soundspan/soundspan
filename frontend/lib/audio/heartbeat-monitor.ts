@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Heartbeat Monitor
  *
@@ -70,7 +71,7 @@ export class HeartbeatMonitor {
     this.isStalled = false;
 
     if (this.debugEnabled) {
-      console.log('[Heartbeat] Started monitoring');
+      sharedFrontendLogger.info('[Heartbeat] Started monitoring');
     }
 
     this.intervalId = setInterval(() => this.tick(), this.config.interval);
@@ -94,7 +95,7 @@ export class HeartbeatMonitor {
     this.isStalled = false;
 
     if (this.debugEnabled) {
-      console.log('[Heartbeat] Stopped monitoring');
+      sharedFrontendLogger.info('[Heartbeat] Stopped monitoring');
     }
   }
 
@@ -106,7 +107,7 @@ export class HeartbeatMonitor {
 
     this.bufferTimeoutId = setTimeout(() => {
       if (this.debugEnabled) {
-        console.log('[Heartbeat] Buffer timeout expired');
+        sharedFrontendLogger.info('[Heartbeat] Buffer timeout expired');
       }
       this.callbacks.onBufferTimeout();
     }, this.config.bufferTimeout);
@@ -137,7 +138,7 @@ export class HeartbeatMonitor {
         this.callbacks.onRecovery();
 
         if (this.debugEnabled) {
-          console.log('[Heartbeat] Recovered from stall');
+          sharedFrontendLogger.info('[Heartbeat] Recovered from stall');
         }
       }
     }
@@ -153,21 +154,21 @@ export class HeartbeatMonitor {
       this.staleCount++;
 
       if (this.debugEnabled && this.staleCount > 0) {
-        console.log(`[Heartbeat] Stale count: ${this.staleCount}, time: ${currentTime.toFixed(2)}`);
+        sharedFrontendLogger.info(`[Heartbeat] Stale count: ${this.staleCount}, time: ${currentTime.toFixed(2)}`);
       }
 
       if (this.staleCount >= this.config.staleThreshold) {
         if (!isActuallyPlaying) {
           // Howler stopped but we didn't get an event
           if (this.debugEnabled) {
-            console.log('[Heartbeat] Unexpected stop detected');
+            sharedFrontendLogger.info('[Heartbeat] Unexpected stop detected');
           }
           this.callbacks.onUnexpectedStop();
         } else if (!this.isStalled) {
           // Howler says playing but time isn't moving - network stall
           this.isStalled = true;
           if (this.debugEnabled) {
-            console.log('[Heartbeat] Stall detected');
+            sharedFrontendLogger.info('[Heartbeat] Stall detected');
           }
           this.callbacks.onStall();
         }
@@ -183,7 +184,7 @@ export class HeartbeatMonitor {
         this.callbacks.onRecovery();
 
         if (this.debugEnabled) {
-          console.log('[Heartbeat] Recovered from stall');
+          sharedFrontendLogger.info('[Heartbeat] Recovered from stall');
         }
       }
     }

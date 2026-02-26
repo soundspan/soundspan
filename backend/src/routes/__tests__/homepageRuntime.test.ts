@@ -44,6 +44,7 @@ jest.mock("../../utils/redis", () => ({
 import router from "../homepage";
 import { prisma as prismaClient } from "../../utils/db";
 import { redisClient as redis } from "../../utils/redis";
+import { createMockJsonResponse } from "./helpers/mockJsonResponse";
 
 const mockAlbumFindMany = prismaClient.album.findMany as jest.Mock;
 const mockPodcastFindMany = prismaClient.podcast.findMany as jest.Mock;
@@ -61,21 +62,7 @@ function getHandler(path: string, method: "get") {
     return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
-function createRes() {
-    const res: any = {
-        statusCode: 200,
-        body: undefined as unknown,
-        status: jest.fn(function (code: number) {
-            res.statusCode = code;
-            return res;
-        }),
-        json: jest.fn(function (payload: unknown) {
-            res.body = payload;
-            return res;
-        }),
-    };
-    return res;
-}
+const createRes = createMockJsonResponse;
 
 describe("homepage routes runtime", () => {
     const getGenres = getHandler("/genres", "get");

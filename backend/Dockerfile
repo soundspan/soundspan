@@ -11,6 +11,9 @@ FROM node:20-slim AS deps
 
 WORKDIR /app
 
+# Inject monorepo contract package into /packages so file:../packages/* links resolve.
+COPY --from=media-metadata-contract . /packages/media-metadata-contract
+
 # Copy dependency manifests first for better layer caching
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -18,6 +21,9 @@ COPY prisma ./prisma/
 # Install all deps (includes dev deps needed for tsx/prisma CLI)
 RUN npm ci && \
     npm cache clean --force
+
+# Build local contract package expected by backend imports.
+RUN npx tsc -p /packages/media-metadata-contract/tsconfig.json
 
 # Generate Prisma client once against repo schema
 RUN npx prisma generate
@@ -49,6 +55,7 @@ COPY --from=worker-deps /app/node_modules ./node_modules
 COPY --from=worker-deps /app/package*.json ./
 COPY --from=worker-deps /app/prisma ./prisma
 COPY --from=worker-deps /app/dist ./dist
+COPY --from=worker-deps /packages/media-metadata-contract /packages/media-metadata-contract
 
 # Create writable runtime dirs and harden image
 RUN mkdir -p /app/cache /app/logs && \
@@ -67,17 +74,18 @@ FROM node:20-slim AS api-runtime
 
 WORKDIR /app
 
-# ffmpeg is required by API runtime (transcoding/audio paths)
+# ffmpeg is required by API runtime (transcoding/audio paths).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
     tini \
     openssl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # API runtime keeps full deps because entrypoint uses npx prisma + tsx runtime
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package*.json ./
 COPY --from=deps /app/prisma ./prisma
+COPY --from=deps /packages/media-metadata-contract /packages/media-metadata-contract
 COPY src ./src
 
 # Healthcheck + entrypoint

@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { howlerEngine } from "@/lib/howler-engine";
+import { createRuntimeAudioEngine } from "@/lib/audio-engine";
+
+const playbackEngine = createRuntimeAudioEngine();
 
 export function usePreviewPlayer() {
     const [currentPreview, setCurrentPreview] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export function usePreviewPlayer() {
             });
             // Resume main player if needed
             if (mainPlayerWasPausedRef.current) {
-                howlerEngine.play();
+                playbackEngine.play();
                 mainPlayerWasPausedRef.current = false;
             }
         };
@@ -50,13 +52,13 @@ export function usePreviewPlayer() {
                 setCurrentPreview(null);
                 // Resume main player if it was playing before
                 if (mainPlayerWasPausedRef.current) {
-                    howlerEngine.play();
+                    playbackEngine.play();
                     mainPlayerWasPausedRef.current = false;
                 }
             } else {
                 // Pause the main player if it's playing
-                if (howlerEngine.isPlaying()) {
-                    howlerEngine.pause();
+                if (playbackEngine.isPlaying()) {
+                    playbackEngine.pause();
                     mainPlayerWasPausedRef.current = true;
                 }
 
@@ -67,7 +69,7 @@ export function usePreviewPlayer() {
                         setCurrentPreview(null);
                         // Resume main player if it was playing before
                         if (mainPlayerWasPausedRef.current) {
-                            howlerEngine.play();
+                            playbackEngine.play();
                             mainPlayerWasPausedRef.current = false;
                         }
                     };

@@ -1,0 +1,467 @@
+{
+  "metadata": {
+    "id": "canonical-ruleset",
+    "version": "2026-02-24.11",
+    "description": "Canonical governance rule catalog used for policy and drift checks.",
+    "generated_from": [
+      ".agents-config/policies/agent-governance.json",
+      ".agents-config/docs/AGENT_RULES.md"
+    ],
+    "lineage": {
+      "policy_required_ids_sha256": "d500972825993e32998b5bfbff2efdf0848a5d8a8fbd14d35471aaeeb1f1bc81",
+      "policy_orchestrator_rules_sha256": "2ed533f4959dde7409cf7030d0b6d5853d160632f172488a2a04810ac21fef99",
+      "rules_doc_catalog_sha256": "8fc23673bea4896fed5182478bdfc4900f402c91ef7ff0d5e13183fb8094a701",
+      "canonical_rules_sha256": "17e42b1f97f0032b4755a5b95963ea8fe85e9367fb920d4bf058ec91163eb0a6"
+    }
+  },
+  "rules": [
+    {
+      "id": "rule_startup_read_order",
+      "statement": "Follow startup read order and run session preflight before non-trivial implementation.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_context_index_usage",
+      "statement": "Use `.agents-config/docs/CONTEXT_INDEX.json` as the machine-readable map for context lookup.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_execution_queue_required",
+      "statement": "Maintain canonical machine-readable execution queue in `.agents/EXECUTION_QUEUE.json`.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_queue_plan_before_execution",
+      "statement": "Plan all execution work into queue entries before changing any entry to active execution state.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_queue_single_source_of_truth",
+      "statement": "Use `.agents/EXECUTION_QUEUE.json` as the only queue/scope authority across orchestrator and subagents.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_queue_scoped_context_read",
+      "statement": "Read only queue fields/items relevant to the active feature/item scope to preserve context efficiency.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_queue_archive_on_complete",
+      "statement": "Move completed task/feature work from hot queue into feature-sharded archive artifacts.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_plan_machine_contract_required",
+      "statement": "Maintain machine-readable plan lifecycle + authoritative narrative context (including enforced pre-spec purpose/non-goals fields) in `PLAN.json` for each active/deferred/archived feature plan directory.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_plan_step_reference_required",
+      "statement": "Require at least one concrete reference in every `PLAN.json` implementation step.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_plan_non_goals_status_gate",
+      "statement": "Require non-empty `narrative.pre_spec_outline.non_goals` for policy-configured plan statuses (default: `ready`, `deferred`).",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_plan_placeholder_deliverables_forbidden",
+      "statement": "Forbid placeholder implementation-step deliverables using policy deny patterns.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_plan_complete_step_summary_required",
+      "statement": "For complete implementation steps, require non-empty completion-summary arrays for delivered work, touched files/functions/hooks, and verification/testing.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_plan_status_coherence_required",
+      "statement": "Enforce policy-driven coherence between top-level plan status and implementation-step statuses.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_scope_tight_no_overbroad_refactor",
+      "statement": "Keep changes narrowly scoped unless the user explicitly requests broad refactors.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_hybrid_machine_human_contract",
+      "statement": "Use machine-readable contracts as authority with concise human nuance addenda when needed.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_policy_sync_required",
+      "statement": "When process expectations change, update policy + enforcement + human docs together.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_continuity_required",
+      "statement": "Read and maintain `.agents/CONTINUITY.md` as canonical continuity context.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_post_compaction_rebootstrap",
+      "statement": "Treat compaction recovery as full startup and run preflight.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_repo_index_preflight_gate",
+      "statement": "Require preflight index readiness checks (always re-index, then strict verify) before implementation starts.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_context_index_drift_guard",
+      "statement": "Keep `.agents-config/docs/CONTEXT_INDEX.json` synchronized with policy/documentation contracts and fail checks on drift.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_canonical_ruleset_contract_required",
+      "statement": "Maintain canonical rule IDs/statements in `.agents-config/contracts/rules/canonical-ruleset.json` with hash lineage tied to policy and rules docs.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_local_rule_overrides_contract_required",
+      "statement": "Allow local-only override IDs only through `.agents-config/agent-overrides/rule-overrides.json`, validated against `.agents-config/agent-overrides/rule-overrides.schema.json`.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_managed_files_known_overrides_only",
+      "statement": "Permit managed-file override payloads only for explicitly allowlisted entries (`allow_override=true`) and fail unknown `.agents-config/agent-overrides/**` payload files.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_managed_files_canonical_contract_required",
+      "statement": "Keep managed workflow manifests (`.agents-config/agent-managed.json` and `.agents-config/tools/bootstrap/managed-files.template.json`) canonical with explicit `canonical_contract` defaults and authority modes.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_canonical_agents_root",
+      "statement": "Treat `.agents` as the canonical project-local agent-context path; bootstrap defaults to external workfiles mode where `.agents` symlinks to `<agents-workfiles-path>/<project-id>` (default path `../agents-workfiles`), and local `.agents` mode is explicit via `--agents-mode local`.",
+      "category": "governance",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_worktree_root_required",
+      "statement": "Keep all non-primary Git worktrees under `../<repo-name>.worktrees`.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_agents_semantic_merge_required",
+      "statement": "`.agents/**` is shared multi-session state; every `.agents/**` edit must be semantically merged against latest on-disk state.",
+      "category": "execution",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_tdd_default",
+      "statement": "Prefer true TDD and document deviations when strict TDD is impractical.",
+      "category": "quality",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_coverage_default_100",
+      "statement": "Treat 100% coverage as default bar unless user-approved exception exists.",
+      "category": "quality",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_scope_completeness_gate",
+      "statement": "Explicitly map outcomes to all in-scope user requests before closeout.",
+      "category": "quality",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_feature_index_required",
+      "statement": "Maintain `.agents-config/docs/FEATURE_INDEX.json` as the canonical machine-readable feature map.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_test_matrix_required",
+      "statement": "Maintain `.agents-config/docs/TEST_MATRIX.md` as the canonical targeted test-command matrix.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_release_notes_template_required",
+      "statement": "Enforce canonical release-notes template + generator workflow, section order, and plain-English non-jargon summaries through policy checks.",
+      "category": "release",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_release_notes_changelog_source_required",
+      "statement": "Treat `CHANGELOG.md` as release-notes source of truth and rotate `Unreleased` during `release:prepare`.",
+      "category": "release",
+      "severity": "error",
+      "overrideable": false,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_logging_contract_required",
+      "statement": "Maintain `.agents-config/docs/LOGGING_STANDARDS.md` and enforce logging compliance checks across frontend/backend/python runtime code.",
+      "category": "logging",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "orch_hybrid_instruction_contract",
+      "statement": "Use a hybrid instruction contract: machine-readable payload plus concise human-readable intent/nuance.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_scope_tightness",
+      "statement": "Keep delegated work and resulting diffs tightly scoped to the user request; no overbroad refactors unless explicitly requested.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_machine_payload_authoritative",
+      "statement": "Treat the machine-readable payload as authoritative for execution; resolve conflicts with prose before proceeding.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_delegate_substantive_work",
+      "statement": "Preserve orchestrator context by delegating substantive implementation/investigation tasks whenever delegation is available.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_operator_subagent_default",
+      "statement": "All non-trivial work must be delegated to subagents; direct single-agent execution is restricted to trivial tasks.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_non_trivial_subagent_mandatory",
+      "statement": "Treat subagent delegation for non-trivial work as mandatory and non-optional to preserve orchestrator context budget.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_human_nuance_addendum",
+      "statement": "When nuances are not fully captured by machine-readable fields, include concise human-language addenda.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_atomic_task_delegation",
+      "statement": "Delegate work in atomic task slices so each subagent context remains narrow and auditable.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_dual_channel_result_envelope",
+      "statement": "Require subagent output in two channels: machine-readable result envelope plus concise human-readable summary.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_orchestrator_coordination_only",
+      "statement": "Limit orchestrator direct execution to coordination/meta tasks; if delegation is infeasible, record explicit rationale first.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_release_idle_subagents_required",
+      "statement": "Release idle subagents as soon as they are no longer actively executing delegated work.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_default_cli_routing",
+      "statement": "Default subagent orchestration mapping is Codex agents via `codex` CLI and Claude agents via `claude` CLI unless user-overridden.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": true,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_unconfirmed_unknowns",
+      "statement": "Mark unknowns explicitly as `UNCONFIRMED` and fail fast on missing required fields.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_atomic_single_objective_scope",
+      "statement": "Each delegated subagent task must target exactly one concrete objective with explicit atomic_scope boundaries; split multi-objective requests into separate tasks.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_single_orchestrator_authority",
+      "statement": "Use exactly one orchestrator context owner per session; subagents execute delegated work and must not recursively orchestrate.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_concise_subagent_briefs",
+      "statement": "Keep subagent machine payloads and human addenda concise, bounded by configured verbosity budgets.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_spec_refined_plan_verbosity",
+      "statement": "Apply concise verbosity budgets across spec outline, refined spec, and detailed implementation plan artifacts.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": false,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "orch_codex_model_default",
+      "statement": "Default model routing is role/risk-based: orchestrator uses `gpt-5.3-codex` with `xhigh`, subagents use `gpt-5.3-codex` with `high`, and Spark is reserved for low-risk loops with explicit verification commands.",
+      "category": "orchestration",
+      "severity": "error",
+      "overrideable": true,
+      "source": "policy.orchestratorSubagent.rules"
+    },
+    {
+      "id": "rule_route_map_required",
+      "statement": "Maintain `.agents-config/docs/ROUTE_MAP.md` as the canonical generated backend/frontend route map.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_domain_readmes_required",
+      "statement": "Maintain per-domain start-here READMEs in `backend/src/routes`, `backend/src/services`, and `frontend/features/*`.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_jsdoc_coverage_required",
+      "statement": "Maintain `.agents-config/docs/JSDOC_COVERAGE.md` as the generated exported-symbol documentation drift tracker.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    }
+  ]
+}

@@ -11,7 +11,10 @@ import {
     useMemo,
 } from "react";
 import { useAudioState } from "./audio-state-context";
-import { playbackStateMachine, type PlaybackState } from "./audio";
+import {
+    playbackStateMachine,
+    type PlaybackState,
+} from "./audio";
 import { api } from "@/lib/api";
 import {
     createMigratingStorageKey,
@@ -23,7 +26,19 @@ import {
     LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX,
     PLAYBACK_PROGRESS_SAVE_INTERVAL_MS,
 } from "@/lib/playback-state-cadence";
-import { resolveHydratedPlaybackIntent } from "@/lib/playback-intent";
+import {
+    resolveHydratedPlaybackIntent,
+    resolveMachinePlaybackIntent,
+} from "@/lib/playback-intent";
+import { clampNonNegativePlaybackTime } from "@/lib/audio-playback-normalization";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+
+export interface PlaybackStreamProfile {
+    mode: "direct" | "dash";
+    sourceType: "local" | "tidal" | "ytmusic" | "unknown";
+    codec: string | null;
+    bitrateKbps: number | null;
+}
 
 interface AudioPlaybackContextType {
     isPlaying: boolean;
@@ -36,6 +51,7 @@ interface AudioPlaybackContextType {
     isSeekLocked: boolean; // True when a seek operation is in progress
     audioError: string | null; // Error message from state machine
     playbackState: PlaybackState; // Raw state machine state for advanced use
+    streamProfile: PlaybackStreamProfile | null;
     setIsPlaying: (playing: boolean) => void;
     setCurrentTime: (time: number) => void;
     setCurrentTimeFromEngine: (time: number) => void; // For timeupdate events - respects seek lock
@@ -44,6 +60,7 @@ interface AudioPlaybackContextType {
     setTargetSeekPosition: (position: number | null) => void;
     setCanSeek: (canSeek: boolean) => void;
     setDownloadProgress: (progress: number | null) => void;
+    setStreamProfile: (profile: PlaybackStreamProfile | null) => void;
     lockSeek: (targetTime: number) => void; // Lock updates during seek
     unlockSeek: () => void; // Unlock after seek completes
     clearAudioError: () => void; // Clear the audio error state
@@ -94,6 +111,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     );
     const [audioError, setAudioError] = useState<string | null>(null);
     const [playbackState, setPlaybackState] = useState<PlaybackState>("IDLE");
+    const [streamProfile, setStreamProfile] =
+        useState<PlaybackStreamProfile | null>(null);
     const [isHydrated] = useState(() => typeof window !== "undefined");
     const lastSaveTimeRef = useRef<number>(0);
     const lastServerProgressSaveRef = useRef<number>(0);
@@ -114,19 +133,20 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         const unsubscribe = playbackStateMachine.subscribe((ctx) => {
             setPlaybackState(ctx.state);
 
-            // Derive isPlaying and isBuffering from state machine
-            // This creates a single source of truth
-            const machineIsPlaying = ctx.state === "PLAYING";
-            const machineIsBuffering = ctx.state === "BUFFERING" || ctx.state === "LOADING";
+            // Derive playback flags from state machine. Transitional states
+            // preserve prior play intent to avoid pause/reload loops.
+            const machineIsBuffering =
+                ctx.state === "BUFFERING" ||
+                ctx.state === "LOADING" ||
+                ctx.state === "RECOVERING";
 
-            // During LOADING, don't override isPlaying — preserve the play
-            // intent that playTracks()/playTrack() set so the load-complete
-            // handler knows to auto-play.  Without this guard the subscriber
-            // forces isPlaying=false (LOADING ≠ PLAYING), which causes the
-            // "click play twice" bug: the first click loads but never plays.
-            if (ctx.state !== "LOADING") {
-                setIsPlaying((prev) => prev !== machineIsPlaying ? machineIsPlaying : prev);
-            }
+            setIsPlaying((prev) => {
+                const nextIsPlaying = resolveMachinePlaybackIntent(
+                    ctx.state,
+                    prev
+                );
+                return prev !== nextIsPlaying ? nextIsPlaying : prev;
+            });
             setIsBuffering((prev) => prev !== machineIsBuffering ? machineIsBuffering : prev);
 
             // Update error state
@@ -309,7 +329,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                 );
             }
         } catch (error) {
-            console.error("[AudioPlayback] Failed to save currentTime:", error);
+            sharedFrontendLogger.error("[AudioPlayback] Failed to save currentTime:", error);
         }
     }, [
         currentTime,
@@ -372,7 +392,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                     currentIndex: adjustedIndex,
                     isShuffle: state.isShuffle,
                     isPlaying,
-                    currentTime: Math.max(0, currentTimeRef.current),
+                    currentTime: clampNonNegativePlaybackTime(
+                        currentTimeRef.current
+                    ),
                 });
                 lastServerProgressSaveRef.current = now;
                 writeMigratingStorageItem(
@@ -382,7 +404,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             } catch (err) {
                 // Ignore auth/state sync failures to avoid disrupting playback.
                 if (err instanceof Error && err.message !== "Not authenticated") {
-                    console.warn("[AudioPlayback] Failed to save playback progress:", err);
+                    sharedFrontendLogger.warn("[AudioPlayback] Failed to save playback progress:", err);
                 }
             }
         },
@@ -442,6 +464,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             isSeekLocked,
             audioError,
             playbackState,
+            streamProfile,
             setIsPlaying,
             setCurrentTime,
             setCurrentTimeFromEngine,
@@ -450,6 +473,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             setTargetSeekPosition,
             setCanSeek,
             setDownloadProgress,
+            setStreamProfile,
             lockSeek,
             unlockSeek,
             clearAudioError,
@@ -465,6 +489,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             isSeekLocked,
             audioError,
             playbackState,
+            streamProfile,
             setCurrentTimeFromEngine,
             lockSeek,
             unlockSeek,

@@ -6,6 +6,7 @@ import { useAudioState } from "@/lib/audio-state-context";
 import { useToast } from "@/lib/toast-context";
 import { api } from "@/lib/api";
 import type { Audiobook } from "../types";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export function useAudiobookActions(
   audiobookId: string,
@@ -78,7 +79,7 @@ export function useAudiobookActions(
       toast.success("Marked as completed");
       refetch();
     } catch (error) {
-      console.error("Failed to mark as completed:", error);
+      sharedFrontendLogger.error("Failed to mark as completed:", error);
       toast.error("Failed to mark as completed");
     }
   }, [
@@ -113,7 +114,7 @@ export function useAudiobookActions(
       toast.success("Progress reset");
       refetch();
     } catch (error) {
-      console.error("Failed to reset progress:", error);
+      sharedFrontendLogger.error("Failed to reset progress:", error);
       toast.error("Failed to reset progress");
     }
   }, [

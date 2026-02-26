@@ -66,12 +66,15 @@ Status labels:
 | `NODE_ENV` | `backend`, `backend-worker`, `frontend` | Optional | `production` (compose) | Runtime mode. |
 | `BACKEND_PROCESS_ROLE` | `backend`, `backend-worker` | Optional | split stack: `all`; HA override for backend: `api`; worker: `worker` | Role split for API/worker processes. |
 | `WORKER_HEALTH_PORT` | `backend-worker` | Optional | `3010` | Worker health endpoint port (`/health/live`, `/health/ready`). |
-| `LOG_LEVEL` | `backend-worker` | Optional | `warn` | Worker log verbosity. |
+| `LOG_LEVEL` | `backend`, `backend-worker`, python sidecars using shared logger | Optional | backend-worker compose: `warn`; otherwise env-dependent defaults | Shared logger verbosity (`debug`, `info`, `warn`, `error`, `silent` for TS; Python also supports `critical`). |
 | `DATABASE_POOL_SIZE` | `backend`, `backend-worker` | Optional | role-aware: `api=8`, `worker=4`, `all=12` | Prisma DB pool connection limit. |
 | `DATABASE_POOL_TIMEOUT` | `backend`, `backend-worker` | Optional | `30` | Prisma DB pool timeout in seconds. |
 | `LOG_QUERIES` | `backend`, `backend-worker` | Optional | `false` | Enables Prisma query logging in development. |
 | `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` | Preserves Redis streams/groups by default; do not flush on start. |
 | `TRANSCODE_CACHE_PATH` | `backend` | Optional | `/app/cache/transcodes` (compose) | Directory for transcoding cache files. |
+| `SEGMENTED_STREAMING_CACHE_PATH` | `backend` | Optional | defaults to `TRANSCODE_CACHE_PATH` | Base directory for segmented streaming cache artifacts (`segmented-dash` subdirectory is created under this path). |
+| `SEGMENTED_LOCAL_SEG_DURATION_SEC` | `backend` | Optional | `1.0` | DASH segment duration (seconds) for local segmented sessions; remote/transient DASH generation keeps its default duration. |
+| `SEGMENTED_LOCAL_STARTUP_QUALITY` | `backend` | Optional | `low` | Startup representation quality for local two-representation DASH ladders (`low` or `medium`) before ramping to requested target quality. |
 | `TRANSCODE_CACHE_MAX_GB` | `backend` | Optional | `10` | Max transcode cache size in GB. |
 | `ALLOWED_ORIGINS` | `backend` | Optional | `http://localhost:3000,http://localhost:3030` | Allowed CORS origins (comma-separated). |
 | `SECURE_COOKIES` | `backend` | Optional | `false` | Forces secure cookies when `true`. |
@@ -94,7 +97,6 @@ Status labels:
 | `LISTEN_TOGETHER_MUTATION_LOCK_PREFIX` | `backend` | Optional | `listen-together:mutation-lock` | Redis key prefix for mutation locks. |
 | `LISTEN_TOGETHER_RECONNECT_SLO_MS` | `backend` | Optional | `5000` | Reconnect latency warning threshold. |
 | `LISTEN_TOGETHER_ALLOW_POLLING` | `backend` | Optional | `false` | Allows polling fallback transport when `true`. |
-| `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` | `frontend` | Optional | `false` | Frontend polling fallback toggle for Listen Together socket client. |
 | `SCHEDULER_CLAIM_SKIP_WARN_THRESHOLD` | `backend`, `backend-worker` | Optional | `3` | Warn threshold for consecutive skipped scheduler claims. |
 | `READINESS_REQUIRE_DEPENDENCIES` | `backend`, `backend-worker` | Optional | `true` | Makes readiness depend on Redis/Postgres health. |
 | `READINESS_DEPENDENCY_CHECK_INTERVAL_MS` | `backend`, `backend-worker` | Optional | `5000` | Min interval between readiness dependency checks. |
@@ -108,8 +110,14 @@ Status labels:
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
 | `BACKEND_URL` | `frontend` (and `audio-analyzer-clap-local` in local profile) | Optional (required when default route is not correct) | split stack: `http://backend:3006`; local CLAP: `http://host.docker.internal:3007` | Server-side URL used by frontend proxy/SSR and local CLAP callback target. |
+| `STREAMING_ENGINE_MODE` | `frontend`, `soundspan` (AIO) | Optional | defaults to `videojs` when unset/invalid | Runtime (non-build-time) audio engine mode: `videojs` (default segmented) or `howler-rollback` (explicit rollback only). |
+| `SEGMENTED_VHS_PROFILE` | `frontend`, `soundspan` (AIO) | Optional | `balanced` (`legacy` available for rollback) | Runtime (non-build-time) Video.js VHS startup/retry profile for segmented playback; `balanced` enables bandwidth persistence + bounded playlist retries, `legacy` keeps pre-tuning defaults. |
+| `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` | `frontend`, `soundspan` (AIO) | Optional | `5000` (runtime clamp: `1500-15000`) | Runtime timeout used to trigger segmented startup retries when DASH startup stalls (no automatic direct-play fallback). |
+| `LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED` | `frontend`, `soundspan` (AIO) | Optional | `false` | Enables segmented startup/handoff/recovery while a Listen Together group is active; defaults to disabled for conservative LT behavior. |
 | `NEXT_PUBLIC_API_URL` | `frontend` (build-time) | Optional (build-time only) | empty | Explicit browser API base URL. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_API_PATH_MODE` | `frontend` (build-time) | Optional (build-time only) | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. Runtime changes on prebuilt images do not affect browser bundle behavior. |
+| `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` | `frontend` (build-time) | Optional (build-time only) | `false` | Browser polling fallback toggle for Listen Together socket client. Runtime changes on prebuilt images do not affect browser bundle behavior. |
+| `NEXT_PUBLIC_LOG_LEVEL` | `frontend` (build-time) | Optional (build-time only) | `info` (dev), `warn` (prod) | Browser-visible frontend logger verbosity (`debug`, `info`, `warn`, `error`, `silent`). Uses `NEXT_PUBLIC_` because client-side code cannot read non-public env vars. |
 | `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional (build-time only) | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |
 | `NEXT_PUBLIC_APP_VERSION` | `frontend` (build-time) | Optional (build-time only) | `frontend/package.json` version | Explicit app version override in UI. |
 | `ANALYZE` | `frontend` (build-time) | Optional (build-time only) | unset (`false`) | Enables Next.js bundle analyzer when `true`. |
@@ -147,6 +155,7 @@ Status labels:
 | `YTMUSIC_EXTRACT_DELAY_MIN` | `ytmusic-streamer` | Optional | `0.5` | Min delay between stream extraction calls (seconds). |
 | `YTMUSIC_EXTRACT_DELAY_MAX` | `ytmusic-streamer` | Optional | `2.0` | Max delay between stream extraction calls (seconds). |
 | `YTMUSIC_SEARCH_CACHE_TTL` | `ytmusic-streamer` | Optional | `300` | Search cache TTL in seconds (`0` disables cache). |
+| `YTMUSIC_SEARCH_MODE` | `ytmusic-streamer` | Optional | `auto` | Search strategy: `auto` (native-first with per-user TV fallback on #813 invalid-argument errors), `tv` (legacy TV parser), or `native` (`ytmusicapi` `yt.search()` only). |
 
 ## Analyzer Variables
 
@@ -232,5 +241,6 @@ Used primarily with `docker-compose.local.yml` (host-run backend/frontend; conta
 | --- | --- |
 | Secrets | Always set `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, and `INTERNAL_API_SECRET` explicitly in production. |
 | API routing mode | Keep `NEXT_PUBLIC_API_PATH_MODE=auto` unless you intentionally need direct browser calls (`direct`). |
+| Frontend build-time vars | In prebuilt frontend images, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_API_PATH_MODE`, and `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` require an image rebuild to change browser behavior. |
 | HA behavior | Keep Listen Together Redis/state/lock flags enabled for multi-replica correctness. |
 | Drift control | When adding/changing/removing env vars in compose, backend/frontend config, or sidecars, update this file in the same PR. |

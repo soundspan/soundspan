@@ -5,8 +5,8 @@ Start-here guide for API route handlers in `backend/src/routes`.
 ## Start Here
 
 1. Mount points and middleware chain: `backend/src/index.ts`.
-2. Canonical endpoint map: `docs/ROUTE_MAP.md`.
-3. Targeted verification commands: `docs/TEST_MATRIX.md`.
+2. Canonical endpoint map: `.agents-config/docs/ROUTE_MAP.md`.
+3. Targeted verification commands: `.agents-config/docs/TEST_MATRIX.md`.
 
 ## Mounted Route Modules
 
@@ -37,11 +37,13 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/podcasts.ts` | `/api/podcasts` |
 | `backend/src/routes/recommendations.ts` | `/api/recommendations` |
 | `backend/src/routes/releases.ts` | `/api/releases` |
+| `backend/src/routes/routeErrorResponse.ts` | (not found in `backend/src/index.ts` mounts) |
 | `backend/src/routes/search.ts` | `/api/search` |
 | `backend/src/routes/settings.ts` | `/api/settings` |
 | `backend/src/routes/social.ts` | `/api/social` |
 | `backend/src/routes/soulseek.ts` | `/api/soulseek` |
 | `backend/src/routes/spotify.ts` | `/api/spotify` |
+| `backend/src/routes/streaming.ts` | `/api/streaming` |
 | `backend/src/routes/subsonic.ts` | `/rest` |
 | `backend/src/routes/system.ts` | `/api/system` |
 | `backend/src/routes/systemSettings.ts` | `/api/system-settings` |
@@ -52,4 +54,4 @@ Start-here guide for API route handlers in `backend/src/routes`.
 
 ## Update Rule
 
-- When adding, removing, or changing endpoints in this directory, regenerate `docs/ROUTE_MAP.md` and verify impacted targeted commands in `docs/TEST_MATRIX.md`.
+- When adding, removing, or changing endpoints in this directory, regenerate `.agents-config/docs/ROUTE_MAP.md` and verify impacted targeted commands in `.agents-config/docs/TEST_MATRIX.md`.

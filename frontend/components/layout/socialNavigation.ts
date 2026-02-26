@@ -11,6 +11,7 @@ export interface MobileQuickLinkItem {
 
 export const SIDEBAR_NAVIGATION: SidebarNavigationItem[] = [
     { name: "Library", href: "/library" },
+    { name: "My Liked", href: "/playlist/my-liked" },
     { name: "Radio", href: "/radio" },
     { name: "Discovery", href: "/discover" },
     { name: "Listen Together", href: "/listen-together" },
@@ -21,6 +22,7 @@ export const SIDEBAR_NAVIGATION: SidebarNavigationItem[] = [
 
 export const MOBILE_QUICK_LINKS: MobileQuickLinkItem[] = [
     { name: "Discover", href: "/discover" },
+    { name: "My Liked", href: "/playlist/my-liked" },
     { name: "Radio", href: "/radio" },
     { name: "Listen Together", href: "/listen-together" },
 ];

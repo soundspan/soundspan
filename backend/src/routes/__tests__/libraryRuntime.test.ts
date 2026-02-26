@@ -39,6 +39,7 @@ jest.mock("../../utils/db", () => ({
         likedTrack: {
             findUnique: jest.fn(),
             findMany: jest.fn(),
+            count: jest.fn(),
             upsert: jest.fn(),
             createMany: jest.fn(),
             deleteMany: jest.fn(),
@@ -151,6 +152,12 @@ jest.mock("../../services/deezer", () => ({
     deezerService: {
         getAlbumCover: jest.fn(),
         getArtistImage: jest.fn(),
+    },
+}));
+
+jest.mock("../../services/imageProvider", () => ({
+    imageProviderService: {
+        getAlbumCover: jest.fn(),
     },
 }));
 
@@ -268,6 +275,7 @@ import { getSystemSettings } from "../../utils/systemSettings";
 import { dataCacheService } from "../../services/dataCache";
 import { lastFmService } from "../../services/lastfm";
 import { deezerService } from "../../services/deezer";
+import { imageProviderService } from "../../services/imageProvider";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { getMergedGenres } from "../../utils/metadataOverrides";
 import {
@@ -295,6 +303,7 @@ const mockTrackDelete = prisma.track.delete as jest.Mock;
 const mockTrackDeleteMany = prisma.track.deleteMany as jest.Mock;
 const mockLikedTrackFindUnique = prisma.likedTrack.findUnique as jest.Mock;
 const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
+const mockLikedTrackCount = prisma.likedTrack.count as jest.Mock;
 const mockLikedTrackUpsert = prisma.likedTrack.upsert as jest.Mock;
 const mockLikedTrackCreateMany = prisma.likedTrack.createMany as jest.Mock;
 const mockLikedTrackDeleteMany = prisma.likedTrack.deleteMany as jest.Mock;
@@ -353,6 +362,8 @@ const mockGetArtistImage = dataCacheService.getArtistImage as jest.Mock;
 const mockLastFmGetArtistTopTracks = lastFmService.getArtistTopTracks as jest.Mock;
 const mockLastFmGetSimilarArtists = lastFmService.getSimilarArtists as jest.Mock;
 const mockDeezerGetArtistImage = deezerService.getArtistImage as jest.Mock;
+const mockImageProviderGetAlbumCover =
+    imageProviderService.getAlbumCover as jest.Mock;
 const mockMusicBrainzSearchArtist = musicBrainzService.searchArtist as jest.Mock;
 const mockMusicBrainzGetReleaseGroups = musicBrainzService.getReleaseGroups as jest.Mock;
 const mockIsBackfillNeeded = isBackfillNeeded as jest.Mock;
@@ -1197,6 +1208,7 @@ describe("library catalog list runtime coverage", () => {
     const albumsHandler = getHandler("get", "/albums");
     const albumByIdHandler = getHandler("get", "/albums/:id");
     const tracksHandler = getHandler("get", "/tracks");
+    const likedPlaylistHandler = getHandler("get", "/liked");
     const shuffleHandler = getHandler("get", "/tracks/shuffle");
     const coverArtHandler = getHandler("get", "/cover-art/:id?", 1);
     const albumCoverHandler = getHandler("get", "/album-cover/:mbid", 1);
@@ -1234,6 +1246,7 @@ describe("library catalog list runtime coverage", () => {
         mockTrackDeleteMany.mockResolvedValue({ count: 0 });
         mockLikedTrackFindUnique.mockResolvedValue(null);
         mockLikedTrackFindMany.mockResolvedValue([]);
+        mockLikedTrackCount.mockResolvedValue(0);
         mockLikedTrackUpsert.mockResolvedValue({ userId: "user-1", trackId: "track-1" });
         mockLikedTrackCreateMany.mockResolvedValue({ count: 0 });
         mockLikedTrackDeleteMany.mockResolvedValue({ count: 0 });
@@ -1260,6 +1273,7 @@ describe("library catalog list runtime coverage", () => {
         mockLastFmGetArtistTopTracks.mockResolvedValue([]);
         mockLastFmGetSimilarArtists.mockResolvedValue([]);
         mockDeezerGetArtistImage.mockResolvedValue(null);
+        mockImageProviderGetAlbumCover.mockResolvedValue(null);
         mockMusicBrainzSearchArtist.mockResolvedValue([]);
         mockMusicBrainzGetReleaseGroups.mockResolvedValue([]);
         mockArtistFindMany.mockResolvedValue([]);
@@ -2513,6 +2527,139 @@ describe("library catalog list runtime coverage", () => {
         expect(errRes.body).toEqual({ error: "Failed to fetch tracks" });
     });
 
+    it("requires authentication for liked playlist retrieval", async () => {
+        const req = { query: { limit: "5" } } as any;
+        const res = createRes();
+
+        await likedPlaylistHandler(req, res);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body).toEqual({
+            error: "Authentication required for liked playlist",
+        });
+        expect(mockLikedTrackFindMany).not.toHaveBeenCalled();
+    });
+
+    it("returns liked playlist tracks in deterministic order with cursor-safe pagination", async () => {
+        const tiedLikedAt = new Date("2026-02-20T00:00:00.000Z");
+        const olderLikedAt = new Date("2026-02-19T00:00:00.000Z");
+
+        mockLikedTrackCount.mockResolvedValue(3);
+        mockLikedTrackFindMany
+            .mockResolvedValueOnce([
+                { trackId: "liked-b", likedAt: tiedLikedAt },
+                { trackId: "liked-a", likedAt: tiedLikedAt },
+                { trackId: "liked-c", likedAt: olderLikedAt },
+            ])
+            .mockResolvedValueOnce([
+                { trackId: "liked-c", likedAt: olderLikedAt },
+            ]);
+        mockTrackFindMany
+            .mockResolvedValueOnce([
+                createRadioTrack("liked-a"),
+                createRadioTrack("liked-b"),
+            ])
+            .mockResolvedValueOnce([createRadioTrack("liked-c")]);
+
+        const firstReq = {
+            query: { limit: "2" },
+            user: { id: "user-1" },
+        } as any;
+        const firstRes = createRes();
+        await likedPlaylistHandler(firstReq, firstRes);
+
+        expect(firstRes.statusCode).toBe(200);
+        expect(mockLikedTrackFindMany).toHaveBeenNthCalledWith(1, {
+            where: { userId: "user-1" },
+            select: { trackId: true, likedAt: true },
+            orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
+            take: 3,
+        });
+        expect(firstRes.body.playlist).toEqual({
+            id: "my-liked",
+            name: "My Liked",
+            description: "All your thumbs-up tracks",
+        });
+        expect(firstRes.body.tracks.map((track: any) => track.id)).toEqual([
+            "liked-b",
+            "liked-a",
+        ]);
+        expect(firstRes.body.pagination).toEqual({
+            limit: 2,
+            hasMore: true,
+            nextCursor: {
+                likedAt: tiedLikedAt.toISOString(),
+                trackId: "liked-a",
+            },
+        });
+        expect(firstRes.body.total).toBe(3);
+
+        const secondReq = {
+            query: {
+                limit: "2",
+                cursorLikedAt: firstRes.body.pagination.nextCursor.likedAt,
+                cursorTrackId: firstRes.body.pagination.nextCursor.trackId,
+            },
+            user: { id: "user-1" },
+        } as any;
+        const secondRes = createRes();
+        await likedPlaylistHandler(secondReq, secondRes);
+
+        expect(secondRes.statusCode).toBe(200);
+        expect(mockLikedTrackFindMany).toHaveBeenNthCalledWith(2, {
+            where: {
+                userId: "user-1",
+                OR: [
+                    { likedAt: { lt: tiedLikedAt } },
+                    {
+                        likedAt: tiedLikedAt,
+                        trackId: { gt: "liked-a" },
+                    },
+                ],
+            },
+            select: { trackId: true, likedAt: true },
+            orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
+            take: 3,
+        });
+        expect(secondRes.body.tracks.map((track: any) => track.id)).toEqual([
+            "liked-c",
+        ]);
+        expect(secondRes.body.pagination).toEqual({
+            limit: 2,
+            hasMore: false,
+            nextCursor: null,
+        });
+    });
+
+    it("returns empty liked playlist payload with stable pagination metadata", async () => {
+        mockLikedTrackCount.mockResolvedValueOnce(0);
+        mockLikedTrackFindMany.mockResolvedValueOnce([]);
+
+        const req = {
+            query: { limit: "25" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+        await likedPlaylistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            playlist: {
+                id: "my-liked",
+                name: "My Liked",
+                description: "All your thumbs-up tracks",
+            },
+            tracks: [],
+            total: 0,
+            pagination: {
+                limit: 25,
+                hasMore: false,
+                nextCursor: null,
+            },
+        });
+        expect(mockTrackFindMany).not.toHaveBeenCalled();
+    });
+
     it("handles shuffle for empty, small, and large libraries", async () => {
         mockTrackCount.mockResolvedValueOnce(0);
         const emptyReq = { query: { limit: "3" } } as any;
@@ -3764,16 +3911,8 @@ describe("library catalog list runtime coverage", () => {
             .mockReturnValueOnce(true);
         mockAlbumFindUnique
             .mockResolvedValueOnce({
-            id: "cover-miss",
-            title: "Missed Album",
-            artist: {
-                id: "artist-cover",
-                name: "Cover Artist",
-            },
-            })
-            .mockResolvedValueOnce({
-                id: "cover-present",
-                title: "Present Album",
+                id: "cover-miss",
+                title: "Missed Album",
                 artist: {
                     id: "artist-cover",
                     name: "Cover Artist",
@@ -3834,6 +3973,54 @@ describe("library catalog list runtime coverage", () => {
                 },
             },
         });
+        existsSpy.mockRestore();
+    });
+
+    it("recovers missing native cover IDs via Cover Art service when Deezer has no result", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(false);
+        mockAlbumFindUnique.mockResolvedValue({
+            id: "cover-fallback",
+            title: "Fallback Album",
+            rgMbid: "rg-fallback",
+            artist: {
+                id: "artist-fallback",
+                name: "Fallback Artist",
+            },
+        });
+        mockCoverArtGetCoverArt.mockResolvedValue(
+            "https://coverartarchive.org/release-group/rg-fallback/front.jpg"
+        );
+        mockDeezerGetAlbumCover.mockResolvedValue(null);
+        mockDownloadAndStoreImage.mockResolvedValue(
+            "native:albums/cover-fallback.jpg"
+        );
+
+        const req = {
+            params: { id: "native:cover-fallback.jpg" },
+            query: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+        await coverArtHandler(req, res);
+
+        expect(mockCoverArtGetCoverArt).toHaveBeenCalledWith("rg-fallback");
+        expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
+            "https://coverartarchive.org/release-group/rg-fallback/front.jpg",
+            "cover-fallback",
+            "album"
+        );
+        expect(mockAlbumUpdate).toHaveBeenCalledWith({
+            where: { id: "cover-fallback" },
+            data: { coverUrl: "native:albums/cover-fallback.jpg" },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            redirect:
+                "/api/library/cover-art?url=native%3Aalbums%2Fcover-fallback.jpg",
+        });
+
         existsSpy.mockRestore();
     });
 

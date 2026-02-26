@@ -55,6 +55,8 @@ export const queryKeys = {
         limit?: number;
         offset?: number;
     }) => ["library", "tracks", params] as const,
+    likedPlaylist: (limit: number = 10_000) =>
+        ["library", "liked-playlist", limit] as const,
     recentlyListened: (limit?: number) =>
         ["library", "recently-listened", limit] as const,
     recentlyAdded: (limit?: number) =>
@@ -712,6 +714,20 @@ export function usePlaylistQuery(id: string | undefined) {
             return await api.getPlaylist(id);
         },
         enabled: !!id,
+        staleTime: 1 * 60 * 1000, // 1 minute
+    });
+}
+
+/**
+ * Hook to fetch the hard-wired My Liked playlist
+ *
+ * @param limit - Number of liked tracks to fetch (defaults to backend max)
+ * @returns Query result with liked playlist payload
+ */
+export function useLikedPlaylistQuery(limit: number = 10_000) {
+    return useQuery({
+        queryKey: queryKeys.likedPlaylist(limit),
+        queryFn: () => api.getLikedPlaylist({ limit }),
         staleTime: 1 * 60 * 1000, // 1 minute
     });
 }

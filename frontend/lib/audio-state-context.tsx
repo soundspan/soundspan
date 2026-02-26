@@ -9,6 +9,10 @@ import {
     useMemo,
 } from "react";
 import { api } from "@/lib/api";
+import type {
+    CanonicalMediaProviderIdentity,
+    CanonicalMediaSource,
+} from "@soundspan/media-metadata-contract";
 import type { Episode } from "@/features/podcast/types";
 import {
     createMigratingStorageKey,
@@ -22,7 +26,15 @@ import {
     parsePlaybackStateSaveTimestamp,
     shouldSkipPlaybackStatePoll,
 } from "@/lib/playback-state-cadence";
+import { clampNonNegativePlaybackTime } from "@/lib/audio-playback-normalization";
 import { resolveInitialAudioVolume } from "@/lib/audio-volume";
+import {
+    normalizeQueueIndex,
+    queuesMatchByTrackId,
+    resolveServerPlaybackPollDecision,
+    type PlaybackSnapshotType,
+} from "@/lib/playback-state-reconciliation";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 function queueDebugEnabled(): boolean {
     try {
@@ -38,7 +50,7 @@ function queueDebugEnabled(): boolean {
 
 function queueDebugLog(message: string, data?: Record<string, unknown>) {
     if (!queueDebugEnabled()) return;
-    console.log(`[QueueDebug] ${message}`, data || {});
+    sharedFrontendLogger.info(`[QueueDebug] ${message}`, data || {});
 }
 
 export type PlayerMode = "full" | "mini" | "overlay";
@@ -71,6 +83,8 @@ export interface Track {
     duration: number;
     filePath?: string;
     // Streaming source fields
+    mediaSource?: CanonicalMediaSource;
+    provider?: CanonicalMediaProviderIdentity;
     streamSource?: "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
@@ -295,7 +309,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         }
                     })
                     .catch((err: unknown) => {
-                        console.error(
+                        sharedFrontendLogger.error(
                             "[AudioState] Failed to refresh audiobook progress:",
                             err
                         );
@@ -323,7 +337,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             }
                         })
                         .catch((err: unknown) => {
-                            console.error(
+                            sharedFrontendLogger.error(
                                 "[AudioState] Failed to refresh podcast progress:",
                                 err
                             );
@@ -337,8 +351,90 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             .then((serverState) => {
                 if (!serverState) return;
 
+                const serverPlaybackType: PlaybackSnapshotType =
+                    serverState.playbackType === "track" ||
+                    serverState.playbackType === "audiobook" ||
+                    serverState.playbackType === "podcast"
+                        ? serverState.playbackType
+                        : null;
+                const serverMediaId =
+                    serverState.trackId ||
+                    serverState.audiobookId ||
+                    serverState.podcastId ||
+                    null;
+                const serverQueue = Array.isArray(serverState.queue)
+                    ? (serverState.queue as Track[])
+                    : null;
+
+                const hydratedLocalPlaybackTypeRaw = readStorage(
+                    STORAGE_KEYS.PLAYBACK_TYPE
+                );
+                const hydratedLocalPlaybackType: PlaybackSnapshotType =
+                    hydratedLocalPlaybackTypeRaw === "track" ||
+                    hydratedLocalPlaybackTypeRaw === "audiobook" ||
+                    hydratedLocalPlaybackTypeRaw === "podcast"
+                        ? hydratedLocalPlaybackTypeRaw
+                        : null;
+                const hydratedLocalTrack = parseStorageJson<Track | null>(
+                    STORAGE_KEYS.CURRENT_TRACK,
+                    null
+                );
+                const hydratedLocalAudiobook =
+                    parseStorageJson<Audiobook | null>(
+                        STORAGE_KEYS.CURRENT_AUDIOBOOK,
+                        null
+                    );
+                const hydratedLocalPodcast = parseStorageJson<Podcast | null>(
+                    STORAGE_KEYS.CURRENT_PODCAST,
+                    null
+                );
+                const hydratedLocalQueue = parseStorageJson(
+                    STORAGE_KEYS.QUEUE,
+                    [] as Track[]
+                );
+                const hydratedLocalMediaId =
+                    hydratedLocalTrack?.id ||
+                    hydratedLocalAudiobook?.id ||
+                    hydratedLocalPodcast?.id ||
+                    null;
+                const localLastSaveAtMs = parsePlaybackStateSaveTimestamp(
+                    readStorage(STORAGE_KEYS.LAST_PLAYBACK_STATE_SAVE_AT)
+                );
+                const serverUpdatedAtRaw = Date.parse(
+                    String(serverState.updatedAt || "")
+                );
+                const serverUpdatedAtMs = Number.isFinite(serverUpdatedAtRaw)
+                    ? serverUpdatedAtRaw
+                    : 0;
+                const startupDecision = resolveServerPlaybackPollDecision({
+                    localPlaybackType: hydratedLocalPlaybackType,
+                    localMediaId: hydratedLocalMediaId,
+                    localQueue: hydratedLocalQueue,
+                    localLastSaveAtMs,
+                    serverPlaybackType,
+                    serverMediaId,
+                    serverQueue,
+                    serverUpdatedAtMs,
+                });
+                if (!startupDecision.shouldApplyServerSnapshot) {
+                    queueDebugLog(
+                        "Startup ignored server playback snapshot",
+                        {
+                            reason: startupDecision.reason,
+                            localPlaybackType: hydratedLocalPlaybackType,
+                            serverPlaybackType,
+                            localMediaId: hydratedLocalMediaId,
+                            serverMediaId,
+                            localQueueLen: hydratedLocalQueue.length,
+                            serverQueueLen: serverQueue?.length || 0,
+                            serverUpdatedAt: serverState.updatedAt,
+                        }
+                    );
+                    return;
+                }
+
                 if (
-                    serverState.playbackType === "track" &&
+                    serverPlaybackType === "track" &&
                     serverState.trackId
                 ) {
                     api.getTrack(serverState.trackId)
@@ -359,7 +455,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setCurrentIndex(0);
                         });
                 } else if (
-                    serverState.playbackType === "audiobook" &&
+                    serverPlaybackType === "audiobook" &&
                     serverState.audiobookId
                 ) {
                     api.getAudiobook(serverState.audiobookId).then(
@@ -371,7 +467,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         }
                     );
                 } else if (
-                    serverState.playbackType === "podcast" &&
+                    serverPlaybackType === "podcast" &&
                     serverState.podcastId
                 ) {
                     const [podcastId, episodeId] =
@@ -395,17 +491,29 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         }
                     });
                 }
-
-                if (serverState.queue) setQueue(serverState.queue);
-                if (serverState.currentIndex !== undefined)
-                    setCurrentIndex(serverState.currentIndex);
+                if (
+                    serverQueue &&
+                    !queuesMatchByTrackId(hydratedLocalQueue, serverQueue)
+                ) {
+                    setQueue(serverQueue);
+                }
+                if (serverQueue) {
+                    setCurrentIndex(
+                        normalizeQueueIndex(
+                            serverState.currentIndex,
+                            serverQueue.length
+                        )
+                    );
+                }
                 if (serverState.isShuffle !== undefined)
                     setIsShuffle(serverState.isShuffle);
                     if (
                         typeof serverState.currentTime === "number" &&
                         Number.isFinite(serverState.currentTime)
                     ) {
-                            const safeCurrentTime = Math.max(0, serverState.currentTime);
+                            const safeCurrentTime = clampNonNegativePlaybackTime(
+                                serverState.currentTime
+                            );
                             try {
                             writeMigratingStorageItem(
                                 STORAGE_KEYS.CURRENT_TIME,
@@ -486,7 +594,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             writeMigratingStorageItem(STORAGE_KEYS.VOLUME, volume.toString());
             writeMigratingStorageItem(STORAGE_KEYS.IS_MUTED, isMuted.toString());
         } catch (error) {
-            console.error("[AudioState] Failed to save state:", error);
+            sharedFrontendLogger.error("[AudioState] Failed to save state:", error);
         }
     }, [
         currentTrack,
@@ -534,11 +642,27 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 const serverState = await api.getPlaybackState();
                 if (!serverState || !mounted) return;
 
-                const serverUpdatedAt = new Date(serverState.updatedAt);
-
-                if (lastServerSync && serverUpdatedAt <= lastServerSync) {
+                const serverUpdatedAtMs = Date.parse(
+                    String(serverState.updatedAt || "")
+                );
+                if (!Number.isFinite(serverUpdatedAtMs)) {
                     return;
                 }
+                const serverUpdatedAt = new Date(serverUpdatedAtMs);
+
+                if (
+                    lastServerSync &&
+                    serverUpdatedAt.getTime() <= lastServerSync.getTime()
+                ) {
+                    return;
+                }
+
+                const serverPlaybackType: PlaybackSnapshotType =
+                    serverState.playbackType === "track" ||
+                    serverState.playbackType === "audiobook" ||
+                    serverState.playbackType === "podcast"
+                        ? serverState.playbackType
+                        : null;
 
                 const serverMediaId =
                     serverState.trackId ||
@@ -549,12 +673,40 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     currentAudiobook?.id ||
                     currentPodcast?.id;
 
+                const serverQueue = Array.isArray(serverState.queue)
+                    ? (serverState.queue as Track[])
+                    : null;
+                const pollDecision = resolveServerPlaybackPollDecision({
+                    localPlaybackType: playbackType,
+                    localMediaId: currentMediaId || null,
+                    localQueue: queue,
+                    localLastSaveAtMs: lastLocalSave,
+                    serverPlaybackType,
+                    serverMediaId: serverMediaId || null,
+                    serverQueue,
+                    serverUpdatedAtMs,
+                });
+                if (!pollDecision.shouldApplyServerSnapshot) {
+                    queueDebugLog("Polling ignored server playback snapshot", {
+                        reason: pollDecision.reason,
+                        localPlaybackType: playbackType,
+                        serverPlaybackType,
+                        localMediaId: currentMediaId,
+                        serverMediaId,
+                        localQueueLen: queue.length,
+                        serverQueueLen: serverQueue?.length || 0,
+                        serverUpdatedAt: serverState.updatedAt,
+                    });
+                    setLastServerSync(serverUpdatedAt);
+                    return;
+                }
+
                 if (
                     serverMediaId !== currentMediaId ||
-                    serverState.playbackType !== playbackType
+                    serverPlaybackType !== playbackType
                 ) {
                     if (
-                        serverState.playbackType === "track" &&
+                        serverPlaybackType === "track" &&
                         serverState.trackId
                     ) {
                         try {
@@ -566,13 +718,17 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setPlaybackType("track");
                             setCurrentAudiobook(null);
                             setCurrentPodcast(null);
-                            if (
-                                serverState.queue &&
-                                serverState.queue.length > 0
-                            ) {
-                                setQueue(serverState.queue);
-                                setCurrentIndex(serverState.currentIndex || 0);
-                                setIsShuffle(serverState.isShuffle || false);
+                            if (serverQueue && serverQueue.length > 0) {
+                                if (!queuesMatchByTrackId(queue, serverQueue)) {
+                                    setQueue(serverQueue);
+                                }
+                                setCurrentIndex(
+                                    normalizeQueueIndex(
+                                        serverState.currentIndex,
+                                        serverQueue.length
+                                    )
+                                );
+                                setIsShuffle(Boolean(serverState.isShuffle));
                             }
                         } catch {
                             if (!mounted) return;
@@ -586,7 +742,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             return;
                         }
                     } else if (
-                        serverState.playbackType === "audiobook" &&
+                        serverPlaybackType === "audiobook" &&
                         serverState.audiobookId
                     ) {
                         const audiobook = await api.getAudiobook(
@@ -598,7 +754,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         setCurrentTrack(null);
                         setCurrentPodcast(null);
                     } else if (
-                        serverState.playbackType === "podcast" &&
+                        serverPlaybackType === "podcast" &&
                         serverState.podcastId
                     ) {
                         const [podcastId, episodeId] =
@@ -625,21 +781,31 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
                     if (!mounted) return;
                     if (
-                        JSON.stringify(serverState.queue) !==
-                        JSON.stringify(queue)
+                        serverQueue &&
+                        serverQueue.length > 0 &&
+                        !queuesMatchByTrackId(queue, serverQueue)
                     ) {
                         queueDebugLog("Polling applied server queue", {
-                            serverQueueLen: serverState.queue?.length || 0,
+                            reason: pollDecision.reason,
+                            serverQueueLen: serverQueue.length,
                             localQueueLen: queue?.length || 0,
-                            serverCurrentIndex: serverState.currentIndex || 0,
+                            serverCurrentIndex: normalizeQueueIndex(
+                                serverState.currentIndex,
+                                serverQueue.length
+                            ),
                             localCurrentIndex: currentIndex,
                             serverIsShuffle: serverState.isShuffle,
                             localIsShuffle: isShuffle,
                             serverUpdatedAt: serverState.updatedAt,
                         });
-                        setQueue(serverState.queue || []);
-                        setCurrentIndex(serverState.currentIndex || 0);
-                        setIsShuffle(serverState.isShuffle || false);
+                        setQueue(serverQueue);
+                        setCurrentIndex(
+                            normalizeQueueIndex(
+                                serverState.currentIndex,
+                                serverQueue.length
+                            )
+                        );
+                        setIsShuffle(Boolean(serverState.isShuffle));
                     }
 
                     setLastServerSync(serverUpdatedAt);

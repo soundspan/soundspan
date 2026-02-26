@@ -4,7 +4,10 @@ import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, Trash2, RotateCcw, History, Disc, Music } from "lucide-react";
 import { api } from "@/lib/api";
 import { useDownloadContext } from "@/lib/download-context";
+import { createFrontendLogger } from "@/lib/logger";
 import { cn } from "@/utils/cn";
+
+const logger = createFrontendLogger("Activity.HistoryTab");
 
 interface DownloadHistory {
     id: string;
@@ -27,7 +30,7 @@ export function HistoryTab() {
             const data = await api.getDownloadHistory();
             setHistory(data);
         } catch (error) {
-            console.error("Failed to fetch download history:", error);
+            logger.error("Failed to fetch download history", { error });
         } finally {
             setLoading(false);
         }
@@ -49,7 +52,7 @@ export function HistoryTab() {
             // Notify other components that download status has changed
             window.dispatchEvent(new CustomEvent("download-status-changed"));
         } catch (error) {
-            console.error("Failed to clear download:", error);
+            logger.error("Failed to clear download history item", { id, error });
         }
     };
 
@@ -60,7 +63,7 @@ export function HistoryTab() {
             // Notify other components that download status has changed
             window.dispatchEvent(new CustomEvent("download-status-changed"));
         } catch (error) {
-            console.error("Failed to clear all history:", error);
+            logger.error("Failed to clear all download history", { error });
         }
     };
 
@@ -73,7 +76,7 @@ export function HistoryTab() {
                 setHistory((prev) => prev.filter((h) => h.id !== id));
             }
         } catch (error) {
-            console.error("Failed to retry download:", error);
+            logger.error("Failed to retry download", { id, error });
         } finally {
             setRetrying((prev) => {
                 const next = new Set(prev);

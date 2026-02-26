@@ -17,6 +17,10 @@ import { createIORedisClient } from "../utils/ioredis";
 import { listenTogetherClusterSync } from "./listenTogetherClusterSync";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";
 import {
+    subscribeSocialPresenceUpdates,
+    type SocialPresenceUpdatedEvent,
+} from "./socialPresenceEvents";
+import {
     groupManager,
     GroupError,
     type ManagerCallbacks,
@@ -125,6 +129,7 @@ let redisAdapterPubClient: any = null;
 let redisAdapterSubClient: any = null;
 const mutationLockNodeId = randomUUID();
 let mutationLockRedisClient: ReturnType<typeof createIORedisClient> | null = null;
+let unsubscribeSocialPresenceUpdates: (() => void) | null = null;
 
 if (LISTEN_TOGETHER_MUTATION_LOCK_ENABLED) {
     mutationLockRedisClient = createIORedisClient("listen-together-mutation-locks");
@@ -333,6 +338,14 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
     });
 
     const ns = io.of("/listen-together");
+
+    if (!unsubscribeSocialPresenceUpdates) {
+        unsubscribeSocialPresenceUpdates = subscribeSocialPresenceUpdates(
+            (event: SocialPresenceUpdatedEvent) => {
+                ns.emit("social:presence-updated", event);
+            }
+        );
+    }
 
     if (LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED) {
         try {
@@ -865,6 +878,11 @@ export function shutdownListenTogetherSocket(): void {
     if (mutationLockRedisClient) {
         mutationLockRedisClient.disconnect();
         mutationLockRedisClient = null;
+    }
+
+    if (unsubscribeSocialPresenceUpdates) {
+        unsubscribeSocialPresenceUpdates();
+        unsubscribeSocialPresenceUpdates = null;
     }
 
     listenTogetherStateStore.stop();

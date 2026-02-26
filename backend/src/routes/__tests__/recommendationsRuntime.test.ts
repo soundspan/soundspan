@@ -54,6 +54,7 @@ import router from "../recommendations";
 import { prisma } from "../../utils/db";
 import { lastFmService } from "../../services/lastfm";
 import { redisClient } from "../../utils/redis";
+import { createMockJsonResponse } from "./helpers/mockJsonResponse";
 
 const mockPlayFindMany = prisma.play.findMany as jest.Mock;
 const mockSimilarArtistFindMany = prisma.similarArtist.findMany as jest.Mock;
@@ -76,21 +77,7 @@ function getGetHandler(path: string) {
     return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
-function createRes() {
-    const res: any = {
-        statusCode: 200,
-        body: undefined as unknown,
-        status: jest.fn(function (code: number) {
-            res.statusCode = code;
-            return res;
-        }),
-        json: jest.fn(function (payload: unknown) {
-            res.body = payload;
-            return res;
-        }),
-    };
-    return res;
-}
+const createRes = createMockJsonResponse;
 
 describe("recommendations routes runtime", () => {
     const getForYou = getGetHandler("/for-you");
@@ -518,6 +505,59 @@ describe("recommendations routes runtime", () => {
                 lastFmUrl: "https://last.fm/unknown",
             })
         );
+    });
+
+    it("falls back to same-artist library tracks when Last.fm similar tracks are empty", async () => {
+        mockTrackFindUnique.mockResolvedValue({
+            id: "seed-track",
+            title: "Seed Song",
+            album: {
+                title: "Seed Album",
+                artist: {
+                    id: "seed-artist-id",
+                    name: "Seed Artist",
+                },
+            },
+        });
+        mockLastfmSimilarTracks.mockResolvedValue([]);
+        mockTrackFindMany.mockResolvedValue([
+            {
+                id: "fallback-track-1",
+                title: "Another Seed Artist Song",
+                album: {
+                    title: "Another Album",
+                    artist: {
+                        id: "seed-artist-id",
+                        name: "Seed Artist",
+                    },
+                },
+            },
+        ]);
+
+        const req = { query: { seedTrackId: "seed-track" } } as any;
+        const res = createRes();
+        await getTrackRecommendations(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockTrackFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    id: { not: "seed-track" },
+                    album: expect.objectContaining({
+                        artistId: "seed-artist-id",
+                    }),
+                }),
+                take: 20,
+            })
+        );
+        expect(res.body.recommendations).toEqual([
+            expect.objectContaining({
+                id: "fallback-track-1",
+                inLibrary: true,
+                recommendationSource: "same-artist-fallback",
+                matchConfidence: 100,
+            }),
+        ]);
     });
 
     it("returns 404 for missing seed track in /tracks", async () => {

@@ -6,8 +6,11 @@ import { SettingsSection, SettingsInput, SettingsSelect } from "../ui";
 import { Modal } from "@/components/ui/Modal";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
 import { useAdminConnectedUsers } from "@/hooks/useSocialPresence";
+
+const logger = createFrontendLogger("Settings.UserManagementSection");
 
 interface User {
     id: string;
@@ -45,7 +48,7 @@ export function UserManagementSection() {
             const data = await api.get<User[]>("/auth/users");
             setUsers(data);
         } catch (error) {
-            console.error("Failed to load users:", error);
+            logger.error("Failed to load users", { error });
         } finally {
             setLoading(false);
         }

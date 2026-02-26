@@ -12,14 +12,32 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
                   node-version: "20"
 
+            - name: Checkout agents-template
+              uses: actions/checkout@v4
+              with:
+                  repository: BonzTM/agents-template
+                  path: .agents-template-cache
+
             - name: Enforce AGENTS policy contract
-              run: node .github/scripts/enforce-agent-policies.mjs
+              run: node .agents-config/scripts/enforce-agent-policies.mjs
+
+            - name: Check managed workflow drift
+              env:
+                  AGENT_TEMPLATE_LOCAL_PATH: .agents-template-cache
+              run: npm run agent:managed -- --mode check
+
+            - name: Enforce template-impact declaration
+              env:
+                  PR_BODY: ${{ github.event.pull_request.body }}
+              run: npm run agent:template-impact:check -- --base-ref origin/${{ github.base_ref }}
 
     lint-frontend:
         name: Lint Frontend

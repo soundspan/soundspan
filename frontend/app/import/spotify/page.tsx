@@ -18,6 +18,7 @@ import {
 import { api } from "@/lib/api";
 import { useDownloadContext } from "@/lib/download-context";
 import { useToast } from "@/lib/toast-context";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // Types for Spotify Import
 interface SpotifyTrack {
@@ -200,7 +201,7 @@ function SpotifyImportPageContent() {
                     );
                 }
             } catch (err) {
-                console.error("Failed to poll job status:", err);
+                sharedFrontendLogger.error("Failed to poll job status:", err);
             }
         }, 2000);
 

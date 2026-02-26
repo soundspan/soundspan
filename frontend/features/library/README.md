@@ -5,7 +5,7 @@ Start-here guide for `frontend/features/library`.
 ## Start Here
 
 1. Route entrypoints: `frontend/app/library/page.tsx`, `frontend/app/page.tsx`, `frontend/app/radio/page.tsx`
-2. Domain ownership and contracts: `docs/FEATURE_INDEX.json`.
+2. Domain ownership and contracts: `.agents-config/docs/FEATURE_INDEX.json`.
 3. Targeted verification commands:
 - `npm --prefix backend test -- --runInBand src/routes/__tests__/libraryRuntime.test.ts src/routes/__tests__/homepageRuntime.test.ts`
 - `npm --prefix frontend run test:component`
@@ -29,4 +29,4 @@ Start-here guide for `frontend/features/library`.
 
 ## Update Rule
 
-- When adding/removing significant files or changing behavior in this domain, update or verify this README along with `docs/FEATURE_INDEX.json` and `docs/TEST_MATRIX.md`.
+- When adding/removing significant files or changing behavior in this domain, update or verify this README along with `.agents-config/docs/FEATURE_INDEX.json` and `.agents-config/docs/TEST_MATRIX.md`.

@@ -39,6 +39,7 @@ const ytMusicService = {
     pollDeviceAuth: jest.fn(),
     clearAuth: jest.fn(),
     search: jest.fn(),
+    searchCanonical: jest.fn(),
     getAlbum: jest.fn(),
     getArtist: jest.fn(),
     getSong: jest.fn(),
@@ -49,8 +50,20 @@ const ytMusicService = {
     findMatchForTrack: jest.fn(),
     findMatchesForAlbum: jest.fn(),
 };
+const normalizeYtMusicStreamQuality = jest.fn(
+    (quality: string | null | undefined) => {
+        const normalized = quality?.trim().toLowerCase();
+        return normalized === "low" ||
+            normalized === "medium" ||
+            normalized === "high" ||
+            normalized === "lossless"
+            ? normalized
+            : undefined;
+    }
+);
 jest.mock("../../services/youtubeMusic", () => ({
     ytMusicService,
+    normalizeYtMusicStreamQuality,
 }));
 
 const mockGetSystemSettings = jest.fn();
@@ -177,7 +190,12 @@ describe("youtube music route runtime behavior", () => {
             error: undefined,
         });
         ytMusicService.clearAuth.mockResolvedValue(undefined);
-        ytMusicService.search.mockResolvedValue({ songs: [] });
+        ytMusicService.searchCanonical.mockResolvedValue({
+            query: "nina simone",
+            filter: "songs",
+            total: 0,
+            results: [],
+        });
         ytMusicService.getAlbum.mockResolvedValue({ id: "album-1" });
         ytMusicService.getArtist.mockResolvedValue({ id: "artist-1" });
         ytMusicService.getSong.mockResolvedValue({ id: "song-1" });
@@ -210,6 +228,17 @@ describe("youtube music route runtime behavior", () => {
             { videoId: "m1" },
             { videoId: "m2" },
         ]);
+        normalizeYtMusicStreamQuality.mockImplementation(
+            (quality: string | null | undefined) => {
+                const normalized = quality?.trim().toLowerCase();
+                return normalized === "low" ||
+                    normalized === "medium" ||
+                    normalized === "high" ||
+                    normalized === "lossless"
+                    ? normalized
+                    : undefined;
+            }
+        );
 
         prisma.userSettings.findUnique.mockResolvedValue({
             ytMusicOAuthJson: "enc:{\"access_token\":\"abc\"}",
@@ -463,17 +492,8 @@ describe("youtube music route runtime behavior", () => {
         expect(errorRes.body).toEqual({ error: "clear failed" });
     });
 
-    it("handles search oauth checks, validation, success, auth failures, and generic errors", async () => {
+    it("handles search validation, success, auth failures, and generic errors", async () => {
         const reqBase = { user: { id: "user-1" } } as any;
-
-        ytMusicService.getAuthStatus.mockResolvedValueOnce({ authenticated: false });
-        prisma.userSettings.findUnique.mockResolvedValueOnce(null);
-        const oauthMissingRes = createRes();
-        await searchHandler(
-            { ...reqBase, body: { query: "query text" } } as any,
-            oauthMissingRes
-        );
-        expect(oauthMissingRes.statusCode).toBe(401);
 
         const missingQueryRes = createRes();
         await searchHandler({ ...reqBase, body: {} } as any, missingQueryRes);
@@ -485,13 +505,23 @@ describe("youtube music route runtime behavior", () => {
             successRes
         );
         expect(successRes.statusCode).toBe(200);
-        expect(ytMusicService.search).toHaveBeenCalledWith(
+        expect(ytMusicService.searchCanonical).toHaveBeenCalledWith(
             "user-1",
             "nina simone",
             "songs"
         );
+        expect(successRes.body).toEqual(
+            expect.objectContaining({
+                query: "nina simone",
+                filter: "songs",
+                total: 0,
+                results: [],
+            })
+        );
 
-        ytMusicService.search.mockRejectedValueOnce({ response: { status: 401 } });
+        ytMusicService.searchCanonical.mockRejectedValueOnce({
+            response: { status: 401 },
+        });
         const authErrorRes = createRes();
         await searchHandler(
             { ...reqBase, body: { query: "auth error test" } } as any,
@@ -499,7 +529,7 @@ describe("youtube music route runtime behavior", () => {
         );
         expect(authErrorRes.statusCode).toBe(401);
 
-        ytMusicService.search.mockRejectedValueOnce({
+        ytMusicService.searchCanonical.mockRejectedValueOnce({
             response: { data: { detail: "search crashed" } },
         });
         const errorRes = createRes();
@@ -655,6 +685,11 @@ describe("youtube music route runtime behavior", () => {
             duration: 200,
             content_type: "audio/webm",
         });
+        expect(ytMusicService.getStreamInfo).toHaveBeenCalledWith(
+            "user-1",
+            "vid-1",
+            "high"
+        );
 
         ytMusicService.getStreamInfo.mockRejectedValueOnce({
             response: { status: 404 },
@@ -681,6 +716,40 @@ describe("youtube music route runtime behavior", () => {
         const errorRes = createRes();
         await streamInfoHandler(req, errorRes);
         expect(errorRes.statusCode).toBe(500);
+    });
+
+    it("falls back to user ytMusicQuality for stream-info and stream when request omits quality", async () => {
+        prisma.userSettings.findUnique.mockResolvedValue({ ytMusicQuality: "LOW" });
+
+        const streamInfoReq = {
+            user: { id: "user-1" },
+            params: { videoId: "vid-1" },
+            query: {},
+        } as any;
+        const streamInfoRes = createRes();
+        await streamInfoHandler(streamInfoReq, streamInfoRes);
+        expect(streamInfoRes.statusCode).toBe(200);
+        expect(ytMusicService.getStreamInfo).toHaveBeenCalledWith(
+            "user-1",
+            "vid-1",
+            "low"
+        );
+
+        const streamReq = {
+            user: { id: "user-1" },
+            params: { videoId: "vid-1" },
+            query: {},
+            headers: {},
+        } as any;
+        const streamRes = createRes();
+        await streamHandler(streamReq, streamRes);
+        expect(streamRes.statusCode).toBe(206);
+        expect(ytMusicService.getStreamProxy).toHaveBeenCalledWith(
+            "user-1",
+            "vid-1",
+            "low",
+            undefined
+        );
     });
 
     it("proxies stream responses, handles upstream errors, and maps proxy exceptions", async () => {
@@ -903,14 +972,7 @@ describe("youtube music route runtime behavior", () => {
         expect(batchErrorRes.statusCode).toBe(500);
     });
 
-    it("restores credentials from DB when sidecar has no active auth session", async () => {
-        ytMusicService.getAuthStatus.mockResolvedValueOnce({
-            authenticated: false,
-        });
-        prisma.userSettings.findUnique.mockResolvedValueOnce({
-            ytMusicOAuthJson: "enc:{\"refresh_token\":\"r1\"}",
-        });
-
+    it("does not attempt OAuth restore/status checks for search endpoint", async () => {
         const req = {
             user: { id: "user-1" },
             body: { query: "nina simone" },
@@ -919,17 +981,42 @@ describe("youtube music route runtime behavior", () => {
         await searchHandler(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(ytMusicService.restoreOAuthWithCredentials).toHaveBeenCalledWith(
-            "user-1",
-            "{\"refresh_token\":\"r1\"}",
-            "client-id",
-            "client-secret"
-        );
+        expect(ytMusicService.getAuthStatus).not.toHaveBeenCalled();
+        expect(ytMusicService.restoreOAuthWithCredentials).not.toHaveBeenCalled();
     });
 
-    it("maps sidecar auth status failures to unauthorized when OAuth cannot be restored", async () => {
-        ytMusicService.getAuthStatus.mockRejectedValueOnce(new Error("status failed"));
-        mockDecrypt.mockReturnValueOnce("");
+    it("does not attempt OAuth restore/status checks for match endpoints", async () => {
+        const reqBase = { user: { id: "user-1" } } as any;
+
+        const matchRes = createRes();
+        await matchHandler(
+            {
+                ...reqBase,
+                body: { artist: "Massive Attack", title: "Teardrop" },
+            } as any,
+            matchRes
+        );
+        expect(matchRes.statusCode).toBe(200);
+
+        const batchRes = createRes();
+        await matchBatchHandler(
+            {
+                ...reqBase,
+                body: {
+                    tracks: [{ artist: "Artist 1", title: "Track 1" }],
+                },
+            } as any,
+            batchRes
+        );
+        expect(batchRes.statusCode).toBe(200);
+        expect(ytMusicService.getAuthStatus).not.toHaveBeenCalled();
+        expect(ytMusicService.restoreOAuthWithCredentials).not.toHaveBeenCalled();
+    });
+
+    it("still maps sidecar 401 responses to unauthorized for search", async () => {
+        ytMusicService.searchCanonical.mockRejectedValueOnce({
+            response: { status: 401 },
+        });
         const req = {
             user: { id: "user-1" },
             body: { query: "nina simone" },
@@ -939,7 +1026,7 @@ describe("youtube music route runtime behavior", () => {
 
         expect(res.statusCode).toBe(401);
         expect(res.body).toEqual({
-            error: "YouTube Music authentication expired or missing. Please reconnect your account.",
+            error: "YouTube Music authentication expired or invalid. Please reconnect your account.",
         });
     });
 });

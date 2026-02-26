@@ -2,11 +2,7 @@
 
 import { useAudio } from "@/lib/audio-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
-import {
-    useStreamBitrate,
-    formatLocalQualityBadge,
-    formatYtQualityBadge,
-} from "@/hooks/useStreamBitrate";
+import { useStreamBitrate } from "@/hooks/useStreamBitrate";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -20,9 +16,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { clampTime } from "@/utils/formatTime";
-import { TidalBadge } from "@/components/ui/TidalBadge";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { PlaybackQualityBadge } from "@/components/player/PlaybackQualityBadge";
 
 export function MiniPlayer() {
     const {
@@ -47,13 +43,8 @@ export function MiniPlayer() {
 
     const { title, subtitle, coverUrl, hasMedia } = useMediaInfo(100);
     const {
-        bitrate: streamBitrate,
-        codec: streamCodec,
-        tidalQuality,
-        localQuality,
+        qualityBadge,
     } = useStreamBitrate();
-    const ytQualityLabel = formatYtQualityBadge(streamCodec, streamBitrate);
-    const localQualityLabel = formatLocalQualityBadge(localQuality);
     const currentMediaId = currentTrack?.id || currentAudiobook?.id || currentPodcast?.id || "default";
     const artworkLayoutId = `mobile-player-artwork-${currentMediaId}`;
 
@@ -154,28 +145,12 @@ export function MiniPlayer() {
                                     <p className="truncate text-xs text-gray-300/80">
                                         {subtitle}
                                     </p>
-                                    {currentTrack?.streamSource === "tidal" && (
-                                        <TidalBadge
-                                            quality={tidalQuality}
-                                            className="max-w-[45vw] flex-shrink-0 text-[9px] px-1 leading-none"
+                                    {qualityBadge ? (
+                                        <PlaybackQualityBadge
+                                            badge={qualityBadge}
+                                            size="mini"
                                         />
-                                    )}
-                                    {currentTrack?.streamSource === "youtube" && (
-                                        <span
-                                            className="max-w-[45vw] flex-shrink-0 overflow-hidden text-ellipsis whitespace-nowrap rounded bg-red-500/20 px-1 py-0.5 text-[9px] font-bold leading-none text-red-400"
-                                            title={ytQualityLabel}
-                                        >
-                                            {ytQualityLabel}
-                                        </span>
-                                    )}
-                                    {!currentTrack?.streamSource && localQuality && (
-                                        <span
-                                            className="max-w-[45vw] flex-shrink-0 overflow-hidden text-ellipsis whitespace-nowrap rounded bg-emerald-500/20 px-1 py-0.5 text-[9px] font-bold leading-none text-emerald-400"
-                                            title={localQualityLabel || undefined}
-                                        >
-                                            {localQualityLabel}
-                                        </span>
-                                    )}
+                                    ) : null}
                                     <SyncBadge compact />
                                 </div>
                             </>

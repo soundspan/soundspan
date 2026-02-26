@@ -8,6 +8,10 @@ import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "./routeErrorResponse";
 
 const router = Router();
 const WEBHOOK_NAME_ALIASES = [BRAND_NAME];
@@ -146,7 +150,7 @@ router.get("/", async (req, res) => {
         res.json(decryptedSettings);
     } catch (error) {
         logger.error("Get system settings error:", error);
-        res.status(500).json({ error: "Failed to get system settings" });
+        sendInternalRouteError(res, "Failed to get system settings");
     }
 });
 
@@ -432,7 +436,7 @@ router.post("/", async (req, res) => {
                 .json({ error: "Invalid settings", details: error.errors });
         }
         logger.error("Update system settings error:", error);
-        res.status(500).json({ error: "Failed to update system settings" });
+        sendInternalRouteError(res, "Failed to update system settings");
     }
 });
 
@@ -503,7 +507,7 @@ router.post("/test-openai", async (req, res) => {
         const { apiKey, model } = req.body;
 
         if (!apiKey) {
-            return res.status(400).json({ error: "API key is required" });
+            return sendRouteError(res, 400, "API key is required");
         }
 
         const axios = require("axios");
@@ -540,7 +544,7 @@ router.post("/test-fanart", async (req, res) => {
         const { fanartApiKey } = req.body;
 
         if (!fanartApiKey) {
-            return res.status(400).json({ error: "API key is required" });
+            return sendRouteError(res, 400, "API key is required");
         }
 
         const axios = require("axios");
@@ -582,7 +586,7 @@ router.post("/test-lastfm", async (req, res) => {
         const { lastfmApiKey } = req.body;
 
         if (!lastfmApiKey) {
-            return res.status(400).json({ error: "API key is required" });
+            return sendRouteError(res, 400, "API key is required");
         }
 
         const axios = require("axios");
@@ -847,7 +851,7 @@ router.post("/tidal-auth/token", async (req, res) => {
     try {
         const { device_code } = req.body;
         if (!device_code) {
-            return res.status(400).json({ error: "device_code is required" });
+            return sendRouteError(res, 400, "device_code is required");
         }
 
         const { tidalService } = await import("../services/tidal");

@@ -16,6 +16,7 @@ import { useToast } from "@/lib/toast-context";
 import { formatTime } from "@/utils/formatTime";
 import { cn } from "@/utils/cn";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface PlayHistoryTrack {
     id: string;
@@ -105,7 +106,7 @@ export default function MyHistoryPage() {
                 const data = await api.get<PlayHistoryEntry[]>("/plays?limit=250");
                 setHistory(Array.isArray(data) ? data.filter((entry) => Boolean(entry.track?.id)) : []);
             } catch (err) {
-                console.error("Failed to load play history:", err);
+                sharedFrontendLogger.error("Failed to load play history:", err);
                 setError("Failed to load your listening history");
             } finally {
                 setLoading(false);
@@ -143,7 +144,7 @@ export default function MyHistoryPage() {
             await api.addTrackToPlaylist(playlistId, selectedTrackId);
             toast.success("Added to playlist");
         } catch (err) {
-            console.error("Failed to add track to playlist:", err);
+            sharedFrontendLogger.error("Failed to add track to playlist:", err);
             toast.error("Failed to add track to playlist");
         } finally {
             setIsSavingToPlaylist(false);

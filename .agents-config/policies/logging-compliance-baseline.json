@@ -1,0 +1,23 @@
+{
+  "metadata": {
+    "id": "soundspan-logging-compliance-baseline",
+    "version": "2026-02-21.01",
+    "generated_at": "2026-02-23T18:28:52.701Z",
+    "description": "Tracked raw logging callsites that are allowed temporarily while log-standard migration reaches 100% coverage."
+  },
+  "rules": [
+    {
+      "id": "ts_raw_console",
+      "description": "Frontend/backend runtime code must use shared logger helpers instead of direct console calls."
+    },
+    {
+      "id": "py_raw_print",
+      "description": "Python sidecars must avoid raw print statements in favor of shared logging utilities."
+    },
+    {
+      "id": "py_logging_basic_config",
+      "description": "Python sidecars must configure logging through services/common/logging_utils.py."
+    }
+  ],
+  "findings": []
+}

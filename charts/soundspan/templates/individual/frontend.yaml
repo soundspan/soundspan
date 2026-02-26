@@ -53,18 +53,25 @@ spec:
             - name: http
               containerPort: {{ .Values.frontend.port }}
               protocol: TCP
+          {{- $frontendEnv := .Values.frontend.env | default (dict) }}
+          {{- $defaultBackendURL := printf "http://%s-backend:%v" (include "soundspan.fullname" .) .Values.backend.port }}
           env:
+            # Runtime server-side API proxy target used by SSR/frontend proxy routes.
             - name: BACKEND_URL
-              value: "http://{{ include "soundspan.fullname" . }}-backend:{{ .Values.backend.port }}"
+              value: {{ if hasKey $frontendEnv "BACKEND_URL" }}{{ index $frontendEnv "BACKEND_URL" | quote }}{{ else }}{{ $defaultBackendURL | quote }}{{ end }}
+            # Build-time browser var in published images; kept for custom/source-build parity.
             - name: NEXT_PUBLIC_API_URL
-              value: ""
+              value: {{ if hasKey $frontendEnv "NEXT_PUBLIC_API_URL" }}{{ index $frontendEnv "NEXT_PUBLIC_API_URL" | quote }}{{ else }}""{{ end }}
+            # Mirrors backend polling policy by default; same build-time caveat as above.
             - name: NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING
-              value: {{ $ltAllowPolling | quote }}
+              value: {{ if hasKey $frontendEnv "NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING" }}{{ index $frontendEnv "NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING" | quote }}{{ else }}{{ $ltAllowPolling | quote }}{{ end }}
             - name: TZ
-              value: {{ .Values.config.timezone | quote }}
-            {{- range $key, $val := .Values.frontend.env }}
+              value: {{ if hasKey $frontendEnv "TZ" }}{{ index $frontendEnv "TZ" | quote }}{{ else }}{{ .Values.config.timezone | quote }}{{ end }}
+            {{- range $key := keys $frontendEnv | sortAlpha }}
+            {{- if and (ne $key "BACKEND_URL") (ne $key "NEXT_PUBLIC_API_URL") (ne $key "NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING") (ne $key "TZ") }}
             - name: {{ $key }}
-              value: {{ $val | quote }}
+              value: {{ index $frontendEnv $key | quote }}
+            {{- end }}
             {{- end }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
@@ -82,6 +89,9 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
+          volumeMounts:
+            - name: frontend-next-cache
+              mountPath: /app/.next/cache
           livenessProbe:
             httpGet:
               path: /health/live
@@ -100,6 +110,9 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      volumes:
+        - name: frontend-next-cache
+          emptyDir: {}
       {{- with .Values.frontend.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}

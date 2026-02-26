@@ -3,6 +3,17 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
+import {
+    resolveAdaptivePollingInterval,
+    resolveFixedPollingInterval,
+    resolvePollingEnabled,
+} from "@/hooks/pollingCadence";
+
+const logger = createFrontendLogger("Hooks.useNotifications");
+const NOTIFICATIONS_POLL_INTERVAL_MS = 30_000;
+const ACTIVE_DOWNLOADS_POLL_ACTIVE_MS = 10_000;
+const ACTIVE_DOWNLOADS_POLL_IDLE_MS = 30_000;
 
 export interface Notification {
     id: string;
@@ -66,7 +77,7 @@ interface PollingOptions {
  * All components using this hook share the same cache and update together.
  */
 export function useNotifications(options: PollingOptions = {}): UseNotificationsReturn {
-    const enabled = options.enabled ?? true;
+    const enabled = resolvePollingEnabled(options.enabled);
     const queryClient = useQueryClient();
 
     // Single source of truth - React Query cache
@@ -82,7 +93,10 @@ export function useNotifications(options: PollingOptions = {}): UseNotifications
         staleTime: 15_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchInterval: enabled ? 30000 : false,
+        refetchInterval: resolveFixedPollingInterval(
+            enabled,
+            NOTIFICATIONS_POLL_INTERVAL_MS
+        ),
     });
 
     // Derive unread count from data (computed, not stored)
@@ -211,7 +225,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
                 (old) => old?.filter((d) => d.id !== id) || []
             );
         } catch (err: unknown) {
-            console.error("Failed to clear download:", err);
+            logger.error("Failed to clear download", { id, err });
         }
     }, [queryClient]);
 
@@ -220,7 +234,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
             await api.post("/notifications/downloads/clear-all");
             queryClient.setQueryData<DownloadHistoryItem[]>(["download-history"], []);
         } catch (err: unknown) {
-            console.error("Failed to clear all:", err);
+            logger.error("Failed to clear all download history", { err });
         }
     }, [queryClient]);
 
@@ -232,7 +246,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
                 (old) => old?.filter((d) => d.id !== id) || []
             );
         } catch (err: unknown) {
-            console.error("Failed to retry download:", err);
+            logger.error("Failed to retry download", { id, err });
         }
     }, [queryClient]);
 
@@ -255,7 +269,7 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
 export function useActiveDownloads(
     options: PollingOptions = {}
 ): UseActiveDownloadsReturn {
-    const enabled = options.enabled ?? true;
+    const enabled = resolvePollingEnabled(options.enabled);
     const fetchDownloads = useCallback(async () => {
         return api.get<DownloadHistoryItem[]>("/notifications/downloads/active");
     }, []);
@@ -274,11 +288,13 @@ export function useActiveDownloads(
         refetchOnReconnect: false,
         // Adaptive polling: 10s when active, 30s when idle
         refetchInterval: (query) => {
-            if (!enabled) {
-                return false;
-            }
             const data = query.state.data;
-            return data && data.length > 0 ? 10000 : 30000;
+            return resolveAdaptivePollingInterval({
+                enabled,
+                hasActiveItems: (data?.length ?? 0) > 0,
+                activeIntervalMs: ACTIVE_DOWNLOADS_POLL_ACTIVE_MS,
+                idleIntervalMs: ACTIVE_DOWNLOADS_POLL_IDLE_MS,
+            });
         },
     });
 

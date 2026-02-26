@@ -274,6 +274,23 @@ describe("validateMusicConfig", () => {
         });
     });
 
+    it("throws AppError for non-numeric transcodeCacheMaxGb", async () => {
+        const { validateMusicConfig } = loadValidator({
+            env: {
+                MUSIC_PATH: "/env/music",
+                TRANSCODE_CACHE_MAX_GB: "abc",
+            },
+            existingPaths: ["/env/music"],
+        });
+
+        await expect(validateMusicConfig()).rejects.toMatchObject({
+            name: "AppError",
+            code: ErrorCode.INVALID_CONFIG,
+            category: ErrorCategory.FATAL,
+            message: "Invalid transcode cache size: must be a positive integer. Got: NaN",
+        });
+    });
+
     it("logs warning and continues when bundled ffmpeg is missing", async () => {
         const { validateMusicConfig, execSync, logger, ffmpegPath } = loadValidator({
             env: { MUSIC_PATH: "/env/music" },

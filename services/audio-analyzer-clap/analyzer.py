@@ -24,7 +24,6 @@ import sys
 import signal
 import json
 import time
-import logging
 import gc
 import threading
 import uuid
@@ -35,12 +34,24 @@ import numpy as np
 import librosa
 import requests
 
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_POTENTIAL_PROJECT_ROOTS = (
+    _CURRENT_DIR,
+    os.path.dirname(_CURRENT_DIR),
+    os.path.dirname(os.path.dirname(_CURRENT_DIR)),
+)
+for _root in _POTENTIAL_PROJECT_ROOTS:
+    if os.path.isdir(os.path.join(_root, "services", "common")):
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        break
+
+from services.common.logging_utils import configure_service_logger
+from services.common.analyzer_env import configure_thread_env, get_int_env
+
 # CPU thread limiting must be set before importing torch
-THREADS_PER_WORKER = int(os.getenv('THREADS_PER_WORKER', '1'))
-os.environ['OMP_NUM_THREADS'] = str(THREADS_PER_WORKER)
-os.environ['OPENBLAS_NUM_THREADS'] = str(THREADS_PER_WORKER)
-os.environ['MKL_NUM_THREADS'] = str(THREADS_PER_WORKER)
-os.environ['NUMEXPR_MAX_THREADS'] = str(THREADS_PER_WORKER)
+THREADS_PER_WORKER = get_int_env('THREADS_PER_WORKER', 1)
+configure_thread_env(THREADS_PER_WORKER)
 
 import torch
 torch.set_num_threads(THREADS_PER_WORKER)
@@ -58,29 +69,25 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('clap-analyzer')
+logger = configure_service_logger('clap-analyzer')
 
 # Configuration from environment
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 MUSIC_PATH = os.getenv('MUSIC_PATH', '/music')
-SLEEP_INTERVAL = int(os.getenv('SLEEP_INTERVAL', '5'))
-NUM_WORKERS = int(os.getenv('NUM_WORKERS', '2'))
+SLEEP_INTERVAL = get_int_env('SLEEP_INTERVAL', 5)
+NUM_WORKERS = get_int_env('NUM_WORKERS', 2)
 BACKEND_URL = os.getenv('BACKEND_URL', 'http://backend:3006')
-MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
+MODEL_IDLE_TIMEOUT = get_int_env('MODEL_IDLE_TIMEOUT', 300)
 
 # Queue and channel names
 ANALYSIS_QUEUE = 'audio:clap:queue'
 TEXT_EMBED_REQUEST_STREAM = 'audio:text:embed:requests'
 TEXT_EMBED_GROUP = os.getenv('TEXT_EMBED_GROUP', 'clap:text:embed:group')
 TEXT_EMBED_RESPONSE_PREFIX = 'audio:text:embed:response:'
-TEXT_EMBED_RESPONSE_TTL_SECONDS = int(os.getenv('TEXT_EMBED_RESPONSE_TTL_SECONDS', '120'))
-TEXT_EMBED_CLAIM_IDLE_MS = int(os.getenv('TEXT_EMBED_CLAIM_IDLE_MS', '60000'))
-TEXT_EMBED_CLAIM_BATCH = int(os.getenv('TEXT_EMBED_CLAIM_BATCH', '10'))
+TEXT_EMBED_RESPONSE_TTL_SECONDS = get_int_env('TEXT_EMBED_RESPONSE_TTL_SECONDS', 120)
+TEXT_EMBED_CLAIM_IDLE_MS = get_int_env('TEXT_EMBED_CLAIM_IDLE_MS', 60000)
+TEXT_EMBED_CLAIM_BATCH = get_int_env('TEXT_EMBED_CLAIM_BATCH', 10)
 CONTROL_CHANNEL = 'audio:clap:control'
 
 # Model version identifier

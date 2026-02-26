@@ -118,6 +118,8 @@ jobs:
               uses: docker/build-push-action@v5
               with:
                   context: ./frontend
+                  build-contexts: |
+                      media-metadata-contract=./packages/media-metadata-contract
                   push: true
                   build-args: |
                       NEXT_PUBLIC_BUILD_TYPE=${{ steps.tag-config.outputs.frontend_build_type }}

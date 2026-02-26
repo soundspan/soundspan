@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * useTidalGapFill — enriches unowned album tracks with TIDAL
  * streaming data (streamSource + tidalTrackId).
@@ -154,7 +155,7 @@ export function useTidalGapFill(
                 _albumMatchCache.set(album.id, newMatches);
                 setMatches(newMatches);
             } catch (err) {
-                console.error("[TIDAL GapFill] Batch match failed:", err);
+                sharedFrontendLogger.error("[TIDAL GapFill] Batch match failed:", err);
             }
 
             if (!cancelled) setLoading(false);

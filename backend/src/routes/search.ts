@@ -13,6 +13,92 @@ function normalizeDiscoverArtistName(value: unknown): string {
     return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+function normalizeDiscoverArtistTags(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+        .filter((tag): tag is string => tag.length > 0);
+}
+
+async function getLocalSimilarArtistsFromGraph(
+    artistName: string,
+    artistMbid: string,
+    limit: number
+): Promise<any[]> {
+    const normalizedArtistName = normalizeDiscoverArtistName(artistName);
+    const seedFilters: any[] = [
+        { name: { equals: artistName, mode: "insensitive" } },
+    ];
+
+    if (normalizedArtistName) {
+        seedFilters.push({ normalizedName: normalizedArtistName });
+    }
+
+    if (artistMbid) {
+        seedFilters.push({ mbid: artistMbid });
+    }
+
+    const seedArtist = await prisma.artist.findFirst({
+        where: {
+            OR: seedFilters,
+        },
+        select: { id: true },
+    });
+
+    if (!seedArtist) {
+        return [];
+    }
+
+    const graphSimilar = await prisma.similarArtist.findMany({
+        where: { fromArtistId: seedArtist.id },
+        orderBy: { weight: "desc" },
+        take: limit,
+        include: {
+            toArtist: {
+                select: {
+                    id: true,
+                    mbid: true,
+                    name: true,
+                    heroUrl: true,
+                    summary: true,
+                    genres: true,
+                },
+            },
+        },
+    });
+
+    const seen = new Set<string>();
+    const mapped: any[] = [];
+    for (const relation of graphSimilar) {
+        const target = relation.toArtist;
+        const dedupeKey =
+            target.mbid ||
+            target.id ||
+            normalizeDiscoverArtistName(target.name);
+        if (!target.name || !dedupeKey || seen.has(dedupeKey)) {
+            continue;
+        }
+
+        seen.add(dedupeKey);
+        mapped.push({
+            type: "music",
+            id: target.mbid || target.id,
+            name: target.name,
+            listeners: 0,
+            url: null,
+            image: target.heroUrl || null,
+            mbid: target.mbid,
+            bio: target.summary || null,
+            tags: normalizeDiscoverArtistTags(target.genres),
+        });
+    }
+
+    return mapped;
+}
+
 async function filterLibraryArtistsFromDiscoverResults(artists: any[]): Promise<any[]> {
     if (artists.length === 0) {
         return artists;
@@ -398,9 +484,24 @@ router.get("/discover/similar", async (req, res) => {
             artistName,
             seedLimit
         );
-        const similarArtists = similar.length > 0
+        let similarArtists = similar.length > 0
             ? await lastFmService.enrichSimilarArtists(similar, similarLimit)
             : [];
+
+        if (similarArtists.length === 0) {
+            logger.debug(
+                `[SEARCH SIMILAR] Last.fm returned no enriched artists for artist="${artistName}", falling back to local graph`
+            );
+            try {
+                similarArtists = await getLocalSimilarArtistsFromGraph(
+                    artistName,
+                    artistMbid,
+                    similarLimit
+                );
+            } catch (fallbackError) {
+                logger.warn("[SEARCH SIMILAR] Local fallback query error:", fallbackError);
+            }
+        }
 
         const payload = { similarArtists };
 

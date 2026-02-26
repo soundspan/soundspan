@@ -1304,7 +1304,6 @@ async function queueAudioAnalysis(): Promise<number> {
         `[Audio Analysis] Queueing ${tracks.length} tracks for Essentia...`,
     );
 
-    const redis = getRedis();
     let queued = 0;
 
     for (const track of tracks) {
@@ -1313,7 +1312,7 @@ async function queueAudioAnalysis(): Promise<number> {
             await withEnrichmentQueueRedisRetry(
                 `queueAudioAnalysis.rpush(${track.id})`,
                 () =>
-                    redis.rpush(
+                    getRedis().rpush(
                         "audio:analysis:queue",
                         JSON.stringify({
                             trackId: track.id,
@@ -1372,7 +1371,6 @@ async function queueVibeEmbeddings(): Promise<number> {
         return 0;
     }
 
-    const redis = getRedis();
     let queued = 0;
 
     for (const track of tracks) {
@@ -1380,7 +1378,7 @@ async function queueVibeEmbeddings(): Promise<number> {
             await withEnrichmentQueueRedisRetry(
                 `queueVibeEmbeddings.rpush(${track.id})`,
                 () =>
-                    redis.rpush(
+                    getRedis().rpush(
                         "audio:clap:queue",
                         JSON.stringify({
                             trackId: track.id,

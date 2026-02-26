@@ -131,7 +131,7 @@ jobs:
           mkdir -p .chart-build
           cp -R charts/soundspan .chart-build/soundspan
 
-          node .github/scripts/prepare-helm-chart-release.mjs \
+          node .agents-config/scripts/prepare-helm-chart-release.mjs \
             --chart-dir .chart-build/soundspan \
             --release-tag "${{ steps.meta.outputs.release_tag }}"
 

@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { cn } from "@/utils/cn";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface RadioStation {
     id: string;
@@ -30,8 +31,7 @@ interface RadioStation {
             | "discovery"
             | "favorites"
             | "all"
-            | "workout"
-            | "liked";
+            | "workout";
         value?: string;
     };
     minTracks?: number;
@@ -51,14 +51,6 @@ const STATIC_STATIONS: RadioStation[] = [
         color: "from-[#3b82f6]/60 to-amber-600/40",
         filter: { type: "all" },
         minTracks: 10,
-    },
-    {
-        id: "liked",
-        name: "My Liked",
-        description: "All your thumbs-up tracks",
-        color: "from-emerald-500/50 to-green-700/40",
-        filter: { type: "liked" },
-        minTracks: 1,
     },
     {
         id: "workout",
@@ -217,7 +209,7 @@ export function LibraryRadioStations() {
                 setGenres(validGenres);
                 setDecades((decadesRes.decades || []).slice(0, 4));
             } catch (error) {
-                console.error("Failed to fetch radio data:", error);
+                sharedFrontendLogger.error("Failed to fetch radio data:", error);
             } finally {
                 setIsLoading(false);
             }
@@ -241,7 +233,7 @@ export function LibraryRadioStations() {
             if (station.filter.value) {
                 params.set("value", station.filter.value);
             }
-            params.set("limit", station.filter.type === "liked" ? "10000" : "100");
+            params.set("limit", "100");
 
             const response = await api.get<{ tracks: Track[] }>(
                 `/library/radio?${params.toString()}`
@@ -269,7 +261,7 @@ export function LibraryRadioStations() {
                 icon: <Shuffle className="w-4 h-4" />,
             });
         } catch (error) {
-            console.error("Failed to start radio:", error);
+            sharedFrontendLogger.error("Failed to start radio:", error);
             toast.error("Failed to start radio station");
         } finally {
             setLoadingStation(null);

@@ -11,6 +11,10 @@ import { musicBrainzService } from "../services/musicbrainz";
 import { lastFmService } from "../services/lastfm";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { mapInteractiveRelease } from "../services/releaseContracts";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "./routeErrorResponse";
 import crypto from "crypto";
 
 const router = Router();
@@ -38,7 +42,7 @@ router.get("/availability", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("Download availability check error:", error.message);
-        res.status(500).json({ error: "Failed to check download availability" });
+        sendInternalRouteError(res, "Failed to check download availability");
     }
 });
 
@@ -314,7 +318,7 @@ router.post("/", async (req, res) => {
             }
         }
         logger.error("Create download job error:", error);
-        res.status(500).json({ error: "Failed to create download job" });
+        sendInternalRouteError(res, "Failed to create download job");
     }
 });
 
@@ -790,7 +794,7 @@ router.delete("/clear-all", async (req, res) => {
         res.json({ success: true, deleted: result.count });
     } catch (error) {
         logger.error("Clear downloads error:", error);
-        res.status(500).json({ error: "Failed to clear downloads" });
+        sendInternalRouteError(res, "Failed to clear downloads");
     }
 });
 
@@ -805,7 +809,7 @@ router.post("/clear-lidarr-queue", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("Clear Lidarr queue error:", error);
-        res.status(500).json({ error: "Failed to clear Lidarr queue" });
+        sendInternalRouteError(res, "Failed to clear Lidarr queue");
     }
 });
 
@@ -823,7 +827,7 @@ router.get("/failed", async (req, res) => {
         res.json(failedAlbums);
     } catch (error) {
         logger.error("List failed albums error:", error);
-        res.status(500).json({ error: "Failed to list failed albums" });
+        sendInternalRouteError(res, "Failed to list failed albums");
     }
 });
 
@@ -839,7 +843,7 @@ router.delete("/failed/:id", async (req, res) => {
         });
 
         if (!failedAlbum) {
-            return res.status(404).json({ error: "Failed album not found" });
+            return sendRouteError(res, 404, "Failed album not found");
         }
 
         await prisma.unavailableAlbum.delete({
@@ -849,7 +853,7 @@ router.delete("/failed/:id", async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         logger.error("Delete failed album error:", error);
-        res.status(500).json({ error: "Failed to delete failed album" });
+        sendInternalRouteError(res, "Failed to delete failed album");
     }
 });
 
@@ -861,12 +865,12 @@ router.get("/releases/:albumMbid", async (req, res) => {
         const albumTitle = String(req.query.albumTitle || "").trim();
 
         if (!albumMbid) {
-            return res.status(400).json({ error: "Missing albumMbid parameter" });
+            return sendRouteError(res, 400, "Missing albumMbid parameter");
         }
 
         const lidarrEnabled = await lidarrService.isEnabled();
         if (!lidarrEnabled) {
-            return res.status(400).json({ error: "Lidarr not configured" });
+            return sendRouteError(res, 400, "Lidarr not configured");
         }
 
         logger.debug(
@@ -988,7 +992,7 @@ router.post("/grab", async (req, res) => {
 
         const lidarrEnabled = await lidarrService.isEnabled();
         if (!lidarrEnabled) {
-            return res.status(400).json({ error: "Lidarr not configured" });
+            return sendRouteError(res, 400, "Lidarr not configured");
         }
 
         const duplicateWhere: any = {
@@ -1054,7 +1058,7 @@ router.post("/grab", async (req, res) => {
                     completedAt: new Date(),
                 },
             });
-            return res.status(500).json({ error: "Failed to grab release" });
+            return sendInternalRouteError(res, "Failed to grab release");
         }
 
         res.json({
@@ -1085,13 +1089,13 @@ router.get("/:id", async (req, res) => {
         });
 
         if (!job) {
-            return res.status(404).json({ error: "Download job not found" });
+            return sendRouteError(res, 404, "Download job not found");
         }
 
         res.json(job);
     } catch (error) {
         logger.error("Get download job error:", error);
-        res.status(500).json({ error: "Failed to get download job" });
+        sendInternalRouteError(res, "Failed to get download job");
     }
 });
 
@@ -1110,7 +1114,7 @@ router.patch("/:id", async (req, res) => {
         });
 
         if (!job) {
-            return res.status(404).json({ error: "Download job not found" });
+            return sendRouteError(res, 404, "Download job not found");
         }
 
         const updated = await prisma.downloadJob.update({
@@ -1124,7 +1128,7 @@ router.patch("/:id", async (req, res) => {
         res.json(updated);
     } catch (error) {
         logger.error("Update download job error:", error);
-        res.status(500).json({ error: "Failed to update download job" });
+        sendInternalRouteError(res, "Failed to update download job");
     }
 });
 
@@ -1194,7 +1198,7 @@ router.get("/", async (req, res) => {
         res.json(filteredJobs);
     } catch (error) {
         logger.error("List download jobs error:", error);
-        res.status(500).json({ error: "Failed to list download jobs" });
+        sendInternalRouteError(res, "Failed to list download jobs");
     }
 });
 
@@ -1205,7 +1209,7 @@ router.post("/keep-track", async (req, res) => {
         const userId = req.user!.id;
 
         if (!discoveryTrackId) {
-            return res.status(400).json({ error: "Missing discoveryTrackId" });
+            return sendRouteError(res, 400, "Missing discoveryTrackId");
         }
 
         const discoveryTrack = await prisma.discoveryTrack.findUnique({
@@ -1216,7 +1220,7 @@ router.post("/keep-track", async (req, res) => {
         });
 
         if (!discoveryTrack) {
-            return res.status(404).json({ error: "Discovery track not found" });
+            return sendRouteError(res, 404, "Discovery track not found");
         }
 
         // Mark as kept
@@ -1253,7 +1257,7 @@ router.post("/keep-track", async (req, res) => {
         });
     } catch (error) {
         logger.error("Keep track error:", error);
-        res.status(500).json({ error: "Failed to keep track" });
+        sendInternalRouteError(res, "Failed to keep track");
     }
 });
 

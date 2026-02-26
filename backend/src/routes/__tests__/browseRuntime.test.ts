@@ -40,6 +40,7 @@ jest.mock("../../services/spotify", () => ({
 }));
 
 import router from "../browse";
+import { createMockJsonResponse } from "./helpers/mockJsonResponse";
 
 function getHandler(path: string, method: "get" | "post") {
     const layer = (router as any).stack.find(
@@ -54,22 +55,7 @@ function getHandler(path: string, method: "get" | "post") {
     return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
-function createRes() {
-    const res: any = {
-        statusCode: 200,
-        body: undefined as unknown,
-        status: jest.fn(function (code: number) {
-            res.statusCode = code;
-            return res;
-        }),
-        json: jest.fn(function (payload: unknown) {
-            res.body = payload;
-            return res;
-        }),
-    };
-
-    return res;
-}
+const createRes = createMockJsonResponse;
 
 describe("browse route runtime", () => {
     const getFeaturedPlaylists = getHandler("/playlists/featured", "get");

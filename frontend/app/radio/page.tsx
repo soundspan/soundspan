@@ -11,6 +11,7 @@ import { shuffleArray } from "@/utils/shuffle";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { cn } from "@/utils/cn";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface RadioStation {
     id: string;
@@ -24,8 +25,7 @@ interface RadioStation {
             | "discovery"
             | "favorites"
             | "all"
-            | "workout"
-            | "liked";
+            | "workout";
         value?: string;
     };
     minTracks?: number;
@@ -45,14 +45,6 @@ const STATIC_STATIONS: RadioStation[] = [
         color: "from-brand/40 to-sky-400/30",
         filter: { type: "all" },
         minTracks: 10,
-    },
-    {
-        id: "liked",
-        name: "My Liked",
-        description: "All your thumbs-up tracks",
-        color: "from-emerald-500/35 to-green-700/35",
-        filter: { type: "liked" },
-        minTracks: 1,
     },
     {
         id: "workout",
@@ -277,7 +269,7 @@ export default function RadioPage() {
             if (station.filter.value) {
                 params.set("value", station.filter.value);
             }
-            params.set("limit", station.filter.type === "liked" ? "10000" : "100");
+            params.set("limit", "100");
 
             const response = await api.get<{ tracks: Track[] }>(`/library/radio?${params.toString()}`);
 
@@ -303,7 +295,7 @@ export default function RadioPage() {
                 icon: <Shuffle className="w-4 h-4" />,
             });
         } catch (error) {
-            console.error("Failed to start radio:", error);
+            sharedFrontendLogger.error("Failed to start radio:", error);
             toast.error("Failed to start radio station");
         } finally {
             setLoadingStation(null);

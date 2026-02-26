@@ -612,7 +612,8 @@ describe("unified enrichment runtime behavior", () => {
         const result = await enrichment.runFullEnrichment();
 
         expect(queueRedisPrimary.disconnect).toHaveBeenCalledTimes(1);
-        expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(2);
+        expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(1);
+        expect(queueRedisRecovery.rpush).toHaveBeenCalledTimes(1);
         expect(prisma.track.update).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: { id: "track-enrich-1" },
@@ -1918,6 +1919,43 @@ describe("unified enrichment runtime behavior", () => {
         );
     });
 
+    it("retries CLAP queue push with recreated redis client when the connection closes", async () => {
+        const {
+            prisma,
+            getFeatures,
+            queueRedisPrimary,
+            queueRedisRecovery,
+        } = setupUnifiedEnrichmentMocks();
+        getFeatures.mockResolvedValueOnce({ vibeEmbeddings: true });
+        (prisma.$queryRaw as jest.Mock).mockResolvedValueOnce([
+            {
+                id: "track-vibe-rpush-recovery",
+                filePath: "/music/track-vibe-rpush-recovery.flac",
+                vibeAnalysisStatus: null,
+            },
+        ]);
+        (queueRedisPrimary.rpush as jest.Mock).mockRejectedValueOnce(
+            new Error("Connection is closed")
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const queued = await enrichment.reRunVibeEmbeddingsOnly();
+
+        expect(queued).toBe(1);
+        expect(queueRedisPrimary.disconnect).toHaveBeenCalledTimes(1);
+        expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(1);
+        expect(queueRedisRecovery.rpush).toHaveBeenCalledTimes(1);
+        expect(prisma.track.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "track-vibe-rpush-recovery" },
+                data: expect.objectContaining({
+                    vibeAnalysisStatus: "processing",
+                }),
+            })
+        );
+    });
+
     it("logs vibe cleanup reset counts and queued embeddings", async () => {
         const {
             claimRedisPrimary,
@@ -2571,7 +2609,13 @@ describe("unified enrichment runtime behavior", () => {
     });
 
     it("retries queue redis operations when retryable errors are thrown as strings", async () => {
-        const { claimRedisPrimary, prisma, getFeatures, queueRedisPrimary } =
+        const {
+            claimRedisPrimary,
+            prisma,
+            getFeatures,
+            queueRedisPrimary,
+            queueRedisRecovery,
+        } =
             setupUnifiedEnrichmentMocks();
         (claimRedisPrimary.set as jest.Mock).mockResolvedValueOnce("OK");
         getFeatures.mockResolvedValue({ vibeEmbeddings: false });
@@ -2599,7 +2643,8 @@ describe("unified enrichment runtime behavior", () => {
         await enrichment.runFullEnrichment();
 
         expect(queueRedisPrimary.disconnect).toHaveBeenCalledTimes(1);
-        expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(2);
+        expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(1);
+        expect(queueRedisRecovery.rpush).toHaveBeenCalledTimes(1);
     });
 
     it("keeps queued-audio summary silent when all queue pushes fail", async () => {

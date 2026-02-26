@@ -5,7 +5,7 @@ Start-here guide for `frontend/features/search`.
 ## Start Here
 
 1. Route entrypoints: `frontend/app/browse/playlists/page.tsx`, `frontend/app/search/page.tsx`
-2. Domain ownership and contracts: `docs/FEATURE_INDEX.json`.
+2. Domain ownership and contracts: `.agents-config/docs/FEATURE_INDEX.json`.
 3. Targeted verification commands:
 - `npm --prefix backend test -- --runInBand src/routes/__tests__/searchRuntime.test.ts src/routes/__tests__/browseRuntime.test.ts`
 - `npm --prefix backend test -- --runInBand src/services/__tests__/searchService.test.ts`
@@ -36,4 +36,4 @@ Start-here guide for `frontend/features/search`.
 
 ## Update Rule
 
-- When adding/removing significant files or changing behavior in this domain, update or verify this README along with `docs/FEATURE_INDEX.json` and `docs/TEST_MATRIX.md`.
+- When adding/removing significant files or changing behavior in this domain, update or verify this README along with `.agents-config/docs/FEATURE_INDEX.json` and `.agents-config/docs/TEST_MATRIX.md`.

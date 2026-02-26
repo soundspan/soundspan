@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 import bundleAnalyzer from '@next/bundle-analyzer';
 
@@ -16,6 +17,12 @@ const nextConfig: NextConfig = {
         "localhost",
     ],
     
+    // Local file: dependencies resolve via symlinks outside /frontend.
+    // Point Turbopack at monorepo root so package resolution succeeds in CI.
+    turbopack: {
+        root: path.join(__dirname, ".."),
+    },
+
     images: {
         remotePatterns: [
             {
@@ -71,6 +78,11 @@ const nextConfig: NextConfig = {
         imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
         minimumCacheTTL: 60 * 60 * 24 * 7, // Cache for 7 days
         dangerouslyAllowSVG: true,
+    },
+    experimental: {
+        // Frontend pods may run with read-only root filesystems; disable
+        // disk cache writes (including image cache) to prevent EACCES spam.
+        isrFlushToDisk: false,
     },
     reactStrictMode: true,
     async headers() {

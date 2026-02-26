@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import type { SoulseekResult } from "../types";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface UseSoulseekSearchProps {
     query: string;
@@ -34,7 +35,7 @@ export function useSoulseekSearch({
                 const status = await api.getSlskdStatus();
                 setSoulseekEnabled(Boolean(status.enabled));
             } catch (error) {
-                console.error("Failed to check Soulseek status:", error);
+                sharedFrontendLogger.error("Failed to check Soulseek status:", error);
                 setSoulseekEnabled(false);
             }
         };
@@ -113,7 +114,7 @@ export function useSoulseekSearch({
                         }
                     } catch (error) {
                         if (abortController.signal.aborted) return;
-                        console.error("Error polling Soulseek results:", error);
+                        sharedFrontendLogger.error("Error polling Soulseek results:", error);
                         if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
                         pollIntervalRef.current = null;
                         setIsSoulseekPolling(false);
@@ -121,7 +122,7 @@ export function useSoulseekSearch({
                 }, 2000);
             } catch (error) {
                 if (abortController.signal.aborted) return;
-                console.error("Soulseek search error:", error);
+                sharedFrontendLogger.error("Soulseek search error:", error);
                 if (error instanceof Error && error.message?.includes("not enabled")) {
                     setSoulseekEnabled(false);
                 }
@@ -166,7 +167,7 @@ export function useSoulseekSearch({
                 });
             }, 5000);
         } catch (error) {
-            console.error("Download error:", error);
+            sharedFrontendLogger.error("Download error:", error);
             const message =
                 error instanceof Error ? error.message : "Failed to start download";
             toast.error(message);

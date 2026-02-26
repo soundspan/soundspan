@@ -1,5 +1,8 @@
 import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
+
+const logger = createFrontendLogger("Settings.useTwoFactor");
 
 export function useTwoFactor() {
     const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
@@ -32,13 +35,15 @@ export function useTwoFactor() {
             // Reset retry count on success
             retryCountRef.current = 0;
         } catch (error) {
-            console.error("Failed to load 2FA status:", error);
+            logger.error("Failed to load 2FA status", { error });
             retryCountRef.current++;
             
             // Stop retrying after max attempts
             if (retryCountRef.current >= maxRetries) {
                 hasFailedRef.current = true;
-                console.warn(`2FA status load failed after ${maxRetries} attempts, giving up`);
+                logger.warn("2FA status load failed after max retries, giving up", {
+                    maxRetries,
+                });
             }
         } finally {
             setLoadingTwoFactor(false);
@@ -53,7 +58,7 @@ export function useTwoFactor() {
             setTwoFactorQR(response.qrCode);
             setSettingUpTwoFactor(true);
         } catch (error: unknown) {
-            console.error("Failed to setup 2FA:", error);
+            logger.error("Failed to set up 2FA", { error });
             throw error;
         } finally {
             setLoadingTwoFactor(false);
@@ -74,7 +79,7 @@ export function useTwoFactor() {
             setSettingUpTwoFactor(false);
             setTwoFactorToken("");
         } catch (error: unknown) {
-            console.error("Failed to enable 2FA:", error);
+            logger.error("Failed to enable 2FA", { error });
             throw error;
         } finally {
             setLoadingTwoFactor(false);
@@ -93,7 +98,7 @@ export function useTwoFactor() {
             setDisableTwoFactorPassword("");
             setDisableTwoFactorToken("");
         } catch (error: unknown) {
-            console.error("Failed to disable 2FA:", error);
+            logger.error("Failed to disable 2FA", { error });
             throw error;
         } finally {
             setDisablingTwoFactor(false);

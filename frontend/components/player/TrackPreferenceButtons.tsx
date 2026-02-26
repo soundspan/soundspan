@@ -1,6 +1,7 @@
 "use client";
 
 import { ThumbsDown, ThumbsUp } from "lucide-react";
+import { type TrackPreferenceSignal } from "@/lib/api";
 import { useTrackPreference } from "@/hooks/useTrackPreference";
 import { cn } from "@/utils/cn";
 
@@ -10,6 +11,11 @@ interface TrackPreferenceButtonsProps {
     buttonSizeClassName?: string;
     iconSizeClassName?: string;
     mode?: "both" | "up-only" | "down-only";
+    signal?: TrackPreferenceSignal;
+    isSaving?: boolean;
+    onToggleThumbsUp?: () => Promise<unknown> | unknown;
+    onToggleThumbsDown?: () => Promise<unknown> | unknown;
+    resolveFromQuery?: boolean;
 }
 
 interface FilledThumbIconProps {
@@ -48,21 +54,29 @@ function ThumbsDownFilledIcon({
     );
 }
 
-export function TrackPreferenceButtons({
-    trackId,
-    className,
-    buttonSizeClassName = "h-11 w-11",
-    iconSizeClassName = "h-6 w-6",
-    mode = "both",
-}: TrackPreferenceButtonsProps) {
-    const {
-        signal: preferenceSignal,
-        isSaving: isPreferenceSaving,
-        toggleThumbsUp,
-        toggleThumbsDown,
-    } = useTrackPreference(trackId);
+interface TrackPreferenceButtonsContentProps {
+    className?: string;
+    buttonSizeClassName: string;
+    iconSizeClassName: string;
+    mode: "both" | "up-only" | "down-only";
+    preferenceSignal: TrackPreferenceSignal;
+    isPreferenceSaving: boolean;
+    canSetTrackPreference: boolean;
+    onThumbsUpToggle: () => Promise<unknown> | unknown;
+    onThumbsDownToggle: () => Promise<unknown> | unknown;
+}
 
-    const canSetTrackPreference = Boolean(trackId);
+function TrackPreferenceButtonsContent({
+    className,
+    buttonSizeClassName,
+    iconSizeClassName,
+    mode,
+    preferenceSignal,
+    isPreferenceSaving,
+    canSetTrackPreference,
+    onThumbsUpToggle,
+    onThumbsDownToggle,
+}: TrackPreferenceButtonsContentProps) {
     const isThumbsUp = preferenceSignal === "thumbs_up";
     const isThumbsDown = preferenceSignal === "thumbs_down";
 
@@ -78,7 +92,7 @@ export function TrackPreferenceButtons({
                     type="button"
                     onClick={(event) => {
                         event.stopPropagation();
-                        void toggleThumbsDown();
+                        void onThumbsDownToggle();
                     }}
                     className={cn(
                         baseButtonClass,
@@ -110,7 +124,7 @@ export function TrackPreferenceButtons({
                     type="button"
                     onClick={(event) => {
                         event.stopPropagation();
-                        void toggleThumbsUp();
+                        void onThumbsUpToggle();
                     }}
                     className={cn(
                         baseButtonClass,
@@ -138,4 +152,83 @@ export function TrackPreferenceButtons({
             )}
         </div>
     );
+}
+
+function TrackPreferenceButtonsControlled({
+    trackId,
+    className,
+    buttonSizeClassName,
+    iconSizeClassName,
+    mode,
+    signal,
+    isSaving,
+    onToggleThumbsUp,
+    onToggleThumbsDown,
+}: TrackPreferenceButtonsProps) {
+    const canSetTrackPreference =
+        Boolean(trackId) ||
+        Boolean(onToggleThumbsUp) ||
+        Boolean(onToggleThumbsDown);
+
+    return (
+        <TrackPreferenceButtonsContent
+            className={className}
+            buttonSizeClassName={buttonSizeClassName ?? "h-11 w-11"}
+            iconSizeClassName={iconSizeClassName ?? "h-6 w-6"}
+            mode={mode ?? "both"}
+            preferenceSignal={signal ?? "clear"}
+            isPreferenceSaving={isSaving ?? false}
+            canSetTrackPreference={canSetTrackPreference}
+            onThumbsUpToggle={onToggleThumbsUp ?? (() => undefined)}
+            onThumbsDownToggle={onToggleThumbsDown ?? (() => undefined)}
+        />
+    );
+}
+
+function TrackPreferenceButtonsWithQuery({
+    trackId,
+    className,
+    buttonSizeClassName,
+    iconSizeClassName,
+    mode,
+    signal,
+    isSaving,
+    onToggleThumbsUp,
+    onToggleThumbsDown,
+}: TrackPreferenceButtonsProps) {
+
+    const {
+        signal: queriedSignal,
+        isSaving: queriedIsSaving,
+        toggleThumbsUp: queriedToggleThumbsUp,
+        toggleThumbsDown: queriedToggleThumbsDown,
+    } = useTrackPreference(trackId);
+
+    const preferenceSignal = signal ?? queriedSignal;
+    const isPreferenceSaving = isSaving ?? queriedIsSaving;
+    const canSetTrackPreference =
+        Boolean(trackId) ||
+        Boolean(onToggleThumbsUp) ||
+        Boolean(onToggleThumbsDown);
+
+    return (
+        <TrackPreferenceButtonsContent
+            className={className}
+            buttonSizeClassName={buttonSizeClassName ?? "h-11 w-11"}
+            iconSizeClassName={iconSizeClassName ?? "h-6 w-6"}
+            mode={mode ?? "both"}
+            preferenceSignal={preferenceSignal}
+            isPreferenceSaving={isPreferenceSaving}
+            canSetTrackPreference={canSetTrackPreference}
+            onThumbsUpToggle={onToggleThumbsUp ?? queriedToggleThumbsUp}
+            onThumbsDownToggle={onToggleThumbsDown ?? queriedToggleThumbsDown}
+        />
+    );
+}
+
+export function TrackPreferenceButtons(props: TrackPreferenceButtonsProps) {
+    if (props.resolveFromQuery === false) {
+        return <TrackPreferenceButtonsControlled {...props} />;
+    }
+    return <TrackPreferenceButtonsWithQuery {...props} />;
 }

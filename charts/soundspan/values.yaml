@@ -284,6 +284,16 @@ frontend:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # Frontend runtime knobs (effective without image rebuild), for example:
+  # env:
+  #   BACKEND_URL: http://my-release-backend:3006
+  #   STREAMING_ENGINE_MODE: videojs
+  #   SEGMENTED_VHS_PROFILE: balanced
+  #   SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: "5000"
+  #
+  # NOTE: `NEXT_PUBLIC_*` browser vars in published frontend images are
+  # build-time. Runtime overrides here are still injected into pod env, but
+  # browser behavior changes only when you ship a rebuilt frontend image.
   env: {}
   # -- Additional environment variable sources for frontend container.
   # Example:
@@ -425,6 +435,11 @@ ytmusicStreamer:
     # Search result cache TTL in seconds (0 to disable).
     # Prevents identical searches from hitting InnerTube repeatedly.
     YTMUSIC_SEARCH_CACHE_TTL: "300"
+    # Search strategy:
+    # - auto: native-first; pin failing users to tv fallback on #813 errors
+    # - tv: legacy TV parser only
+    # - native: ytmusicapi yt.search() only
+    YTMUSIC_SEARCH_MODE: "auto"
   # -- Additional environment variable sources for YT Music streamer container.
   # Example:
   # envFrom:
@@ -671,7 +686,4 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-
-
-
 

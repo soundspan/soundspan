@@ -174,7 +174,53 @@ describe("lastFmService", () => {
             }),
         });
         expect(mockRedisSetEx).toHaveBeenCalledWith(
-            "lastfm:similar:name:Fallback Name",
+            "lastfm:similar:name:fallback name:limit:5",
+            604800,
+            JSON.stringify(result)
+        );
+    });
+
+    it("uses name lookup and cache keys when MBID is missing", async () => {
+        mockRedisGet.mockResolvedValueOnce(null);
+        mockHttpGet.mockResolvedValueOnce({
+            data: {
+                similarartists: {
+                    artist: [
+                        {
+                            name: "Name Only Similar",
+                            mbid: "name-only-mbid",
+                            match: "0.73",
+                            url: "https://last.fm/music/name-only-similar",
+                        },
+                    ],
+                },
+            },
+        });
+
+        const result = await lastFmService.getSimilarArtists(
+            "",
+            "Name Only Artist",
+            7
+        );
+
+        expect(result).toEqual([
+            {
+                name: "Name Only Similar",
+                mbid: "name-only-mbid",
+                match: 0.73,
+                url: "https://last.fm/music/name-only-similar",
+            },
+        ]);
+        expect(mockHttpGet).toHaveBeenCalledTimes(1);
+        expect(mockHttpGet).toHaveBeenCalledWith("/", {
+            params: expect.objectContaining({
+                method: "artist.getSimilar",
+                artist: "Name Only Artist",
+                limit: 7,
+            }),
+        });
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "lastfm:similar:name:name only artist:limit:7",
             604800,
             JSON.stringify(result)
         );

@@ -1,0 +1,511 @@
+{
+  "metadata": {
+    "id": "soundspan-agent-context-index",
+    "version": "2026-02-24.11",
+    "description": "Machine-readable index for startup context retrieval and governance drift checks."
+  },
+  "startupReadOrder": [
+    "AGENTS.md",
+    ".agents-config/docs/AGENT_RULES.md",
+    ".agents-config/docs/CONTEXT_INDEX.json",
+    ".agents-config/docs/AGENT_CONTEXT.md",
+    ".agents/EXECUTION_QUEUE.json",
+    ".agents/CONTINUITY.md"
+  ],
+  "primaryContracts": {
+    "bootstrapFile": "AGENTS.md",
+    "rulesFile": ".agents-config/docs/AGENT_RULES.md",
+    "contextFile": ".agents-config/docs/AGENT_CONTEXT.md",
+    "canonicalRulesFile": ".agents-config/contracts/rules/canonical-ruleset.json",
+    "policyFile": ".agents-config/policies/agent-governance.json",
+    "enforcerFile": ".agents-config/scripts/enforce-agent-policies.mjs",
+    "preflightFile": ".agents-config/scripts/agent-session-preflight.mjs",
+    "managedManifestFile": ".agents-config/agent-managed.json",
+    "managedManifestTemplateFile": ".agents-config/tools/bootstrap/managed-files.template.json"
+  },
+  "sessionArtifacts": {
+    "executionQueueFile": ".agents/EXECUTION_QUEUE.json",
+    "continuityFile": ".agents/CONTINUITY.md",
+    "sessionBriefJsonFile": ".agents/SESSION_BRIEF.json",
+    "archiveRoot": ".agents/archives",
+    "archiveIndexFile": ".agents/EXECUTION_ARCHIVE_INDEX.json",
+    "archiveShardBy": "feature_id",
+    "archiveFormat": "jsonl",
+    "archiveReadPolicy": "cold_lookup_only",
+    "retiredArtifacts": [
+      ".agents/ACTIVE_SCOPE.json",
+      ".agents/UNRESOLVED_QUEUE.json"
+    ],
+    "queueScopedRead": {
+      "requiredTopLevelFields": [
+        "state",
+        "feature_id",
+        "task_id",
+        "objective",
+        "last_updated",
+        "updated_at",
+        "in_scope",
+        "out_of_scope",
+        "open_questions"
+      ],
+      "itemSelectorFields": [
+        "id",
+        "plan_ref",
+        "owner",
+        "depends_on"
+      ],
+      "maxItemsPerRead": 25
+    },
+    "archiveOnComplete": {
+      "itemStates": [
+        "complete"
+      ],
+      "queueStates": [
+        "complete"
+      ],
+      "forbidCompleteInHotQueue": true
+    },
+    "plansRoot": ".agents/plans",
+    "planRoots": [
+      ".agents/plans/current",
+      ".agents/plans/deferred",
+      ".agents/plans/archived"
+    ],
+    "planQueueSync": {
+      "enabled": true,
+      "planFileName": "PLAN.json",
+      "roots": [
+        ".agents/plans/current",
+        ".agents/plans/deferred"
+      ],
+      "stateByRoot": {
+        ".agents/plans/current": "pending",
+        ".agents/plans/deferred": "deferred"
+      }
+    },
+    "planMachineContract": {
+      "enabled": true,
+      "planFileName": "PLAN.json",
+      "machineFileName": "PLAN.json",
+      "schemaVersion": "1.0",
+      "roots": [
+        ".agents/plans/current",
+        ".agents/plans/deferred",
+        ".agents/plans/archived"
+      ],
+      "requiredTopLevelFields": [
+        "schema_version",
+        "feature_id",
+        "feature_title",
+        "plan_ref",
+        "status",
+        "updated_at",
+        "planning_stages",
+        "narrative",
+        "subagent"
+      ],
+      "requiredPlanningStages": [
+        "spec_outline",
+        "refined_spec",
+        "implementation_plan"
+      ],
+      "requiredNarrativeFields": [
+        "spec_outline",
+        "refined_spec",
+        "implementation_plan"
+      ],
+      "preSpecOutlineRequiredFields": [
+        "purpose_goals",
+        "non_goals"
+      ],
+      "statusesRequiringNonEmptyPreSpecNonGoals": [
+        "ready",
+        "deferred"
+      ],
+      "statusesRequiringNarrativeContent": [
+        "in_progress",
+        "complete"
+      ],
+      "narrativeMinLength": 24,
+      "preSpecOutlineMinLength": 24,
+      "narrativeMinSteps": 1,
+      "specOutlineListFieldName": "full_spec_outline",
+      "refinedSpecListFieldName": "full_refined_spec",
+      "specOutlineEntryRequiredFields": [
+        "id",
+        "objective",
+        "deliverable",
+        "acceptance_criteria",
+        "references"
+      ],
+      "refinedSpecEntryRequiredFields": [
+        "id",
+        "decision",
+        "rationale",
+        "acceptance_criteria",
+        "references"
+      ],
+      "statusesRequiringSpecOutlineEntries": [
+        "in_progress",
+        "complete"
+      ],
+      "statusesRequiringRefinedSpecEntries": [
+        "in_progress",
+        "complete"
+      ],
+      "specOutlineMinEntries": 1,
+      "refinedSpecMinEntries": 1,
+      "implementationStepsFieldName": "steps",
+      "allowedNarrativeStepStatuses": [
+        "pending",
+        "in_progress",
+        "complete",
+        "blocked"
+      ],
+      "narrativeStepRequiredFields": [
+        "status",
+        "deliverable",
+        "acceptance_criteria",
+        "references",
+        "completion_summary"
+      ],
+      "narrativeStepOptionalFields": [],
+      "implementationStepDeliverableDenyPatterns": [
+        "^\\s*(todo|tbd|placeholder|n\\/?a|none|unknown)\\s*$",
+        "^\\s*(step|task|item|deliverable)\\s*\\d+\\s*$",
+        "^\\s*<[^>]+>\\s*$"
+      ],
+      "implementationStepAcceptanceCriteriaMinCount": 1,
+      "stepStatusesRequiringAcceptanceCriteria": [
+        "in_progress",
+        "complete"
+      ],
+      "stepStatusesRequiringNonEmptyCompletionSummary": [
+        "complete"
+      ],
+      "implementationCompletionSummaryRequiredFields": [
+        "delivered",
+        "files_functions_hooks_touched",
+        "verification_testing"
+      ],
+      "allowedPlanningStageStates": [
+        "pending",
+        "in_progress",
+        "complete"
+      ],
+      "allowedSubagentRequirements": [
+        "required",
+        "recommended",
+        "optional",
+        "none"
+      ],
+      "requiredSubagentFields": [
+        "requirement",
+        "primary_agent",
+        "execution_agents",
+        "last_executor"
+      ],
+      "statusesRequiringLastExecutor": [
+        "in_progress",
+        "complete"
+      ],
+      "allowedStatusByRoot": {
+        ".agents/plans/current": [
+          "draft",
+          "ready",
+          "in_progress",
+          "blocked",
+          "complete"
+        ],
+        ".agents/plans/deferred": [
+          "deferred"
+        ],
+        ".agents/plans/archived": [
+          "complete",
+          "archived"
+        ]
+      },
+      "statusCoherence": {
+        "requireInProgressPlanStatusWhenAnyStepInProgress": true,
+        "statusesRequiringAllImplementationStepsComplete": [
+          "complete"
+        ],
+        "statusesForbiddingInProgressImplementationSteps": [
+          "deferred"
+        ]
+      }
+    },
+    "archivedPlanSync": {
+      "enabled": true,
+      "root": ".agents/plans/archived",
+      "planFileName": "PLAN.json",
+      "archiveKeyPrefix": "feature-plan:",
+      "indexKind": "feature"
+    },
+    "stalePlanReferenceCheck": {
+      "enabled": true,
+      "failureMode": "fail",
+      "scanRoots": [
+        ".agents/plans"
+      ]
+    },
+    "repositoryIndexPreflight": {
+      "enabled": true,
+      "buildIfMissing": true,
+      "reindexBeforeVerify": true,
+      "verifyStrict": true,
+      "failureMode": "fail",
+      "closeoutVerifyIfPossible": true
+    },
+    "workspaceLayout": {
+      "canonicalRepoRoot": ".",
+      "canonicalAgentsRoot": "../agents-workfiles/soundspan",
+      "worktreesRoot": "../soundspan.worktrees",
+      "semanticMergeRequired": true,
+      "semanticMergeOnAgentsEditRequired": true,
+      "worktreeAgentsSymlinkRequired": true,
+      "localAgentsPath": ".agents"
+    },
+    "sessionBriefContract": {
+      "requiredFields": [
+        "generated_at",
+        "policy",
+        "scope",
+        "queue_file",
+        "archive_index_file",
+        "index_readiness",
+        "queue_read_contract",
+        "queue_overview",
+        "startup_attestation",
+        "queue_quality_gate",
+        "next_actions"
+      ],
+      "freshnessHoursWarning": 24,
+      "freshnessFailureMode": "fail"
+    },
+    "queueQualityGate": {
+      "failureMode": "fail",
+      "failureRules": [
+        "missingTopLevelDeferredReason",
+        "missingTopLevelScope",
+        "missingTopLevelAcceptance",
+        "deferredItemIds",
+        "activeOrCompleteMissingStartIds",
+        "completeItemMissingCompletedAtIds",
+        "completeItemMissingEvidenceIds"
+      ],
+      "verificationEvidencePrefix": "verify:"
+    }
+  },
+  "ruleCatalog": {
+    "file": ".agents-config/docs/AGENT_RULES.md",
+    "section": "## Rule ID Catalog (Machine Cross-Reference)"
+  },
+  "canonicalRules": {
+    "file": ".agents-config/contracts/rules/canonical-ruleset.json",
+    "overrideSchemaFile": ".agents-config/agent-overrides/rule-overrides.schema.json",
+    "optionalOverrideFile": ".agents-config/agent-overrides/rule-overrides.json",
+    "verifyCommandKey": "canonicalRulesVerify",
+    "syncCommandKey": "canonicalRulesSync"
+  },
+  "orchestratorSubagent": {
+    "policyPath": "contracts.orchestratorSubagent",
+    "singleOrchestratorOnly": true,
+    "allowSubagentDelegation": false,
+    "defaultPattern": "operator_subagent_required_non_trivial",
+    "nonTrivialSubagentDelegationRequired": true,
+    "idleSubagentReleaseRequired": true,
+    "idleSubagentMaxIdleMinutes": 15,
+    "modelRouting": {
+      "orchestrator": "gpt-5.3-codex",
+      "subagent": "gpt-5.3-codex",
+      "lowRiskLoop": "gpt-5.3-codex-spark"
+    },
+    "reasoningEffortRouting": {
+      "orchestrator": "xhigh",
+      "subagent": "high",
+      "lowRiskLoop": "medium"
+    },
+    "lowRiskSparkPolicy": {
+      "allowedTaskClasses": [
+        "single_file_edit",
+        "grep_triage",
+        "draft_rewrite"
+      ],
+      "explicitVerificationCommandsRequired": true,
+      "minimumVerificationCommands": 1,
+      "requiredVerificationCommands": [
+        "node .agents-config/scripts/enforce-agent-policies.mjs"
+      ],
+      "requiredEvidencePrefix": "verify:"
+    },
+    "verbosityBudgets": {
+      "subagentObjectiveMaxWords": 32,
+      "subagentInputContextMaxWords": 200,
+      "subagentSummaryMaxWords": 120,
+      "specOutlineMaxWords": 220,
+      "refinedSpecMaxWords": 420,
+      "implementationTaskMaxWords": 160
+    }
+  },
+  "rulesSections": [
+    {
+      "id": "rules_global_agreements",
+      "file": ".agents-config/docs/AGENT_RULES.md",
+      "heading": "## Global Operating Agreements (All LLMs)"
+    },
+    {
+      "id": "rules_orchestrator_contract",
+      "file": ".agents-config/docs/AGENT_RULES.md",
+      "heading": "### Orchestrator/Subagent Instruction Contract (Required)"
+    },
+    {
+      "id": "rules_continuity",
+      "file": ".agents-config/docs/AGENT_RULES.md",
+      "heading": "### CONTINUITY.md Contract (Required)"
+    },
+    {
+      "id": "rules_post_compaction",
+      "file": ".agents-config/docs/AGENT_RULES.md",
+      "heading": "### Post-Compaction Startup Checklist (Required)"
+    },
+    {
+      "id": "rules_definition_of_done",
+      "file": ".agents-config/docs/AGENT_RULES.md",
+      "heading": "### Definition of Done"
+    }
+  ],
+  "contextSections": [
+    {
+      "id": "context_project_overview",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Project Overview"
+    },
+    {
+      "id": "context_architecture",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Architecture"
+    },
+    {
+      "id": "context_tech_stack",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Tech Stack"
+    },
+    {
+      "id": "context_project_structure",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Project Structure"
+    },
+    {
+      "id": "context_key_conventions",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Key Conventions"
+    },
+    {
+      "id": "context_reuse_atlas",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Reuse and Consolidation Atlas"
+    },
+    {
+      "id": "context_fork_docs",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Fork Documentation Maintenance"
+    },
+    {
+      "id": "context_full_stack_gates",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Full-Stack Delivery Gates"
+    },
+    {
+      "id": "context_database",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Database"
+    },
+    {
+      "id": "context_streaming_integration",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Streaming Integration"
+    },
+    {
+      "id": "context_testing",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Testing"
+    },
+    {
+      "id": "context_local_testing_bootstrap",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Local Testing Bootstrap"
+    },
+    {
+      "id": "context_common_tasks",
+      "file": ".agents-config/docs/AGENT_CONTEXT.md",
+      "heading": "## Common Tasks"
+    }
+  ],
+  "commands": {
+    "policyCheck": "node .agents-config/scripts/enforce-agent-policies.mjs",
+    "sessionPreflight": "npm run agent:preflight",
+    "agentPayloadStub": "npm run agent:payload:stub -- --help",
+    "queueLifecycle": "npm run agent:queue:open -- --help",
+    "indexBuild": "npm run index:build",
+    "indexVerify": "npm run index:verify",
+    "featureIndexVerify": "npm run feature-index:verify",
+    "routeMapGenerate": "npm run route-map:generate",
+    "routeMapVerify": "npm run route-map:verify",
+    "domainReadmesGenerate": "npm run domain-readmes:generate",
+    "domainReadmesVerify": "npm run domain-readmes:verify",
+    "jsdocCoverageGenerate": "npm run jsdoc-coverage:generate",
+    "jsdocCoverageVerify": "npm run jsdoc-coverage:verify",
+    "loggingComplianceGenerate": "npm run logging:compliance:generate",
+    "loggingComplianceVerify": "npm run logging:compliance:verify",
+    "indexQueryStrictFresh": "node .agents-config/tools/index/indexer.mjs query \"<query>\" --strict-fresh",
+    "releasePrepare": "npm run release:prepare -- --version <X.Y.Z>",
+    "releaseVerify": "npm run release:verify -- --version <X.Y.Z>",
+    "releaseNotes": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+    "changelogFile": "cat CHANGELOG.md",
+    "featureIndexFile": "cat .agents-config/docs/FEATURE_INDEX.json",
+    "testMatrixFile": "cat .agents-config/docs/TEST_MATRIX.md",
+    "routeMapFile": "cat .agents-config/docs/ROUTE_MAP.md",
+    "jsdocCoverageFile": "cat .agents-config/docs/JSDOC_COVERAGE.md",
+    "loggingStandardsFile": "cat .agents-config/docs/LOGGING_STANDARDS.md",
+    "routesReadmeFile": "cat backend/src/routes/README.md",
+    "servicesReadmeFile": "cat backend/src/services/README.md",
+    "frontendFeaturesReadmeFile": "cat frontend/features/README.md",
+    "canonicalRulesVerify": "npm run rules:canonical:verify",
+    "canonicalRulesSync": "npm run rules:canonical:sync",
+    "agentManaged": "npm run agent:managed -- --mode check",
+    "templateImpactCheck": "npm run agent:template-impact:check -- --base-ref origin/<base-branch>",
+    "agentManagedFix": "npm run agent:managed -- --fix --recheck"
+  },
+  "profiles": {
+    "availableProfiles": [
+      "base",
+      "node-web"
+    ],
+    "activeProfiles": [
+      "base",
+      "node-web"
+    ]
+  },
+  "managedFilesCanonical": {
+    "manifestFile": ".agents-config/agent-managed.json",
+    "manifestTemplateFile": ".agents-config/tools/bootstrap/managed-files.template.json",
+    "canonicalContractField": "canonical_contract",
+    "defaultAuthority": "template",
+    "allowedAuthorities": [
+      "template",
+      "project"
+    ],
+    "overrideMode": "explicit_allowlist",
+    "overrideReservedPaths": [
+      "rule-overrides.schema.json",
+      "rule-overrides.json",
+      "README.md",
+      ".gitkeep"
+    ],
+    "entryAllowOverrideField": "allow_override",
+    "entryAuthorityField": "authority",
+    "checkCommandKey": "agentManaged",
+    "fixCommandKey": "agentManagedFix"
+  }
+}

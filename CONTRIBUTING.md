@@ -155,8 +155,8 @@ Recommended rollout:
 
 Agent/process governance is validated by executable checks, not prose alone.
 
-- Policy manifest: `.github/policies/agent-governance.json`
-- Runner: `.github/scripts/enforce-agent-policies.mjs`
+- Policy manifest: `.agents-config/policies/agent-governance.json`
+- Runner: `.agents-config/scripts/enforce-agent-policies.mjs`
 - PR gate: `.github/workflows/pr-checks.yml` (`policy-as-code` job)
 
 Run locally before pushing:

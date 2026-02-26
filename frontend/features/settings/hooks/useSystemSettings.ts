@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { createFrontendLogger } from "@/lib/logger";
 import { SystemSettings } from "../types";
 import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
+
+const logger = createFrontendLogger("Settings.useSystemSettings");
 
 const defaultSystemSettings: SystemSettings = {
     lidarrEnabled: true,
@@ -98,7 +101,7 @@ export function useSystemSettings() {
             setOriginalSettings(combinedSettings);
             setLoadError(false);
         } catch (error) {
-            console.error("Failed to load system settings:", error);
+            logger.error("Failed to load system settings", { error });
             setLoadError(true);
         } finally {
             if (!isBackground) {
@@ -194,7 +197,7 @@ export function useSystemSettings() {
 
             return changed; // Return changed services
         } catch (error) {
-            console.error("Failed to save system settings:", error);
+            logger.error("Failed to save system settings", { error });
             throw error; // Caller handles the error display
         } finally {
             setIsSaving(false);
@@ -259,7 +262,7 @@ export function useSystemSettings() {
 
             return { success: true, version: result?.version };
         } catch (error: unknown) {
-            console.error(`Failed to test ${service}:`, error);
+            logger.error("Failed to test service", { service, error });
             return { success: false, error: error instanceof Error ? error.message : `Failed to connect` };
         }
     };

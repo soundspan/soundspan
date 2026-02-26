@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { beforeEach, mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import {
+    installTrackOverflowHarness,
+    trackOverflowIcon,
+} from "../trackOverflowHarness.ts";
 
 /**
  * Component tests for TrackOverflowMenu.
@@ -19,73 +23,34 @@ const state = {
     isInListenTogetherGroup: false,
 };
 
-// Stub icon component
-const Icon = (props: Record<string, unknown>) => React.createElement("i", props);
-
 // Mock lucide-react icons
 mock.module("lucide-react", {
     namedExports: {
-        EllipsisVertical: Icon,
-        ListEnd: Icon,
-        ListPlus: Icon,
-        Plus: Icon,
-        User: Icon,
-        Disc3: Icon,
-        AudioWaveform: Icon,
-        Link: Icon,
+        EllipsisVertical: trackOverflowIcon,
+        ListEnd: trackOverflowIcon,
+        ListPlus: trackOverflowIcon,
+        Plus: trackOverflowIcon,
+        User: trackOverflowIcon,
+        Disc3: trackOverflowIcon,
+        AudioWaveform: trackOverflowIcon,
+        Link: trackOverflowIcon,
     },
 });
 
-// Mock cn utility
-mock.module("@/utils/cn", {
-    namedExports: {
-        cn: (...values: Array<string | false | null | undefined>) =>
-            values.filter(Boolean).join(" "),
-    },
-});
-
-// Mock audio controls
-mock.module("@/lib/audio-controls-context", {
-    namedExports: {
-        useAudioControls: () => ({
-            playNext: (track: { id: string; title: string }) => {
-                state.lastPlayNextTrack = track;
-            },
-            addToQueue: (track: { id: string; title: string }) => {
-                state.lastAddToQueueTrack = track;
-            },
-            playTrack: () => undefined,
-            startVibeMode: async () => ({ success: true, trackCount: 10 }),
-        }),
-    },
-});
-
-// Mock audio state
-mock.module("@/lib/audio-state-context", {
-    namedExports: {
-        useAudioState: () => ({
-            playbackType: state.playbackType,
-        }),
-        // Re-export Track type placeholder (not needed for runtime but keeps imports happy)
-    },
-});
-
-// Mock PlaylistSelector
-mock.module("@/components/ui/PlaylistSelector", {
-    namedExports: {
-        PlaylistSelector: (props: { isOpen: boolean }) =>
-            props.isOpen
-                ? React.createElement("div", { "data-testid": "playlist-selector" }, "PlaylistSelector")
-                : null,
-    },
-});
-
-// Mock artistRoute utility
-mock.module("@/utils/artistRoute", {
-    namedExports: {
-        getArtistHref: (artist: { id?: string; name?: string }) =>
-            artist.id ? `/artist/${artist.id}` : artist.name ? `/artist/${encodeURIComponent(artist.name)}` : null,
-    },
+installTrackOverflowHarness(mock, {
+    useAudioControls: () => ({
+        playNext: (track: { id: string; title: string }) => {
+            state.lastPlayNextTrack = track;
+        },
+        addToQueue: (track: { id: string; title: string }) => {
+            state.lastAddToQueueTrack = track;
+        },
+        playTrack: () => undefined,
+        startVibeMode: async () => ({ success: true, trackCount: 10 }),
+    }),
+    useAudioState: () => ({
+        playbackType: state.playbackType,
+    }),
 });
 
 // Mock next/navigation
@@ -96,17 +61,6 @@ mock.module("next/navigation", {
                 state.routerPushPath = path;
             },
         }),
-    },
-});
-
-// Mock sonner toast
-mock.module("sonner", {
-    namedExports: {
-        toast: {
-            success: () => undefined,
-            error: () => undefined,
-            info: () => undefined,
-        },
     },
 });
 

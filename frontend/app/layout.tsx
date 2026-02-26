@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Montserrat } from "next/font/google";
 import localFont from "next/font/local";
+import Script from "next/script";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { FeaturesProvider } from "@/lib/features-context";
@@ -69,6 +70,7 @@ export default function RootLayout({
                 className={`${montserrat.variable} ${polea.variable} antialiased`}
                 style={{ fontFamily: "var(--font-montserrat)" }}
             >
+                <Script src="/runtime-config" strategy="beforeInteractive" />
                 <GlobalErrorBoundary>
                     <ServiceWorkerRegistration />
                     <AuthProvider>

@@ -146,7 +146,7 @@ test("shuffle indices handle empty array", () => {
 
 test("multiple playNext calls insert in LIFO order (most recent plays first)", () => {
     let queue = [trackA, trackB, trackC];
-    let currentIndex = 0;
+    const currentIndex = 0;
 
     // First playNext: insert trackNew
     const result1 = simulatePlayNextInsert(queue, currentIndex, trackNew);

@@ -17,6 +17,10 @@ import {
     GroupError,
 } from "./listenTogetherManager";
 import { listenTogetherStateStore } from "./listenTogetherStateStore";
+import {
+    normalizeCanonicalMediaProviderIdentity,
+    toLegacyStreamFields,
+} from "@soundspan/media-metadata-contract";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -132,6 +136,8 @@ async function validateLocalTracks(trackIds: string[]): Promise<SyncQueueItem[]>
             duration: t.duration,
             artist: { id: t.album.artist.id, name: t.album.artist.name },
             album: { id: t.album.id, title: t.album.title, coverArt: t.album.coverUrl },
+            mediaSource: "local",
+            provider: { source: "local" },
         });
     }
 
@@ -621,6 +627,20 @@ function parseQueueFromDb(raw: Prisma.JsonValue | null): SyncQueueItem[] {
             artist && typeof artist.id === "string" && typeof artist.name === "string" &&
             album && typeof album.id === "string" && typeof album.title === "string"
         ) {
+            const provider = normalizeCanonicalMediaProviderIdentity({
+                mediaSource: q.mediaSource,
+                streamSource: q.streamSource,
+                sourceType: q.sourceType,
+                providerTrackId:
+                    (q.provider as Record<string, unknown> | undefined)
+                        ?.providerTrackId ?? q.providerTrackId,
+                tidalTrackId:
+                    (q.provider as Record<string, unknown> | undefined)
+                        ?.tidalTrackId ?? q.tidalTrackId,
+                youtubeVideoId:
+                    (q.provider as Record<string, unknown> | undefined)
+                        ?.youtubeVideoId ?? q.youtubeVideoId,
+            });
             result.push({
                 id: q.id,
                 title: q.title,
@@ -631,6 +651,9 @@ function parseQueueFromDb(raw: Prisma.JsonValue | null): SyncQueueItem[] {
                     title: album.title,
                     coverArt: typeof album.coverArt === "string" ? album.coverArt : null,
                 },
+                mediaSource: provider.source,
+                provider,
+                ...toLegacyStreamFields(provider),
             });
         }
     }

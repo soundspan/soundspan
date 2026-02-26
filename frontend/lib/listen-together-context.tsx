@@ -1,5 +1,6 @@
 "use client";
 
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Listen Together context — the bridge between server-authoritative group
  * state (via Socket.IO) and the local audio player.
@@ -31,7 +32,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useAudioState, type Track } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { howlerEngine } from "@/lib/howler-engine";
+import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import {
     listenTogetherSocket,
     type GroupSnapshot,
@@ -43,6 +44,12 @@ import {
     type SocketRouteProbeResult,
 } from "@/lib/listen-together-socket";
 import { setListenTogetherSessionSnapshot } from "@/lib/listen-together-session";
+import {
+    normalizeCanonicalMediaProviderIdentity,
+    toLegacyStreamFields,
+} from "@soundspan/media-metadata-contract";
+
+const playbackEngine = createRuntimeAudioEngine();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,12 +118,24 @@ const ListenTogetherContext = createContext<ListenTogetherContextType | undefine
 
 /** Convert a SyncQueueItem to a local Track for the audio player. */
 function toLocalTrack(item: SyncQueueItem): Track {
+    const provider = normalizeCanonicalMediaProviderIdentity({
+        mediaSource: item.mediaSource,
+        providerTrackId: item.provider?.providerTrackId,
+        tidalTrackId: item.provider?.tidalTrackId ?? item.tidalTrackId,
+        youtubeVideoId: item.provider?.youtubeVideoId ?? item.youtubeVideoId,
+        streamSource: item.streamSource,
+    });
+    const legacyStreamFields = toLegacyStreamFields(provider);
+
     return {
         id: item.id,
         title: item.title,
         duration: item.duration,
         artist: { id: item.artist.id, name: item.artist.name },
         album: { id: item.album.id, title: item.album.title, coverArt: item.album.coverArt ?? undefined },
+        mediaSource: provider.source,
+        provider,
+        ...legacyStreamFields,
     };
 }
 
@@ -269,7 +288,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         const targetSec = targetMs / 1000;
 
         // Seek if needed
-        const drift = Math.abs(howlerEngine.getCurrentTime() - targetSec);
+        const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
         if (drift > 1.5 || state.currentTrack?.id !== targetTrack?.id) {
             ctrl.seek(targetSec, {
                 allowListenTogetherFollower: true,
@@ -318,7 +337,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         }
 
         const targetSec = targetMs / 1000;
-        const drift = Math.abs(howlerEngine.getCurrentTime() - targetSec);
+        const drift = Math.abs(playbackEngine.getCurrentTime() - targetSec);
 
         // Seek if drift is significant
         if (drift > 1.5) {
@@ -329,14 +348,14 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         }
 
         // Play/pause
-        if (delta.isPlaying && !howlerEngine.isPlaying()) {
+        if (delta.isPlaying && !playbackEngine.isPlaying()) {
             ctrl.resume({
                 suppressListenTogetherBroadcast: true,
                 listenTogetherForceIsPlaying: true,
                 listenTogetherPositionMs: delta.positionMs,
                 listenTogetherServerTimeMs: delta.serverTime,
             });
-        } else if (!delta.isPlaying && howlerEngine.isPlaying()) {
+        } else if (!delta.isPlaying && playbackEngine.isPlaying()) {
             ctrl.pause({ suppressListenTogetherBroadcast: true });
         }
 
@@ -376,7 +395,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         };
 
         const onReloaded = () => {
-            howlerEngine.off("load", onReloaded);
+            playbackEngine.off("load", onReloaded);
             clearRecoveryTimeout();
 
             const active = activeGroupRef.current;
@@ -396,13 +415,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
         // Force stream re-open to recover from dead socket-backed stream handles
         // after backend pod failover.
-        howlerEngine.on("load", onReloaded);
+        playbackEngine.on("load", onReloaded);
         clearRecoveryTimeout();
         reconnectAudioRecoveryTimeoutRef.current = setTimeout(() => {
-            howlerEngine.off("load", onReloaded);
+            playbackEngine.off("load", onReloaded);
             reconnectAudioRecoveryTimeoutRef.current = null;
         }, 10_000);
-        howlerEngine.reload();
+        playbackEngine.reload();
     }, []);
 
     // -----------------------------------------------------------------------
@@ -691,7 +710,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 pendingReconnectAudioRecoveryRef.current = true;
             },
             onReconnectError: (err) => {
-                console.error("[ListenTogether] Reconnect error:", err.message);
+                sharedFrontendLogger.error("[ListenTogether] Reconnect error:", err.message);
             },
             onReconnectFailed: () => {
                 setError("Listen Together reconnect failed. Check route/proxy health and try rejoining.");
@@ -701,7 +720,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 setIsConnected(false);
             },
             onError: (err) => {
-                console.error("[ListenTogether] Socket error:", err.message);
+                sharedFrontendLogger.error("[ListenTogether] Socket error:", err.message);
                 const isRouteSensitiveError =
                     err.message.includes("xhr poll error") ||
                     err.message.includes("websocket error") ||
@@ -774,7 +793,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
                 // Ensure snapshot has required structure before using it
                 if (!groupSnapshot.playback || !Array.isArray(groupSnapshot.members)) {
-                    console.warn("[ListenTogether] Received malformed group snapshot, ignoring");
+                    sharedFrontendLogger.warn("[ListenTogether] Received malformed group snapshot, ignoring");
                     setActiveGroup(null);
                     lastAppliedVersionRef.current = 0;
                     setIsLoading(false);
@@ -790,7 +809,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 }
             } catch (err) {
                 if (!mounted) return;
-                console.error("[ListenTogether] Failed to fetch active group:", err);
+                sharedFrontendLogger.error("[ListenTogether] Failed to fetch active group:", err);
                 setIsLoading(false);
             }
         })();
@@ -841,10 +860,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             if (!listenTogetherSocket.isConnected) return;
 
             // Only push if we're actually playing
-            if (!howlerEngine.isPlaying()) return;
+            if (!playbackEngine.isPlaying()) return;
 
             // Use seek to sync position (lightweight, no ready gate)
-            const positionMs = howlerEngine.getCurrentTime() * 1000;
+            const positionMs = playbackEngine.getCurrentTime() * 1000;
             listenTogetherSocket.seek(positionMs).catch(() => {});
         }, 5000); // Every 5 seconds
 
@@ -889,8 +908,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     localTrackIds.includes(nowPlayingTrack.id)
                 ) {
                     currentTrackId = nowPlayingTrack.id;
-                    currentTimeMs = Math.max(0, howlerEngine.getCurrentTime() * 1000);
-                    isPlaying = howlerEngine.isPlaying();
+                    currentTimeMs = Math.max(0, playbackEngine.getCurrentTime() * 1000);
+                    isPlaying = playbackEngine.isPlaying();
                 }
 
                 if (removedCount > 0) {

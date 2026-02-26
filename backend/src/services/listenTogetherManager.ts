@@ -8,6 +8,11 @@
  * Design references: Jellyfin SyncPlay, Syncplay, Synctube.
  */
 
+import type {
+    CanonicalMediaProviderIdentity,
+    CanonicalMediaSource,
+} from "@soundspan/media-metadata-contract";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -18,6 +23,11 @@ export interface SyncQueueItem {
     duration: number;
     artist: { id: string; name: string };
     album: { id: string; title: string; coverArt: string | null };
+    mediaSource?: CanonicalMediaSource;
+    provider?: CanonicalMediaProviderIdentity;
+    streamSource?: "tidal" | "youtube";
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
 }
 
 export interface GroupMember {

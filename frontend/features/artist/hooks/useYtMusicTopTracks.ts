@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * useYtMusicTopTracks — enriches unowned artist top-tracks with
  * YouTube Music streaming data (streamSource + youtubeVideoId).
@@ -124,7 +125,7 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
                 _artistMatchCache.set(artist.id, newMatches);
                 setMatches(newMatches);
             } catch (err) {
-                console.error("[YTMusic TopTracks] Batch match failed:", err);
+                sharedFrontendLogger.error("[YTMusic TopTracks] Batch match failed:", err);
             }
 
             if (!cancelled) setLoading(false);

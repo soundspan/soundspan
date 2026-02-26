@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agents-template.local/schemas/rule-overrides.schema.json",
+  "title": "Agent Rule Overrides",
+  "description": "Project-local override declarations keyed by local-only IDs that extend canonical rule IDs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "overrides"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 3
+        }
+      }
+    },
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "extends",
+          "reason",
+          "owner",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "extends": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 8
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 2
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 2
+          },
+          "adjustments": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "error",
+                  "warn",
+                  "disabled"
+                ]
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 3
+              },
+              "guidance_addendum": {
+                "type": "string",
+                "minLength": 3
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

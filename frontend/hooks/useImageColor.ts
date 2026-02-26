@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export interface ColorPalette {
     vibrant: string;
@@ -334,7 +335,7 @@ export function useImageColor(imageUrl: string | null | undefined) {
             })
             .catch((error) => {
                 if (cancelled) return;
-                console.error("[useImageColor] Failed to extract colors:", error.message || error);
+                sharedFrontendLogger.error("[useImageColor] Failed to extract colors:", error.message || error);
                 setAsyncState({
                     imageUrl,
                     colors: PLACEHOLDER_PALETTE,

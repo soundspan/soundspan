@@ -38,6 +38,7 @@ For integration-specific setup values, see [`INTEGRATIONS.md`](INTEGRATIONS.md).
 | `MAX_FILE_SIZE_MB` | `250` | Analyzer input file hard cap (`0` disables cap) |
 | `BATCH_ANALYSIS_TIMEOUT_SECONDS` | `900` | Batch processing timeout before permanent failure |
 | `LOG_LEVEL` | `warn` (prod) / `debug` (dev) | Logging verbosity |
+| `NEXT_PUBLIC_LOG_LEVEL` | `warn` (prod) / `info` (dev) | Frontend browser logger verbosity (build-time; `NEXT_PUBLIC_` required for client visibility) |
 | `DOCS_PUBLIC` | `false` | Allow public API docs in production when `true` |
 | `RUN_DB_MIGRATIONS_ON_STARTUP` | `true` | API entrypoint toggle to run `prisma migrate deploy` on startup |
 | `PRISMA_MIGRATE_MAX_ATTEMPTS` | `12` | Max startup migration retries for transient DB saturation/connectivity failures |
@@ -121,7 +122,7 @@ If users access soundspan from outside your local network, configure CORS and AP
 
 ### Frontend Build-Time vs Runtime
 
-`NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_PATH_MODE` are frontend build-time variables.
+`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_API_PATH_MODE`, and `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` are frontend build-time variables.
 
 - They work as expected in source-build flows (`npm run dev`, `npm run build` with env/build args).
 - In pre-published frontend images, changing these vars at container runtime does not change browser behavior.
@@ -141,6 +142,7 @@ ALLOWED_ORIGINS=http://localhost:3030,https://soundspan.yourdomain.com
 For users consuming published images:
 
 - Leave `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_API_PATH_MODE` unset unless you are publishing your own rebuilt frontend image.
+- `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` is also build-time; runtime container env changes on pre-published images do not switch browser transport behavior.
 - Route `/api/*` to backend in your reverse proxy, and route app traffic to frontend.
 - Set backend `ALLOWED_ORIGINS` to include your frontend origin.
 
@@ -156,6 +158,7 @@ For pre-published images, see reverse-proxy path routing guidance in [`REVERSE_P
 For Listen Together, the frontend proxies `/socket.io/listen-together` to backend by default in split deployments.
 If you bypass frontend proxying intentionally, your edge proxy/tunnel must route `/socket.io/listen-together` to backend `:3006`.
 `LISTEN_TOGETHER_ALLOW_POLLING=false` is recommended for HA deployments; only enable polling fallback when sticky sessions are guaranteed end-to-end.
+For pre-published frontend images, browser polling fallback also requires rebuilding with `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING=true`.
 
 For multi-replica backend/frontend deployments, configure Redis as a highly available endpoint.
 A single Redis pod is a runtime SPOF for sessions, queues, and realtime coordination.

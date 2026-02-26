@@ -20,7 +20,10 @@ jest.mock("../../utils/logger", () => ({
     },
 }));
 
-import { ytMusicService } from "../youtubeMusic";
+import {
+    ytMusicService,
+    normalizeYtMusicStreamQuality,
+} from "../youtubeMusic";
 import { logger } from "../../utils/logger";
 
 describe("youtubeMusic service", () => {
@@ -34,6 +37,9 @@ describe("youtubeMusic service", () => {
         await expect(ytMusicService.isAvailable()).resolves.toBe(true);
         expect(mockClient.get).toHaveBeenCalledWith("/health", { timeout: 5000 });
 
+        // Reset availability memoization so the next check exercises the failure path.
+        (ytMusicService as any).availabilityCache = null;
+        (ytMusicService as any).availabilityInFlight = null;
         mockClient.get.mockRejectedValueOnce(new Error("down"));
         await expect(ytMusicService.isAvailable()).resolves.toBe(false);
 
@@ -120,6 +126,15 @@ describe("youtubeMusic service", () => {
         );
     });
 
+    it("normalizes stream quality values from settings and requests", () => {
+        expect(normalizeYtMusicStreamQuality("LOW")).toBe("low");
+        expect(normalizeYtMusicStreamQuality(" medium ")).toBe("medium");
+        expect(normalizeYtMusicStreamQuality("HIGH")).toBe("high");
+        expect(normalizeYtMusicStreamQuality("LOSSLESS")).toBe("lossless");
+        expect(normalizeYtMusicStreamQuality("ultra")).toBeUndefined();
+        expect(normalizeYtMusicStreamQuality(undefined)).toBeUndefined();
+    });
+
     it("retries search for retryable failures and throws non-retryable failures", async () => {
         jest.useFakeTimers();
 
@@ -144,6 +159,52 @@ describe("youtubeMusic service", () => {
         await expect(
             ytMusicService.search("u1", "bad query", "songs")
         ).rejects.toEqual({ response: { status: 400 } });
+    });
+
+    it("maps canonical search results for frontend contract usage", async () => {
+        mockClient.post.mockResolvedValueOnce({
+            data: {
+                results: [
+                    {
+                        videoId: "vid-1",
+                        title: "Song One",
+                        artist: "Artist One",
+                        album: { title: "Album One" },
+                        duration_seconds: 201,
+                        thumbnails: [{ url: "https://img/1.jpg" }],
+                    },
+                    {
+                        videoId: "",
+                        title: "Missing video id",
+                    },
+                ],
+                total: 2,
+            },
+        });
+
+        await expect(
+            ytMusicService.searchCanonical("u1", "artist one", "songs")
+        ).resolves.toEqual({
+            query: "artist one",
+            filter: "songs",
+            total: 2,
+            results: [
+                {
+                    source: "youtube",
+                    provider: "ytmusic",
+                    providerTrackId: "vid-1",
+                    title: "Song One",
+                    artistName: "Artist One",
+                    albumTitle: "Album One",
+                    durationSec: 201,
+                    thumbnailUrl: "https://img/1.jpg",
+                    raw: expect.objectContaining({
+                        videoId: "vid-1",
+                        title: "Song One",
+                    }),
+                },
+            ],
+        });
     });
 
     it("handles browse, stream, and library request shapes", async () => {

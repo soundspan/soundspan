@@ -21,6 +21,7 @@ import {
     CheckCircle,
     Loader2,
 } from "lucide-react";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Audiobook {
     id: string;
@@ -65,7 +66,7 @@ export default function SeriesDetailPage() {
                 const data = await api.getAudiobookSeries(seriesName);
                 setBooks(Array.isArray(data) ? data : []);
             } catch (error: unknown) {
-                console.error("Failed to load series:", error);
+                sharedFrontendLogger.error("Failed to load series:", error);
                 toast.error("Failed to load series");
             } finally {
                 setIsLoading(false);

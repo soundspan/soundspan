@@ -14,6 +14,10 @@ import { discoverQueue, scanQueue } from "../workers/queues";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
 import { discoveryRecommendationsService } from "../services/discovery";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "./routeErrorResponse";
 
 const router = Router();
 const isLegacyDiscoveryMode = config.discover.mode === "legacy";
@@ -107,7 +111,7 @@ router.get("/batch-status", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get batch status error:", error);
-        res.status(500).json({ error: "Failed to get batch status" });
+        sendInternalRouteError(res, "Failed to get batch status");
     }
 });
 
@@ -188,7 +192,7 @@ router.post("/generate", async (req, res) => {
         });
     } catch (error) {
         logger.error("Generate Discover Weekly error:", error);
-        res.status(500).json({ error: "Failed to start generation" });
+        sendInternalRouteError(res, "Failed to start generation");
     }
 });
 
@@ -198,7 +202,7 @@ router.get("/generate/status/:jobId", async (req, res) => {
         const job = await discoverQueue.getJob(req.params.jobId);
 
         if (!job) {
-            return res.status(404).json({ error: "Job not found" });
+            return sendRouteError(res, 404, "Job not found");
         }
 
         const state = await job.getState();
@@ -212,7 +216,7 @@ router.get("/generate/status/:jobId", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get generation status error:", error);
-        res.status(500).json({ error: "Failed to get job status" });
+        sendInternalRouteError(res, "Failed to get job status");
     }
 });
 
@@ -469,7 +473,7 @@ router.post("/like", async (req, res) => {
         const { albumId } = req.body;
 
         if (!albumId) {
-            return res.status(400).json({ error: "albumId required" });
+            return sendRouteError(res, 400, "albumId required");
         }
 
         // Find the discovery album
@@ -624,7 +628,7 @@ router.post("/like", async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         logger.error("Like discovery album error:", error);
-        res.status(500).json({ error: "Failed to like album" });
+        sendInternalRouteError(res, "Failed to like album");
     }
 });
 
@@ -641,7 +645,7 @@ router.delete("/unlike", async (req, res) => {
         const { albumId } = req.body;
 
         if (!albumId) {
-            return res.status(400).json({ error: "albumId required" });
+            return sendRouteError(res, 400, "albumId required");
         }
 
         const discoveryAlbum = await prisma.discoveryAlbum.findFirst({
@@ -653,7 +657,7 @@ router.delete("/unlike", async (req, res) => {
         });
 
         if (!discoveryAlbum) {
-            return res.status(404).json({ error: "Album not liked" });
+            return sendRouteError(res, 404, "Album not liked");
         }
 
         // Revert status back to ACTIVE
@@ -699,7 +703,7 @@ router.delete("/unlike", async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         logger.error("Unlike discovery album error:", error);
-        res.status(500).json({ error: "Failed to unlike album" });
+        sendInternalRouteError(res, "Failed to unlike album");
     }
 });
 
@@ -729,7 +733,7 @@ router.get("/config", async (req, res) => {
         res.json(config);
     } catch (error) {
         logger.error("Get Discover Weekly config error:", error);
-        res.status(500).json({ error: "Failed to get configuration" });
+        sendInternalRouteError(res, "Failed to get configuration");
     }
 });
 
@@ -815,7 +819,7 @@ router.patch("/config", async (req, res) => {
         res.json(config);
     } catch (error) {
         logger.error("Update Discover Weekly config error:", error);
-        res.status(500).json({ error: "Failed to update configuration" });
+        sendInternalRouteError(res, "Failed to update configuration");
     }
 });
 
@@ -1827,7 +1831,7 @@ router.delete("/exclusions", async (req, res) => {
         });
     } catch (error) {
         logger.error("Clear exclusions error:", error);
-        res.status(500).json({ error: "Failed to clear exclusions" });
+        sendInternalRouteError(res, "Failed to clear exclusions");
     }
 });
 
@@ -1842,7 +1846,7 @@ router.delete("/exclusions/:id", async (req, res) => {
         });
 
         if (!exclusion) {
-            return res.status(404).json({ error: "Exclusion not found" });
+            return sendRouteError(res, 404, "Exclusion not found");
         }
 
         await prisma.discoverExclusion.delete({
@@ -1855,7 +1859,7 @@ router.delete("/exclusions/:id", async (req, res) => {
         });
     } catch (error) {
         logger.error("Remove exclusion error:", error);
-        res.status(500).json({ error: "Failed to remove exclusion" });
+        sendInternalRouteError(res, "Failed to remove exclusion");
     }
 });
 
@@ -1880,7 +1884,7 @@ router.post("/cleanup-lidarr", async (req, res) => {
             !settings.lidarrUrl ||
             !settings.lidarrApiKey
         ) {
-            return res.status(400).json({ error: "Lidarr not configured" });
+            return sendRouteError(res, 400, "Lidarr not configured");
         }
 
         // Get all artists from Lidarr

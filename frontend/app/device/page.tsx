@@ -20,6 +20,7 @@ import {
     Trash2,
     AlertCircle 
 } from "lucide-react";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface DeviceLinkCode {
     code: string;
@@ -59,7 +60,7 @@ export default function DeviceLinkPage() {
             const response = await api.request<LinkedDevice[]>("/device-link/devices");
             setDevices(response);
         } catch (err) {
-            console.error("Failed to load devices:", err);
+            sharedFrontendLogger.error("Failed to load devices:", err);
         } finally {
             setIsLoadingDevices(false);
         }
@@ -122,7 +123,7 @@ export default function DeviceLinkPage() {
                     loadDevices(); // Refresh devices list
                 }
             } catch (err) {
-                console.error("Failed to check code status:", err);
+                sharedFrontendLogger.error("Failed to check code status:", err);
             }
         }, 2000);
 
@@ -146,7 +147,7 @@ export default function DeviceLinkPage() {
             });
             setDevices((prev) => prev.filter((d) => d.id !== deviceId));
         } catch (err) {
-            console.error("Failed to revoke device:", err);
+            sharedFrontendLogger.error("Failed to revoke device:", err);
         }
     };
 

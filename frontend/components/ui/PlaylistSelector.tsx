@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { X, Plus, Music2 } from "lucide-react";
 import { GradientSpinner } from "./GradientSpinner";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface PlaylistSelectorProps {
     isOpen: boolean;
@@ -38,7 +39,7 @@ export function PlaylistSelector({
             const data = await api.getPlaylists();
             setPlaylists(Array.isArray(data) ? data : []);
         } catch (error) {
-            console.error("Failed to load playlists:", error);
+            sharedFrontendLogger.error("Failed to load playlists:", error);
         } finally {
             setIsLoading(false);
         }
@@ -63,7 +64,7 @@ export function PlaylistSelector({
 
             onClose();
         } catch (error) {
-            console.error("Failed to create playlist:", error);
+            sharedFrontendLogger.error("Failed to create playlist:", error);
         } finally {
             setIsCreating(false);
         }
@@ -78,7 +79,7 @@ export function PlaylistSelector({
             await loadPlaylists();
             onClose();
         } catch (error) {
-            console.error("Failed to add to playlist:", error);
+            sharedFrontendLogger.error("Failed to add to playlist:", error);
         }
     };
 

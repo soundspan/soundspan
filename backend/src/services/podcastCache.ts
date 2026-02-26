@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
+import { buildCachePath } from "./cacheHelpers";
 
 /**
  * Service to cache podcast cover images locally
@@ -22,7 +23,7 @@ export class PodcastCacheService {
 
     constructor() {
         // Store covers in: <MUSIC_PATH>/cover-cache/podcasts/
-        this.coverCacheDir = path.join(
+        this.coverCacheDir = buildCachePath(
             config.music.musicPath,
             "cover-cache",
             "podcasts"

@@ -2,6 +2,7 @@ import { Job } from "bull";
 import { logger } from "../../utils/logger";
 import { MusicScannerService } from "../../services/musicScanner";
 import { config } from "../../config";
+import { resolveDownloadJobMetadata } from "../../utils/downloadJobMetadata";
 import * as path from "path";
 
 /**
@@ -27,11 +28,13 @@ async function reconcileDownloadJobsWithScan(): Promise<number> {
     // Extract job metadata for matching
     const jobsWithMetadata = activeJobs
         .map((job) => {
-            const metadata = (job.metadata as any) || {};
+            const { artistName, albumTitle } = resolveDownloadJobMetadata(
+                job.metadata
+            );
             return {
                 job,
-                artistName: metadata?.artistName as string | undefined,
-                albumTitle: metadata?.albumTitle as string | undefined,
+                artistName,
+                albumTitle,
             };
         })
         .filter((j) => j.artistName && j.albumTitle);

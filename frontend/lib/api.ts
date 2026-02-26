@@ -1,4 +1,9 @@
 import { resolveApiBaseUrl } from "./api-base-url";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import type {
+    CanonicalMediaSearchResult,
+    SegmentedStreamingSourceType,
+} from "@soundspan/media-metadata-contract";
 
 const AUTH_TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
@@ -149,6 +154,93 @@ export interface AlbumPreferenceResponse {
     updatedAt: string | null;
 }
 
+export interface LikedPlaylistTrack {
+    id: string;
+    title: string;
+    duration: number;
+    trackNo: number | null;
+    filePath: string | null;
+    likedAt: string;
+    artist: {
+        id: string;
+        name: string;
+    };
+    album: {
+        id: string;
+        title: string;
+        coverArt: string | null;
+    };
+}
+
+export interface LikedPlaylistCursor {
+    likedAt: string;
+    trackId: string;
+}
+
+export interface LikedPlaylistResponse {
+    playlist: {
+        id: string;
+        name: string;
+        description: string;
+    };
+    tracks: LikedPlaylistTrack[];
+    total: number;
+    pagination: {
+        limit: number;
+        hasMore: boolean;
+        nextCursor: LikedPlaylistCursor | null;
+    };
+}
+
+export interface SegmentedStreamingSessionResponse {
+    sessionId: string;
+    manifestUrl: string;
+    sessionToken: string;
+    expiresAt: string;
+    playbackProfile?: {
+        protocol?: "dash";
+        sourceType?: SegmentedStreamingSourceType;
+        codec?: string;
+        bitrateKbps?: number;
+    };
+    engineHints?: {
+        protocol?: "dash";
+        sourceType?: SegmentedStreamingSourceType;
+        recommendedEngine?: "videojs";
+        assetBuildInFlight?: boolean;
+    };
+}
+
+export interface CreateSegmentedStreamingSessionInput {
+    trackId: string;
+    sourceType?: SegmentedStreamingSourceType;
+    desiredQuality?: "original" | "high" | "medium" | "low";
+}
+
+export interface SegmentedStreamingHeartbeatResponse {
+    sessionId: string;
+    sessionToken: string;
+    expiresAt: string;
+}
+
+export interface SegmentedStreamingSnapshotInput {
+    positionSec?: number;
+    isPlaying?: boolean;
+    bufferedUntilSec?: number;
+}
+
+export interface SegmentedStreamingHandoffResponse
+    extends SegmentedStreamingSessionResponse {
+    previousSessionId: string;
+    resumeAtSec: number;
+    shouldPlay: boolean;
+}
+
+export interface SegmentedStreamingClientMetricInput {
+    event: string;
+    fields?: Record<string, unknown>;
+}
+
 interface ApiError extends Error {
     status?: number;
     data?: Record<string, unknown>;
@@ -286,6 +378,16 @@ class ApiClient {
         return getApiBaseUrl();
     }
 
+    private toAbsoluteApiUrl(pathOrUrl: string): string {
+        if (/^https?:\/\//i.test(pathOrUrl)) {
+            return pathOrUrl;
+        }
+        const normalizedPath = pathOrUrl.startsWith("/")
+            ? pathOrUrl
+            : `/${pathOrUrl}`;
+        return `${this.getBaseUrl()}${normalizedPath}`;
+    }
+
     private isTimeoutError(error: unknown): boolean {
         return (
             error instanceof Error &&
@@ -357,7 +459,7 @@ class ApiClient {
             this.clearToken();
             return false;
         } catch (error) {
-            console.error("[API] Token refresh failed:", error);
+            sharedFrontendLogger.error("[API] Token refresh failed:", error);
             this.clearToken();
             return false;
         }
@@ -521,7 +623,7 @@ class ApiClient {
 
                 // Only log non-404 errors (404s are often expected)
                 if (!(silent404 && response.status === 404)) {
-                    console.error(`[API] Request failed: ${url}`, error);
+                    sharedFrontendLogger.error(`[API] Request failed: ${url}`, error);
                 }
 
                 // Handle 401 with token refresh (retry once)
@@ -918,6 +1020,27 @@ class ApiClient {
         );
     }
 
+    async getLikedPlaylist(params?: {
+        limit?: number;
+        cursorLikedAt?: string;
+        cursorTrackId?: string;
+    }) {
+        const searchParams = new URLSearchParams();
+        if (typeof params?.limit === "number") {
+            searchParams.set("limit", String(params.limit));
+        }
+        if (params?.cursorLikedAt) {
+            searchParams.set("cursorLikedAt", params.cursorLikedAt);
+        }
+        if (params?.cursorTrackId) {
+            searchParams.set("cursorTrackId", params.cursorTrackId);
+        }
+        const queryString = searchParams.toString();
+        return this.request<LikedPlaylistResponse>(
+            `/library/liked${queryString ? `?${queryString}` : ""}`
+        );
+    }
+
     // Streaming
     getStreamUrl(trackId: string): string {
         const baseUrl = `${this.getBaseUrl()}/api/library/tracks/${trackId}/stream`;
@@ -928,6 +1051,79 @@ class ApiClient {
             return `${baseUrl}?token=${encodeURIComponent(token)}`;
         }
         return baseUrl;
+    }
+
+    async createSegmentedStreamingSession(
+        input: CreateSegmentedStreamingSessionInput,
+    ): Promise<SegmentedStreamingSessionResponse> {
+        const session = await this.request<SegmentedStreamingSessionResponse>(
+            "/streaming/v1/sessions",
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    trackId: input.trackId,
+                    sourceType: input.sourceType,
+                    desiredQuality: input.desiredQuality,
+                }),
+            },
+        );
+
+        return {
+            ...session,
+            manifestUrl: this.toAbsoluteApiUrl(session.manifestUrl),
+        };
+    }
+
+    getStreamingAuthToken(): string | null {
+        return this.getCurrentToken();
+    }
+
+    async heartbeatSegmentedStreamingSession(
+        sessionId: string,
+        sessionToken: string,
+        snapshot: SegmentedStreamingSnapshotInput,
+    ): Promise<SegmentedStreamingHeartbeatResponse> {
+        return this.request<SegmentedStreamingHeartbeatResponse>(
+            `/streaming/v1/sessions/${encodeURIComponent(sessionId)}/heartbeat`,
+            {
+                method: "POST",
+                body: JSON.stringify(snapshot),
+                headers: {
+                    "x-streaming-session-token": sessionToken,
+                },
+            },
+        );
+    }
+
+    async handoffSegmentedStreamingSession(
+        sessionId: string,
+        sessionToken: string,
+        snapshot: SegmentedStreamingSnapshotInput,
+    ): Promise<SegmentedStreamingHandoffResponse> {
+        const handoff = await this.request<SegmentedStreamingHandoffResponse>(
+            `/streaming/v1/sessions/${encodeURIComponent(sessionId)}/handoff`,
+            {
+                method: "POST",
+                body: JSON.stringify(snapshot),
+                headers: {
+                    "x-streaming-session-token": sessionToken,
+                },
+            },
+        );
+
+        return {
+            ...handoff,
+            manifestUrl: this.toAbsoluteApiUrl(handoff.manifestUrl),
+        };
+    }
+
+    async reportSegmentedStreamingClientMetric(
+        input: SegmentedStreamingClientMetricInput,
+    ): Promise<void> {
+        await this.request<void>("/streaming/v1/client-metrics", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
     }
 
     /**
@@ -2500,7 +2696,12 @@ class ApiClient {
     async searchYtMusic(
         query: string,
         filter?: "songs" | "albums" | "artists" | "videos"
-    ): Promise<{ results: any[]; filter: string | null }> {
+    ): Promise<{
+        query: string;
+        filter: "songs" | "albums" | "artists" | "videos" | null;
+        total: number;
+        results: CanonicalMediaSearchResult[];
+    }> {
         return this.post(`/ytmusic/search`, { query, filter });
     }
 
@@ -2711,7 +2912,13 @@ class ApiClient {
      * Fetch audio quality metadata for a local (owned) track by probing
      * the file on disk. Used by the player UI to display quality info.
      */
-    async getLocalTrackAudioInfo(trackId: string): Promise<{
+    async getLocalTrackAudioInfo(
+        trackId: string,
+        options?: {
+            playback?: boolean;
+            quality?: "original" | "high" | "medium" | "low";
+        }
+    ): Promise<{
         codec: string | null;
         bitrate: number | null;
         sampleRate: number | null;
@@ -2719,7 +2926,15 @@ class ApiClient {
         lossless: boolean | null;
         channels: number | null;
     }> {
-        return this.get(`/library/tracks/${trackId}/audio-info`);
+        const params = new URLSearchParams();
+        if (options?.playback) {
+            params.set("playback", "true");
+        }
+        if (options?.quality) {
+            params.set("quality", options.quality);
+        }
+        const suffix = params.toString();
+        return this.get(`/library/tracks/${trackId}/audio-info${suffix ? `?${suffix}` : ""}`);
     }
 
     // -----------------------------------------------------------------------

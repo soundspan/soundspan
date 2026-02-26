@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { howlerEngine } from "@/lib/howler-engine";
+import { createRuntimeAudioEngine } from "@/lib/audio-engine";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+
+const playbackEngine = createRuntimeAudioEngine();
 
 interface PreviewableTrack {
     id: string;
@@ -57,7 +60,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 await previewAudioRef.current.play();
             } catch (err: unknown) {
                 if (isAbortError(err)) return;
-                console.error("Preview error:", err);
+                sharedFrontendLogger.error("Preview error:", err);
             }
             setPreviewPlaying(true);
             return;
@@ -88,8 +91,8 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 return;
             }
 
-            if (howlerEngine.isPlaying()) {
-                howlerEngine.pause();
+            if (playbackEngine.isPlaying()) {
+                playbackEngine.pause();
                 mainPlayerWasPausedRef.current = true;
             }
 
@@ -131,7 +134,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 showNoPreviewToast(track.id);
                 return;
             }
-            console.error("Failed to play preview:", error);
+            sharedFrontendLogger.error("Failed to play preview:", error);
             toast.error("Failed to play preview");
             setPreviewPlaying(false);
             setPreviewTrack(null);
@@ -153,9 +156,9 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             }
         };
 
-        howlerEngine.on("play", stopPreview);
+        playbackEngine.on("play", stopPreview);
         return () => {
-            howlerEngine.off("play", stopPreview);
+            playbackEngine.off("play", stopPreview);
         };
     }, []);
 

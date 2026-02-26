@@ -13,10 +13,14 @@ import fs from "fs";
 import { config } from "../config";
 import { fanartService } from "../services/fanart";
 import { deezerService } from "../services/deezer";
+import { imageProviderService } from "../services/imageProvider";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
 import { getSystemSettings } from "../utils/systemSettings";
-import { AudioStreamingService } from "../services/audioStreaming";
+import {
+    AudioStreamingService,
+    type Quality as StreamingQuality,
+} from "../services/audioStreaming";
 import { scanQueue } from "../workers/queues";
 import { organizeSingles } from "../workers/organizeSingles";
 import { BRAND_USER_AGENT } from "../config/brand";
@@ -56,6 +60,10 @@ import {
     TRACK_DISLIKE_ENTITY_TYPE,
     type ResolvedTrackPreference,
 } from "../services/trackPreference";
+import {
+    sendInternalRouteError,
+    sendRouteError,
+} from "./routeErrorResponse";
 
 const router = Router();
 
@@ -78,12 +86,20 @@ const TRACK_SORT_MAP: Record<string, any> = {
 
 // Maximum items per request to prevent DoS attacks while supporting large libraries
 const MAX_LIMIT = 10000;
+const DEFAULT_MY_LIKED_LIMIT = 100;
+const MY_LIKED_PLAYLIST_ID = "my-liked";
+const MY_LIKED_PLAYLIST_NAME = "My Liked";
+const MY_LIKED_PLAYLIST_DESCRIPTION = "All your thumbs-up tracks";
+const ALBUM_COVER_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
 const COVER_ART_IMAGE_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
 const COVER_ART_NOT_FOUND_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 const COVER_ART_IMAGE_CACHE_CONTROL = `public, max-age=${COVER_ART_IMAGE_CACHE_TTL_SECONDS}, immutable`;
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
 const AUDIO_INFO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AUDIO_INFO_CACHE_MAX_ENTRIES = 2000;
+const NATIVE_COVER_HEAL_TIMEOUT_MS = 5000;
+
+const nativeCoverHealInFlight = new Map<string, Promise<string | null>>();
 
 interface AudioInfoResponsePayload {
     codec: string | null;
@@ -104,11 +120,17 @@ const audioInfoCache = new Map<string, AudioInfoCacheEntry>();
 const buildAudioInfoCacheKey = (
     trackId: string,
     filePath: string,
-    fileModified?: Date | null
+    fileModified?: Date | null,
+    options: {
+        scope?: "source" | "playback";
+        quality?: StreamingQuality | null;
+    } = {}
 ): string => {
     const modifiedToken =
         fileModified instanceof Date ? fileModified.toISOString() : "unknown";
-    return `${trackId}:${filePath}:${modifiedToken}`;
+    const scope = options.scope ?? "source";
+    const quality = options.quality ?? "na";
+    return `${trackId}:${scope}:${quality}:${filePath}:${modifiedToken}`;
 };
 
 const pruneAudioInfoCache = (now: number) => {
@@ -125,6 +147,47 @@ const pruneAudioInfoCache = (now: number) => {
         if (!oldestKey) break;
         audioInfoCache.delete(oldestKey);
     }
+};
+
+const normalizeStreamingQuality = (
+    value: unknown,
+): StreamingQuality | null => {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (
+        normalized === "original" ||
+        normalized === "high" ||
+        normalized === "medium" ||
+        normalized === "low"
+    ) {
+        return normalized;
+    }
+    return null;
+};
+
+const resolveAudioInfoAbsolutePath = (relativeFilePath: string): string =>
+    path.join(config.music.musicPath, relativeFilePath.replace(/\\/g, "/"));
+
+const readAudioInfoPayload = async (
+    absolutePath: string
+): Promise<AudioInfoResponsePayload> => {
+    const { parseFile } = await import("music-metadata");
+    const metadata = await parseFile(absolutePath, {
+        duration: false,
+        skipCovers: true,
+    });
+    const fmt = metadata.format;
+
+    return {
+        codec: fmt.codec || null,
+        bitrate: fmt.bitrate ? Math.round(fmt.bitrate / 1000) : null, // kbps
+        sampleRate: fmt.sampleRate || null, // Hz
+        bitDepth: fmt.bitsPerSample || null, // e.g. 16, 24
+        lossless: fmt.lossless ?? null,
+        channels: fmt.numberOfChannels || null,
+    };
 };
 
 const hasReliableEnhancedAnalysis = (
@@ -440,57 +503,168 @@ const getNativeCoverCachePath = (nativePath: string): string =>
 const buildNativeCoverProxyRedirectPath = (nativeCoverUrl: string): string =>
     `/api/library/cover-art?url=${encodeURIComponent(nativeCoverUrl)}`;
 
+const persistHealedAlbumCover = async (
+    albumId: string,
+    coverUrl: string
+): Promise<void> => {
+    await prisma.album.update({
+        where: { id: albumId },
+        data: { coverUrl },
+    });
+
+    try {
+        await redisClient.setEx(
+            `album-cover:${albumId}`,
+            ALBUM_COVER_CACHE_TTL_SECONDS,
+            coverUrl
+        );
+    } catch (cacheError) {
+        logger.warn(
+            `[COVER-ART] Failed to refresh album cover cache for ${albumId}:`,
+            cacheError
+        );
+    }
+};
+
 const tryHealMissingNativeAlbumCover = async (
     nativePath: string
 ): Promise<string | null> => {
     const albumId = getAlbumIdFromNativeCoverPath(nativePath);
     if (!albumId) return null;
 
-    const album = await prisma.album.findUnique({
-        where: { id: albumId },
-        include: { artist: true },
-    });
-
-    if (!album || !album.artist) {
-        return null;
+    const inFlight = nativeCoverHealInFlight.get(albumId);
+    if (inFlight) {
+        return inFlight;
     }
 
-    const existingNativeCover = album.coverUrl;
-    if (
-        typeof existingNativeCover === "string" &&
-        existingNativeCover.startsWith("native:")
-    ) {
-        const existingNativePath = existingNativeCover.replace("native:", "");
-        const existingNativeFilePath = getNativeCoverCachePath(existingNativePath);
-        if (fs.existsSync(existingNativeFilePath)) {
-            return buildNativeCoverProxyRedirectPath(existingNativeCover);
+    const healPromise = (async (): Promise<string | null> => {
+        const album = await prisma.album.findUnique({
+            where: { id: albumId },
+            select: {
+                id: true,
+                title: true,
+                rgMbid: true,
+                coverUrl: true,
+                artist: {
+                    select: {
+                        name: true,
+                    },
+                },
+            },
+        });
+
+        if (!album || !album.artist) {
+            return null;
         }
-    }
 
-    const deezerCover = await deezerService.getAlbumCover(
-        album.artist.name,
-        album.title
-    );
-    if (!deezerCover) {
+        const existingNativeCover = album.coverUrl;
+        if (
+            typeof existingNativeCover === "string" &&
+            existingNativeCover.startsWith("native:")
+        ) {
+            const existingNativePath = existingNativeCover.replace("native:", "");
+            const existingNativeFilePath =
+                getNativeCoverCachePath(existingNativePath);
+            if (fs.existsSync(existingNativeFilePath)) {
+                return buildNativeCoverProxyRedirectPath(existingNativeCover);
+            }
+        }
+
+        const candidateUrls = new Set<string>();
+        const addCandidateUrl = (candidate: string | null | undefined) => {
+            if (!candidate) return;
+            const normalized = normalizeExternalImageUrl(candidate);
+            if (normalized) {
+                candidateUrls.add(normalized);
+            }
+        };
+
+        if (
+            typeof album.coverUrl === "string" &&
+            (album.coverUrl.startsWith("http://") ||
+                album.coverUrl.startsWith("https://"))
+        ) {
+            addCandidateUrl(album.coverUrl);
+        }
+
+        const validRgMbid =
+            typeof album.rgMbid === "string" &&
+            album.rgMbid.length > 0 &&
+            !album.rgMbid.startsWith("temp-")
+                ? album.rgMbid
+                : null;
+
+        if (validRgMbid) {
+            try {
+                const coverArtArchiveCover =
+                    await coverArtService.getCoverArt(validRgMbid);
+                addCandidateUrl(coverArtArchiveCover);
+            } catch (error) {
+                logger.warn(
+                    `[COVER-ART] Cover Art Archive recovery failed for ${validRgMbid}:`,
+                    error
+                );
+            }
+        }
+
+        try {
+            const providerCover = await imageProviderService.getAlbumCover(
+                album.artist.name,
+                album.title,
+                validRgMbid ?? undefined,
+                { timeout: NATIVE_COVER_HEAL_TIMEOUT_MS }
+            );
+            addCandidateUrl(providerCover?.url);
+        } catch (error) {
+            logger.warn(
+                `[COVER-ART] Provider-chain recovery failed for ${album.artist.name} - ${album.title}:`,
+                error
+            );
+        }
+
+        try {
+            const deezerCover = await deezerService.getAlbumCover(
+                album.artist.name,
+                album.title
+            );
+            addCandidateUrl(deezerCover);
+        } catch (error) {
+            logger.warn(
+                `[COVER-ART] Deezer recovery failed for ${album.artist.name} - ${album.title}:`,
+                error
+            );
+        }
+
+        const orderedCandidateUrls = Array.from(candidateUrls);
+        for (const candidateUrl of orderedCandidateUrls) {
+            const localCoverPath = await downloadAndStoreImage(
+                candidateUrl,
+                album.id,
+                "album"
+            );
+
+            if (!localCoverPath) {
+                continue;
+            }
+
+            await persistHealedAlbumCover(album.id, localCoverPath);
+            return buildNativeCoverProxyRedirectPath(localCoverPath);
+        }
+
+        const fallbackExternalUrl = orderedCandidateUrls[0];
+        if (fallbackExternalUrl) {
+            await persistHealedAlbumCover(album.id, fallbackExternalUrl);
+            return fallbackExternalUrl;
+        }
+
         return null;
-    }
+    })()
+        .finally(() => {
+            nativeCoverHealInFlight.delete(albumId);
+        });
 
-    const localCoverPath = await downloadAndStoreImage(
-        deezerCover,
-        album.id,
-        "album"
-    );
-
-    const healedCoverUrl = localCoverPath ?? deezerCover;
-
-    await prisma.album.update({
-        where: { id: albumId },
-        data: { coverUrl: healedCoverUrl },
-    });
-
-    return localCoverPath ?
-            buildNativeCoverProxyRedirectPath(localCoverPath)
-        :   deezerCover;
+    nativeCoverHealInFlight.set(albumId, healPromise);
+    return healPromise;
 };
 
 const isLibraryDeletionEnabled = async (): Promise<boolean> => {
@@ -537,7 +711,7 @@ router.get("/delete-policy", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get library delete policy error:", error);
-        return res.status(500).json({ error: "Failed to determine delete policy" });
+        return sendInternalRouteError(res, "Failed to determine delete policy");
     }
 });
 
@@ -613,7 +787,7 @@ router.post("/scan", async (req, res) => {
         });
     } catch (error) {
         logger.error("Scan trigger error:", error);
-        res.status(500).json({ error: "Failed to start scan" });
+        sendInternalRouteError(res, "Failed to start scan");
     }
 });
 
@@ -623,7 +797,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
         const job = await scanQueue.getJob(req.params.jobId);
 
         if (!job) {
-            return res.status(404).json({ error: "Job not found" });
+            return sendRouteError(res, 404, "Job not found");
         }
 
         const state = await job.getState();
@@ -637,7 +811,7 @@ router.get("/scan/status/:jobId", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get scan status error:", error);
-        res.status(500).json({ error: "Failed to get job status" });
+        sendInternalRouteError(res, "Failed to get job status");
     }
 });
 
@@ -652,7 +826,7 @@ router.post("/organize", async (req, res) => {
         res.json({ message: "Organization started in background" });
     } catch (error) {
         logger.error("Organization trigger error:", error);
-        res.status(500).json({ error: "Failed to start organization" });
+        sendInternalRouteError(res, "Failed to start organization");
     }
 });
 
@@ -841,7 +1015,7 @@ router.get("/recently-listened", async (req, res) => {
         res.json({ items: results });
     } catch (error) {
         logger.error("Get recently listened error:", error);
-        res.status(500).json({ error: "Failed to fetch recently listened" });
+        sendInternalRouteError(res, "Failed to fetch recently listened");
     }
 });
 
@@ -912,7 +1086,7 @@ router.get("/recently-added", async (req, res) => {
         res.json({ artists: artistsWithImages });
     } catch (error) {
         logger.error("Get recently added error:", error);
-        res.status(500).json({ error: "Failed to fetch recently added" });
+        sendInternalRouteError(res, "Failed to fetch recently added");
     }
 });
 
@@ -1067,7 +1241,7 @@ router.get("/artist-counts/status", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ArtistCounts] Status check error:", error?.message);
-        res.status(500).json({ error: "Failed to check status" });
+        sendInternalRouteError(res, "Failed to check status");
     }
 });
 
@@ -1094,7 +1268,7 @@ router.post("/artist-counts/backfill", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ArtistCounts] Backfill trigger error:", error?.message);
-        res.status(500).json({ error: "Failed to start backfill" });
+        sendInternalRouteError(res, "Failed to start backfill");
     }
 });
 
@@ -1112,7 +1286,7 @@ router.get("/image-backfill/status", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ImageBackfill] Status check error:", error?.message);
-        res.status(500).json({ error: "Failed to check status" });
+        sendInternalRouteError(res, "Failed to check status");
     }
 });
 
@@ -1137,7 +1311,7 @@ router.post("/image-backfill/start", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[ImageBackfill] Backfill trigger error:", error?.message);
-        res.status(500).json({ error: "Failed to start image backfill" });
+        sendInternalRouteError(res, "Failed to start image backfill");
     }
 });
 
@@ -1186,7 +1360,7 @@ router.post("/backfill-genres", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[Backfill] Genre backfill error:", error?.message);
-        res.status(500).json({ error: "Failed to backfill genres" });
+        sendInternalRouteError(res, "Failed to backfill genres");
     }
 });
 
@@ -1250,7 +1424,7 @@ router.get("/artists/:id", async (req, res) => {
         });
 
         if (!artist) {
-            return res.status(404).json({ error: "Artist not found" });
+            return sendRouteError(res, 404, "Artist not found");
         }
 
         // For enriched artists with ownedAlbums, skip expensive MusicBrainz calls.
@@ -1915,7 +2089,7 @@ router.get("/artists/:id", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get artist error:", error);
-        res.status(500).json({ error: "Failed to fetch artist" });
+        sendInternalRouteError(res, "Failed to fetch artist");
     }
 });
 
@@ -2060,7 +2234,7 @@ router.get("/albums/:id", async (req, res) => {
               });
 
         if (!album) {
-            return res.status(404).json({ error: "Album not found" });
+            return sendRouteError(res, 404, "Album not found");
         }
 
         // Check ownership with O(1) indexed lookup (separate query is faster than fetching all ownedAlbums)
@@ -2086,7 +2260,7 @@ router.get("/albums/:id", async (req, res) => {
         });
     } catch (error) {
         logger.error("Get album error:", error);
-        res.status(500).json({ error: "Failed to fetch album" });
+        sendInternalRouteError(res, "Failed to fetch album");
     }
 });
 
@@ -2154,7 +2328,179 @@ router.get("/tracks", async (req, res) => {
         res.json({ tracks, total, offset, limit });
     } catch (error) {
         logger.error("Get tracks error:", error);
-        res.status(500).json({ error: "Failed to fetch tracks" });
+        sendInternalRouteError(res, "Failed to fetch tracks");
+    }
+});
+
+// GET /library/liked?limit=100&cursorLikedAt=<iso>&cursorTrackId=<id>
+router.get("/liked", async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return sendRouteError(
+                res,
+                401,
+                "Authentication required for liked playlist"
+            );
+        }
+
+        const parsedLimit = Number.parseInt(String(req.query.limit ?? ""), 10);
+        const limit =
+            Number.isFinite(parsedLimit) && parsedLimit > 0 ?
+                Math.min(parsedLimit, MAX_LIMIT)
+            :   DEFAULT_MY_LIKED_LIMIT;
+
+        const cursorLikedAtParam =
+            typeof req.query.cursorLikedAt === "string" ?
+                req.query.cursorLikedAt
+            :   null;
+        const cursorTrackIdParam =
+            typeof req.query.cursorTrackId === "string" ?
+                req.query.cursorTrackId
+            :   null;
+
+        if (!!cursorLikedAtParam !== !!cursorTrackIdParam) {
+            return sendRouteError(
+                res,
+                400,
+                "cursorLikedAt and cursorTrackId must be provided together"
+            );
+        }
+
+        let cursorLikedAt: Date | null = null;
+        if (cursorLikedAtParam) {
+            const parsedCursor = new Date(cursorLikedAtParam);
+            if (Number.isNaN(parsedCursor.getTime())) {
+                return sendRouteError(res, 400, "Invalid cursorLikedAt timestamp");
+            }
+            cursorLikedAt = parsedCursor;
+        }
+
+        const likedWhere: Prisma.LikedTrackWhereInput =
+            cursorLikedAt && cursorTrackIdParam ?
+                {
+                    userId,
+                    OR: [
+                        { likedAt: { lt: cursorLikedAt } },
+                        {
+                            likedAt: cursorLikedAt,
+                            trackId: { gt: cursorTrackIdParam },
+                        },
+                    ],
+                }
+            :   { userId };
+
+        const [total, likedEntriesWithExtra] = await Promise.all([
+            prisma.likedTrack.count({
+                where: { userId },
+            }),
+            prisma.likedTrack.findMany({
+                where: likedWhere,
+                select: {
+                    trackId: true,
+                    likedAt: true,
+                },
+                orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
+                take: limit + 1,
+            }),
+        ]);
+
+        const hasMore = likedEntriesWithExtra.length > limit;
+        const likedEntries =
+            hasMore ?
+                likedEntriesWithExtra.slice(0, limit)
+            :   likedEntriesWithExtra;
+        const trackIds = likedEntries.map((entry) => entry.trackId);
+
+        if (trackIds.length === 0) {
+            return res.json({
+                playlist: {
+                    id: MY_LIKED_PLAYLIST_ID,
+                    name: MY_LIKED_PLAYLIST_NAME,
+                    description: MY_LIKED_PLAYLIST_DESCRIPTION,
+                },
+                tracks: [],
+                total,
+                pagination: {
+                    limit,
+                    hasMore: false,
+                    nextCursor: null,
+                },
+            });
+        }
+
+        const tracks = await prisma.track.findMany({
+            where: {
+                id: { in: trackIds },
+            },
+            include: {
+                album: {
+                    include: {
+                        artist: {
+                            select: {
+                                id: true,
+                                name: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        const trackById = new Map(tracks.map((track) => [track.id, track]));
+        const orderedTracks = likedEntries
+            .map((entry) => {
+                const track = trackById.get(entry.trackId);
+                if (!track) {
+                    return null;
+                }
+
+                return {
+                    id: track.id,
+                    title: track.title,
+                    duration: track.duration,
+                    trackNo: track.trackNo,
+                    filePath: track.filePath,
+                    likedAt: entry.likedAt.toISOString(),
+                    artist: {
+                        id: track.album.artist.id,
+                        name: track.album.artist.name,
+                    },
+                    album: {
+                        id: track.album.id,
+                        title: track.album.title,
+                        coverArt: track.album.coverUrl,
+                    },
+                };
+            })
+            .filter((track): track is NonNullable<typeof track> => track !== null);
+
+        const nextCursor =
+            hasMore && likedEntries.length > 0 ?
+                {
+                    likedAt:
+                        likedEntries[likedEntries.length - 1].likedAt.toISOString(),
+                    trackId: likedEntries[likedEntries.length - 1].trackId,
+                }
+            :   null;
+
+        return res.json({
+            playlist: {
+                id: MY_LIKED_PLAYLIST_ID,
+                name: MY_LIKED_PLAYLIST_NAME,
+                description: MY_LIKED_PLAYLIST_DESCRIPTION,
+            },
+            tracks: orderedTracks,
+            total,
+            pagination: {
+                limit,
+                hasMore,
+                nextCursor,
+            },
+        });
+    } catch (error) {
+        logger.error("Get liked playlist error:", error);
+        return sendInternalRouteError(res, "Failed to fetch liked playlist");
     }
 });
 
@@ -2241,7 +2587,7 @@ router.get("/tracks/shuffle", async (req, res) => {
         res.json({ tracks, total: totalTracks });
     } catch (error) {
         logger.error("Shuffle tracks error:", error);
-        res.status(500).json({ error: "Failed to shuffle tracks" });
+        sendInternalRouteError(res, "Failed to shuffle tracks");
     }
 });
 
@@ -2352,7 +2698,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                             error
                         );
                     }
-                    return res.status(404).json({ error: "Cover art not found" });
+                    return sendRouteError(res, 404, "Cover art not found");
                 }
 
                 // Serve the file directly
@@ -2436,7 +2782,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     );
                 }
 
-                return res.status(404).json({ error: "Cover art not found" });
+                return sendRouteError(res, 404, "Cover art not found");
             }
 
             // Check if this is an audiobook cover (prefixed with "audiobook__")
@@ -2518,7 +2864,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         const normalizedCoverUrl = normalizeExternalImageUrl(coverUrl);
         if (!normalizedCoverUrl) {
             logger.warn(`[COVER-ART] Blocked invalid cover URL: ${coverUrl}`);
-            return res.status(400).json({ error: "Invalid cover art URL" });
+            return sendRouteError(res, 400, "Invalid cover art URL");
         }
         coverUrl = normalizedCoverUrl;
 
@@ -2597,7 +2943,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 logger.warn(
                     `[COVER-ART] Blocked invalid cover URL: ${imageResult.url}`
                 );
-                return res.status(400).json({ error: "Invalid cover art URL" });
+                return sendRouteError(res, 400, "Invalid cover art URL");
             }
 
             if (imageResult.status === "not_found") {
@@ -2614,13 +2960,13 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     logger.warn("[COVER-ART] Redis cache write error:", cacheError);
                 }
 
-                return res.status(404).json({ error: "Cover art not found" });
+                return sendRouteError(res, 404, "Cover art not found");
             }
 
             logger.error(
                 `[COVER-ART] Failed to fetch: ${imageResult.url} (${imageResult.message || "fetch error"})`
             );
-            return res.status(502).json({ error: "Failed to fetch cover art" });
+            return sendRouteError(res, 502, "Failed to fetch cover art");
         }
 
         logger.debug(`[COVER-ART] Successfully fetched, caching...`);
@@ -2661,7 +3007,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         res.send(imageBuffer);
     } catch (error) {
         logger.error("Get cover art error:", error);
-        res.status(500).json({ error: "Failed to fetch cover art" });
+        sendInternalRouteError(res, "Failed to fetch cover art");
     }
 });
 
@@ -2672,7 +3018,7 @@ router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
         const { mbid } = req.params;
 
         if (!mbid || mbid.startsWith("temp-")) {
-            return res.status(400).json({ error: "Valid MBID required" });
+            return sendRouteError(res, 400, "Valid MBID required");
         }
 
         // Fetch from Cover Art Archive (this uses caching internally)
@@ -2687,7 +3033,7 @@ router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
         res.json({ coverUrl });
     } catch (error) {
         logger.error("Get album cover error:", error);
-        res.status(500).json({ error: "Failed to fetch cover art" });
+        sendInternalRouteError(res, "Failed to fetch cover art");
     }
 });
 
@@ -2697,7 +3043,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         const { url } = req.query;
 
         if (!url) {
-            return res.status(400).json({ error: "URL parameter required" });
+            return sendRouteError(res, 400, "URL parameter required");
         }
 
         const rawImageUrl = Array.isArray(url) ? url[0] : url;
@@ -2708,7 +3054,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         const normalizedImageUrl = normalizeExternalImageUrl(imageUrl);
         if (!normalizedImageUrl) {
             logger.warn(`[COLORS] Blocked invalid image URL: ${imageUrl}`);
-            return res.status(400).json({ error: "Invalid image URL" });
+            return sendRouteError(res, 400, "Invalid image URL");
         }
 
         // Handle placeholder images - return default fallback colors
@@ -2767,13 +3113,13 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
                 logger.error(
                     `[COLORS] Failed to fetch image: ${imageResult.url} (404)`
                 );
-                return res.status(404).json({ error: "Image not found" });
+                return sendRouteError(res, 404, "Image not found");
             }
 
             logger.error(
                 `[COLORS] Failed to fetch image: ${imageResult.url} (${imageResult.message || "fetch error"})`
             );
-            return res.status(504).json({ error: "Image fetch failed" });
+            return sendRouteError(res, 504, "Image fetch failed");
         }
 
         const imageBuffer = imageResult.buffer;
@@ -2798,7 +3144,7 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
         res.json(colors);
     } catch (error) {
         logger.error("Extract colors error:", error);
-        res.status(500).json({ error: "Failed to extract colors" });
+        sendInternalRouteError(res, "Failed to extract colors");
     }
 });
 
@@ -2811,7 +3157,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
         if (!userId) {
             logger.debug("[STREAM] No userId in session - unauthorized");
-            return res.status(401).json({ error: "Unauthorized" });
+            return sendRouteError(res, 401, "Unauthorized");
         }
 
         const track = await prisma.track.findUnique({
@@ -2820,7 +3166,7 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
         if (!track) {
             logger.debug("[STREAM] Track not found");
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         // Log play start - only if this is a new playback session
@@ -2964,10 +3310,10 @@ router.get("/tracks/:id/stream", async (req, res) => {
 
         // No file path available
         logger.debug("[STREAM] Track has no file path - unavailable");
-        return res.status(404).json({ error: "Track not available" });
+        return sendRouteError(res, 404, "Track not available");
     } catch (error) {
         logger.error("Stream track error:", error);
-        res.status(500).json({ error: "Failed to stream track" });
+        sendInternalRouteError(res, "Failed to stream track");
     }
 });
 
@@ -2976,7 +3322,7 @@ router.get("/tracks/:id/preference", async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
+            return sendRouteError(res, 401, "Authentication required");
         }
 
         const trackId = req.params.id;
@@ -2985,7 +3331,7 @@ router.get("/tracks/:id/preference", async (req, res) => {
             select: { id: true },
         });
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         const [likedEntry, dislikedEntry] = await Promise.all([
@@ -3022,7 +3368,7 @@ router.get("/tracks/:id/preference", async (req, res) => {
         res.json(formatTrackPreferenceResponse(trackId, preference));
     } catch (error) {
         logger.error("Get track preference error:", error);
-        res.status(500).json({ error: "Failed to fetch track preference" });
+        sendInternalRouteError(res, "Failed to fetch track preference");
     }
 });
 
@@ -3031,7 +3377,7 @@ router.post("/albums/:id/preference", async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
+            return sendRouteError(res, 401, "Authentication required");
         }
 
         const requestedAlbumId = req.params.id;
@@ -3054,7 +3400,7 @@ router.post("/albums/:id/preference", async (req, res) => {
             },
         });
         if (!album) {
-            return res.status(404).json({ error: "Album not found" });
+            return sendRouteError(res, 404, "Album not found");
         }
 
         const albumTracks = await prisma.track.findMany({
@@ -3099,7 +3445,7 @@ router.post("/albums/:id/preference", async (req, res) => {
         );
     } catch (error) {
         logger.error("Set album preference error:", error);
-        res.status(500).json({ error: "Failed to set album preference" });
+        sendInternalRouteError(res, "Failed to set album preference");
     }
 });
 
@@ -3108,7 +3454,7 @@ router.post("/tracks/:id/preference", async (req, res) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ error: "Authentication required" });
+            return sendRouteError(res, 401, "Authentication required");
         }
 
         const trackId = req.params.id;
@@ -3127,7 +3473,7 @@ router.post("/tracks/:id/preference", async (req, res) => {
             select: { id: true },
         });
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         const now = new Date();
@@ -3205,7 +3551,7 @@ router.post("/tracks/:id/preference", async (req, res) => {
         res.json(formatTrackPreferenceResponse(trackId, preference));
     } catch (error) {
         logger.error("Set track preference error:", error);
-        res.status(500).json({ error: "Failed to set track preference" });
+        sendInternalRouteError(res, "Failed to set track preference");
     }
 });
 
@@ -3229,7 +3575,7 @@ router.get("/tracks/:id", async (req, res) => {
         });
 
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         // Transform to match frontend Track interface: artist at top level
@@ -3251,7 +3597,7 @@ router.get("/tracks/:id", async (req, res) => {
         res.json(formattedTrack);
     } catch (error) {
         logger.error("Get track error:", error);
-        res.status(500).json({ error: "Failed to fetch track" });
+        sendInternalRouteError(res, "Failed to fetch track");
     }
 });
 
@@ -3262,6 +3608,7 @@ router.get("/tracks/:id", async (req, res) => {
 router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
     try {
         const trackId = req.params.id;
+        const playback = parseBooleanQueryParam(req.query.playback, false);
         const track = await prisma.track.findUnique({
             where: { id: trackId },
             select: {
@@ -3271,14 +3618,62 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
         });
 
         if (!track?.filePath) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
-        const cacheKey = buildAudioInfoCacheKey(
-            trackId,
-            track.filePath,
-            track.fileModified
-        );
+        const absolutePath = resolveAudioInfoAbsolutePath(track.filePath);
+        if (!fs.existsSync(absolutePath)) {
+            return sendRouteError(res, 404, "File not found on disk");
+        }
+
+        let metadataPath = absolutePath;
+        let cacheScope: "source" | "playback" = "source";
+        let cacheQuality: StreamingQuality | null = null;
+
+        if (playback) {
+            const userId = req.user?.id;
+            if (!userId) {
+                return sendRouteError(res, 401, "Unauthorized");
+            }
+
+            const queryQuality = normalizeStreamingQuality(req.query.quality);
+            let requestedQuality: StreamingQuality = queryQuality ?? "medium";
+
+            if (!queryQuality) {
+                const userSettings = await prisma.userSettings.findUnique({
+                    where: { userId },
+                    select: { playbackQuality: true },
+                });
+                requestedQuality =
+                    normalizeStreamingQuality(userSettings?.playbackQuality) ??
+                    "medium";
+            }
+
+            const streamingService = new AudioStreamingService(
+                config.music.musicPath,
+                config.music.transcodeCachePath,
+                config.music.transcodeCacheMaxGb
+            );
+
+            try {
+                const playbackFile = await streamingService.getStreamFilePath(
+                    trackId,
+                    requestedQuality,
+                    track.fileModified,
+                    absolutePath
+                );
+                metadataPath = playbackFile.filePath;
+                cacheScope = "playback";
+                cacheQuality = requestedQuality;
+            } finally {
+                streamingService.destroy();
+            }
+        }
+
+        const cacheKey = buildAudioInfoCacheKey(trackId, track.filePath, track.fileModified, {
+            scope: cacheScope,
+            quality: cacheQuality,
+        });
         const now = Date.now();
         const cachedEntry = audioInfoCache.get(cacheKey);
         if (cachedEntry && cachedEntry.expiresAt > now) {
@@ -3288,27 +3683,11 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
             audioInfoCache.delete(cacheKey);
         }
 
-        const absolutePath = path.join(
-            config.music.musicPath,
-            track.filePath.replace(/\\/g, "/")
-        );
-
-        if (!fs.existsSync(absolutePath)) {
-            return res.status(404).json({ error: "File not found on disk" });
+        if (!fs.existsSync(metadataPath)) {
+            return sendRouteError(res, 404, "Playback file not found on disk");
         }
 
-        const { parseFile } = await import("music-metadata");
-        const metadata = await parseFile(absolutePath, { duration: false, skipCovers: true });
-        const fmt = metadata.format;
-
-        const payload: AudioInfoResponsePayload = {
-            codec: fmt.codec || null,
-            bitrate: fmt.bitrate ? Math.round(fmt.bitrate / 1000) : null,    // kbps
-            sampleRate: fmt.sampleRate || null,                               // Hz
-            bitDepth: fmt.bitsPerSample || null,                              // e.g. 16, 24
-            lossless: fmt.lossless ?? null,
-            channels: fmt.numberOfChannels || null,
-        };
+        const payload = await readAudioInfoPayload(metadataPath);
 
         audioInfoCache.set(cacheKey, {
             payload,
@@ -3319,7 +3698,7 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
         res.json(payload);
     } catch (error) {
         logger.error("Get audio info error:", error);
-        res.status(500).json({ error: "Failed to read audio metadata" });
+        sendInternalRouteError(res, "Failed to read audio metadata");
     }
 });
 
@@ -3345,7 +3724,7 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
         });
 
         if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            return sendRouteError(res, 404, "Track not found");
         }
 
         // Delete file from filesystem if path is available
@@ -3376,7 +3755,7 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
         res.json({ message: "Track deleted successfully" });
     } catch (error) {
         logger.error("Delete track error:", error);
-        res.status(500).json({ error: "Failed to delete track" });
+        sendInternalRouteError(res, "Failed to delete track");
     }
 });
 
@@ -3403,7 +3782,7 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
         });
 
         if (!album) {
-            return res.status(404).json({ error: "Album not found" });
+            return sendRouteError(res, 404, "Album not found");
         }
 
         // Delete all track files
@@ -3463,7 +3842,7 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
         });
     } catch (error) {
         logger.error("Delete album error:", error);
-        res.status(500).json({ error: "Failed to delete album" });
+        sendInternalRouteError(res, "Failed to delete album");
     }
 });
 
@@ -3489,7 +3868,7 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
         });
 
         if (!artist) {
-            return res.status(404).json({ error: "Artist not found" });
+            return sendRouteError(res, 404, "Artist not found");
         }
 
         // Delete all track files and collect actual artist folders from file paths
@@ -3749,7 +4128,7 @@ router.get("/genres", async (req, res) => {
         res.json({ genres });
     } catch (error) {
         logger.error("Genres endpoint error:", error);
-        res.status(500).json({ error: "Failed to get genres" });
+        sendInternalRouteError(res, "Failed to get genres");
     }
 });
 
@@ -3793,7 +4172,7 @@ router.get("/decades", async (req, res) => {
         res.json({ decades });
     } catch (error) {
         logger.error("Decades endpoint error:", error);
-        res.status(500).json({ error: "Failed to get decades" });
+        sendInternalRouteError(res, "Failed to get decades");
     }
 });
 
@@ -3821,7 +4200,7 @@ router.get("/radio", async (req, res) => {
         const userId = req.user?.id;
 
         if (!radioType) {
-            return res.status(400).json({ error: "Radio type is required" });
+            return sendRouteError(res, 400, "Radio type is required");
         }
 
         let trackIds: string[] = [];
@@ -4486,7 +4865,7 @@ router.get("/radio", async (req, res) => {
                 })) as any; // Cast to any to include all Track fields
 
                 if (!sourceTrack) {
-                    return res.status(404).json({ error: "Track not found" });
+                    return sendRouteError(res, 404, "Track not found");
                 }
 
                 const sourceHasReliableEnhancedAnalysis =
@@ -5327,7 +5706,7 @@ router.get("/radio", async (req, res) => {
         res.json(response);
     } catch (error) {
         logger.error("Radio endpoint error:", error);
-        res.status(500).json({ error: "Failed to get radio tracks" });
+        sendInternalRouteError(res, "Failed to get radio tracks");
     }
 });
 

@@ -9,6 +9,7 @@ import {
 import { scanQueue } from "../workers/queues";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { yieldToEventLoop } from "../utils/async";
+import { resolveDownloadJobMetadata } from "../utils/downloadJobMetadata";
 
 class QueueCleanerService {
     private isRunning = false;
@@ -231,7 +232,9 @@ class QueueCleanerService {
                         );
 
                         for (const job of matchingJobs) {
-                            const metadata = (job.metadata as any) || {};
+                            const { metadata } = resolveDownloadJobMetadata(
+                                job.metadata
+                            );
                             const currentRetryCount = metadata.retryCount || 0;
 
                             await this.withPrismaRetry(
@@ -455,11 +458,13 @@ class QueueCleanerService {
         // Extract jobs with valid artist/album metadata
         const jobsToCheck = processingJobs
             .map((job) => {
-                const metadata = (job.metadata as any) || {};
+                const { artistName, albumTitle } = resolveDownloadJobMetadata(
+                    job.metadata
+                );
                 return {
                     job,
-                    artistName: metadata?.artistName as string | undefined,
-                    albumTitle: metadata?.albumTitle as string | undefined,
+                    artistName,
+                    albumTitle,
                 };
             })
             .filter((x) => x.artistName && x.albumTitle);

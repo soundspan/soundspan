@@ -1,0 +1,20 @@
+{
+    "name": "@soundspan/media-metadata-contract",
+    "version": "1.0.0",
+    "private": true,
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "npm exec --yes --package typescript -- tsc -p tsconfig.json",
+        "typecheck": "npm exec --yes --package typescript -- tsc -p tsconfig.json --noEmit"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    }
+}

@@ -32,3 +32,14 @@ test("quick links and sidebar include listen together destination", () => {
         true
     );
 });
+
+test("navigation exposes a direct my-liked playlist destination", () => {
+    assert.equal(
+        SIDEBAR_NAVIGATION.some((link) => link.href === "/playlist/my-liked"),
+        true
+    );
+    assert.equal(
+        MOBILE_QUICK_LINKS.some((link) => link.href === "/playlist/my-liked"),
+        true
+    );
+});

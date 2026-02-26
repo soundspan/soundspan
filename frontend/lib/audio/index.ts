@@ -1,4 +1,7 @@
-export { PlaybackStateMachine, playbackStateMachine } from './playback-state-machine';
+export {
+    PlaybackStateMachine,
+    playbackStateMachine,
+} from './playback-state-machine';
 export type { PlaybackState, StateContext, StateListener } from './playback-state-machine';
 
 export { OperationLock, operationLock } from './operation-lock';

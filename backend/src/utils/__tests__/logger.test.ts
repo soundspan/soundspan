@@ -45,6 +45,9 @@ describe("logger", () => {
 
         return {
             logger: loggerModule.logger,
+            createLogger: loggerModule.createLogger,
+            withLogTiming: loggerModule.withLogTiming,
+            logErrorWithContext: loggerModule.logErrorWithContext,
             consoleDebug,
             consoleInfo,
             consoleWarn,
@@ -156,11 +159,96 @@ describe("logger", () => {
         expect(consoleDebug).toHaveBeenCalledWith("[DEBUG] starting", context, payload);
         expect(consoleInfo).toHaveBeenCalledWith("[INFO] running", 1, "two", context);
         expect(consoleWarn).toHaveBeenCalledWith("[WARN] almost", payload);
-        expect(consoleError).toHaveBeenCalledWith(
-            "[ERROR] failed",
-            expect.any(Error)
+        expect(consoleError).toHaveBeenCalledWith("[ERROR] failed", {
+            name: "Error",
+            message: "nope",
+            stack: expect.any(String),
+        });
+    });
+
+    it("creates scoped child loggers with dotted scope names", () => {
+        const { createLogger, consoleInfo } = loadLoggerModule({
+            logLevel: "info",
+        });
+
+        const base = createLogger("Worker");
+        const child = base.child("Scan");
+
+        child.info("started", { jobId: "42" });
+
+        expect(consoleInfo).toHaveBeenCalledWith(
+            "[INFO] [Worker.Scan] started",
+            { jobId: "42" }
         );
-        expect(consoleError.mock.calls[0][1]).toBeInstanceOf(Error);
-        expect((consoleError.mock.calls[0][1] as Error).message).toBe("nope");
+    });
+
+    it("withLogTiming records start and completion duration", async () => {
+        const { logger, withLogTiming, consoleDebug } = loadLoggerModule({
+            logLevel: "debug",
+        });
+
+        const result = await withLogTiming(
+            logger,
+            "refresh-cache",
+            async () => "ok",
+            { cacheKey: "abc" }
+        );
+
+        expect(result).toBe("ok");
+        expect(consoleDebug).toHaveBeenCalledTimes(2);
+        expect(consoleDebug.mock.calls[0][0]).toBe("[DEBUG] refresh-cache started");
+        expect(consoleDebug.mock.calls[0][1]).toEqual({ cacheKey: "abc" });
+        expect(consoleDebug.mock.calls[1][0]).toBe(
+            "[DEBUG] refresh-cache completed"
+        );
+        expect(consoleDebug.mock.calls[1][1]).toMatchObject({
+            cacheKey: "abc",
+        });
+        expect(typeof consoleDebug.mock.calls[1][1].durationMs).toBe("number");
+    });
+
+    it("withLogTiming records failure context and rethrows", async () => {
+        const { logger, withLogTiming, consoleError } = loadLoggerModule({
+            logLevel: "debug",
+        });
+
+        await expect(
+            withLogTiming(
+                logger,
+                "refresh-cache",
+                async () => {
+                    throw new Error("boom");
+                },
+                { cacheKey: "abc" }
+            )
+        ).rejects.toThrow("boom");
+
+        expect(consoleError).toHaveBeenCalledTimes(1);
+        expect(consoleError.mock.calls[0][0]).toBe("[ERROR] refresh-cache failed");
+        expect(consoleError.mock.calls[0][1]).toMatchObject({
+            cacheKey: "abc",
+        });
+        expect(consoleError.mock.calls[0][1].error).toMatchObject({
+            message: "boom",
+            name: "Error",
+        });
+    });
+
+    it("logErrorWithContext merges explicit context with error payload", () => {
+        const { logger, logErrorWithContext, consoleError } = loadLoggerModule({
+            logLevel: "error",
+        });
+
+        logErrorWithContext(logger, "job failed", new Error("nope"), {
+            jobId: "job-1",
+        });
+
+        expect(consoleError).toHaveBeenCalledWith("[ERROR] job failed", {
+            jobId: "job-1",
+            error: expect.objectContaining({
+                message: "nope",
+                name: "Error",
+            }),
+        });
     });
 });

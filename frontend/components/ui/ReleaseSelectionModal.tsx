@@ -20,6 +20,7 @@ import { useDownloadContext } from "@/lib/download-context";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { cn } from "@/utils/cn";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface ReleaseSelectionModalProps {
     isOpen: boolean;
@@ -118,7 +119,7 @@ export function ReleaseSelectionModal({
                 setReleases(result.releases);
                 setLidarrAlbumId(result.lidarrAlbumId);
             } catch (err: unknown) {
-                console.error("Failed to fetch releases:", err);
+                sharedFrontendLogger.error("Failed to fetch releases:", err);
                 setError(
                     err instanceof Error
                         ? err.message
@@ -257,7 +258,7 @@ export function ReleaseSelectionModal({
             });
             onClose();
         } catch (err: unknown) {
-            console.error("Failed to grab release:", err);
+            sharedFrontendLogger.error("Failed to grab release:", err);
             toast.error("Failed to start download", {
                 description:
                     err instanceof Error ? err.message : "Unknown release error",

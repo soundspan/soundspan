@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from "react";
 import { useAudio } from "@/lib/audio-context";
 import { api } from "@/lib/api";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 /**
  * Media Session API integration for OS-level media controls
@@ -61,7 +62,7 @@ export function useMediaSession() {
     useEffect(() => {
         // Check if Media Session API is supported
         if (!("mediaSession" in navigator)) {
-            console.warn("[MediaSession] Media Session API not supported");
+            sharedFrontendLogger.warn("[MediaSession] Media Session API not supported");
             return;
         }
 
@@ -341,7 +342,7 @@ export function useMediaSession() {
                 });
             } catch (error) {
                 // Some browsers may not support position state
-                console.warn(
+                sharedFrontendLogger.warn(
                     "[MediaSession] Failed to set position state:",
                     error
                 );

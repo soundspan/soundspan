@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Operation Lock
  *
@@ -36,7 +37,7 @@ export class OperationLock {
       this.opId++;
 
       if (this.debugEnabled) {
-        console.log(`[OpLock] Acquired: ${op} (id: ${this.opId})`);
+        sharedFrontendLogger.info(`[OpLock] Acquired: ${op} (id: ${this.opId})`);
       }
       return this.opId;
     }
@@ -45,7 +46,7 @@ export class OperationLock {
     if (op === 'seek') {
       if (this.currentOp === 'load') {
         if (this.debugEnabled) {
-          console.log(`[OpLock] Denied seek - load in progress`);
+          sharedFrontendLogger.info(`[OpLock] Denied seek - load in progress`);
         }
         return null;
       }
@@ -53,7 +54,7 @@ export class OperationLock {
       this.opId++;
 
       if (this.debugEnabled) {
-        console.log(`[OpLock] Acquired: ${op} (id: ${this.opId})`);
+        sharedFrontendLogger.info(`[OpLock] Acquired: ${op} (id: ${this.opId})`);
       }
       return this.opId;
     }
@@ -61,7 +62,7 @@ export class OperationLock {
     // Play/pause must wait for seek/load to complete
     if (this.currentOp === 'seek' || this.currentOp === 'load') {
       if (this.debugEnabled) {
-        console.log(`[OpLock] ${op} waiting for ${this.currentOp}`);
+        sharedFrontendLogger.info(`[OpLock] ${op} waiting for ${this.currentOp}`);
       }
       return null;
     }
@@ -70,7 +71,7 @@ export class OperationLock {
     this.opId++;
 
     if (this.debugEnabled) {
-      console.log(`[OpLock] Acquired: ${op} (id: ${this.opId})`);
+      sharedFrontendLogger.info(`[OpLock] Acquired: ${op} (id: ${this.opId})`);
     }
     return this.opId;
   }
@@ -106,7 +107,7 @@ export class OperationLock {
     }
 
     if (this.debugEnabled) {
-      console.log(`[OpLock] Released: ${this.currentOp} (id: ${id})`);
+      sharedFrontendLogger.info(`[OpLock] Released: ${this.currentOp} (id: ${id})`);
     }
 
     this.currentOp = null;

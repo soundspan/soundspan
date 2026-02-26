@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "template": {
+    "repo": "BonzTM/agents-template",
+    "ref": "main",
+    "localPath": "../agents-template"
+  },
+  "profiles": [
+    "base",
+    "node-web"
+  ],
+  "overrideRoot": ".agents-config/agent-overrides",
+  "managed_files": [
+    { "path": "AGENTS.md", "source_path": ".agents-config/AGENTS_TEMPLATE.md", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/enforce-agent-policies.mjs", "profiles": ["base"], "allow_override": true },
+    { "path": ".agents-config/scripts/agent-session-preflight.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/agent-queue-lifecycle.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/generate-subagent-payload-stub.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/repair-queue-verification-evidence.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/tools/rules/verify-canonical-ruleset.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/agent-overrides/rule-overrides.schema.json", "profiles": ["base"] },
+    { "path": ".agents-config/tools/bootstrap/agent-managed-files.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/tools/bootstrap/check-template-impact.mjs", "profiles": ["base"] }
+  ],
+  "meaningful_paths": [
+    { "path": ".agents-config/contracts/rules/canonical-ruleset.json", "profiles": ["base"] },
+    { "path": ".agents-config/agent-overrides/rule-overrides.schema.json", "profiles": ["base"] },
+    { "path": "AGENTS.md", "profiles": ["base"] },
+    { "path": ".agents-config/docs/AGENT_RULES.md", "profiles": ["base"] },
+    { "path": ".agents-config/docs/AGENT_CONTEXT.md", "profiles": ["base"] },
+    { "path": ".agents-config/docs/CONTEXT_INDEX.json", "profiles": ["base"] },
+    { "path": ".agents-config/policies/agent-governance.json", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/enforce-agent-policies.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/agent-session-preflight.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/agent-queue-lifecycle.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/generate-subagent-payload-stub.mjs", "profiles": ["base"] },
+    { "path": ".agents-config/scripts/repair-queue-verification-evidence.mjs", "profiles": ["base"] },
+    { "path": ".github/workflows/pr-checks.yml", "profiles": ["base"] },
+    { "path": "package.json", "profiles": ["base"] }
+  ],
+  "canonical_contract": {
+    "default_authority": "template",
+    "allowed_authorities": [
+      "template",
+      "project"
+    ],
+    "override_mode": "explicit_allowlist",
+    "override_reserved_paths": [
+      "rule-overrides.schema.json",
+      "rule-overrides.json",
+      "README.md",
+      ".gitkeep"
+    ]
+  }
+}

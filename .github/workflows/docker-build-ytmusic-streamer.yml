@@ -94,7 +94,8 @@ jobs:
             - name: Build and push image
               uses: docker/build-push-action@v5
               with:
-                  context: ./services/ytmusic-streamer
+                  context: .
+                  file: ./services/ytmusic-streamer/Dockerfile
                   push: true
                   tags: ${{ steps.tag-config.outputs.tags }}
                   labels: |

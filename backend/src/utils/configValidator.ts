@@ -5,6 +5,7 @@ import { execSync } from "child_process";
 import { AppError, ErrorCode, ErrorCategory } from "./errors";
 import ffmpegPath from "@ffmpeg-installer/ffmpeg";
 import { getSystemSettings } from "./systemSettings";
+import { parseEnvInt } from "./envParsers";
 
 export interface MusicConfig {
     musicPath: string;
@@ -101,7 +102,7 @@ export async function validateMusicConfig(): Promise<MusicConfig> {
     // Get cache size limit from SystemSettings or fallback to env/default
     const transcodeCacheMaxGb =
         settings?.transcodeCacheMaxGb ||
-        parseInt(process.env.TRANSCODE_CACHE_MAX_GB || "10", 10);
+        parseEnvInt(process.env.TRANSCODE_CACHE_MAX_GB, 10);
 
     if (isNaN(transcodeCacheMaxGb) || transcodeCacheMaxGb < 1) {
         throw new AppError(

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Component, ReactNode } from "react";
+import { createFrontendLogger } from "@/lib/logger";
 
 interface Props {
     children: ReactNode;
@@ -10,6 +11,8 @@ interface State {
     hasError: boolean;
     error: Error | null;
 }
+
+const logger = createFrontendLogger("GlobalErrorBoundary");
 
 /**
  * Global error boundary for catching application-level errors.
@@ -26,11 +29,10 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     }
 
     componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-        console.error("[GlobalErrorBoundary] Application error:", error);
-        console.error(
-            "[GlobalErrorBoundary] Component stack:",
-            errorInfo.componentStack
-        );
+        logger.error("Application error", error);
+        logger.error("Component stack", {
+            componentStack: errorInfo.componentStack,
+        });
     }
 
     private handleReload = () => {

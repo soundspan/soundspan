@@ -23,6 +23,20 @@ import { listenTogetherSocket } from "./listen-together-socket";
 import { getListenTogetherSessionSnapshot } from "./listen-together-session";
 import { toast } from "sonner";
 import { computePlayNowInsertion } from "./queue-utils";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { clampAudioVolume } from "@/lib/audio-volume";
+import {
+    clampPlaybackTimeToUpperBound,
+    resolvePlaybackTimeUpperBound,
+} from "@/lib/audio-playback-normalization";
+import {
+    createMigratingStorageKey,
+    writeMigratingStorageItem,
+} from "@/lib/storage-migration";
+
+const CURRENT_TIME_KEY = createMigratingStorageKey("current_time");
+const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey("current_time_track_id");
+const LISTEN_TOGETHER_NAV_DEBOUNCE_MS = 700;
 
 function queueDebugEnabled(): boolean {
     try {
@@ -38,7 +52,17 @@ function queueDebugEnabled(): boolean {
 
 function queueDebugLog(message: string, data?: Record<string, unknown>) {
     if (!queueDebugEnabled()) return;
-    console.log(`[QueueDebug] ${message}`, data || {});
+    sharedFrontendLogger.info(`[QueueDebug] ${message}`, data || {});
+}
+
+function resetPersistedTrackStartPosition(trackId: string): void {
+    if (typeof window === "undefined") return;
+    try {
+        writeMigratingStorageItem(CURRENT_TIME_KEY, "0");
+        writeMigratingStorageItem(CURRENT_TIME_TRACK_ID_KEY, trackId);
+    } catch {
+        // Ignore storage failures (private mode/quota/etc.)
+    }
 }
 
 function isListenTogetherLocalTrack(track: Track | null | undefined): track is Track {
@@ -127,6 +151,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const lastQueueInsertAtRef = useRef<number | null>(null);
     const lastCursorTrackIndexRef = useRef<number | null>(null);
     const lastCursorIsShuffleRef = useRef<boolean | null>(null);
+    const lastListenTogetherNavRef = useRef<{
+        action: "next" | "previous" | null;
+        atMs: number;
+    }>({
+        action: null,
+        atMs: 0,
+    });
 
     // Ref to track repeat-one timeout for cleanup
     const repeatTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -230,6 +261,25 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         return snapshot;
     }, []);
 
+    const shouldSuppressListenTogetherNav = useCallback(
+        (action: "next" | "previous"): boolean => {
+            const now = Date.now();
+            const last = lastListenTogetherNavRef.current;
+            if (
+                last.action === action &&
+                now - last.atMs < LISTEN_TOGETHER_NAV_DEBOUNCE_MS
+            ) {
+                return true;
+            }
+            lastListenTogetherNavRef.current = {
+                action,
+                atMs: now,
+            };
+            return false;
+        },
+        []
+    );
+
     const playTrack = useCallback(
         (track: Track) => {
             const playbackState = playbackRef.current;
@@ -255,7 +305,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setVibeSourceFeatures(null);
                 state.setVibeQueueIds([]);
             }
-            
+
+            resetPersistedTrackStartPosition(track.id);
             state.setPlaybackType("track");
             state.setCurrentTrack(track);
             state.setCurrentAudiobook(null);
@@ -319,6 +370,15 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 isVibeQueue,
             });
 
+            const normalizedStartIndex = Math.min(
+                Math.max(startIndex, 0),
+                tracks.length - 1
+            );
+            const startTrack = tracks[normalizedStartIndex];
+            if (!startTrack?.id) {
+                return;
+            }
+
             // If not a vibe queue and vibe mode is on, disable it
             if (!isVibeQueue && state.vibeMode) {
                 state.setVibeMode(false);
@@ -326,18 +386,19 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setVibeQueueIds([]);
             }
 
+            resetPersistedTrackStartPosition(startTrack.id);
             state.setPlaybackType("track");
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
             state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing tracks
             state.setQueue(tracks);
-            state.setCurrentIndex(startIndex);
-            state.setCurrentTrack(tracks[startIndex]);
+            state.setCurrentIndex(normalizedStartIndex);
+            state.setCurrentTrack(startTrack);
             playbackState.setIsPlaying(true);
             playbackState.setCurrentTime(0);
             state.setRepeatOneCount(0);
             state.setShuffleIndices(
-                generateShuffleIndices(tracks.length, startIndex)
+                generateShuffleIndices(tracks.length, normalizedStartIndex)
             );
         },
         [state, generateShuffleIndices, getActiveListenTogetherSession]
@@ -482,9 +543,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     : state.playbackType === "audiobook"
                     ? state.currentAudiobook?.duration || 0
                     : state.currentTrack?.duration || 0;
-            const clampedTarget = mediaDuration > 0
-                ? Math.min(Math.max(targetSec, 0), mediaDuration)
-                : Math.max(targetSec, 0);
+            const clampedTarget = clampPlaybackTimeToUpperBound(
+                targetSec,
+                mediaDuration
+            );
 
             playbackState.lockSeek(clampedTarget);
             playbackState.setCurrentTime(clampedTarget);
@@ -505,6 +567,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         const ltSession = getActiveListenTogetherSession();
         if (ltSession) {
             if (!ltSession.isHost) return;
+            if (shouldSuppressListenTogetherNav("next")) return;
             listenTogetherSocket.next().catch(() => {});
             return;
         }
@@ -572,13 +635,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setCurrentTrack(nextTrack);
         playbackState.setCurrentTime(0);
         playbackState.setIsPlaying(true);
-    }, [state, getActiveListenTogetherSession]);
+    }, [state, getActiveListenTogetherSession, shouldSuppressListenTogetherNav]);
 
     const previous = useCallback(() => {
         const playbackState = playbackRef.current;
         const ltSession = getActiveListenTogetherSession();
         if (ltSession) {
             if (!ltSession.isHost) return;
+            if (shouldSuppressListenTogetherNav("previous")) return;
             listenTogetherSocket.previous().catch(() => {});
             return;
         }
@@ -610,7 +674,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setCurrentTrack(prevTrack);
         playbackState.setCurrentTime(0);
         playbackState.setIsPlaying(true);
-    }, [state, getActiveListenTogetherSession]);
+    }, [state, getActiveListenTogetherSession, shouldSuppressListenTogetherNav]);
 
     const addTracksToQueue = useCallback(
         (tracks: Track[], options?: { silent?: boolean }) => {
@@ -664,6 +728,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             // If no tracks are playing (empty queue or non-track playback), start fresh
             if (state.queue.length === 0 || state.playbackType !== "track") {
+                resetPersistedTrackStartPosition(validTracks[0].id);
                 state.setPlaybackType("track");
                 state.setQueue(validTracks);
                 state.setCurrentIndex(0);
@@ -772,6 +837,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             // If nothing is playing, just start the track
             if (state.queue.length === 0 || state.playbackType !== "track") {
+                resetPersistedTrackStartPosition(track.id);
                 state.setPlaybackType("track");
                 state.setQueue([track]);
                 state.setCurrentIndex(0);
@@ -856,6 +922,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             // Empty queue or non-track playback: start fresh with just this track
             if (state.queue.length === 0 || state.playbackType !== "track") {
+                resetPersistedTrackStartPosition(track.id);
                 state.setPlaybackType("track");
                 state.setCurrentTrack(track);
                 state.setCurrentAudiobook(null);
@@ -973,6 +1040,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (!state.currentTrack || state.playbackType !== "track") {
                 // No current track, just start playing the new tracks
                 if (tracks.length > 0) {
+                    if (!tracks[0]?.id) {
+                        return;
+                    }
+                    resetPersistedTrackStartPosition(tracks[0].id);
                     state.setQueue(tracks);
                     state.setCurrentIndex(0);
                     state.setCurrentTrack(tracks[0]);
@@ -1081,14 +1152,14 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     : state.playbackType === "audiobook"
                     ? state.currentAudiobook?.duration || 0
                     : state.currentTrack?.duration || 0;
-            const maxDuration =
-                mediaDuration > 0 && playbackState.duration > 0
-                    ? Math.min(mediaDuration, playbackState.duration)
-                    : mediaDuration || playbackState.duration || 0;
-            const clampedTime =
-                maxDuration > 0
-                    ? Math.min(Math.max(time, 0), maxDuration)
-                    : Math.max(time, 0);
+            const maxDuration = resolvePlaybackTimeUpperBound(
+                mediaDuration,
+                playbackState.duration
+            );
+            const clampedTime = clampPlaybackTimeToUpperBound(
+                time,
+                maxDuration
+            );
 
             // Lock seek to prevent stale timeupdate events from overwriting optimistic update
             // This is especially important for podcasts where seeking may require audio reload
@@ -1189,7 +1260,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
     const setVolumeControl = useCallback(
         (newVolume: number) => {
-            const clampedVolume = Math.max(0, Math.min(1, newVolume));
+            const clampedVolume = clampAudioVolume(newVolume);
             state.setVolume(clampedVolume);
             if (clampedVolume > 0) {
                 state.setIsMuted(false);
@@ -1291,7 +1362,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             return { success: true, trackCount: response.tracks.length };
         } catch (error) {
-            console.error("[Vibe] Failed to get similar tracks:", error);
+            sharedFrontendLogger.error("[Vibe] Failed to get similar tracks:", error);
             if (error instanceof Error) {
                 toast.error(error.message);
             }

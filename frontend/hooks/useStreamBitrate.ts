@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAudioState } from "@/lib/audio-context";
+import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
 import { api } from "@/lib/api";
 
 // ── TIDAL stream quality info ──────────────────────────────────────
@@ -52,6 +52,8 @@ const tidalInfoCache = new Map<number, TidalStreamQuality>();
 const tidalInfoInFlight = new Map<number, Promise<TidalStreamQuality>>();
 const localInfoCache = new Map<string, LocalTrackQuality>();
 const localInfoInFlight = new Map<string, Promise<LocalTrackQuality>>();
+const localPlaybackInfoCache = new Map<string, LocalTrackQuality>();
+const localPlaybackInfoInFlight = new Map<string, Promise<LocalTrackQuality>>();
 
 function fetchYtStreamInfo(videoId: string): Promise<{ abr: number; acodec: string }> {
     const cached = ytInfoCache.get(videoId);
@@ -105,15 +107,24 @@ function fetchTidalStreamInfo(trackId: number): Promise<TidalStreamQuality> {
     return request;
 }
 
-function fetchLocalTrackQuality(trackId: string): Promise<LocalTrackQuality> {
-    const cached = localInfoCache.get(trackId);
+function fetchLocalTrackQuality(
+    trackId: string,
+    options: { playback: boolean },
+): Promise<LocalTrackQuality> {
+    const cache = options.playback ? localPlaybackInfoCache : localInfoCache;
+    const inFlightMap = options.playback
+        ? localPlaybackInfoInFlight
+        : localInfoInFlight;
+    const cached = cache.get(trackId);
     if (cached) return Promise.resolve(cached);
 
-    const inFlight = localInfoInFlight.get(trackId);
+    const inFlight = inFlightMap.get(trackId);
     if (inFlight) return inFlight;
 
     const request = api
-        .getLocalTrackAudioInfo(trackId)
+        .getLocalTrackAudioInfo(trackId, {
+            playback: options.playback,
+        })
         .then((info) => {
             const normalized: LocalTrackQuality = {
                 codec: info.codec || "Unknown",
@@ -122,14 +133,14 @@ function fetchLocalTrackQuality(trackId: string): Promise<LocalTrackQuality> {
                 bitDepth: info.bitDepth,
                 lossless: info.lossless ?? false,
             };
-            localInfoCache.set(trackId, normalized);
+            cache.set(trackId, normalized);
             return normalized;
         })
         .finally(() => {
-            localInfoInFlight.delete(trackId);
+            inFlightMap.delete(trackId);
         });
 
-    localInfoInFlight.set(trackId, request);
+    inFlightMap.set(trackId, request);
     return request;
 }
 
@@ -149,6 +160,63 @@ function normalizeCodecLabel(raw?: string | null): string | null {
     const normalized = raw.trim();
     if (!normalized) return null;
     return friendlyCodecName(normalized).toUpperCase();
+}
+
+function isLosslessCodec(codec?: string | null): boolean {
+    const normalized = normalizeCodecLabel(codec);
+    return (
+        normalized === "FLAC" ||
+        normalized === "ALAC" ||
+        normalized === "WAV" ||
+        normalized === "PCM"
+    );
+}
+
+function resolveEffectiveLocalPlaybackQuality(input: {
+    sourceQuality: LocalTrackQuality | null;
+    playbackQuality: LocalTrackQuality | null;
+    streamProfile:
+        | {
+            mode: "direct" | "dash";
+            sourceType: "local" | "tidal" | "ytmusic" | "unknown";
+            codec: string | null;
+            bitrateKbps: number | null;
+        }
+        | null;
+}): LocalTrackQuality | null {
+    if (!input.streamProfile || input.streamProfile.sourceType !== "local") {
+        return input.sourceQuality;
+    }
+
+    if (input.streamProfile.mode === "direct") {
+        return input.playbackQuality ?? input.sourceQuality;
+    }
+
+    const profileCodec = normalizeCodecLabel(input.streamProfile.codec);
+    if (!profileCodec) {
+        return input.sourceQuality;
+    }
+
+    if (isLosslessCodec(profileCodec)) {
+        return {
+            codec: profileCodec,
+            bitrate: null,
+            sampleRate: input.sourceQuality?.sampleRate ?? null,
+            bitDepth: input.sourceQuality?.bitDepth ?? null,
+            lossless: true,
+        };
+    }
+
+    return {
+        codec: profileCodec,
+        bitrate:
+            input.streamProfile.bitrateKbps && input.streamProfile.bitrateKbps > 0
+                ? input.streamProfile.bitrateKbps
+                : (input.playbackQuality?.bitrate ?? input.sourceQuality?.bitrate ?? null),
+        sampleRate: null,
+        bitDepth: null,
+        lossless: false,
+    };
 }
 
 function isLikelyLosslessTidal(quality: TidalStreamQuality): boolean {
@@ -215,6 +283,57 @@ export function formatYtQualityBadge(codec?: string | null, bitrate?: number | n
     return "YT MUSIC";
 }
 
+export interface PlaybackQualityBadge {
+    variant: "tidal" | "youtube" | "local";
+    label: string;
+}
+
+export type PlaybackStreamSource = "local" | "tidal" | "youtube";
+
+export function resolvePlaybackQualityBadge(input: {
+    streamSource?: PlaybackStreamSource;
+    tidalQuality: TidalStreamQuality | null;
+    localQuality: LocalTrackQuality | null;
+    codec: string | null;
+    bitrate: number | null;
+}): PlaybackQualityBadge | null {
+    if (input.streamSource === "tidal") {
+        return {
+            variant: "tidal",
+            label: formatTidalQualityBadge(input.tidalQuality) || "TIDAL",
+        };
+    }
+
+    if (input.streamSource === "youtube") {
+        return {
+            variant: "youtube",
+            label: formatYtQualityBadge(input.codec, input.bitrate),
+        };
+    }
+
+    const localLabel = formatLocalQualityBadge(input.localQuality);
+    if (!localLabel) {
+        return null;
+    }
+
+    return {
+        variant: "local",
+        label: localLabel,
+    };
+}
+
+export function resolvePlaybackQualityBadgeFromStreamSource(
+    streamSource: PlaybackStreamSource | undefined,
+): PlaybackQualityBadge | null {
+    return resolvePlaybackQualityBadge({
+        streamSource,
+        tidalQuality: null,
+        localQuality: null,
+        codec: null,
+        bitrate: null,
+    });
+}
+
 /**
  * Returns audio quality metadata for the currently playing track:
  *   - YouTube Music: bitrate (kbps) + codec
@@ -230,12 +349,16 @@ export function useStreamBitrate(): {
     codec: string | null;
     tidalQuality: TidalStreamQuality | null;
     localQuality: LocalTrackQuality | null;
+    qualityBadge: PlaybackQualityBadge | null;
 } {
     const { currentTrack, playbackType } = useAudioState();
+    const { streamProfile } = useAudioPlayback();
     const [bitrate, setBitrate] = useState<number | null>(null);
     const [codec, setCodec] = useState<string | null>(null);
     const [tidalQuality, setTidalQuality] = useState<TidalStreamQuality | null>(null);
     const [localQuality, setLocalQuality] = useState<LocalTrackQuality | null>(null);
+    const [localPlaybackQuality, setLocalPlaybackQuality] =
+        useState<LocalTrackQuality | null>(null);
 
     // ── YouTube Music stream info ──────────────────────────────────
     useEffect(() => {
@@ -319,7 +442,7 @@ export function useStreamBitrate(): {
         const trackId = currentTrack!.id;
         let cancelled = false;
 
-        fetchLocalTrackQuality(trackId)
+        fetchLocalTrackQuality(trackId, { playback: false })
             .then((quality) => {
                 if (cancelled) return;
                 setLocalQuality(quality);
@@ -333,5 +456,67 @@ export function useStreamBitrate(): {
         };
     }, [currentTrack, playbackType]);
 
-    return { bitrate, codec, tidalQuality, localQuality };
+    // ── Local playback-target quality info (direct mode) ───────────
+    useEffect(() => {
+        const isLocalDirectPlayback =
+            playbackType === "track" &&
+            !!currentTrack &&
+            !currentTrack.streamSource &&
+            !!currentTrack.id &&
+            !currentTrack.id.startsWith("lastfm-") &&
+            streamProfile?.sourceType === "local" &&
+            streamProfile.mode === "direct";
+
+        if (!isLocalDirectPlayback) {
+            setLocalPlaybackQuality(null);
+            return;
+        }
+
+        const trackId = currentTrack!.id;
+        let cancelled = false;
+
+        fetchLocalTrackQuality(trackId, { playback: true })
+            .then((quality) => {
+                if (cancelled) return;
+                setLocalPlaybackQuality(quality);
+            })
+            .catch(() => {
+                if (!cancelled) setLocalPlaybackQuality(null);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentTrack, playbackType, streamProfile]);
+
+    const effectiveLocalQuality =
+        playbackType === "track" && currentTrack
+            ? resolveEffectiveLocalPlaybackQuality({
+                sourceQuality: localQuality,
+                playbackQuality: localPlaybackQuality,
+                streamProfile:
+                    !currentTrack.streamSource && streamProfile?.sourceType === "local"
+                        ? streamProfile
+                        : null,
+            })
+            : null;
+
+    const qualityBadge =
+        playbackType === "track" && currentTrack
+            ? resolvePlaybackQualityBadge({
+                streamSource: currentTrack.streamSource,
+                tidalQuality,
+                localQuality: effectiveLocalQuality,
+                codec,
+                bitrate,
+            })
+            : null;
+
+    return {
+        bitrate,
+        codec,
+        tidalQuality,
+        localQuality,
+        qualityBadge,
+    };
 }

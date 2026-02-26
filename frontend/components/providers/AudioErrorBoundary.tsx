@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Component, ReactNode } from "react";
+import { createFrontendLogger } from "@/lib/logger";
 
 interface Props {
     children: ReactNode;
@@ -11,6 +12,8 @@ interface State {
     hasError: boolean;
     error: Error | null;
 }
+
+const logger = createFrontendLogger("AudioErrorBoundary");
 
 /**
  * Error boundary specifically for audio-related errors.
@@ -29,24 +32,21 @@ export class AudioErrorBoundary extends Component<Props, State> {
     }
 
     componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-        // Log the error for debugging
-        console.error("[AudioErrorBoundary] Audio system error:", error);
-        console.error("[AudioErrorBoundary] Component stack:", errorInfo.componentStack);
+        logger.error("Audio system error", error);
+        logger.error("Component stack", {
+            componentStack: errorInfo.componentStack,
+        });
     }
 
     render() {
         if (this.state.hasError) {
-            // If there's a custom fallback, use it
             if (this.props.fallback) {
                 return this.props.fallback;
             }
-            
-            // Otherwise, render children without audio functionality
-            // This allows the app to continue working, just without audio
+
             return this.props.children;
         }
 
         return this.props.children;
     }
 }
-

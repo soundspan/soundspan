@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 export default function Error({
   error,
@@ -11,7 +12,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('Route error:', error);
+    sharedFrontendLogger.error('Route error:', error);
   }, [error]);
 
   return (

@@ -510,6 +510,40 @@ router.get("/tracks", async (req, res) => {
             }))
             .filter((track) => track.title.length > 0);
 
+        // Fallback for tracks/artists with sparse Last.fm similarity data.
+        if (lfmTracks.length === 0) {
+            const sameArtistTracks = await prisma.track.findMany({
+                where: {
+                    id: { not: seedTrack.id },
+                    album: {
+                        artistId: seedTrack.album.artist.id,
+                    },
+                },
+                include: {
+                    album: { include: { artist: true } },
+                },
+                take: 20,
+            });
+
+            const fallbackRecommendations = sameArtistTracks.map((track) => ({
+                ...track,
+                inLibrary: true,
+                similarity: 0,
+                matchConfidence: 100,
+                recommendationSource: "same-artist-fallback",
+            }));
+
+            return res.json({
+                seedTrack: {
+                    id: seedTrack.id,
+                    title: seedTrack.title,
+                    artist: seedTrack.album.artist.name,
+                    album: seedTrack.album.title,
+                },
+                recommendations: fallbackRecommendations,
+            });
+        }
+
         const normalizedArtistNames = Array.from(
             new Set(
                 lfmTracks

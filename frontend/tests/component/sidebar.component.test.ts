@@ -131,6 +131,7 @@ test("renders social navigation without my history link", async () => {
     const html = renderToStaticMarkup(React.createElement(Sidebar));
 
     assert.match(html, />Library</);
+    assert.match(html, />My Liked</);
     assert.match(html, />Radio</);
     assert.match(html, />Discovery</);
     assert.match(html, />Listen Together</);
@@ -153,6 +154,7 @@ test("keeps prefetch enabled for primary sidebar navigation links", async () => 
 
     const navHrefs = [
         "/library",
+        "/playlist/my-liked",
         "/radio",
         "/discover",
         "/listen-together",

@@ -6,31 +6,41 @@
 import os
 import sys
 
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_POTENTIAL_PROJECT_ROOTS = (
+    _CURRENT_DIR,
+    os.path.dirname(_CURRENT_DIR),
+    os.path.dirname(os.path.dirname(_CURRENT_DIR)),
+)
+for _root in _POTENTIAL_PROJECT_ROOTS:
+    if os.path.isdir(os.path.join(_root, "services", "common")):
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        break
+
+from services.common.logging_utils import configure_service_logger
+from services.common.analyzer_env import configure_thread_env, get_int_env
+
 # Get thread configuration from environment (default to 1 for safety)
-THREADS_PER_WORKER = int(os.getenv('THREADS_PER_WORKER', '1'))
+THREADS_PER_WORKER = get_int_env('THREADS_PER_WORKER', 1)
 
-# Configure TensorFlow threading via environment variables
-# These are read by TensorFlow C++ runtime before thread pool initialization
-# Must be set BEFORE any TensorFlow/Essentia imports load TensorFlow
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TF logging noise
-os.environ['TF_NUM_INTRAOP_THREADS'] = str(THREADS_PER_WORKER)  # Threads within ops
-os.environ['TF_NUM_INTEROP_THREADS'] = '1'  # Serialize op scheduling
+# Configure TensorFlow and BLAS/OpenMP threading before TensorFlow/Essentia imports.
+configure_thread_env(THREADS_PER_WORKER, configure_tensorflow=True)
 
-# Also set NumPy/BLAS/OpenMP limits for non-TensorFlow operations
-os.environ['OMP_NUM_THREADS'] = str(THREADS_PER_WORKER)
-os.environ['OPENBLAS_NUM_THREADS'] = str(THREADS_PER_WORKER)
-os.environ['MKL_NUM_THREADS'] = str(THREADS_PER_WORKER)
-os.environ['NUMEXPR_MAX_THREADS'] = str(THREADS_PER_WORKER)
+logger = configure_service_logger('audio-analyzer')
 
 # Log thread configuration on startup
-print("=" * 80, file=sys.stderr)
-print("AUDIO ANALYZER THREAD CONFIGURATION", file=sys.stderr)
-print("=" * 80, file=sys.stderr)
-print(f"TF_NUM_INTRAOP_THREADS: {THREADS_PER_WORKER}", file=sys.stderr)
-print(f"TF_NUM_INTEROP_THREADS: 1", file=sys.stderr)
-print(f"OpenMP/BLAS threads: {THREADS_PER_WORKER}", file=sys.stderr)
-print(f"Expected CPU usage: ~{THREADS_PER_WORKER * 100 + 100}% per worker", file=sys.stderr)
-print("=" * 80, file=sys.stderr)
+logger.info("=" * 80)
+logger.info("AUDIO ANALYZER THREAD CONFIGURATION")
+logger.info("=" * 80)
+logger.info("TF_NUM_INTRAOP_THREADS: %s", THREADS_PER_WORKER)
+logger.info("TF_NUM_INTEROP_THREADS: 1")
+logger.info("OpenMP/BLAS threads: %s", THREADS_PER_WORKER)
+logger.info(
+    "Expected CPU usage: ~%s%% per worker",
+    THREADS_PER_WORKER * 100 + 100,
+)
+logger.info("=" * 80)
 
 """
 Essentia Audio Analyzer Service - Enhanced Vibe Matching
@@ -54,7 +64,6 @@ It connects to Redis for job queue and PostgreSQL for storing results.
 # NOW safe to import other dependencies
 import json
 import time
-import logging
 import gc
 import uuid
 from datetime import datetime
@@ -87,13 +96,6 @@ import redis
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('audio-analyzer')
-
 # Essentia imports (will fail gracefully if not installed for testing)
 ESSENTIA_AVAILABLE = False
 try:
@@ -119,27 +121,22 @@ TensorflowPredictMusiCNN = None  # Loaded in worker processes
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 MUSIC_PATH = os.getenv('MUSIC_PATH', '/music')
-BATCH_SIZE = int(os.getenv('BATCH_SIZE', '10'))
-SLEEP_INTERVAL = int(os.getenv('SLEEP_INTERVAL', '5'))
+BATCH_SIZE = get_int_env('BATCH_SIZE', 10)
+SLEEP_INTERVAL = get_int_env('SLEEP_INTERVAL', 5)
 
 # BRPOP timeout: how long to block waiting for work (seconds)
 # Also serves as the DB reconciliation interval
 # Uses SLEEP_INTERVAL for backward compatibility, minimum 5s
-BRPOP_TIMEOUT = max(5, int(os.getenv('BRPOP_TIMEOUT', str(SLEEP_INTERVAL))))
+BRPOP_TIMEOUT = max(5, get_int_env('BRPOP_TIMEOUT', SLEEP_INTERVAL))
 
 # DB reconciliation cadence (adaptive backoff while idle)
 DB_RECONCILE_MIN_INTERVAL_SECONDS = max(
     BRPOP_TIMEOUT,
-    int(os.getenv('DB_RECONCILE_MIN_INTERVAL_SECONDS', str(BRPOP_TIMEOUT))),
+    get_int_env('DB_RECONCILE_MIN_INTERVAL_SECONDS', BRPOP_TIMEOUT),
 )
 DB_RECONCILE_MAX_INTERVAL_SECONDS = max(
     DB_RECONCILE_MIN_INTERVAL_SECONDS,
-    int(
-        os.getenv(
-            'DB_RECONCILE_MAX_INTERVAL_SECONDS',
-            str(max(BRPOP_TIMEOUT * 12, 60)),
-        )
-    ),
+    get_int_env('DB_RECONCILE_MAX_INTERVAL_SECONDS', max(BRPOP_TIMEOUT * 12, 60)),
 )
 DB_RECONCILE_BACKOFF_MULTIPLIER = max(
     1.0,
@@ -148,7 +145,7 @@ DB_RECONCILE_BACKOFF_MULTIPLIER = max(
 
 # Idle timeout before unloading ML models from memory (seconds)
 # Models are reloaded automatically when new work arrives
-MODEL_IDLE_TIMEOUT = int(os.getenv('MODEL_IDLE_TIMEOUT', '300'))
+MODEL_IDLE_TIMEOUT = get_int_env('MODEL_IDLE_TIMEOUT', 300)
 
 # Debounce delay for worker resize (seconds) -- prevents pool churn when user drags a slider
 RESIZE_DEBOUNCE_SECONDS = 5
@@ -157,9 +154,9 @@ RESIZE_DEBOUNCE_SECONDS = 5
 # Oversized files are permanently failed to avoid repeated timeout loops.
 # Set to 0 to disable file-size guardrail.
 # Default is tuned for FLAC-heavy libraries with larger hi-res tracks.
-MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '500'))
+MAX_FILE_SIZE_MB = get_int_env('MAX_FILE_SIZE_MB', 500)
 # Hard timeout for an entire analysis batch before remaining tracks are failed permanently.
-BATCH_ANALYSIS_TIMEOUT_SECONDS = int(os.getenv('BATCH_ANALYSIS_TIMEOUT_SECONDS', '900'))
+BATCH_ANALYSIS_TIMEOUT_SECONDS = get_int_env('BATCH_ANALYSIS_TIMEOUT_SECONDS', 900)
 
 
 class DatabaseConnection:
@@ -235,12 +232,12 @@ def _get_workers_from_db() -> int:
             return workers
         else:
             logger.info("No worker count found in database, using env var or default")
-            return int(os.getenv('NUM_WORKERS', str(DEFAULT_WORKERS)))
+            return get_int_env('NUM_WORKERS', DEFAULT_WORKERS)
             
     except Exception as e:
         logger.warning(f"Failed to fetch worker count from database: {e}")
         logger.info("Falling back to env var or default")
-        return int(os.getenv('NUM_WORKERS', str(DEFAULT_WORKERS)))
+        return get_int_env('NUM_WORKERS', DEFAULT_WORKERS)
 # Conservative default: 2 workers (stable on any system)
 # Previous default used auto-scaling which could cause OOM on memory-constrained systems
 DEFAULT_WORKERS = 2
@@ -249,8 +246,8 @@ NUM_WORKERS = _get_workers_from_db()
 ESSENTIA_VERSION = '2.1b6-enhanced-v3'
 
 # Retry configuration
-MAX_RETRIES = int(os.getenv('MAX_RETRIES', '3'))  # Max retry attempts per track
-STALE_PROCESSING_MINUTES = int(os.getenv('STALE_PROCESSING_MINUTES', '15'))  # Reset tracks stuck in 'processing' (synchronized with backend)
+MAX_RETRIES = get_int_env('MAX_RETRIES', 3)  # Max retry attempts per track
+STALE_PROCESSING_MINUTES = get_int_env('STALE_PROCESSING_MINUTES', 15)  # Reset tracks stuck in 'processing' (synchronized with backend)
 
 # Queue names
 ANALYSIS_QUEUE = 'audio:analysis:queue'
@@ -512,7 +509,7 @@ class AudioAnalyzer:
             result['_error'] = 'Essentia library not installed'
             return result
 
-        MAX_ANALYZE_SECONDS = int(os.getenv('MAX_ANALYZE_SECONDS', '90'))
+        MAX_ANALYZE_SECONDS = get_int_env('MAX_ANALYZE_SECONDS', 90)
         audio_44k = None
         try:
             audio_44k = self.load_audio(file_path, max_duration=MAX_ANALYZE_SECONDS)
@@ -2033,12 +2030,12 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == '--test':
         # Test mode: analyze a single file
         if len(sys.argv) < 3:
-            print("Usage: analyzer.py --test <audio_file>")
+            logger.error("Usage: analyzer.py --test <audio_file>")
             sys.exit(1)
         
         analyzer = AudioAnalyzer()
         result = analyzer.analyze(sys.argv[2])
-        print(json.dumps(result, indent=2))
+        logger.info("Test analysis result:\n%s", json.dumps(result, indent=2))
         return
     
     # Normal worker mode

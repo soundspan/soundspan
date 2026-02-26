@@ -11,6 +11,7 @@ import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePodcastsQuery, useTopPodcastsQuery } from "@/hooks/useQueries";
 import Image from "next/image";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // Always proxy images through the backend for caching and mobile compatibility
 const getProxiedImageUrl = (imageUrl: string | undefined): string | null => {
@@ -150,7 +151,7 @@ export default function PodcastsPage() {
                 setSearchResults(podcastResults);
                 setShowDropdown(podcastResults.length > 0);
             } catch (error) {
-                console.error("Podcast search failed:", error);
+                sharedFrontendLogger.error("Podcast search failed:", error);
                 setSearchResults([]);
                 setShowDropdown(false);
             } finally {

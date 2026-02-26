@@ -7,6 +7,10 @@
 
 import { io, type Socket } from "socket.io-client";
 import { api } from "./api";
+import type {
+    CanonicalMediaProviderIdentity,
+    CanonicalMediaSource,
+} from "@soundspan/media-metadata-contract";
 
 // ---------------------------------------------------------------------------
 // Server → Client event types
@@ -18,6 +22,11 @@ export interface SyncQueueItem {
     duration: number;
     artist: { id: string; name: string };
     album: { id: string; title: string; coverArt: string | null };
+    mediaSource?: CanonicalMediaSource;
+    provider?: CanonicalMediaProviderIdentity;
+    streamSource?: "tidal" | "youtube";
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
 }
 
 export interface GroupSnapshot {

@@ -13,6 +13,15 @@ const router = Router();
 const ANALYSIS_QUEUE = "audio:analysis:queue";
 const VIBE_QUEUE = "audio:clap:queue";
 
+function buildVibePendingReset() {
+    return {
+        vibeAnalysisStatus: "pending" as const,
+        vibeAnalysisError: null,
+        vibeAnalysisStartedAt: null,
+        vibeAnalysisStatusUpdatedAt: new Date(),
+    };
+}
+
 /**
  * GET /api/analysis/status
  * Get audio analysis status and progress
@@ -494,6 +503,12 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
         // If force mode, delete all existing embeddings first
         if (force) {
             await prisma.$executeRaw`DELETE FROM track_embeddings`;
+            await prisma.track.updateMany({
+                data: {
+                    ...buildVibePendingReset(),
+                    vibeAnalysisRetryCount: 0,
+                },
+            });
             await enrichmentFailureService.clearAllFailures("vibe");
             logger.info("Cleared all vibe embeddings for re-generation");
         }
@@ -513,6 +528,15 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
             return res.json({
                 message: "All tracks have vibe embeddings",
                 queued: 0,
+            });
+        }
+
+        // Align producer state with queue handoff: newly queued tracks should
+        // be recoverable as pending if Redis is later drained or workers are down.
+        if (!force) {
+            await prisma.track.updateMany({
+                where: { id: { in: tracks.map((track) => track.id) } },
+                data: buildVibePendingReset(),
             });
         }
 
@@ -569,6 +593,20 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
         const tracks = await prisma.track.findMany({
             where: { id: { in: trackIds } },
             select: { id: true, filePath: true, duration: true, title: true },
+        });
+
+        if (tracks.length === 0) {
+            return res.json({
+                message: "No failed tracks found for vibe retry",
+                queued: 0,
+            });
+        }
+
+        // Retry should clear failed state before enqueue so queue loss does not
+        // leave tracks permanently stranded as failed.
+        await prisma.track.updateMany({
+            where: { id: { in: tracks.map((track) => track.id) } },
+            data: buildVibePendingReset(),
         });
 
         // Queue for retry

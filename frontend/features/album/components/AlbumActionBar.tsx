@@ -248,16 +248,16 @@ export function AlbumActionBar({
                     )}
 
                     {canShowAlbumPreference && (
-                        <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-1">
+                        <div className="flex items-center gap-1.5">
                             {onThumbsDownAlbum && (
                                 <button
                                     onClick={onThumbsDownAlbum}
                                     disabled={isApplyingAlbumPreference}
                                     className={cn(
-                                        "h-7 w-7 rounded-full flex items-center justify-center transition-all",
+                                        "h-8 w-8 rounded-full flex items-center justify-center transition-colors",
                                         isApplyingAlbumPreference ?
                                             "cursor-not-allowed text-white/35"
-                                        :   "text-white/70 hover:bg-white/10 hover:text-white"
+                                        :   "text-white/60 hover:bg-white/10 hover:text-white"
                                     )}
                                     title="Thumbs down every track on this album"
                                 >
@@ -273,10 +273,10 @@ export function AlbumActionBar({
                                     onClick={onThumbsUpAlbum}
                                     disabled={isApplyingAlbumPreference}
                                     className={cn(
-                                        "h-7 w-7 rounded-full flex items-center justify-center transition-all",
+                                        "h-8 w-8 rounded-full flex items-center justify-center transition-colors",
                                         isApplyingAlbumPreference ?
                                             "cursor-not-allowed text-white/35"
-                                        :   "text-white/70 hover:bg-white/10 hover:text-white"
+                                        :   "text-white/60 hover:bg-white/10 hover:text-white"
                                     )}
                                     title="Thumbs up every track on this album"
                                 >

@@ -35,6 +35,19 @@ spec:
           imagePullPolicy: {{ .Values.audioAnalyzerClap.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.global.securityContext | nindent 12 }}
+          {{- $audioAnalyzerClapEnv := .Values.audioAnalyzerClap.env | default (dict) }}
+          {{- $audioAnalyzerClapDefaultBackendURL := printf "http://%s-backend:%v" (include "soundspan.fullname" .) .Values.backend.port }}
+          {{- $audioAnalyzerClapReservedEnv := dict
+            "POSTGRES_USER" true
+            "POSTGRES_PASSWORD" true
+            "POSTGRES_DB" true
+            "DATABASE_URL" true
+            "REDIS_URL" true
+            "MUSIC_PATH" true
+            "BACKEND_URL" true
+            "INTERNAL_API_SECRET" true
+            "TZ" true
+          }}
           env:
             - name: POSTGRES_USER
               valueFrom:
@@ -58,7 +71,7 @@ spec:
             - name: MUSIC_PATH
               value: /music
             - name: BACKEND_URL
-              value: "http://{{ include "soundspan.fullname" . }}-backend:{{ .Values.backend.port }}"
+              value: {{ if hasKey $audioAnalyzerClapEnv "BACKEND_URL" }}{{ index $audioAnalyzerClapEnv "BACKEND_URL" | quote }}{{ else }}{{ $audioAnalyzerClapDefaultBackendURL | quote }}{{ end }}
             - name: INTERNAL_API_SECRET
               valueFrom:
                 secretKeyRef:
@@ -66,9 +79,11 @@ spec:
                   key: INTERNAL_API_SECRET
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
-            {{- range $key, $val := .Values.audioAnalyzerClap.env }}
+            {{- range $key := keys $audioAnalyzerClapEnv | sortAlpha }}
+            {{- if not (hasKey $audioAnalyzerClapReservedEnv $key) }}
             - name: {{ $key }}
-              value: {{ $val | quote }}
+              value: {{ index $audioAnalyzerClapEnv $key | quote }}
+            {{- end }}
             {{- end }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}

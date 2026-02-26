@@ -13,6 +13,7 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { Prisma } from "@prisma/client";
+import { resolveDownloadJobMetadata } from "../utils/downloadJobMetadata";
 
 const DATA_INTEGRITY_PRISMA_RETRY_ATTEMPTS = 3;
 
@@ -220,10 +221,11 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     const discoveryArtistMbids = new Set<string>();
     
     for (const job of discoveryJobs) {
-        const metadata = job.metadata as any;
-        const albumTitle = (metadata?.albumTitle || "").toLowerCase().trim();
-        const artistName = (metadata?.artistName || "").toLowerCase().trim();
-        const artistMbid = metadata?.artistMbid;
+        const {
+            normalizedAlbumTitle: albumTitle,
+            normalizedArtistName: artistName,
+            artistMbid,
+        } = resolveDownloadJobMetadata(job.metadata);
         if (albumTitle) discoveryAlbumTitles.add(albumTitle);
         if (artistName) discoveryArtistNames.add(artistName);
         if (artistMbid) discoveryArtistMbids.add(artistMbid);

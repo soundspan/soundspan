@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { Download, Loader2, Music, Disc, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "../ui/GradientSpinner";
 import {
     useActiveDownloads,
     type DownloadHistoryItem,
 } from "@/hooks/useNotifications";
+
+const logger = createFrontendLogger("Activity.ActiveDownloadsTab");
 
 interface ActiveDownloadsTabProps {
     downloads?: DownloadHistoryItem[];
@@ -36,7 +39,7 @@ export function ActiveDownloadsTab({
             // Refetch to get updated list
             refetch();
         } catch (error) {
-            console.error("Failed to cancel download:", error);
+            logger.error("Failed to cancel download", { id, error });
         } finally {
             setCancelling((prev) => {
                 const next = new Set(prev);
@@ -54,7 +57,10 @@ export function ActiveDownloadsTab({
             await Promise.all(ids.map((id) => api.deleteDownload(id)));
             refetch();
         } catch (error) {
-            console.error("Failed to cancel all downloads:", error);
+            logger.error("Failed to cancel all downloads", {
+                ids,
+                error,
+            });
             refetch();
         } finally {
             setCancelling(new Set());

@@ -8,6 +8,10 @@ import { config } from "./config";
 import { redisClient } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
+import {
+    getRuntimeDrainState,
+    setRuntimeDrainState,
+} from "./utils/runtimeLifecycle";
 
 // BigInt values from Prisma (e.g. Audiobook.size) must be serialisable to JSON.
 // Without this polyfill, JSON.stringify throws "Do not know how to serialize a BigInt".
@@ -49,9 +53,11 @@ import vibeRoutes from "./routes/vibe";
 import systemRoutes from "./routes/system";
 import ytMusicRoutes from "./routes/youtubeMusic";
 import tidalStreamingRoutes from "./routes/tidalStreaming";
+import streamingRoutes from "./routes/streaming";
 import lyricsRoutes from "./routes/lyrics";
 import listenTogetherRoutes from "./routes/listenTogether";
 import subsonicRoutes from "./routes/subsonic";
+import { segmentedSegmentService } from "./services/segmented-streaming/segmentService";
 import { setupListenTogetherSocket, shutdownListenTogetherSocket } from "./services/listenTogetherSocket";
 import { startPersistLoop, stopPersistLoop, persistAllGroups } from "./services/listenTogether";
 import { createServer } from "http";
@@ -105,7 +111,6 @@ const runWorkerRole =
     backendProcessRole === "all" || backendProcessRole === "worker";
 let workersInitialized = false;
 let isStartupComplete = false;
-let isDraining = false;
 const dependencyReadiness = createDependencyReadinessTracker("api");
 const HTTP_SERVER_CLOSE_TIMEOUT_MS = 12_000;
 
@@ -182,7 +187,7 @@ app.use(express.json({ limit: "1mb" })); // Increased from 100KB default to supp
 
 // When the process is draining, force connection close so clients reconnect to healthy pods quickly.
 app.use((req, res, next) => {
-    if (isDraining) {
+    if (getRuntimeDrainState()) {
         res.setHeader("Connection", "close");
     }
     next();
@@ -256,6 +261,7 @@ app.use("/api/vibe", apiLimiter, vibeRoutes);
 app.use("/api/system", apiLimiter, systemRoutes);
 app.use("/api/ytmusic", apiLimiter, ytMusicRoutes);
 app.use("/api/tidal-streaming", apiLimiter, tidalStreamingRoutes);
+app.use("/api/streaming", apiLimiter, streamingRoutes);
 app.use("/api/lyrics", lyricsLimiter, lyricsRoutes);
 app.use("/api/listen-together", apiLimiter, listenTogetherRoutes);
 app.use("/rest", subsonicRoutes);
@@ -265,7 +271,7 @@ function buildHealthPayload() {
         status: "ok",
         role: backendProcessRole,
         startupComplete: isStartupComplete,
-        draining: isDraining,
+        draining: getRuntimeDrainState(),
         dependencies: dependencyReadiness.getSnapshot(),
     };
 }
@@ -273,7 +279,7 @@ function buildHealthPayload() {
 async function isReadyForTraffic(): Promise<boolean> {
     try {
         await dependencyReadiness.probe();
-        if (!isStartupComplete || isDraining) {
+        if (!isStartupComplete || getRuntimeDrainState()) {
             return false;
         }
         return dependencyReadiness.isHealthy();
@@ -473,6 +479,7 @@ httpServer.listen(config.port, "0.0.0.0", async () => {
     // Initialize music configuration (reads from SystemSettings)
     const { initializeMusicConfig } = await import("./config");
     await initializeMusicConfig();
+    await segmentedSegmentService.initializeDashCapabilityProbe();
 
     if (runWorkerRole) {
         // Initialize Bull queue workers
@@ -599,7 +606,7 @@ async function gracefulShutdown(signal: string) {
     }
 
     isShuttingDown = true;
-    isDraining = true;
+    setRuntimeDrainState(true);
     logger.debug(`\nReceived ${signal}. Starting graceful shutdown...`);
 
     try {

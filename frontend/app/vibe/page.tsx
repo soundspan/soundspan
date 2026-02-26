@@ -20,6 +20,7 @@ import {
     X,
     AudioWaveform,
 } from "lucide-react";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface TrackFeatures {
     energy: number;
@@ -817,7 +818,7 @@ function VibePageContent() {
                 setVibeStatus(status);
                 setLibraryTracks(tracks);
             } catch (err) {
-                console.error("Failed to load vibe status:", err);
+                sharedFrontendLogger.error("Failed to load vibe status:", err);
             }
         };
 
@@ -881,7 +882,7 @@ function VibePageContent() {
                 setVibeStatus(status);
                 setLibraryTracks(tracks);
             } catch (err) {
-                console.error("Failed to refresh:", err);
+                sharedFrontendLogger.error("Failed to refresh:", err);
             }
         }
     }, [sourceTrack, loadSimilarTracks]);

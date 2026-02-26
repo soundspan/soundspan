@@ -41,14 +41,18 @@ spec:
             - name: http
               containerPort: {{ .Values.ytmusicStreamer.port }}
               protocol: TCP
+          {{- $ytmusicEnv := .Values.ytmusicStreamer.env | default (dict) }}
+          {{- $ytmusicReservedEnv := dict "DATA_PATH" true "TZ" true }}
           env:
             - name: DATA_PATH
               value: /data
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
-            {{- range $key, $val := .Values.ytmusicStreamer.env }}
+            {{- range $key := keys $ytmusicEnv | sortAlpha }}
+            {{- if not (hasKey $ytmusicReservedEnv $key) }}
             - name: {{ $key }}
-              value: {{ $val | quote }}
+              value: {{ index $ytmusicEnv $key | quote }}
+            {{- end }}
             {{- end }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}

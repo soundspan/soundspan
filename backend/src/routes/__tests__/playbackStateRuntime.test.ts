@@ -145,7 +145,7 @@ describe("playbackState routes runtime", () => {
             where: { userId_deviceId: { userId: "u1", deviceId: "mobile" } },
             update: expect.objectContaining({
                 playbackType: "podcast",
-                queue: PrismaClient.DbNull,
+                queue: (PrismaClient as any).DbNull,
                 currentIndex: 1,
                 isPlaying: false,
                 currentTime: 45,
@@ -154,7 +154,7 @@ describe("playbackState routes runtime", () => {
                 userId: "u1",
                 deviceId: "mobile",
                 isPlaying: false,
-                queue: PrismaClient.DbNull,
+                queue: (PrismaClient as any).DbNull,
             }),
         });
         expect(res.statusCode).toBe(200);
@@ -237,6 +237,8 @@ describe("playbackState routes runtime", () => {
                         id: "t1",
                         title: "First Track",
                         duration: "215",
+                        streamSource: "youtube",
+                        youtubeVideoId: "yt-123",
                         artist: { id: "a1", name: "Artist A" },
                         album: { id: "al1", title: "Album A", coverArt: "/img/a.jpg" },
                     },
@@ -266,7 +268,17 @@ describe("playbackState routes runtime", () => {
                 playbackType: "track",
                 trackId: "track-1",
                 queue: [
-                    expect.objectContaining({ id: "t1", duration: 215 }),
+                    expect.objectContaining({
+                        id: "t1",
+                        duration: 215,
+                        mediaSource: "youtube",
+                        streamSource: "youtube",
+                        youtubeVideoId: "yt-123",
+                        provider: expect.objectContaining({
+                            source: "youtube",
+                            providerTrackId: "yt-123",
+                        }),
+                    }),
                     expect.objectContaining({ id: "t2", duration: 180 }),
                 ],
                 currentIndex: 1,
@@ -279,7 +291,14 @@ describe("playbackState routes runtime", () => {
                 deviceId: "legacy",
                 isPlaying: true,
                 queue: [
-                    expect.objectContaining({ id: "t1" }),
+                    expect.objectContaining({
+                        id: "t1",
+                        mediaSource: "youtube",
+                        provider: expect.objectContaining({
+                            source: "youtube",
+                            providerTrackId: "yt-123",
+                        }),
+                    }),
                     expect.objectContaining({ id: "t2" }),
                 ],
             }),
@@ -319,7 +338,9 @@ describe("playbackState routes runtime", () => {
 
         const whereArg = mockUpsert.mock.calls[0][0].where;
         expect(whereArg.userId_deviceId.deviceId).toHaveLength(128);
-        expect(mockUpsert.mock.calls[0][0].update.queue).toBe(PrismaClient.DbNull);
+        expect(mockUpsert.mock.calls[0][0].update.queue).toBe(
+            (PrismaClient as any).DbNull
+        );
         expect(res.statusCode).toBe(200);
     });
 
@@ -341,7 +362,20 @@ describe("playbackState routes runtime", () => {
         expect(mockUpsert.mock.calls[0][0].update).toEqual(
             expect.not.objectContaining({ isPlaying: expect.anything() })
         );
+        expect(mockUpsert.mock.calls[0][0].update).toEqual(
+            expect.not.objectContaining({
+                queue: expect.anything(),
+                currentIndex: expect.anything(),
+                isShuffle: expect.anything(),
+                currentTime: expect.anything(),
+            })
+        );
         expect(mockUpsert.mock.calls[0][0].create.isPlaying).toBe(false);
+        expect(mockUpsert.mock.calls[0][0].create.currentTime).toBe(0);
+        expect(mockUpsert.mock.calls[0][0].create.currentIndex).toBe(0);
+        expect(mockUpsert.mock.calls[0][0].create.queue).toBe(
+            (PrismaClient as any).DbNull
+        );
         expect(res.statusCode).toBe(200);
     });
 

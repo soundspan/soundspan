@@ -5,8 +5,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 ## Start Here
 
 1. API call entrypoints: `backend/src/routes/*.ts`.
-2. Endpoint-to-handler map: `docs/ROUTE_MAP.md`.
-3. Feature-targeted verification commands: `docs/TEST_MATRIX.md`.
+2. Endpoint-to-handler map: `.agents-config/docs/ROUTE_MAP.md`.
+3. Feature-targeted verification commands: `.agents-config/docs/TEST_MATRIX.md`.
 
 ## Service Modules
 
@@ -18,6 +18,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/audiobookCache.ts` | Core |
 | `backend/src/services/audiobookshelf.ts` | Core |
 | `backend/src/services/audioStreaming.ts` | Core |
+| `backend/src/services/cacheHelpers.ts` | Core |
 | `backend/src/services/coverArt.ts` | Core |
 | `backend/src/services/coverArtExtractor.ts` | Core |
 | `backend/src/services/dataCache.ts` | Core |
@@ -65,7 +66,13 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/releaseContracts.ts` | Core |
 | `backend/src/services/rss-parser.ts` | Core |
 | `backend/src/services/search.ts` | Core |
+| `backend/src/services/segmented-streaming/cacheService.ts` | Segmented Streaming |
+| `backend/src/services/segmented-streaming/manifestService.ts` | Segmented Streaming |
+| `backend/src/services/segmented-streaming/segmentService.ts` | Segmented Streaming |
+| `backend/src/services/segmented-streaming/sessionService.ts` | Segmented Streaming |
+| `backend/src/services/segmented-streaming/trace.ts` | Segmented Streaming |
 | `backend/src/services/simpleDownloadManager.ts` | Core |
+| `backend/src/services/socialPresenceEvents.ts` | Core |
 | `backend/src/services/soulseek.ts` | Core |
 | `backend/src/services/spotify.ts` | Core |
 | `backend/src/services/spotifyImport.ts` | Core |

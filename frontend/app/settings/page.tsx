@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { createFrontendLogger } from "@/lib/logger";
 import { RestartModal } from "@/components/ui/RestartModal";
 import { useSettingsData } from "@/features/settings/hooks/useSettingsData";
 import { useSystemSettings } from "@/features/settings/hooks/useSystemSettings";
@@ -127,6 +128,8 @@ const UserManagementSection = dynamic(
     { loading: renderSectionFallback }
 );
 
+const logger = createFrontendLogger("Settings.Page");
+
 export default function SettingsPage() {
     const { isAuthenticated, isLoading: authLoading, user } = useAuth();
     useSearchParams();
@@ -180,7 +183,9 @@ export default function SettingsPage() {
         try {
             await saveUserSettings(userSettings);
         } catch (error) {
-            console.error("Failed to save user settings:", error);
+            logger.error("Failed to save user settings from settings page", {
+                error,
+            });
             hasError = true;
         }
 
@@ -188,7 +193,9 @@ export default function SettingsPage() {
             try {
                 changedSystemServices = await saveSystemSettings(systemSettings) || [];
             } catch (error) {
-                console.error("Failed to save system settings:", error);
+                logger.error("Failed to save system settings from settings page", {
+                    error,
+                });
                 hasError = true;
             }
         }

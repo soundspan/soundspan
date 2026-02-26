@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
 import { ApiKey } from "../types";
+
+const logger = createFrontendLogger("Settings.useAPIKeys");
 
 export function useAPIKeys() {
     const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -22,7 +25,7 @@ export function useAPIKeys() {
             }));
             setApiKeys(mappedKeys);
         } catch (error) {
-            console.error("Failed to load API keys:", error);
+            logger.error("Failed to load API keys", { error });
             // Caller handles error display if needed
         } finally {
             setLoadingApiKeys(false);
@@ -48,7 +51,7 @@ export function useAPIKeys() {
             await loadApiKeys();
             return { success: true };
         } catch (error: unknown) {
-            console.error("Failed to create API key:", error);
+            logger.error("Failed to create API key", { error });
             return { success: false, error: error instanceof Error ? error.message : "Failed to create" };
         } finally {
             setCreatingApiKey(false);
@@ -65,7 +68,7 @@ export function useAPIKeys() {
             await loadApiKeys();
             return { success: true };
         } catch (error: unknown) {
-            console.error("Failed to revoke API key:", error);
+            logger.error("Failed to revoke API key", { id, error });
             return { success: false, error: error instanceof Error ? error.message : "Failed to revoke" };
         }
     };

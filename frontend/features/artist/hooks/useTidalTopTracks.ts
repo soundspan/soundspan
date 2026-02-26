@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * useTidalTopTracks — enriches unowned artist top-tracks with TIDAL
  * streaming data (streamSource + tidalTrackId).
@@ -126,7 +127,7 @@ export function useTidalTopTracks(artist: Artist | null | undefined) {
                 _artistMatchCache.set(artist.id, newMatches);
                 setMatches(newMatches);
             } catch (err) {
-                console.error("[TIDAL TopTracks] Batch match failed:", err);
+                sharedFrontendLogger.error("[TIDAL TopTracks] Batch match failed:", err);
             }
 
             if (!cancelled) setLoading(false);

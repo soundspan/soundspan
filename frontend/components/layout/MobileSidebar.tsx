@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Settings, RefreshCw, LogOut, Compass, X, Radio, Users } from "lucide-react";
+import {
+    Compass,
+    Heart,
+    LogOut,
+    Radio,
+    RefreshCw,
+    Settings,
+    Users,
+    X,
+} from "lucide-react";
 import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -13,6 +22,7 @@ import { EqBars } from "@/components/ui/EqBars";
 import Image from "next/image";
 import { MOBILE_QUICK_LINKS } from "./socialNavigation";
 import { BRAND_NAME } from "@/lib/brand";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface MobileSidebarProps {
     isOpen: boolean;
@@ -42,7 +52,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
             window.dispatchEvent(new CustomEvent("notifications-changed"));
             onClose();
         } catch (error) {
-            console.error("Failed to sync library:", error);
+            sharedFrontendLogger.error("Failed to sync library:", error);
             toast.error("Failed to start scan. Please try again.");
         } finally {
             setTimeout(() => setIsSyncing(false), 2000);
@@ -56,7 +66,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
             toast.success("Logged out successfully");
             onClose();
         } catch (error) {
-            console.error("Logout error:", error);
+            sharedFrontendLogger.error("Logout error:", error);
             toast.error("Failed to logout");
         }
     };
@@ -65,6 +75,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
     const quickLinkIcons = {
         "/discover": Compass,
+        "/playlist/my-liked": Heart,
         "/radio": Radio,
         "/listen-together": Users,
     } as const;

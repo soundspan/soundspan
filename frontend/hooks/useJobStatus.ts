@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { createFrontendLogger } from "@/lib/logger";
+
+const logger = createFrontendLogger("Hooks.useJobStatus");
 
 export type JobType = "scan" | "discover";
 
@@ -69,7 +72,11 @@ export function useJobStatus(
             }
         } catch (error: unknown) {
             if (cancelledRef.current) return;
-            console.error("Error checking job status:", error);
+            logger.error("Error checking job status", {
+                jobId,
+                jobType,
+                error,
+            });
             setIsPolling(false);
             if (optionsRef.current?.onError) {
                 optionsRef.current.onError(error instanceof Error ? error.message : "Failed to check job status");

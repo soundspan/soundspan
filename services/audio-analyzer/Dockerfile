@@ -82,7 +82,8 @@ RUN echo "Models downloaded:" && ls -lh /app/models/
 RUN pip3 install --no-cache-dir redis psycopg2-binary 'numpy>=1.19.0,<2.0.0'
 
 # Copy application code
-COPY analyzer.py .
+COPY services/audio-analyzer/analyzer.py /app/analyzer.py
+COPY services/common /app/services/common
 
 # Create non-root user
 RUN useradd -m -u 1000 analyzer && \

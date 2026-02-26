@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { formatTime } from "@/utils/formatTime";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Episode {
     id: string;
@@ -97,7 +98,7 @@ export function PodcastPlayer({
                         isFinished
                     );
                 } catch (error) {
-                    console.error("Failed to sync podcast progress:", error);
+                    sharedFrontendLogger.error("Failed to sync podcast progress:", error);
                 }
             }
         }, 10000);
@@ -147,7 +148,7 @@ export function PodcastPlayer({
                     false
                 );
             } catch (error) {
-                console.error(
+                sharedFrontendLogger.error(
                     "Failed to save podcast progress on pause:",
                     error
                 );
@@ -170,7 +171,7 @@ export function PodcastPlayer({
                 toast.success("Episode finished!");
                 onEpisodeChange?.(episode);
             } catch (error) {
-                console.error("Failed to save podcast progress on end:", error);
+                sharedFrontendLogger.error("Failed to save podcast progress on end:", error);
             }
         }
     };
@@ -224,7 +225,7 @@ export function PodcastPlayer({
             toast.success("Progress removed");
             onEpisodeChange?.(episode);
         } catch (error) {
-            console.error("Failed to remove progress:", error);
+            sharedFrontendLogger.error("Failed to remove progress:", error);
             toast.error("Failed to remove progress");
         } finally {
             setIsRemovingProgress(false);

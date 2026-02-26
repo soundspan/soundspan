@@ -482,6 +482,15 @@ describe("analysis routes runtime", () => {
         await postVibeStart(req, res);
 
         expect(mockExecuteRaw).toHaveBeenCalled();
+        expect(mockTrackUpdateMany).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisRetryCount: 0,
+                vibeAnalysisError: null,
+                vibeAnalysisStartedAt: null,
+                vibeAnalysisStatusUpdatedAt: expect.any(Date),
+            }),
+        });
         expect(mockClearAllFailures).toHaveBeenCalledWith("vibe");
         expect(pipeline.rPush).toHaveBeenCalledTimes(2);
         expect(mockClearFailure).toHaveBeenCalledWith("vibe", "t1");
@@ -526,6 +535,15 @@ describe("analysis routes runtime", () => {
         const res = createRes();
         await postVibeRetry(req, res);
 
+        expect(mockTrackUpdateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["t9"] } },
+            data: expect.objectContaining({
+                vibeAnalysisStatus: "pending",
+                vibeAnalysisError: null,
+                vibeAnalysisStartedAt: null,
+                vibeAnalysisStatusUpdatedAt: expect.any(Date),
+            }),
+        });
         expect(pipeline.rPush).toHaveBeenCalledTimes(1);
         expect(mockResetRetryCount).toHaveBeenCalledWith(["f1"]);
         expect(res.body).toEqual({

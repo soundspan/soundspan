@@ -4,13 +4,62 @@ All notable changes to soundspan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
 
 ### Added
 
+- Added a new segmented streaming path across backend and frontend, with Video.js as the default segmented player.
+- Added backend segmented-streaming APIs for session create, manifest, segment delivery, heartbeat, and handoff under `/api/streaming/v1/sessions`.
+- Added playback diagnostics capture for segmented sessions (`POST /api/streaming/v1/client-metrics`) plus a baseline capture script for before/after startup comparisons.
+- Added a hard-wired `My Liked` playlist surface at `/playlist/my-liked`, backed by a dedicated liked-tracks API (`GET /api/library/liked`).
+- Added a shared `@soundspan/media-metadata-contract` package so backend/frontend playback, search, and socket payloads use one canonical media-source schema.
+- Added push-driven social presence refresh (`social:presence-updated` over the Listen Together socket namespace) so Social activity refreshes immediately after heartbeat/playback updates.
+- Added `YTMUSIC_SEARCH_MODE` (`auto`, `native`, `tv`) in the ytmusic sidecar, including per-user fallback from native search to TV-parser search when upstream native calls fail.
+
 ### Changed
 
+- Streaming engine selection is now runtime-controlled with `STREAMING_ENGINE_MODE`: `videojs` by default, with non-default `howler-rollback` for rollback without rebuilding images.
+- Segmented cache storage now supports `SEGMENTED_STREAMING_CACHE_PATH` and defaults to `TRANSCODE_CACHE_PATH` when not set.
+- Segmented DASH cache keys now include a schema/version suffix, and segmented session routing now accepts both `.m4s` and `.webm` segment variants.
+- Segmented startup timeout is now runtime-configurable with `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` (1500-15000ms, default 5000ms) through `/runtime-config`, and now controls segmented startup retry timing.
+- Session creation now returns quickly while segment assets build in the background, and startup reuses prewarmed/startup segmented sessions when available.
+- Track transitions now prewarm upcoming segmented sessions and reuse prewarmed manifests/tokens when possible.
+- Playback quality now defaults to the user’s saved quality when the client does not pass one explicitly.
+- Playback quality badges now come from one shared resolver used by Mini Player, Full Player, and Overlay Player, with segmented profiles surfacing canonical bitrate/codec metadata.
+- The player coordinator was renamed to `AudioPlaybackOrchestrator` to match its current role.
+- Video.js segmented requests now use per-player VHS hooks (instead of a global hook) and explicitly disable native media tracks to keep DASH behavior consistent across browsers.
+- `My Liked` is now playlist-only (removed from Home/Radio station generation), with direct navigation links in sidebar and mobile quick links.
+- Album-wide thumbs-up/down actions no longer render inside a shared pill container; they now use standalone icon controls.
+- Playback-state persistence writes now treat queue/index/time/shuffle as patch fields so omitted values are preserved instead of being reset.
+- YouTube Music `/search` and `/match` no longer require per-user OAuth restore and now run through public sidecar search clients (browse/library/stream endpoints remain OAuth-protected).
+- Segmented playback in active Listen Together groups is now runtime-gated by `LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED` (default `false` for conservative LT behavior).
+
 ### Fixed
+
+- Fixed segmented-playback recovery so local player state stays authoritative for resume position and play/pause intent after disruptions.
+- Fixed long buffering/spinner stalls by keeping heartbeat checks active during buffering and retrying segmented startup within bounded stage/window budgets before surfacing timeout errors.
+- Fixed repeated handoff/reseek churn with per-track cooldowns, bounded retries, and explicit handoff skip diagnostics.
+- Fixed token/session race cases during in-flight handoff so manifest/segment validation tolerates session ID swaps without producing intermittent 403 stalls.
+- Fixed compatibility issues across ffmpeg builds by probing supported DASH flags at startup and retrying generation without unsupported flags when needed.
+- Fixed local original-quality segmented output to generate lossless FLAC-in-fMP4 segments when supported, with automatic direct-play fallback when not supported by client/runtime.
+- Fixed client path compatibility for manifest-relative `.m4s` segment requests so chunk URLs continue working across route variations.
+- Fixed segmented storage growth by adding periodic `segmented-dash` pruning with active-session protection, minimum-age guardrails, and configurable size/interval thresholds.
+- Fixed remote-provider segmented generation flakiness (including short TIDAL starts) by adding ffmpeg reconnect/read-timeout input flags for remote sources.
+- Fixed silent mid-track pauses by adding explicit unexpected-pause telemetry and running segmented/transient recovery attempts before hard stop.
+- Fixed occasional wrong start offsets on newly selected tracks by preventing stale prior-track resume time from being applied during track switches.
+- Fixed overlay player control geometry so the `+` action aligns with the play/pause centerline, and fixed Up Next opening so current-track centering settles correctly after panel/layout animation.
+- Fixed social presence rows to distinguish `Playing`, `Paused`, and idle/not-playing states (including paused-for-more-than-five-minutes idle behavior) and added direct artist/song navigation links where available.
+- Fixed startup reliability regressions where stale persisted queue/time snapshots could cause mid-track starts, unexpected skips/stops, or volume mismatch at queue start by hardening playback-state reconciliation and reapplying runtime output state at load/play boundaries.
+- Fixed playback intent drift during transitional machine states and removed same-source forced `seek(0)` resets that could trigger restart loops.
+- Fixed Discover page state transitions so recently generated playlists stay in a resolving/loading state (with short retries) instead of flashing the "Generate Now" empty state while track data is still arriving.
+- Fixed Related-tab recommendations by correcting Last.fm similar-artist cache keying/name lookup and adding local-library fallbacks for both similar tracks and similar artists when Last.fm is sparse.
+- Fixed noisy frontend `EACCES` image-cache write errors in read-only container filesystems by disabling on-disk ISR/image cache flushing.
+- Fixed missing-cover regressions by expanding native cover healing to use Cover Art Archive, provider-chain lookup, and Deezer fallback with in-flight dedupe and cache refreshes.
+- Fixed CLAP rerun stalls where progress could remain "running" with idle workers by resetting queued/retry tracks back to pending and ensuring Redis enqueue retries use a fresh client after reconnect.
+- Fixed `My Liked` row actions so thumbs-up rendering reflects canonical liked state (active white icon) instead of an unbound local control.
+- Fixed duplicate Listen Together host next/previous socket emits by debouncing host transport controls.
+- Fixed split-stack and AIO Docker builds that could miss the shared media metadata contract in build contexts.
 
 ## [1.1.2] - 2026-02-20
 
@@ -70,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a canonical release notes template (`docs/RELEASE_NOTES_TEMPLATE.md`) and generator workflow (`npm run release:notes`) for repeatable release publishing.
+- Added a canonical release notes template (`.agents-config/docs/RELEASE_NOTES_TEMPLATE.md`) and generator workflow (`npm run release:notes`) for repeatable release publishing.
 - Added queue-end auto Match Vibe continuation so playback can extend automatically when repeat is off and Listen Together is not active.
 - Added shared thumbs preference controls and supporting tests across player/list surfaces (`trackPreferenceSignals`, shared button component, and regression coverage).
 

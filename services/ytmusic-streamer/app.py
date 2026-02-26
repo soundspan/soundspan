@@ -10,23 +10,35 @@ own YouTube Music account. Credentials are stored as individual files
 (`oauth_{user_id}.json`) and each user gets a separate YTMusic instance.
 
 The Node.js backend communicates with this service over HTTP on port 8586,
-passing `user_id` as a query parameter to scope every request.
+passing `user_id` as a query parameter for per-user credential scoping on
+user-private operations and per-user cache segmentation for public search.
 """
 
 import asyncio
 import json
-import logging
 import os
 import re
+import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional, Literal
+from typing import Any, Callable, Optional, Literal, cast
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ytmusicapi import YTMusic, OAuthCredentials
+
+SERVICES_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICES_ROOT) not in sys.path:
+    sys.path.append(str(SERVICES_ROOT))
+
+from common.logging_utils import configure_service_logger
+from common.sidecar_runtime_utils import (
+    build_stream_proxy_client,
+    env_float,
+    env_int,
+)
 
 # ════════════════════════════════════════════════════════════════════
 # WORKAROUND REGISTRY — ytmusicapi issue #813  (OAuth + WEB_REMIX broken)
@@ -38,25 +50,26 @@ from ytmusicapi import YTMusic, OAuthCredentials
 #
 #   https://github.com/sigma67/ytmusicapi/issues/813
 #
-# Our workaround switches the client context to TVHTML5 v7, which
-# Google still accepts with OAuth tokens. However the TVHTML5 client
-# returns a different response format (TV renderers) that ytmusicapi's
-# built-in parsers cannot handle, so we also implement a custom search
-# parser (_tv_search).
+# Our workaround can switch the client context to TVHTML5 v7, which
+# Google accepts with OAuth tokens. However the TVHTML5 client returns
+# a different response format (TV renderers) that ytmusicapi's built-in
+# parsers cannot handle, so we also implement a custom search parser
+# (_tv_search). Runtime selection is controlled via YTMUSIC_SEARCH_MODE.
 #
 # ── PIECES OF THIS WORKAROUND (search for "WORKAROUND(#813)") ──────
 #
-#   1. _get_ytmusic()  — lines ~117-127
-#      Overrides yt.context clientName/clientVersion to TVHTML5 and
-#      strips the API key from yt.params.
+#   1. _get_ytmusic()
+#      In TV strategy, overrides yt.context clientName/clientVersion
+#      to TVHTML5 and strips the API key from yt.params.
 #
 #   2. _tv_search()    — lines ~224-410
 #      Entire function. Custom parser that calls yt._send_request()
 #      directly and walks compactVideoRenderer / tileRenderer /
 #      musicCardShelfRenderer trees to extract search results.
 #
-#   3. search()        — lines ~590-607
-#      Calls _tv_search() instead of yt.search().
+#   3. search()
+#      Uses strategy-based search helper. TV strategy calls _tv_search();
+#      native strategy calls yt.search().
 #
 #   4. search_debug()  — lines ~610-625
 #      Debug endpoint for inspecting raw TV responses. Can be deleted.
@@ -86,11 +99,7 @@ from ytmusicapi import YTMusic, OAuthCredentials
 # ════════════════════════════════════════════════════════════════════
 
 # ── Logging ─────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
-log = logging.getLogger("ytmusic-streamer")
+log = configure_service_logger("ytmusic-streamer")
 
 # ── FastAPI app ─────────────────────────────────────────────────────
 app = FastAPI(title="soundspan YouTube Music Streamer", version="1.0.0")
@@ -107,23 +116,30 @@ DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
 
 # Max concurrent InnerTube search requests in a batch (default: 3).
 # Prevents firing 50 simultaneous requests that look bot-like.
-BATCH_CONCURRENCY = int(os.getenv("YTMUSIC_BATCH_CONCURRENCY", "3"))
+BATCH_CONCURRENCY = env_int("YTMUSIC_BATCH_CONCURRENCY", "3")
 _batch_semaphore = asyncio.Semaphore(BATCH_CONCURRENCY)
 
 # Delay range (seconds) between search requests within a batch.
 # A random value in [min, max] is chosen to look organic.
-BATCH_DELAY_MIN = float(os.getenv("YTMUSIC_BATCH_DELAY_MIN", "0.3"))
-BATCH_DELAY_MAX = float(os.getenv("YTMUSIC_BATCH_DELAY_MAX", "1.0"))
+BATCH_DELAY_MIN = env_float("YTMUSIC_BATCH_DELAY_MIN", "0.3")
+BATCH_DELAY_MAX = env_float("YTMUSIC_BATCH_DELAY_MAX", "1.0")
 
 # Delay range (seconds) between yt-dlp extractions.
-EXTRACT_DELAY_MIN = float(os.getenv("YTMUSIC_EXTRACT_DELAY_MIN", "0.5"))
-EXTRACT_DELAY_MAX = float(os.getenv("YTMUSIC_EXTRACT_DELAY_MAX", "2.0"))
+EXTRACT_DELAY_MIN = env_float("YTMUSIC_EXTRACT_DELAY_MIN", "0.5")
+EXTRACT_DELAY_MAX = env_float("YTMUSIC_EXTRACT_DELAY_MAX", "2.0")
 _extract_lock = asyncio.Lock()   # Serialize yt-dlp extractions
 _last_extract_time: float = 0.0  # Timestamp of last extraction
 
 # Search result cache (in-memory, short TTL to reduce duplicate requests)
 _search_cache: dict[str, dict] = {}
-SEARCH_CACHE_TTL = int(os.getenv("YTMUSIC_SEARCH_CACHE_TTL", "300"))  # 5 minutes
+SEARCH_CACHE_TTL = env_int("YTMUSIC_SEARCH_CACHE_TTL", "300")  # 5 minutes
+SEARCH_MODE = (os.getenv("YTMUSIC_SEARCH_MODE", "auto") or "auto").strip().lower()
+if SEARCH_MODE not in {"tv", "native", "auto"}:
+    log.warning(
+        "Invalid YTMUSIC_SEARCH_MODE=%r (expected tv|native|auto); defaulting to auto",
+        SEARCH_MODE,
+    )
+    SEARCH_MODE = "auto"
 
 # Realistic browser User-Agent for yt-dlp and httpx proxy requests
 _USER_AGENT = (
@@ -138,10 +154,18 @@ import random
 # Keys are "{user_id}:{video_id}" to isolate per-user sessions
 _stream_cache: dict[str, dict] = {}
 STREAM_CACHE_TTL = 5 * 60 * 60  # 5 hours (YouTube URLs expire at ~6h)
+TV_CLIENT_NAME = "TVHTML5"
+TV_CLIENT_VERSION = "7.20250101.00.00"
 
-# ── Per-user YTMusic instances ──────────────────────────────────────
+# ── YTMusic instances ────────────────────────────────────────────────
+# Per-user authenticated clients are used for user-private operations
+# (library, stream auth checks, browse calls).
 _ytmusic_instances: dict[str, YTMusic] = {}
 _ytmusic_lock = asyncio.Lock()
+_ytmusic_auto_tv_fallback_users: set[str] = set()
+# Public unauthenticated clients are used for search/matching so queries do not
+# run under a user's OAuth session.
+_public_ytmusic_instances: dict[Literal["tv", "native"], YTMusic] = {}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -194,6 +218,171 @@ def _oauth_file(user_id: str) -> Path:
     return DATA_PATH / f"oauth_{user_id}.json"
 
 
+def _clear_user_search_fallback(user_id: str):
+    """Clear per-user auto-fallback state so native search can be retried."""
+    _ytmusic_auto_tv_fallback_users.discard(user_id)
+
+
+def _resolve_user_search_strategy(user_id: str) -> Literal["tv", "native"]:
+    """
+    Resolve the active search strategy for a user.
+    - tv:     always use TVHTML parser path
+    - native: always use ytmusicapi yt.search()
+    - auto:   start native; pin user to tv after native failure
+    """
+    if SEARCH_MODE == "tv":
+        return "tv"
+    if SEARCH_MODE == "native":
+        return "native"
+    if user_id in _ytmusic_auto_tv_fallback_users:
+        return "tv"
+    return "native"
+
+
+def _apply_tv_client_context(yt: YTMusic):
+    """Apply TVHTML5 client context required by the custom TV search parser."""
+    yt.context["context"]["client"]["clientName"] = TV_CLIENT_NAME
+    yt.context["context"]["client"]["clientVersion"] = TV_CLIENT_VERSION
+    yt.params = "?alt=json"  # TV client must NOT send the API key
+
+
+def _get_public_ytmusic(strategy: Literal["tv", "native"]) -> YTMusic:
+    """
+    Get or create an unauthenticated YTMusic instance for public search.
+    """
+    existing = _public_ytmusic_instances.get(strategy)
+    if existing:
+        return existing
+
+    yt = YTMusic()
+    if strategy == "tv":
+        _apply_tv_client_context(yt)
+    _public_ytmusic_instances[strategy] = yt
+    return yt
+
+
+def _invalidate_public_ytmusic(strategy: Literal["tv", "native"]):
+    """Force re-creation of a public search client on next use."""
+    _public_ytmusic_instances.pop(strategy, None)
+
+
+def _parse_duration_text_value(value: Any) -> int:
+    """
+    Parse "mm:ss" or "hh:mm:ss" duration strings to seconds.
+    Returns 0 when missing/invalid.
+    """
+    if isinstance(value, (int, float)) and value > 0:
+        return int(value)
+    text = str(value or "").strip()
+    if ":" not in text:
+        return 0
+    parts = text.split(":")
+    try:
+        parts_int = [int(p) for p in parts]
+    except ValueError:
+        return 0
+    if len(parts_int) == 3:
+        return parts_int[0] * 3600 + parts_int[1] * 60 + parts_int[2]
+    if len(parts_int) == 2:
+        return parts_int[0] * 60 + parts_int[1]
+    return 0
+
+
+def _normalize_native_search_item(item: dict) -> Optional[dict]:
+    """
+    Normalize search results into the connector shim shape used by the backend.
+    This accepts both native `yt.search()` items and TV-parser candidates.
+    """
+    if not isinstance(item, dict):
+        return None
+
+    result_type = str(item.get("resultType") or item.get("type") or "").strip()
+    normalized_type = result_type.lower() if result_type else "unknown"
+    video_id = item.get("videoId")
+
+    if not video_id:
+        # Keep only directly playable entries for matching.
+        return None
+
+    artists_value = item.get("artists")
+    artist_names: list[str] = []
+    if isinstance(artists_value, list):
+        for artist in artists_value:
+            if isinstance(artist, dict):
+                name = str(artist.get("name") or "").strip()
+                if name:
+                    artist_names.append(name)
+            elif isinstance(artist, str):
+                name = artist.strip()
+                if name:
+                    artist_names.append(name)
+
+    primary_artist = (
+        artist_names[0]
+        if artist_names
+        else str(item.get("artist") or item.get("author") or "Unknown").strip()
+    )
+    if not primary_artist:
+        primary_artist = "Unknown"
+
+    album = item.get("album")
+    album_name: Optional[str] = None
+    if isinstance(album, dict):
+        name = str(album.get("name") or "").strip()
+        album_name = name or None
+    elif isinstance(album, str):
+        name = album.strip()
+        album_name = name or None
+
+    duration = item.get("duration")
+    duration_seconds_raw = item.get("duration_seconds")
+    if not isinstance(duration_seconds_raw, int):
+        duration_seconds_raw = item.get("durationSeconds")
+    duration_seconds = _parse_duration_text_value(
+        duration_seconds_raw if duration_seconds_raw is not None else duration
+    )
+
+    thumbnails = item.get("thumbnails")
+    if not isinstance(thumbnails, list):
+        thumbnails = []
+
+    title = str(item.get("title") or "").strip() or "Unknown"
+    is_explicit = item.get("isExplicit")
+    return {
+        "type": normalized_type,
+        "videoId": str(video_id),
+        "title": title,
+        "artist": primary_artist,
+        "artists": artist_names,
+        "album": album_name,
+        "duration": str(duration or ""),
+        "duration_seconds": duration_seconds,
+        "thumbnails": thumbnails,
+        "isExplicit": bool(is_explicit) if is_explicit is not None else False,
+    }
+
+
+def _native_search(
+    yt: YTMusic,
+    query: str,
+    filter: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict]:
+    """Execute yt.search() and normalize results to sidecar response shape."""
+    raw_items = yt.search(query, filter=filter, limit=limit)
+    if not isinstance(raw_items, list):
+        return []
+
+    normalized: list[dict] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        mapped = _normalize_native_search_item(item)
+        if mapped:
+            normalized.append(mapped)
+    return normalized[:limit]
+
+
 def _get_ytmusic(user_id: str) -> YTMusic:
     """Get or create an authenticated YTMusic instance for a specific user."""
     if user_id in _ytmusic_instances:
@@ -220,26 +409,29 @@ def _get_ytmusic(user_id: str) -> YTMusic:
             else:
                 yt = YTMusic(str(oauth_path))
 
-            # ── WORKAROUND(#813) START ──────────────────────────────
-            # Google broke OAuth + WEB_REMIX since ~Aug 29 2025.
-            # Switching the client context to TVHTML5 v7 makes OAuth
-            # requests succeed. The response format is different (TV
-            # renderers instead of musicShelfRenderer), so we use a
-            # custom search parser (_tv_search) below.
-            #
-            # Original values (set by ytmusicapi's initialize_context()):
-            #   clientName    = "WEB_REMIX"
-            #   clientVersion = "1.yyyymmdd.xx.xx"  (auto-detected)
-            #   yt.params     = "?alt=json&key=<INNERTUBE_API_KEY>"
-            #
-            # REVERT: delete these 3 lines when issue #813 is fixed.
-            yt.context["context"]["client"]["clientName"] = "TVHTML5"
-            yt.context["context"]["client"]["clientVersion"] = "7.20250101.00.00"
-            yt.params = "?alt=json"  # TV client must NOT send the API key
-            # ── WORKAROUND(#813) END ────────────────────────────────
+            client_mode = _resolve_user_search_strategy(user_id)
+            if client_mode == "tv":
+                # ── WORKAROUND(#813) START ──────────────────────────────
+                # Google broke OAuth + WEB_REMIX since ~Aug 29 2025.
+                # Switching the client context to TVHTML5 v7 makes OAuth
+                # requests succeed. The response format is different (TV
+                # renderers instead of musicShelfRenderer), so we use a
+                # custom search parser (_tv_search) below.
+                #
+                # Original values (set by ytmusicapi's initialize_context()):
+                #   clientName    = "WEB_REMIX"
+                #   clientVersion = "1.yyyymmdd.xx.xx"  (auto-detected)
+                #   yt.params     = "?alt=json&key=<INNERTUBE_API_KEY>"
+                _apply_tv_client_context(yt)
+                # ── WORKAROUND(#813) END ────────────────────────────────
 
             _ytmusic_instances[user_id] = yt
-            log.info(f"Loaded YTMusic for user {user_id} (TVHTML5 context)")
+            log.info(
+                "Loaded YTMusic for user %s (search_strategy=%s, configured_mode=%s)",
+                user_id,
+                client_mode,
+                SEARCH_MODE,
+            )
             return yt
         except Exception as e:
             log.error(f"Failed to load OAuth for user {user_id}: {e}")
@@ -304,6 +496,40 @@ def _run_ytmusic_with_auth_retry(
     try:
         return func(yt)
     except Exception as first_err:
+        # In auto mode, transparently migrate users to TV strategy when the
+        # known #813 invalid-argument failure appears on non-search calls.
+        if (
+            SEARCH_MODE == "auto"
+            and user_id not in _ytmusic_auto_tv_fallback_users
+            and _is_issue_813_invalid_argument_error(first_err)
+        ):
+            log.warning(
+                "Detected ytmusicapi #813 signature during %s for user %s; "
+                "switching this user to TV fallback and retrying once.",
+                operation,
+                user_id,
+            )
+            _ytmusic_auto_tv_fallback_users.add(user_id)
+            _invalidate_ytmusic(user_id)
+            try:
+                fallback_client = _get_ytmusic(user_id)
+                return func(fallback_client)
+            except HTTPException as retry_http:
+                if retry_http.status_code == 401:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="OAuth credentials expired or invalid. Please re-authenticate.",
+                    )
+                raise
+            except Exception as retry_err:
+                if _is_oauth_auth_error(retry_err):
+                    _invalidate_ytmusic(user_id)
+                    raise HTTPException(
+                        status_code=401,
+                        detail="OAuth credentials expired or invalid. Please re-authenticate.",
+                    )
+                raise
+
         if not _is_oauth_auth_error(first_err):
             raise
 
@@ -330,6 +556,26 @@ def _run_ytmusic_with_auth_retry(
                     detail="OAuth credentials expired or invalid. Please re-authenticate.",
                 )
             raise
+
+
+def _is_issue_813_invalid_argument_error(err: Exception) -> bool:
+    """Detect the OAuth + WEB_REMIX invalid-argument failure signature."""
+    response = getattr(err, "response", None)
+    response_status = getattr(response, "status_code", None)
+    response_text = ""
+    if response is not None:
+        response_text = str(getattr(response, "text", "") or "")
+
+    message = f"{err} {response_text}".lower()
+    if response_status != 400:
+        return False
+    markers = (
+        "request contains an invalid argument",
+        "invalid argument",
+        "invalid_argument",
+        "badrequest",
+    )
+    return any(marker in message for marker in markers)
 
 
 def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> dict:
@@ -511,6 +757,38 @@ def _tv_search(yt: YTMusic, query: str, filter: Optional[str] = None, limit: int
             return parts_int[0] * 60 + parts_int[1]
         return 0
 
+    def _parse_duration_label(text: str) -> int:
+        """
+        Parse human-readable accessibility labels like:
+        - "3 minutes, 45 seconds"
+        - "1 hour, 2 minutes, 5 seconds"
+        """
+        if not text:
+            return 0
+        lower = text.lower()
+        hours = re.search(r"(\d+)\s*hour", lower)
+        minutes = re.search(r"(\d+)\s*minute", lower)
+        seconds = re.search(r"(\d+)\s*second", lower)
+        if not any((hours, minutes, seconds)):
+            return 0
+        return (
+            (int(hours.group(1)) * 3600 if hours else 0)
+            + (int(minutes.group(1)) * 60 if minutes else 0)
+            + (int(seconds.group(1)) if seconds else 0)
+        )
+
+    def _is_metadata_noise(text: str) -> bool:
+        """Detect metadata tokens that are not artist/album labels."""
+        value = (text or "").strip().lower()
+        if not value or value == "\u2022":
+            return True
+        return bool(
+            re.search(
+                r"\b(view|views|ago|subscriber|subscribers|episode|episodes|song|songs)\b",
+                value,
+            )
+        )
+
     def _walk_renderers(node, depth=0):
         """Recursively walk the TV response tree and extract results."""
         if depth > 15 or len(items) >= limit:
@@ -550,38 +828,88 @@ def _tv_search(yt: YTMusic, query: str, filter: Optional[str] = None, limit: int
                     nav_ep2 = r.get("navigationEndpoint", {}).get("watchEndpoint", {})
                     vid = nav_ep2.get("videoId", "")
                 if vid:
-                    title_text = _extract_text(r.get("header", {}).get("tileHeaderRenderer", {}).get("title"))
-                    # metadata lines contain artist / album / duration
                     metadata = r.get("metadata", {}).get("tileMetadataRenderer", {})
+                    title_text = (
+                        _extract_text(r.get("header", {}).get("tileHeaderRenderer", {}).get("title"))
+                        or _extract_text(metadata.get("title"))
+                        or _extract_text(
+                            r.get("overlayMetadata", {})
+                            .get("primaryText")
+                        )
+                    )
+
+                    # metadata lines contain artist / album / duration
                     lines = metadata.get("lines", []) if metadata else []
                     artist_name = ""
+                    album_name = None
                     duration_text = ""
+                    duration_seconds = 0
                     for line in lines:
                         line_renderer = line.get("lineRenderer", {})
+                        line_values: list[str] = []
                         for item_entry in line_renderer.get("items", []):
-                            lt = _extract_text(item_entry.get("lineItemRenderer", {}).get("text"))
+                            text_obj = (
+                                item_entry.get("lineItemRenderer", {}).get("text")
+                            )
+                            lt = _extract_text(text_obj)
                             if lt:
+                                line_values.append(lt)
                                 # Duration looks like 3:45
-                                if re.match(r"^\d+:\d{2}", lt):
+                                if re.match(r"^\d{1,2}:\d{2}(:\d{2})?$", lt):
                                     duration_text = lt
-                                elif not artist_name:
-                                    artist_name = lt
-                    thumbs = (
-                        r.get("contentImage", {})
-                        .get("musicThumbnailRenderer", {})
-                        .get("thumbnail", {})
-                        .get("thumbnails", [])
-                    )
+                                    duration_seconds = _parse_duration_text(lt)
+                            if isinstance(text_obj, dict):
+                                accessibility_label = (
+                                    text_obj.get("accessibility", {})
+                                    .get("accessibilityData", {})
+                                    .get("label", "")
+                                )
+                                if accessibility_label:
+                                    duration_seconds = max(
+                                        duration_seconds,
+                                        _parse_duration_label(accessibility_label),
+                                    )
+
+                        if not artist_name and line_values:
+                            primary_values = [
+                                value for value in line_values if not _is_metadata_noise(value)
+                            ]
+                            if primary_values:
+                                artist_name = primary_values[0]
+                                if len(primary_values) > 1:
+                                    album_name = primary_values[1]
+
+                    if not artist_name and title_text and " - " in title_text:
+                        # Fallback for titles like "Artist - Track Name".
+                        artist_name = title_text.split(" - ", 1)[0].strip()
+
+                    if duration_seconds > 0 and not duration_text:
+                        minutes = duration_seconds // 60
+                        seconds = duration_seconds % 60
+                        duration_text = f"{minutes}:{seconds:02d}"
+
+                    if not title_text:
+                        # Last-resort fallback to avoid empty-title candidates.
+                        title_text = _extract_text(metadata.get("title")) or "Unknown"
+
+                    if not artist_name:
+                        artist_name = "Unknown"
+
                     items.append({
                         "type": "song",
                         "videoId": vid,
-                        "title": title_text or "",
-                        "artist": artist_name or "Unknown",
-                        "artists": [artist_name] if artist_name else [],
-                        "album": None,
+                        "title": title_text,
+                        "artist": artist_name,
+                        "artists": [artist_name] if artist_name != "Unknown" else [],
+                        "album": album_name,
                         "duration": duration_text,
-                        "duration_seconds": _parse_duration_text(duration_text),
-                        "thumbnails": thumbs,
+                        "duration_seconds": duration_seconds,
+                        "thumbnails": (
+                            r.get("contentImage", {})
+                            .get("musicThumbnailRenderer", {})
+                            .get("thumbnail", {})
+                            .get("thumbnails", [])
+                        ),
                         "isExplicit": False,
                     })
                 return
@@ -622,8 +950,20 @@ def _tv_search(yt: YTMusic, query: str, filter: Optional[str] = None, limit: int
 
     _walk_renderers(raw)
 
-    log.debug(f"TV search '{query}' filter={filter!r}: found {len(items)} result(s)")
-    return items[:limit]
+    normalized: list[dict] = []
+    for item in items:
+        mapped = _normalize_native_search_item(item)
+        if mapped:
+            normalized.append(mapped)
+
+    log.debug(
+        "TV search %r filter=%r: parsed=%s normalized=%s",
+        query,
+        filter,
+        len(items),
+        len(normalized),
+    )
+    return normalized[:limit]
 
 
 def _clean_stream_cache():
@@ -636,14 +976,26 @@ def _clean_stream_cache():
         log.debug(f"Cleaned {len(expired)} expired stream cache entries")
 
 
-def _search_cache_key(user_id: str, query: str, filter_: Optional[str], limit: int) -> str:
+def _search_cache_key(
+    user_id: str,
+    query: str,
+    filter_: Optional[str],
+    limit: int,
+    strategy: Literal["tv", "native"],
+) -> str:
     """Build a deterministic cache key for search results."""
-    return f"{user_id}:{query}:{filter_ or ''}:{limit}"
+    return f"{user_id}:{strategy}:{query}:{filter_ or ''}:{limit}"
 
 
-def _get_cached_search(user_id: str, query: str, filter_: Optional[str], limit: int) -> Optional[list]:
+def _get_cached_search(
+    user_id: str,
+    query: str,
+    filter_: Optional[str],
+    limit: int,
+    strategy: Literal["tv", "native"],
+) -> Optional[list]:
     """Return cached search results if still valid, else None."""
-    key = _search_cache_key(user_id, query, filter_, limit)
+    key = _search_cache_key(user_id, query, filter_, limit, strategy)
     entry = _search_cache.get(key)
     if entry and entry.get("expires_at", 0) > time.time():
         log.debug(f"Search cache hit: {key}")
@@ -653,13 +1005,152 @@ def _get_cached_search(user_id: str, query: str, filter_: Optional[str], limit: 
     return None
 
 
-def _set_cached_search(user_id: str, query: str, filter_: Optional[str], limit: int, results: list):
+def _set_cached_search(
+    user_id: str,
+    query: str,
+    filter_: Optional[str],
+    limit: int,
+    strategy: Literal["tv", "native"],
+    results: list,
+):
     """Store search results in cache with TTL."""
-    key = _search_cache_key(user_id, query, filter_, limit)
+    key = _search_cache_key(user_id, query, filter_, limit, strategy)
     _search_cache[key] = {
         "results": results,
         "expires_at": time.time() + SEARCH_CACHE_TTL,
     }
+
+
+def _search_once(
+    user_id: str,
+    query: str,
+    filter_: Optional[str],
+    limit: int,
+    strategy: Literal["tv", "native"],
+    use_unauth_client: bool = False,
+) -> list[dict]:
+    """
+    Execute one search strategy with cache lookup/store.
+    """
+    cached = _get_cached_search(user_id, query, filter_, limit, strategy)
+    if cached is not None:
+        return cast(list[dict], cached)
+
+    if use_unauth_client:
+        yt = _get_public_ytmusic(strategy)
+        try:
+            if strategy == "native":
+                items = _native_search(yt, query, filter=filter_, limit=limit)
+            else:
+                items = _tv_search(yt, query, filter=filter_, limit=limit)
+        except Exception as first_err:
+            log.warning(
+                "Public %s search client failed for user=%s query=%r; rebuilding and retrying once: %s",
+                strategy,
+                user_id,
+                query,
+                first_err,
+            )
+            _invalidate_public_ytmusic(strategy)
+            retry_client = _get_public_ytmusic(strategy)
+            if strategy == "native":
+                items = _native_search(
+                    retry_client, query, filter=filter_, limit=limit
+                )
+            else:
+                items = _tv_search(
+                    retry_client, query, filter=filter_, limit=limit
+                )
+    else:
+        if strategy == "native":
+            items = _run_ytmusic_with_auth_retry(
+                user_id,
+                operation=f"search-native query={query!r}",
+                func=lambda yt: _native_search(
+                    yt, query, filter=filter_, limit=limit
+                ),
+            )
+        else:
+            items = _run_ytmusic_with_auth_retry(
+                user_id,
+                operation=f"search-tv query={query!r}",
+                func=lambda yt: _tv_search(
+                    yt, query, filter=filter_, limit=limit
+                ),
+            )
+
+    _set_cached_search(user_id, query, filter_, limit, strategy, items)
+    return items
+
+
+def _search_with_mode_fallback(
+    user_id: str,
+    query: str,
+    filter_: Optional[str],
+    limit: int,
+    use_unauth_client: bool = False,
+) -> tuple[list[dict], Literal["tv", "native"]]:
+    """
+    Execute search according to configured mode.
+    In auto mode, try native first and fall back to tv per-user on failure.
+    `use_unauth_client=True` routes search through public clients so queries do
+    not use user OAuth sessions.
+    """
+    strategy = _resolve_user_search_strategy(user_id)
+    if strategy == "tv":
+        return (
+            _search_once(
+                user_id,
+                query,
+                filter_,
+                limit,
+                "tv",
+                use_unauth_client=use_unauth_client,
+            ),
+            "tv",
+        )
+
+    try:
+        return (
+            _search_once(
+                user_id,
+                query,
+                filter_,
+                limit,
+                "native",
+                use_unauth_client=use_unauth_client,
+            ),
+            "native",
+        )
+    except Exception as native_err:
+        # Preserve explicit native behavior unless auto fallback is enabled.
+        if SEARCH_MODE != "auto" or (
+            not use_unauth_client and _is_oauth_auth_error(native_err)
+        ):
+            raise
+
+        log.warning(
+            "Native yt.search() failed for user %s; switching to TV fallback "
+            "(query=%r, filter=%r, error=%s)",
+            user_id,
+            query,
+            filter_,
+            native_err,
+        )
+        _ytmusic_auto_tv_fallback_users.add(user_id)
+        if not use_unauth_client:
+            _invalidate_ytmusic(user_id)
+        return (
+            _search_once(
+                user_id,
+                query,
+                filter_,
+                limit,
+                "tv",
+                use_unauth_client=use_unauth_client,
+            ),
+            "tv",
+        )
 
 
 def _clean_search_cache():
@@ -684,6 +1175,8 @@ async def health():
         "status": "ok",
         "service": "ytmusic-streamer",
         "authenticated_users": len(oauth_files),
+        "search_mode": SEARCH_MODE,
+        "auto_tv_fallback_users": len(_ytmusic_auto_tv_fallback_users),
     }
 
 
@@ -736,6 +1229,7 @@ async def auth_restore(req: Request, user_id: str = Query(...)):
         }))
 
     _invalidate_ytmusic(user_id)
+    _clear_user_search_fallback(user_id)
     log.info(f"OAuth credentials restored for user {user_id}")
     return {"status": "ok", "message": "OAuth credentials restored"}
 
@@ -744,6 +1238,7 @@ async def auth_restore(req: Request, user_id: str = Query(...)):
 async def auth_clear(user_id: str = Query(...)):
     """Remove stored OAuth credentials for a specific user."""
     _invalidate_ytmusic(user_id)
+    _clear_user_search_fallback(user_id)
     oauth_path = _oauth_file(user_id)
     if oauth_path.exists():
         oauth_path.unlink()
@@ -829,6 +1324,7 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
         }))
 
         _invalidate_ytmusic(user_id)
+        _clear_user_search_fallback(user_id)
         log.info(f"Device code flow completed for user {user_id}")
 
         return {
@@ -860,27 +1356,30 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
 async def search(req: SearchRequest, user_id: str = Query(...)):
     """Search YouTube Music for songs, albums, or artists.
 
-    WORKAROUND(#813): calls _tv_search() instead of yt.search() because
-    the TVHTML5 client context returns TV-format responses that
-    ytmusicapi's built-in parser cannot handle.
+    Search uses an unauthenticated client context so user OAuth search history
+    is not touched. user_id is still used for cache segmentation and pacing.
 
-    REVERT: replace the _tv_search() call with the original yt.search()
-    call and its result-mapping loop.  The original code is in git
-    history — see the commit that introduced this workaround.
+    Mode behavior is controlled by YTMUSIC_SEARCH_MODE:
+      - auto (default): try native and pin user to tv fallback on failure
+      - tv: force TVHTML parser path
+      - native: force ytmusicapi yt.search()
     """
-    # Check search cache first to avoid redundant InnerTube requests
-    cached = _get_cached_search(user_id, req.query, req.filter, req.limit)
-    if cached is not None:
-        return {"results": cached, "total": len(cached)}
-
     try:
-        log.debug(f"Search: query={req.query!r}, filter={req.filter!r}, limit={req.limit}")
-        items = _run_ytmusic_with_auth_retry(
+        items, strategy = _search_with_mode_fallback(
             user_id,
-            operation=f"search query={req.query!r}",
-            func=lambda yt: _tv_search(yt, req.query, filter=req.filter, limit=req.limit),
+            req.query,
+            req.filter,
+            req.limit,
+            use_unauth_client=True,
         )
-        _set_cached_search(user_id, req.query, req.filter, req.limit, items)
+        log.debug(
+            "Search: query=%r, filter=%r, limit=%s, strategy=%s, configured_mode=%s",
+            req.query,
+            req.filter,
+            req.limit,
+            strategy,
+            SEARCH_MODE,
+        )
         return {"results": items, "total": len(items)}
     except HTTPException:
         raise
@@ -899,11 +1398,10 @@ async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
     Rate-pacing: requests are throttled via _batch_semaphore and
     inter-request delays instead of firing all N simultaneously.
     """
-    _get_ytmusic(user_id)
-
     async def _run_one(q: BatchSearchQuery) -> dict:
-        # Check cache first — avoids consuming a semaphore slot
-        cached = _get_cached_search(user_id, q.query, q.filter, q.limit)
+        # Check primary cache first — avoids consuming a semaphore slot.
+        strategy = _resolve_user_search_strategy(user_id)
+        cached = _get_cached_search(user_id, q.query, q.filter, q.limit, strategy)
         if cached is not None:
             return {"results": cached, "total": len(cached), "error": None}
 
@@ -912,13 +1410,14 @@ async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
             delay = random.uniform(BATCH_DELAY_MIN, BATCH_DELAY_MAX)
             await asyncio.sleep(delay)
             try:
-                items = await asyncio.to_thread(
-                    _run_ytmusic_with_auth_retry,
+                items, _used_strategy = await asyncio.to_thread(
+                    _search_with_mode_fallback,
                     user_id,
-                    f"batch search query={q.query!r}",
-                    lambda yt: _tv_search(yt, q.query, filter=q.filter, limit=q.limit),
+                    q.query,
+                    q.filter,
+                    q.limit,
+                    True,  # use_unauth_client
                 )
-                _set_cached_search(user_id, q.query, q.filter, q.limit, items)
                 return {"results": items, "total": len(items), "error": None}
             except HTTPException:
                 raise
@@ -942,7 +1441,9 @@ async def search_debug(req: SearchRequest, user_id: str = Query(...)):
 
     REVERT: delete this entire endpoint when #813 is fixed.
     """
-    yt = _get_ytmusic(user_id)
+    # Keep user_id in the route signature for request-shape compatibility, but
+    # debug search uses the public TV client like normal search paths.
+    yt = _get_public_ytmusic("tv")
     body: dict = {"query": req.query}
     if req.filter == "songs":
         body["params"] = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
@@ -1136,10 +1637,7 @@ async def proxy_stream(
         headers["Range"] = request.headers["range"]
 
     async def stream_audio():
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, read=300.0),
-            headers={"User-Agent": _USER_AGENT},
-        ) as client:
+        async with build_stream_proxy_client(user_agent=_USER_AGENT) as client:
             try:
                 async with client.stream("GET", stream_url, headers=headers) as response:
                     async for chunk in response.aiter_bytes(chunk_size=65536):
@@ -1158,10 +1656,7 @@ async def proxy_stream(
         # used `async with`, the `return` would exit the context manager,
         # closing the client/connection before Starlette ever iterates
         # the generator — causing an immediate ReadError on every request.
-        client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, read=300.0),
-            headers={"User-Agent": _USER_AGENT},
-        )
+        client = build_stream_proxy_client(user_agent=_USER_AGENT)
         upstream = await client.send(
             client.build_request("GET", stream_url, headers=headers),
             stream=True,
@@ -1278,7 +1773,8 @@ async def startup():
         f"Rate-pacing config: batch_concurrency={BATCH_CONCURRENCY}, "
         f"batch_delay={BATCH_DELAY_MIN}-{BATCH_DELAY_MAX}s, "
         f"extract_delay={EXTRACT_DELAY_MIN}-{EXTRACT_DELAY_MAX}s, "
-        f"search_cache_ttl={SEARCH_CACHE_TTL}s"
+        f"search_cache_ttl={SEARCH_CACHE_TTL}s, "
+        f"search_mode={SEARCH_MODE}"
     )
 
     # Ensure data directory exists and is writable

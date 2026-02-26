@@ -9,12 +9,17 @@
   },
   "private": true,
   "scripts": {
+    "predev": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "dev": "node server.js",
+    "prebuild": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "build": "next build",
     "start": "node server.js",
+    "prelint": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "lint": "eslint",
+    "pretest:unit": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "test:unit": "node --test --experimental-strip-types tests/unit/**/*.test.ts",
     "test:coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=components/layout/activityPanelTabs.ts --test-coverage-include=components/layout/socialNavigation.ts --test-coverage-include=features/settings/components/sections/playbackHistoryConfig.ts tests/unit/**/*.test.ts",
+    "pretest:component": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "test:component": "node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/*.test.ts",
     "test:component:coverage": "node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs --experimental-test-coverage --test-coverage-include=components/layout/ActivityPanel.tsx --test-coverage-include=components/layout/Sidebar.tsx --test-coverage-include=components/layout/MobileSidebar.tsx --test-coverage-include=features/settings/components/sections/PlaybackHistorySection.tsx tests/component/*.test.ts",
     "test:component:coverage:changed": "bash -lc 'set -o pipefail; npm run test:component:coverage 2>&1 | node scripts/check-social-changed-coverage.mjs'",
@@ -26,6 +31,7 @@
     "analyze": "ANALYZE=true next build --webpack"
   },
   "dependencies": {
+    "@soundspan/media-metadata-contract": "file:../packages/media-metadata-contract",
     "@tanstack/react-query": "^5.90.10",
     "@tanstack/react-query-devtools": "^5.90.2",
     "@types/dompurify": "^3.0.5",
@@ -35,9 +41,9 @@
     "dompurify": "^3.3.1",
     "framer-motion": "^12.23.26",
     "howler": "^2.2.4",
+    "http-proxy-middleware": "^3.0.5",
     "lucide-react": "^0.552.0",
     "next": "^16.0.10",
-    "http-proxy-middleware": "^3.0.5",
     "qrcode.react": "^4.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -45,7 +51,8 @@
     "recharts": "^3.6.0",
     "socket.io-client": "^4.8.3",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "video.js": "^8.23.7"
   },
   "devDependencies": {
     "@next/bundle-analyzer": "^15.1.3",

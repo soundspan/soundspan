@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { GradientSpinner } from "./ui/GradientSpinner";
 import { MusicBrainzLookup } from "./ui/MusicBrainzLookup";
 import Image from "next/image";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface MetadataEditorProps {
     type: "artist" | "album" | "track";
@@ -164,7 +165,7 @@ export function MetadataEditor({
             onSave?.(response);
             setIsOpen(false);
         } catch (error: unknown) {
-            console.error("Failed to update metadata:", error);
+            sharedFrontendLogger.error("Failed to update metadata:", error);
             const apiError = toMetadataEditorApiError(error);
             if (apiError?.data) {
                 const apiField =

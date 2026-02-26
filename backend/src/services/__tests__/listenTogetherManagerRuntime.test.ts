@@ -13,6 +13,8 @@ describe("listenTogetherManager runtime behavior", () => {
         duration,
         artist: { id: `artist-${id}`, name: `Artist ${id}` },
         album: { id: `album-${id}`, title: `Album ${id}`, coverArt: null },
+        mediaSource: "local",
+        provider: { source: "local" },
     });
 
     const createCallbacks = (): jest.Mocked<ManagerCallbacks> => ({
@@ -297,6 +299,7 @@ describe("listenTogetherManager runtime behavior", () => {
             items: [track("1"), track("2")],
         });
         expect(addDelta.queue.length).toBe(2);
+        expect(addDelta.queue[0]?.provider?.source).toBe("local");
         expect(groupManager.get("g-queue")?.syncState).toBe("paused");
 
         groupManager.modifyQueue("g-queue", "host", { action: "remove", index: 0 });

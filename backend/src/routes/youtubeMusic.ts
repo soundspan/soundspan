@@ -13,7 +13,10 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
-import { ytMusicService } from "../services/youtubeMusic";
+import {
+    ytMusicService,
+    normalizeYtMusicStreamQuality,
+} from "../services/youtubeMusic";
 import { getSystemSettings } from "../utils/systemSettings";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
@@ -25,6 +28,7 @@ import {
 
 const router = Router();
 const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
+const DEFAULT_YTMUSIC_STREAM_QUALITY = "high";
 const ytOauthSessionCache = new Map<
     string,
     { authenticated: boolean; expiresAt: number }
@@ -180,6 +184,41 @@ function handleYtMusicAuthError(
         error: "YouTube Music authentication expired or invalid. Please reconnect your account.",
     });
     return true;
+}
+
+const getRequestedStreamQuality = (rawQuality: unknown): string | undefined => {
+    if (typeof rawQuality !== "string") {
+        return undefined;
+    }
+    const trimmed = rawQuality.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+};
+
+async function resolveYtMusicStreamQuality(
+    userId: string,
+    rawRequestedQuality: unknown
+): Promise<string> {
+    const requestedQuality = getRequestedStreamQuality(rawRequestedQuality);
+    if (requestedQuality) {
+        return requestedQuality;
+    }
+
+    try {
+        const settings = await prisma.userSettings.findUnique({
+            where: { userId },
+            select: { ytMusicQuality: true },
+        });
+        return (
+            normalizeYtMusicStreamQuality(settings?.ytMusicQuality) ??
+            DEFAULT_YTMUSIC_STREAM_QUALITY
+        );
+    } catch (error) {
+        logger.warn(
+            `[YTMusic] Failed to read user quality preference for user ${userId}; falling back to ${DEFAULT_YTMUSIC_STREAM_QUALITY}`,
+            error
+        );
+        return DEFAULT_YTMUSIC_STREAM_QUALITY;
+    }
 }
 
 // ── Status ─────────────────────────────────────────────────────────
@@ -391,6 +430,9 @@ router.post(
 );
 
 // ── Search ─────────────────────────────────────────────────────────
+// Search and gap-fill matching intentionally skip requireUserOAuth:
+// the sidecar executes these operations with public clients so user OAuth
+// search history is not affected.
 
 router.post(
     "/search",
@@ -400,13 +442,16 @@ router.post(
     async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
-            if (!(await requireUserOAuth(userId, res))) return;
 
             const { query, filter } = req.body;
             if (!query) {
                 return res.status(400).json({ error: "query is required" });
             }
-            const result = await ytMusicService.search(userId, query, filter);
+            const result = await ytMusicService.searchCanonical(
+                userId,
+                query,
+                filter
+            );
             res.json(result);
         } catch (err: any) {
             if (handleYtMusicAuthError(res, err)) return;
@@ -496,8 +541,10 @@ router.get(
             if (!(await requireUserOAuth(userId, res))) return;
 
             const { videoId } = req.params;
-            const quality =
-                (req.query.quality as string) || undefined;
+            const quality = await resolveYtMusicStreamQuality(
+                userId,
+                req.query.quality
+            );
 
             const info = await ytMusicService.getStreamInfo(
                 userId,
@@ -547,8 +594,10 @@ router.get(
             if (!(await requireUserOAuth(userId, res))) return;
 
             const { videoId } = req.params;
-            const quality =
-                (req.query.quality as string) || undefined;
+            const quality = await resolveYtMusicStreamQuality(
+                userId,
+                req.query.quality
+            );
             const rangeHeader = req.headers.range;
 
             const proxyRes = await ytMusicService.getStreamProxy(
@@ -659,7 +708,6 @@ router.post(
     async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
-            if (!(await requireUserOAuth(userId, res))) return;
 
             const schema = z.object({
                 artist: z.string().min(1),
@@ -703,7 +751,6 @@ router.post(
     async (req: Request, res: Response) => {
         try {
             const userId = req.user!.id;
-            if (!(await requireUserOAuth(userId, res))) return;
 
             const schema = z.object({
                 tracks: z

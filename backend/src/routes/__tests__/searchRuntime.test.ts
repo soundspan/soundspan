@@ -17,6 +17,10 @@ jest.mock("../../utils/db", () => ({
     prisma: {
         artist: {
             findMany: jest.fn(),
+            findFirst: jest.fn(),
+        },
+        similarArtist: {
+            findMany: jest.fn(),
         },
         genre: {
             findMany: jest.fn(),
@@ -64,6 +68,8 @@ import { lastFmService } from "../../services/lastfm";
 import { searchService } from "../../services/search";
 
 const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
+const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
+const mockSimilarArtistFindMany = prisma.similarArtist.findMany as jest.Mock;
 const mockGenreFindMany = prisma.genre.findMany as jest.Mock;
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
@@ -113,6 +119,8 @@ describe("search route runtime behavior", () => {
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
         mockArtistFindMany.mockResolvedValue([]);
+        mockArtistFindFirst.mockResolvedValue(null);
+        mockSimilarArtistFindMany.mockResolvedValue([]);
         mockGenreFindMany.mockResolvedValue([]);
         mockGetArtistCorrection.mockResolvedValue(null);
         mockSearchArtists.mockResolvedValue([]);
@@ -543,6 +551,110 @@ describe("search route runtime behavior", () => {
         });
     });
 
+    it("falls back to local similar-artist graph when Last.fm enrichment is empty", async () => {
+        mockGetSimilarArtists.mockResolvedValueOnce([
+            { name: "Sparse Similar", match: 0.64 },
+        ]);
+        mockEnrichSimilarArtists.mockResolvedValueOnce([]);
+        mockArtistFindFirst.mockResolvedValueOnce({ id: "artist-seed-1" });
+        mockSimilarArtistFindMany.mockResolvedValueOnce([
+            {
+                weight: 0.98,
+                toArtist: {
+                    id: "artist-2",
+                    mbid: "mbid-thom",
+                    name: "Thom Yorke",
+                    heroUrl: "thom.jpg",
+                    summary: "Radiohead side projects and solo work",
+                    genres: ["alternative", "electronic"],
+                },
+            },
+            {
+                weight: 0.87,
+                toArtist: {
+                    id: "artist-3",
+                    mbid: "mbid-atoms",
+                    name: "Atoms for Peace",
+                    heroUrl: null,
+                    summary: null,
+                    genres: null,
+                },
+            },
+        ]);
+
+        const req = {
+            query: { artist: "Radiohead", mbid: "mbid-r", limit: "2" },
+        } as any;
+        const res = createRes();
+
+        await discoverSimilarHandler(req, res);
+
+        expect(mockGetSimilarArtists).toHaveBeenCalledWith("mbid-r", "Radiohead", 10);
+        expect(mockEnrichSimilarArtists).toHaveBeenCalledWith(
+            [{ name: "Sparse Similar", match: 0.64 }],
+            2
+        );
+        expect(mockArtistFindFirst).toHaveBeenCalledWith({
+            where: {
+                OR: [
+                    { name: { equals: "Radiohead", mode: "insensitive" } },
+                    { normalizedName: "radiohead" },
+                    { mbid: "mbid-r" },
+                ],
+            },
+            select: { id: true },
+        });
+        expect(mockSimilarArtistFindMany).toHaveBeenCalledWith({
+            where: { fromArtistId: "artist-seed-1" },
+            orderBy: { weight: "desc" },
+            take: 2,
+            include: {
+                toArtist: {
+                    select: {
+                        id: true,
+                        mbid: true,
+                        name: true,
+                        heroUrl: true,
+                        summary: true,
+                        genres: true,
+                    },
+                },
+            },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            similarArtists: [
+                {
+                    type: "music",
+                    id: "mbid-thom",
+                    name: "Thom Yorke",
+                    listeners: 0,
+                    url: null,
+                    image: "thom.jpg",
+                    mbid: "mbid-thom",
+                    bio: "Radiohead side projects and solo work",
+                    tags: ["alternative", "electronic"],
+                },
+                {
+                    type: "music",
+                    id: "mbid-atoms",
+                    name: "Atoms for Peace",
+                    listeners: 0,
+                    url: null,
+                    image: null,
+                    mbid: "mbid-atoms",
+                    bio: null,
+                    tags: [],
+                },
+            ],
+        });
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            "search:discover:similar:radiohead:mbid-r:2",
+            3600,
+            expect.any(String)
+        );
+    });
+
     it("returns empty similar artists when no similar seed results exist", async () => {
         mockGetSimilarArtists.mockResolvedValueOnce([]);
         const req = {
@@ -553,6 +665,16 @@ describe("search route runtime behavior", () => {
         await discoverSimilarHandler(req, res);
 
         expect(mockEnrichSimilarArtists).not.toHaveBeenCalled();
+        expect(mockArtistFindFirst).toHaveBeenCalledWith({
+            where: {
+                OR: [
+                    { name: { equals: "NoMatch", mode: "insensitive" } },
+                    { normalizedName: "nomatch" },
+                ],
+            },
+            select: { id: true },
+        });
+        expect(mockSimilarArtistFindMany).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ similarArtists: [] });
     });

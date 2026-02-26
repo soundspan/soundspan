@@ -6,8 +6,6 @@ import { useAudioControls } from "@/lib/audio-controls-context";
 import { useMediaInfo } from "@/hooks/useMediaInfo";
 import {
     useStreamBitrate,
-    formatLocalQualityBadge,
-    formatYtQualityBadge,
 } from "@/hooks/useStreamBitrate";
 import Image from "next/image";
 import Link from "next/link";
@@ -32,9 +30,9 @@ import { KeyboardShortcutsTooltip } from "./KeyboardShortcutsTooltip";
 import { cn } from "@/utils/cn";
 import { formatTime, clampTime, formatTimeRemaining } from "@/utils/formatTime";
 import { SeekSlider } from "./SeekSlider";
-import { TidalBadge } from "@/components/ui/TidalBadge";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
+import { PlaybackQualityBadge } from "./PlaybackQualityBadge";
 
 /**
  * FullPlayer - UI-only component for desktop bottom player
@@ -179,13 +177,8 @@ export function FullPlayer() {
 
     const { title, subtitle, coverUrl, artistLink, mediaLink, hasMedia } = useMediaInfo(100);
     const {
-        bitrate: streamBitrate,
-        codec: streamCodec,
-        tidalQuality,
-        localQuality,
+        qualityBadge,
     } = useStreamBitrate();
-    const ytQualityLabel = formatYtQualityBadge(streamCodec, streamBitrate);
-    const localQualityLabel = formatLocalQualityBadge(localQuality);
 
     // Determine if seeking is allowed
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -275,28 +268,12 @@ export function FullPlayer() {
                             )}
                             {/* Quality & status badges */}
                             <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                            {/* TIDAL streaming indicator */}
-                            {currentTrack?.streamSource === "tidal" && (
-                                <TidalBadge quality={tidalQuality} className="inline-flex items-center" />
-                            )}
-                            {/* YouTube Music stream quality badge */}
-                            {currentTrack?.streamSource === "youtube" && (
-                                <span
-                                    className="inline-flex max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400"
-                                    title={ytQualityLabel}
-                                >
-                                    {ytQualityLabel}
-                                </span>
-                            )}
-                            {/* Local track quality badge */}
-                            {!currentTrack?.streamSource && localQuality && (
-                                <span
-                                    className="inline-flex max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400"
-                                    title={localQualityLabel || undefined}
-                                >
-                                    {localQualityLabel}
-                                </span>
-                            )}
+                            {qualityBadge ? (
+                                <PlaybackQualityBadge
+                                    badge={qualityBadge}
+                                    size="full"
+                                />
+                            ) : null}
                             {/* Vibe match score when in vibe mode */}
                             {vibeMode && vibeMatchScore !== null && (
                                 <span

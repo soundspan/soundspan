@@ -120,13 +120,19 @@ describe("social presence compatibility", () => {
                 playbackStates: [
                     {
                         playbackType: "track",
+                        isPlaying: true,
+                        updatedAt: new Date(now),
                         queue: [
                             {
                                 id: "track-1",
                                 title: "Song One",
                                 duration: 181,
-                                artist: { name: "Artist One" },
-                                album: { title: "Album One", coverArt: "cover-1" },
+                                artist: { id: "artist-1", name: "Artist One" },
+                                album: {
+                                    id: "album-1",
+                                    title: "Album One",
+                                    coverArt: "cover-1",
+                                },
                             },
                         ],
                         currentIndex: 0,
@@ -154,6 +160,8 @@ describe("social presence compatibility", () => {
                 playbackStates: [
                     {
                         playbackType: "track",
+                        isPlaying: true,
+                        updatedAt: new Date(now),
                         queue: [
                             {
                                 id: "track-3",
@@ -187,12 +195,15 @@ describe("social presence compatibility", () => {
                     username: "alice",
                     displayName: "Alice D",
                     isInListenTogetherGroup: true,
+                    listeningStatus: "playing",
                     listeningTrack: {
                         id: "track-1",
                         title: "Song One",
                         duration: 181,
                         artistName: "Artist One",
+                        artistId: "artist-1",
                         albumTitle: "Album One",
+                        albumId: "album-1",
                         coverArt: "cover-1",
                     },
                     lastHeartbeatAt: expect.any(String),
@@ -202,6 +213,7 @@ describe("social presence compatibility", () => {
                     username: "carol",
                     displayName: "carol",
                     isInListenTogetherGroup: false,
+                    listeningStatus: "idle",
                     listeningTrack: null,
                     lastHeartbeatAt: expect.any(String),
                 },
@@ -271,6 +283,7 @@ describe("social presence compatibility", () => {
             users: [
                 expect.objectContaining({
                     id: "user-1",
+                    listeningStatus: "idle",
                     listeningTrack: null,
                 }),
             ],
@@ -360,6 +373,7 @@ describe("social presence compatibility", () => {
         await onlineHandler(req, res);
 
         expect(res.statusCode).toBe(200);
+        expect(res.body.users[0].listeningStatus).toBe("idle");
         expect(res.body.users[0].listeningTrack).toBeNull();
     });
 
@@ -397,6 +411,7 @@ describe("social presence compatibility", () => {
         await onlineHandler(req, res);
 
         expect(res.statusCode).toBe(200);
+        expect(res.body.users[0].listeningStatus).toBe("idle");
         expect(res.body.users[0].listeningTrack).toBeNull();
     });
 
@@ -442,6 +457,7 @@ describe("social presence compatibility", () => {
         await onlineHandler(req, res);
 
         expect(res.statusCode).toBe(200);
+        expect(res.body.users[0].listeningStatus).toBe("idle");
         expect(res.body.users[0].listeningTrack).toBeNull();
     });
 
@@ -487,10 +503,11 @@ describe("social presence compatibility", () => {
         await onlineHandler(req, res);
 
         expect(res.statusCode).toBe(200);
+        expect(res.body.users[0].listeningStatus).toBe("idle");
         expect(res.body.users[0].listeningTrack).toBeNull();
     });
 
-    it("projects valid tracks with null cover art and missing heartbeat fallback", async () => {
+    it("projects valid tracks with paused status and missing heartbeat fallback", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
             asAsyncIterable(["social:presence:user:user-1"])
@@ -508,13 +525,22 @@ describe("social presence compatibility", () => {
                 playbackStates: [
                     {
                         playbackType: "track",
+                        isPlaying: false,
+                        updatedAt: new Date(now - 2 * 60 * 1000),
                         queue: [
                             {
                                 id: "t-ghost",
                                 title: "Ghost Song",
                                 duration: 140,
-                                artist: { name: "Ghost Artist" },
-                                album: { title: "Ghost Album", coverArt: null },
+                                artist: {
+                                    id: "artist-ghost",
+                                    name: "Ghost Artist",
+                                },
+                                album: {
+                                    id: "album-ghost",
+                                    title: "Ghost Album",
+                                    coverArt: null,
+                                },
                             },
                         ],
                         currentIndex: 0,
@@ -539,18 +565,117 @@ describe("social presence compatibility", () => {
                     username: "ghost",
                     displayName: "Ghost",
                     isInListenTogetherGroup: false,
+                    listeningStatus: "paused",
                     listeningTrack: {
                         id: "t-ghost",
                         title: "Ghost Song",
                         duration: 140,
                         artistName: "Ghost Artist",
+                        artistId: "artist-ghost",
                         albumTitle: "Ghost Album",
+                        albumId: "album-ghost",
                         coverArt: null,
                     },
                     lastHeartbeatAt: expect.any(String),
                 },
             ],
         });
+    });
+
+    it("reports idle status when pause age exceeds five minutes", async () => {
+        const now = Date.now();
+        mockScanIterator.mockReturnValue(
+            asAsyncIterable(["social:presence:user:user-1"])
+        );
+        mockMGet.mockResolvedValue([String(now)]);
+        mockUserFindMany.mockResolvedValue([
+            {
+                id: "user-1",
+                username: "alice",
+                displayName: null,
+                settings: {
+                    shareOnlinePresence: true,
+                    shareListeningStatus: true,
+                },
+                playbackStates: [
+                    {
+                        playbackType: "track",
+                        isPlaying: false,
+                        updatedAt: new Date(now - 6 * 60 * 1000),
+                        queue: [
+                            {
+                                id: "track-1",
+                                title: "Song One",
+                                duration: 181,
+                                artist: { id: "artist-1", name: "Artist One" },
+                                album: {
+                                    id: "album-1",
+                                    title: "Album One",
+                                    coverArt: "cover-1",
+                                },
+                            },
+                        ],
+                        currentIndex: 0,
+                    },
+                ],
+            },
+        ]);
+        mockSyncGroupMemberFindMany.mockResolvedValue([]);
+
+        const req = {
+            user: { id: "viewer-1", role: "user" },
+        } as any;
+        const res = createRes();
+
+        await onlineHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.users[0].listeningStatus).toBe("idle");
+        expect(res.body.users[0].listeningTrack).toEqual(
+            expect.objectContaining({
+                id: "track-1",
+            })
+        );
+    });
+
+    it("reports idle status when the playback queue is empty", async () => {
+        const now = Date.now();
+        mockScanIterator.mockReturnValue(
+            asAsyncIterable(["social:presence:user:user-1"])
+        );
+        mockMGet.mockResolvedValue([String(now)]);
+        mockUserFindMany.mockResolvedValue([
+            {
+                id: "user-1",
+                username: "alice",
+                displayName: null,
+                settings: {
+                    shareOnlinePresence: true,
+                    shareListeningStatus: true,
+                },
+                playbackStates: [
+                    {
+                        playbackType: "track",
+                        isPlaying: true,
+                        updatedAt: new Date(now),
+                        queue: [],
+                        currentIndex: 0,
+                    },
+                ],
+            },
+        ]);
+        mockSyncGroupMemberFindMany.mockResolvedValue([]);
+
+        const req = {
+            user: { id: "viewer-1", role: "user" },
+        } as any;
+        const res = createRes();
+
+        await onlineHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.users[0].listeningStatus).toBe("idle");
+        expect(res.body.users[0].listeningTrack).toBeNull();
     });
 
     it("returns all connected users for admins regardless of sharing settings", async () => {

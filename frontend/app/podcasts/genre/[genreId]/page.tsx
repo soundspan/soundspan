@@ -6,6 +6,7 @@ import Image from "next/image";
 import { Mic2, ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Podcast {
     id: string;
@@ -64,7 +65,7 @@ export default function GenrePage() {
             setPodcasts((prev) => [...prev, ...data]);
             setOffset((prev) => prev + data.length);
         } catch (error) {
-            console.error("Failed to load podcasts:", error);
+            sharedFrontendLogger.error("Failed to load podcasts:", error);
             setHasMore(false);
         } finally {
             setLoading(false);

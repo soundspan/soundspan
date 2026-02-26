@@ -14,6 +14,7 @@ import axios, { AxiosInstance } from "axios";
 import http from "node:http";
 import https from "node:https";
 import { logger } from "../utils/logger";
+import type { CanonicalMediaSearchResult } from "@soundspan/media-metadata-contract";
 
 // ── Sidecar URL ────────────────────────────────────────────────────
 const YTMUSIC_STREAMER_URL =
@@ -51,6 +52,13 @@ export interface YtMusicDeviceCodePollResult {
 export interface YtMusicSearchResult {
     results: any[];
     total: number;
+}
+
+export interface YtMusicCanonicalSearchResponse {
+    query: string;
+    filter: "songs" | "albums" | "artists" | "videos" | null;
+    total: number;
+    results: CanonicalMediaSearchResult[];
 }
 
 export interface YtMusicAlbum {
@@ -93,6 +101,27 @@ export interface YtMusicStreamInfo {
     expires_at: number;
 }
 
+export type YtMusicStreamQuality = "low" | "medium" | "high" | "lossless";
+
+/**
+ * Normalize user-provided or stored quality values to sidecar query values.
+ * Accepts both persisted uppercase settings and lowercase request values.
+ */
+export const normalizeYtMusicStreamQuality = (
+    quality: string | null | undefined
+): YtMusicStreamQuality | undefined => {
+    const normalized = quality?.trim().toLowerCase();
+    if (
+        normalized === "low" ||
+        normalized === "medium" ||
+        normalized === "high" ||
+        normalized === "lossless"
+    ) {
+        return normalized;
+    }
+    return undefined;
+};
+
 interface YtMusicMatchInput {
     artist: string;
     title: string;
@@ -119,6 +148,95 @@ function parseDuration(item: any): number {
         if (parts.length === 2) return parts[0] * 60 + parts[1];
     }
     return 0;
+}
+
+function normalizeText(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolvePrimaryArtist(item: Record<string, unknown>): string {
+    const artist = normalizeText(item.artist);
+    if (artist) {
+        return artist;
+    }
+
+    const artists = item.artists;
+    if (Array.isArray(artists)) {
+        for (const entry of artists) {
+            if (typeof entry === "string") {
+                const normalized = normalizeText(entry);
+                if (normalized) return normalized;
+                continue;
+            }
+            if (entry && typeof entry === "object") {
+                const name = normalizeText(
+                    (entry as Record<string, unknown>).name
+                );
+                if (name) return name;
+            }
+        }
+    }
+
+    return "Unknown Artist";
+}
+
+function resolveAlbumTitle(item: Record<string, unknown>): string | null {
+    const album = item.album;
+    if (typeof album === "string") {
+        return normalizeText(album);
+    }
+    if (album && typeof album === "object") {
+        const record = album as Record<string, unknown>;
+        return normalizeText(record.title) ?? normalizeText(record.name);
+    }
+    return null;
+}
+
+function resolveThumbnailUrl(item: Record<string, unknown>): string | null {
+    const thumbnails = item.thumbnails;
+    if (!Array.isArray(thumbnails)) return null;
+    for (const thumb of thumbnails) {
+        if (!thumb || typeof thumb !== "object") continue;
+        const url = normalizeText((thumb as Record<string, unknown>).url);
+        if (url) return url;
+    }
+    return null;
+}
+
+function toCanonicalSearchResultItem(
+    item: unknown
+): CanonicalMediaSearchResult | null {
+    if (!item || typeof item !== "object") {
+        return null;
+    }
+
+    const record = item as Record<string, unknown>;
+    const providerTrackId = normalizeText(record.videoId);
+    const title = normalizeText(record.title);
+
+    if (!providerTrackId || !title) {
+        return null;
+    }
+
+    const durationSecRaw = parseDuration(record);
+    const durationSec =
+        Number.isFinite(durationSecRaw) && durationSecRaw > 0
+            ? durationSecRaw
+            : null;
+
+    return {
+        source: "youtube",
+        provider: "ytmusic",
+        providerTrackId,
+        title,
+        artistName: resolvePrimaryArtist(record),
+        albumTitle: resolveAlbumTitle(record),
+        durationSec,
+        thumbnailUrl: resolveThumbnailUrl(record),
+        raw: record,
+    };
 }
 
 // ── Service ────────────────────────────────────────────────────────
@@ -346,6 +464,32 @@ class YouTubeMusicService {
             );
             return res.data;
         }, `search(${query})`);
+    }
+
+    async searchCanonical(
+        userId: string,
+        query: string,
+        filter?: "songs" | "albums" | "artists" | "videos"
+    ): Promise<YtMusicCanonicalSearchResponse> {
+        const rawResult = await this.search(userId, query, filter);
+        const canonicalResults = Array.isArray(rawResult.results)
+            ? rawResult.results
+                  .map((item) => toCanonicalSearchResultItem(item))
+                  .filter(
+                      (item): item is CanonicalMediaSearchResult => item !== null
+                  )
+            : [];
+
+        return {
+            query,
+            filter: filter ?? null,
+            total:
+                typeof rawResult.total === "number" &&
+                Number.isFinite(rawResult.total)
+                    ? rawResult.total
+                    : canonicalResults.length,
+            results: canonicalResults,
+        };
     }
 
     // ── Browse ─────────────────────────────────────────────────────

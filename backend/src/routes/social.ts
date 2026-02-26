@@ -3,21 +3,45 @@ import { requireAuth, requireAdmin } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
+import { publishSocialPresenceUpdate } from "../services/socialPresenceEvents";
 
 const router = express.Router();
 router.use(requireAuth);
 
 const PRESENCE_KEY_PREFIX = "social:presence:user:";
 const PRESENCE_TTL_SECONDS = 75;
+const PAUSED_TO_IDLE_CUTOFF_MS = 5 * 60 * 1000;
+
+type ListeningStatus = "playing" | "paused" | "idle";
 
 type QueueTrackProjection = {
     id: string;
     title: string;
     duration: number;
     artistName: string;
+    artistId: string | null;
     albumTitle: string;
+    albumId: string | null;
     coverArt: string | null;
 };
+
+function asNonEmptyString(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+
+function getElapsedMs(value: unknown): number | null {
+    const timestamp =
+        value instanceof Date
+            ? value.getTime()
+            : typeof value === "string"
+              ? Date.parse(value)
+              : Number.NaN;
+
+    if (!Number.isFinite(timestamp)) return null;
+    return Math.max(0, Date.now() - timestamp);
+}
 
 function extractQueueTrack(
     queueRaw: unknown,
@@ -54,10 +78,35 @@ function extractQueueTrack(
         title: item.title,
         duration: item.duration,
         artistName: artist.name,
+        artistId: asNonEmptyString(artist.id),
         albumTitle: album.title,
+        albumId: asNonEmptyString(album.id),
         coverArt:
             typeof album.coverArt === "string" ? album.coverArt : null,
     };
+}
+
+function resolveListeningStatus(
+    shareListening: boolean,
+    latestPlaybackState: {
+        playbackType: string;
+        isPlaying: boolean;
+        updatedAt: Date;
+    } | null | undefined,
+    listeningTrack: QueueTrackProjection | null
+): ListeningStatus {
+    if (!shareListening) return "idle";
+    if (!latestPlaybackState || latestPlaybackState.playbackType !== "track") {
+        return "idle";
+    }
+    if (!listeningTrack) return "idle";
+    if (latestPlaybackState.isPlaying) return "playing";
+
+    const elapsedMs = getElapsedMs(latestPlaybackState.updatedAt);
+    if (elapsedMs === null || elapsedMs > PAUSED_TO_IDLE_CUTOFF_MS) {
+        return "idle";
+    }
+    return "paused";
 }
 
 async function getOnlinePresenceMap(): Promise<Map<string, number>> {
@@ -99,11 +148,17 @@ async function getOnlinePresenceMap(): Promise<Map<string, number>> {
 router.post("/presence/heartbeat", async (req, res) => {
     try {
         const userId = req.user!.id;
+        const timestampMs = Date.now();
         await redisClient.set(
             `${PRESENCE_KEY_PREFIX}${userId}`,
-            Date.now().toString(),
+            timestampMs.toString(),
             { EX: PRESENCE_TTL_SECONDS }
         );
+        publishSocialPresenceUpdate({
+            userId,
+            reason: "heartbeat",
+            timestampMs,
+        });
 
         return res.json({
             success: true,
@@ -144,6 +199,8 @@ router.get("/online", async (_req, res) => {
                             playbackType: true,
                             queue: true,
                             currentIndex: true,
+                            isPlaying: true,
+                            updatedAt: true,
                         },
                     },
                 },
@@ -178,6 +235,11 @@ router.get("/online", async (_req, res) => {
                               latestPlaybackState.currentIndex
                           )
                         : null;
+                const listeningStatus = resolveListeningStatus(
+                    shareListening,
+                    latestPlaybackState,
+                    listeningTrack
+                );
                 const lastHeartbeatMs = onlinePresenceByUserId.get(user.id);
 
                 return {
@@ -185,6 +247,7 @@ router.get("/online", async (_req, res) => {
                     username: user.username,
                     displayName: user.displayName ?? user.username,
                     isInListenTogetherGroup: inListenTogether.has(user.id),
+                    listeningStatus,
                     listeningTrack,
                     lastHeartbeatAt: lastHeartbeatMs
                         ? new Date(lastHeartbeatMs).toISOString()

@@ -45,6 +45,7 @@ mock.module("lucide-react", {
         RefreshCw: Icon,
         LogOut: Icon,
         Compass: Icon,
+        Heart: Icon,
         X: Icon,
         Radio: Icon,
         Users: Icon,
@@ -131,6 +132,7 @@ test("renders quick links and omits my history", async () => {
 
     assert.match(html, /Quick Links/);
     assert.match(html, />Discover</);
+    assert.match(html, />My Liked</);
     assert.match(html, />Radio</);
     assert.match(html, />Listen Together</);
     assert.doesNotMatch(html, /My History/);

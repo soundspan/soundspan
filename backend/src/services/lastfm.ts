@@ -83,7 +83,17 @@ class LastFmService {
         artistName: string,
         limit = 30
     ): Promise<SimilarArtist[]> {
-        const cacheKey = `lastfm:similar:${artistMbid}`;
+        const normalizedArtistName = this.normalizeName(artistName);
+        const trimmedMbid = (artistMbid || "").trim();
+        const cacheKey = trimmedMbid
+            ? `lastfm:similar:mbid:${trimmedMbid}:limit:${limit}`
+            : `lastfm:similar:name:${normalizedArtistName}:limit:${limit}`;
+
+        // Many tracks in local libraries do not include artist MBIDs.
+        // Avoid querying Last.fm with an empty MBID and relying on error fallback.
+        if (!trimmedMbid && normalizedArtistName.length > 0) {
+            return this.getSimilarArtistsByName(artistName, limit);
+        }
 
         try {
             const cached = await redisClient.get(cacheKey);
@@ -97,7 +107,7 @@ class LastFmService {
         try {
             const data = await this.request({
                 method: "artist.getSimilar",
-                mbid: artistMbid,
+                mbid: trimmedMbid,
                 api_key: this.apiKey,
                 format: "json",
                 limit,
@@ -145,7 +155,9 @@ class LastFmService {
         artistName: string,
         limit = 30
     ): Promise<SimilarArtist[]> {
-        const cacheKey = `lastfm:similar:name:${artistName}`;
+        const cacheKey = `lastfm:similar:name:${this.normalizeName(
+            artistName
+        )}:limit:${limit}`;
 
         try {
             const cached = await redisClient.get(cacheKey);

@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * useHomeData Hook
  *
@@ -132,7 +133,7 @@ export function useHomeData(): UseHomeDataReturn {
             await refreshMixes();
             toast.success("Mixes refreshed! Check out your new daily picks");
         } catch (error) {
-            console.error("Failed to refresh mixes:", error);
+            sharedFrontendLogger.error("Failed to refresh mixes:", error);
             toast.error("Failed to refresh mixes");
         }
     };

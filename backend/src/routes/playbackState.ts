@@ -2,6 +2,11 @@ import express from "express";
 import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
 import { requireAuth } from "../middleware/auth";
+import { publishSocialPresenceUpdate } from "../services/socialPresenceEvents";
+import {
+    normalizeCanonicalMediaProviderIdentity,
+    toLegacyStreamFields,
+} from "@soundspan/media-metadata-contract";
 
 const router = express.Router();
 
@@ -11,6 +16,16 @@ function getPlaybackDeviceId(req: express.Request): string {
     if (!trimmed) return "legacy";
     // Keep identifiers bounded to avoid untrusted oversized header values
     return trimmed.substring(0, 128);
+}
+
+function sanitizeOptionalString(
+    value: unknown,
+    maxLen: number
+): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    return trimmed.substring(0, maxLen);
 }
 
 // Get current playback state for the authenticated user
@@ -104,62 +119,150 @@ router.post("/", requireAuth, async (req, res) => {
             return res.status(400).json({ error: "Invalid playbackType" });
         }
 
-        // Limit queue size and sanitize queue items to prevent database issues
-        let safeQueue: any[] | null = null;
-        if (Array.isArray(queue) && queue.length > 0) {
-            // Only keep essential fields from each queue item to reduce JSON size
-            // Filter out any invalid items first
-            try {
-                safeQueue = queue
-                    .slice(0, 100)
-                    .filter((item: any) => item && item.id) // Must have at least an ID
-                    .map((item: any) => ({
-                        id: String(item.id || ""),
-                        title: String(item.title || "Unknown").substring(0, 500), // Limit title length
-                        duration: Number(item.duration) || 0,
-                        artist: item.artist ? {
-                            id: String(item.artist.id || ""),
-                            name: String(item.artist.name || "Unknown").substring(0, 200),
-                        } : null,
-                        album: item.album ? {
-                            id: String(item.album.id || ""),
-                            title: String(item.album.title || "Unknown").substring(0, 500),
-                            coverArt: item.album.coverArt ? String(item.album.coverArt).substring(0, 1000) : null,
-                        } : null,
-                    }));
-                
-                // If sanitization removed all items, set to null
-                if (safeQueue.length === 0) {
-                    safeQueue = null;
-                }
-            } catch (sanitizeError: any) {
-                logger.error("[PlaybackState] Queue sanitization failed:", sanitizeError?.message);
-                safeQueue = null; // Fall back to null queue
-            }
-        }
-        
-        const safeCurrentIndex = Math.min(
-            Math.max(0, currentIndex || 0),
-            safeQueue?.length ? safeQueue.length - 1 : 0
-        );
-        const safeCurrentTime =
-            typeof currentTime === "number" && Number.isFinite(currentTime)
-                ? Math.max(0, currentTime)
-                : 0;
+        const hasExplicitQueue = Array.isArray(queue);
+        const hasExplicitCurrentIndex = Number.isInteger(currentIndex);
+        const hasExplicitCurrentTime =
+            typeof currentTime === "number" && Number.isFinite(currentTime);
+        const hasExplicitIsShuffle = typeof isShuffle === "boolean";
         const hasExplicitIsPlaying = typeof isPlaying === "boolean";
         const safeIsPlaying = hasExplicitIsPlaying ? isPlaying : false;
+        const safeCurrentTime = hasExplicitCurrentTime
+            ? Math.max(0, currentTime)
+            : 0;
+
+        // `undefined` means caller omitted queue and we should preserve persisted value.
+        let safeQueue: any[] | null | undefined = undefined;
+        if (hasExplicitQueue) {
+            safeQueue = null;
+            if (queue.length > 0) {
+                // Only keep essential fields from each queue item to reduce JSON size.
+                try {
+                    safeQueue = queue
+                        .slice(0, 100)
+                        .filter((item: any) => item && item.id)
+                        .map((item: any) => ({
+                            ...(() => {
+                                const provider = normalizeCanonicalMediaProviderIdentity({
+                                    mediaSource: item.mediaSource,
+                                    streamSource: item.streamSource,
+                                    sourceType: item.sourceType,
+                                    providerTrackId:
+                                        item.provider?.providerTrackId ??
+                                        item.providerTrackId,
+                                    tidalTrackId:
+                                        item.provider?.tidalTrackId ??
+                                        item.tidalTrackId,
+                                    youtubeVideoId:
+                                        item.provider?.youtubeVideoId ??
+                                        item.youtubeVideoId,
+                                });
+                                const sanitizedProvider = {
+                                    source: provider.source,
+                                    ...(sanitizeOptionalString(
+                                        provider.providerTrackId,
+                                        128,
+                                    )
+                                        ? {
+                                              providerTrackId: sanitizeOptionalString(
+                                                  provider.providerTrackId,
+                                                  128,
+                                              ),
+                                          }
+                                        : {}),
+                                    ...(typeof provider.tidalTrackId === "number" &&
+                                    Number.isFinite(provider.tidalTrackId)
+                                        ? { tidalTrackId: provider.tidalTrackId }
+                                        : {}),
+                                    ...(sanitizeOptionalString(
+                                        provider.youtubeVideoId,
+                                        64,
+                                    )
+                                        ? {
+                                              youtubeVideoId: sanitizeOptionalString(
+                                                  provider.youtubeVideoId,
+                                                  64,
+                                              ),
+                                          }
+                                        : {}),
+                                };
+
+                                return {
+                                    mediaSource: provider.source,
+                                    provider: sanitizedProvider,
+                                    ...toLegacyStreamFields(provider),
+                                };
+                            })(),
+                            id: String(item.id || ""),
+                            title: String(item.title || "Unknown").substring(0, 500),
+                            duration: Number(item.duration) || 0,
+                            artist: item.artist
+                                ? {
+                                      id: String(item.artist.id || ""),
+                                      name: String(item.artist.name || "Unknown").substring(
+                                          0,
+                                          200,
+                                      ),
+                                  }
+                                : null,
+                            album: item.album
+                                ? {
+                                      id: String(item.album.id || ""),
+                                      title: String(
+                                          item.album.title || "Unknown",
+                                      ).substring(0, 500),
+                                      coverArt: item.album.coverArt
+                                          ? String(item.album.coverArt).substring(
+                                                0,
+                                                1000,
+                                            )
+                                          : null,
+                                  }
+                                : null,
+                        }));
+                    if (safeQueue.length === 0) {
+                        safeQueue = null;
+                    }
+                } catch (sanitizeError: any) {
+                    logger.error(
+                        "[PlaybackState] Queue sanitization failed:",
+                        sanitizeError?.message,
+                    );
+                    safeQueue = null;
+                }
+            }
+        }
+
+        const safeCurrentIndexFromPayload = hasExplicitCurrentIndex
+            ? Math.max(0, currentIndex)
+            : 0;
+        const safeCurrentIndex =
+            safeQueue !== undefined
+                ? Math.min(
+                      safeCurrentIndexFromPayload,
+                      safeQueue?.length ? safeQueue.length - 1 : 0,
+                  )
+                : safeCurrentIndexFromPayload;
 
         const updatePayload: Prisma.PlaybackStateUncheckedUpdateInput = {
             playbackType,
             trackId: trackId || null,
             audiobookId: audiobookId || null,
             podcastId: podcastId || null,
-            queue: safeQueue === null ? Prisma.DbNull : safeQueue,
-            currentIndex: safeCurrentIndex,
-            isShuffle: isShuffle || false,
-            currentTime: safeCurrentTime,
             ...(hasExplicitIsPlaying ? { isPlaying: safeIsPlaying } : {}),
         };
+        if (safeQueue !== undefined) {
+            updatePayload.queue = safeQueue === null ? Prisma.DbNull : safeQueue;
+        }
+        if (hasExplicitCurrentIndex || safeQueue !== undefined) {
+            updatePayload.currentIndex = safeCurrentIndex;
+        }
+        if (hasExplicitIsShuffle) {
+            updatePayload.isShuffle = isShuffle;
+        }
+        if (hasExplicitCurrentTime) {
+            updatePayload.currentTime = safeCurrentTime;
+        }
+
         const createPayload: Prisma.PlaybackStateUncheckedCreateInput = {
             userId,
             deviceId,
@@ -167,17 +270,29 @@ router.post("/", requireAuth, async (req, res) => {
             trackId: trackId || null,
             audiobookId: audiobookId || null,
             podcastId: podcastId || null,
-            queue: safeQueue === null ? Prisma.DbNull : safeQueue,
-            currentIndex: safeCurrentIndex,
-            isShuffle: isShuffle || false,
+            queue:
+                safeQueue === undefined || safeQueue === null
+                    ? Prisma.DbNull
+                    : safeQueue,
+            currentIndex:
+                hasExplicitCurrentIndex || safeQueue !== undefined
+                    ? safeCurrentIndex
+                    : 0,
+            isShuffle: hasExplicitIsShuffle ? isShuffle : false,
             isPlaying: safeIsPlaying,
-            currentTime: safeCurrentTime,
+            currentTime: hasExplicitCurrentTime ? safeCurrentTime : 0,
         };
 
         const playbackState = await prisma.playbackState.upsert({
             where: { userId_deviceId: { userId, deviceId } },
             update: updatePayload,
             create: createPayload,
+        });
+        publishSocialPresenceUpdate({
+            userId,
+            deviceId,
+            reason: "playback-state",
+            timestampMs: Date.now(),
         });
 
         res.json(playbackState);
@@ -206,6 +321,12 @@ router.delete("/", requireAuth, async (req, res) => {
 
         await prisma.playbackState.deleteMany({
             where: { userId, deviceId },
+        });
+        publishSocialPresenceUpdate({
+            userId,
+            deviceId,
+            reason: "playback-state-cleared",
+            timestampMs: Date.now(),
         });
 
         res.json({ success: true });

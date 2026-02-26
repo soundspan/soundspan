@@ -1,3 +1,4 @@
+import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 /**
  * Playback State Machine
  *
@@ -8,6 +9,7 @@
 export type PlaybackState =
   | 'IDLE'
   | 'LOADING'
+  | 'RECOVERING'
   | 'READY'
   | 'PLAYING'
   | 'SEEKING'
@@ -26,12 +28,13 @@ export interface StateContext {
 // Valid state transitions - anything not listed is invalid
 const VALID_TRANSITIONS: Record<PlaybackState, PlaybackState[]> = {
   IDLE: ['LOADING'],
-  LOADING: ['READY', 'PLAYING', 'ERROR', 'IDLE'],
+  LOADING: ['RECOVERING', 'READY', 'PLAYING', 'ERROR', 'IDLE'],
+  RECOVERING: ['LOADING', 'READY', 'PLAYING', 'ERROR', 'IDLE'],
   READY: ['PLAYING', 'LOADING', 'IDLE', 'SEEKING'],
-  PLAYING: ['READY', 'SEEKING', 'BUFFERING', 'LOADING', 'ERROR', 'IDLE'],
+  PLAYING: ['RECOVERING', 'READY', 'SEEKING', 'BUFFERING', 'LOADING', 'ERROR', 'IDLE'],
   SEEKING: ['PLAYING', 'READY', 'ERROR', 'LOADING'],
-  BUFFERING: ['PLAYING', 'ERROR', 'IDLE'],
-  ERROR: ['LOADING', 'IDLE'],
+  BUFFERING: ['RECOVERING', 'PLAYING', 'ERROR', 'IDLE'],
+  ERROR: ['RECOVERING', 'LOADING', 'IDLE'],
 };
 
 export type StateListener = (context: StateContext) => void;
@@ -71,7 +74,7 @@ export class PlaybackStateMachine {
   transition(to: PlaybackState, options?: { error?: string; errorCode?: number }): boolean {
     if (!this.canTransition(to)) {
       if (this.debugEnabled) {
-        console.warn(
+        sharedFrontendLogger.warn(
           `[StateMachine] Invalid transition: ${this.context.state} → ${to}`
         );
       }
@@ -99,7 +102,7 @@ export class PlaybackStateMachine {
     };
 
     if (this.debugEnabled) {
-      console.log(`[StateMachine] ${from} → ${to}`, error ? `(${error})` : '');
+      sharedFrontendLogger.info(`[StateMachine] ${from} → ${to}`, error ? `(${error})` : '');
     }
 
     this.notify();
@@ -113,7 +116,7 @@ export class PlaybackStateMachine {
     const from = this.context.state;
 
     if (this.debugEnabled) {
-      console.log(`[StateMachine] FORCE: ${from} → ${to}`);
+      sharedFrontendLogger.info(`[StateMachine] FORCE: ${from} → ${to}`);
     }
 
     this.context = {
@@ -142,7 +145,7 @@ export class PlaybackStateMachine {
       try {
         fn(ctx);
       } catch (err) {
-        console.error('[StateMachine] Listener error:', err);
+        sharedFrontendLogger.error('[StateMachine] Listener error:', err);
       }
     });
   }
@@ -162,6 +165,7 @@ export class PlaybackStateMachine {
   // Convenience getters for common checks
   get isIdle(): boolean { return this.context.state === 'IDLE'; }
   get isLoading(): boolean { return this.context.state === 'LOADING'; }
+  get isRecovering(): boolean { return this.context.state === 'RECOVERING'; }
   get isReady(): boolean { return this.context.state === 'READY'; }
   get isPlaying(): boolean { return this.context.state === 'PLAYING'; }
   get isSeeking(): boolean { return this.context.state === 'SEEKING'; }

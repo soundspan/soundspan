@@ -4,6 +4,7 @@ import { prisma } from "../utils/db";
 import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
+import { buildCachePath, isPastStaleWindow } from "./cacheHelpers";
 
 /**
  * Service to sync audiobooks from Audiobookshelf and cache them locally
@@ -18,13 +19,15 @@ interface SyncResult {
     errors: string[];
 }
 
+const AUDIOBOOK_CACHE_STALE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 export class AudiobookCacheService {
     private coverCacheDir: string;
     private coverCacheAvailable: boolean = false;
 
     constructor() {
         // Store covers in: <MUSIC_PATH>/cover-cache/audiobooks/
-        this.coverCacheDir = path.join(
+        this.coverCacheDir = buildCachePath(
             config.music.musicPath,
             "cover-cache",
             "audiobooks"
@@ -358,8 +361,10 @@ export class AudiobookCacheService {
         // If not in cache or stale (> 7 days), try to sync it
         if (
             !audiobook ||
-            audiobook.lastSyncedAt <
-                new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            isPastStaleWindow(
+                audiobook.lastSyncedAt,
+                AUDIOBOOK_CACHE_STALE_WINDOW_MS
+            )
         ) {
             logger.debug(
                 `[AUDIOBOOK] Audiobook ${audiobookId} not cached or stale, syncing...`

@@ -3,6 +3,11 @@ import { z } from "zod";
 import * as fs from "fs";
 import { validateMusicConfig, MusicConfig } from "./utils/configValidator";
 import { logger } from "./utils/logger";
+import {
+    isEnvFlagEnabled,
+    parseEnvCsv,
+    parseEnvInt,
+} from "./utils/envParsers";
 
 dotenv.config();
 
@@ -39,11 +44,10 @@ let musicConfig: MusicConfig = {
     musicPath: process.env.MUSIC_PATH || "/music",
     transcodeCachePath:
         process.env.TRANSCODE_CACHE_PATH || "./cache/transcodes",
-    transcodeCacheMaxGb: parseInt(
-        process.env.TRANSCODE_CACHE_MAX_GB || "10",
-        10
-    ),
+    transcodeCacheMaxGb: parseEnvInt(process.env.TRANSCODE_CACHE_MAX_GB, 10),
 };
+
+const allowedOriginsFromEnv = parseEnvCsv(process.env.ALLOWED_ORIGINS);
 
 // Initialize music configuration asynchronously
 /** Loads and validates music-path/cache settings, with safe fallback to env defaults. */
@@ -61,7 +65,7 @@ export async function initializeMusicConfig() {
 
 /** Centralized runtime configuration object for backend services and integrations. */
 export const config = {
-    port: parseInt(process.env.PORT || "3006", 10),
+    port: parseEnvInt(process.env.PORT, 3006),
     nodeEnv: process.env.NODE_ENV || "development",
     // DATABASE_URL and REDIS_URL are validated by envSchema above, so they're guaranteed to exist
     databaseUrl: process.env.DATABASE_URL!,
@@ -75,14 +79,11 @@ export const config = {
     },
 
     // Lidarr - now reads from database via lidarrService.ensureInitialized()
-    lidarr:
-        process.env.LIDARR_ENABLED === "true"
-            ? {
-                  url: process.env.LIDARR_URL!,
-                  apiKey: process.env.LIDARR_API_KEY!,
-                  enabled: true,
-              }
-            : undefined,
+    lidarr: isEnvFlagEnabled(process.env.LIDARR_ENABLED) ? {
+        url: process.env.LIDARR_URL!,
+        apiKey: process.env.LIDARR_API_KEY!,
+        enabled: true,
+    } : undefined,
 
     // Last.fm - ships with default app key, user can optionally override
     lastfm: {
@@ -111,6 +112,6 @@ export const config = {
         : undefined,
 
     allowedOrigins:
-        process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ||
+        allowedOriginsFromEnv ||
         (process.env.NODE_ENV === "development" ? true : []),
 };
