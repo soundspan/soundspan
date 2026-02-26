@@ -334,57 +334,6 @@ export function resolvePlaybackQualityBadgeFromStreamSource(
     });
 }
 
-export interface PlaybackQualityBadge {
-    variant: "tidal" | "youtube" | "local";
-    label: string;
-}
-
-export type PlaybackStreamSource = "local" | "tidal" | "youtube";
-
-export function resolvePlaybackQualityBadge(input: {
-    streamSource?: PlaybackStreamSource;
-    tidalQuality: TidalStreamQuality | null;
-    localQuality: LocalTrackQuality | null;
-    codec: string | null;
-    bitrate: number | null;
-}): PlaybackQualityBadge | null {
-    if (input.streamSource === "tidal") {
-        return {
-            variant: "tidal",
-            label: formatTidalQualityBadge(input.tidalQuality) || "TIDAL",
-        };
-    }
-
-    if (input.streamSource === "youtube") {
-        return {
-            variant: "youtube",
-            label: formatYtQualityBadge(input.codec, input.bitrate),
-        };
-    }
-
-    const localLabel = formatLocalQualityBadge(input.localQuality);
-    if (!localLabel) {
-        return null;
-    }
-
-    return {
-        variant: "local",
-        label: localLabel,
-    };
-}
-
-export function resolvePlaybackQualityBadgeFromStreamSource(
-    streamSource: PlaybackStreamSource | undefined,
-): PlaybackQualityBadge | null {
-    return resolvePlaybackQualityBadge({
-        streamSource,
-        tidalQuality: null,
-        localQuality: null,
-        codec: null,
-        bitrate: null,
-    });
-}
-
 /**
  * Returns audio quality metadata for the currently playing track:
  *   - YouTube Music: bitrate (kbps) + codec

@@ -33,7 +33,6 @@
         "@bull-board/express": "^6.14.2",
         "@ffmpeg-installer/ffmpeg": "^1.1.0",
         "@prisma/client": "^6.19.2",
-        "@soundspan/media-metadata-contract": "file:../packages/media-metadata-contract",
         "@socket.io/redis-adapter": "^8.3.0",
         "@soundspan/media-metadata-contract": "file:../packages/media-metadata-contract",
         "@types/bull": "^3.15.9",

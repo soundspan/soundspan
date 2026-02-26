@@ -255,13 +255,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const lastQueueInsertAtRef = useRef<number | null>(null);
     const lastCursorTrackIndexRef = useRef<number | null>(null);
     const lastCursorIsShuffleRef = useRef<boolean | null>(null);
-    const lastListenTogetherNavRef = useRef<{
-        action: "next" | "previous" | null;
-        atMs: number;
-    }>({
-        action: null,
-        atMs: 0,
-    });
 
     const queueRef = useRef(state.queue);
 

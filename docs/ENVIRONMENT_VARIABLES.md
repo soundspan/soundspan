@@ -76,9 +76,6 @@ Experimental feature note:
 | `LOG_QUERIES` | `backend`, `backend-worker` | Optional | `false` | Enables Prisma query logging in development. |
 | `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` | Preserves Redis streams/groups by default; do not flush on start. |
 | `TRANSCODE_CACHE_PATH` | `backend` | Optional | `/app/cache/transcodes` (compose) | Directory for transcoding cache files. |
-| `SEGMENTED_STREAMING_CACHE_PATH` | `backend` | Optional | defaults to `TRANSCODE_CACHE_PATH` | Base directory for segmented streaming cache artifacts (`segmented-dash` subdirectory is created under this path). |
-| `SEGMENTED_LOCAL_SEG_DURATION_SEC` | `backend` | Optional | `1.0` | DASH segment duration (seconds) for local segmented sessions; remote/transient DASH generation keeps its default duration. |
-| `SEGMENTED_LOCAL_STARTUP_QUALITY` | `backend` | Optional | `low` | Startup representation quality for local two-representation DASH ladders (`low` or `medium`) before ramping to requested target quality. |
 | `TRANSCODE_CACHE_MAX_GB` | `backend` | Optional | `10` | Max transcode cache size in GB. |
 | `ALLOWED_ORIGINS` | `backend` | Optional | `http://localhost:3000,http://localhost:3030` | Allowed CORS origins (comma-separated). |
 | `SECURE_COOKIES` | `backend` | Optional | `false` | Forces secure cookies when `true`. |
@@ -114,10 +111,6 @@ Experimental feature note:
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
 | `BACKEND_URL` | `frontend` (and `audio-analyzer-clap-local` in local profile) | Optional (required when default route is not correct) | split stack: `http://backend:3006`; local CLAP: `http://host.docker.internal:3007` | Server-side URL used by frontend proxy/SSR and local CLAP callback target. |
-| `STREAMING_ENGINE_MODE` | `frontend`, `soundspan` (AIO) | Optional | defaults to `videojs` when unset/invalid | Runtime (non-build-time) audio engine mode: `videojs` (default segmented) or `howler-rollback` (explicit rollback only). |
-| `SEGMENTED_VHS_PROFILE` | `frontend`, `soundspan` (AIO) | Optional | `balanced` (`legacy` available for rollback) | Runtime (non-build-time) Video.js VHS startup/retry profile for segmented playback; `balanced` enables bandwidth persistence + bounded playlist retries, `legacy` keeps pre-tuning defaults. |
-| `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` | `frontend`, `soundspan` (AIO) | Optional | `5000` (runtime clamp: `1500-15000`) | Runtime timeout used to trigger segmented startup retries when DASH startup stalls (no automatic direct-play fallback). |
-| `LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED` | `frontend`, `soundspan` (AIO) | Optional | `false` | Enables segmented startup/handoff/recovery while a Listen Together group is active; defaults to disabled for conservative LT behavior. |
 | `NEXT_PUBLIC_API_URL` | `frontend` (build-time) | Optional (build-time only) | empty | Explicit browser API base URL. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_API_PATH_MODE` | `frontend` (build-time) | Optional (build-time only) | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` | `frontend` (build-time) | Optional (build-time only) | `false` | Browser polling fallback toggle for Listen Together socket client. Runtime changes on prebuilt images do not affect browser bundle behavior. |
