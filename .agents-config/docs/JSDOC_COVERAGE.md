@@ -16,12 +16,12 @@ Scope:
 | Backend services | 70 | 84 | 52 | 32 | 61.9% |
 | Backend utils | 31 | 79 | 57 | 22 | 72.2% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
-| Frontend components | 71 | 74 | 11 | 63 | 14.9% |
-| Frontend features | 135 | 113 | 8 | 105 | 7.1% |
-| Frontend hooks | 25 | 86 | 59 | 27 | 68.6% |
+| Frontend components | 73 | 76 | 11 | 65 | 14.5% |
+| Frontend features | 136 | 114 | 8 | 106 | 7.0% |
+| Frontend hooks | 25 | 89 | 59 | 30 | 66.3% |
 | Frontend lib | 55 | 84 | 26 | 58 | 31.0% |
-| Frontend other | 61 | 59 | 6 | 53 | 10.2% |
-| **Total** | **515** | **668** | **244** | **424** | **36.5%** |
+| Frontend other | 63 | 61 | 6 | 55 | 9.8% |
+| **Total** | **520** | **676** | **244** | **432** | **36.1%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -90,15 +90,15 @@ Scope:
 | Backend services | DiscoverySeeding | backend/src/services/discovery/discoverySeeding.ts:20 |
 | Backend services | EnrichmentService | backend/src/services/enrichment.ts:63 |
 | Backend services | FileValidatorService | backend/src/services/fileValidator.ts:15 |
-| Backend services | findSimilarTracks | backend/src/services/hybridSimilarity.ts:95 |
+| Backend services | findSimilarTracks | backend/src/services/hybridSimilarity.ts:101 |
 | Backend services | ImageProviderService | backend/src/services/imageProvider.ts:30 |
 | Backend services | fetchExternalImage | backend/src/services/imageProxy.ts:96 |
 | Backend services | startPersistLoop | backend/src/services/listenTogether.ts:473 |
 | Backend services | stopPersistLoop | backend/src/services/listenTogether.ts:479 |
-| Backend services | GroupError | backend/src/services/listenTogetherManager.ts:134 |
+| Backend services | GroupError | backend/src/services/listenTogetherManager.ts:135 |
 | Backend services | setupListenTogetherSocket | backend/src/services/listenTogetherSocket.ts:404 |
-| Backend services | getListenTogetherIO | backend/src/services/listenTogetherSocket.ts:903 |
-| Backend services | shutdownListenTogetherSocket | backend/src/services/listenTogetherSocket.ts:907 |
+| Backend services | getListenTogetherIO | backend/src/services/listenTogetherSocket.ts:925 |
+| Backend services | shutdownListenTogetherSocket | backend/src/services/listenTogetherSocket.ts:929 |
 | Backend services | MoodBucketService | backend/src/services/moodBucketService.ts:155 |
 | Backend services | MusicScannerService | backend/src/services/musicScanner.ts:47 |
 | Backend services | PodcastCacheService | backend/src/services/podcastCache.ts:21 |
@@ -160,12 +160,13 @@ Scope:
 | Frontend components | resolveActivityTab | frontend/components/layout/activityPanelTabs.ts:80 |
 | Frontend components | AuthenticatedLayout | frontend/components/layout/AuthenticatedLayout.tsx:26 |
 | Frontend components | BottomNavigation | frontend/components/layout/BottomNavigation.tsx:36 |
-| Frontend components | MobileSidebar | frontend/components/layout/MobileSidebar.tsx:32 |
+| Frontend components | MobileSidebar | frontend/components/layout/MobileSidebar.tsx:33 |
 | Frontend components | PageHeader | frontend/components/layout/PageHeader.tsx:17 |
-| Frontend components | Sidebar | frontend/components/layout/Sidebar.tsx:30 |
+| Frontend components | Sidebar | frontend/components/layout/Sidebar.tsx:35 |
 | Frontend components | hasMyHistoryLink | frontend/components/layout/socialNavigation.ts:30 |
-| Frontend components | TopBar | frontend/components/layout/TopBar.tsx:34 |
+| Frontend components | TopBar | frontend/components/layout/TopBar.tsx:25 |
 | Frontend components | TVLayout | frontend/components/layout/TVLayout.tsx:27 |
+| Frontend components | UserAvatarMenu | frontend/components/layout/UserAvatarMenu.tsx:14 |
 | Frontend components | MoodMixer | frontend/components/MoodMixer.tsx:110 |
 | Frontend components | shouldAttemptSegmentedRecoveryOnUnexpectedPause | frontend/components/player/audioPlaybackOrchestratorPolicy.ts:1 |
 | Frontend components | createEmptySegmentedStartupRecoveryStageAttempts | frontend/components/player/audioPlaybackOrchestratorPolicy.ts:118 |
@@ -177,12 +178,13 @@ Scope:
 | Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:23 |
 | Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:100 |
 | Frontend components | PlaybackQualityBadge | frontend/components/player/PlaybackQualityBadge.tsx:37 |
+| Frontend components | PlaybackQualityBadgeWithStats | frontend/components/player/PlaybackQualityBadgeWithStats.tsx:56 |
 | Frontend components | PlayerModeWrapper | frontend/components/player/PlayerModeWrapper.tsx:6 |
-| Frontend components | SeekSlider | frontend/components/player/SeekSlider.tsx:33 |
+| Frontend components | SeekSlider | frontend/components/player/SeekSlider.tsx:35 |
 | Frontend components | parseSegmentedStartupErrorHint | frontend/components/player/segmentedStartupErrorContract.ts:139 |
 | Frontend components | resolveConservativeSegmentedStartupRetryDelayMs | frontend/components/player/segmentedStartupErrorContract.ts:203 |
 | Frontend components | SyncedLyrics | frontend/components/player/SyncedLyrics.tsx:79 |
-| Frontend components | TrackPreferenceButtons | frontend/components/player/TrackPreferenceButtons.tsx:229 |
+| Frontend components | TrackPreferenceButtons | frontend/components/player/TrackPreferenceButtons.tsx:162 |
 | Frontend components | ConditionalAudioProvider | frontend/components/providers/ConditionalAudioProvider.tsx:12 |
 | Frontend components | PWAInstallPrompt | frontend/components/PWAInstallPrompt.tsx:12 |
 | Frontend components | ServiceWorkerRegistration | frontend/components/ServiceWorkerRegistration.tsx:46 |
@@ -206,9 +208,9 @@ Scope:
 | Frontend components | HeroSkeleton | frontend/components/ui/Skeleton.tsx:70 |
 | Frontend components | Skeleton | frontend/components/ui/Skeleton.tsx:9 |
 | Frontend components | TidalBadge | frontend/components/ui/TidalBadge.tsx:15 |
-| Frontend components | TrackOverflowMenu | frontend/components/ui/TrackOverflowMenu.tsx:43 |
+| Frontend components | TrackOverflowMenu | frontend/components/ui/TrackOverflowMenu.tsx:44 |
 | Frontend components | YouTubeBadge | frontend/components/ui/YouTubeBadge.tsx:13 |
-| Frontend features | AlbumActionBar | frontend/features/album/components/AlbumActionBar.tsx:44 |
+| Frontend features | AlbumActionBar | frontend/features/album/components/AlbumActionBar.tsx:42 |
 | Frontend features | AlbumHero | frontend/features/album/components/AlbumHero.tsx:24 |
 | Frontend features | SimilarAlbums | frontend/features/album/components/SimilarAlbums.tsx:14 |
 | Frontend features | useAlbumActions | frontend/features/album/hooks/useAlbumActions.ts:13 |
@@ -233,17 +235,17 @@ Scope:
 | Frontend features | PlayControls | frontend/features/audiobook/components/PlayControls.tsx:16 |
 | Frontend features | useAudiobookActions | frontend/features/audiobook/hooks/useAudiobookActions.ts:11 |
 | Frontend features | useAudiobookData | frontend/features/audiobook/hooks/useAudiobookData.ts:9 |
-| Frontend features | DiscoverActionBar | frontend/features/discover/components/DiscoverActionBar.tsx:31 |
+| Frontend features | DiscoverActionBar | frontend/features/discover/components/DiscoverActionBar.tsx:32 |
 | Frontend features | DiscoverHero | frontend/features/discover/components/DiscoverHero.tsx:10 |
 | Frontend features | DiscoverSettings | frontend/features/discover/components/DiscoverSettings.tsx:16 |
 | Frontend features | HowItWorks | frontend/features/discover/components/HowItWorks.tsx:6 |
 | Frontend features | TrackList | frontend/features/discover/components/TrackList.tsx:78 |
 | Frontend features | UnavailableAlbums | frontend/features/discover/components/UnavailableAlbums.tsx:33 |
-| Frontend features | mapDiscoverTrackToPlaybackTrack | frontend/features/discover/hooks/useDiscoverActions.ts:23 |
-| Frontend features | useDiscoverActions | frontend/features/discover/hooks/useDiscoverActions.ts:49 |
+| Frontend features | mapDiscoverTrackToPlaybackTrack | frontend/features/discover/hooks/useDiscoverActions.ts:24 |
+| Frontend features | useDiscoverActions | frontend/features/discover/hooks/useDiscoverActions.ts:50 |
 | Frontend features | useDiscoverData | frontend/features/discover/hooks/useDiscoverData.ts:20 |
 | Frontend features | applyDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:46 |
-| Frontend features | useDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:78 |
+| Frontend features | useDiscoverProviderGapFill | frontend/features/discover/hooks/useDiscoverProviderGapFill.ts:89 |
 | Frontend features | usePreviewPlayer | frontend/features/discover/hooks/usePreviewPlayer.ts:7 |
 | Frontend features | AudiobooksGrid | frontend/features/home/components/AudiobooksGrid.tsx:59 |
 | Frontend features | ContinueListening | frontend/features/home/components/ContinueListening.tsx:143 |
@@ -275,5 +277,3 @@ Scope:
 | Frontend features | getQualityBadge | frontend/features/search/components/SoulseekSongsList.tsx:19 |
 | Frontend features | SoulseekSongsList | frontend/features/search/components/SoulseekSongsList.tsx:67 |
 | Frontend features | TopResult | frontend/features/search/components/TopResult.tsx:12 |
-| Frontend features | TVSearchInput | frontend/features/search/components/TVSearchInput.tsx:12 |
-| Frontend features | useSearchData | frontend/features/search/hooks/useSearchData.ts:24 |

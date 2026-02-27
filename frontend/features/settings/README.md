@@ -45,6 +45,7 @@ Start-here guide for `frontend/features/settings`.
 | `components/ui/index.ts` | components |
 | `components/ui/InfoTooltip.tsx` | components |
 | `components/ui/IntegrationCard.tsx` | components |
+| `components/ui/ProfilePictureUpload.tsx` | components |
 | `components/ui/SettingsInput.tsx` | components |
 | `components/ui/SettingsLayout.tsx` | components |
 | `components/ui/SettingsRow.tsx` | components |

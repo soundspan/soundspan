@@ -11,7 +11,7 @@
   ],
   "overrideRoot": ".agents-config/agent-overrides",
   "managed_files": [
-    { "path": "AGENTS.md", "source_path": ".agents-config/AGENTS_TEMPLATE.md", "profiles": ["base"] },
+    { "path": "AGENTS.md", "source_path": ".agents-config/AGENTS_TEMPLATE.md", "profiles": ["base"], "allow_override": true },
     { "path": ".agents-config/scripts/enforce-agent-policies.mjs", "profiles": ["base"], "allow_override": true },
     { "path": ".agents-config/scripts/agent-session-preflight.mjs", "profiles": ["base"] },
     { "path": ".agents-config/scripts/agent-queue-lifecycle.mjs", "profiles": ["base"] },

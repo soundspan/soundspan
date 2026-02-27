@@ -1,4 +1,6 @@
-# {{VERSION}} Release Notes - {{RELEASE_DATE}}
+# soundspan {{VERSION}} Release Notes
+
+Release date: {{RELEASE_DATE}}
 
 ## Release Summary
 {{RELEASE_SUMMARY}}
