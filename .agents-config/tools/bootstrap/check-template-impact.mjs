@@ -6,6 +6,16 @@ import { spawnSync } from "node:child_process";
 
 const DEFAULT_MANIFEST_PATH = ".agents-config/agent-managed.json";
 const DEFAULT_PROFILES = ["base", "node-web"];
+const MIN_NONE_REASON_LENGTH = 24;
+const CRITICAL_TEMPLATE_IMPACT_PREFIXES = [
+  ".agents-config/policies/",
+  ".agents-config/contracts/rules/",
+  ".agents-config/scripts/",
+  ".agents-config/tools/bootstrap/",
+  ".agents-config/tools/rules/",
+  ".agents-config/tools/index/",
+  ".github/workflows/",
+];
 
 function fail(message) {
   console.error(message);
@@ -295,6 +305,20 @@ function run() {
     const reason = parseDeclaration(prBody, "Template-Impact-Reason");
     if (!reason) {
       fail("Template-Impact is none, but Template-Impact-Reason is missing.");
+    }
+    if (reason.length < MIN_NONE_REASON_LENGTH) {
+      fail(
+        `Template-Impact-Reason must be at least ${MIN_NONE_REASON_LENGTH} characters when Template-Impact is none.`,
+      );
+    }
+
+    const criticalChanges = matchedFiles.filter((filePath) =>
+      CRITICAL_TEMPLATE_IMPACT_PREFIXES.some((prefix) => filePath.startsWith(prefix)),
+    );
+    if (criticalChanges.length > 0) {
+      fail(
+        `Template-Impact cannot be \"none\" for critical governance path changes: ${criticalChanges.join(", ")}`,
+      );
     }
   }
 

@@ -4617,8 +4617,12 @@ function main() {
     process.exit(1);
   }
 
-  if (policyCheckState === "fail") {
-    const details = policyCheckError || "Policy check failed.";
+  if (policyCheckState !== "pass") {
+    const details =
+      policyCheckError ||
+      (policyCheckState === "unavailable"
+        ? "Policy check unavailable."
+        : "Policy check failed.");
     console.error(details);
     process.exit(1);
   }

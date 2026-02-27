@@ -604,6 +604,11 @@ function validateOverridesFile({
         errors.push(`${prefix}.expires_at must be >= created_at.`);
       }
     }
+    if (expiresAt && isValidIsoDate(expiresAt) && Date.parse(expiresAt) < Date.now()) {
+      errors.push(
+        `${prefix}.expires_at is in the past. Remove or extend the override before running verification.`,
+      );
+    }
 
     if ("adjustments" in entry) {
       if (

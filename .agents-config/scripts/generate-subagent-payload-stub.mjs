@@ -122,6 +122,7 @@ function printHelp() {
   info("  --task-id <id>");
   info("  --orchestrator-id <id>");
   info("  --objective <text>");
+  info("  --runtime <codex|claude> (default: codex)");
   info("  --task-class <single_file_edit|grep_triage|draft_rewrite|implementation>");
   info("  --input <text> (repeatable)");
   info("  --constraint <text> (repeatable)");
@@ -150,7 +151,14 @@ function main() {
   const repoRoot = resolveRepoRoot(process.cwd());
   const contract = loadPolicy(repoRoot);
 
+  const runtime = getSingleFlag(flags, "runtime", "codex");
+  if (runtime !== "codex" && runtime !== "claude") {
+    fail(`--runtime must be "codex" or "claude", got "${runtime}".`);
+  }
+  const isClaude = runtime === "claude";
+
   const defaultModelRouting = contract.defaultModelRouting ?? {};
+  const claudeModelRouting = contract.claudeModelRouting ?? {};
   const defaultReasoningEffortRouting = contract.defaultReasoningEffortRouting ?? {};
   const lowRiskSparkPolicy = contract.lowRiskSparkPolicy ?? {};
   const verbosityBudgets = contract.verbosityBudgets ?? {};
@@ -228,12 +236,22 @@ function main() {
     "Unrelated cleanup.",
   ]);
 
-  const recommendedModel = isLowRiskClass
-    ? toNonEmptyString(defaultModelRouting.lowRiskLoop) ?? "gpt-5.3-codex-spark"
-    : toNonEmptyString(defaultModelRouting.subagent) ?? "gpt-5.3-codex";
-  const recommendedReasoningEffort = isLowRiskClass
-    ? toNonEmptyString(defaultReasoningEffortRouting.lowRiskLoop) ?? "medium"
-    : toNonEmptyString(defaultReasoningEffortRouting.subagent) ?? "high";
+  let recommendedModel;
+  let recommendedReasoningEffort;
+
+  if (isClaude) {
+    recommendedModel = isLowRiskClass
+      ? toNonEmptyString(claudeModelRouting.lowRiskLoop) ?? "claude-haiku-4-5"
+      : toNonEmptyString(claudeModelRouting.subagent) ?? "claude-opus-4-6";
+    recommendedReasoningEffort = null;
+  } else {
+    recommendedModel = isLowRiskClass
+      ? toNonEmptyString(defaultModelRouting.lowRiskLoop) ?? "gpt-5.3-codex-spark"
+      : toNonEmptyString(defaultModelRouting.subagent) ?? "gpt-5.3-codex";
+    recommendedReasoningEffort = isLowRiskClass
+      ? toNonEmptyString(defaultReasoningEffortRouting.lowRiskLoop) ?? "medium"
+      : toNonEmptyString(defaultReasoningEffortRouting.subagent) ?? "high";
+  }
 
   const payload = {
     task_id: taskId,
@@ -257,9 +275,12 @@ function main() {
       implementation_task_max_words: verbosityBudgets.implementationTaskMaxWords ?? 160,
     },
     routing: {
+      runtime,
       task_class: taskClass,
       recommended_model: recommendedModel,
-      recommended_reasoning_effort: recommendedReasoningEffort,
+      ...(recommendedReasoningEffort !== null
+        ? { recommended_reasoning_effort: recommendedReasoningEffort }
+        : {}),
       spark_allowed_for_task_class: isLowRiskClass,
       explicit_verification_required: isLowRiskClass && requiresExplicitVerification,
     },

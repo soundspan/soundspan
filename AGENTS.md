@@ -130,7 +130,7 @@ Policy-canonical rule IDs:
 - `orch_machine_payload_authoritative`
 - `orch_delegate_substantive_work`
 - `orch_operator_subagent_default`
-- `orch_non_trivial_subagent_mandatory`
+- `orch_subagent_delegation_required_when_possible`
 - `orch_human_nuance_addendum`
 - `orch_atomic_task_delegation`
 - `orch_dual_channel_result_envelope`
@@ -143,15 +143,23 @@ Policy-canonical rule IDs:
 - `orch_concise_subagent_briefs`
 - `orch_spec_refined_plan_verbosity`
 - `orch_codex_model_default`
+- `orch_claude_model_default`
 
 Single-orchestrator topology is required: one orchestrator agent owns cross-task coordination/context and subagents execute delegated atomic tasks only.
-Operator/subagent execution is mandatory for non-trivial work; direct single-agent execution is allowed only for trivial tasks.
-Release idle subagents immediately once they are no longer actively executing delegated work.
+Orchestrators should make complex decisions, but must delegate discovery and implementation work to subagents whenever possible.
+Operator/subagent execution is mandatory whenever delegation is feasible; direct single-agent execution is allowed only for trivial coordination/meta tasks or explicit infeasibility cases.
+Subagent assignments must be strict and atomic with clear objective, context, acceptance criteria, and verification expectations.
+Release/close subagents immediately once they are complete or no longer actively executing delegated work.
 Subagent handoff brevity and spec/refined-spec/plan verbosity budgets are defined in `contracts.orchestratorSubagent.verbosityBudgets`.
 Default model routing is policy-defined by role/risk:
 - orchestrator: `gpt-5.3-codex` with `xhigh` reasoning effort
 - subagents: `gpt-5.3-codex` with `high` reasoning effort
 - low-risk fast loops only: `gpt-5.3-codex-spark` with explicit verification commands
+Claude model routing is policy-defined by role/risk:
+- orchestrator: `claude-opus-4-6`
+- subagents: `claude-opus-4-6` (or `claude-sonnet-4-6` for lighter tasks)
+- low-risk fast loops only: `claude-haiku-4-5`
+Claude-to-Codex delegation: prefer `codex exec` for atomic tasks; use interactive `codex` for iterative work.
 Default CLI routing is policy-defined in `contracts.orchestratorSubagent.defaultCliRouting`:
 - Codex agents: `codex`
 - Claude agents: `claude`
@@ -159,6 +167,7 @@ Default CLI routing is policy-defined in `contracts.orchestratorSubagent.default
 ## Policy-as-Code Enforcement
 
 - Local: `node .agents-config/scripts/enforce-agent-policies.mjs`
+- CI-safe local command: `npm run policy:check:ci`
 - Session preflight: `npm run agent:preflight`
 - Canonical rules verify: `npm run rules:canonical:verify`
 - Canonical rules sync: `npm run rules:canonical:sync`
@@ -172,6 +181,7 @@ Default CLI routing is policy-defined in `contracts.orchestratorSubagent.default
 - Template-impact declaration gate (PR metadata): `npm run agent:template-impact:check -- --base-ref origin/<base-branch>`
 - Release prep (changelog rotation): `npm run release:prepare -- --version <X.Y.Z>`
 - Release notes generator: `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`
+- Release runtime contract check: `npm run release:contract:check`
 - Release workflow rule: `release:prepare` must promote `## [Unreleased]` into `## [<version>] - <date>` and recreate a fresh empty `## [Unreleased]` scaffold (`Added`, `Changed`, `Fixed`).
 - Release notes source rule: `release:notes` must read items from the corresponding `CHANGELOG.md` version section (plain-English changelog bullets are canonical).
 - Release notes content rule: summarize changes in plain English and avoid raw commit-jargon wording.
@@ -180,7 +190,7 @@ Default CLI routing is policy-defined in `contracts.orchestratorSubagent.default
 - JSDoc coverage verify: `npm run jsdoc-coverage:verify`
 - Logging compliance verify: `npm run logging:compliance:verify`
 - Logging policy requirement: runtime code paths should not ship without appropriate scoped logging coverage.
-- CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code`
+- CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code` (policy + managed drift + template-impact + index readiness + release-runtime checks)
 - CI template gate: meaningful workflow-path changes must carry `Template-Impact` declaration (`yes` with `Template-Ref`, or `none` with `Template-Impact-Reason`).
 - If process expectations change, update all of:
   - `.agents-config/AGENTS_TEMPLATE.md`

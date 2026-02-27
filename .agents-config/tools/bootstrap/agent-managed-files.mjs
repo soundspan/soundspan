@@ -161,7 +161,24 @@ function ensureDir(dirPath) {
 }
 
 function normalizeRelativePath(input) {
-  return normalizePath(input).replace(/^\.\//, "");
+  const normalized = path.posix
+    .normalize(normalizePath(input))
+    .replace(/^\.\//, "");
+  if (normalized === ".") {
+    return "";
+  }
+  return normalized;
+}
+
+function assertSafeRepoRelativePath(candidatePath, label) {
+  const normalized = normalizeRelativePath(candidatePath);
+  if (
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.split("/").includes("..")
+  ) {
+    fail(`${label} must remain inside the repository root (received: ${candidatePath}).`);
+  }
 }
 
 function resolveOverrideRepoRelativePath({
@@ -176,12 +193,19 @@ function resolveOverrideRepoRelativePath({
         `Managed entry ${JSON.stringify(entry?.path ?? "<unknown>")} uses absolute override_path; use a repo-relative path.`,
       );
     }
+    assertSafeRepoRelativePath(
+      explicitOverridePath,
+      `Managed entry ${JSON.stringify(entry?.path ?? "<unknown>")} override_path`,
+    );
     return normalizeRelativePath(explicitOverridePath);
   }
 
   const normalizedOverrideRoot = toNonEmptyString(overrideRoot)
     ? normalizeRelativePath(overrideRoot)
     : "";
+  if (normalizedOverrideRoot) {
+    assertSafeRepoRelativePath(normalizedOverrideRoot, "overrideRoot");
+  }
   if (!normalizedOverrideRoot) {
     return null;
   }
@@ -479,10 +503,15 @@ async function run() {
   }
 
   const canonicalContract = resolveCanonicalContract(manifest);
-  const knownOverrideRootRelativePaths = new Set();
+  const allowlistedOverrideRootRelativePaths = new Set();
   for (const entry of managedFiles) {
     const candidatePath = toNonEmptyString(entry?.path);
     if (!candidatePath) {
+      continue;
+    }
+    const authority = resolveEntryAuthority(entry, canonicalContract);
+    const allowOverride = entry?.allow_override === true;
+    if (!allowOverride || authority !== "template") {
       continue;
     }
     const overrideRepoRelativePath = resolveOverrideRepoRelativePath({
@@ -498,7 +527,7 @@ async function run() {
       rootRelativePath: overrideRoot,
     });
     if (overrideRootRelativePath !== null) {
-      knownOverrideRootRelativePaths.add(overrideRootRelativePath);
+      allowlistedOverrideRootRelativePaths.add(overrideRootRelativePath);
     }
   }
 
@@ -577,10 +606,11 @@ async function run() {
         continue;
       }
 
-      if (!knownOverrideRootRelativePaths.has(overrideRelativePath)) {
+      if (!allowlistedOverrideRootRelativePaths.has(overrideRelativePath)) {
         overrideViolations.push({
           path: overrideRelativePath,
-          reason: "no managed_files entry maps to this override path",
+          reason:
+            "override file exists but no allowlisted managed_files entry maps to this path",
         });
         continue;
       }
