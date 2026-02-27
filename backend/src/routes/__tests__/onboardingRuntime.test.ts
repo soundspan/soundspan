@@ -139,12 +139,14 @@ describe("onboarding route runtime", () => {
         process.env.SETTINGS_ENCRYPTION_KEY = originalSettingsEncryptionKey;
     });
 
-    it("registers users with validation, first-user bootstrap, and username conflict", async () => {
+    it("registers first user as admin and rejects registration after setup", async () => {
+        // Validation still runs before the user-count guard
         const invalidReq = { body: { username: "ab", password: "123" } } as any;
         const invalidRes = createRes();
         await register(invalidReq, invalidRes);
         expect(invalidRes.statusCode).toBe(400);
 
+        // First user (count=0) — allowed, becomes admin
         prisma.user.count.mockResolvedValueOnce(0);
         prisma.user.findUnique.mockResolvedValueOnce(null);
         prisma.user.create.mockResolvedValueOnce({
@@ -167,15 +169,15 @@ describe("onboarding route runtime", () => {
             })
         );
 
+        // Second registration attempt (count=1) — rejected (registration closed)
         prisma.user.count.mockResolvedValueOnce(1);
-        prisma.user.findUnique.mockResolvedValueOnce({ id: "exists" });
-        const duplicateReq = {
-            body: { username: "alice", password: "secure123" },
+        const closedReq = {
+            body: { username: "hacker", password: "secure123" },
         } as any;
-        const duplicateRes = createRes();
-        await register(duplicateReq, duplicateRes);
-        expect(duplicateRes.statusCode).toBe(400);
-        expect(duplicateRes.body).toEqual({ error: "Username already taken" });
+        const closedRes = createRes();
+        await register(closedReq, closedRes);
+        expect(closedRes.statusCode).toBe(403);
+        expect(closedRes.body).toEqual({ error: "Registration is closed" });
     });
 
     it("skips encryption key generation when SETTINGS_ENCRYPTION_KEY is already set", async () => {

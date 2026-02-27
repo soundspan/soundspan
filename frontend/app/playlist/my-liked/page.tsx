@@ -313,11 +313,11 @@ export default function MyLikedPlaylistPage() {
                 ) : (
                     <div className="w-full">
                         {/* Table Header */}
-                        <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_auto] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
+                        <div className="hidden md:grid grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
                             <span className="text-center">#</span>
                             <span>Title</span>
                             <span>Album</span>
-                            <span className="text-right">Duration</span>
+                            <span />
                         </div>
 
                         {/* Track Rows */}
@@ -331,7 +331,7 @@ export default function MyLikedPlaylistPage() {
                                         key={track.id}
                                         onClick={() => handlePlayTrack(track)}
                                         className={cn(
-                                            "grid cursor-pointer grid-cols-[28px_1fr_auto] items-center gap-2 px-2 py-2 rounded-md transition-colors hover:bg-white/5 md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_auto] md:gap-4 md:px-4",
+                                            "group grid cursor-pointer grid-cols-[28px_1fr_auto] items-center gap-2 px-2 py-2 rounded-md transition-colors hover:bg-white/5 md:grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto] md:gap-4 md:px-4",
                                             isCurrent && "bg-[#3b82f6]/10"
                                         )}
                                     >

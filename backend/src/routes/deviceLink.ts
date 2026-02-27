@@ -21,6 +21,21 @@ function generateApiKey(): string {
     return crypto.randomBytes(32).toString("hex");
 }
 
+/**
+ * @openapi
+ * /api/device-link/generate:
+ *   post:
+ *     summary: Generate a new device link code
+ *     tags: [Device Link]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Generated link code with expiry information
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /device-link/generate - Generate a new device link code (requires auth)
 router.post("/generate", requireAuthOrToken, async (req, res) => {
     try {
@@ -70,6 +85,35 @@ router.post("/generate", requireAuthOrToken, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/device-link/verify:
+ *   post:
+ *     summary: Verify a device link code and receive an API key
+ *     tags: [Device Link]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 description: 6-character device link code
+ *               deviceName:
+ *                 type: string
+ *                 description: Name for the linked device
+ *     responses:
+ *       200:
+ *         description: API key issued for the device
+ *       400:
+ *         description: Code already used or expired
+ *       404:
+ *         description: Invalid code
+ */
 // POST /device-link/verify - Verify a code and get API key (no auth required)
 router.post("/verify", async (req, res) => {
     try {
@@ -129,6 +173,25 @@ router.post("/verify", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/device-link/status/{code}:
+ *   get:
+ *     summary: Poll for device link code usage status
+ *     tags: [Device Link]
+ *     parameters:
+ *       - in: path
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 6-character device link code
+ *     responses:
+ *       200:
+ *         description: "Code status (pending, used, or expired)"
+ *       404:
+ *         description: Invalid code
+ */
 // GET /device-link/status/:code - Poll for code usage status (no auth required)
 router.get("/status/:code", async (req, res) => {
     try {
@@ -167,6 +230,21 @@ router.get("/status/:code", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/device-link/devices:
+ *   get:
+ *     summary: List all linked devices for the current user
+ *     tags: [Device Link]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of linked devices with API key metadata
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /device-link/devices - List linked devices (requires auth)
 router.get("/devices", requireAuthOrToken, async (req, res) => {
     try {
@@ -190,6 +268,30 @@ router.get("/devices", requireAuthOrToken, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/device-link/devices/{id}:
+ *   delete:
+ *     summary: Revoke a linked device
+ *     tags: [Device Link]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: API key ID of the device to revoke
+ *     responses:
+ *       200:
+ *         description: Device revoked successfully
+ *       404:
+ *         description: Device not found
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /device-link/devices/:id - Revoke a device (requires auth)
 router.delete("/devices/:id", requireAuthOrToken, async (req, res) => {
     try {

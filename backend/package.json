@@ -1,6 +1,6 @@
 {
     "name": "soundspan-backend",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "description": "soundspan backend API server",
     "license": "GPL-3.0",
     "repository": {
@@ -59,6 +59,7 @@
         "fuzzball": "^2.2.3",
         "helmet": "^7.1.0",
         "jsonwebtoken": "^9.0.2",
+        "multer": "^2.0.2",
         "music-metadata": "^11.10.0",
         "node-cron": "^4.2.1",
         "p-limit": "^7.2.0",
@@ -81,6 +82,7 @@
         "@types/express-session": "^1.17.10",
         "@types/jest": "^30.0.0",
         "@types/jsonwebtoken": "^9.0.10",
+        "@types/multer": "^2.0.0",
         "@types/node": "^20.10.4",
         "jest": "^30.2.0",
         "prisma": "^6.19.2",

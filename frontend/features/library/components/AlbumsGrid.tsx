@@ -89,7 +89,7 @@ const AlbumCardItem = memo(
                         {!hidePlayButtons && (
                             <button
                                 onClick={handlePlay}
-                                className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-[#60a5fa] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-[#60a5fa] flex items-center justify-center shadow-xl opacity-0 pointer-events-none sm:pointer-events-auto group-hover:opacity-100 transition-opacity"
                             >
                                 {showPlaySpinner ? (
                                     <Loader2 className="w-4 h-4 animate-spin text-black" />

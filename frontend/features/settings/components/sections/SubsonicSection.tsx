@@ -95,7 +95,7 @@ export function SubsonicRows() {
     return (
         <SettingsRow
             label="Subsonic Password"
-            align="start"
+            align="center"
             labelExtra={
                 <span className="relative inline-flex">
                     <button
@@ -125,62 +125,61 @@ export function SubsonicRows() {
             }
             htmlFor="subsonic-password"
         >
-            <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-3">
                 {hasPassword && !isEditing ? (
                     <>
-                        <input
-                            id="subsonic-password"
-                            type="text"
-                            value="••••••••"
-                            disabled
-                            className="w-56 bg-[#333] text-white text-sm px-3 py-2 rounded-md border-0 outline-none opacity-50 cursor-not-allowed"
-                        />
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setIsEditing(true)}
-                                className="px-3 py-2 text-sm text-gray-400 hover:text-white transition-colors"
-                            >
-                                Change
-                            </button>
-                            <button
-                                onClick={handleClear}
-                                disabled={isSaving}
-                                className="px-3 py-2 text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-50"
-                            >
-                                Clear
-                            </button>
+                        <div className="w-64">
+                            <input
+                                id="subsonic-password"
+                                type="text"
+                                value="••••••••"
+                                disabled
+                                className="w-full bg-[#333] text-white text-sm px-3 py-2 rounded-md border-0 outline-none opacity-50 cursor-not-allowed"
+                            />
                         </div>
+                        <button
+                            onClick={() => setIsEditing(true)}
+                            className="text-sm text-gray-400 hover:text-white transition-colors"
+                        >
+                            Change
+                        </button>
+                        <button
+                            onClick={handleClear}
+                            disabled={isSaving}
+                            className="text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+                        >
+                            Clear
+                        </button>
                     </>
                 ) : (
                     <>
-                        <SettingsInput
-                            id="subsonic-password"
-                            type="password"
-                            value={password}
-                            onChange={setPassword}
-                            placeholder="Enter Subsonic password"
-                            className="w-56"
-                        />
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={handleSave}
-                                disabled={!password.trim() || isSaving}
-                                className="px-4 py-2 text-sm bg-white text-black rounded-md font-medium hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isSaving ? "Saving..." : "Save"}
-                            </button>
-                            {hasPassword && (
-                                <button
-                                    onClick={() => {
-                                        setIsEditing(false);
-                                        setPassword("");
-                                    }}
-                                    className="px-3 py-2 text-sm text-gray-400 hover:text-white transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                            )}
+                        <div className="w-64">
+                            <SettingsInput
+                                id="subsonic-password"
+                                type="password"
+                                value={password}
+                                onChange={setPassword}
+                                placeholder="Enter Subsonic password"
+                            />
                         </div>
+                        <button
+                            onClick={handleSave}
+                            disabled={!password.trim() || isSaving}
+                            className="px-4 py-2 text-sm bg-white text-black rounded-full font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isSaving ? "Saving..." : "Save"}
+                        </button>
+                        {hasPassword && (
+                            <button
+                                onClick={() => {
+                                    setIsEditing(false);
+                                    setPassword("");
+                                }}
+                                className="text-sm text-gray-400 hover:text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        )}
                     </>
                 )}
                 <InlineStatus

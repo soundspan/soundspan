@@ -12,6 +12,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.2.1] - 2026-02-28
+
+### Security
+
+- Closed an open registration vulnerability where unauthenticated users could create accounts via `/onboarding/register` after the initial admin was set up. Registration is now locked to first-user-only; all subsequent accounts require an admin-issued invite code.
+- Removed the dead open-registration page and replaced it with an invite-code-gated registration flow.
+- Library deletion and Lidarr integration now default to disabled in new installations, preventing accidental data loss before an admin explicitly opts in.
+
+### Added
+
+- Invite code system: admins can generate time-limited, usage-capped invite codes (1h to 30d, or no expiry). New users register with an invite code, display name, and email. Full CRUD for codes in the admin panel with copy-to-clipboard and revoke.
+- Dedicated admin settings page at `/admin` — system configuration is now separate from user settings at `/settings`. Each page has its own sidebar, state, and save button. Non-admins are redirected away from `/admin`.
+- Admin navigation links in both the desktop avatar dropdown and mobile sidebar (admin-only visibility).
+- User management enhancements: admins can edit usernames, emails, passwords, and roles for existing users directly from the Users section.
+- Profile pictures: upload, preview, and remove in Settings > Social. Images are automatically resized to 512x512 JPEG via Sharp. Pictures display in the avatar menu, social activity tab, and settings.
+- Playback stats overlay ("stats for nerds") showing real-time codec, bitrate, sample rate, and streaming source during playback.
+- API Keys section exposed in user settings so all users can generate and manage personal API keys for programmatic access.
+- Show version toggle: admin setting to display the app version in the player bar.
+- Library scan shortcut in the avatar dropdown menu, available without navigating to admin settings.
+- Login with email: users can now sign in with either username or email address.
+- OpenAPI documentation for all 338 non-subsonic backend endpoints via `swagger-jsdoc` annotations. Interactive Swagger UI at `/api/docs`.
+- Deployment guide (`docs/DEPLOYMENT.md`) covering Docker Compose configuration, scaling, and production setup.
+- Docker Bake file (`docker-bake.json`) for parallel multi-service image builds.
+- Playlist `updatedAt` timestamp with backfill migration for existing playlists.
+
+### Changed
+
+- Register page fully redesigned with galaxy background, branded logo/wordmark, and invite code field. Redirects to onboarding if no users exist yet.
+- Standardized action button styling across all settings sections — 12 buttons in 7 files changed from gray `bg-[#333]` to the standard white pill style used elsewhere.
+- API Keys section restyled to use `SettingsSection` wrapper and standard button conventions instead of the `Button` component with brand-colored variants.
+- Subsonic section layout changed from vertical right-aligned to horizontal inline, matching the email/display name row pattern.
+- Save status indicator below the floating save button now has a dark backdrop pill for readability over scrolled content.
+- Made For You playlist mosaics changed from circular to square with rounded corners, matching album art style everywhere else.
+- Sidebar navigation link spacing adjusted to balanced `py-2` / `space-y-1` after earlier over-compression.
+- Desktop logo/wordmark bumped 15% larger while maintaining 4:3 ratio. Mobile sidebar wordmark fills available space proportionally.
+- Swagger UI is now accessible without authentication; auth is only required for the raw JSON spec endpoint.
+
+### Fixed
+
+- Profile picture serving returned JSON-serialized byte arrays (`{"0":255,"1":216,...}`) instead of binary image data because Express `res.send()` doesn't handle `Uint8Array` from Prisma. Fixed by wrapping with `Buffer.from()`.
+- Profile picture avatar never recovered from initial 404 — once `imgError` was set (no picture uploaded yet), it stayed true permanently even after uploading. Added cross-component event dispatch and cache-busting query parameter.
+- Library could appear empty in the UI due to the Next.js API proxy double-decompressing gzip responses. Node.js `fetch` auto-decompresses but preserves `Content-Encoding` headers, causing the browser to attempt a second decompression. Fixed by stripping compression-related headers in the proxy.
+- Swagger UI returned 401 because `requireAuth` middleware blocked HTML/CSS/JS asset loading on the `/api/docs` route.
+- Albums could auto-add to queue on mobile due to pointer event handling on touch devices.
+- Settings save could overwrite backend-managed database fields; added guards to prevent this.
+
+### Database Migrations
+
+- `20260227000000` — Add `profilePicture` (BYTEA) column to User table.
+- `20260227100000` — Add `updatedAt` timestamp to Playlist table with backfill from `createdAt`.
+- `20260228000000` — Add `email` to User (unique), create InviteCode and InviteCodeUsage tables with indexes and foreign keys.
+- `20260228100000` — Add `showVersion` boolean to SystemSettings.
+
 ## [1.2.0] - 2026-02-27
 
 ### Added

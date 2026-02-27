@@ -1,11 +1,64 @@
 import express from "express";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import { requireAuth, requireAuthOrToken, requireAdmin } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
 import { publishSocialPresenceUpdate } from "../services/socialPresenceEvents";
 
 const router = express.Router();
+
+/**
+ * @openapi
+ * /api/social/profile-picture/{userId}:
+ *   get:
+ *     summary: Get a user's profile picture
+ *     description: Serves the profile picture as JPEG. Uses query token auth since img tags cannot send Authorization headers.
+ *     tags: [Social]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The user ID whose profile picture to retrieve
+ *     responses:
+ *       200:
+ *         description: Profile picture image
+ *         content:
+ *           image/jpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: No profile picture found
+ *       401:
+ *         description: Not authenticated
+ */
+// Profile picture serving — must be before router-level requireAuth
+// because <img> tags can't send Authorization headers; uses query token instead
+router.get("/profile-picture/:userId", requireAuthOrToken, async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.params.userId },
+            select: { profilePicture: true },
+        });
+
+        if (!user?.profilePicture) {
+            return res.status(404).json({ error: "No profile picture" });
+        }
+
+        res.set("Content-Type", "image/jpeg");
+        res.set("Cache-Control", "public, max-age=300");
+        return res.send(Buffer.from(user.profilePicture));
+    } catch (error) {
+        logger.error("[Social] Failed to serve profile picture:", error);
+        return res.status(500).json({ error: "Failed to get profile picture" });
+    }
+});
+
 router.use(requireAuth);
 
 const PRESENCE_KEY_PREFIX = "social:presence:user:";
@@ -145,6 +198,34 @@ async function getOnlinePresenceMap(): Promise<Map<string, number>> {
     }
 }
 
+/**
+ * @openapi
+ * /api/social/presence/heartbeat:
+ *   post:
+ *     summary: Send a presence heartbeat
+ *     description: Updates the user's online presence timestamp in Redis with a TTL. Called periodically by the client to indicate the user is online.
+ *     tags: [Social]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Heartbeat recorded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 ttlSeconds:
+ *                   type: integer
+ *                   description: TTL in seconds before presence expires
+ *       401:
+ *         description: Not authenticated
+ *       503:
+ *         description: Presence service unavailable
+ */
 router.post("/presence/heartbeat", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -170,6 +251,51 @@ router.post("/presence/heartbeat", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/social/online:
+ *   get:
+ *     summary: Get online users
+ *     description: Returns a list of users who are currently online and have opted to share their online presence. Includes listening status and track info for users who share that.
+ *     tags: [Social]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of online users with presence and listening info
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 users:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       username:
+ *                         type: string
+ *                       displayName:
+ *                         type: string
+ *                       hasProfilePicture:
+ *                         type: boolean
+ *                       isInListenTogetherGroup:
+ *                         type: boolean
+ *                       listeningStatus:
+ *                         type: string
+ *                         enum: [playing, paused, idle]
+ *                       listeningTrack:
+ *                         type: object
+ *                         nullable: true
+ *                       lastHeartbeatAt:
+ *                         type: string
+ *                         format: date-time
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/online", async (_req, res) => {
     try {
         const onlinePresenceByUserId = await getOnlinePresenceMap();
@@ -217,8 +343,17 @@ router.get("/online", async (_req, res) => {
             }),
         ]);
 
+        const usersWithPictures = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT id FROM "User"
+            WHERE id = ANY(${onlineUserIds})
+            AND "profilePicture" IS NOT NULL
+        `;
+
         const inListenTogether = new Set(
             activeMemberships.map((entry) => entry.userId)
+        );
+        const hasProfilePictureSet = new Set(
+            usersWithPictures.map((u) => u.id)
         );
 
         const socialUsers = users
@@ -246,6 +381,7 @@ router.get("/online", async (_req, res) => {
                     id: user.id,
                     username: user.username,
                     displayName: user.displayName ?? user.username,
+                    hasProfilePicture: hasProfilePictureSet.has(user.id),
                     isInListenTogetherGroup: inListenTogether.has(user.id),
                     listeningStatus,
                     listeningTrack,
@@ -263,6 +399,51 @@ router.get("/online", async (_req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/social/connected:
+ *   get:
+ *     summary: Get all connected users (admin only)
+ *     description: Returns all users with active presence heartbeats regardless of their sharing preferences. Admin-only endpoint for monitoring connected sessions.
+ *     tags: [Social]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of all connected users with their settings
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 users:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       username:
+ *                         type: string
+ *                       displayName:
+ *                         type: string
+ *                       hasProfilePicture:
+ *                         type: boolean
+ *                       role:
+ *                         type: string
+ *                       shareOnlinePresence:
+ *                         type: boolean
+ *                       shareListeningStatus:
+ *                         type: boolean
+ *                       lastHeartbeatAt:
+ *                         type: string
+ *                         format: date-time
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Forbidden - admin role required
+ */
 router.get("/connected", requireAdmin, async (req, res) => {
     try {
         if (req.user?.role !== "admin") {
@@ -292,6 +473,16 @@ router.get("/connected", requireAdmin, async (req, res) => {
             },
         });
 
+        const usersWithPicturesConnected = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT id FROM "User"
+            WHERE id = ANY(${onlineUserIds})
+            AND "profilePicture" IS NOT NULL
+        `;
+
+        const hasProfilePictureSet = new Set(
+            usersWithPicturesConnected.map((u) => u.id)
+        );
+
         const connectedUsers = users
             .map((user) => {
                 const lastHeartbeatMs = onlinePresenceByUserId.get(user.id);
@@ -299,6 +490,7 @@ router.get("/connected", requireAdmin, async (req, res) => {
                     id: user.id,
                     username: user.username,
                     displayName: user.displayName ?? user.username,
+                    hasProfilePicture: hasProfilePictureSet.has(user.id),
                     role: user.role,
                     shareOnlinePresence:
                         user.settings?.shareOnlinePresence ?? false,

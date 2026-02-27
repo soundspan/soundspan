@@ -28,6 +28,25 @@ export default function OnboardingPage() {
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
 
+    // Guard: redirect away if onboarding is not needed (users already exist)
+    useEffect(() => {
+        let cancelled = false;
+        async function checkOnboarding() {
+            try {
+                const res = await fetch("/api/onboarding/status");
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelled && !data.needsOnboarding) {
+                    router.replace("/login");
+                }
+            } catch {
+                // Ignore — fail open so first-time setup still works
+            }
+        }
+        checkOnboarding();
+        return () => { cancelled = true; };
+    }, [router]);
+
     // Use auth context state instead of duplicate API call
     useEffect(() => {
         // Wait for auth context to finish loading

@@ -18,6 +18,27 @@ const addTrackSchema = z.object({
     trackId: z.string(),
 });
 
+/**
+ * @openapi
+ * /api/playlists:
+ *   get:
+ *     summary: Get all playlists for the current user (owned and public)
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of playlists with track counts and ownership info
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /playlists
 router.get("/", async (req, res) => {
     try {
@@ -97,6 +118,39 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists:
+ *   post:
+ *     summary: Create a new playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 200
+ *               isPublic:
+ *                 type: boolean
+ *                 default: false
+ *     responses:
+ *       200:
+ *         description: Created playlist
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /playlists
 router.post("/", async (req, res) => {
     try {
@@ -126,6 +180,32 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}:
+ *   get:
+ *     summary: Get a single playlist with tracks and pending tracks
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     responses:
+ *       200:
+ *         description: Playlist details with merged items
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /playlists/:id
 router.get("/:id", async (req, res) => {
     try {
@@ -230,6 +310,49 @@ router.get("/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}:
+ *   put:
+ *     summary: Update a playlist name and visibility
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 200
+ *               isPublic:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Updated playlist
+ *       400:
+ *         description: Invalid request
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // PUT /playlists/:id
 router.put("/:id", async (req, res) => {
     try {
@@ -272,6 +395,41 @@ router.put("/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}/hide:
+ *   post:
+ *     summary: Hide a playlist from your view
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     responses:
+ *       200:
+ *         description: Playlist hidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 isHidden:
+ *                   type: boolean
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /playlists/:id/hide - Hide any playlist from your view
 router.post("/:id/hide", async (req, res) => {
     try {
@@ -311,6 +469,37 @@ router.post("/:id/hide", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}/hide:
+ *   delete:
+ *     summary: Unhide a previously hidden playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     responses:
+ *       200:
+ *         description: Playlist unhidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 isHidden:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /playlists/:id/hide - Unhide a shared playlist
 router.delete("/:id/hide", async (req, res) => {
     try {
@@ -332,6 +521,32 @@ router.delete("/:id/hide", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}:
+ *   delete:
+ *     summary: Delete a playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     responses:
+ *       200:
+ *         description: Playlist deleted
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /playlists/:id
 router.delete("/:id", async (req, res) => {
     try {
@@ -364,6 +579,45 @@ router.delete("/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}/items:
+ *   post:
+ *     summary: Add a track to a playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - trackId
+ *             properties:
+ *               trackId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Track added to playlist (or already exists)
+ *       400:
+ *         description: Invalid request
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist or track not found
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /playlists/:id/items
 router.post("/:id/items", async (req, res) => {
     try {
@@ -427,24 +681,30 @@ router.post("/:id/items", async (req, res) => {
         // Get next sort position
         const maxSort = playlist.items[0]?.sort || 0;
 
-        const item = await prisma.playlistItem.create({
-            data: {
-                playlistId: req.params.id,
-                trackId,
-                sort: maxSort + 1,
-            },
-            include: {
-                track: {
-                    include: {
-                        album: {
-                            include: {
-                                artist: true,
+        const [item] = await prisma.$transaction([
+            prisma.playlistItem.create({
+                data: {
+                    playlistId: req.params.id,
+                    trackId,
+                    sort: maxSort + 1,
+                },
+                include: {
+                    track: {
+                        include: {
+                            album: {
+                                include: {
+                                    artist: true,
+                                },
                             },
                         },
                     },
                 },
-            },
-        });
+            }),
+            prisma.playlist.update({
+                where: { id: req.params.id },
+                data: { updatedAt: new Date() },
+            }),
+        ]);
 
         res.json(item);
     } catch (error) {
@@ -458,6 +718,38 @@ router.post("/:id/items", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}/items/{trackId}:
+ *   delete:
+ *     summary: Remove a track from a playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID to remove
+ *     responses:
+ *       200:
+ *         description: Track removed from playlist
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /playlists/:id/items/:trackId
 router.delete("/:id/items/:trackId", async (req, res) => {
     try {
@@ -476,14 +768,20 @@ router.delete("/:id/items/:trackId", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        await prisma.playlistItem.delete({
-            where: {
-                playlistId_trackId: {
-                    playlistId: req.params.id,
-                    trackId: req.params.trackId,
+        await prisma.$transaction([
+            prisma.playlistItem.delete({
+                where: {
+                    playlistId_trackId: {
+                        playlistId: req.params.id,
+                        trackId: req.params.trackId,
+                    },
                 },
-            },
-        });
+            }),
+            prisma.playlist.update({
+                where: { id: req.params.id },
+                data: { updatedAt: new Date() },
+            }),
+        ]);
 
         res.json({ message: "Track removed from playlist" });
     } catch (error) {
@@ -492,6 +790,48 @@ router.delete("/:id/items/:trackId", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playlists/{id}/items/reorder:
+ *   put:
+ *     summary: Reorder tracks in a playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - trackIds
+ *             properties:
+ *               trackIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of track IDs in the desired order
+ *     responses:
+ *       200:
+ *         description: Playlist reordered
+ *       400:
+ *         description: trackIds must be an array
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // PUT /playlists/:id/items/reorder
 router.put("/:id/items/reorder", async (req, res) => {
     try {
@@ -528,7 +868,13 @@ router.put("/:id/items/reorder", async (req, res) => {
             })
         );
 
-        await prisma.$transaction(updates);
+        await prisma.$transaction([
+            ...updates,
+            prisma.playlist.update({
+                where: { id: req.params.id },
+                data: { updatedAt: new Date() },
+            }),
+        ]);
 
         res.json({ message: "Playlist reordered" });
     } catch (error) {
@@ -538,8 +884,44 @@ router.put("/:id/items/reorder", async (req, res) => {
 });
 
 /**
- * GET /playlists/:id/pending
- * Get pending tracks for a playlist (tracks from Spotify that haven't been matched yet)
+ * @openapi
+ * /api/playlists/{id}/pending:
+ *   get:
+ *     summary: Get pending tracks for a playlist (unmatched Spotify imports)
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     responses:
+ *       200:
+ *         description: Pending tracks list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 count:
+ *                   type: integer
+ *                 tracks:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 spotifyPlaylistId:
+ *                   type: string
+ *                   nullable: true
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/:id/pending", async (req, res) => {
     try {
@@ -583,8 +965,36 @@ router.get("/:id/pending", async (req, res) => {
 });
 
 /**
- * DELETE /playlists/:id/pending/:trackId
- * Remove a pending track (user decides they don't want to wait for it)
+ * @openapi
+ * /api/playlists/{id}/pending/{trackId}:
+ *   delete:
+ *     summary: Remove a pending track from a playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Pending track ID
+ *     responses:
+ *       200:
+ *         description: Pending track removed
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist or pending track not found
+ *       401:
+ *         description: Not authenticated
  */
 router.delete("/:id/pending/:trackId", async (req, res) => {
     try {
@@ -619,8 +1029,41 @@ router.delete("/:id/pending/:trackId", async (req, res) => {
 });
 
 /**
- * GET /playlists/:id/pending/:trackId/preview
- * Get a fresh Deezer preview URL for a pending track (since they expire)
+ * @openapi
+ * /api/playlists/{id}/pending/{trackId}/preview:
+ *   get:
+ *     summary: Get a fresh Deezer preview URL for a pending track
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Pending track ID
+ *     responses:
+ *       200:
+ *         description: Fresh preview URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 previewUrl:
+ *                   type: string
+ *       404:
+ *         description: Pending track not found or no preview available
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/:id/pending/:trackId/preview", async (req, res) => {
     try {
@@ -662,9 +1105,50 @@ router.get("/:id/pending/:trackId/preview", async (req, res) => {
 });
 
 /**
- * POST /playlists/:id/pending/:trackId/retry
- * Retry downloading a failed/pending track from Soulseek
- * Returns immediately and downloads in background
+ * @openapi
+ * /api/playlists/{id}/pending/{trackId}/retry:
+ *   post:
+ *     summary: Retry downloading a pending track from Soulseek
+ *     description: Returns immediately and downloads in background. Triggers a library scan after download.
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Pending track ID
+ *     responses:
+ *       200:
+ *         description: Download started or track not found on Soulseek
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 downloadJobId:
+ *                   type: string
+ *       400:
+ *         description: Music path or Soulseek credentials not configured
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist or pending track not found
+ *       401:
+ *         description: Not authenticated
  */
 router.post("/:id/pending/:trackId/retry", async (req, res) => {
     try {
@@ -968,8 +1452,41 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
 });
 
 /**
- * POST /playlists/:id/pending/reconcile
- * Manually trigger reconciliation for a specific playlist
+ * @openapi
+ * /api/playlists/{id}/pending/reconcile:
+ *   post:
+ *     summary: Manually trigger reconciliation of pending tracks for a playlist
+ *     tags: [Playlists]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Playlist ID
+ *     responses:
+ *       200:
+ *         description: Reconciliation complete
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 tracksAdded:
+ *                   type: integer
+ *                 playlistsUpdated:
+ *                   type: integer
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
  */
 router.post("/:id/pending/reconcile", async (req, res) => {
     try {

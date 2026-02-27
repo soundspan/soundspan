@@ -29,6 +29,19 @@ export function LibrarySafetySection({
                     }
                 />
             </SettingsRow>
+            <SettingsRow
+                label="Show version"
+                description="Display the app version in the bottom-right corner of the player bar."
+                htmlFor="show-version"
+            >
+                <SettingsToggle
+                    id="show-version"
+                    checked={settings.showVersion}
+                    onChange={(checked) =>
+                        onUpdate({ showVersion: checked })
+                    }
+                />
+            </SettingsRow>
         </SettingsSection>
     );
 }

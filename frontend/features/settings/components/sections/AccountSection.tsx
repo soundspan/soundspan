@@ -21,6 +21,12 @@ const displayNamePattern = /^[A-Za-z0-9 .-]+$/;
 export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
     const { user } = useAuth();
     
+    // Email change state
+    const [email, setEmail] = useState(user?.email || "");
+    const [emailStatus, setEmailStatus] = useState<StatusType>("idle");
+    const [emailMessage, setEmailMessage] = useState("");
+    const [savingEmail, setSavingEmail] = useState(false);
+
     // Password change state
     const [currentPassword, setCurrentPassword] = useState("");
     const [newPassword, setNewPassword] = useState("");
@@ -63,6 +69,28 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
     useEffect(() => {
         load2FAStatus();
     }, [load2FAStatus]);
+
+    // Handle email change
+    const handleChangeEmail = async () => {
+        const trimmed = email.trim();
+        if (!trimmed) {
+            setEmailStatus("error");
+            setEmailMessage("Email required");
+            return;
+        }
+        setSavingEmail(true);
+        setEmailStatus("loading");
+        try {
+            await api.post("/auth/change-email", { email: trimmed });
+            setEmailStatus("success");
+            setEmailMessage("Updated");
+        } catch (error: unknown) {
+            setEmailStatus("error");
+            setEmailMessage(error instanceof Error ? error.message : "Failed");
+        } finally {
+            setSavingEmail(false);
+        }
+    };
 
     // Handle password change
     const handleChangePassword = async () => {
@@ -160,6 +188,37 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
                 {/* Username Display */}
                 <SettingsRow label="Username" description={`Logged in as ${user?.username}`}>
                     <span className="text-sm text-gray-400">{user?.role}</span>
+                </SettingsRow>
+
+                {/* Email */}
+                <SettingsRow
+                    label="Email"
+                    description="Used for login and account recovery"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="w-64">
+                            <SettingsInput
+                                id="email"
+                                type="email"
+                                value={email}
+                                onChange={setEmail}
+                                placeholder="you@example.com"
+                            />
+                        </div>
+                        <button
+                            onClick={handleChangeEmail}
+                            disabled={savingEmail || email.trim() === (user?.email || "")}
+                            className="px-4 py-2 bg-white text-black text-sm font-medium rounded-full
+                                hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
+                        >
+                            {savingEmail ? "Saving..." : "Save"}
+                        </button>
+                        <InlineStatus
+                            status={emailStatus}
+                            message={emailMessage}
+                            onClear={() => setEmailStatus("idle")}
+                        />
+                    </div>
                 </SettingsRow>
 
                 {/* Change Password */}

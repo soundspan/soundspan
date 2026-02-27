@@ -12,6 +12,41 @@ const downloadAlbumSchema = z.object({
     quality: z.enum(["original", "high", "medium", "low"]).optional(),
 });
 
+/**
+ * @openapi
+ * /api/offline/albums/{id}/download:
+ *   post:
+ *     summary: Create a download job for an album's tracks
+ *     tags: [Offline]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Album ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               quality:
+ *                 type: string
+ *                 enum: [original, high, medium, low]
+ *                 description: Audio quality for download
+ *     responses:
+ *       200:
+ *         description: Download job created with track stream URLs
+ *       400:
+ *         description: Cache size limit exceeded or invalid request
+ *       404:
+ *         description: Album not found
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /offline/albums/:id/download
 router.post("/albums/:id/download", async (req, res) => {
     try {
@@ -112,6 +147,49 @@ router.post("/albums/:id/download", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/offline/tracks/{id}/complete:
+ *   post:
+ *     summary: Mark a track download as complete
+ *     tags: [Offline]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - localPath
+ *               - quality
+ *               - fileSizeMb
+ *             properties:
+ *               localPath:
+ *                 type: string
+ *                 description: Local file path on device
+ *               quality:
+ *                 type: string
+ *                 description: Audio quality of the cached file
+ *               fileSizeMb:
+ *                 type: number
+ *                 description: File size in megabytes
+ *     responses:
+ *       200:
+ *         description: Cached track record created or updated
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /offline/tracks/:id/complete (called by mobile after download)
 router.post("/tracks/:id/complete", async (req, res) => {
     try {
@@ -154,6 +232,20 @@ router.post("/tracks/:id/complete", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/offline/albums:
+ *   get:
+ *     summary: Get all offline-cached albums for the current user
+ *     tags: [Offline]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: List of cached albums with track details and sizes
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /offline/albums
 router.get("/albums", async (req, res) => {
     try {
@@ -218,6 +310,27 @@ router.get("/albums", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/offline/albums/{id}:
+ *   delete:
+ *     summary: Remove a cached album from offline storage
+ *     tags: [Offline]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Album ID
+ *     responses:
+ *       200:
+ *         description: Album removed from cache
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /offline/albums/:id
 router.delete("/albums/:id", async (req, res) => {
     try {
@@ -254,6 +367,20 @@ router.delete("/albums/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/offline/stats:
+ *   get:
+ *     summary: Get offline cache usage statistics
+ *     tags: [Offline]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Cache usage stats including size and track count
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /offline/stats
 router.get("/stats", async (req, res) => {
     try {

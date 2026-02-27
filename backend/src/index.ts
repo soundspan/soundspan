@@ -324,16 +324,16 @@ app.get("/api/health/ready", async (req, res) => {
 });
 
 // Swagger API Documentation
-// In production: require auth unless DOCS_PUBLIC=true
-// In development: always public for easier testing
-const docsMiddleware =
+// The UI itself is always accessible so HTML/CSS/JS assets load correctly.
+// The raw JSON spec requires auth in production unless DOCS_PUBLIC=true.
+// Actual API calls from "Try it out" are protected by each endpoint's own auth.
+const specMiddleware =
     config.nodeEnv === "production" && process.env.DOCS_PUBLIC !== "true"
         ? [requireAuth]
         : [];
 
 app.use(
     "/api/docs",
-    ...docsMiddleware,
     swaggerUi.serve,
     swaggerUi.setup(swaggerSpec, {
         customCss: ".swagger-ui .topbar { display: none }",
@@ -341,8 +341,8 @@ app.use(
     })
 );
 
-// Serve raw OpenAPI spec
-app.get("/api/docs.json", ...docsMiddleware, (req, res) => {
+// Serve raw OpenAPI spec (auth-gated in production)
+app.get("/api/docs.json", ...specMiddleware, (req, res) => {
     res.json(swaggerSpec);
 });
 

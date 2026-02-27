@@ -212,11 +212,11 @@ export function TracksList({
     return (
         <>
             {/* Header row */}
-            <div className="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-3 py-2 border-b border-white/10 text-xs text-gray-500 uppercase tracking-wider">
+            <div className="hidden md:grid grid-cols-[auto_1fr_1fr_auto] items-center gap-3 px-3 py-2 border-b border-white/10 text-xs text-gray-500 uppercase tracking-wider">
                 <div className="w-8 text-center">#</div>
                 <div>Title</div>
-                <div className="hidden md:block">Album</div>
-                <div className="w-[230px] text-right pr-2">Duration</div>
+                <div>Album</div>
+                <div className="w-[230px]" />
             </div>
 
             <div data-tv-section="library-tracks">

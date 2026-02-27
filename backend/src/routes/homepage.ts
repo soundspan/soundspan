@@ -10,8 +10,26 @@ const router = Router();
 router.use(requireAuthOrToken);
 
 /**
- * GET /homepage/genres
- * Get top genres from user's library with sample albums
+ * @openapi
+ * /api/homepage/genres:
+ *   get:
+ *     summary: Get top genres from user's library with sample albums
+ *     tags: [Homepage]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 4
+ *         description: Number of top genres to return
+ *     responses:
+ *       200:
+ *         description: Top genres with sample albums for each
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/genres", async (req, res) => {
     try {
@@ -123,8 +141,26 @@ router.get("/genres", async (req, res) => {
 });
 
 /**
- * GET /homepage/top-podcasts
- * Get top podcasts (most subscribed or most recent episodes)
+ * @openapi
+ * /api/homepage/top-podcasts:
+ *   get:
+ *     summary: Get top podcasts (most recently added)
+ *     tags: [Homepage]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 6
+ *         description: Number of top podcasts to return
+ *     responses:
+ *       200:
+ *         description: Top podcasts with episode counts
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/top-podcasts", async (req, res) => {
     try {

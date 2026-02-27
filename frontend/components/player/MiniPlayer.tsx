@@ -18,7 +18,7 @@ import { cn } from "@/utils/cn";
 import { clampTime } from "@/utils/formatTime";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
-import { PlaybackQualityBadge } from "@/components/player/PlaybackQualityBadge";
+import { PlaybackQualityBadgeWithStats } from "@/components/player/PlaybackQualityBadgeWithStats";
 
 export function MiniPlayer() {
     const {
@@ -146,7 +146,7 @@ export function MiniPlayer() {
                                         {subtitle}
                                     </p>
                                     {qualityBadge ? (
-                                        <PlaybackQualityBadge
+                                        <PlaybackQualityBadgeWithStats
                                             badge={qualityBadge}
                                             size="mini"
                                         />

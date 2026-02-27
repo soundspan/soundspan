@@ -8,7 +8,7 @@ import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
 const logger = createFrontendLogger("Settings.useSystemSettings");
 
 const defaultSystemSettings: SystemSettings = {
-    lidarrEnabled: true,
+    lidarrEnabled: false,
     lidarrUrl: "http://localhost:8686",
     lidarrApiKey: "",
     openaiEnabled: false,
@@ -37,7 +37,7 @@ const defaultSystemSettings: SystemSettings = {
     maxCacheSizeMb: 10240,
     autoSync: true,
     autoEnrichMetadata: true,
-    libraryDeletionEnabled: true,
+    libraryDeletionEnabled: false,
     audioAnalyzerWorkers: 2,
     soulseekConcurrentDownloads: 4,
     // Download preferences
@@ -47,18 +47,23 @@ const defaultSystemSettings: SystemSettings = {
     ytMusicEnabled: false,
     ytMusicClientId: "",
     ytMusicClientSecret: "",
+    // UI
+    showVersion: false,
 };
 
 export function useSystemSettings() {
     const { isAuthenticated, user } = useAuth();
-    const [systemSettings, setSystemSettings] = useState<SystemSettings>(
-        defaultSystemSettings
+    // Initialize as null — settings are only valid once loaded from the DB.
+    // This prevents stale frontend defaults from being saved over real values
+    // if the API call fails.
+    const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(
+        null
     );
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [changedServices, setChangedServices] = useState<string[]>([]);
-    const [originalSettings, setOriginalSettings] = useState<SystemSettings>(
-        defaultSystemSettings
+    const [originalSettings, setOriginalSettings] = useState<SystemSettings | null>(
+        null
     );
     const [loadError, setLoadError] = useState(false);
     const lastLoadAttemptAtRef = useRef(0);
@@ -149,6 +154,12 @@ export function useSystemSettings() {
     }, [isAuthenticated, isAdmin, loadError, loadSystemSettings]);
 
     const saveSystemSettings = async (settingsToSave: SystemSettings, _showToast = false) => {
+        // Guard: never save if settings were never loaded from the DB.
+        // This prevents frontend defaults from overwriting real values.
+        if (!originalSettings) {
+            throw new Error("Cannot save — settings have not been loaded from the server yet.");
+        }
+
         try {
             setIsSaving(true);
 
@@ -205,7 +216,7 @@ export function useSystemSettings() {
     };
 
     const updateSystemSettings = (updates: Partial<SystemSettings>) => {
-        setSystemSettings((prev) => ({ ...prev, ...updates }));
+        setSystemSettings((prev) => prev ? { ...prev, ...updates } : null);
     };
 
     /**
@@ -214,6 +225,9 @@ export function useSystemSettings() {
      * Caller handles displaying the result inline
      */
     const testService = async (service: string): Promise<{ success: boolean; version?: string; error?: string }> => {
+        if (!systemSettings) {
+            return { success: false, error: "Settings have not been loaded yet." };
+        }
         try {
             let result;
             switch (service) {

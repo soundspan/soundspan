@@ -606,11 +606,11 @@ export default function PlaylistDetailPage() {
                 playlist.pendingTracks?.length > 0 ? (
                     <div className="w-full">
                         {/* Table Header */}
-                        <div className="hidden md:grid grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_auto] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
+                        <div className="hidden md:grid grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
                             <span className="text-center">#</span>
                             <span>Title</span>
                             <span>Album</span>
-                            <span className="text-right">Duration</span>
+                            <span />
                         </div>
 
                         {/* Track Rows - use mergedItems to show tracks and pending in correct order */}
@@ -634,7 +634,7 @@ export default function PlaylistDetailPage() {
                                         return (
                                             <div
                                                 key={`pending-${pending.id}`}
-                                                className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_120px] gap-4 px-4 py-2 rounded-md opacity-60 hover:opacity-80 group transition-opacity"
+                                                className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_120px] gap-4 px-4 py-2 rounded-md opacity-60 hover:opacity-80 group transition-opacity"
                                             >
                                                 {/* Track Number - failed icon */}
                                                 <div className="flex items-center justify-center">
@@ -754,7 +754,7 @@ export default function PlaylistDetailPage() {
                                                 handlePlayTrack(trackIndex)
                                             }
                                             className={cn(
-                                                "grid grid-cols-[28px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(100px,1fr)_auto] gap-2 px-1 md:gap-4 md:px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
+                                                "grid grid-cols-[28px_1fr_auto] md:grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto] gap-2 px-1 md:gap-4 md:px-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                                                 isCurrentlyPlaying &&
                                                     "bg-white/10",
                                                 isInQueue &&

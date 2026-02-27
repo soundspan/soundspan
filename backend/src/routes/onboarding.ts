@@ -84,8 +84,36 @@ async function ensureEncryptionKey(): Promise<void> {
 }
 
 /**
- * POST /onboarding/register
- * Step 1: Create user account - returns JWT token like regular login
+ * @openapi
+ * /api/onboarding/register:
+ *   post:
+ *     summary: Create the initial admin account during first-time setup
+ *     tags: [Onboarding]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - username
+ *               - password
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 50
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 6
+ *     responses:
+ *       200:
+ *         description: Account created, returns JWT token
+ *       400:
+ *         description: Invalid request or username already taken
+ *       403:
+ *         description: Registration is closed (users already exist)
  */
 router.post("/register", async (req, res) => {
     try {
@@ -98,6 +126,12 @@ router.post("/register", async (req, res) => {
         // Check if any user exists (first user becomes admin)
         const userCount = await prisma.user.count();
         const isFirstUser = userCount === 0;
+
+        // SECURITY: After initial setup, only admins can create new accounts.
+        // Unauthenticated registration is only allowed when no users exist.
+        if (!isFirstUser) {
+            return res.status(403).json({ error: "Registration is closed" });
+        }
 
         // If this is the first user, ensure encryption key is generated
         if (isFirstUser) {
@@ -167,8 +201,39 @@ router.post("/register", async (req, res) => {
 });
 
 /**
- * POST /onboarding/lidarr
- * Step 2a: Configure Lidarr integration
+ * @openapi
+ * /api/onboarding/lidarr:
+ *   post:
+ *     summary: Configure Lidarr integration during onboarding
+ *     tags: [Onboarding]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - enabled
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *               apiKey:
+ *                 type: string
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Lidarr configuration saved
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.post("/lidarr", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -246,8 +311,39 @@ router.post("/lidarr", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
- * POST /onboarding/audiobookshelf
- * Step 2b: Configure Audiobookshelf integration
+ * @openapi
+ * /api/onboarding/audiobookshelf:
+ *   post:
+ *     summary: Configure Audiobookshelf integration during onboarding
+ *     tags: [Onboarding]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - enabled
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *               apiKey:
+ *                 type: string
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Audiobookshelf configuration saved
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.post("/audiobookshelf", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -322,8 +418,39 @@ router.post("/audiobookshelf", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
- * POST /onboarding/soulseek
- * Step 2c: Configure Soulseek integration (direct connection via slsk-client)
+ * @openapi
+ * /api/onboarding/soulseek:
+ *   post:
+ *     summary: Configure Soulseek integration during onboarding
+ *     tags: [Onboarding]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - enabled
+ *             properties:
+ *               username:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *                 format: password
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Soulseek configuration saved
+ *       400:
+ *         description: Invalid request or missing credentials
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -380,8 +507,34 @@ router.post("/soulseek", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
- * POST /onboarding/enrichment
- * Step 3: Configure metadata enrichment
+ * @openapi
+ * /api/onboarding/enrichment:
+ *   post:
+ *     summary: Configure metadata enrichment during onboarding
+ *     tags: [Onboarding]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - enabled
+ *             properties:
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Enrichment configuration saved
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 router.post("/enrichment", requireAuth, requireAdmin, async (req, res) => {
     try {
@@ -411,8 +564,19 @@ router.post("/enrichment", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
- * POST /onboarding/complete
- * Final step: Mark onboarding as complete
+ * @openapi
+ * /api/onboarding/complete:
+ *   post:
+ *     summary: Mark onboarding as complete for the current user
+ *     tags: [Onboarding]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Onboarding marked as complete
+ *       401:
+ *         description: Not authenticated
  */
 router.post("/complete", requireAuth, async (req, res) => {
     try {
@@ -430,8 +594,14 @@ router.post("/complete", requireAuth, async (req, res) => {
 });
 
 /**
- * GET /onboarding/status
- * Check if user needs onboarding
+ * @openapi
+ * /api/onboarding/status:
+ *   get:
+ *     summary: Check if the system needs onboarding or if a user has completed it
+ *     tags: [Onboarding]
+ *     responses:
+ *       200:
+ *         description: Onboarding status
  */
 router.get("/status", async (req, res) => {
     try {

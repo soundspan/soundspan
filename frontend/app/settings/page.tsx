@@ -5,10 +5,7 @@ import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createFrontendLogger } from "@/lib/logger";
-import { RestartModal } from "@/components/ui/RestartModal";
 import { useSettingsData } from "@/features/settings/hooks/useSettingsData";
-import { useSystemSettings } from "@/features/settings/hooks/useSystemSettings";
-import { shouldShowSettingsPageLoading } from "@/features/settings/hooks/settingsHydration";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { InlineStatus, useInlineStatus } from "@/components/ui/InlineStatus";
 import {
@@ -29,15 +26,7 @@ const sidebarItems: SidebarItem[] = [
     { id: "history", label: "History & Personalization" },
     { id: "playback", label: "Playback" },
     { id: "integrations", label: "Integrations" },
-    { id: "download-preferences", label: "Download Preferences", adminOnly: true },
-    { id: "download-services", label: "Download Services", adminOnly: true },
-    { id: "audiobookshelf", label: "Media Servers", adminOnly: true },
-    { id: "youtube-music-admin", label: "YouTube Music (Admin)", adminOnly: true },
-    { id: "ai-services", label: "Artwork", adminOnly: true },
-    { id: "storage", label: "Storage", adminOnly: true },
-    { id: "library-safety", label: "Library Safety", adminOnly: true },
-    { id: "cache", label: "Cache & Automation", adminOnly: true },
-    { id: "users", label: "Users", adminOnly: true },
+    { id: "api-keys", label: "API Keys" },
 ];
 
 function renderSectionFallback() {
@@ -56,89 +45,21 @@ const PlaybackHistorySection = dynamic(
     { loading: renderSectionFallback }
 );
 
-const DownloadPreferencesSection = dynamic(
+const APIKeysSection = dynamic(
     () =>
         import(
-            "@/features/settings/components/sections/DownloadPreferencesSection"
-        ).then((mod) => mod.DownloadPreferencesSection),
-    { loading: renderSectionFallback }
-);
-
-const DownloadServicesSection = dynamic(
-    () =>
-        import(
-            "@/features/settings/components/sections/DownloadServicesSection"
-        ).then((mod) => mod.DownloadServicesSection),
-    { loading: renderSectionFallback }
-);
-
-const AudiobookshelfSection = dynamic(
-    () =>
-        import(
-            "@/features/settings/components/sections/AudiobookshelfSection"
-        ).then((mod) => mod.AudiobookshelfSection),
-    { loading: renderSectionFallback }
-);
-
-const YouTubeMusicAdminSection = dynamic(
-    () =>
-        import("@/features/settings/components/sections/YouTubeMusicSection").then(
-            (mod) => mod.YouTubeMusicAdminSection
-        ),
-    { loading: renderSectionFallback }
-);
-
-const AIServicesSection = dynamic(
-    () =>
-        import("@/features/settings/components/sections/AIServicesSection").then(
-            (mod) => mod.AIServicesSection
-        ),
-    { loading: renderSectionFallback }
-);
-
-const StoragePathsSection = dynamic(
-    () =>
-        import("@/features/settings/components/sections/StoragePathsSection").then(
-            (mod) => mod.StoragePathsSection
-        ),
-    { loading: renderSectionFallback }
-);
-
-const LibrarySafetySection = dynamic(
-    () =>
-        import("@/features/settings/components/sections/LibrarySafetySection").then(
-            (mod) => mod.LibrarySafetySection
-        ),
-    { loading: renderSectionFallback }
-);
-
-const CacheSection = dynamic(
-    () =>
-        import("@/features/settings/components/sections/CacheSection").then(
-            (mod) => mod.CacheSection
-        ),
-    { loading: renderSectionFallback }
-);
-
-const UserManagementSection = dynamic(
-    () =>
-        import(
-            "@/features/settings/components/sections/UserManagementSection"
-        ).then((mod) => mod.UserManagementSection),
+            "@/features/settings/components/sections/APIKeysSection"
+        ).then((mod) => mod.APIKeysSection),
     { loading: renderSectionFallback }
 );
 
 const logger = createFrontendLogger("Settings.Page");
 
 export default function SettingsPage() {
-    const { isAuthenticated, isLoading: authLoading, user } = useAuth();
+    const { isAuthenticated, isLoading: authLoading } = useAuth();
     useSearchParams();
     const [isSaving, setIsSaving] = useState(false);
-    const [showRestartModal, setShowRestartModal] = useState(false);
-    const [testingServices, setTestingServices] = useState<Record<string, boolean>>({});
     const saveStatus = useInlineStatus();
-
-    const isAdmin = user?.role === "admin";
 
     // User settings hook
     const {
@@ -146,17 +67,8 @@ export default function SettingsPage() {
         isLoading: userSettingsLoading,
         updateSettings: updateUserSettings,
         saveSettings: saveUserSettings,
+        loadSettings: reloadUserSettings,
     } = useSettingsData();
-
-    // System settings hook (only used if admin)
-    const {
-        systemSettings,
-        isLoading: systemSettingsLoading,
-        changedServices,
-        updateSystemSettings,
-        saveSystemSettings,
-        testService,
-    } = useSystemSettings();
 
     // Handle initial hash for section scrolling
     useEffect(() => {
@@ -173,54 +85,20 @@ export default function SettingsPage() {
         }
     }, []);
 
-    // Unified save function
     const handleSaveAll = useCallback(async () => {
         setIsSaving(true);
         saveStatus.setLoading();
-        let hasError = false;
-        let changedSystemServices: string[] = [];
 
         try {
             await saveUserSettings(userSettings);
-        } catch (error) {
-            logger.error("Failed to save user settings from settings page", {
-                error,
-            });
-            hasError = true;
-        }
-
-        if (isAdmin) {
-            try {
-                changedSystemServices = await saveSystemSettings(systemSettings) || [];
-            } catch (error) {
-                logger.error("Failed to save system settings from settings page", {
-                    error,
-                });
-                hasError = true;
-            }
-        }
-
-        setIsSaving(false);
-
-        if (hasError) {
-            saveStatus.setError("Failed to save");
-        } else {
+            setIsSaving(false);
             saveStatus.setSuccess("Saved");
-            if (changedSystemServices.length > 0) {
-                setShowRestartModal(true);
-            }
+        } catch (error) {
+            logger.error("Failed to save user settings from settings page", { error });
+            setIsSaving(false);
+            saveStatus.setError("Failed to save");
         }
-    }, [userSettings, systemSettings, isAdmin, saveUserSettings, saveSystemSettings, saveStatus]);
-
-    // Test service wrapper
-    const handleTestService = useCallback(async (service: string) => {
-        setTestingServices(prev => ({ ...prev, [service]: true }));
-        try {
-            return await testService(service);
-        } finally {
-            setTestingServices(prev => ({ ...prev, [service]: false }));
-        }
-    }, [testService]);
+    }, [userSettings, saveUserSettings, saveStatus]);
 
     if (authLoading) {
         return (
@@ -234,15 +112,7 @@ export default function SettingsPage() {
         return null;
     }
 
-    if (
-        shouldShowSettingsPageLoading({
-            authLoading,
-            isAuthenticated,
-            isUserSettingsLoading: userSettingsLoading,
-            isAdmin,
-            isSystemSettingsLoading: systemSettingsLoading,
-        })
-    ) {
+    if (userSettingsLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
                 <GradientSpinner size="md" />
@@ -251,125 +121,56 @@ export default function SettingsPage() {
     }
 
     return (
-        <>
-            <SettingsLayout sidebarItems={sidebarItems} isAdmin={isAdmin}>
-                {/* Account (includes Subsonic app password) */}
-                <AccountSection
-                    settings={userSettings}
-                    onUpdate={updateUserSettings}
-                />
+        <SettingsLayout sidebarItems={sidebarItems} isAdmin={false}>
+            {/* Account (includes Subsonic app password) */}
+            <AccountSection
+                settings={userSettings}
+                onUpdate={updateUserSettings}
+            />
 
-                {/* Social */}
-                <SocialSection
-                    settings={userSettings}
-                    onUpdate={updateUserSettings}
-                />
+            {/* Social */}
+            <SocialSection
+                settings={userSettings}
+                onUpdate={updateUserSettings}
+                onReloadSettings={() => reloadUserSettings({ background: true })}
+            />
 
-                {/* History & Personalization */}
-                <PlaybackHistorySection />
+            {/* History & Personalization */}
+            <PlaybackHistorySection />
 
-                {/* Playback */}
-                <PlaybackSection
-                    value={userSettings.playbackQuality}
-                    onChange={(quality) => updateUserSettings({ playbackQuality: quality })}
-                />
+            {/* Playback */}
+            <PlaybackSection
+                value={userSettings.playbackQuality}
+                onChange={(quality) => updateUserSettings({ playbackQuality: quality })}
+            />
 
-                {/* Integrations (YouTube Music + TIDAL — visible to all users) */}
-                <IntegrationsSection
-                    settings={userSettings}
-                    onUpdate={updateUserSettings}
-                />
+            {/* Integrations (YouTube Music + TIDAL — visible to all users) */}
+            <IntegrationsSection
+                settings={userSettings}
+                onUpdate={updateUserSettings}
+            />
 
-                {/* Admin-only sections */}
-                {isAdmin && (
-                    <>
-                        {/* Download Preferences */}
-                        <DownloadPreferencesSection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                        />
+            {/* API Keys */}
+            <APIKeysSection />
 
-                        {/* Download Services — Lidarr, Soulseek, TIDAL */}
-                        <DownloadServicesSection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                            onTest={handleTestService}
-                            testingServices={testingServices}
-                        />
-
-                        {/* Media Servers - Audiobookshelf */}
-                        <AudiobookshelfSection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                            onTest={handleTestService}
-                            isTesting={testingServices.audiobookshelf || false}
-                        />
-
-                        {/* YouTube Music Admin Toggle */}
-                        <YouTubeMusicAdminSection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                        />
-
-                        {/* AI Services */}
-                        <AIServicesSection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                            onTest={handleTestService}
-                            isTesting={testingServices.openai || testingServices.fanart || false}
-                        />
-
-                        {/* Storage */}
-                        <StoragePathsSection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                            onTest={handleTestService}
-                            isTesting={false}
-                        />
-
-                        {/* Library Safety */}
-                        <LibrarySafetySection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                        />
-
-                        {/* Cache & Automation */}
-                        <CacheSection
-                            settings={systemSettings}
-                            onUpdate={updateSystemSettings}
-                        />
-
-                        {/* User Management */}
-                        <UserManagementSection />
-                    </>
-                )}
-
-                {/* Save Button - Fixed at bottom */}
-                <div className="sticky bottom-0 pt-8 pb-8 bg-[#0a0a0a]">
-                    <div className="relative">
-                        <button
-                            onClick={handleSaveAll}
-                            disabled={isSaving}
-                            className="w-full bg-white text-black font-semibold py-3 px-4 rounded-full
-                                hover:scale-[1.02] active:scale-[0.98] transition-transform
-                                disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                        >
-                            {isSaving ? "Saving..." : "Save"}
-                        </button>
-                        {/* Status appears below button, absolutely positioned */}
-                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2">
-                            <InlineStatus {...saveStatus.props} />
-                        </div>
+            {/* Save Button - Fixed at bottom */}
+            <div className="sticky bottom-0 pt-8 pb-8">
+                <div className="relative">
+                    <button
+                        onClick={handleSaveAll}
+                        disabled={isSaving}
+                        className="w-full bg-white text-black font-semibold py-3 px-4 rounded-full
+                            hover:scale-[1.02] active:scale-[0.98] transition-transform
+                            disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                    >
+                        {isSaving ? "Saving..." : "Save"}
+                    </button>
+                    {/* Status appears below button, absolutely positioned */}
+                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-[#0a0a0a]/90 backdrop-blur-sm px-3 py-0.5 rounded-full">
+                        <InlineStatus {...saveStatus.props} />
                     </div>
                 </div>
-            </SettingsLayout>
-
-            {/* Restart Modal */}
-            <RestartModal
-                isOpen={showRestartModal}
-                onClose={() => setShowRestartModal(false)}
-                changedServices={changedServices}
-            />
-        </>
+            </div>
+        </SettingsLayout>
     );
 }

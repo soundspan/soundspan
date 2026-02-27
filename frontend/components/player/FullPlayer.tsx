@@ -32,12 +32,13 @@ import { formatTime, clampTime } from "@/utils/formatTime";
 import { SeekSlider } from "./SeekSlider";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
-import { PlaybackQualityBadge } from "./PlaybackQualityBadge";
+import { PlaybackQualityBadgeWithStats } from "./PlaybackQualityBadgeWithStats";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 import { useFeatures } from "@/lib/features-context";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { APP_VERSION } from "@/lib/version";
 
 /**
  * FullPlayer - UI-only component for desktop bottom player
@@ -191,7 +192,7 @@ export function FullPlayer() {
         qualityBadge,
     } = useStreamBitrate();
 
-    const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
+    const { vibeEmbeddings, showVersion, loading: featuresLoading } = useFeatures();
     const [isVibeLoading, setIsVibeLoading] = useState(false);
     const [isRadioLoading, setIsRadioLoading] = useState(false);
 
@@ -548,7 +549,7 @@ export function FullPlayer() {
                         {/* Quality badge — centered in space between controls and time */}
                         <div className="flex-1 flex justify-center">
                             {qualityBadge && (
-                                <PlaybackQualityBadge
+                                <PlaybackQualityBadgeWithStats
                                     badge={qualityBadge}
                                     size="full"
                                 />
@@ -619,8 +620,6 @@ export function FullPlayer() {
                                 <TrackOverflowMenu
                                     track={currentTrack}
                                     showPlayNext={false}
-                                    showMatchVibe={false}
-                                    showStartRadio={false}
                                     triggerClassName="!opacity-100 text-gray-400 hover:text-white"
                                     menuClassName="bottom-full top-auto mb-1 mt-0 z-[10001]"
                                 />
@@ -693,6 +692,12 @@ export function FullPlayer() {
                         </div>
                     </div>
                 </div>
+                {/* Version badge — absolutely positioned bottom-right, doesn't affect layout */}
+                {showVersion && (
+                    <span className="absolute bottom-1 right-2 text-[9px] text-white/20 pointer-events-none select-none">
+                        {APP_VERSION}
+                    </span>
+                )}
             </div>
         </div>
     );

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useAPIKeys } from '@/features/settings/hooks/useAPIKeys';
 import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui/Button';
 import { Copy, Trash2 } from 'lucide-react';
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
+import { SettingsSection } from "../ui";
 
 export const APIKeysSection: React.FC = () => {
   const {
@@ -91,14 +91,11 @@ export const APIKeysSection: React.FC = () => {
   };
 
   return (
-    <section id="api-keys" className="bg-[#111] rounded-lg p-6 scroll-mt-8">
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-xl font-semibold text-white mb-2">API Keys</h2>
-          <p className="text-sm text-gray-400">
-            Manage API keys for programmatic access to your account
-          </p>
-        </div>
+    <SettingsSection
+      id="api-keys"
+      title="API Keys"
+      description="Manage API keys for programmatic access to your account"
+    >
 
       {/* Generated Key Display */}
       {generatedApiKey && (
@@ -115,14 +112,14 @@ export const APIKeysSection: React.FC = () => {
                   value={generatedApiKey}
                   className="flex-1 bg-black/50 border border-yellow-700/50 rounded px-3 py-2 text-sm text-white font-mono"
                 />
-                <Button
+                <button
                   onClick={handleCopyKey}
-                  variant="secondary"
-                  className="shrink-0"
+                  className="shrink-0 inline-flex items-center gap-1.5 px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full
+                    hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Copy className="w-4 h-4 mr-2" />
+                  <Copy className="w-4 h-4" />
                   {copied ? 'Copied!' : 'Copy'}
-                </Button>
+                </button>
               </div>
               <p className="text-xs text-yellow-200 mt-2">
                 Save this key now, you won&apos;t be able to see it again
@@ -130,24 +127,25 @@ export const APIKeysSection: React.FC = () => {
             </div>
           </div>
           <div className="flex justify-end">
-            <Button
+            <button
               onClick={handleDismissKey}
-              variant="ghost"
+              className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition-colors"
             >
               Dismiss
-            </Button>
+            </button>
           </div>
         </div>
       )}
 
       {/* Create Button */}
       <div>
-        <Button
+        <button
           onClick={() => setShowCreateApiKeyDialog(true)}
-          variant="primary"
+          className="px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full
+            hover:scale-105 transition-transform"
         >
           Generate New API Key
-        </Button>
+        </button>
       </div>
 
       {/* API Keys Table */}
@@ -204,14 +202,13 @@ export const APIKeysSection: React.FC = () => {
                     {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
                   </td>
                   <td className="py-3 px-4 text-sm">
-                    <Button
+                    <button
                       onClick={() => setConfirmRevoke(key.id)}
-                      variant="ghost"
-                      className="text-red-400 hover:text-red-300"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-full transition-colors"
                     >
-                      <Trash2 className="w-4 h-4 mr-1" />
+                      <Trash2 className="w-4 h-4" />
                       Revoke
-                    </Button>
+                    </button>
                   </td>
                 </tr>
               ))
@@ -251,24 +248,25 @@ export const APIKeysSection: React.FC = () => {
                 message={createMessage}
                 onClear={() => setCreateStatus("idle")}
               />
-              <Button
+              <button
                 onClick={() => {
                   setShowCreateApiKeyDialog(false);
                   setNewApiKeyName('');
                   setCreateStatus("idle");
                 }}
-                variant="ghost"
                 disabled={creating}
+                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-50"
               >
                 Cancel
-              </Button>
-              <Button
+              </button>
+              <button
                 onClick={handleCreateApiKey}
-                variant="primary"
                 disabled={!newApiKeyName.trim() || creating}
+                className="px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full
+                  hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {creating ? 'Creating...' : 'Create'}
-              </Button>
+              </button>
             </div>
           </div>
         </Modal>
@@ -294,27 +292,26 @@ export const APIKeysSection: React.FC = () => {
                 message={revokeMessage}
                 onClear={() => setRevokeStatus("idle")}
               />
-              <Button
+              <button
                 onClick={() => {
                   setConfirmRevoke(null);
                   setRevokeStatus("idle");
                 }}
-                variant="ghost"
+                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition-colors"
               >
                 Cancel
-              </Button>
-              <Button
+              </button>
+              <button
                 onClick={handleRevokeApiKey}
-                variant="primary"
-                className="bg-red-600 hover:bg-red-700"
+                className="px-4 py-1.5 text-sm bg-red-600 text-white font-medium rounded-full
+                  hover:bg-red-700 transition-colors"
               >
                 Revoke
-              </Button>
+              </button>
             </div>
           </div>
         </Modal>
       )}
-      </div>
-    </section>
+    </SettingsSection>
   );
 };

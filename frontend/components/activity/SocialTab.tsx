@@ -143,8 +143,16 @@ export function SocialTab({
                             className="px-3 py-3 border-b border-white/5 hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#3b82f6]/50 focus-visible:bg-white/5"
                         >
                             <div className="flex items-start gap-3">
-                                <div className="w-8 h-8 rounded-full bg-white/10 text-white/80 text-xs font-semibold flex items-center justify-center shrink-0">
-                                    {user.displayName.charAt(0).toUpperCase()}
+                                <div className="w-8 h-8 rounded-full bg-white/10 text-white/80 text-xs font-semibold flex items-center justify-center shrink-0 overflow-hidden">
+                                    {user.hasProfilePicture ? (
+                                        <img
+                                            src={api.getProfilePictureUrl(user.id)}
+                                            alt={user.displayName}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    ) : (
+                                        user.displayName.charAt(0).toUpperCase()
+                                    )}
                                 </div>
 
                                 <div className="flex-1 min-w-0">

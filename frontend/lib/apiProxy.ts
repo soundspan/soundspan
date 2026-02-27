@@ -210,6 +210,16 @@ export const proxyRequest = async (
     try {
         const upstream = await fetch(targetUrl, init);
         const responseHeaders = new Headers(upstream.headers);
+
+        // Node.js fetch (undici) auto-decompresses gzip/br/deflate responses
+        // but keeps the original content-encoding and content-length headers.
+        // If we forward those to the browser, it tries to decompress the
+        // already-decompressed body and fails with "Failed to fetch".
+        // Strip them so the browser treats the body as raw (uncompressed).
+        responseHeaders.delete("content-encoding");
+        responseHeaders.delete("content-length");
+        responseHeaders.delete("transfer-encoding");
+
         const responseBody = wrapUpstreamBody(upstream.body, method, targetPath);
 
         return new Response(responseBody, {

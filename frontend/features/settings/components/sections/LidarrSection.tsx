@@ -79,8 +79,8 @@ export function LidarrCard({ settings, onUpdate, onTest, isTesting }: LidarrCard
                         <button
                             onClick={handleTest}
                             disabled={isTesting || !settings.lidarrUrl || !settings.lidarrApiKey}
-                            className="px-4 py-1.5 text-sm bg-[#333] text-white rounded-full
-                                hover:bg-[#404040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            className="px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full
+                                hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                         >
                             {testStatus === "loading" ? "Testing..." : "Test Connection"}
                         </button>

@@ -287,6 +287,11 @@ export default function QueuePage() {
                                                 <p className="text-sm text-gray-400 truncate">
                                                     {track.artist?.name}
                                                 </p>
+                                                {track.album?.title && (
+                                                    <p className="text-[11px] text-gray-500 truncate">
+                                                        {track.album.title}
+                                                    </p>
+                                                )}
                                             </div>
 
                                             {/* Actions */}
@@ -413,6 +418,11 @@ export default function QueuePage() {
                                             <p className="text-sm text-gray-400 truncate">
                                                 {track.artist?.name}
                                             </p>
+                                            {track.album?.title && (
+                                                <p className="text-[11px] text-gray-500 truncate">
+                                                    {track.album.title}
+                                                </p>
+                                            )}
                                         </div>
 
                                         <div className="flex items-center gap-1">

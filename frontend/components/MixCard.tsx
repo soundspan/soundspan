@@ -27,8 +27,8 @@ const MixCard = memo(
                 tabIndex={0}
             >
                 <div className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors">
-                    {/* Circular mosaic cover art */}
-                    <div className="aspect-square bg-[#282828] rounded-full mb-3 overflow-hidden relative shadow-lg">
+                    {/* Mosaic cover art */}
+                    <div className="aspect-square bg-[#282828] rounded-lg mb-3 overflow-hidden relative shadow-lg">
                         {mix.coverUrls.length > 0 ? (
                             <div className="grid grid-cols-2 gap-0 w-full h-full">
                                 {mix.coverUrls.slice(0, 4).map((url, idx) => {

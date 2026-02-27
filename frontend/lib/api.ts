@@ -649,6 +649,12 @@ class ApiClient {
                 }
 
                 if (response.status === 401) {
+                    // Token is invalid and refresh failed — clear stale credentials
+                    // and notify the app so the auth context can redirect to login.
+                    this.clearToken();
+                    if (typeof window !== "undefined") {
+                        window.dispatchEvent(new Event("auth:session-expired"));
+                    }
                     const err = new Error("Not authenticated");
                     (err as ApiError).status = response.status;
                     (err as ApiError).data = error;
@@ -703,10 +709,19 @@ class ApiClient {
         });
     }
 
+    // Generic PATCH method for convenience
+    async patch<T = unknown>(endpoint: string, data?: unknown): Promise<T> {
+        return this.request<T>(endpoint, {
+            method: "PATCH",
+            body: data ? JSON.stringify(data) : undefined,
+        });
+    }
+
     // Auth
     async login(username: string, password: string, token?: string): Promise<{
         id: string;
         username: string;
+        displayName?: string | null;
         role: string;
         requires2FA?: boolean;
         onboardingComplete?: boolean;
@@ -717,12 +732,14 @@ class ApiClient {
             user?: {
                 id: string;
                 username: string;
+                displayName?: string | null;
                 role: string;
                 requires2FA?: boolean;
                 onboardingComplete?: boolean;
             };
             id?: string;
             username?: string;
+            displayName?: string | null;
             role?: string;
             requires2FA?: boolean;
             onboardingComplete?: boolean;
@@ -743,22 +760,73 @@ class ApiClient {
         return {
             id: data.id || "",
             username: data.username || "",
+            displayName: data.displayName,
             role: data.role || "",
             requires2FA: data.requires2FA,
             onboardingComplete: data.onboardingComplete,
         };
     }
 
-    async register(username: string, password: string, email?: string) {
+    async register(fields: {
+        inviteCode: string;
+        username: string;
+        displayName: string;
+        password: string;
+        confirmPassword: string;
+        email: string;
+    }) {
         const data = await this.request<{
-            id: string;
-            username: string;
-            role: string;
+            token: string;
+            refreshToken: string;
+            user: {
+                id: string;
+                username: string;
+                displayName: string | null;
+                role: string;
+            };
         }>("/auth/register", {
             method: "POST",
-            body: JSON.stringify({ username, password, email }),
+            body: JSON.stringify(fields),
         });
+        // Store tokens on success
+        if (data.token) {
+            this.setToken(data.token, data.refreshToken);
+        }
         return data;
+    }
+
+    async createInviteCode(ttl: string, maxUses?: number) {
+        return this.request<{
+            id: string;
+            code: string;
+            expiresAt: string | null;
+            maxUses: number;
+            createdAt: string;
+        }>("/auth/invite-codes", {
+            method: "POST",
+            body: JSON.stringify({ ttl, maxUses: maxUses ?? 1 }),
+        });
+    }
+
+    async getInviteCodes() {
+        return this.request<
+            Array<{
+                id: string;
+                code: string;
+                status: "active" | "expired" | "exhausted" | "revoked";
+                maxUses: number;
+                useCount: number;
+                expiresAt: string | null;
+                createdAt: string;
+                createdBy: string;
+            }>
+        >("/auth/invite-codes");
+    }
+
+    async revokeInviteCode(id: string) {
+        return this.request<{ message: string }>(`/auth/invite-codes/${id}`, {
+            method: "DELETE",
+        });
     }
 
     async logout() {
@@ -773,6 +841,7 @@ class ApiClient {
         return this.request<{
             id: string;
             username: string;
+            displayName?: string | null;
             role: string;
             onboardingComplete?: boolean;
             enrichmentSettings?: { enabled: boolean; lastRun?: string };
@@ -1403,11 +1472,47 @@ class ApiClient {
         });
     }
 
+    // Profile Picture
+    async uploadProfilePicture(file: File): Promise<{ success: boolean }> {
+        const formData = new FormData();
+        formData.append("file", file);
+        const baseUrl = this.getBaseUrl();
+        const token = this.getCurrentToken();
+        const res = await fetch(`${baseUrl}/api/settings/profile-picture`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: "Upload failed" }));
+            throw new Error(err.error || "Upload failed");
+        }
+        return res.json();
+    }
+
+    async deleteProfilePicture(): Promise<{ success: boolean }> {
+        return this.request<{ success: boolean }>("/settings/profile-picture", {
+            method: "DELETE",
+        });
+    }
+
+    getProfilePictureUrl(userId: string): string {
+        const baseUrl = this.getBaseUrl();
+        const token = this.getCurrentToken();
+        const params = token ? `?token=${encodeURIComponent(token)}` : "";
+        return `${baseUrl}/api/social/profile-picture/${encodeURIComponent(userId)}${params}`;
+    }
+
     // System Features
     async getFeatures(): Promise<{ musicCNN: boolean; vibeEmbeddings: boolean }> {
         return this.request<{ musicCNN: boolean; vibeEmbeddings: boolean }>(
             "/system/features"
         );
+    }
+
+    // System UI Settings (non-sensitive, available to all authenticated users)
+    async getUiSettings(): Promise<{ showVersion: boolean }> {
+        return this.request<{ showVersion: boolean }>("/system/ui-settings");
     }
 
     // System Settings

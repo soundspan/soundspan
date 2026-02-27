@@ -298,6 +298,34 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/search/genres:
+ *   get:
+ *     summary: Get all genres with track counts
+ *     tags: [Search]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of genres with track counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                   name:
+ *                     type: string
+ *                   trackCount:
+ *                     type: integer
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /search/genres
 router.get("/genres", async (req, res) => {
     try {
@@ -324,9 +352,59 @@ router.get("/genres", async (req, res) => {
 });
 
 /**
- * GET /search/discover?q=query&type=music|podcasts
- * Search for NEW content to discover (not in your library).
- * Cache TTL: 15 min -- external data changes infrequently.
+ * @openapi
+ * /api/search/discover:
+ *   get:
+ *     summary: Search for new content to discover (not in your library)
+ *     tags: [Search]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Search query
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [music, podcasts, all]
+ *           default: music
+ *         description: Type of content to discover
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 50
+ *         description: Maximum number of results
+ *     responses:
+ *       200:
+ *         description: Discovery search results with optional alias info
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 results:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 aliasInfo:
+ *                   type: object
+ *                   nullable: true
+ *                   properties:
+ *                     original:
+ *                       type: string
+ *                     canonical:
+ *                       type: string
+ *                     mbid:
+ *                       type: string
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/discover", async (req, res) => {
     try {
@@ -448,10 +526,47 @@ router.get("/discover", async (req, res) => {
 });
 
 /**
- * GET /search/discover/similar?artist=name&mbid=xxx
- * Fetch musically similar artists (Last.fm getSimilar).
- * Separate from discover so main search results return immediately.
- * Cache TTL: 1 hour -- similar artists change very rarely.
+ * @openapi
+ * /api/search/discover/similar:
+ *   get:
+ *     summary: Fetch musically similar artists via Last.fm
+ *     tags: [Search]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: artist
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Artist name
+ *       - in: query
+ *         name: mbid
+ *         schema:
+ *           type: string
+ *         description: MusicBrainz artist ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 6
+ *           maximum: 50
+ *         description: Maximum number of similar artists
+ *     responses:
+ *       200:
+ *         description: Similar artists list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 similarArtists:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/discover/similar", async (req, res) => {
     try {

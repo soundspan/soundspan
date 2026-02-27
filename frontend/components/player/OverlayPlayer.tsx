@@ -1857,7 +1857,7 @@ export function OverlayPlayer() {
                                                                             track={track}
                                                                             showPlayNext={false}
                                                                             showAddToQueue={false}
-                                                                            triggerClassName="opacity-100"
+                                                                            triggerClassName="!opacity-100"
                                                                             extraItemsAfter={
                                                                                 !isCurrentTrack ? (
                                                                                     <TrackMenuButton
@@ -1872,6 +1872,19 @@ export function OverlayPlayer() {
                                                                                 ) : undefined
                                                                             }
                                                                         />
+                                                                        {!isCurrentTrack && (
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleRemoveFromQueue(queueIndex);
+                                                                                }}
+                                                                                className="h-7 w-7 flex items-center justify-center rounded-full text-gray-500 hover:bg-white/10 hover:text-white transition-colors"
+                                                                                title="Remove from queue"
+                                                                                aria-label="Remove from queue"
+                                                                            >
+                                                                                <X className="h-3.5 w-3.5" />
+                                                                            </button>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             );

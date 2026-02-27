@@ -12,14 +12,16 @@ model User {
   id                     String                @id @default(cuid())
   username               String                @unique
   displayName            String?
+  email                  String?               @unique
   passwordHash           String
-  subsonicPassword       String?               // Encrypted plaintext for Subsonic token auth (md5 requires plaintext)
+  subsonicPassword       String? // Encrypted plaintext for Subsonic token auth (md5 requires plaintext)
   role                   String                @default("user")
   onboardingComplete     Boolean               @default(false)
   enrichmentSettings     Json?
   twoFactorEnabled       Boolean               @default(false)
   twoFactorSecret        String?
   twoFactorRecoveryCodes String?
+  profilePicture         Bytes?
   moodMixParams          Json?
   tokenVersion           Int                   @default(0)
   createdAt              DateTime              @default(now())
@@ -48,6 +50,8 @@ model User {
   discoverConfig         UserDiscoverConfig?
   userMoodMix            UserMoodMix?
   settings               UserSettings?
+  inviteCodesCreated     InviteCode[]          @relation("InviteCodesCreated")
+  inviteCodeUsed         InviteCodeUsage?      @relation("InviteCodeUsed")
 }
 
 model UserSettings {
@@ -65,6 +69,34 @@ model UserSettings {
   tidalOAuthJson        String? // Encrypted JSON with access_token, refresh_token, user_id, country_code
   tidalStreamingQuality String  @default("HIGH")
   user                  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model InviteCode {
+  id        String            @id @default(cuid())
+  code      String            @unique
+  createdBy String
+  expiresAt DateTime?
+  maxUses   Int               @default(1)
+  useCount  Int               @default(0)
+  revoked   Boolean           @default(false)
+  createdAt DateTime          @default(now())
+  creator   User              @relation("InviteCodesCreated", fields: [createdBy], references: [id], onDelete: Cascade)
+  usages    InviteCodeUsage[]
+
+  @@index([code])
+  @@index([createdBy])
+}
+
+model InviteCodeUsage {
+  id           String     @id @default(cuid())
+  inviteCodeId String
+  usedBy       String     @unique
+  usedAt       DateTime   @default(now())
+  inviteCode   InviteCode @relation(fields: [inviteCodeId], references: [id], onDelete: Cascade)
+  user         User       @relation("InviteCodeUsed", fields: [usedBy], references: [id], onDelete: Cascade)
+
+  @@index([inviteCodeId])
+  @@index([usedBy])
 }
 
 model PlaybackState {
@@ -88,47 +120,47 @@ model PlaybackState {
 }
 
 model SyncGroup {
-  id             String              @id @default(cuid())
-  name           String              @default("Listen Together")
-  joinCode       String              @unique
-  groupType      String              @default("host-follower") // "host-follower" | "collaborative"
-  visibility     String              @default("public") // "public" | "private"
-  hostUserId     String
-  isActive       Boolean             @default(true)
+  id         String  @id @default(cuid())
+  name       String  @default("Listen Together")
+  joinCode   String  @unique
+  groupType  String  @default("host-follower") // "host-follower" | "collaborative"
+  visibility String  @default("public") // "public" | "private"
+  hostUserId String
+  isActive   Boolean @default(true)
 
   // Playback state (persisted periodically from in-memory manager)
   trackId        String?
   queue          Json? // Array of SyncQueueItem objects
-  currentIndex   Int                 @default(0)
-  isPlaying      Boolean             @default(false)
-  currentTime    Float               @default(0)
-  stateVersion   Int                 @default(0) // Monotonic counter
-  stateUpdatedAt DateTime            @default(now())
+  currentIndex   Int      @default(0)
+  isPlaying      Boolean  @default(false)
+  currentTime    Float    @default(0)
+  stateVersion   Int      @default(0) // Monotonic counter
+  stateUpdatedAt DateTime @default(now())
 
-  endedAt        DateTime?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   // Relations
-  hostUser       User                @relation("SyncGroupHost", fields: [hostUserId], references: [id], onDelete: Cascade)
-  track          Track?              @relation("SyncGroupTrack", fields: [trackId], references: [id], onDelete: SetNull)
-  members        SyncGroupMember[]
+  hostUser User              @relation("SyncGroupHost", fields: [hostUserId], references: [id], onDelete: Cascade)
+  track    Track?            @relation("SyncGroupTrack", fields: [trackId], references: [id], onDelete: SetNull)
+  members  SyncGroupMember[]
 
   @@index([hostUserId, isActive])
   @@index([isActive, visibility, updatedAt])
 }
 
 model SyncGroupMember {
-  id           String     @id @default(cuid())
-  syncGroupId  String
-  userId       String
-  isHost       Boolean    @default(false)
-  joinedAt     DateTime   @default(now())
-  lastSeenAt   DateTime   @updatedAt
-  leftAt       DateTime?
+  id          String    @id @default(cuid())
+  syncGroupId String
+  userId      String
+  isHost      Boolean   @default(false)
+  joinedAt    DateTime  @default(now())
+  lastSeenAt  DateTime  @updatedAt
+  leftAt      DateTime?
 
-  syncGroup    SyncGroup  @relation(fields: [syncGroupId], references: [id], onDelete: Cascade)
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  syncGroup SyncGroup @relation(fields: [syncGroupId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([syncGroupId, userId])
   @@index([userId, leftAt])
@@ -137,7 +169,7 @@ model SyncGroupMember {
 
 model SystemSettings {
   id                          String   @id @default("default")
-  lidarrEnabled               Boolean  @default(true)
+  lidarrEnabled               Boolean  @default(false)
   lidarrUrl                   String?  @default("http://localhost:8686")
   lidarrApiKey                String?
   openaiEnabled               Boolean  @default(false)
@@ -165,7 +197,7 @@ model SystemSettings {
   downloadPath                String?  @default("/downloads")
   autoSync                    Boolean  @default(true)
   autoEnrichMetadata          Boolean  @default(true)
-  libraryDeletionEnabled      Boolean  @default(true)
+  libraryDeletionEnabled      Boolean  @default(false)
   maxConcurrentDownloads      Int      @default(3)
   downloadRetryAttempts       Int      @default(3)
   transcodeCacheMaxGb         Int      @default(10)
@@ -181,9 +213,10 @@ model SystemSettings {
   soulseekConcurrentDownloads Int      @default(4)
   // YouTube Music streaming — admin toggle + OAuth app credentials
   ytMusicEnabled              Boolean  @default(false)
-  ytMusicClientId             String?  // Google OAuth client ID (TVs and Limited Input devices)
-  ytMusicClientSecret         String?  // Google OAuth client secret
+  ytMusicClientId             String? // Google OAuth client ID (TVs and Limited Input devices)
+  ytMusicClientSecret         String? // Google OAuth client secret
   discNoBackfillDone          Boolean  @default(false)
+  showVersion                 Boolean  @default(false)
 }
 
 model Artist {
@@ -303,25 +336,25 @@ model Track {
   displayTrackNo     Int?
   hasUserOverrides   Boolean                  @default(false)
   analysisStartedAt  DateTime?
-  
-// Vibe analysis status tracking
-   vibeAnalysisStatus        String?      // Analysis status: pending, processing, completed, failed
-   vibeAnalysisStartedAt     DateTime?
-   vibeAnalysisError         String?
-   vibeAnalysisRetryCount    Int          @default(0)
-   vibeAnalysisStatusUpdatedAt DateTime?    // When the status was last updated
-  
-  cachedBy           CachedTrack[]
-  likedBy            LikedTrack[]
-  moodBuckets        MoodBucket[]
-  plays              Play[]
-  playlistItems      PlaylistItem[]
-  album              Album                    @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  trackGenres        TrackGenre[]
-  transcodedFiles    TranscodedFile[]
-  embedding          TrackEmbedding?
-  lyrics             TrackLyrics?
-  syncGroups         SyncGroup[]              @relation("SyncGroupTrack")
+
+  // Vibe analysis status tracking
+  vibeAnalysisStatus          String? // Analysis status: pending, processing, completed, failed
+  vibeAnalysisStartedAt       DateTime?
+  vibeAnalysisError           String?
+  vibeAnalysisRetryCount      Int       @default(0)
+  vibeAnalysisStatusUpdatedAt DateTime? // When the status was last updated
+
+  cachedBy        CachedTrack[]
+  likedBy         LikedTrack[]
+  moodBuckets     MoodBucket[]
+  plays           Play[]
+  playlistItems   PlaylistItem[]
+  album           Album            @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  trackGenres     TrackGenre[]
+  transcodedFiles TranscodedFile[]
+  embedding       TrackEmbedding?
+  lyrics          TrackLyrics?
+  syncGroups      SyncGroup[]      @relation("SyncGroupTrack")
 
   @@index([albumId])
   @@index([albumId, discNo, trackNo])
@@ -384,6 +417,7 @@ model Playlist {
   name               String
   isPublic           Boolean                @default(false)
   createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @default(now())
   spotifyPlaylistId  String?
   spotifyPlaylistUrl String?
   hiddenByUsers      HiddenPlaylist[]
@@ -993,7 +1027,7 @@ model TrackLyrics {
   trackId      String   @unique
   syncedLyrics String?  @db.Text
   plainLyrics  String?  @db.Text
-  source       String   // "lrclib", "embedded", "none"
+  source       String // "lrclib", "embedded", "none"
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   track        Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)

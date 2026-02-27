@@ -34,6 +34,21 @@ function isValidMusicBrainzId(value: string): boolean {
 }
 
 /**
+ * @openapi
+ * /api/enrichment/progress:
+ *   get:
+ *     summary: Get comprehensive enrichment progress
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Progress data for artists, track tags, and audio analysis
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /enrichment/progress
  * Get comprehensive enrichment progress (artists, track tags, audio analysis)
  */
@@ -48,6 +63,21 @@ router.get("/progress", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/status:
+ *   get:
+ *     summary: Get detailed enrichment state
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Enrichment state including running, paused, or idle status
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /enrichment/status
  * Get detailed enrichment state (running, paused, etc.)
  */
@@ -61,6 +91,25 @@ router.get("/status", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/pause:
+ *   post:
+ *     summary: Pause the enrichment process
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Enrichment paused
+ *       400:
+ *         description: Cannot pause enrichment in current state
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * POST /enrichment/pause
  * Pause the enrichment process
@@ -81,6 +130,25 @@ router.post("/pause", requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/resume:
+ *   post:
+ *     summary: Resume a paused enrichment process
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Enrichment resumed
+ *       400:
+ *         description: Cannot resume enrichment in current state
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * POST /enrichment/resume
  * Resume a paused enrichment process
  */
@@ -100,6 +168,25 @@ router.post("/resume", requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/stop:
+ *   post:
+ *     summary: Stop the enrichment process
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Enrichment stopping
+ *       400:
+ *         description: Cannot stop enrichment in current state
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * POST /enrichment/stop
  * Stop the enrichment process
  */
@@ -118,6 +205,35 @@ router.post("/stop", requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/full:
+ *   post:
+ *     summary: Trigger full enrichment of all content
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               forceVibeRebuild:
+ *                 type: boolean
+ *                 default: false
+ *               forceMoodBucketBackfill:
+ *                 type: boolean
+ *                 default: false
+ *     responses:
+ *       200:
+ *         description: Full enrichment started in background
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * POST /enrichment/full
  * Trigger full enrichment (re-enriches everything regardless of status)
@@ -153,6 +269,23 @@ router.post("/full", requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/reset-artists:
+ *   post:
+ *     summary: Reset and re-run artist enrichment only
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Artist enrichment reset and queued for re-processing
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * POST /enrichment/reset-artists
  * Reset only artist enrichment (keeps mood tags and audio analysis intact)
  * Admin only - selective re-enrichment for large libraries
@@ -172,6 +305,23 @@ router.post("/reset-artists", requireAdmin, async (req, res) => {
      }
  });
 
+/**
+ * @openapi
+ * /api/enrichment/reset-mood-tags:
+ *   post:
+ *     summary: Reset and re-run mood tag enrichment only
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Mood tags reset and queued for re-processing
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * POST /enrichment/reset-mood-tags
  * Reset only mood tags (keeps artist metadata and audio analysis intact)
@@ -193,6 +343,23 @@ router.post("/reset-mood-tags", requireAdmin, async (req, res) => {
  });
 
 /**
+ * @openapi
+ * /api/enrichment/reset-audio-analysis:
+ *   post:
+ *     summary: Reset and re-run audio analysis only
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Audio analysis reset and queued for re-processing
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * POST /enrichment/reset-audio-analysis
  * Reset only audio analysis (keeps artist metadata and mood tags intact)
  * Admin only - selective re-enrichment for large libraries
@@ -212,6 +379,23 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
      }
  });
 
+/**
+ * @openapi
+ * /api/enrichment/reset-vibe-embeddings:
+ *   post:
+ *     summary: Reset and re-run vibe embedding generation only
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Vibe embeddings reset and queued for re-processing
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
  /**
   * POST /enrichment/reset-vibe-embeddings
   * Reset only vibe embeddings (keeps all other enrichment intact)
@@ -232,6 +416,21 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
      }
  });
 
+/**
+ * @openapi
+ * /api/enrichment/sync:
+ *   post:
+ *     summary: Trigger incremental enrichment sync
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Incremental sync started, processing new and pending items only
+ *       401:
+ *         description: Not authenticated
+ */
  /**
   * POST /enrichment/sync
   * Trigger incremental enrichment (only processes pending items)
@@ -255,6 +454,21 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
  });
 
 /**
+ * @openapi
+ * /api/enrichment/settings:
+ *   get:
+ *     summary: Get enrichment settings for the current user
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: User enrichment settings
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /enrichment/settings
  * Get enrichment settings for current user
  */
@@ -269,6 +483,28 @@ router.get("/settings", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/settings:
+ *   put:
+ *     summary: Update enrichment settings for the current user
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: Enrichment settings to update
+ *     responses:
+ *       200:
+ *         description: Updated enrichment settings
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * PUT /enrichment/settings
  * Update enrichment settings for current user
@@ -287,6 +523,32 @@ router.put("/settings", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/artist/{id}:
+ *   post:
+ *     summary: Enrich a single artist
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The artist ID
+ *     responses:
+ *       200:
+ *         description: Artist enrichment data with confidence score
+ *       400:
+ *         description: Enrichment is not enabled
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: No enrichment data found
+ */
 /**
  * POST /enrichment/artist/:id
  * Enrich a single artist
@@ -330,6 +592,32 @@ router.post("/artist/:id", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/album/{id}:
+ *   post:
+ *     summary: Enrich a single album
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The album ID
+ *     responses:
+ *       200:
+ *         description: Album enrichment data with confidence score
+ *       400:
+ *         description: Enrichment is not enabled
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: No enrichment data found
+ */
+/**
  * POST /enrichment/album/:id
  * Enrich a single album
  */
@@ -372,6 +660,23 @@ router.post("/album/:id", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/start:
+ *   post:
+ *     summary: Start library-wide enrichment in background
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Library enrichment started in background
+ *       400:
+ *         description: Enrichment is not enabled in settings
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * POST /enrichment/start
  * Start library-wide enrichment (runs in background)
  * Delegates to the unified enrichment worker for consistent state tracking,
@@ -409,6 +714,31 @@ router.post("/start", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/search/musicbrainz/artists:
+ *   get:
+ *     summary: Search MusicBrainz for artists by name
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 2
+ *         description: Artist name search query
+ *     responses:
+ *       200:
+ *         description: List of matching MusicBrainz artists
+ *       400:
+ *         description: Query must be at least 2 characters
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /enrichment/search/musicbrainz/artists
  * Search MusicBrainz for artists by name.
  * Used by metadata editing workflows to assist MBID correction.
@@ -444,6 +774,36 @@ router.get("/search/musicbrainz/artists", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/search/musicbrainz/release-groups:
+ *   get:
+ *     summary: Search MusicBrainz for release groups by title
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 2
+ *         description: Release group title search query
+ *       - in: query
+ *         name: artist
+ *         schema:
+ *           type: string
+ *         description: Optional artist name to constrain results
+ *     responses:
+ *       200:
+ *         description: List of matching MusicBrainz release groups
+ *       400:
+ *         description: Query must be at least 2 characters
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * GET /enrichment/search/musicbrainz/release-groups
  * Search MusicBrainz for release groups by title (optionally constrained by artist).
@@ -493,6 +853,48 @@ router.get("/search/musicbrainz/release-groups", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/failures:
+ *   get:
+ *     summary: Get all enrichment failures with filtering
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: entityType
+ *         schema:
+ *           type: string
+ *           enum: [artist, track, audio, vibe]
+ *         description: Filter by entity type
+ *       - in: query
+ *         name: includeSkipped
+ *         schema:
+ *           type: string
+ *           enum: ["true", "false"]
+ *         description: Include skipped failures
+ *       - in: query
+ *         name: includeResolved
+ *         schema:
+ *           type: string
+ *           enum: ["true", "false"]
+ *         description: Include resolved failures
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of enrichment failures
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /enrichment/failures
  * Get all enrichment failures with filtering
  */
@@ -517,6 +919,21 @@ router.get("/failures", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/failures/counts:
+ *   get:
+ *     summary: Get enrichment failure counts by type
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Failure counts grouped by entity type
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /enrichment/failures/counts
  * Get failure counts by type
  */
@@ -530,6 +947,38 @@ router.get("/failures/counts", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/retry:
+ *   post:
+ *     summary: Retry specific failed enrichment items
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [ids]
+ *             properties:
+ *               ids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of failure record IDs to retry
+ *     responses:
+ *       200:
+ *         description: Items queued for retry
+ *       400:
+ *         description: Must provide array of failure IDs
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * POST /enrichment/retry
  * Retry specific failed items
@@ -654,6 +1103,38 @@ router.post("/retry", requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/skip:
+ *   post:
+ *     summary: Skip specific enrichment failures
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [ids]
+ *             properties:
+ *               ids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of failure record IDs to skip
+ *     responses:
+ *       200:
+ *         description: Failures marked as skipped
+ *       400:
+ *         description: Must provide array of failure IDs
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * POST /enrichment/skip
  * Skip specific failures (won't retry automatically)
  */
@@ -681,6 +1162,32 @@ router.post("/skip", requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/failures:
+ *   delete:
+ *     summary: Clear all unresolved enrichment failures
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: entityType
+ *         schema:
+ *           type: string
+ *           enum: [artist, track, audio]
+ *         description: Optional filter to clear failures of a specific type only
+ *     responses:
+ *       200:
+ *         description: Failures cleared
+ *       400:
+ *         description: Invalid entityType
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * DELETE /enrichment/failures
  * Clear all unresolved failures (optionally filtered by type)
  */
@@ -707,6 +1214,30 @@ router.delete("/failures", requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/failures/{id}:
+ *   delete:
+ *     summary: Delete a specific enrichment failure record
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The failure record ID
+ *     responses:
+ *       200:
+ *         description: Failure deleted
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * DELETE /enrichment/failures/:id
  * Delete a specific failure record
  */
@@ -727,6 +1258,54 @@ router.delete("/failures/:id", requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/artists/{id}/metadata:
+ *   put:
+ *     summary: Update artist metadata manually (non-destructive overrides)
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The artist ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               bio:
+ *                 type: string
+ *               genres:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               heroUrl:
+ *                 type: string
+ *               mbid:
+ *                 type: string
+ *                 description: MusicBrainz artist ID (UUID format)
+ *     responses:
+ *       200:
+ *         description: Updated artist with override metadata
+ *       400:
+ *         description: Invalid MusicBrainz ID format
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Artist not found
+ *       409:
+ *         description: MusicBrainz ID conflict with another artist
+ */
 /**
  * PUT /enrichment/artists/:id/metadata
  * Update artist metadata manually (non-destructive overrides)
@@ -864,6 +1443,54 @@ router.put("/artists/:id/metadata", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/albums/{id}/metadata:
+ *   put:
+ *     summary: Update album metadata manually (non-destructive overrides)
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The album ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *               year:
+ *                 type: integer
+ *               genres:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               coverUrl:
+ *                 type: string
+ *               rgMbid:
+ *                 type: string
+ *                 description: MusicBrainz release-group ID (UUID format)
+ *     responses:
+ *       200:
+ *         description: Updated album with override metadata
+ *       400:
+ *         description: Invalid release-group MBID format
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Album not found
+ *       409:
+ *         description: Release-group MBID conflict with another album
+ */
 /**
  * PUT /enrichment/albums/:id/metadata
  * Update album metadata manually (non-destructive overrides)
@@ -1011,6 +1638,39 @@ router.put("/albums/:id/metadata", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/tracks/{id}/metadata:
+ *   put:
+ *     summary: Update track metadata manually (non-destructive overrides)
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The track ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *               trackNo:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Updated track with override metadata
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * PUT /enrichment/tracks/:id/metadata
  * Update track metadata manually (non-destructive overrides)
  * User edits are stored as overrides; canonical data preserved
@@ -1066,6 +1726,30 @@ router.put("/tracks/:id/metadata", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/artists/{id}/reset:
+ *   post:
+ *     summary: Reset artist metadata to canonical values
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The artist ID
+ *     responses:
+ *       200:
+ *         description: Artist metadata reset to original values
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Artist not found
+ */
 /**
  * POST /enrichment/artists/:id/reset
  * Reset artist metadata to canonical values (clear all user overrides)
@@ -1135,6 +1819,30 @@ router.post("/artists/:id/reset", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/albums/{id}/reset:
+ *   post:
+ *     summary: Reset album metadata to canonical values
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The album ID
+ *     responses:
+ *       200:
+ *         description: Album metadata reset to original values
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Album not found
+ */
+/**
  * POST /enrichment/albums/:id/reset
  * Reset album metadata to canonical values (clear all user overrides)
  */
@@ -1202,6 +1910,30 @@ router.post("/albums/:id/reset", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/tracks/{id}/reset:
+ *   post:
+ *     summary: Reset track metadata to canonical values
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The track ID
+ *     responses:
+ *       200:
+ *         description: Track metadata reset to original values
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Track not found
+ */
+/**
  * POST /enrichment/tracks/:id/reset
  * Reset track metadata to canonical values (clear all user overrides)
  */
@@ -1265,6 +1997,21 @@ router.post("/tracks/:id/reset", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/enrichment/concurrency:
+ *   get:
+ *     summary: Get enrichment concurrency configuration
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Current concurrency setting and estimated processing speeds
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /enrichment/concurrency
  * Get current enrichment concurrency configuration
  */
@@ -1289,6 +2036,37 @@ router.get("/concurrency", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/enrichment/concurrency:
+ *   put:
+ *     summary: Update enrichment concurrency configuration
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [concurrency]
+ *             properties:
+ *               concurrency:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 5
+ *     responses:
+ *       200:
+ *         description: Concurrency updated with estimated processing speeds
+ *       400:
+ *         description: Missing or invalid concurrency parameter
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * PUT /enrichment/concurrency
  * Update enrichment concurrency configuration

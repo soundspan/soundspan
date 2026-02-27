@@ -28,6 +28,27 @@ function sanitizeOptionalString(
     return trimmed.substring(0, maxLen);
 }
 
+/**
+ * @openapi
+ * /api/playback-state:
+ *   get:
+ *     summary: Get current playback state for the authenticated user
+ *     tags: [Playback State]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: X-Playback-Device-Id
+ *         schema:
+ *           type: string
+ *         description: Device identifier (defaults to "legacy")
+ *     responses:
+ *       200:
+ *         description: Current playback state or null if none exists
+ *       401:
+ *         description: Not authenticated
+ */
 // Get current playback state for the authenticated user
 router.get("/", requireAuth, async (req, res) => {
     try {
@@ -90,6 +111,59 @@ router.get("/", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playback-state:
+ *   post:
+ *     summary: Update current playback state for the authenticated user
+ *     tags: [Playback State]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: X-Playback-Device-Id
+ *         schema:
+ *           type: string
+ *         description: Device identifier (defaults to "legacy")
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - playbackType
+ *             properties:
+ *               playbackType:
+ *                 type: string
+ *                 enum: [track, audiobook, podcast]
+ *               trackId:
+ *                 type: string
+ *               audiobookId:
+ *                 type: string
+ *               podcastId:
+ *                 type: string
+ *               queue:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *               currentIndex:
+ *                 type: integer
+ *               isShuffle:
+ *                 type: boolean
+ *               isPlaying:
+ *                 type: boolean
+ *               currentTime:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Playback state updated
+ *       400:
+ *         description: Invalid playbackType or missing required fields
+ *       401:
+ *         description: Not authenticated
+ */
 // Update current playback state for the authenticated user
 router.post("/", requireAuth, async (req, res) => {
     try {
@@ -313,6 +387,27 @@ router.post("/", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/playback-state:
+ *   delete:
+ *     summary: Clear playback state when the user stops playback
+ *     tags: [Playback State]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: X-Playback-Device-Id
+ *         schema:
+ *           type: string
+ *         description: Device identifier (defaults to "legacy")
+ *     responses:
+ *       200:
+ *         description: Playback state cleared
+ *       401:
+ *         description: Not authenticated
+ */
 // Clear playback state (when user stops playback completely)
 router.delete("/", requireAuth, async (req, res) => {
     try {

@@ -727,6 +727,32 @@ router.use((req, res, next) => {
     return apiLimiter(req, res, next);
 });
 
+/**
+ * @openapi
+ * /api/library/delete-policy:
+ *   get:
+ *     summary: Get library deletion policy for the current user
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Deletion policy details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 isAdmin:
+ *                   type: boolean
+ *                 libraryDeletionEnabled:
+ *                   type: boolean
+ *                 canDelete:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/delete-policy - Determine whether current user can delete library content
 router.get("/delete-policy", async (req, res) => {
     try {
@@ -828,6 +854,41 @@ router.post("/scan", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/scan/status/{jobId}:
+ *   get:
+ *     summary: Check the status of a library scan job
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The scan job ID returned from POST /scan
+ *     responses:
+ *       200:
+ *         description: Scan job status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                 progress:
+ *                   type: object
+ *                 result:
+ *                   type: object
+ *       404:
+ *         description: Job not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/scan/status/:jobId - Check scan job status
 router.get("/scan/status/:jobId", async (req, res) => {
     try {
@@ -852,6 +913,28 @@ router.get("/scan/status/:jobId", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/organize:
+ *   post:
+ *     summary: Manually trigger file organization script
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Organization started
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /library/organize - Manually trigger organization script
 router.post("/organize", async (req, res) => {
     try {
@@ -867,6 +950,37 @@ router.post("/organize", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/recently-listened:
+ *   get:
+ *     summary: Get recently listened artists, audiobooks, and podcasts
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Maximum number of items to return
+ *     responses:
+ *       200:
+ *         description: Recently listened items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/recently-listened?limit=10
 router.get("/recently-listened", async (req, res) => {
     try {
@@ -1056,6 +1170,37 @@ router.get("/recently-listened", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/recently-added:
+ *   get:
+ *     summary: Get recently added artists to the library
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Maximum number of artists to return
+ *     responses:
+ *       200:
+ *         description: Recently added artists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 artists:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/recently-added?limit=10
 router.get("/recently-added", async (req, res) => {
     try {
@@ -1127,6 +1272,76 @@ router.get("/recently-added", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/artists:
+ *   get:
+ *     summary: List artists in the library with pagination and filtering
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: query
+ *         schema:
+ *           type: string
+ *         description: Search filter by artist name
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Number of artists to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Offset for pagination
+ *       - in: query
+ *         name: filter
+ *         schema:
+ *           type: string
+ *           enum: [owned, discovery, all]
+ *           default: owned
+ *         description: Filter by ownership type
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Cursor ID for cursor-based pagination
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [name, name-desc, tracks]
+ *           default: name
+ *         description: Sort order
+ *     responses:
+ *       200:
+ *         description: Paginated list of artists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 artists:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 total:
+ *                   type: integer
+ *                 offset:
+ *                   type: integer
+ *                 limit:
+ *                   type: integer
+ *                 nextCursor:
+ *                   type: string
+ *                   nullable: true
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/artists?query=&limit=&offset=&filter=owned|discovery|all&cursor=
 // Optimized with denormalized counts for O(1) filtering
 router.get("/artists", async (req, res) => {
@@ -1148,26 +1363,46 @@ router.get("/artists", async (req, res) => {
 
         const orderBy = ARTIST_SORT_MAP[sortBy as string] ?? { name: "asc" as const };
 
-        // Build WHERE clause using denormalized counts (fast indexed lookup)
-        // This replaces the expensive OR with nested some conditions
+        // Check whether denormalized counts have been backfilled.
+        // If no artist has a non-null countsLastUpdated, the counts are stale
+        // (e.g. fresh DB after first scan before backfill finishes) and we
+        // must fall back to JOIN-based filtering to avoid returning 0 results.
+        const countsReady = (await prisma.artist.count({
+            where: { countsLastUpdated: { not: null } },
+        })) > 0;
+
+        // Build WHERE clause
         let where: any = {};
 
-        if (filter === "owned") {
-            // Artists with library albums OR liked discovery albums (via ownedAlbums)
-            where.OR = [
-                { libraryAlbumCount: { gt: 0 } },
-                { ownedAlbums: { some: {} } },
-            ];
-        } else if (filter === "discovery") {
-            // Artists with ONLY discovery albums (no library albums)
-            where.discoveryAlbumCount = { gt: 0 };
-            where.libraryAlbumCount = 0;
+        if (countsReady) {
+            // Fast path: use denormalized counts (indexed lookup)
+            if (filter === "owned") {
+                where.OR = [
+                    { libraryAlbumCount: { gt: 0 } },
+                    { ownedAlbums: { some: {} } },
+                ];
+            } else if (filter === "discovery") {
+                where.discoveryAlbumCount = { gt: 0 };
+                where.libraryAlbumCount = 0;
+            } else {
+                where.OR = [
+                    { libraryAlbumCount: { gt: 0 } },
+                    { discoveryAlbumCount: { gt: 0 } },
+                ];
+            }
         } else {
-            // "all" - any artists with albums that have tracks
-            where.OR = [
-                { libraryAlbumCount: { gt: 0 } },
-                { discoveryAlbumCount: { gt: 0 } },
-            ];
+            // Fallback: counts not yet backfilled — use JOINs
+            if (filter === "owned") {
+                where.OR = [
+                    { albums: { some: { location: "LIBRARY", tracks: { some: {} } } } },
+                    { ownedAlbums: { some: {} } },
+                ];
+            } else if (filter === "discovery") {
+                where.albums = { some: { location: "DISCOVER", tracks: { some: {} } } };
+                where.NOT = { albums: { some: { location: "LIBRARY", tracks: { some: {} } } } };
+            } else {
+                where.albums = { some: { tracks: { some: {} } } };
+            }
         }
 
         // Add search query if provided
@@ -1224,13 +1459,14 @@ router.get("/artists", async (req, res) => {
             const coverArt =
                 imageMap.get(artist.id) || artist.heroUrl || null;
 
-            // Use denormalized counts based on filter
-            const albumCount =
-                filter === "discovery"
+            // Use denormalized counts when ready, otherwise show raw sum
+            const albumCount = countsReady
+                ? (filter === "discovery"
                     ? artist.discoveryAlbumCount
                     : filter === "all"
-                    ? artist.libraryAlbumCount + artist.discoveryAlbumCount
-                    : artist.libraryAlbumCount;
+                      ? artist.libraryAlbumCount + artist.discoveryAlbumCount
+                      : artist.libraryAlbumCount)
+                : artist.libraryAlbumCount + artist.discoveryAlbumCount;
 
             return {
                 id: artist.id,
@@ -1264,6 +1500,28 @@ router.get("/artists", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/artist-counts/status:
+ *   get:
+ *     summary: Check artist counts backfill status
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Backfill status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 needsBackfill:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/artist-counts/status - Check artist counts backfill status
 router.get("/artist-counts/status", async (req, res) => {
     try {
@@ -1282,6 +1540,30 @@ router.get("/artist-counts/status", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/artist-counts/backfill:
+ *   post:
+ *     summary: Trigger artist counts backfill
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Backfill started or already in progress
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 status:
+ *                   type: string
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /library/artist-counts/backfill - Trigger artist counts backfill
 router.post("/artist-counts/backfill", async (req, res) => {
     try {
@@ -1309,6 +1591,25 @@ router.post("/artist-counts/backfill", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/image-backfill/status:
+ *   get:
+ *     summary: Check image backfill status
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Image backfill status and progress
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/image-backfill/status - Check image backfill status
 router.get("/image-backfill/status", async (req, res) => {
     try {
@@ -1327,6 +1628,30 @@ router.get("/image-backfill/status", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/image-backfill/start:
+ *   post:
+ *     summary: Trigger image backfill for artists and albums
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Image backfill started or already in progress
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 status:
+ *                   type: string
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /library/image-backfill/start - Trigger image backfill
 router.post("/image-backfill/start", async (req, res) => {
     try {
@@ -1352,6 +1677,34 @@ router.post("/image-backfill/start", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/backfill-genres:
+ *   post:
+ *     summary: Backfill genres for artists missing genre data
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Genre backfill result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 count:
+ *                   type: integer
+ *                 artists:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /library/backfill-genres - Backfill genres for artists missing them
 router.post("/backfill-genres", async (req, res) => {
     try {
@@ -1401,6 +1754,48 @@ router.post("/backfill-genres", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/artists/{id}:
+ *   get:
+ *     summary: Get detailed artist information including discography and similar artists
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Artist ID, name, or MusicBrainz ID
+ *       - in: query
+ *         name: includeDiscography
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include full discography from MusicBrainz
+ *       - in: query
+ *         name: includeTopTracks
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include top tracks from Last.fm
+ *       - in: query
+ *         name: includeSimilarArtists
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include similar artists
+ *     responses:
+ *       200:
+ *         description: Artist details with albums, top tracks, and similar artists
+ *       404:
+ *         description: Artist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/artists/:id
 router.get("/artists/:id", async (req, res) => {
     try {
@@ -2163,6 +2558,68 @@ router.get("/artists/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/albums:
+ *   get:
+ *     summary: List albums in the library with pagination and filtering
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: artistId
+ *         schema:
+ *           type: string
+ *         description: Filter by artist ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 500
+ *         description: Number of albums to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Offset for pagination
+ *       - in: query
+ *         name: filter
+ *         schema:
+ *           type: string
+ *           enum: [owned, discovery, all]
+ *           default: owned
+ *         description: Filter by ownership type
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [name, name-desc, recent]
+ *           default: name
+ *         description: Sort order
+ *     responses:
+ *       200:
+ *         description: Paginated list of albums
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 albums:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 total:
+ *                   type: integer
+ *                 offset:
+ *                   type: integer
+ *                 limit:
+ *                   type: integer
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/albums?artistId=&limit=&offset=&filter=owned|discovery|all
 router.get("/albums", async (req, res) => {
     try {
@@ -2256,6 +2713,36 @@ router.get("/albums", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/albums/{id}:
+ *   get:
+ *     summary: Get album details with tracks
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Album ID or release group MBID
+ *       - in: query
+ *         name: includeTracks
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include track listing
+ *     responses:
+ *       200:
+ *         description: Album details with tracks and ownership info
+ *       404:
+ *         description: Album not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/albums/:id
 router.get("/albums/:id", async (req, res) => {
     try {
@@ -2334,6 +2821,61 @@ router.get("/albums/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks:
+ *   get:
+ *     summary: List tracks with optional album filter and pagination
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: albumId
+ *         schema:
+ *           type: string
+ *         description: Filter by album ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Number of tracks to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Offset for pagination
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [name, name-desc]
+ *           default: name
+ *         description: Sort order (ignored when albumId is provided)
+ *     responses:
+ *       200:
+ *         description: Paginated list of tracks
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 tracks:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 total:
+ *                   type: integer
+ *                 offset:
+ *                   type: integer
+ *                 limit:
+ *                   type: integer
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/tracks?albumId=&limit=100&offset=0
 router.get("/tracks", async (req, res) => {
     try {
@@ -2402,6 +2944,64 @@ router.get("/tracks", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/liked:
+ *   get:
+ *     summary: Get the user's liked tracks playlist with cursor-based pagination
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Number of tracks to return
+ *       - in: query
+ *         name: cursorLikedAt
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: Cursor timestamp for pagination (must be paired with cursorTrackId)
+ *       - in: query
+ *         name: cursorTrackId
+ *         schema:
+ *           type: string
+ *         description: Cursor track ID for pagination (must be paired with cursorLikedAt)
+ *     responses:
+ *       200:
+ *         description: Liked tracks playlist with pagination info
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 playlist:
+ *                   type: object
+ *                 tracks:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 total:
+ *                   type: integer
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *                     nextCursor:
+ *                       type: object
+ *                       nullable: true
+ *       400:
+ *         description: Bad request (mismatched cursor params)
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/liked?limit=100&cursorLikedAt=<iso>&cursorTrackId=<id>
 router.get("/liked", async (req, res) => {
     try {
@@ -2574,6 +3174,39 @@ router.get("/liked", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks/shuffle:
+ *   get:
+ *     summary: Get random tracks for shuffle play
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Number of random tracks to return
+ *     responses:
+ *       200:
+ *         description: Shuffled tracks
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 tracks:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 total:
+ *                   type: integer
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/tracks/shuffle?limit=100 - Get random tracks for shuffle play
 router.get("/tracks/shuffle", async (req, res) => {
     try {
@@ -2661,6 +3294,49 @@ router.get("/tracks/shuffle", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/cover-art/{id}:
+ *   get:
+ *     summary: Proxy and cache album cover art images
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Album ID, cover URL, native cover path, or audiobook cover path
+ *       - in: query
+ *         name: url
+ *         schema:
+ *           type: string
+ *         description: Full cover art URL (alternative to path parameter)
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: string
+ *         description: Requested image size
+ *     responses:
+ *       200:
+ *         description: Cover art image binary
+ *         content:
+ *           image/jpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       304:
+ *         description: Not modified (client cache is current)
+ *       400:
+ *         description: Invalid cover art URL
+ *       404:
+ *         description: Cover art not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/cover-art/:id?size= or GET /library/cover-art?url=&size=
 // Apply lenient image limiter (500 req/min) instead of general API limiter (100 req/15min)
 router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
@@ -3178,6 +3854,39 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/album-cover/{mbid}:
+ *   get:
+ *     summary: Fetch and cache album cover art by MusicBrainz release group ID
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mbid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MusicBrainz release group MBID
+ *     responses:
+ *       200:
+ *         description: Cover art URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 coverUrl:
+ *                   type: string
+ *       204:
+ *         description: No cover art available for this MBID
+ *       400:
+ *         description: Valid MBID required
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/album-cover/:mbid - Fetch and cache album cover by MBID
 // This is called lazily by the frontend when an album doesn't have a cached cover
 router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
@@ -3204,6 +3913,49 @@ router.get("/album-cover/:mbid", imageLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/cover-art-colors:
+ *   get:
+ *     summary: Extract dominant colors from a cover art image
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: url
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Cover art image URL to extract colors from
+ *     responses:
+ *       200:
+ *         description: Extracted color palette
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 vibrant:
+ *                   type: string
+ *                 darkVibrant:
+ *                   type: string
+ *                 lightVibrant:
+ *                   type: string
+ *                 muted:
+ *                   type: string
+ *                 darkMuted:
+ *                   type: string
+ *                 lightMuted:
+ *                   type: string
+ *       400:
+ *         description: URL parameter required or invalid
+ *       404:
+ *         description: Image not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/cover-art-colors?url= - Extract colors from a cover art URL
 router.get("/cover-art-colors", imageLimiter, async (req, res) => {
     try {
@@ -3315,6 +4067,43 @@ router.get("/cover-art-colors", imageLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks/{id}/stream:
+ *   get:
+ *     summary: Stream an audio track with optional quality transcoding
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *           enum: [original, high, medium, low]
+ *         description: Streaming quality (defaults to user preference)
+ *     responses:
+ *       200:
+ *         description: Audio stream
+ *         content:
+ *           audio/mpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       206:
+ *         description: Partial content (range request)
+ *       404:
+ *         description: Track not found or not available
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/tracks/:id/stream
 router.get("/tracks/:id/stream", async (req, res) => {
     try {
@@ -3484,6 +4273,49 @@ router.get("/tracks/:id/stream", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks/{id}/preference:
+ *   get:
+ *     summary: Get the current user's preference (like/dislike) for a track
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID
+ *     responses:
+ *       200:
+ *         description: Track preference state
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 trackId:
+ *                   type: string
+ *                 signal:
+ *                   type: string
+ *                 state:
+ *                   type: string
+ *                 score:
+ *                   type: number
+ *                 likedAt:
+ *                   type: string
+ *                   nullable: true
+ *                 dislikedAt:
+ *                   type: string
+ *                   nullable: true
+ *       404:
+ *         description: Track not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/tracks/:id/preference
 router.get("/tracks/:id/preference", async (req, res) => {
     try {
@@ -3539,6 +4371,42 @@ router.get("/tracks/:id/preference", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/albums/{id}/preference:
+ *   post:
+ *     summary: Set preference (like/dislike) for all tracks in an album
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Album ID or release group MBID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               signal:
+ *                 type: string
+ *                 enum: [thumbs_up, thumbs_down, clear]
+ *     responses:
+ *       200:
+ *         description: Album preference set successfully
+ *       400:
+ *         description: Invalid preference signal
+ *       404:
+ *         description: Album not found
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /library/albums/:id/preference
 router.post("/albums/:id/preference", async (req, res) => {
     try {
@@ -3616,6 +4484,42 @@ router.post("/albums/:id/preference", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks/{id}/preference:
+ *   post:
+ *     summary: Set preference (like/dislike/clear) for a track
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               signal:
+ *                 type: string
+ *                 enum: [thumbs_up, thumbs_down, clear]
+ *     responses:
+ *       200:
+ *         description: Track preference set successfully
+ *       400:
+ *         description: Invalid preference signal
+ *       404:
+ *         description: Track not found
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /library/tracks/:id/preference
 router.post("/tracks/:id/preference", async (req, res) => {
     try {
@@ -3722,6 +4626,30 @@ router.post("/tracks/:id/preference", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks/{id}:
+ *   get:
+ *     summary: Get a single track by ID
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID
+ *     responses:
+ *       200:
+ *         description: Track details with artist and album info
+ *       404:
+ *         description: Track not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/tracks/:id
 router.get("/tracks/:id", async (req, res) => {
     try {
@@ -3768,6 +4696,65 @@ router.get("/tracks/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks/{id}/audio-info:
+ *   get:
+ *     summary: Get audio quality metadata for a track (codec, bitrate, sample rate, etc.)
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID
+ *       - in: query
+ *         name: playback
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         description: If true, return info for the transcoded playback file instead of the source
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *           enum: [original, high, medium, low]
+ *         description: Quality level for playback info (defaults to user preference)
+ *     responses:
+ *       200:
+ *         description: Audio metadata
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 codec:
+ *                   type: string
+ *                   nullable: true
+ *                 bitrate:
+ *                   type: number
+ *                   nullable: true
+ *                 sampleRate:
+ *                   type: number
+ *                   nullable: true
+ *                 bitDepth:
+ *                   type: number
+ *                   nullable: true
+ *                 lossless:
+ *                   type: boolean
+ *                   nullable: true
+ *                 channels:
+ *                   type: number
+ *                   nullable: true
+ *       404:
+ *         description: Track or file not found
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /library/tracks/:id/audio-info
 // Returns audio quality metadata (bitrate, sample rate, bit depth, codec)
 // by probing the file on disk with music-metadata. Uses a short-lived
@@ -3869,6 +4856,32 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/tracks/{id}:
+ *   delete:
+ *     summary: Delete a track from the library and filesystem
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Track ID
+ *     responses:
+ *       200:
+ *         description: Track deleted successfully
+ *       403:
+ *         description: Library deletion is disabled or not admin
+ *       404:
+ *         description: Track not found
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /library/tracks/:id
 router.delete("/tracks/:id", requireAdmin, async (req, res) => {
     try {
@@ -3926,6 +4939,41 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/albums/{id}:
+ *   delete:
+ *     summary: Delete an album and its tracks from the library and filesystem
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Album ID
+ *     responses:
+ *       200:
+ *         description: Album deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 deletedFiles:
+ *                   type: integer
+ *       403:
+ *         description: Library deletion is disabled or not admin
+ *       404:
+ *         description: Album not found
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /library/albums/:id
 router.delete("/albums/:id", requireAdmin, async (req, res) => {
     try {
@@ -4013,6 +5061,46 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/library/artists/{id}:
+ *   delete:
+ *     summary: Delete an artist and all their albums/tracks from the library and filesystem
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Artist ID
+ *     responses:
+ *       200:
+ *         description: Artist deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 deletedFiles:
+ *                   type: integer
+ *                 lidarrDeleted:
+ *                   type: boolean
+ *                 lidarrError:
+ *                   type: string
+ *                   nullable: true
+ *       403:
+ *         description: Library deletion is disabled or not admin
+ *       404:
+ *         description: Artist not found
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /library/artists/:id
 router.delete("/artists/:id", requireAdmin, async (req, res) => {
     try {
@@ -4245,8 +5333,33 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
 });
 
 /**
- * GET /library/genres
- * Get list of genres in the library with track counts
+ * @openapi
+ * /api/library/genres:
+ *   get:
+ *     summary: Get list of genres in the library with track counts
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of genres with track counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 genres:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       genre:
+ *                         type: string
+ *                       count:
+ *                         type: integer
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/genres", async (req, res) => {
     try {
@@ -4300,9 +5413,34 @@ router.get("/genres", async (req, res) => {
 });
 
 /**
- * GET /library/decades
- * Get available decades in the library with track counts
- * Returns only decades with enough tracks (15+)
+ * @openapi
+ * /api/library/decades:
+ *   get:
+ *     summary: Get available decades in the library with track counts
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of decades with track counts (only decades with 15+ tracks)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 decades:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       decade:
+ *                         type: integer
+ *                         example: 1990
+ *                       count:
+ *                         type: integer
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/decades", async (req, res) => {
     try {
@@ -4344,13 +5482,52 @@ router.get("/decades", async (req, res) => {
 });
 
 /**
- * GET /library/radio
- * Get tracks for a library-based radio station
- *
- * Query params:
- * - type: "all" | "liked" | "discovery" | "favorites" | "decade" | "genre" | "mood" | "workout" | "artist" | "vibe"
- * - value: Optional value for decade (e.g., "1990") or genre name
- * - limit: Number of tracks to return (default 50)
+ * @openapi
+ * /api/library/radio:
+ *   get:
+ *     summary: Get tracks for a library-based radio station
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [all, liked, discovery, favorites, decade, genre, mood, workout, artist, vibe]
+ *         description: Radio station type
+ *       - in: query
+ *         name: value
+ *         schema:
+ *           type: string
+ *         description: Value for the radio type (e.g. decade year, genre name, artist ID, track ID)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Number of tracks to return
+ *     responses:
+ *       200:
+ *         description: Radio tracks queue
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 tracks:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 sourceFeatures:
+ *                   type: object
+ *                   description: Source track audio features (only for vibe mode)
+ *       400:
+ *         description: Radio type is required
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/radio", async (req, res) => {
     try {

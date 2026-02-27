@@ -43,6 +43,31 @@ const parseBooleanQueryParam = (
     return defaultValue;
 };
 
+/**
+ * @openapi
+ * /api/artists/preview/{artistName}/{trackTitle}:
+ *   get:
+ *     summary: Get Deezer preview URL for a track
+ *     tags: [Artists]
+ *     parameters:
+ *       - in: path
+ *         name: artistName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: URL-encoded artist name
+ *       - in: path
+ *         name: trackTitle
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: URL-encoded track title
+ *     responses:
+ *       200:
+ *         description: Deezer preview URL
+ *       404:
+ *         description: Preview not found
+ */
 // GET /artists/preview/:artistName/:trackTitle - Get Deezer preview URL for a track
 router.get("/preview/:artistName/:trackTitle", async (req, res) => {
     try {
@@ -73,6 +98,46 @@ router.get("/preview/:artistName/:trackTitle", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/artists/discover/{nameOrMbid}:
+ *   get:
+ *     summary: Get artist details for discovery
+ *     tags: [Artists]
+ *     parameters:
+ *       - in: path
+ *         name: nameOrMbid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Artist name (URL-encoded) or MusicBrainz ID
+ *       - in: query
+ *         name: includeDiscography
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include album discography from MusicBrainz
+ *       - in: query
+ *         name: includeTopTracks
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include top tracks from Last.fm
+ *       - in: query
+ *         name: includeSimilarArtists
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include similar artists from Last.fm
+ *     responses:
+ *       200:
+ *         description: Artist details with bio, discography, top tracks, and similar artists
+ *       404:
+ *         description: Artist not found
+ */
 // GET /artists/discover/:nameOrMbid - Get artist details for discovery (not in library yet)
 router.get("/discover/:nameOrMbid", async (req, res) => {
     try {
@@ -448,6 +513,32 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/artists/album/{mbid}:
+ *   get:
+ *     summary: Get album details for discovery
+ *     tags: [Artists]
+ *     parameters:
+ *       - in: path
+ *         name: mbid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MusicBrainz release-group or release ID
+ *       - in: query
+ *         name: includeTracks
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include track listing from MusicBrainz
+ *     responses:
+ *       200:
+ *         description: Album details with tracks, cover art, and metadata
+ *       404:
+ *         description: Album not found
+ */
 // GET /artists/album/:mbid - Get album details for discovery (not in library yet)
 router.get("/album/:mbid", async (req, res) => {
     try {

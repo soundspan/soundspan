@@ -118,8 +118,77 @@ async function buildTrackPreferenceScoreMapForUser(
 }
 
 /**
- * GET /api/vibe/similar/:trackId
- * Find tracks similar to a given track using hybrid similarity (CLAP + audio features)
+ * @openapi
+ * /api/vibe/similar/{trackId}:
+ *   get:
+ *     summary: Find similar tracks
+ *     description: Returns tracks similar to the given track using hybrid similarity (CLAP embeddings + audio features). Results are weighted by user track preferences (likes/dislikes).
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Source track ID to find similar tracks for
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           minimum: 1
+ *           maximum: 100
+ *         description: Maximum number of similar tracks to return
+ *     responses:
+ *       200:
+ *         description: Similar tracks with similarity scores and audio features
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sourceTrackId:
+ *                   type: string
+ *                 sourceFeatures:
+ *                   type: object
+ *                   nullable: true
+ *                   properties:
+ *                     energy:
+ *                       type: number
+ *                     valence:
+ *                       type: number
+ *                     danceability:
+ *                       type: number
+ *                     arousal:
+ *                       type: number
+ *                 tracks:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       title:
+ *                         type: string
+ *                       duration:
+ *                         type: number
+ *                       distance:
+ *                         type: number
+ *                       similarity:
+ *                         type: number
+ *                       album:
+ *                         type: object
+ *                       artist:
+ *                         type: object
+ *                       audioFeatures:
+ *                         type: object
+ *       404:
+ *         description: No similar tracks found or track not analyzed
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/similar/:trackId", requireAuth, async (req, res) => {
     try {
@@ -233,8 +302,65 @@ interface TextEmbedResponsePayload {
 }
 
 /**
- * POST /api/vibe/search
- * Search for tracks using natural language text via CLAP text embeddings
+ * @openapi
+ * /api/vibe/search:
+ *   post:
+ *     summary: Search tracks by natural language vibe
+ *     description: Searches for tracks using natural language text via CLAP text embeddings. Queries are expanded with a vocabulary of genre/mood terms and results are re-ranked using audio features.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - query
+ *             properties:
+ *               query:
+ *                 type: string
+ *                 minLength: 2
+ *                 description: Natural language search query (e.g. "chill acoustic guitar", "aggressive punk rock")
+ *               limit:
+ *                 type: integer
+ *                 default: 20
+ *                 minimum: 1
+ *                 maximum: 100
+ *               minSimilarity:
+ *                 type: number
+ *                 minimum: 0
+ *                 maximum: 1
+ *                 default: 0.60
+ *                 description: Minimum similarity threshold (0-1)
+ *     responses:
+ *       200:
+ *         description: Matching tracks ranked by similarity
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 query:
+ *                   type: string
+ *                 tracks:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 minSimilarity:
+ *                   type: number
+ *                 totalAboveThreshold:
+ *                   type: integer
+ *                 debug:
+ *                   type: object
+ *       400:
+ *         description: Query must be at least 2 characters
+ *       401:
+ *         description: Not authenticated
+ *       504:
+ *         description: Text embedding service unavailable
  */
 router.post("/search", requireAuth, async (req, res) => {
     try {
@@ -417,8 +543,34 @@ router.post("/search", requireAuth, async (req, res) => {
 });
 
 /**
- * GET /api/vibe/status
- * Get embedding analysis progress statistics
+ * @openapi
+ * /api/vibe/status:
+ *   get:
+ *     summary: Get embedding analysis progress
+ *     description: Returns statistics on how many tracks have been analyzed with CLAP embeddings, including total track count, embedded count, and completion percentage
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Embedding analysis progress
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 totalTracks:
+ *                   type: integer
+ *                 embeddedTracks:
+ *                   type: integer
+ *                 progress:
+ *                   type: integer
+ *                   description: Percentage of tracks analyzed (0-100)
+ *                 isComplete:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/status", requireAuth, async (req, res) => {
     try {

@@ -7,6 +7,7 @@ export type Tab = "user" | "account" | "system";
 
 export interface UserSettings {
     displayName?: string | null;
+    hasProfilePicture?: boolean;
     playbackQuality: "original" | "high" | "medium" | "low";
     shareOnlinePresence: boolean;
     shareListeningStatus: boolean;
@@ -69,6 +70,8 @@ export interface SystemSettings {
     ytMusicEnabled: boolean;
     ytMusicClientId: string;
     ytMusicClientSecret: string;
+    // UI
+    showVersion: boolean;
 }
 
 export interface ApiKey {

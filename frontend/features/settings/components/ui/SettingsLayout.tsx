@@ -7,9 +7,10 @@ interface SettingsLayoutProps {
     children: ReactNode;
     sidebarItems: SidebarItem[];
     isAdmin: boolean;
+    title?: string;
 }
 
-export function SettingsLayout({ children, sidebarItems, isAdmin }: SettingsLayoutProps) {
+export function SettingsLayout({ children, sidebarItems, isAdmin, title = "Settings" }: SettingsLayoutProps) {
     const [activeSection, setActiveSection] = useState(sidebarItems[0]?.id || "");
     const mainContentRef = useRef<HTMLDivElement>(null);
     
@@ -103,7 +104,7 @@ export function SettingsLayout({ children, sidebarItems, isAdmin }: SettingsLayo
             
             <div className="relative max-w-5xl mx-auto px-4 md:px-8 py-8">
                 {/* Header */}
-                <h1 className="text-2xl font-bold text-white mb-8">Settings</h1>
+                <h1 className="text-2xl font-bold text-white mb-8">{title}</h1>
                 
                 {/* Layout */}
                 <div className="flex gap-12">

@@ -268,7 +268,39 @@ router.post("/mood", async (req, res) => {
 });
 
 /**
- * Available mood presets for the UI
+ * @openapi
+ * /api/mixes/mood/presets:
+ *   get:
+ *     summary: Get available mood presets
+ *     description: Returns a list of mood presets for the UI, each with a name, color gradient, and mood filter parameters
+ *     tags: [Mixes]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of mood presets
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                     example: "happy"
+ *                   name:
+ *                     type: string
+ *                     example: "Happy & Upbeat"
+ *                   color:
+ *                     type: string
+ *                     example: "from-yellow-400 to-orange-500"
+ *                   params:
+ *                     type: object
+ *                     description: Mood filter parameters for mix generation
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/mood/presets", async (req, res) => {
     // Presets use ML mood predictions for more accurate matching
@@ -406,8 +438,38 @@ router.get("/mood/presets", async (req, res) => {
 });
 
 /**
- * Save user's mood mix preferences
- * These preferences are used to generate "Your Mood Mix" in the mix rotation
+ * @openapi
+ * /api/mixes/mood/save-preferences:
+ *   post:
+ *     summary: Save mood mix preferences
+ *     description: Saves the user's mood mix parameters, used to generate "Your Mood Mix" in the mix rotation. Invalidates the mix cache so changes take effect immediately.
+ *     tags: [Mixes]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: Mood filter parameters (valence, energy, danceability, etc.)
+ *     responses:
+ *       200:
+ *         description: Preferences saved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: No mood parameters provided
+ *       401:
+ *         description: Not authenticated
  */
 router.post("/mood/save-preferences", async (req, res) => {
     try {

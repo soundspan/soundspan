@@ -22,6 +22,34 @@ const getHistoryRangeStart = (range: Exclude<PlayHistoryRange, "all">): Date => 
     return new Date(now - lookbackDays * dayMs);
 };
 
+/**
+ * @openapi
+ * /api/plays/summary:
+ *   get:
+ *     summary: Get play count summaries across time ranges
+ *     tags: [Plays]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Play count summaries
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 allTime:
+ *                   type: integer
+ *                 last7Days:
+ *                   type: integer
+ *                 last30Days:
+ *                   type: integer
+ *                 last365Days:
+ *                   type: integer
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /plays/summary (counts for warning/confirmation UI)
 router.get("/summary", async (req, res) => {
     try {
@@ -67,6 +95,41 @@ router.get("/summary", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/plays/history:
+ *   delete:
+ *     summary: Clear play history for a given time range
+ *     tags: [Plays]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: range
+ *         schema:
+ *           type: string
+ *           enum: [7d, 30d, 365d, all]
+ *           default: 30d
+ *     responses:
+ *       200:
+ *         description: Play history cleared
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 range:
+ *                   type: string
+ *                 deletedCount:
+ *                   type: integer
+ *       400:
+ *         description: Invalid range parameter
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /plays/history?range=7d|30d|365d|all
 router.delete("/history", async (req, res) => {
     try {
@@ -106,6 +169,36 @@ router.delete("/history", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/plays:
+ *   post:
+ *     summary: Log a new play for a track
+ *     tags: [Plays]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - trackId
+ *             properties:
+ *               trackId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Play logged successfully
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Track not found
+ */
 // POST /plays
 router.post("/", async (req, res) => {
     try {
@@ -140,6 +233,27 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/plays:
+ *   get:
+ *     summary: Get recent plays for the authenticated user
+ *     tags: [Plays]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *     responses:
+ *       200:
+ *         description: List of recent plays with track details
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /plays (recent plays for user)
 router.get("/", async (req, res) => {
     try {

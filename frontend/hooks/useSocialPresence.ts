@@ -33,6 +33,7 @@ export interface SocialOnlineUser {
     id: string;
     username: string;
     displayName: string;
+    hasProfilePicture: boolean;
     isInListenTogetherGroup: boolean;
     listeningStatus: SocialListeningStatus;
     listeningTrack: SocialListeningTrack | null;

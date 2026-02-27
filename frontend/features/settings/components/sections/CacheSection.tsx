@@ -775,8 +775,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     disabled={
                                         syncing || reEnriching || isEnrichmentActive
                                     }
-                                    className="px-3 py-1.5 text-xs bg-[#333] text-white rounded-full
-                                    hover:bg-[#404040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    className="px-3 py-1.5 text-xs bg-white text-black font-medium rounded-full
+                                    hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                                 >
                                     {reEnriching ? "Starting..." : "Re-enrich All"}
                                 </button>
@@ -1162,16 +1162,16 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     <button
                         onClick={handleClearCaches}
                         disabled={clearingCaches}
-                        className="px-4 py-1.5 text-sm bg-[#333] text-white rounded-full w-fit
-                        hover:bg-[#404040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full w-fit
+                        hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                     >
                         {clearingCaches ? "Clearing..." : "Clear All Caches"}
                     </button>
                     <button
                         onClick={handleCleanupStaleJobs}
                         disabled={cleaningStaleJobs}
-                        className="px-4 py-1.5 text-sm bg-[#333] text-white rounded-full w-fit
-                        hover:bg-[#404040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full w-fit
+                        hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                     >
                         {cleaningStaleJobs
                             ? "Cleaning..."
@@ -1181,8 +1181,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                         <button
                             onClick={handleRetryFailedAnalysis}
                             disabled={retryingFailed || isEnrichmentActive}
-                            className="px-4 py-1.5 text-sm bg-[#333] text-white rounded-full w-fit
-                            hover:bg-[#404040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            className="px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full w-fit
+                            hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                         >
                             {retryingFailed
                                 ? "Retrying..."
@@ -1192,8 +1192,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                     <button
                         onClick={handleBackfillMoodBuckets}
                         disabled={backfillingMoodBuckets || isEnrichmentActive}
-                        className="px-4 py-1.5 text-sm bg-[#333] text-white rounded-full w-fit
-                        hover:bg-[#404040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-4 py-1.5 text-sm bg-white text-black font-medium rounded-full w-fit
+                        hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                     >
                         {backfillingMoodBuckets
                             ? "Backfilling..."

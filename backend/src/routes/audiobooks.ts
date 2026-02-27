@@ -9,6 +9,21 @@ import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
 const router = Router();
 
 /**
+ * @openapi
+ * /api/audiobooks/continue-listening:
+ *   get:
+ *     summary: Get audiobooks the user is currently listening to
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of audiobooks with active progress
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /audiobooks/continue-listening
  * Get audiobooks the user is currently listening to (for "Continue Listening" section)
  * NOTE: This must come BEFORE the /:id route to avoid matching "continue-listening" as an ID
@@ -68,6 +83,23 @@ router.get(
 );
 
 /**
+ * @openapi
+ * /api/audiobooks/sync:
+ *   post:
+ *     summary: Manually trigger audiobook sync from Audiobookshelf
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Sync completed successfully
+ *       400:
+ *         description: Audiobookshelf not enabled
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * POST /audiobooks/sync
  * Manually trigger audiobook sync from Audiobookshelf
  * Fetches all audiobooks and caches metadata + cover images locally
@@ -117,6 +149,23 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/audiobooks/debug-series:
+ *   get:
+ *     summary: Debug endpoint to see raw series data from Audiobookshelf
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Raw series debug information
+ *       400:
+ *         description: Audiobookshelf not enabled
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * GET /audiobooks/debug-series
  * Debug endpoint to see raw series data from Audiobookshelf
@@ -186,6 +235,30 @@ router.get("/debug-series", requireAuthOrToken, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/audiobooks/search:
+ *   get:
+ *     summary: Search audiobooks
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Search query string
+ *     responses:
+ *       200:
+ *         description: Search results
+ *       400:
+ *         description: Query parameter required
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /audiobooks/search
  * Search audiobooks
  */
@@ -216,6 +289,34 @@ router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/audiobooks:
+ *   get:
+ *     summary: Get all audiobooks from cached database
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema:
+ *           type: integer
+ *         description: Maximum number of audiobooks to return (max 100)
+ *       - in: query
+ *         name: offset
+ *         required: false
+ *         schema:
+ *           type: integer
+ *         description: Number of audiobooks to skip for pagination
+ *     responses:
+ *       200:
+ *         description: List of audiobooks with user progress
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * GET /audiobooks
  * Get all audiobooks from cached database (instant, no API calls)
@@ -314,6 +415,28 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/audiobooks/series/{seriesName}:
+ *   get:
+ *     summary: Get all books in a series
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: seriesName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: URL-encoded series name
+ *     responses:
+ *       200:
+ *         description: List of audiobooks in the series with user progress
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * GET /audiobooks/series/:seriesName
  * Get all books in a series (from cached database)
@@ -414,6 +537,23 @@ router.get(
 );
 
 /**
+ * @openapi
+ * /api/audiobooks/{id}/cover:
+ *   options:
+ *     summary: CORS preflight for audiobook cover images
+ *     tags: [Audiobooks]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Audiobook ID
+ *     responses:
+ *       204:
+ *         description: CORS preflight response
+ */
+/**
  * OPTIONS /audiobooks/:id/cover
  * Handle CORS preflight request for cover images
  */
@@ -427,6 +567,30 @@ router.options("/:id/cover", (req, res) => {
     res.status(204).end();
 });
 
+/**
+ * @openapi
+ * /api/audiobooks/{id}/cover:
+ *   get:
+ *     summary: Serve audiobook cover image
+ *     tags: [Audiobooks]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Audiobook ID
+ *     responses:
+ *       200:
+ *         description: Cover image file
+ *         content:
+ *           image/jpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: Cover not found
+ */
 /**
  * GET /audiobooks/:id/cover
  * Serve cached cover image from local disk, or proxy from Audiobookshelf if not cached
@@ -521,6 +685,30 @@ router.get("/:id/cover", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/audiobooks/{id}:
+ *   get:
+ *     summary: Get a specific audiobook with full details
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Audiobook ID
+ *     responses:
+ *       200:
+ *         description: Audiobook details with chapters, audio files, and user progress
+ *       404:
+ *         description: Audiobook not found
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * GET /audiobooks/:id
  * Get a specific audiobook with full details (from cache, fallback to API)
@@ -619,6 +807,43 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/audiobooks/{id}/stream:
+ *   get:
+ *     summary: Stream an audiobook with authentication proxy
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Audiobook ID
+ *       - in: header
+ *         name: Range
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: HTTP range header for partial content
+ *     responses:
+ *       200:
+ *         description: Full audio stream
+ *         content:
+ *           audio/mpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       206:
+ *         description: Partial audio stream
+ *       401:
+ *         description: Not authenticated
+ *       503:
+ *         description: Audiobookshelf is not configured
+ */
+/**
  * GET /audiobooks/:id/stream
  * Proxy the audiobook stream with authentication
  */
@@ -707,6 +932,44 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/audiobooks/{id}/progress:
+ *   post:
+ *     summary: Update playback progress for an audiobook
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Audiobook ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               currentTime:
+ *                 type: number
+ *                 description: Current playback position in seconds
+ *               duration:
+ *                 type: number
+ *                 description: Total duration in seconds
+ *               isFinished:
+ *                 type: boolean
+ *                 description: Whether the audiobook is finished
+ *     responses:
+ *       200:
+ *         description: Progress updated successfully
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * POST /audiobooks/:id/progress
  * Update playback progress for an audiobook
@@ -882,6 +1145,28 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /api/audiobooks/{id}/progress:
+ *   delete:
+ *     summary: Remove playback progress for an audiobook
+ *     tags: [Audiobooks]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Audiobook ID
+ *     responses:
+ *       200:
+ *         description: Progress removed successfully
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * DELETE /audiobooks/:id/progress
  * Remove/reset progress for an audiobook

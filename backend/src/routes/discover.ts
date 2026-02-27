@@ -24,7 +24,21 @@ const isLegacyDiscoveryMode = config.discover.mode === "legacy";
 
 router.use(requireAuthOrToken);
 
-// GET /discover/batch-status - Check if there's an active batch being processed
+/**
+ * @openapi
+ * /api/discover/batch-status:
+ *   get:
+ *     summary: Check if there is an active batch being processed
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Current batch processing status
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/batch-status", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -115,7 +129,23 @@ router.get("/batch-status", async (req, res) => {
     }
 });
 
-// POST /discover/generate - Generate new Discover Weekly playlist (using Bull queue)
+/**
+ * @openapi
+ * /api/discover/generate:
+ *   post:
+ *     summary: Generate new Discover Weekly playlist
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Generation job started successfully
+ *       409:
+ *         description: Generation already in progress
+ *       401:
+ *         description: Not authenticated
+ */
 router.post("/generate", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -196,7 +226,30 @@ router.post("/generate", async (req, res) => {
     }
 });
 
-// GET /discover/generate/status/:jobId - Check generation job status
+/**
+ * @openapi
+ * /api/discover/generate/status/{jobId}:
+ *   get:
+ *     summary: Check generation job status
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bull queue job ID
+ *     responses:
+ *       200:
+ *         description: Job status, progress, and result
+ *       404:
+ *         description: Job not found
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/generate/status/:jobId", async (req, res) => {
     try {
         const job = await discoverQueue.getJob(req.params.jobId);
@@ -220,7 +273,21 @@ router.get("/generate/status/:jobId", async (req, res) => {
     }
 });
 
-// GET /discover/current - Get current week's Discover Weekly playlist
+/**
+ * @openapi
+ * /api/discover/current:
+ *   get:
+ *     summary: Get current week's Discover Weekly playlist
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Current discovery playlist with tracks and unavailable albums
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/current", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -463,7 +530,37 @@ router.get("/current", async (req, res) => {
     }
 });
 
-// POST /discover/like - Like a track (marks entire album for keeping)
+/**
+ * @openapi
+ * /api/discover/like:
+ *   post:
+ *     summary: Like a discovery album (marks entire album for keeping)
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - albumId
+ *             properties:
+ *               albumId:
+ *                 type: string
+ *                 description: MusicBrainz release group MBID of the album
+ *     responses:
+ *       200:
+ *         description: Album liked successfully
+ *       404:
+ *         description: Album not in active discovery
+ *       410:
+ *         description: Endpoint disabled for recommendation-only discovery mode
+ *       401:
+ *         description: Not authenticated
+ */
 router.post("/like", async (req, res) => {
     try {
         if (!isLegacyDiscoveryMode) {
@@ -635,7 +732,37 @@ router.post("/like", async (req, res) => {
     }
 });
 
-// DELETE /discover/unlike - Unlike a track
+/**
+ * @openapi
+ * /api/discover/unlike:
+ *   delete:
+ *     summary: Unlike a previously liked discovery album
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - albumId
+ *             properties:
+ *               albumId:
+ *                 type: string
+ *                 description: MusicBrainz release group MBID of the album
+ *     responses:
+ *       200:
+ *         description: Album unliked successfully
+ *       404:
+ *         description: Album not liked
+ *       410:
+ *         description: Endpoint disabled for recommendation-only discovery mode
+ *       401:
+ *         description: Not authenticated
+ */
 router.delete("/unlike", async (req, res) => {
     try {
         if (!isLegacyDiscoveryMode) {
@@ -710,7 +837,21 @@ router.delete("/unlike", async (req, res) => {
     }
 });
 
-// GET /discover/config - Get user's Discover Weekly configuration
+/**
+ * @openapi
+ * /api/discover/config:
+ *   get:
+ *     summary: Get user's Discover Weekly configuration
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: User's discovery configuration settings
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/config", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -740,7 +881,49 @@ router.get("/config", async (req, res) => {
     }
 });
 
-// PATCH /discover/config - Update user's Discover Weekly configuration
+/**
+ * @openapi
+ * /api/discover/config:
+ *   patch:
+ *     summary: Update user's Discover Weekly configuration
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               playlistSize:
+ *                 type: integer
+ *                 minimum: 5
+ *                 maximum: 50
+ *                 description: Playlist size (increments of 5)
+ *               maxRetryAttempts:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 10
+ *               exclusionMonths:
+ *                 type: integer
+ *                 minimum: 0
+ *                 maximum: 12
+ *               downloadRatio:
+ *                 type: number
+ *                 minimum: 1.0
+ *                 maximum: 2.0
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Updated discovery configuration
+ *       400:
+ *         description: Invalid configuration values
+ *       401:
+ *         description: Not authenticated
+ */
 router.patch("/config", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -826,7 +1009,28 @@ router.patch("/config", async (req, res) => {
     }
 });
 
-// GET /discover/popular-artists - Get popular artists from Last.fm charts
+/**
+ * @openapi
+ * /api/discover/popular-artists:
+ *   get:
+ *     summary: Get popular artists from Last.fm charts
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Maximum number of artists to return
+ *     responses:
+ *       200:
+ *         description: List of popular chart artists
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/popular-artists", async (req, res) => {
     try {
         const limit = parseInt(req.query.limit as string) || 20;
@@ -844,7 +1048,21 @@ router.get("/popular-artists", async (req, res) => {
     }
 });
 
-// DELETE /discover/clear - Clear the discovery playlist (move liked to library, delete the rest)
+/**
+ * @openapi
+ * /api/discover/clear:
+ *   delete:
+ *     summary: Clear the discovery playlist (move liked to library, delete the rest)
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Playlist cleared with summary of moved and deleted albums
+ *       401:
+ *         description: Not authenticated
+ */
 router.delete("/clear", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -1777,7 +1995,21 @@ router.delete("/clear", async (req, res) => {
     }
 });
 
-// GET /discover/exclusions - Get all exclusions for current user
+/**
+ * @openapi
+ * /api/discover/exclusions:
+ *   get:
+ *     summary: Get all active discovery exclusions for the current user
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of active exclusions with count
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/exclusions", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -1814,7 +2046,21 @@ router.get("/exclusions", async (req, res) => {
     }
 });
 
-// DELETE /discover/exclusions - Clear all exclusions for current user
+/**
+ * @openapi
+ * /api/discover/exclusions:
+ *   delete:
+ *     summary: Clear all discovery exclusions for the current user
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: All exclusions cleared with count
+ *       401:
+ *         description: Not authenticated
+ */
 router.delete("/exclusions", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -1838,7 +2084,30 @@ router.delete("/exclusions", async (req, res) => {
     }
 });
 
-// DELETE /discover/exclusions/:id - Remove a specific exclusion
+/**
+ * @openapi
+ * /api/discover/exclusions/{id}:
+ *   delete:
+ *     summary: Remove a specific discovery exclusion
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Exclusion ID
+ *     responses:
+ *       200:
+ *         description: Exclusion removed successfully
+ *       404:
+ *         description: Exclusion not found
+ *       401:
+ *         description: Not authenticated
+ */
 router.delete("/exclusions/:id", async (req, res) => {
     try {
         const userId = req.user!.id;
@@ -1866,8 +2135,25 @@ router.delete("/exclusions/:id", async (req, res) => {
     }
 });
 
-// POST /discover/cleanup-lidarr - Remove discovery-only artists from Lidarr
-// This cleans up artists that were added for discovery but shouldn't remain
+/**
+ * @openapi
+ * /api/discover/cleanup-lidarr:
+ *   post:
+ *     summary: Remove discovery-only artists from Lidarr
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Cleanup summary with removed, kept, and errored artists
+ *       400:
+ *         description: Lidarr not configured
+ *       410:
+ *         description: Only available in legacy discovery mode
+ *       401:
+ *         description: Not authenticated
+ */
 router.post("/cleanup-lidarr", async (req, res) => {
     try {
         if (!isLegacyDiscoveryMode) {
@@ -2008,9 +2294,23 @@ router.post("/cleanup-lidarr", async (req, res) => {
     }
 });
 
-// POST /discover/fix-tagging - Fix albums incorrectly tagged as LIBRARY that should be DISCOVER
-// This repairs existing bad data caused by scanner timing issues
-// IMPORTANT: Does NOT touch albums that user has LIKED (discovery_liked) or native library
+/**
+ * @openapi
+ * /api/discover/fix-tagging:
+ *   post:
+ *     summary: Fix albums incorrectly tagged as LIBRARY that should be DISCOVER
+ *     tags: [Discover]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Tagging repair summary with fixed albums count
+ *       410:
+ *         description: Only available in legacy discovery mode
+ *       401:
+ *         description: Not authenticated
+ */
 router.post("/fix-tagging", async (req, res) => {
     try {
         if (!isLegacyDiscoveryMode) {

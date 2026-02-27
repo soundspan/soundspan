@@ -25,6 +25,34 @@ const importSchema = z.object({
 });
 
 /**
+ * @openapi
+ * /api/spotify/parse:
+ *   post:
+ *     summary: Parse a Spotify URL and return basic info
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [url]
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *     responses:
+ *       200:
+ *         description: Parsed Spotify URL info
+ *       400:
+ *         description: Invalid URL or unsupported type
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * POST /api/spotify/parse
  * Parse a Spotify URL and return basic info
  */
@@ -60,6 +88,36 @@ router.post("/parse", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/spotify/preview:
+ *   post:
+ *     summary: Generate a preview of what will be imported from a Spotify or Deezer playlist
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [url]
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *     responses:
+ *       200:
+ *         description: Import preview with track matching summary
+ *       400:
+ *         description: Invalid request body or Deezer playlist URL
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Deezer playlist not found
+ */
 /**
  * POST /api/spotify/preview
  * Generate a preview of what will be imported from a Spotify or Deezer playlist
@@ -119,6 +177,42 @@ router.post("/preview", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/spotify/import:
+ *   post:
+ *     summary: Start importing a Spotify playlist
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [spotifyPlaylistId, playlistName, albumMbidsToDownload]
+ *             properties:
+ *               spotifyPlaylistId:
+ *                 type: string
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *               playlistName:
+ *                 type: string
+ *               albumMbidsToDownload:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Import job started
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * POST /api/spotify/import
  * Start importing a Spotify playlist
@@ -191,6 +285,31 @@ router.post("/import", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/spotify/import/{jobId}/status:
+ *   get:
+ *     summary: Get the status of an import job
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Import job status
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized to view this job
+ *       404:
+ *         description: Import job not found
+ */
+/**
  * GET /api/spotify/import/:jobId/status
  * Get the status of an import job
  */
@@ -224,6 +343,21 @@ router.get("/import/:jobId/status", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/spotify/imports:
+ *   get:
+ *     summary: Get all import jobs for the current user
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of import jobs
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /api/spotify/imports
  * Get all import jobs for the current user
  */
@@ -243,6 +377,31 @@ router.get("/imports", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/spotify/import/{jobId}/refresh:
+ *   post:
+ *     summary: Re-match pending tracks and add newly downloaded ones to the playlist
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Refresh result with count of newly added tracks
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized to refresh this job
+ *       404:
+ *         description: Import job not found
+ */
 /**
  * POST /api/spotify/import/:jobId/refresh
  * Re-match pending tracks and add newly downloaded ones to the playlist
@@ -284,6 +443,31 @@ router.post("/import/:jobId/refresh", async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/spotify/import/{jobId}/cancel:
+ *   post:
+ *     summary: Cancel an import job and create playlist with whatever succeeded
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Import cancelled with partial playlist creation info
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized to cancel this job
+ *       404:
+ *         description: Import job not found
+ */
+/**
  * POST /api/spotify/import/:jobId/cancel
  * Cancel an import job and create playlist with whatever succeeded
  */
@@ -321,6 +505,21 @@ router.post("/import/:jobId/cancel", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/spotify/import/session-log:
+ *   get:
+ *     summary: Get the current session log for debugging import issues
+ *     tags: [Spotify]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Session log content and file path
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * GET /api/spotify/import/session-log
  * Get the current session log for debugging import issues

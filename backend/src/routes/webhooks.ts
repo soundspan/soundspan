@@ -17,6 +17,16 @@ import { BRAND_SLUG } from "../config/brand";
 const router = Router();
 const LEGACY_SERVICE_ALIASES = [BRAND_SLUG];
 
+/**
+ * @openapi
+ * /api/webhooks/lidarr/verify:
+ *   get:
+ *     summary: Verify webhook endpoint is reachable
+ *     tags: [Webhooks]
+ *     responses:
+ *       200:
+ *         description: Webhook service status and version
+ */
 // GET /webhooks/lidarr/verify - Webhook verification endpoint
 router.get("/lidarr/verify", (req, res) => {
     logger.debug("[WEBHOOK] Verification request received");
@@ -29,6 +39,37 @@ router.get("/lidarr/verify", (req, res) => {
     });
 });
 
+/**
+ * @openapi
+ * /api/webhooks/lidarr:
+ *   post:
+ *     summary: Handle incoming Lidarr webhook events
+ *     tags: [Webhooks]
+ *     parameters:
+ *       - in: header
+ *         name: x-webhook-secret
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Webhook secret for authentication (if configured)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               eventType:
+ *                 type: string
+ *                 description: "Lidarr event type (Grab, Download, Test, etc.)"
+ *     responses:
+ *       200:
+ *         description: Webhook processed successfully
+ *       202:
+ *         description: Webhook ignored (Lidarr disabled)
+ *       401:
+ *         description: Invalid webhook secret
+ */
 // POST /webhooks/lidarr - Handle Lidarr webhooks
 router.post("/lidarr", async (req, res) => {
     try {

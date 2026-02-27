@@ -92,7 +92,28 @@ function scoreTrackCandidate(
     };
 }
 
-// GET /recommendations/for-you?limit=10
+/**
+ * @openapi
+ * /api/recommendations/for-you:
+ *   get:
+ *     summary: Get personalized artist recommendations based on listening history
+ *     tags: [Recommendations]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Maximum number of recommended artists to return
+ *     responses:
+ *       200:
+ *         description: Recommended artists with metadata and album counts
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/for-you", async (req, res) => {
     try {
         const { limit = "10" } = req.query;
@@ -260,7 +281,32 @@ router.get("/for-you", async (req, res) => {
     }
 });
 
-// GET /recommendations?seedArtistId=
+/**
+ * @openapi
+ * /api/recommendations:
+ *   get:
+ *     summary: Get similar artist recommendations for a seed artist
+ *     tags: [Recommendations]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: seedArtistId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID of the seed artist to find similar artists for
+ *     responses:
+ *       200:
+ *         description: Similar artists with top albums and similarity scores
+ *       400:
+ *         description: seedArtistId is required
+ *       404:
+ *         description: Artist not found
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/", async (req, res) => {
     try {
         const { seedArtistId } = req.query;
@@ -351,7 +397,32 @@ router.get("/", async (req, res) => {
     }
 });
 
-// GET /recommendations/albums?seedAlbumId=
+/**
+ * @openapi
+ * /api/recommendations/albums:
+ *   get:
+ *     summary: Get album recommendations based on a seed album
+ *     tags: [Recommendations]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: seedAlbumId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID of the seed album to find similar albums for
+ *     responses:
+ *       200:
+ *         description: Recommended albums from similar artists and matching genres
+ *       400:
+ *         description: seedAlbumId is required
+ *       404:
+ *         description: Album not found
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/albums", async (req, res) => {
     try {
         const { seedAlbumId } = req.query;
@@ -470,10 +541,39 @@ router.get("/albums", async (req, res) => {
     }
 });
 
-// GET /recommendations/tracks?seedTrackId=&artist=&title=
-// seedTrackId resolves via the Track table.  When the track isn't in the
-// DB (e.g. synthetic Last.fm / gap-fill IDs), the endpoint falls back to
-// the artist + title query params for a direct Last.fm similarity lookup.
+/**
+ * @openapi
+ * /api/recommendations/tracks:
+ *   get:
+ *     summary: Get track recommendations using Last.fm similarity
+ *     tags: [Recommendations]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: seedTrackId
+ *         schema:
+ *           type: string
+ *         description: ID of the seed track (falls back to artist+title if not in DB)
+ *       - in: query
+ *         name: artist
+ *         schema:
+ *           type: string
+ *         description: Artist name (used as fallback when seedTrackId is unavailable)
+ *       - in: query
+ *         name: title
+ *         schema:
+ *           type: string
+ *         description: Track title (used as fallback when seedTrackId is unavailable)
+ *     responses:
+ *       200:
+ *         description: Similar tracks with library match info and confidence scores
+ *       400:
+ *         description: seedTrackId or artist+title required
+ *       401:
+ *         description: Not authenticated
+ */
 router.get("/tracks", async (req, res) => {
     try {
         const { seedTrackId, artist: artistParam, title: titleParam } = req.query;

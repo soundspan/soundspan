@@ -16,6 +16,8 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 interface User {
     id: string;
     username: string;
+    displayName?: string | null;
+    email?: string | null;
     role: string;
     onboardingComplete?: boolean;
 }
@@ -148,6 +150,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(false);
         setUser(null);
         router.push("/login");
+    }, [router]);
+
+    // Listen for session-expired events from the API client (stale/invalid tokens)
+    useEffect(() => {
+        const handleSessionExpired = () => {
+            setIsAuthenticated(false);
+            setUser(null);
+            router.push("/login");
+        };
+        window.addEventListener("auth:session-expired", handleSessionExpired);
+        return () => window.removeEventListener("auth:session-expired", handleSessionExpired);
     }, [router]);
 
     // Memoize context value to prevent unnecessary re-renders

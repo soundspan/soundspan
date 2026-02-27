@@ -8,7 +8,7 @@ import {
     Plus,
     Loader2,
     Search,
-    ThumbsUp,
+    Heart,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import type { Album } from "../types";
@@ -260,7 +260,7 @@ export function AlbumActionBar({
                                     {isApplyingAlbumPreference ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                     ) : (
-                                        <ThumbsUp className="h-4 w-4" />
+                                        <Heart className="h-4 w-4" />
                                     )}
                                 </button>
                             )}

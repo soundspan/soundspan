@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import Image from "next/image";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { GalaxyBackground } from "@/components/ui/GalaxyBackground";
 import {
@@ -285,7 +286,7 @@ export default function LoginPage() {
                                             htmlFor="username"
                                             className="block text-sm font-medium text-white/90 mb-1.5"
                                         >
-                                            Username
+                                            Username or Email
                                         </label>
                                         <input
                                             id="username"
@@ -294,7 +295,7 @@ export default function LoginPage() {
                                             onChange={(e) =>
                                                 setUsername(e.target.value)
                                             }
-                                            placeholder="Enter your username"
+                                            placeholder="Enter your username or email"
                                             required
                                             autoFocus
                                             autoCapitalize="none"
@@ -445,6 +446,16 @@ export default function LoginPage() {
                                 </button>
                             )}
                         </form>
+
+                        <p className="text-center text-white/50 text-sm mt-6">
+                            Have an invite code?{" "}
+                            <Link
+                                href="/register"
+                                className="text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+                            >
+                                Create an account
+                            </Link>
+                        </p>
                     </div>
 
                     {/* Footer */}

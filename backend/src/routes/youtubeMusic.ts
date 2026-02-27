@@ -223,6 +223,20 @@ async function resolveYtMusicStreamQuality(
 
 // ── Status ─────────────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/ytmusic/status:
+ *   get:
+ *     summary: Check YouTube Music integration and authentication status
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: YouTube Music status including enabled, available, and authentication state
+ *       401:
+ *         description: Not authenticated
+ */
 router.get(
     "/status",
     requireAuth,
@@ -260,6 +274,24 @@ router.get(
 
 // ── OAuth Device Code Flow (per-user) ──────────────────────────────
 
+/**
+ * @openapi
+ * /api/ytmusic/auth/device-code:
+ *   post:
+ *     summary: Initiate OAuth device code flow for YouTube Music authentication
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Device code and verification URL for user authorization
+ *       400:
+ *         description: YouTube Music client credentials not configured
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.post(
     "/auth/device-code",
     requireAuth,
@@ -288,6 +320,34 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /api/ytmusic/auth/device-code/poll:
+ *   post:
+ *     summary: Poll device code authorization status for YouTube Music OAuth
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [deviceCode]
+ *             properties:
+ *               deviceCode:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Poll result with authorization status
+ *       400:
+ *         description: Missing deviceCode or client credentials not configured
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.post(
     "/auth/device-code/poll",
     requireAuth,
@@ -345,6 +405,35 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /api/ytmusic/auth/save-token:
+ *   post:
+ *     summary: Save OAuth token JSON for YouTube Music authentication
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [oauthJson]
+ *             properties:
+ *               oauthJson:
+ *                 type: string
+ *                 description: OAuth credentials as a JSON string
+ *     responses:
+ *       200:
+ *         description: OAuth token saved successfully
+ *       400:
+ *         description: Missing or invalid oauthJson
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.post(
     "/auth/save-token",
     requireAuth,
@@ -398,6 +487,22 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /api/ytmusic/auth/clear:
+ *   post:
+ *     summary: Clear YouTube Music OAuth credentials for the current user
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: OAuth credentials cleared successfully
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.post(
     "/auth/clear",
     requireAuth,
@@ -434,6 +539,36 @@ router.post(
 // the sidecar executes these operations with public clients so user OAuth
 // search history is not affected.
 
+/**
+ * @openapi
+ * /api/ytmusic/search:
+ *   post:
+ *     summary: Search YouTube Music catalog
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [query]
+ *             properties:
+ *               query:
+ *                 type: string
+ *               filter:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Search results from YouTube Music
+ *       400:
+ *         description: Missing query parameter
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.post(
     "/search",
     requireAuth,
@@ -465,6 +600,28 @@ router.post(
 
 // ── Browse ─────────────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/ytmusic/album/{browseId}:
+ *   get:
+ *     summary: Get YouTube Music album details by browse ID
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: browseId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Album details from YouTube Music
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.get(
     "/album/:browseId",
     requireAuth,
@@ -485,6 +642,28 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /api/ytmusic/artist/{channelId}:
+ *   get:
+ *     summary: Get YouTube Music artist details by channel ID
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: channelId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Artist details from YouTube Music
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.get(
     "/artist/:channelId",
     requireAuth,
@@ -505,6 +684,28 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /api/ytmusic/song/{videoId}:
+ *   get:
+ *     summary: Get YouTube Music song details by video ID
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Song details from YouTube Music
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.get(
     "/song/:videoId",
     requireAuth,
@@ -530,6 +731,38 @@ router.get(
 // without proxying the actual audio bytes. Used by the player UI
 // to display quality information.
 
+/**
+ * @openapi
+ * /api/ytmusic/stream-info/{videoId}:
+ *   get:
+ *     summary: Get stream metadata (bitrate, codec, duration) for a YouTube Music track
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *         description: Requested stream quality (e.g. high, low)
+ *     responses:
+ *       200:
+ *         description: Stream metadata including bitrate, codec, and duration
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ *       404:
+ *         description: Stream not found
+ *       451:
+ *         description: Content is age-restricted and cannot be streamed
+ */
 router.get(
     "/stream-info/:videoId",
     requireAuthOrToken,
@@ -583,6 +816,45 @@ router.get(
 // and we pipe it from the sidecar. This avoids exposing IP-locked
 // YouTube CDN URLs directly to the browser.
 
+/**
+ * @openapi
+ * /api/ytmusic/stream/{videoId}:
+ *   get:
+ *     summary: Proxy audio stream from YouTube Music sidecar
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *         description: Requested stream quality (e.g. high, low)
+ *     responses:
+ *       200:
+ *         description: Audio stream bytes piped from the YouTube Music sidecar
+ *         content:
+ *           audio/*:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       206:
+ *         description: Partial content (range request)
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ *       404:
+ *         description: Stream not found
+ *       451:
+ *         description: Content is age-restricted and cannot be streamed
+ */
 router.get(
     "/stream/:videoId",
     requireAuthOrToken,
@@ -656,6 +928,29 @@ router.get(
 
 // ── Library ────────────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/ytmusic/library/songs:
+ *   get:
+ *     summary: Get songs from the user's YouTube Music library
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Maximum number of songs to return
+ *     responses:
+ *       200:
+ *         description: List of library songs
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.get(
     "/library/songs",
     requireAuth,
@@ -677,6 +972,29 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /api/ytmusic/library/albums:
+ *   get:
+ *     summary: Get albums from the user's YouTube Music library
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Maximum number of albums to return
+ *     responses:
+ *       200:
+ *         description: List of library albums
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.get(
     "/library/albums",
     requireAuth,
@@ -700,6 +1018,42 @@ router.get(
 
 // ── Gap-Fill Match ─────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/ytmusic/match:
+ *   post:
+ *     summary: Find the best YouTube Music match for a given track
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [artist, title]
+ *             properties:
+ *               artist:
+ *                 type: string
+ *               title:
+ *                 type: string
+ *               albumTitle:
+ *                 type: string
+ *               duration:
+ *                 type: number
+ *               isrc:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Best matching track from YouTube Music
+ *       400:
+ *         description: Missing required artist and title fields
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.post(
     "/match",
     requireAuth,
@@ -743,6 +1097,49 @@ router.post(
 
 // ── Batch Gap-Fill Match ───────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/ytmusic/match-batch:
+ *   post:
+ *     summary: Batch-match multiple tracks against YouTube Music catalog
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [tracks]
+ *             properties:
+ *               tracks:
+ *                 type: array
+ *                 minItems: 1
+ *                 maxItems: 50
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     artist:
+ *                       type: string
+ *                     title:
+ *                       type: string
+ *                     albumTitle:
+ *                       type: string
+ *                     duration:
+ *                       type: number
+ *                     isrc:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: Matches keyed by index for each input track
+ *       400:
+ *         description: Invalid or missing tracks array
+ *       401:
+ *         description: Not authenticated or YouTube Music auth expired
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
 router.post(
     "/match-batch",
     requireAuth,

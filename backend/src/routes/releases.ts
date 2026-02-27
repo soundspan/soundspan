@@ -28,10 +28,32 @@ interface ReleaseRadarResponse {
 }
 
 /**
- * GET /releases/radar
- * 
- * Get upcoming and recent releases for the user's monitored artists
- * and their similar artists.
+ * @openapi
+ * /api/releases/radar:
+ *   get:
+ *     summary: Get upcoming and recent releases for monitored and similar artists
+ *     tags: [Releases]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: daysBack
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *         description: Number of days to look back for recent releases
+ *       - in: query
+ *         name: daysAhead
+ *         schema:
+ *           type: integer
+ *           default: 90
+ *         description: Number of days to look ahead for upcoming releases
+ *     responses:
+ *       200:
+ *         description: Upcoming and recent releases with artist counts
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/radar", async (req, res) => {
     try {
@@ -126,9 +148,26 @@ router.get("/radar", async (req, res) => {
 });
 
 /**
- * GET /releases/upcoming
- * 
- * Get only upcoming releases (next X days)
+ * @openapi
+ * /api/releases/upcoming:
+ *   get:
+ *     summary: Get only upcoming releases
+ *     tags: [Releases]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           default: 90
+ *         description: Number of days ahead to look for upcoming releases
+ *     responses:
+ *       200:
+ *         description: Upcoming releases sorted by release date (soonest first)
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/upcoming", async (req, res) => {
     try {
@@ -155,9 +194,26 @@ router.get("/upcoming", async (req, res) => {
 });
 
 /**
- * GET /releases/recent
- * 
- * Get recently released albums (last X days) that user might want to download
+ * @openapi
+ * /api/releases/recent:
+ *   get:
+ *     summary: Get recently released albums not yet in the user's library
+ *     tags: [Releases]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *         description: Number of days to look back for recent releases
+ *     responses:
+ *       200:
+ *         description: Recent releases not in library sorted by date (newest first)
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/recent", async (req, res) => {
     try {
@@ -195,9 +251,28 @@ router.get("/recent", async (req, res) => {
 });
 
 /**
- * POST /releases/download/:albumMbid
- * 
- * Download a release from the radar
+ * @openapi
+ * /api/releases/download/{albumMbid}:
+ *   post:
+ *     summary: Download a release from the radar
+ *     tags: [Releases]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: albumMbid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MusicBrainz album ID to download
+ *     responses:
+ *       200:
+ *         description: Download started successfully
+ *       401:
+ *         description: Not authenticated
+ *       501:
+ *         description: Download feature not yet implemented
  */
 router.post("/download/:albumMbid", async (req, res) => {
     try {

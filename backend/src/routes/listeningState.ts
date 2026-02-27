@@ -15,6 +15,44 @@ const listeningStateSchema = z.object({
     positionMs: z.number().int().min(0),
 });
 
+/**
+ * @openapi
+ * /api/listening-state:
+ *   post:
+ *     summary: Create or update a listening state for an entity
+ *     tags: [Listening State]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - kind
+ *               - entityId
+ *               - positionMs
+ *             properties:
+ *               kind:
+ *                 type: string
+ *                 enum: [music, book]
+ *               entityId:
+ *                 type: string
+ *               trackId:
+ *                 type: string
+ *               positionMs:
+ *                 type: integer
+ *                 minimum: 0
+ *     responses:
+ *       200:
+ *         description: Listening state created or updated
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /listening-state
 router.post("/", async (req, res) => {
     try {
@@ -52,6 +90,37 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/listening-state:
+ *   get:
+ *     summary: Get listening state for a specific entity
+ *     tags: [Listening State]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: kind
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [music, book]
+ *       - in: query
+ *         name: entityId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Listening state for the entity
+ *       400:
+ *         description: Missing kind or entityId query parameters
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: No listening state found
+ */
 // GET /listening-state
 router.get("/", async (req, res) => {
     try {
@@ -85,6 +154,27 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/listening-state/recent:
+ *   get:
+ *     summary: Get recent listening states for "Continue Listening"
+ *     tags: [Listening State]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: List of recent listening states ordered by last update
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /listening-state/recent (for "Continue Listening")
 router.get("/recent", async (req, res) => {
     try {

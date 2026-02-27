@@ -15,12 +15,14 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 interface FeaturesState {
     musicCNN: boolean;
     vibeEmbeddings: boolean;
+    showVersion: boolean;
     loading: boolean;
 }
 
 const defaultState: FeaturesState = {
     musicCNN: false,
     vibeEmbeddings: false,
+    showVersion: false,
     loading: true,
 };
 const FEATURES_REFRESH_INTERVAL_MS = 60_000;
@@ -31,10 +33,14 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<FeaturesState>(defaultState);
     const refreshFeatures = useCallback(async () => {
         try {
-            const features = await api.getFeatures();
+            const [features, uiSettings] = await Promise.all([
+                api.getFeatures(),
+                api.getUiSettings().catch(() => ({ showVersion: false })),
+            ]);
             setState({
                 musicCNN: features.musicCNN,
                 vibeEmbeddings: features.vibeEmbeddings,
+                showVersion: uiSettings.showVersion,
                 loading: false,
             });
         } catch (error) {
@@ -44,6 +50,7 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
                     ? {
                           musicCNN: false,
                           vibeEmbeddings: false,
+                          showVersion: false,
                           loading: false,
                       }
                     : prev

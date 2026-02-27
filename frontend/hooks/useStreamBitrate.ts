@@ -172,7 +172,7 @@ function isLosslessCodec(codec?: string | null): boolean {
     );
 }
 
-function resolveEffectiveLocalPlaybackQuality(input: {
+export function resolveEffectiveLocalPlaybackQuality(input: {
     sourceQuality: LocalTrackQuality | null;
     playbackQuality: LocalTrackQuality | null;
     streamProfile:
@@ -219,14 +219,14 @@ function resolveEffectiveLocalPlaybackQuality(input: {
     };
 }
 
-function isLikelyLosslessTidal(quality: TidalStreamQuality): boolean {
+export function isLikelyLosslessTidal(quality: TidalStreamQuality): boolean {
     if (quality.bitDepth && quality.sampleRate) return true;
     if (/LOSSLESS/i.test(quality.quality || "")) return true;
     const codec = normalizeCodecLabel(quality.codec);
     return codec === "FLAC" || codec === "ALAC" || codec === "WAV" || codec === "PCM";
 }
 
-function estimateTidalLossyBitrateKbps(qualityTier?: string): number | null {
+export function estimateTidalLossyBitrateKbps(qualityTier?: string): number | null {
     const tier = (qualityTier || "").toUpperCase();
     if (tier === "LOW") return 96;
     if (tier === "MEDIUM") return 160;

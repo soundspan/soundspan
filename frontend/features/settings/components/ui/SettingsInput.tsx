@@ -3,7 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 
 interface SettingsInputProps {
     id?: string;
-    type?: "text" | "password" | "url" | "number";
+    type?: "text" | "password" | "url" | "number" | "email";
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;

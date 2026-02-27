@@ -59,8 +59,27 @@ function deezerRadioToUnified(radio: DeezerRadioStation): PlaylistPreview {
 }
 
 /**
- * GET /api/browse/playlists/featured
- * Get featured/chart playlists from Deezer
+ * @openapi
+ * /api/browse/playlists/featured:
+ *   get:
+ *     summary: Get featured/chart playlists from Deezer
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 200
+ *         description: Maximum number of playlists to return
+ *     responses:
+ *       200:
+ *         description: Featured playlists retrieved successfully
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/playlists/featured", async (req, res) => {
     try {
@@ -82,8 +101,36 @@ router.get("/playlists/featured", async (req, res) => {
 });
 
 /**
- * GET /api/browse/playlists/search
- * Search for playlists on Deezer
+ * @openapi
+ * /api/browse/playlists/search:
+ *   get:
+ *     summary: Search for playlists on Deezer
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 2
+ *         description: Search query (minimum 2 characters)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *         description: Maximum number of results to return
+ *     responses:
+ *       200:
+ *         description: Playlist search results
+ *       400:
+ *         description: Search query too short
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/playlists/search", async (req, res) => {
     try {
@@ -111,8 +158,28 @@ router.get("/playlists/search", async (req, res) => {
 });
 
 /**
- * GET /api/browse/playlists/:id
- * Get full details of a Deezer playlist
+ * @openapi
+ * /api/browse/playlists/{id}:
+ *   get:
+ *     summary: Get full details of a Deezer playlist
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Deezer playlist ID
+ *     responses:
+ *       200:
+ *         description: Playlist details retrieved successfully
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/playlists/:id", async (req, res) => {
     try {
@@ -135,8 +202,19 @@ router.get("/playlists/:id", async (req, res) => {
 });
 
 /**
- * GET /api/browse/radios
- * Get all radio stations (mood/theme based mixes)
+ * @openapi
+ * /api/browse/radios:
+ *   get:
+ *     summary: Get all radio stations (mood/theme based mixes)
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Radio stations retrieved successfully
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/radios", async (req, res) => {
     try {
@@ -155,8 +233,19 @@ router.get("/radios", async (req, res) => {
 });
 
 /**
- * GET /api/browse/radios/by-genre
- * Get radio stations organized by genre
+ * @openapi
+ * /api/browse/radios/by-genre:
+ *   get:
+ *     summary: Get radio stations organized by genre
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Radio stations grouped by genre
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/radios/by-genre", async (req, res) => {
     try {
@@ -182,8 +271,28 @@ router.get("/radios/by-genre", async (req, res) => {
 });
 
 /**
- * GET /api/browse/radios/:id
- * Get tracks from a radio station (as playlist format for import)
+ * @openapi
+ * /api/browse/radios/{id}:
+ *   get:
+ *     summary: Get tracks from a radio station
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Radio station ID
+ *     responses:
+ *       200:
+ *         description: Radio station tracks in playlist format for import
+ *       404:
+ *         description: Radio station not found
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/radios/:id", async (req, res) => {
     try {
@@ -208,8 +317,19 @@ router.get("/radios/:id", async (req, res) => {
 });
 
 /**
- * GET /api/browse/genres
- * Get all available genres
+ * @openapi
+ * /api/browse/genres:
+ *   get:
+ *     summary: Get all available genres
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of all available genres
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/genres", async (req, res) => {
     try {
@@ -228,8 +348,28 @@ router.get("/genres", async (req, res) => {
 });
 
 /**
- * GET /api/browse/genres/:id
- * Get content for a specific genre (playlists + radios)
+ * @openapi
+ * /api/browse/genres/{id}:
+ *   get:
+ *     summary: Get content for a specific genre (playlists and radios)
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Genre ID
+ *     responses:
+ *       200:
+ *         description: Genre content including playlists and radios
+ *       400:
+ *         description: Invalid genre ID
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/genres/:id", async (req, res) => {
     try {
@@ -254,8 +394,35 @@ router.get("/genres/:id", async (req, res) => {
 });
 
 /**
- * GET /api/browse/genres/:id/playlists
- * Get playlists for a specific genre (by name search)
+ * @openapi
+ * /api/browse/genres/{id}/playlists:
+ *   get:
+ *     summary: Get playlists for a specific genre
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Genre ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 50
+ *         description: Maximum number of playlists to return
+ *     responses:
+ *       200:
+ *         description: Genre playlists retrieved successfully
+ *       404:
+ *         description: Genre not found
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/genres/:id/playlists", async (req, res) => {
     try {
@@ -285,9 +452,33 @@ router.get("/genres/:id/playlists", async (req, res) => {
 });
 
 /**
- * POST /api/browse/playlists/parse
- * Parse a Spotify or Deezer URL and return playlist info
- * This is the main entry point for URL-based imports
+ * @openapi
+ * /api/browse/playlists/parse:
+ *   post:
+ *     summary: Parse a Spotify or Deezer URL and return playlist info
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - url
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 description: Spotify or Deezer playlist URL
+ *     responses:
+ *       200:
+ *         description: Parsed playlist info (source, type, id, url)
+ *       400:
+ *         description: Missing or invalid/unsupported URL
+ *       401:
+ *         description: Not authenticated
  */
 router.post("/playlists/parse", async (req, res) => {
     try {
@@ -328,9 +519,19 @@ router.post("/playlists/parse", async (req, res) => {
 });
 
 /**
- * GET /api/browse/all
- * Get a combined view of featured content (playlists, genres)
- * Note: Radio stations are now internal (library-based), not from Deezer
+ * @openapi
+ * /api/browse/all:
+ *   get:
+ *     summary: Get a combined view of featured content (playlists, genres)
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Combined browse content including playlists and genres
+ *       401:
+ *         description: Not authenticated
  */
 router.get("/all", async (req, res) => {
     try {

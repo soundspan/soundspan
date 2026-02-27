@@ -190,6 +190,34 @@ async function ensureUserOAuth(userId: string): Promise<boolean> {
 // requireAuthOrToken (query-param token for the audio element).
 
 /**
+ * @openapi
+ * /api/tidal-streaming/status:
+ *   get:
+ *     summary: Check TIDAL streaming availability for the current user
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: TIDAL streaming status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 enabled:
+ *                   type: boolean
+ *                 available:
+ *                   type: boolean
+ *                 authenticated:
+ *                   type: boolean
+ *                 credentialsConfigured:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /status
  * Check TIDAL streaming availability for the current user.
  */
@@ -217,6 +245,42 @@ router.get("/status", requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * @openapi
+ * /api/tidal-streaming/auth/device-code:
+ *   post:
+ *     summary: Initiate TIDAL device-code OAuth flow
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Device code and verification URI
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 device_code:
+ *                   type: string
+ *                 user_code:
+ *                   type: string
+ *                 verification_uri:
+ *                   type: string
+ *                 verification_uri_complete:
+ *                   type: string
+ *                 expires_in:
+ *                   type: integer
+ *                 interval:
+ *                   type: integer
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: TIDAL streaming is not enabled
+ *       503:
+ *         description: TIDAL service is not available
+ */
+/**
  * POST /auth/device-code
  * Initiate device-code OAuth flow for the current user.
  */
@@ -242,6 +306,38 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /api/tidal-streaming/auth/device-code/poll:
+ *   post:
+ *     summary: Poll for TIDAL device-code auth completion
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - deviceCode
+ *             properties:
+ *               deviceCode:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Auth status (pending or success with username)
+ *       400:
+ *         description: deviceCode is required
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: TIDAL streaming is not enabled
+ *       503:
+ *         description: TIDAL service is not available
+ */
 /**
  * POST /auth/device-code/poll
  * Poll for device-code auth completion.
@@ -306,6 +402,38 @@ router.post(
 );
 
 /**
+ * @openapi
+ * /api/tidal-streaming/auth/save-token:
+ *   post:
+ *     summary: Save a TIDAL OAuth token manually
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - oauthJson
+ *             properties:
+ *               oauthJson:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Token saved successfully
+ *       400:
+ *         description: oauthJson is required
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: TIDAL streaming is not enabled
+ *       503:
+ *         description: TIDAL service is not available
+ */
+/**
  * POST /auth/save-token
  * Save TIDAL OAuth token manually (e.g. from external auth).
  */
@@ -348,6 +476,21 @@ router.post(
 );
 
 /**
+ * @openapi
+ * /api/tidal-streaming/auth/clear:
+ *   post:
+ *     summary: Clear the user's TIDAL auth credentials
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: TIDAL auth cleared
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * POST /auth/clear
  * Clear user's TIDAL auth credentials.
  */
@@ -373,6 +516,40 @@ router.post("/auth/clear", requireAuth, async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/tidal-streaming/search:
+ *   post:
+ *     summary: Search TIDAL catalog using the user's credentials
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - query
+ *             properties:
+ *               query:
+ *                 type: string
+ *               filter:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: TIDAL search results
+ *       400:
+ *         description: query is required
+ *       401:
+ *         description: Not authenticated or not authenticated to TIDAL
+ *       404:
+ *         description: TIDAL streaming is not enabled
+ *       503:
+ *         description: TIDAL service is not available
+ */
 /**
  * POST /search
  * Search TIDAL using the user's credentials.
@@ -412,6 +589,47 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /api/tidal-streaming/match:
+ *   post:
+ *     summary: Match a single track against the TIDAL catalog
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - artist
+ *               - title
+ *             properties:
+ *               artist:
+ *                 type: string
+ *               title:
+ *                 type: string
+ *               albumTitle:
+ *                 type: string
+ *               duration:
+ *                 type: number
+ *               isrc:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Matched TIDAL track or null
+ *       400:
+ *         description: artist and title are required
+ *       401:
+ *         description: Not authenticated or not authenticated to TIDAL
+ *       404:
+ *         description: TIDAL streaming is not enabled
+ *       503:
+ *         description: TIDAL service is not available
+ */
 /**
  * POST /match
  * Match a single track against TIDAL (gap-fill).
@@ -461,6 +679,55 @@ router.post(
 );
 
 /**
+ * @openapi
+ * /api/tidal-streaming/match-batch:
+ *   post:
+ *     summary: Batch match tracks against TIDAL for album gap-fill
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - tracks
+ *             properties:
+ *               tracks:
+ *                 type: array
+ *                 maxItems: 50
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - artist
+ *                     - title
+ *                   properties:
+ *                     artist:
+ *                       type: string
+ *                     title:
+ *                       type: string
+ *                     albumTitle:
+ *                       type: string
+ *                     duration:
+ *                       type: number
+ *                     isrc:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: Array of matched TIDAL tracks
+ *       400:
+ *         description: tracks array is required
+ *       401:
+ *         description: Not authenticated or not authenticated to TIDAL
+ *       404:
+ *         description: TIDAL streaming is not enabled
+ *       503:
+ *         description: TIDAL service is not available
+ */
+/**
  * POST /match-batch
  * Batch match tracks against TIDAL (gap-fill for albums).
  */
@@ -509,6 +776,38 @@ router.post(
 );
 
 /**
+ * @openapi
+ * /api/tidal-streaming/stream-info/{trackId}:
+ *   get:
+ *     summary: Get TIDAL stream metadata (quality, codec, etc.)
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *         description: Desired stream quality (defaults to user preference)
+ *     responses:
+ *       200:
+ *         description: Stream info including quality and codec details
+ *       400:
+ *         description: Invalid trackId
+ *       401:
+ *         description: Not authenticated or not authenticated to TIDAL
+ *       404:
+ *         description: TIDAL streaming is not enabled
+ *       503:
+ *         description: TIDAL service is not available
+ */
+/**
  * GET /stream-info/:trackId
  * Get stream metadata (quality, codec, etc.)
  */
@@ -554,6 +853,41 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /api/tidal-streaming/stream/{trackId}:
+ *   get:
+ *     summary: Proxy audio stream from TIDAL to the browser
+ *     tags: [TIDAL Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *         description: Desired stream quality (defaults to user preference)
+ *       - in: header
+ *         name: Range
+ *         schema:
+ *           type: string
+ *         description: HTTP range header for partial content
+ *     responses:
+ *       200:
+ *         description: Audio stream data
+ *       206:
+ *         description: Partial audio stream data (range request)
+ *       400:
+ *         description: Invalid trackId
+ *       401:
+ *         description: Not authenticated or not authenticated to TIDAL
+ */
 /**
  * GET /stream/:trackId
  * Proxy audio stream from TIDAL to the browser.

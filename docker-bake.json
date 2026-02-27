@@ -1,0 +1,118 @@
+{
+  "group": {
+    "default": {
+      "targets": ["frontend", "backend", "backend-worker", "tidal-downloader", "ytmusic-streamer", "audio-analyzer", "audio-analyzer-clap"]
+    },
+    "core": {
+      "targets": ["frontend", "backend", "backend-worker"]
+    },
+    "db": {
+      "targets": ["postgres", "redis"]
+    },
+    "external": {
+      "targets": ["tidal-downloader", "ytmusic-streamer"]
+    },
+    "analysis": {
+      "targets": ["audio-analyzer", "audio-analyzer-clap"]
+    },
+    "aio": {
+      "targets": ["soundspan-aio"]
+    }
+  },
+
+  "target": {
+    "frontend": {
+      "context": "./frontend",
+      "dockerfile": "Dockerfile",
+      "contexts": {
+        "media-metadata-contract": "./packages/media-metadata-contract"
+      },
+      "args": {
+        "NEXT_PUBLIC_API_URL": "",
+        "NEXT_PUBLIC_LOG_LEVEL": "",
+        "NEXT_PUBLIC_BUILD_TYPE": "nightly"
+      },
+      "tags": [
+        "soundspan-frontend:latest"
+      ]
+    },
+
+    "backend": {
+      "context": "./backend",
+      "dockerfile": "Dockerfile",
+      "target": "api-runtime",
+      "contexts": {
+        "media-metadata-contract": "./packages/media-metadata-contract"
+      },
+      "tags": [
+        "soundspan-backend:latest"
+      ]
+    },
+
+    "backend-worker": {
+      "context": "./backend",
+      "dockerfile": "Dockerfile",
+      "target": "worker-runtime",
+      "contexts": {
+        "media-metadata-contract": "./packages/media-metadata-contract"
+      },
+      "tags": [
+        "soundspan-backend-worker:latest"
+      ]
+    },
+
+    "postgres": {
+      "dockerfile-inline": "FROM pgvector/pgvector:pg16",
+      "tags": [
+        "soundspan-postgres:latest"
+      ]
+    },
+
+    "redis": {
+      "dockerfile-inline": "FROM redis:7-alpine",
+      "tags": [
+        "soundspan-redis:latest"
+      ]
+    },
+
+    "tidal-downloader": {
+      "context": ".",
+      "dockerfile": "services/tidal-downloader/Dockerfile",
+      "tags": [
+        "soundspan-tidal-downloader:latest"
+      ]
+    },
+
+    "ytmusic-streamer": {
+      "context": ".",
+      "dockerfile": "services/ytmusic-streamer/Dockerfile",
+      "tags": [
+        "soundspan-ytmusic-streamer:latest"
+      ]
+    },
+
+    "audio-analyzer": {
+      "context": ".",
+      "dockerfile": "services/audio-analyzer/Dockerfile",
+      "tags": [
+        "soundspan-audio-analyzer:latest"
+      ]
+    },
+
+    "audio-analyzer-clap": {
+      "context": ".",
+      "dockerfile": "services/audio-analyzer-clap/Dockerfile",
+      "tags": [
+        "soundspan-audio-analyzer-clap:latest"
+      ]
+    },
+
+    "soundspan-aio": {
+      "context": ".",
+      "dockerfile": "Dockerfile",
+      "tags": [
+        "soundspan:latest"
+      ]
+    }
+  }
+}

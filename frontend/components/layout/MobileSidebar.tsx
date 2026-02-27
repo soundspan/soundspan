@@ -10,6 +10,7 @@ import {
     Radio,
     RefreshCw,
     Settings,
+    Shield,
     Users,
     X,
 } from "lucide-react";
@@ -31,7 +32,7 @@ interface MobileSidebarProps {
 
 export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
     const pathname = usePathname();
-    const { logout } = useAuth();
+    const { user, logout } = useAuth();
     const { toast } = useToast();
     const hasActiveSessions = useActiveListenSessions();
     const [isSyncing, setIsSyncing] = useState(false);
@@ -100,7 +101,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
                     <Link
                         href="/"
-                        className="flex items-center gap-3"
+                        className="flex-1 min-w-0 flex items-center gap-3"
                         onClick={onClose}
                     >
                         <Image
@@ -111,7 +112,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             sizes="32px"
                             className="flex-shrink-0"
                         />
-                        <span className="brand-wordmark text-lg font-bold text-white tracking-tight">
+                        <span className="brand-wordmark text-2xl font-bold text-white tracking-tight truncate">
                             {BRAND_NAME}
                         </span>
                     </Link>
@@ -207,6 +208,26 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                                 Settings
                             </span>
                         </Link>
+
+                        {user?.role === "admin" && (
+                            <Link
+                                href="/admin"
+                                aria-current={
+                                    pathname === "/admin" ? "page" : undefined
+                                }
+                                className={cn(
+                                    "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors",
+                                    pathname === "/admin" ?
+                                        "bg-white/10 text-white"
+                                    :   "text-gray-400 hover:text-white hover:bg-white/5",
+                                )}
+                            >
+                                <Shield className="w-5 h-5" />
+                                <span className="text-[15px] font-medium">
+                                    Admin
+                                </span>
+                            </Link>
+                        )}
                     </div>
                 </nav>
 

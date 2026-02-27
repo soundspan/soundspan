@@ -58,6 +58,7 @@ docker run -d \
 | `docker-compose.services.yml` | Optional external Lidarr service layered onto either stack above | `docker compose -f docker-compose.yml -f docker-compose.services.yml up -d` |
 | `docker-compose.local.yml` | Local npm/tsx host-run dependencies only (postgres+redis; optional analyzer profile), using +1 collision-avoidance ports | `docker compose -f docker-compose.local.yml up -d postgres-local redis-local` |
 | `docker-compose.override.lite-mode.yml` | Optional override to disable analyzers in split stack | `cp docker-compose.override.lite-mode.yml docker-compose.override.yml && docker compose up -d` |
+| `docker-bake.json` | Docker Buildx Bake file for building images by group (core/db/external/analysis/aio) | `docker buildx bake core` |
 
 Deployment defaults in compose files use canonical ports:
 
@@ -140,6 +141,91 @@ Segmented streaming documentation has been moved to a dedicated experimental gui
 - [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md)
 
 Use that guide for segmented runtime controls, rollout levels, observability, and primary-mode reversion procedures.
+
+## Building Images with Docker Bake
+
+The repository includes a `docker-bake.json` file that defines all buildable images organized into groups. This is an alternative to `docker compose build` when you want fine-grained control over which images to build, or want to leverage BuildKit parallelism across targets.
+
+### Prerequisites
+
+Docker Buildx is required (included by default with Docker Desktop and recent Docker Engine installs):
+
+```bash
+docker buildx version
+```
+
+### Groups
+
+| Group | Targets | Description |
+| --- | --- | --- |
+| `default` | frontend, backend, backend-worker, tidal-downloader, ytmusic-streamer, audio-analyzer, audio-analyzer-clap | All buildable split-stack images |
+| `core` | frontend, backend, backend-worker | Application services only |
+| `db` | postgres, redis | Tags upstream images locally (pgvector/pgvector:pg16, redis:7-alpine) |
+| `external` | tidal-downloader, ytmusic-streamer | Streaming sidecars |
+| `analysis` | audio-analyzer, audio-analyzer-clap | ML audio analysis services |
+| `aio` | soundspan-aio | All-in-one container |
+
+### Usage
+
+Build a specific group:
+
+```bash
+# Build core application images (frontend + backend + worker)
+docker buildx bake core
+
+# Build streaming sidecars only
+docker buildx bake external
+
+# Build everything (all split-stack images)
+docker buildx bake
+
+# Build the all-in-one image
+docker buildx bake aio
+```
+
+Build a single target:
+
+```bash
+docker buildx bake frontend
+docker buildx bake backend
+docker buildx bake audio-analyzer-clap
+```
+
+Build multiple groups at once:
+
+```bash
+docker buildx bake core external analysis
+```
+
+Override tags (useful for pushing to a registry):
+
+```bash
+docker buildx bake core --set '*.tags=ghcr.io/soundspan/soundspan-frontend:1.0.0' --set frontend.tags=ghcr.io/soundspan/soundspan-frontend:1.0.0
+```
+
+Override frontend build args:
+
+```bash
+docker buildx bake frontend \
+  --set 'frontend.args.NEXT_PUBLIC_BUILD_TYPE=release' \
+  --set 'frontend.args.NEXT_PUBLIC_LOG_LEVEL=warn'
+```
+
+Dry run (print resolved build configuration without building):
+
+```bash
+docker buildx bake --print core
+```
+
+### Using bake with Compose
+
+You can continue using `docker compose up -d` after building with bake — Compose will use the locally tagged images if they match. To ensure Compose uses your bake-built images instead of rebuilding, reference the image tags in your `.env` or compose override.
+
+### Notes
+
+- The `db` group tags upstream images locally (`pgvector/pgvector:pg16` and `redis:7-alpine`). These are not custom builds — the group exists for completeness so you can pre-pull and tag them in air-gapped or CI environments.
+- The `backend` and `backend-worker` targets share the same Dockerfile (`backend/Dockerfile`) but use different build stages (`api-runtime` and `worker-runtime` respectively).
+- The `core` group is the most common choice for local development builds.
 
 ## Updating a Deployment
 

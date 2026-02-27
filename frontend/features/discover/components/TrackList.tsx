@@ -94,7 +94,7 @@ export function TrackList({
                 <span>Album</span>
                 <span className="text-center">Match</span>
                 <span className="text-center">Source</span>
-                <span className="text-right">Duration</span>
+                <span />
             </div>
 
             {/* Track Rows */}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { Plus, Settings, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, ArrowUpDown } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -22,10 +22,15 @@ interface Playlist {
     id: string;
     name: string;
     trackCount: number;
+    createdAt?: string;
+    updatedAt?: string;
     isHidden?: boolean;
     isOwner?: boolean;
     user?: { username: string };
 }
+
+type PlaylistSort = "created" | "updated" | "alphabetical";
+type PlaylistFilter = "all" | "mine" | "others";
 
 export function Sidebar() {
     const pathname = usePathname();
@@ -41,6 +46,12 @@ export function Sidebar() {
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [playlistSort, setPlaylistSort] = useState<PlaylistSort>("updated");
+    const [playlistFilter, setPlaylistFilter] = useState<PlaylistFilter>("all");
+    const [isSortFilterOpen, setIsSortFilterOpen] = useState(false);
+    const [sortFilterPos, setSortFilterPos] = useState<{ top: number; left: number } | null>(null);
+    const sortFilterRef = useRef<HTMLDivElement>(null);
+    const sortFilterBtnRef = useRef<HTMLButtonElement>(null);
     const hasLoadedPlaylists = useRef(false);
 
     // Handle library sync - no toast, notification bar handles feedback
@@ -140,11 +151,44 @@ export function Sidebar() {
             window.removeEventListener("toggle-mobile-menu", handleToggle);
     }, []);
 
+    // Close sort/filter popover on outside click
+    useEffect(() => {
+        if (!isSortFilterOpen) return;
+        const handleClick = (e: MouseEvent) => {
+            if (sortFilterRef.current && !sortFilterRef.current.contains(e.target as Node)) {
+                setIsSortFilterOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClick);
+        return () => document.removeEventListener("mousedown", handleClick);
+    }, [isSortFilterOpen]);
+
     // Don't show sidebar on login/register pages
     // (Check after all hooks to comply with Rules of Hooks)
     if (pathname === "/login" || pathname === "/register") {
         return null;
     }
+
+    // Apply filter and sort to playlists
+    const filteredSortedPlaylists = playlists
+        .filter((p) => !p.isHidden)
+        .filter((p) => {
+            if (playlistFilter === "mine") return p.isOwner !== false;
+            if (playlistFilter === "others") return p.isOwner === false;
+            return true;
+        })
+        .sort((a, b) => {
+            if (playlistSort === "alphabetical") {
+                return a.name.localeCompare(b.name);
+            }
+            if (playlistSort === "created") {
+                return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+            }
+            // updated (default) — most recently updated first
+            return (b.updatedAt ?? b.createdAt ?? "").localeCompare(a.updatedAt ?? a.createdAt ?? "");
+        });
+
+    const isFiltered = playlistFilter !== "all" || playlistSort !== "updated";
 
     // Render sidebar content inline to prevent component recreation
     const sidebarContent = (
@@ -201,7 +245,7 @@ export function Sidebar() {
                         </div>
                     </div>
 
-                    {/* Quick Actions - Settings and Sync */}
+                    {/* Quick Actions - Sync */}
                     <div className="flex items-center gap-2">
                         <button
                             onClick={handleSync}
@@ -225,19 +269,6 @@ export function Sidebar() {
                             />
                         </button>
 
-                        <Link
-                            href="/settings"
-                            className={cn(
-                                "w-10 h-10 flex items-center justify-center rounded-full transition-all",
-                                pathname === "/settings" ?
-                                    "bg-white text-black"
-                                :   "bg-white/10 text-gray-400 hover:text-white hover:bg-white/15 active:scale-95",
-                            )}
-                            aria-label="Settings"
-                            title="Settings"
-                        >
-                            <Settings className="w-4 h-4" />
-                        </Link>
                     </div>
                 </div>
             )}
@@ -245,8 +276,7 @@ export function Sidebar() {
             {/* Navigation */}
             <nav
                 className={cn(
-                    "pt-6 space-y-1",
-                    isMobileOrTablet ? "px-6" : "px-3",
+                    isMobileOrTablet ? "pt-4 space-y-1 px-6" : "pt-3 space-y-1 px-3",
                 )}
                 role="navigation"
                 aria-label="Main navigation"
@@ -263,7 +293,7 @@ export function Sidebar() {
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
                                 "block rounded-lg transition-all duration-200 group relative overflow-hidden",
-                                isMobileOrTablet ? "px-4 py-3.5" : "px-4 py-3",
+                                isMobileOrTablet ? "px-4 py-3.5" : "px-3 py-2",
                                 isActive ?
                                     "bg-white/10 text-white"
                                 :   "text-gray-400 hover:text-white hover:bg-white/5 active:bg-white/[0.07]",
@@ -296,11 +326,11 @@ export function Sidebar() {
             </nav>
 
             {/* Playlists Section */}
-            <div className="flex-1 overflow-hidden flex flex-col mt-8">
+            <div className={cn("flex-1 overflow-hidden flex flex-col", isMobileOrTablet ? "mt-8" : "mt-4")}>
                 <div
                     className={cn(
-                        "mb-4 flex items-center justify-between group",
-                        isMobileOrTablet ? "px-6" : "px-4",
+                        "flex items-center justify-between group",
+                        isMobileOrTablet ? "mb-4 px-6" : "mb-2 px-3",
                     )}
                 >
                     <Link
@@ -309,19 +339,103 @@ export function Sidebar() {
                         className="relative group/link"
                     >
                         <span className="text-[10px] font-black text-gray-500 group-hover/link:text-transparent group-hover/link:bg-clip-text group-hover/link:bg-gradient-to-r group-hover/link:from-[#5b5bff] group-hover/link:to-[#00c8ff] transition-all duration-300 uppercase tracking-[0.15em]">
-                            Your playlists
+                            {playlistFilter === "others"
+                                ? "Shared playlists"
+                                : playlistFilter === "mine"
+                                  ? "Your playlists"
+                                  : "All playlists"}
                         </span>
                         <div className="absolute -bottom-0.5 left-0 right-0 h-px bg-gradient-to-r from-[#2323FF]/0 via-[#2323FF]/50 to-[#2323FF]/0 opacity-0 group-hover/link:opacity-100 transition-opacity duration-300" />
                     </Link>
-                    <Link
-                        href="/playlists"
-                        prefetch={false}
-                        className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-[#2323FF] hover:to-[#00c8ff] hover:scale-110 transition-all duration-300 shadow-lg shadow-transparent hover:shadow-[#2323FF]/30 border border-white/5 hover:border-transparent"
-                        aria-label="Create playlist"
-                        title="Create Playlist"
-                    >
-                        <Plus className="w-4 h-4" />
-                    </Link>
+                    <div className="flex items-center gap-1">
+                        <div ref={sortFilterRef} className="relative">
+                            <button
+                                ref={sortFilterBtnRef}
+                                onClick={() => {
+                                    setIsSortFilterOpen((v) => {
+                                        if (!v && sortFilterBtnRef.current) {
+                                            const rect = sortFilterBtnRef.current.getBoundingClientRect();
+                                            setSortFilterPos({ top: rect.top, left: rect.right + 8 });
+                                        }
+                                        return !v;
+                                    });
+                                }}
+                                className={cn(
+                                    "w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 border border-white/5",
+                                    isFiltered
+                                        ? "bg-[#2323FF]/20 text-[#5b5bff] border-[#2323FF]/30"
+                                        : "bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-[#2323FF] hover:to-[#00c8ff] hover:scale-110 shadow-lg shadow-transparent hover:shadow-[#2323FF]/30 hover:border-transparent"
+                                )}
+                                aria-label="Sort and filter playlists"
+                                title="Sort & Filter"
+                            >
+                                <ArrowUpDown className="w-3.5 h-3.5" />
+                            </button>
+
+                            {isSortFilterOpen && sortFilterPos && (
+                                <div
+                                    className="fixed w-44 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl shadow-black/40 py-1 z-[10000]"
+                                    style={{ top: sortFilterPos.top, left: sortFilterPos.left }}
+                                >
+                                    <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                        Sort
+                                    </div>
+                                    {([
+                                        ["updated", "Updated date"],
+                                        ["created", "Created date"],
+                                        ["alphabetical", "Alphabetical"],
+                                    ] as const).map(([value, label]) => (
+                                        <button
+                                            key={value}
+                                            onClick={() => setPlaylistSort(value)}
+                                            className={cn(
+                                                "w-full text-left px-3 py-1.5 text-sm transition-colors",
+                                                playlistSort === value
+                                                    ? "text-white bg-white/5"
+                                                    : "text-gray-400 hover:text-white hover:bg-white/5"
+                                            )}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+
+                                    <div className="mx-2 my-1 border-t border-white/10" />
+
+                                    <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                        Show
+                                    </div>
+                                    {([
+                                        ["all", "All playlists"],
+                                        ["mine", "Your playlists"],
+                                        ["others", "Shared playlists"],
+                                    ] as const).map(([value, label]) => (
+                                        <button
+                                            key={value}
+                                            onClick={() => setPlaylistFilter(value)}
+                                            className={cn(
+                                                "w-full text-left px-3 py-1.5 text-sm transition-colors",
+                                                playlistFilter === value
+                                                    ? "text-white bg-white/5"
+                                                    : "text-gray-400 hover:text-white hover:bg-white/5"
+                                            )}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <Link
+                            href="/playlists"
+                            prefetch={false}
+                            className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-[#2323FF] hover:to-[#00c8ff] hover:scale-110 transition-all duration-300 shadow-lg shadow-transparent hover:shadow-[#2323FF]/30 border border-white/5 hover:border-transparent"
+                            aria-label="Create playlist"
+                            title="Create Playlist"
+                        >
+                            <Plus className="w-4 h-4" />
+                        </Link>
+                    </div>
                 </div>
                 <div
                     className={cn(
@@ -348,9 +462,8 @@ export function Sidebar() {
                                 </div>
                             ))}
                         </>
-                    : playlists.filter((p) => !p.isHidden).length > 0 ?
-                        playlists
-                            .filter((p) => !p.isHidden) // Filter out hidden playlists
+                    : filteredSortedPlaylists.length > 0 ?
+                        filteredSortedPlaylists
                             .map((playlist) => {
                                 const isActive =
                                     pathname === `/playlist/${playlist.id}`;
@@ -417,10 +530,12 @@ export function Sidebar() {
                             })
                     :   <div className="px-4 py-8 text-center">
                             <div className="text-sm text-gray-500 mb-2">
-                                No playlists yet
+                                {isFiltered ? "No matching playlists" : "No playlists yet"}
                             </div>
                             <div className="text-xs text-gray-600">
-                                Create your first playlist to get started
+                                {isFiltered
+                                    ? "Try changing your filter"
+                                    : "Create your first playlist to get started"}
                             </div>
                         </div>
                     }
@@ -441,7 +556,7 @@ export function Sidebar() {
 
             {/* Desktop Sidebar */}
             {!isMobileOrTablet && (
-                <aside className="w-72 bg-[#0f0f0f] rounded-lg flex flex-col overflow-hidden relative z-10 border border-white/[0.03]">
+                <aside className="w-64 bg-[#0f0f0f] rounded-lg flex flex-col overflow-hidden relative z-10 border border-white/[0.03]">
                     {sidebarContent}
                 </aside>
             )}

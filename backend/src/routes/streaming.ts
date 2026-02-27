@@ -775,6 +775,47 @@ const handleSegmentFetch = async (
     }
 };
 
+/**
+ * @openapi
+ * /api/streaming/v1/sessions:
+ *   post:
+ *     summary: Create a new segmented streaming session
+ *     tags: [Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - trackId
+ *             properties:
+ *               trackId:
+ *                 type: string
+ *               sourceType:
+ *                 type: string
+ *                 enum: [local]
+ *               desiredQuality:
+ *                 type: string
+ *                 enum: [original, high, medium, low]
+ *               manifestProfile:
+ *                 type: string
+ *                 enum: [startup_single, steady_state_dual]
+ *               playbackContext:
+ *                 type: object
+ *     responses:
+ *       201:
+ *         description: Streaming session created
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ *       503:
+ *         description: Streaming service is draining
+ */
 router.post("/v1/sessions", requireAuth, async (req, res) => {
     const startedAtMs = Date.now();
     const startupCorrelationFields = resolveSegmentedStartupCorrelationFields(req);
@@ -885,6 +926,42 @@ router.post("/v1/sessions", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/streaming/v1/sessions/{sessionId}/manifest.mpd:
+ *   get:
+ *     summary: Fetch the DASH manifest for a streaming session
+ *     tags: [Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Streaming-Session-Token
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sst
+ *         schema:
+ *           type: string
+ *         description: Streaming session token (alternative to header)
+ *     responses:
+ *       200:
+ *         description: DASH manifest XML
+ *         content:
+ *           application/dash+xml:
+ *             schema:
+ *               type: string
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Session or manifest not found
+ */
 router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req, res) => {
     const startedAtMs = Date.now();
     const startupCorrelationFields = resolveSegmentedStartupCorrelationFields(req);
@@ -1002,18 +1079,130 @@ router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req, res)
     }
 });
 
+/**
+ * @openapi
+ * /api/streaming/v1/sessions/{sessionId}/segments/{segmentName}:
+ *   get:
+ *     summary: Fetch a media segment by name from a streaming session
+ *     tags: [Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: segmentName
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: X-Streaming-Session-Token
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sst
+ *         schema:
+ *           type: string
+ *         description: Streaming session token (alternative to header)
+ *     responses:
+ *       200:
+ *         description: Media segment binary data
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Session or segment not found
+ */
 router.get(
     "/v1/sessions/:sessionId/segments/:segmentName",
     requireAuth,
     handleSegmentFetch,
 );
 
+/**
+ * @openapi
+ * /api/streaming/v1/sessions/{sessionId}/{segmentName}:
+ *   get:
+ *     summary: Fetch a media segment via shorthand path (m4s/webm)
+ *     tags: [Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: segmentName
+ *         required: true
+ *         schema:
+ *           type: string
+ *           pattern: '[A-Za-z0-9_.-]+\.(m4s|webm)'
+ *       - in: header
+ *         name: X-Streaming-Session-Token
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sst
+ *         schema:
+ *           type: string
+ *         description: Streaming session token (alternative to header)
+ *     responses:
+ *       200:
+ *         description: Media segment binary data
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Session or segment not found
+ */
 router.get(
     "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.(?:m4s|webm))",
     requireAuth,
     handleSegmentFetch,
 );
 
+/**
+ * @openapi
+ * /api/streaming/v1/sessions/{sessionId}/heartbeat:
+ *   post:
+ *     summary: Send a heartbeat to keep a streaming session alive
+ *     tags: [Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               positionSec:
+ *                 type: number
+ *               isPlaying:
+ *                 type: boolean
+ *               bufferedUntilSec:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Heartbeat acknowledged
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Session not found
+ */
 router.post("/v1/sessions/:sessionId/heartbeat", requireAuth, async (req, res) => {
     const startedAtMs = Date.now();
     let sourceType: string | undefined;
@@ -1088,6 +1277,43 @@ router.post("/v1/sessions/:sessionId/heartbeat", requireAuth, async (req, res) =
     }
 });
 
+/**
+ * @openapi
+ * /api/streaming/v1/sessions/{sessionId}/handoff:
+ *   post:
+ *     summary: Hand off a streaming session for seamless continuity
+ *     tags: [Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               positionSec:
+ *                 type: number
+ *               isPlaying:
+ *                 type: boolean
+ *               bufferedUntilSec:
+ *                 type: number
+ *     responses:
+ *       201:
+ *         description: Handoff session created
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Session not found
+ */
 router.post("/v1/sessions/:sessionId/handoff", requireAuth, async (req, res) => {
     const startedAtMs = Date.now();
     let sourceType: string | undefined;
@@ -1170,6 +1396,37 @@ router.post("/v1/sessions/:sessionId/handoff", requireAuth, async (req, res) => 
     }
 });
 
+/**
+ * @openapi
+ * /api/streaming/v1/client-metrics:
+ *   post:
+ *     summary: Ingest client-side streaming metrics and signals
+ *     tags: [Streaming]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - event
+ *             properties:
+ *               event:
+ *                 type: string
+ *                 maxLength: 128
+ *               fields:
+ *                 type: object
+ *     responses:
+ *       202:
+ *         description: Metric accepted
+ *       400:
+ *         description: Invalid request body
+ *       401:
+ *         description: Not authenticated
+ */
 router.post("/v1/client-metrics", requireAuth, async (req, res) => {
     const startedAtMs = Date.now();
     try {

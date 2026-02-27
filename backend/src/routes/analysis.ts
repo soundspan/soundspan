@@ -23,6 +23,23 @@ function buildVibePendingReset() {
 }
 
 /**
+ * @openapi
+ * /api/analysis/status:
+ *   get:
+ *     summary: Get audio analysis status and progress
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Analysis status with counts by state, queue length, and CLAP embedding progress
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * GET /api/analysis/status
  * Get audio analysis status and progress
  */
@@ -71,6 +88,36 @@ router.get("/status", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/start:
+ *   post:
+ *     summary: Start audio analysis for pending tracks
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               limit:
+ *                 type: integer
+ *                 default: 100
+ *               priority:
+ *                 type: string
+ *                 enum: [recent, alphabetical]
+ *                 default: recent
+ *     responses:
+ *       200:
+ *         description: Tracks queued for analysis
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * POST /api/analysis/start
  * Start audio analysis for pending tracks (admin only)
@@ -126,6 +173,23 @@ router.post("/start", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/analysis/retry-failed:
+ *   post:
+ *     summary: Retry all failed audio analysis jobs
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Failed tracks reset to pending
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * POST /api/analysis/retry-failed
  * Retry failed analysis jobs (admin only)
  */
@@ -152,6 +216,32 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/analyze/{trackId}:
+ *   post:
+ *     summary: Queue a specific track for audio analysis
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The track ID to analyze
+ *     responses:
+ *       200:
+ *         description: Track queued for analysis
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Track not found
+ */
 /**
  * POST /api/analysis/analyze/:trackId
  * Queue a specific track for analysis
@@ -199,6 +289,32 @@ router.post("/analyze/:trackId", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/track/{trackId}:
+ *   get:
+ *     summary: Get analysis data for a specific track
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The track ID
+ *     responses:
+ *       200:
+ *         description: Track analysis data including BPM, key, energy, mood predictions, and genre tags
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Track not found
+ */
 /**
  * GET /api/analysis/track/:trackId
  * Get analysis data for a specific track
@@ -256,6 +372,23 @@ router.get("/track/:trackId", requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/features:
+ *   get:
+ *     summary: Get aggregated audio feature statistics for the library
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Aggregated statistics including average BPM, energy, danceability, valence, and distributions
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * GET /api/analysis/features
  * Get aggregated feature statistics for the library
@@ -323,6 +456,23 @@ router.get("/features", requireAuth, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/analysis/workers:
+ *   get:
+ *     summary: Get audio analyzer worker configuration
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Current worker count, CPU cores, and recommended configuration
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * GET /api/analysis/workers
  * Get current audio analyzer worker configuration
  */
@@ -347,6 +497,37 @@ router.get("/workers", requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/workers:
+ *   put:
+ *     summary: Update audio analyzer worker count
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [workers]
+ *             properties:
+ *               workers:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 8
+ *     responses:
+ *       200:
+ *         description: Worker count updated successfully
+ *       400:
+ *         description: Workers must be a number between 1 and 8
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * PUT /api/analysis/workers
  * Update audio analyzer worker count
@@ -391,6 +572,23 @@ router.put("/workers", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/analysis/clap-workers:
+ *   get:
+ *     summary: Get CLAP analyzer worker configuration
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Current CLAP worker count, CPU cores, and recommended configuration
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * GET /api/analysis/clap-workers
  * Get current CLAP analyzer worker configuration
  */
@@ -414,6 +612,37 @@ router.get("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/clap-workers:
+ *   put:
+ *     summary: Update CLAP analyzer worker count
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [workers]
+ *             properties:
+ *               workers:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 8
+ *     responses:
+ *       200:
+ *         description: CLAP worker count updated successfully
+ *       400:
+ *         description: CLAP workers must be a number between 1 and 8
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * PUT /api/analysis/clap-workers
  * Update CLAP analyzer worker count
@@ -458,6 +687,44 @@ router.put("/clap-workers", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/analysis/vibe/failure:
+ *   post:
+ *     summary: Record a vibe embedding failure (internal)
+ *     description: Called by the CLAP analyzer service. Uses x-internal-secret header for authentication instead of user session.
+ *     tags: [Analysis]
+ *     parameters:
+ *       - in: header
+ *         name: x-internal-secret
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Shared secret for internal service authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [trackId]
+ *             properties:
+ *               trackId:
+ *                 type: string
+ *               trackName:
+ *                 type: string
+ *               errorMessage:
+ *                 type: string
+ *               errorCode:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Failure recorded
+ *       400:
+ *         description: trackId is required
+ *       403:
+ *         description: Invalid internal secret
+ */
+/**
  * POST /api/analysis/vibe/failure
  * Record a vibe embedding failure (called by CLAP analyzer)
  */
@@ -490,6 +757,36 @@ router.post("/vibe/failure", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/vibe/start:
+ *   post:
+ *     summary: Queue tracks for vibe embedding generation
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               limit:
+ *                 type: integer
+ *                 default: 500
+ *               force:
+ *                 type: boolean
+ *                 default: false
+ *                 description: If true, delete all existing embeddings and re-queue all tracks
+ *     responses:
+ *       200:
+ *         description: Tracks queued for vibe embedding generation
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 /**
  * POST /api/analysis/vibe/start
  * Queue tracks for vibe embedding generation (admin only)
@@ -569,6 +866,23 @@ router.post("/vibe/start", requireAuth, requireAdmin, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/analysis/vibe/retry:
+ *   post:
+ *     summary: Retry failed vibe embeddings
+ *     tags: [Analysis]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Failed tracks queued for vibe embedding retry
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+/**
  * POST /api/analysis/vibe/retry
  * Retry failed vibe embeddings (admin only)
  */
@@ -635,6 +949,38 @@ router.post("/vibe/retry", requireAuth, requireAdmin, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/analysis/vibe/success:
+ *   post:
+ *     summary: Resolve vibe failure records on success (internal)
+ *     description: Called by the CLAP analyzer service. Uses x-internal-secret header for authentication instead of user session.
+ *     tags: [Analysis]
+ *     parameters:
+ *       - in: header
+ *         name: x-internal-secret
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Shared secret for internal service authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [trackId]
+ *             properties:
+ *               trackId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Stale failures resolved
+ *       400:
+ *         description: trackId is required
+ *       403:
+ *         description: Invalid internal secret
+ */
 /**
  * POST /api/analysis/vibe/success
  * Resolve failure records when a vibe embedding succeeds (called by CLAP analyzer)

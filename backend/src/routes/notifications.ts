@@ -7,8 +7,26 @@ import { prisma } from "../utils/db";
 const router = Router();
 
 /**
- * GET /notifications
- * Get all uncleared notifications for the current user
+ * @openapi
+ * /api/notifications:
+ *   get:
+ *     summary: Get all uncleared notifications
+ *     description: Returns all uncleared notifications for the current user
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of notifications
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *       401:
+ *         description: Not authenticated
  */
 router.get(
     "/",
@@ -35,8 +53,27 @@ router.get(
 );
 
 /**
- * GET /notifications/unread-count
- * Get count of unread notifications
+ * @openapi
+ * /api/notifications/unread-count:
+ *   get:
+ *     summary: Get unread notification count
+ *     description: Returns the count of unread notifications for the current user
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Unread count
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 count:
+ *                   type: integer
+ *       401:
+ *         description: Not authenticated
  */
 router.get(
     "/unread-count",
@@ -55,8 +92,33 @@ router.get(
 );
 
 /**
- * POST /notifications/:id/read
- * Mark a notification as read
+ * @openapi
+ * /api/notifications/{id}/read:
+ *   post:
+ *     summary: Mark a notification as read
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Notification ID
+ *     responses:
+ *       200:
+ *         description: Notification marked as read
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
  */
 router.post(
     "/:id/read",
@@ -75,8 +137,26 @@ router.post(
 );
 
 /**
- * POST /notifications/read-all
- * Mark all notifications as read
+ * @openapi
+ * /api/notifications/read-all:
+ *   post:
+ *     summary: Mark all notifications as read
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: All notifications marked as read
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
  */
 router.post(
     "/read-all",
@@ -95,8 +175,34 @@ router.post(
 );
 
 /**
- * POST /notifications/:id/clear
- * Clear (dismiss) a notification
+ * @openapi
+ * /api/notifications/{id}/clear:
+ *   post:
+ *     summary: Clear a notification
+ *     description: Dismiss a single notification by ID
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Notification ID
+ *     responses:
+ *       200:
+ *         description: Notification cleared
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
  */
 router.post(
     "/:id/clear",
@@ -113,8 +219,27 @@ router.post(
 );
 
 /**
- * POST /notifications/clear-all
- * Clear all notifications
+ * @openapi
+ * /api/notifications/clear-all:
+ *   post:
+ *     summary: Clear all notifications
+ *     description: Dismiss all notifications for the current user
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: All notifications cleared
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
  */
 router.post(
     "/clear-all",
@@ -133,9 +258,26 @@ router.post(
 );
 
 /**
- * GET /notifications/downloads/history
- * Get completed/failed downloads that haven't been cleared
- * Deduplicated by album subject (shows only most recent entry per album)
+ * @openapi
+ * /api/notifications/downloads/history:
+ *   get:
+ *     summary: Get download history
+ *     description: Returns completed/failed downloads that haven't been cleared, deduplicated by album subject (most recent entry per album). Limited to 50 results.
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of completed/failed download jobs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *       401:
+ *         description: Not authenticated
  */
 router.get(
     "/downloads/history",
@@ -172,8 +314,26 @@ router.get(
 );
 
 /**
- * GET /notifications/downloads/active
- * Get active downloads (pending/processing)
+ * @openapi
+ * /api/notifications/downloads/active:
+ *   get:
+ *     summary: Get active downloads
+ *     description: Returns downloads that are currently pending or processing
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of active download jobs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *       401:
+ *         description: Not authenticated
  */
 router.get(
     "/downloads/active",
@@ -196,8 +356,34 @@ router.get(
 );
 
 /**
- * POST /notifications/downloads/:id/clear
- * Clear a download from history
+ * @openapi
+ * /api/notifications/downloads/{id}/clear:
+ *   post:
+ *     summary: Clear a download from history
+ *     description: Marks a specific download job as cleared so it no longer appears in history
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Download job ID
+ *     responses:
+ *       200:
+ *         description: Download cleared
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
  */
 router.post(
     "/downloads/:id/clear",
@@ -220,8 +406,27 @@ router.post(
 );
 
 /**
- * POST /notifications/downloads/clear-all
- * Clear all completed/failed downloads from history
+ * @openapi
+ * /api/notifications/downloads/clear-all:
+ *   post:
+ *     summary: Clear all downloads from history
+ *     description: Marks all completed/failed/exhausted download jobs as cleared
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: All downloads cleared
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *       401:
+ *         description: Not authenticated
  */
 router.post(
     "/downloads/clear-all",
@@ -245,8 +450,44 @@ router.post(
 );
 
 /**
- * POST /notifications/downloads/:id/retry
- * Retry a failed download
+ * @openapi
+ * /api/notifications/downloads/{id}/retry:
+ *   post:
+ *     summary: Retry a failed download
+ *     description: Retries a failed or exhausted download job. Supports pending-track-retry (Soulseek), spotify_import (Soulseek then Lidarr fallback), and generic album retry via Lidarr.
+ *     tags: [Notifications]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Download job ID to retry
+ *     responses:
+ *       200:
+ *         description: Retry initiated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 newJobId:
+ *                   type: string
+ *                   description: ID of the new download job created for the retry
+ *                 error:
+ *                   type: string
+ *                   nullable: true
+ *       400:
+ *         description: Cannot retry - missing required metadata
+ *       404:
+ *         description: Download not found or not in failed state
+ *       401:
+ *         description: Not authenticated
  */
 router.post(
     "/downloads/:id/retry",

@@ -368,6 +368,8 @@ services:
                 condition: service_healthy
             redis:
                 condition: service_healthy
+            backend:
+                condition: service_healthy
         restart: unless-stopped
         # Memory limits prevent OOM kills (Issue #26 fix)
         # 6G limit = safe for 2 workers at 2-3GB peak each

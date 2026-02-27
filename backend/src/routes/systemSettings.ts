@@ -97,8 +97,28 @@ const systemSettingsSchema = z.object({
     ytMusicEnabled: z.boolean().optional(),
     ytMusicClientId: z.string().nullable().optional(),
     ytMusicClientSecret: z.string().nullable().optional(),
+
+    // UI
+    showVersion: z.boolean().optional(),
 });
 
+/**
+ * @openapi
+ * /api/system-settings:
+ *   get:
+ *     summary: Get all system settings
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: System settings object with decrypted sensitive fields
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 // GET /system-settings
 router.get("/", async (req, res) => {
     try {
@@ -111,7 +131,7 @@ router.get("/", async (req, res) => {
             settings = await prisma.systemSettings.create({
                 data: {
                     id: "default",
-                    lidarrEnabled: true,
+                    lidarrEnabled: false,
                     lidarrUrl: "http://localhost:8686",
                     openaiEnabled: false,
                     openaiModel: "gpt-4",
@@ -122,7 +142,7 @@ router.get("/", async (req, res) => {
                     downloadPath: "/downloads",
                     autoSync: true,
                     autoEnrichMetadata: true,
-                    libraryDeletionEnabled: true,
+                    libraryDeletionEnabled: false,
                     maxConcurrentDownloads: 3,
                     downloadRetryAttempts: 3,
                     transcodeCacheMaxGb: 10,
@@ -154,6 +174,32 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings:
+ *   post:
+ *     summary: Update system settings
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: Partial system settings to update (Lidarr, OpenAI, Fanart, Last.fm, Audiobookshelf, Soulseek, Spotify, TIDAL, paths, feature flags, etc.)
+ *     responses:
+ *       200:
+ *         description: Settings saved successfully
+ *       400:
+ *         description: Invalid settings payload
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 // POST /system-settings
 router.post("/", async (req, res) => {
     try {
@@ -438,6 +484,39 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-lidarr:
+ *   post:
+ *     summary: Test Lidarr connection
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [url, apiKey]
+ *             properties:
+ *               url:
+ *                 type: string
+ *               apiKey:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Lidarr connection successful
+ *       400:
+ *         description: URL and API key are required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to connect to Lidarr
+ */
 // POST /system-settings/test-lidarr
 router.post("/test-lidarr", async (req, res) => {
     try {
@@ -499,6 +578,39 @@ router.post("/test-lidarr", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-openai:
+ *   post:
+ *     summary: Test OpenAI connection
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [apiKey]
+ *             properties:
+ *               apiKey:
+ *                 type: string
+ *               model:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: OpenAI connection successful
+ *       400:
+ *         description: API key is required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to connect to OpenAI
+ */
 // POST /system-settings/test-openai
 router.post("/test-openai", async (req, res) => {
     try {
@@ -536,6 +648,37 @@ router.post("/test-openai", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-fanart:
+ *   post:
+ *     summary: Test Fanart.tv connection
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [fanartApiKey]
+ *             properties:
+ *               fanartApiKey:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Fanart.tv connection successful
+ *       400:
+ *         description: API key is required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to connect to Fanart.tv
+ */
 // Test Fanart.tv connection
 router.post("/test-fanart", async (req, res) => {
     try {
@@ -578,6 +721,37 @@ router.post("/test-fanart", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-lastfm:
+ *   post:
+ *     summary: Test Last.fm connection
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [lastfmApiKey]
+ *             properties:
+ *               lastfmApiKey:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Last.fm connection successful
+ *       400:
+ *         description: API key is required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to connect to Last.fm
+ */
 // Test Last.fm connection
 router.post("/test-lastfm", async (req, res) => {
     try {
@@ -631,6 +805,39 @@ router.post("/test-lastfm", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-audiobookshelf:
+ *   post:
+ *     summary: Test Audiobookshelf connection
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [url, apiKey]
+ *             properties:
+ *               url:
+ *                 type: string
+ *               apiKey:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Audiobookshelf connection successful
+ *       400:
+ *         description: URL and API key are required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to connect to Audiobookshelf
+ */
 // Test Audiobookshelf connection
 router.post("/test-audiobookshelf", async (req, res) => {
     try {
@@ -671,6 +878,39 @@ router.post("/test-audiobookshelf", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-soulseek:
+ *   post:
+ *     summary: Test Soulseek connection
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [username, password]
+ *             properties:
+ *               username:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Soulseek connection successful
+ *       400:
+ *         description: Username and password are required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to test Soulseek connection
+ */
 // Test Soulseek connection (direct via slsk-client)
 router.post("/test-soulseek", async (req, res) => {
     try {
@@ -732,6 +972,39 @@ router.post("/test-soulseek", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-spotify:
+ *   post:
+ *     summary: Test Spotify credentials
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [clientId, clientSecret]
+ *             properties:
+ *               clientId:
+ *                 type: string
+ *               clientSecret:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Spotify credentials are valid
+ *       400:
+ *         description: Client ID and Client Secret are required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to test Spotify credentials
+ */
 // Test Spotify credentials
 router.post("/test-spotify", async (req, res) => {
     try {
@@ -787,6 +1060,25 @@ router.post("/test-spotify", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/test-tidal:
+ *   post:
+ *     summary: Test TIDAL connection or verify existing session
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: TIDAL session is valid
+ *       401:
+ *         description: Not authenticated or no valid TIDAL session
+ *       403:
+ *         description: Admin access required
+ *       503:
+ *         description: TIDAL service is not running
+ */
 // Test TIDAL connection — initiate device auth or verify existing session
 router.post("/test-tidal", async (req, res) => {
     try {
@@ -824,6 +1116,25 @@ router.post("/test-tidal", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/tidal-auth/device:
+ *   post:
+ *     summary: Initiate TIDAL device authorization (step 1)
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Device authorization initiated, returns device code and verification URL
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       503:
+ *         description: TIDAL service is not running
+ */
 // TIDAL device auth — Step 1: get device code
 router.post("/tidal-auth/device", async (req, res) => {
     try {
@@ -844,6 +1155,39 @@ router.post("/tidal-auth/device", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/tidal-auth/token:
+ *   post:
+ *     summary: Poll for TIDAL device authorization token (step 2)
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [device_code]
+ *             properties:
+ *               device_code:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: TIDAL authentication completed successfully
+ *       202:
+ *         description: Authorization pending, user has not yet approved
+ *       400:
+ *         description: device_code is required
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to complete TIDAL auth
+ */
 // TIDAL device auth — Step 2: poll for token
 router.post("/tidal-auth/token", async (req, res) => {
     try {
@@ -880,11 +1224,47 @@ router.post("/tidal-auth/token", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/queue-cleaner-status:
+ *   get:
+ *     summary: Get queue cleaner status
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Current queue cleaner status
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 // Get queue cleaner status
 router.get("/queue-cleaner-status", (req, res) => {
     res.json(queueCleaner.getStatus());
 });
 
+/**
+ * @openapi
+ * /api/system-settings/queue-cleaner/start:
+ *   post:
+ *     summary: Start the queue cleaner manually
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Queue cleaner started
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to start queue cleaner
+ */
 // Start queue cleaner manually
 router.post("/queue-cleaner/start", async (req, res) => {
     try {
@@ -902,6 +1282,23 @@ router.post("/queue-cleaner/start", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/system-settings/queue-cleaner/stop:
+ *   post:
+ *     summary: Stop the queue cleaner manually
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Queue cleaner stopped
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
 // Stop queue cleaner manually
 router.post("/queue-cleaner/stop", (req, res) => {
     queueCleaner.stop();
@@ -912,6 +1309,25 @@ router.post("/queue-cleaner/stop", (req, res) => {
     });
 });
 
+/**
+ * @openapi
+ * /api/system-settings/clear-caches:
+ *   post:
+ *     summary: Clear all Redis caches (excluding sessions)
+ *     tags: [System Settings]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Caches cleared successfully
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Failed to clear caches
+ */
 // Clear all Redis caches
 router.post("/clear-caches", async (req, res) => {
     try {

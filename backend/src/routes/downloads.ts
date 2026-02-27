@@ -22,6 +22,21 @@ const router = Router();
 router.use(requireAuthOrToken);
 
 /**
+ * @openapi
+ * /api/downloads/availability:
+ *   get:
+ *     summary: Check whether any download service is configured and enabled
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Availability status for each download service (Lidarr, Soulseek, TIDAL)
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /downloads/availability
  * Check whether any download service (Lidarr or Soulseek) is configured and enabled.
  * Non-admin endpoint — any authenticated user can check.
@@ -118,6 +133,48 @@ async function verifyArtistName(
     };
 }
 
+/**
+ * @openapi
+ * /api/downloads:
+ *   post:
+ *     summary: Create a new download job for an artist or album
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [type, mbid, subject]
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 enum: [artist, album]
+ *               mbid:
+ *                 type: string
+ *                 description: MusicBrainz ID of the artist or release group
+ *               subject:
+ *                 type: string
+ *                 description: Display name for the download
+ *               artistName:
+ *                 type: string
+ *               albumTitle:
+ *                 type: string
+ *               downloadType:
+ *                 type: string
+ *                 enum: [library, discovery]
+ *                 default: library
+ *     responses:
+ *       200:
+ *         description: Download job created or duplicate found
+ *       400:
+ *         description: Missing required fields or no download service configured
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /downloads - Create download job
 router.post("/", async (req, res) => {
     try {
@@ -774,6 +831,27 @@ async function processTidalDownload(
     }
 }
 
+/**
+ * @openapi
+ * /api/downloads/clear-all:
+ *   delete:
+ *     summary: Clear all download jobs for the current user
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *         description: Optional status filter to clear only jobs with a specific status
+ *     responses:
+ *       200:
+ *         description: Number of deleted download jobs
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /downloads/clear-all - Clear all download jobs for the current user
 // IMPORTANT: Must be BEFORE /:id route to avoid catching "clear-all" as an ID
 router.delete("/clear-all", async (req, res) => {
@@ -798,6 +876,21 @@ router.delete("/clear-all", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/clear-lidarr-queue:
+ *   post:
+ *     summary: Clear stuck or failed items from Lidarr's download queue
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Number of removed items and any errors
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /downloads/clear-lidarr-queue - Clear stuck/failed items from Lidarr's queue
 router.post("/clear-lidarr-queue", async (req, res) => {
     try {
@@ -813,6 +906,21 @@ router.post("/clear-lidarr-queue", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/failed:
+ *   get:
+ *     summary: List failed or unavailable album downloads for the current user
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of failed/unavailable albums
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /downloads/failed - List failed/unavailable albums for the current user
 // IMPORTANT: Must be BEFORE /:id route to avoid catching "failed" as an ID
 router.get("/failed", async (req, res) => {
@@ -831,6 +939,29 @@ router.get("/failed", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/failed/{id}:
+ *   delete:
+ *     summary: Dismiss a failed album notification
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Failed album dismissed
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Failed album not found
+ */
 // DELETE /downloads/failed/:id - Dismiss a failed album notification
 router.delete("/failed/:id", async (req, res) => {
     try {
@@ -857,6 +988,40 @@ router.delete("/failed/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/releases/{albumMbid}:
+ *   get:
+ *     summary: Get available Lidarr releases for an album (interactive search)
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: albumMbid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MusicBrainz release group ID
+ *       - in: query
+ *         name: artistName
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: albumTitle
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Available releases for the album from Lidarr
+ *       400:
+ *         description: Missing albumMbid or Lidarr not configured
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Album not found in Lidarr
+ */
 // GET /downloads/releases/:albumMbid - Get available releases for an album (interactive search)
 router.get("/releases/:albumMbid", async (req, res) => {
     try {
@@ -967,6 +1132,46 @@ router.get("/releases/:albumMbid", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/grab:
+ *   post:
+ *     summary: Grab a specific release from Lidarr interactive search
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [guid, lidarrAlbumId]
+ *             properties:
+ *               guid:
+ *                 type: string
+ *               indexerId:
+ *                 type: integer
+ *               albumMbid:
+ *                 type: string
+ *               lidarrAlbumId:
+ *                 type: integer
+ *               artistName:
+ *                 type: string
+ *               albumTitle:
+ *                 type: string
+ *               title:
+ *                 type: string
+ *                 description: Release title
+ *     responses:
+ *       200:
+ *         description: Release grabbed from indexer and download job created
+ *       400:
+ *         description: Missing required fields or Lidarr not configured
+ *       401:
+ *         description: Not authenticated
+ */
 // POST /downloads/grab - Grab a specific release from interactive search
 router.post("/grab", async (req, res) => {
     try {
@@ -1075,6 +1280,29 @@ router.post("/grab", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/{id}:
+ *   get:
+ *     summary: Get download job status by ID
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Download job details
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Download job not found
+ */
 // GET /downloads/:id - Get download job status
 router.get("/:id", async (req, res) => {
     try {
@@ -1099,6 +1327,38 @@ router.get("/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/{id}:
+ *   patch:
+ *     summary: Update a download job status
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 description: New status for the download job
+ *     responses:
+ *       200:
+ *         description: Updated download job
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Download job not found
+ */
 // PATCH /downloads/:id - Update download job (e.g., mark as complete)
 router.patch("/:id", async (req, res) => {
     try {
@@ -1132,6 +1392,27 @@ router.patch("/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/{id}:
+ *   delete:
+ *     summary: Delete a download job
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Download job deleted (idempotent)
+ *       401:
+ *         description: Not authenticated
+ */
 // DELETE /downloads/:id - Delete download job
 router.delete("/:id", async (req, res) => {
     try {
@@ -1159,6 +1440,47 @@ router.delete("/:id", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads:
+ *   get:
+ *     summary: List download jobs for the current user
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *         description: Filter by job status
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Maximum number of jobs to return
+ *       - in: query
+ *         name: includeDiscovery
+ *         schema:
+ *           type: string
+ *           enum: ["true", "false"]
+ *           default: "false"
+ *         description: Include automated discovery downloads
+ *       - in: query
+ *         name: includeCleared
+ *         schema:
+ *           type: string
+ *           enum: ["true", "false"]
+ *           default: "false"
+ *         description: Include cleared/dismissed jobs
+ *     responses:
+ *       200:
+ *         description: List of download jobs
+ *       401:
+ *         description: Not authenticated
+ */
 // GET /downloads - List user's download jobs
 router.get("/", async (req, res) => {
     try {
@@ -1202,6 +1524,35 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/downloads/keep-track:
+ *   post:
+ *     summary: Keep a discovery track by moving it to the permanent library
+ *     tags: [Downloads]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [discoveryTrackId]
+ *             properties:
+ *               discoveryTrackId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Track marked as kept with optional download job info
+ *       400:
+ *         description: Missing discoveryTrackId
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Discovery track not found
+ */
 // POST /downloads/keep-track - Keep a discovery track (move to permanent library)
 router.post("/keep-track", async (req, res) => {
     try {

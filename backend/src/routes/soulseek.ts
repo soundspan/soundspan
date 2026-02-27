@@ -52,6 +52,20 @@ async function requireSoulseekConfigured(req: any, res: any, next: any) {
 }
 
 /**
+ * @openapi
+ * /api/soulseek/status:
+ *   get:
+ *     summary: Check Soulseek connection status
+ *     tags: [Soulseek]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Soulseek connection status including enabled, connected, and username
+ *       401:
+ *         description: Not authenticated
+ */
+/**
  * GET /soulseek/status
  * Check connection status
  */
@@ -84,6 +98,22 @@ router.get("/status", requireAuth, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/soulseek/connect:
+ *   post:
+ *     summary: Manually trigger connection to the Soulseek network
+ *     tags: [Soulseek]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully connected to Soulseek network
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Soulseek credentials not configured
+ */
+/**
  * POST /soulseek/connect
  * Manually trigger connection to Soulseek network
  */
@@ -109,6 +139,40 @@ router.post(
     },
 );
 
+/**
+ * @openapi
+ * /api/soulseek/search:
+ *   post:
+ *     summary: Start an async Soulseek search for files
+ *     tags: [Soulseek]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               query:
+ *                 type: string
+ *                 description: Freeform search query
+ *               artist:
+ *                 type: string
+ *                 description: Artist name (used with title for track-specific search)
+ *               title:
+ *                 type: string
+ *                 description: Track title (used with artist for track-specific search)
+ *     responses:
+ *       200:
+ *         description: Search started; returns searchId for polling results
+ *       400:
+ *         description: Missing query or artist/title parameters
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Soulseek credentials not configured
+ */
 /**
  * POST /soulseek/search
  * General search - supports both freeform queries and track-specific searches
@@ -199,6 +263,29 @@ router.post(
 );
 
 /**
+ * @openapi
+ * /api/soulseek/search/{searchId}:
+ *   get:
+ *     summary: Get results for an ongoing Soulseek search
+ *     tags: [Soulseek]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: searchId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Search results with file metadata
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Search not found or expired
+ */
+/**
  * GET /soulseek/search/:searchId
  * Get results for an ongoing search
  */
@@ -266,6 +353,43 @@ router.get("/search/:searchId", requireAuth, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/soulseek/download:
+ *   post:
+ *     summary: Download a track from Soulseek
+ *     tags: [Soulseek]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               artist:
+ *                 type: string
+ *               title:
+ *                 type: string
+ *               album:
+ *                 type: string
+ *               filepath:
+ *                 type: string
+ *               filename:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Download completed with file path
+ *       400:
+ *         description: Music path not configured
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Soulseek credentials not configured
+ *       404:
+ *         description: Download failed or file not found
+ */
+/**
  * POST /soulseek/download
  * Download a track directly
  */
@@ -332,6 +456,20 @@ router.post(
     },
 );
 
+/**
+ * @openapi
+ * /api/soulseek/disconnect:
+ *   post:
+ *     summary: Disconnect from the Soulseek network
+ *     tags: [Soulseek]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully disconnected from Soulseek
+ *       401:
+ *         description: Not authenticated
+ */
 /**
  * POST /soulseek/disconnect
  * Disconnect from Soulseek network

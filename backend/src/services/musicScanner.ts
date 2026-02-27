@@ -236,8 +236,9 @@ export class MusicScannerService {
             logger.info("[Scanner] Disc-number backfill complete — flagged as done");
         }
 
-        // Update artist counts in background (non-blocking)
-        // This ensures denormalized counts are accurate after scan
+        // Update artist denormalized counts in background (non-blocking).
+        // The library artists route has a JOIN-based fallback for when counts
+        // are stale, so the UI works immediately even before this completes.
         backfillAllArtistCounts().catch((err) => {
             logger.error("[Scan] Artist counts update failed:", err);
         });

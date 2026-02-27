@@ -106,7 +106,7 @@ const PlayableCard = memo(function PlayableCard({
                             "shadow-xl shadow-black/50",
                             isPlaying
                                 ? "opacity-100"
-                                : "opacity-0 group-hover:opacity-100",
+                                : "opacity-0 pointer-events-none sm:pointer-events-auto group-hover:opacity-100",
                         )}
                     >
                         {showPlaySpinner ?
