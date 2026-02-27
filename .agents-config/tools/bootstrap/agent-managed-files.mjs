@@ -305,6 +305,34 @@ function resolveCanonicalContract(manifest) {
   };
 }
 
+function isReservedOverridePath(overrideRelativePath, reservedPaths) {
+  if (reservedPaths.has(overrideRelativePath)) {
+    return true;
+  }
+
+  const basename = path.posix.basename(overrideRelativePath);
+  return reservedPaths.has(basename);
+}
+
+function deriveAdditiveOverrideRepoRelativePath(overrideRepoRelativePath) {
+  const normalized = toNonEmptyString(overrideRepoRelativePath)
+    ? normalizeRelativePath(overrideRepoRelativePath)
+    : null;
+  if (!normalized || !normalized.endsWith(".replace.md")) {
+    return null;
+  }
+
+  return `${normalized.slice(0, -".replace.md".length)}.override.md`;
+}
+
+function mergeTemplateWithAdditiveOverride(templateContent, additiveContent) {
+  if (additiveContent.trim().length === 0) {
+    return templateContent;
+  }
+  const separator = templateContent.endsWith("\n") ? "\n" : "\n\n";
+  return `${templateContent}${separator}${additiveContent}`;
+}
+
 function resolveEntryAuthority(entry, canonicalContract) {
   const authority =
     toNonEmptyString(entry?.authority) ?? canonicalContract.defaultAuthority;
@@ -443,6 +471,7 @@ async function resolveExpectedContent({
   source,
   allowOverride,
   overrideRepoRelativePath,
+  additiveOverrideRepoRelativePath,
   templateRelativePath,
   remoteCache,
 }) {
@@ -463,6 +492,19 @@ async function resolveExpectedContent({
     relativePath: normalizedTemplate,
     remoteCache,
   });
+
+  if (allowOverride && additiveOverrideRepoRelativePath) {
+    const additiveOverridePath = path.resolve(repoRoot, additiveOverrideRepoRelativePath);
+    if (fs.existsSync(additiveOverridePath)) {
+      const additiveContent = fs.readFileSync(additiveOverridePath, "utf8");
+      if (additiveContent.trim().length > 0) {
+        return {
+          content: mergeTemplateWithAdditiveOverride(templateContent, additiveContent),
+          sourceLabel: `template+override:${normalizedTemplate} + ${normalizePath(path.relative(repoRoot, additiveOverridePath))}`,
+        };
+      }
+    }
+  }
 
   const sourceLabel =
     !source.preferRemote && source.localAvailable
@@ -529,6 +571,19 @@ async function run() {
     if (overrideRootRelativePath !== null) {
       allowlistedOverrideRootRelativePaths.add(overrideRootRelativePath);
     }
+
+    const additiveOverrideRepoRelativePath =
+      deriveAdditiveOverrideRepoRelativePath(overrideRepoRelativePath);
+    const additiveOverrideRootRelativePath =
+      additiveOverrideRepoRelativePath === null
+        ? null
+        : toPathRelativeToRoot({
+            repoRelativePath: additiveOverrideRepoRelativePath,
+            rootRelativePath: overrideRoot,
+          });
+    if (additiveOverrideRootRelativePath !== null) {
+      allowlistedOverrideRootRelativePaths.add(additiveOverrideRootRelativePath);
+    }
   }
 
   const activeEntriesByPath = new Map();
@@ -574,6 +629,8 @@ async function run() {
             repoRelativePath: overrideRepoRelativePath,
             rootRelativePath: overrideRoot,
           });
+    const additiveOverrideRepoRelativePath =
+      deriveAdditiveOverrideRepoRelativePath(overrideRepoRelativePath);
 
     const resolvedEntry = {
       targetRelativePath,
@@ -582,6 +639,7 @@ async function run() {
       authority,
       allowOverride,
       overrideRepoRelativePath,
+      additiveOverrideRepoRelativePath,
       overrideRootRelativePath,
     };
 
@@ -602,7 +660,7 @@ async function run() {
     const overrideRootPath = path.resolve(repoRoot, overrideRoot);
     const overrideFiles = listRelativeFilesRecursively(overrideRootPath);
     for (const overrideRelativePath of overrideFiles) {
-      if (canonicalContract.reservedPaths.has(overrideRelativePath)) {
+      if (isReservedOverridePath(overrideRelativePath, canonicalContract.reservedPaths)) {
         continue;
       }
 
@@ -664,6 +722,7 @@ async function run() {
         source,
         allowOverride: false,
         overrideRepoRelativePath: null,
+        additiveOverrideRepoRelativePath: null,
         templateRelativePath: entry.templateRelativePath,
         remoteCache,
       });
@@ -683,6 +742,7 @@ async function run() {
       source,
       allowOverride: entry.allowOverride,
       overrideRepoRelativePath: entry.overrideRepoRelativePath,
+      additiveOverrideRepoRelativePath: entry.additiveOverrideRepoRelativePath,
       templateRelativePath: entry.templateRelativePath,
       remoteCache,
     });

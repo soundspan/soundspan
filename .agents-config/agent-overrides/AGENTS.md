@@ -131,7 +131,7 @@ Policy-canonical rule IDs:
 - `orch_machine_payload_authoritative`
 - `orch_delegate_substantive_work`
 - `orch_operator_subagent_default`
-- `orch_non_trivial_subagent_mandatory`
+- `orch_subagent_delegation_required_when_possible`
 - `orch_human_nuance_addendum`
 - `orch_atomic_task_delegation`
 - `orch_dual_channel_result_envelope`
@@ -195,7 +195,7 @@ Default CLI routing is policy-defined in `contracts.orchestratorSubagent.default
 - CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code` (policy + managed drift + template-impact + index readiness + release-runtime checks)
 - CI template gate: meaningful workflow-path changes must carry `Template-Impact` declaration (`yes` with `Template-Ref`, or `none` with `Template-Impact-Reason`).
 - If process expectations change, update all of:
-  - `.agents-config/AGENTS_TEMPLATE.md`
+  - `AGENTS.md`
   - `.agents-config/docs/AGENT_RULES.md`
   - `.agents-config/docs/AGENT_CONTEXT.md`
   - `.agents-config/docs/CONTEXT_INDEX.json`

@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "created_at": "{{NOW_ISO}}",
+  "updated_at": "{{NOW_ISO}}",
+  "last_updated": "{{NOW_ISO}}",
+  "state": "pending",
+  "feature_id": "unassigned",
+  "task_id": "",
+  "objective": "",
+  "in_scope": [],
+  "out_of_scope": [],
+  "acceptance_criteria": [],
+  "constraints": [],
+  "references": [],
+  "open_questions": [],
+  "deferred_reason": null,
+  "cancel_reason": null,
+  "items": []
+}

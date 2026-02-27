@@ -459,7 +459,7 @@ function classifyArea(filePath) {
     return "frontend-lib";
   }
   if (normalized.startsWith("docs/")) {
-    return "docs";
+    return ".agents-config/docs";
   }
   if (normalized.startsWith(".github/")) {
     return "governance";

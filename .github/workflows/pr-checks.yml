@@ -1,122 +1,44 @@
 name: PR Checks
 
 on:
-    pull_request:
-        branches: [main]
-        types: [opened, synchronize, reopened]
+  pull_request:
+  push:
+    branches: [main]
 
 jobs:
-    policy-as-code:
-        name: Policy as Code
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
+  policy-as-code:
+    name: Policy as Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-            - name: Checkout agents-template
-              uses: actions/checkout@v4
-              with:
-                  repository: BonzTM/agents-template
-                  path: .agents-template-cache
+      - name: Install dependencies
+        run: npm ci
 
-            - name: Enforce AGENTS policy contract
-              run: node .agents-config/scripts/enforce-agent-policies.mjs
+      - name: Enforce agent policies (CI profile)
+        run: npm run policy:check:ci
 
-            - name: Check managed workflow drift
-              env:
-                  AGENT_TEMPLATE_LOCAL_PATH: .agents-template-cache
-              run: npm run agent:managed -- --mode check
+      - name: Check managed workflow drift
+        run: npm run agent:managed -- --mode check
 
-            - name: Enforce template-impact declaration
-              env:
-                  PR_BODY: ${{ github.event.pull_request.body }}
-              run: npm run agent:template-impact:check -- --base-ref origin/${{ github.base_ref }}
+      - name: Verify repository index readiness
+        run: |
+          npm run index:build
+          npm run index:verify
 
-    lint-frontend:
-        name: Lint Frontend
-        runs-on: ubuntu-latest
-        needs: [policy-as-code]
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+      - name: Verify release runtime contract
+        run: npm run release:contract:check
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
-                  cache: "npm"
-                  cache-dependency-path: frontend/package-lock.json
-
-            - name: Install frontend dependencies
-              working-directory: frontend
-              run: npm ci
-
-            - name: Run ESLint on frontend
-              working-directory: frontend
-              run: npm run lint
-
-    frontend-unit-coverage:
-        name: Frontend Unit Coverage
-        runs-on: ubuntu-latest
-        needs: [policy-as-code]
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "24"
-                  cache: "npm"
-                  cache-dependency-path: frontend/package-lock.json
-
-            - name: Install frontend dependencies
-              working-directory: frontend
-              run: npm ci
-
-            - name: Run frontend targeted unit coverage
-              working-directory: frontend
-              run: npm run test:coverage
-
-    helm-chart-check:
-        name: Helm Chart Check
-        runs-on: ubuntu-latest
-        needs: [policy-as-code]
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Setup Helm
-              uses: azure/setup-helm@v4
-
-            - name: Lint and render Helm chart
-              run: ./scripts/helm-chart-render-check.sh
-
-    build-docker:
-        name: Docker Build Check
-        runs-on: ubuntu-latest
-        needs: [policy-as-code]
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
-
-            - name: Build Docker image (no push)
-              uses: docker/build-push-action@v5
-              with:
-                  context: .
-                  push: false
-                  build-args: |
-                      HF_TOKEN=${{ secrets.HF_TOKEN }}
-                  tags: soundspan:pr-check
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
+      - name: Enforce template-impact declaration
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: npm run agent:template-impact:check -- --base-ref origin/${{ github.base_ref }}

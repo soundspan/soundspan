@@ -1,6 +1,7 @@
 {
   "scripts": {
     "policy:check": "node .agents-config/scripts/enforce-agent-policies.mjs",
+    "policy:check:ci": "node .agents-config/scripts/enforce-agent-policies.mjs --ci",
     "rules:canonical:verify": "node .agents-config/tools/rules/verify-canonical-ruleset.mjs --check",
     "rules:canonical:sync": "node .agents-config/tools/rules/verify-canonical-ruleset.mjs --write",
     "agent:managed": "node .agents-config/tools/bootstrap/agent-managed-files.mjs",
@@ -20,6 +21,8 @@
     "feature-index:verify": "node .agents-config/tools/docs/feature-index-check.mjs --strict",
     "jsdoc-coverage:generate": "node .agents-config/tools/docs/generate-jsdoc-coverage.mjs --write",
     "jsdoc-coverage:verify": "node .agents-config/tools/docs/generate-jsdoc-coverage.mjs --check",
+    "openapi-coverage:generate": "node .agents-config/tools/docs/generate-openapi-coverage.mjs --write",
+    "openapi-coverage:verify": "node .agents-config/tools/docs/generate-openapi-coverage.mjs --check",
     "logging:compliance:generate": "node .agents-config/scripts/verify-logging-compliance.mjs --write-baseline",
     "logging:compliance:verify": "node .agents-config/scripts/verify-logging-compliance.mjs --check",
     "route-map:generate": "node .agents-config/tools/docs/generate-route-map.mjs --write",
@@ -28,9 +31,12 @@
     "domain-readmes:verify": "node .agents-config/tools/docs/generate-domain-readmes.mjs --check",
     "release:notes": "node .agents-config/scripts/generate-release-notes.mjs",
     "release:prepare": "node .agents-config/scripts/release-version-sync.mjs --write",
-    "release:verify": "node .agents-config/scripts/release-version-sync.mjs --check"
+    "release:verify": "node .agents-config/scripts/release-version-sync.mjs --check",
+    "release:contract:check": "node .agents-config/scripts/release-contract-check.mjs",
+    "bootstrap": "node .agents-config/tools/bootstrap/bootstrap.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
-  }
+  },
+  "name": "soundspan"
 }

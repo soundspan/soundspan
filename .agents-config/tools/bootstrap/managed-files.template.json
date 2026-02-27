@@ -60,8 +60,8 @@
       ]
     },
     {
-      "path": ".claude/CLAUDE.md",
-      "source_path": ".agents-config/templates/claude/CLAUDE.md",
+      "path": "CLAUDE.md",
+      "source_path": ".agents-config/templates/CLAUDE.md",
       "profiles": [
         "base"
       ],
@@ -72,7 +72,8 @@
       "source_path": ".agents-config/AGENTS_TEMPLATE.md",
       "profiles": [
         "base"
-      ]
+      ],
+      "allow_override": true
     },
     {
       "path": ".agents-config/docs/AGENT_RULES.md",
@@ -153,6 +154,12 @@
     },
     {
       "path": ".agents-config/scripts/release-version-sync.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/release-contract-check.mjs",
       "profiles": [
         "base"
       ]
@@ -259,6 +266,13 @@
       "allow_override": true
     },
     {
+      "path": ".agents-config/docs/OPENAPI_COVERAGE.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
       "path": ".agents-config/docs/LOGGING_STANDARDS.md",
       "profiles": [
         "node-web"
@@ -275,7 +289,9 @@
       "path": ".agents-config/docs/REPO_INDEXING.md",
       "profiles": [
         "node-web"
-      ]
+      ],
+      "allow_override": true,
+      "override_path": ".agents-config/agent-overrides/.agents-config/docs/REPO_INDEXING.replace.md"
     },
     {
       "path": "backend/src/routes/README.md",
@@ -323,6 +339,12 @@
       ]
     },
     {
+      "path": ".agents-config/tools/docs/generate-openapi-coverage.mjs",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
       "path": ".agents-config/scripts/verify-logging-compliance.mjs",
       "profiles": [
         "node-web"
@@ -345,7 +367,7 @@
       ]
     },
     {
-      "path": ".claude/CLAUDE.md",
+      "path": "CLAUDE.md",
       "profiles": [
         "base"
       ]
@@ -435,6 +457,12 @@
       ]
     },
     {
+      "path": ".agents-config/scripts/release-contract-check.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
       "path": ".agents-config/scripts/changelog-utils.mjs",
       "profiles": [
         "base"
@@ -496,6 +524,12 @@
     },
     {
       "path": ".agents-config/docs/JSDOC_COVERAGE.md",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/OPENAPI_COVERAGE.md",
       "profiles": [
         "node-web"
       ]

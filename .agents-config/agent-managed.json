@@ -2,7 +2,7 @@
   "version": 1,
   "template": {
     "repo": "BonzTM/agents-template",
-    "ref": "main",
+    "ref": "78626a1",
     "localPath": "../agents-template"
   },
   "profiles": [
@@ -11,32 +11,566 @@
   ],
   "overrideRoot": ".agents-config/agent-overrides",
   "managed_files": [
-    { "path": "AGENTS.md", "source_path": ".agents-config/AGENTS_TEMPLATE.md", "profiles": ["base"], "allow_override": true },
-    { "path": ".agents-config/scripts/enforce-agent-policies.mjs", "profiles": ["base"], "allow_override": true },
-    { "path": ".agents-config/scripts/agent-session-preflight.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/agent-queue-lifecycle.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/generate-subagent-payload-stub.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/repair-queue-verification-evidence.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/tools/rules/verify-canonical-ruleset.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/agent-overrides/rule-overrides.schema.json", "profiles": ["base"] },
-    { "path": ".agents-config/tools/bootstrap/agent-managed-files.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/tools/bootstrap/check-template-impact.mjs", "profiles": ["base"] }
+    {
+      "path": ".agents-config/templates/agents/CONTINUITY.md",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/templates/agents/EXECUTION_QUEUE.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/templates/agents/EXECUTION_ARCHIVE_INDEX.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/templates/agents/archives/.gitkeep",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/templates/agents/index/.gitkeep",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/templates/agents/plans/current/.gitkeep",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/templates/agents/plans/deferred/.gitkeep",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/templates/agents/plans/archived/.gitkeep",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "source_path": ".agents-config/templates/CLAUDE.md",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": "AGENTS.md",
+      "source_path": ".agents-config/AGENTS_TEMPLATE.md",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/AGENT_RULES.md",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/AGENT_CONTEXT.md",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/CONTEXT_INDEX.json",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/contracts/rules/canonical-ruleset.json",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/agent-overrides/rule-overrides.schema.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/policies/agent-governance.json",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/scripts/enforce-agent-policies.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/agent-session-preflight.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/agent-queue-lifecycle.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/generate-subagent-payload-stub.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/repair-queue-verification-evidence.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/generate-release-notes.mjs",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/scripts/release-version-sync.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/release-contract-check.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/changelog-utils.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/prepare-helm-chart-release.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md",
+      "profiles": [
+        "base"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/tools/bootstrap/bootstrap.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/bootstrap/bootstrap-project.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/bootstrap/managed-files.template.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/bootstrap/agent-managed-files.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/bootstrap/check-template-impact.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/rules/verify-canonical-ruleset.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/index/indexer.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/index/index.config.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".github/workflows/pr-checks.yml",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/FEATURE_INDEX.json",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/TEST_MATRIX.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/ROUTE_MAP.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/JSDOC_COVERAGE.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/OPENAPI_COVERAGE.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/LOGGING_STANDARDS.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/docs/README.md",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/REPO_INDEXING.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true,
+      "override_path": ".agents-config/agent-overrides/.agents-config/docs/REPO_INDEXING.replace.md"
+    },
+    {
+      "path": "backend/src/routes/README.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": "backend/src/services/README.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": "frontend/features/README.md",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/tools/docs/feature-index-check.mjs",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/docs/generate-route-map.mjs",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/docs/generate-domain-readmes.mjs",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/docs/generate-jsdoc-coverage.mjs",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/docs/generate-openapi-coverage.mjs",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/verify-logging-compliance.mjs",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    },
+    {
+      "path": ".agents-config/policies/logging-compliance-baseline.json",
+      "profiles": [
+        "node-web"
+      ],
+      "allow_override": true
+    }
   ],
   "meaningful_paths": [
-    { "path": ".agents-config/contracts/rules/canonical-ruleset.json", "profiles": ["base"] },
-    { "path": ".agents-config/agent-overrides/rule-overrides.schema.json", "profiles": ["base"] },
-    { "path": "AGENTS.md", "profiles": ["base"] },
-    { "path": ".agents-config/docs/AGENT_RULES.md", "profiles": ["base"] },
-    { "path": ".agents-config/docs/AGENT_CONTEXT.md", "profiles": ["base"] },
-    { "path": ".agents-config/docs/CONTEXT_INDEX.json", "profiles": ["base"] },
-    { "path": ".agents-config/policies/agent-governance.json", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/enforce-agent-policies.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/agent-session-preflight.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/agent-queue-lifecycle.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/generate-subagent-payload-stub.mjs", "profiles": ["base"] },
-    { "path": ".agents-config/scripts/repair-queue-verification-evidence.mjs", "profiles": ["base"] },
-    { "path": ".github/workflows/pr-checks.yml", "profiles": ["base"] },
-    { "path": "package.json", "profiles": ["base"] }
+    {
+      "path": ".agents-config/templates/agents/",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": "AGENTS.md",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/AGENT_RULES.md",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/AGENT_CONTEXT.md",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/CONTEXT_INDEX.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/contracts/rules/",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/agent-overrides/rule-overrides.schema.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/policies/agent-governance.json",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/enforce-agent-policies.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/agent-session-preflight.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/agent-queue-lifecycle.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/generate-subagent-payload-stub.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/repair-queue-verification-evidence.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/generate-release-notes.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/release-version-sync.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/release-contract-check.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/changelog-utils.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/prepare-helm-chart-release.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/bootstrap/",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/rules/",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/index/",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".github/workflows/pr-checks.yml",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/FEATURE_INDEX.json",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/TEST_MATRIX.md",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/ROUTE_MAP.md",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/JSDOC_COVERAGE.md",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/OPENAPI_COVERAGE.md",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/docs/LOGGING_STANDARDS.md",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": "backend/src/routes/",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": "backend/src/services/",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": "frontend/features/",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/docs/",
+      "profiles": [
+        "node-web"
+      ]
+    },
+    {
+      "path": ".agents-config/scripts/verify-logging-compliance.mjs",
+      "profiles": [
+        "node-web"
+      ]
+    }
   ],
   "canonical_contract": {
     "default_authority": "template",
@@ -51,5 +585,7 @@
       "README.md",
       ".gitkeep"
     ]
-  }
+  },
+  "agentsMode": "external",
+  "agentsWorkfilesPath": "../agents-workfiles"
 }

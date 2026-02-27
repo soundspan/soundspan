@@ -6,7 +6,7 @@
     "version": "1.0.0",
     "dimension": 384
   },
-  "outputDir": ".agents/index/soundspan-v1",
+  "outputDir": ".agents/index/project-v1",
   "isolation": {
     "mode": "branch-worktree",
     "worktreeHashLength": 10
@@ -17,7 +17,6 @@
     ".agents-config/contracts",
     ".agents-config/agent-overrides",
     ".agents-config/docs",
-    "docs",
     "backend/src",
     "backend/prisma",
     "frontend/app",
@@ -96,7 +95,6 @@
     ".agents-config/docs/": 0.86,
     ".agents-config/contracts/": 0.84,
     ".agents-config/agent-overrides/": 0.8,
-    "docs/": 0.86,
     "README.md": 0.75,
     "AGENTS.md": 0.84
   }

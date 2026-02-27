@@ -12,27 +12,14 @@ import {
   writeChangelog,
 } from "./changelog-utils.mjs";
 
-const RELEASE_IMAGE_SECTIONS = [
-  "aio",
-  "backend",
-  "backendWorker",
-  "frontend",
-  "tidalSidecar",
-  "ytmusicStreamer",
-  "audioAnalyzer",
-  "audioAnalyzerClap",
+const POLICY_PATH = ".agents-config/policies/agent-governance.json";
+const DEFAULT_RELEASE_IMAGE_SECTIONS = [
+  "app",
 ];
-
-const PACKAGE_TARGETS = [
+const DEFAULT_PACKAGE_TARGETS = [
   {
-    label: "frontend",
-    dir: "frontend",
-    expectedName: "soundspan-frontend",
-  },
-  {
-    label: "backend",
-    dir: "backend",
-    expectedName: "soundspan-backend",
+    label: "root",
+    dir: ".",
   },
 ];
 
@@ -71,13 +58,28 @@ function parseArgs(argv) {
   return options;
 }
 
+function toNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readJsonIfExists(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    fail(`Failed to parse JSON at ${filePath}: ${error.message}`);
+  }
+}
+
 function ensureReleaseVersion(versionText) {
   if (!versionText) {
     fail("Release version is required (for example 1.6.0).");
   }
   if (versionText.startsWith("v")) {
     fail(
-      `Invalid version "${versionText}". Use semantic versions without a \"v\" prefix (for example 1.6.0).`,
+      `Invalid version "${versionText}". Use semantic versions without a "v" prefix (for example 1.6.0).`,
     );
   }
 
@@ -116,9 +118,9 @@ function parseChartYaml(chartYamlPath) {
   };
 }
 
-function parseReleaseImageTags(valuesYamlPath) {
+function parseReleaseImageTags(valuesYamlPath, releaseImageSections) {
   const lines = fs.readFileSync(valuesYamlPath, "utf8").split(/\r?\n/);
-  const targetSections = new Set(RELEASE_IMAGE_SECTIONS);
+  const targetSections = new Set(releaseImageSections);
   const tags = new Map();
 
   let currentTopLevelSection = null;
@@ -198,6 +200,54 @@ function verifyChangelogForRelease(releaseVersion) {
   }
 }
 
+function normalizePackageTargets(policy) {
+  const configured = policy?.contracts?.releaseVersion?.packageTargets;
+  if (!Array.isArray(configured) || configured.length === 0) {
+    return DEFAULT_PACKAGE_TARGETS;
+  }
+
+  const normalized = [];
+  for (const target of configured) {
+    const dir = toNonEmptyString(target?.dir);
+    if (!dir) {
+      continue;
+    }
+
+    normalized.push({
+      label: toNonEmptyString(target?.label) ?? dir,
+      dir,
+      expectedName: toNonEmptyString(target?.expectedName),
+    });
+  }
+
+  return normalized.length > 0 ? normalized : DEFAULT_PACKAGE_TARGETS;
+}
+
+function resolveHelmChartDir(policy) {
+  const configuredDir = toNonEmptyString(policy?.contracts?.releaseVersion?.chartDir);
+  if (configuredDir) {
+    return configuredDir;
+  }
+
+  const chartName = toNonEmptyString(policy?.contracts?.releaseNotes?.helmChartName);
+  if (!chartName) {
+    return null;
+  }
+  return path.join("charts", chartName);
+}
+
+function resolveReleaseImageSections(policy) {
+  const configured = policy?.contracts?.releaseVersion?.releaseImageSections;
+  if (!Array.isArray(configured) || configured.length === 0) {
+    return DEFAULT_RELEASE_IMAGE_SECTIONS;
+  }
+
+  const sections = configured
+    .map((entry) => toNonEmptyString(entry))
+    .filter((entry) => entry !== null);
+  return sections.length > 0 ? sections : DEFAULT_RELEASE_IMAGE_SECTIONS;
+}
+
 function assertPackageSurface(target, releaseVersion) {
   const packageJsonPath = path.join(target.dir, "package.json");
   const lockJsonPath = path.join(target.dir, "package-lock.json");
@@ -213,22 +263,26 @@ function assertPackageSurface(target, releaseVersion) {
   const lockJson = readJson(lockJsonPath);
   const lockRoot = lockJson.packages?.[""];
 
-  if (packageJson.name !== target.expectedName) {
+  const packageName = toNonEmptyString(packageJson.name);
+  if (!packageName) {
+    fail(`${packageJsonPath} name must be a non-empty string.`);
+  }
+
+  const expectedName = toNonEmptyString(target.expectedName) ?? packageName;
+  if (packageName !== expectedName) {
     fail(
-      `${packageJsonPath} name mismatch. Expected "${target.expectedName}", found "${packageJson.name}".`,
+      `${packageJsonPath} name mismatch. Expected "${expectedName}", found "${packageName}".`,
     );
   }
 
-  if (lockJson.name !== target.expectedName) {
+  if (lockJson.name !== expectedName) {
     fail(
-      `${lockJsonPath} top-level name mismatch. Expected "${target.expectedName}", found "${lockJson.name}".`,
+      `${lockJsonPath} top-level name mismatch. Expected "${expectedName}", found "${lockJson.name}".`,
     );
   }
 
-  if (!lockRoot || lockRoot.name !== target.expectedName) {
-    fail(
-      `${lockJsonPath} packages[\"\"] name mismatch. Expected "${target.expectedName}".`,
-    );
+  if (!lockRoot || lockRoot.name !== expectedName) {
+    fail(`${lockJsonPath} packages[""] name mismatch. Expected "${expectedName}".`);
   }
 
   if (releaseVersion) {
@@ -246,27 +300,25 @@ function assertPackageSurface(target, releaseVersion) {
 
     if (lockRoot.version !== releaseVersion) {
       fail(
-        `${lockJsonPath} packages[\"\"] version mismatch. Expected "${releaseVersion}", found "${lockRoot.version}".`,
+        `${lockJsonPath} packages[""] version mismatch. Expected "${releaseVersion}", found "${lockRoot.version}".`,
       );
     }
   }
+
+  return expectedName;
 }
 
-function verifyAllSurfaces(releaseVersion) {
-  for (const target of PACKAGE_TARGETS) {
-    assertPackageSurface(target, releaseVersion);
+function verifyHelmSurface(releaseVersion, chartDir, releaseImageSections) {
+  if (!chartDir) {
+    return;
   }
 
-  verifyChangelogForRelease(releaseVersion);
+  const chartYamlPath = path.join(chartDir, "Chart.yaml");
+  const valuesYamlPath = path.join(chartDir, "values.yaml");
 
-  const chartYamlPath = path.join("charts", "soundspan", "Chart.yaml");
-  const valuesYamlPath = path.join("charts", "soundspan", "values.yaml");
-
-  if (!fs.existsSync(chartYamlPath)) {
-    fail(`Missing Helm chart manifest: ${chartYamlPath}`);
-  }
-  if (!fs.existsSync(valuesYamlPath)) {
-    fail(`Missing Helm values: ${valuesYamlPath}`);
+  if (!fs.existsSync(chartYamlPath) || !fs.existsSync(valuesYamlPath)) {
+    console.log(`Skipping Helm surface checks (missing chart files under ${chartDir}).`);
+    return;
   }
 
   const chart = parseChartYaml(chartYamlPath);
@@ -281,17 +333,15 @@ function verifyAllSurfaces(releaseVersion) {
     );
   }
 
-  const tags = parseReleaseImageTags(valuesYamlPath);
-  const missingSections = RELEASE_IMAGE_SECTIONS.filter(
-    (section) => !tags.has(section),
-  );
+  const tags = parseReleaseImageTags(valuesYamlPath, releaseImageSections);
+  const missingSections = releaseImageSections.filter((section) => !tags.has(section));
   if (missingSections.length > 0) {
     fail(
       `${valuesYamlPath} is missing image tag entries for section(s): ${missingSections.join(", ")}.`,
     );
   }
 
-  const mismatchedSections = RELEASE_IMAGE_SECTIONS.filter(
+  const mismatchedSections = releaseImageSections.filter(
     (section) => tags.get(section) !== releaseVersion,
   );
 
@@ -299,9 +349,7 @@ function verifyAllSurfaces(releaseVersion) {
     const details = mismatchedSections
       .map((section) => `${section}=${tags.get(section)}`)
       .join(", ");
-    fail(
-      `${valuesYamlPath} release image tags do not match ${releaseVersion}: ${details}.`,
-    );
+    fail(`${valuesYamlPath} release image tags do not match ${releaseVersion}: ${details}.`);
   }
 }
 
@@ -318,13 +366,17 @@ function main() {
   }
 
   const mode = writeMode ? "write" : "check";
+  const policy = readJsonIfExists(POLICY_PATH);
+  const packageTargets = normalizePackageTargets(policy);
+  const chartDir = resolveHelmChartDir(policy);
+  const releaseImageSections = resolveReleaseImageSections(policy);
 
-  for (const target of PACKAGE_TARGETS) {
+  for (const target of packageTargets) {
     assertPackageSurface(target);
   }
 
   if (mode === "write") {
-    for (const target of PACKAGE_TARGETS) {
+    for (const target of packageTargets) {
       runCommand("npm", [
         "--prefix",
         target.dir,
@@ -335,18 +387,30 @@ function main() {
       ]);
     }
 
-    runCommand("node", [
-      ".agents-config/scripts/prepare-helm-chart-release.mjs",
-      "--chart-dir",
-      "charts/soundspan",
-      "--release-tag",
-      releaseVersion,
-    ]);
+    if (chartDir) {
+      const chartYamlPath = path.join(chartDir, "Chart.yaml");
+      const valuesYamlPath = path.join(chartDir, "values.yaml");
+      if (fs.existsSync(chartYamlPath) && fs.existsSync(valuesYamlPath)) {
+        runCommand("node", [
+          ".agents-config/scripts/prepare-helm-chart-release.mjs",
+          "--chart-dir",
+          chartDir,
+          "--release-tag",
+          releaseVersion,
+        ]);
+      } else {
+        console.log(`Skipping chart update (missing chart files under ${chartDir}).`);
+      }
+    }
 
     updateChangelogForRelease(releaseVersion);
   }
 
-  verifyAllSurfaces(releaseVersion);
+  const validatedPackageNames = packageTargets.map((target) =>
+    assertPackageSurface(target, releaseVersion),
+  );
+  verifyChangelogForRelease(releaseVersion);
+  verifyHelmSurface(releaseVersion, chartDir, releaseImageSections);
 
   console.log(
     mode === "write"
@@ -355,8 +419,8 @@ function main() {
   );
 
   console.log("Validated package names:");
-  for (const target of PACKAGE_TARGETS) {
-    console.log(`- ${target.expectedName}`);
+  for (const packageName of validatedPackageNames) {
+    console.log(`- ${packageName}`);
   }
 }
 

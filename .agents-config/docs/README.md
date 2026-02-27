@@ -13,6 +13,7 @@ Central navigation page for governance and contributor documentation.
 | [`TEST_MATRIX.md`](TEST_MATRIX.md) | Canonical targeted test-command map |
 | [`ROUTE_MAP.md`](ROUTE_MAP.md) | Generated backend/frontend route map |
 | [`JSDOC_COVERAGE.md`](JSDOC_COVERAGE.md) | Generated exported-symbol JSDoc coverage tracker |
+| [`OPENAPI_COVERAGE.md`](OPENAPI_COVERAGE.md) | Generated OpenAPI endpoint/spec coverage tracker |
 | [`LOGGING_STANDARDS.md`](LOGGING_STANDARDS.md) | Runtime logging contract and enforcement workflow |
 | [`RELEASE_NOTES_TEMPLATE.md`](RELEASE_NOTES_TEMPLATE.md) | Canonical release-notes format |
 | [`REPO_INDEXING.md`](REPO_INDEXING.md) | Repository indexing model and operations |
