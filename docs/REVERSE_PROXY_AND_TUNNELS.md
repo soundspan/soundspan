@@ -172,3 +172,11 @@ Notes:
 - Listen Together permanently showing `Connecting...`.
 - Listen Together page shows a routing error banner and create/join buttons stay disabled.
 - Socket.IO polling requests returning 404/502 from the wrong upstream.
+
+---
+
+## See also
+
+- [Deployment Guide](DEPLOYMENT.md) — Docker and compose deployment options
+- [Kubernetes Guide](KUBERNETES.md) — Helm deployment and HA rollout
+- [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — External access settings and CORS configuration

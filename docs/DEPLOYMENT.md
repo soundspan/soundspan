@@ -234,3 +234,14 @@ If startup logs show permission errors, `chown` the host path to the UID/GID sho
 - API server (internal)
 - PostgreSQL database (internal)
 - Redis cache (internal)
+
+---
+
+## See also
+
+- [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — Secret handling, external access, and security hardening
+- [Environment Variables](ENVIRONMENT_VARIABLES.md) — Complete env var reference by container
+- [Integrations Guide](INTEGRATIONS.md) — Lidarr, Audiobookshelf, Soulseek, YouTube Music, TIDAL setup
+- [Kubernetes Guide](KUBERNETES.md) — Helm and manual Kubernetes deployment
+- [Reverse Proxy and Tunnels](REVERSE_PROXY_AND_TUNNELS.md) — Edge routing for split deployments
+- [Advanced Analysis and GPU](ADVANCED_ANALYSIS_AND_GPU.md) — CLAP analysis and GPU acceleration

@@ -190,3 +190,12 @@ Local smoke check:
 cd backend
 npm run test:smoke:subsonic-proxy
 ```
+
+---
+
+## See also
+
+- [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — Secret handling and external access settings
+- [Environment Variables](ENVIRONMENT_VARIABLES.md) — Complete env var reference by container
+- [Deployment Guide](DEPLOYMENT.md) — Docker and compose deployment options
+- [Usage Guide](USAGE_GUIDE.md) — Navigation, playback behavior, and administration

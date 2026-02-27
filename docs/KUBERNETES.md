@@ -243,3 +243,12 @@ For full HA live validation (preflight + SLO gate + optional rollout restarts):
   --restart-backend \
   --restart-frontend
 ```
+
+---
+
+## See also
+
+- [Deployment Guide](DEPLOYMENT.md) — Docker run/compose deployment modes and release channels
+- [Reverse Proxy and Tunnels](REVERSE_PROXY_AND_TUNNELS.md) — Edge routing for split deployments
+- [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — Environment config and security hardening
+- [Environment Variables](ENVIRONMENT_VARIABLES.md) — Complete env var reference by container

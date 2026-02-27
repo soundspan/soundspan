@@ -1,6 +1,6 @@
 # Environment Variables by Container
 
-Centralized self-hosting reference for Docker deployments.
+Centralized self-hosting reference for Docker deployments. For configuration guidance, security hardening, and operational patterns, see [`CONFIGURATION_AND_SECURITY.md`](CONFIGURATION_AND_SECURITY.md).
 
 Scope:
 
@@ -118,6 +118,7 @@ Experimental feature note:
 | `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional (build-time only) | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |
 | `NEXT_PUBLIC_APP_VERSION` | `frontend` (build-time) | Optional (build-time only) | `frontend/package.json` version | Explicit app version override in UI. |
 | `ANALYZE` | `frontend` (build-time) | Optional (build-time only) | unset (`false`) | Enables Next.js bundle analyzer when `true`. |
+| `HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED` | `frontend` (runtime) | Optional | `false` | Enables iOS-only Howler lock-screen workarounds (audio-session playback mode, unlock-based retry, and disabled auto-suspend). Applies to the standard `howler` playback engine; not related to segmented streaming. |
 
 ## Integration and Feature Variables
 

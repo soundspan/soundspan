@@ -11,7 +11,6 @@ Segmented streaming is an experimental feature.
 | Variable | Default | Values | Purpose |
 | --- | --- | --- | --- |
 | `STREAMING_ENGINE_MODE` | `howler` | `howler`, `videojs` | Frontend runtime engine mode (`howler` direct primary playback, `videojs` segmented experimental playback). |
-| `HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED` | `false` | `true`, `false` | Enables iOS-only Howler lock-screen workarounds (audio-session playback mode, unlock-based retry, and disabled auto-suspend) in primary `howler` mode. |
 | `SEGMENTED_SESSION_PREWARM_ENABLED` | `true` | `true`, `false` | Enables next-track segmented session prewarm + validation. |
 | `LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED` | `false` | `true`, `false` | Enables segmented startup/handoff/recovery while a Listen Together group is active. |
 | `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` | `20000` | `1500-22000` | Runtime startup timeout used to trigger segmented startup retries when startup stalls. |

@@ -113,3 +113,11 @@ docker logs soundspan_audio_analyzer_clap 2>&1 | grep -i gpu
 
 Expected examples: `TensorFlow GPU detected` or `CUDA available: True`.
 If logs show CPU-only mode, GPU passthrough is not active.
+
+---
+
+## See also
+
+- [Deployment Guide](DEPLOYMENT.md) — Docker and compose deployment options
+- [Environment Variables](ENVIRONMENT_VARIABLES.md) — Analyzer env var reference
+- [Configuration and Security](CONFIGURATION_AND_SECURITY.md) — Environment config and security hardening
