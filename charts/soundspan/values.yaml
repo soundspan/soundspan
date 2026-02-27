@@ -81,7 +81,7 @@ haMode:
 aio:
   image:
     repository: ghcr.io/soundspan/soundspan
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: IfNotPresent
   # Grace window + preStop sleep to drain requests before pod shutdown.
   terminationGracePeriodSeconds: 45
@@ -133,7 +133,7 @@ aio:
 backend:
   image:
     repository: ghcr.io/soundspan/soundspan-backend
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: Always
   # -- Backend process role. Leave empty for auto:
   #    - "all" when backendWorker is disabled
@@ -208,7 +208,7 @@ backendWorker:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-backend-worker
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: Always
   # -- Worker process role override. Defaults to "worker".
   processRole: ""
@@ -261,7 +261,7 @@ backendWorker:
 frontend:
   image:
     repository: ghcr.io/soundspan/soundspan-frontend
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: Always
   replicas: 1
   strategy:
@@ -390,7 +390,7 @@ tidalSidecar:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-tidal-downloader
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: Always
   port: 8585
   resources:
@@ -417,7 +417,7 @@ ytmusicStreamer:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-ytmusic-streamer
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: Always
   port: 8586
   resources:
@@ -470,7 +470,7 @@ audioAnalyzer:
   replicas: 1
   image:
     repository: ghcr.io/soundspan/soundspan-audio-analyzer
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: Always
   resources:
     requests:
@@ -506,7 +506,7 @@ audioAnalyzerClap:
   replicas: 1
   image:
     repository: ghcr.io/soundspan/soundspan-audio-analyzer-clap
-    tag: 1.1.2
+    tag: 1.2.0
     pullPolicy: Always
   resources:
     requests:
@@ -702,3 +702,4 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
+
