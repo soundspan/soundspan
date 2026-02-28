@@ -2,6 +2,10 @@
 export const LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX =
     "last_playback_state_save_at";
 
+/** Shared storage key suffix stamped when the user clears the queue.
+ *  Used to prevent the server poll from re-adopting stale state after a clear. */
+export const QUEUE_CLEARED_AT_KEY_SUFFIX = "queue_cleared_at";
+
 /** Periodic write cadence for playback progress persistence. */
 export const PLAYBACK_PROGRESS_SAVE_INTERVAL_MS = 15000;
 /** Poll cooldown window after a local write to avoid immediate redundant playback-state reads. */

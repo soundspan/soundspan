@@ -41,10 +41,16 @@ import {
     createMigratingStorageKey,
     writeMigratingStorageItem,
 } from "@/lib/storage-migration";
-import { LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX } from "@/lib/playback-state-cadence";
+import {
+    LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX,
+    QUEUE_CLEARED_AT_KEY_SUFFIX,
+} from "@/lib/playback-state-cadence";
 
 const LAST_PLAYBACK_STATE_SAVE_AT_KEY = createMigratingStorageKey(
     LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX
+);
+const QUEUE_CLEARED_AT_KEY = createMigratingStorageKey(
+    QUEUE_CLEARED_AT_KEY_SUFFIX
 );
 
 function queueDebugEnabled(): boolean {
@@ -1159,16 +1165,17 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setQueue([]);
         state.setCurrentIndex(0);
         state.setCurrentTrack(null);
+        state.setPlaybackType(null);
         playbackRef.current.setIsPlaying(false);
         state.setShuffleIndices([]);
 
         // Persist to server so the next playback-state poll sees an empty
         // queue and doesn't restore stale data.  Also stamp the local save
-        // timestamp to activate the 25 s poll cooldown.
-        writeMigratingStorageItem(
-            LAST_PLAYBACK_STATE_SAVE_AT_KEY,
-            Date.now().toString()
-        );
+        // timestamp to activate the 25 s poll cooldown, and the cleared-at
+        // timestamp so the poll ignores stale server state for 60 s.
+        const now = Date.now().toString();
+        writeMigratingStorageItem(LAST_PLAYBACK_STATE_SAVE_AT_KEY, now);
+        writeMigratingStorageItem(QUEUE_CLEARED_AT_KEY, now);
         void api.clearPlaybackState().catch(() => undefined);
     }, [state, getActiveListenTogetherSession]);
 

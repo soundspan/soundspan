@@ -23,6 +23,7 @@ import {
 } from "@/lib/storage-migration";
 import {
     LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX,
+    QUEUE_CLEARED_AT_KEY_SUFFIX,
     parsePlaybackStateSaveTimestamp,
     shouldSkipPlaybackStatePoll,
 } from "@/lib/playback-state-cadence";
@@ -226,6 +227,7 @@ const STORAGE_KEYS = {
     LAST_PLAYBACK_STATE_SAVE_AT: createMigratingStorageKey(
         LAST_PLAYBACK_STATE_SAVE_AT_KEY_SUFFIX
     ),
+    QUEUE_CLEARED_AT: createMigratingStorageKey(QUEUE_CLEARED_AT_KEY_SUFFIX),
 };
 
 function readStorage(key: MigratingStorageKey): string | null {
@@ -636,6 +638,19 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             );
             if (shouldSkipPlaybackStatePoll(lastLocalSave)) {
                 return;
+            }
+
+            // If the queue was recently cleared, skip adopting server state
+            // to prevent a stale in-flight save from resurrecting the queue.
+            const queueClearedAt = parsePlaybackStateSaveTimestamp(
+                readStorage(STORAGE_KEYS.QUEUE_CLEARED_AT)
+            );
+            if (queueClearedAt > 0 && queue.length === 0) {
+                if (Date.now() - queueClearedAt < 60_000) {
+                    return;
+                }
+                // Protection window expired — clean up the flag
+                removeMigratingStorageItem(STORAGE_KEYS.QUEUE_CLEARED_AT);
             }
 
             try {
