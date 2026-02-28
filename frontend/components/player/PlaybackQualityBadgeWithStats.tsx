@@ -214,7 +214,7 @@ export function PlaybackQualityBadgeWithStats({
             onMouseLeave={handleMouseLeave}
         >
             <div onClick={handleClick} className="cursor-pointer">
-                <PlaybackQualityBadge badge={badge} size={size} />
+                <PlaybackQualityBadge badge={badge} size={size} showTitle={false} />
             </div>
 
             {/* Stats popup */}

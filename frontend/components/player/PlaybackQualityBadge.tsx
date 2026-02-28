@@ -32,12 +32,14 @@ interface PlaybackQualityBadgeProps {
     badge: PlaybackQualityBadgeValue;
     size: PlaybackQualityBadgeSize;
     className?: string;
+    showTitle?: boolean;
 }
 
 export function PlaybackQualityBadge({
     badge,
     size,
     className,
+    showTitle = true,
 }: PlaybackQualityBadgeProps) {
     return (
         <span
@@ -46,7 +48,7 @@ export function PlaybackQualityBadge({
                 getPlaybackQualityBadgeToneClassName(badge.variant),
                 className
             )}
-            title={badge.label}
+            title={showTitle ? badge.label : undefined}
         >
             {badge.label}
         </span>
