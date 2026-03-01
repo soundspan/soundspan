@@ -1002,6 +1002,51 @@ class YouTubeMusicService {
 
         return null;
     }
+
+    // ── Browse (unauthenticated) ─────────────────────────────────
+
+    async getCharts(country: string = "US"): Promise<Record<string, any[]>> {
+        const { data } = await this.client.get("/charts", {
+            params: { country },
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    async getMoodCategories(): Promise<
+        Array<{ title: string; items: Array<{ title: string; params: string }> }>
+    > {
+        const { data } = await this.client.get("/moods-and-genres", {
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    async getBrowsePlaylist(
+        playlistId: string,
+        limit: number = 100
+    ): Promise<{
+        id: string;
+        title: string;
+        description: string;
+        trackCount: number;
+        thumbnailUrl: string | null;
+        tracks: Array<{
+            videoId: string;
+            title: string;
+            artist: string;
+            artists: string[];
+            album: string;
+            duration: number;
+            thumbnailUrl: string | null;
+        }>;
+    }> {
+        const { data } = await this.client.get(`/playlist/${playlistId}`, {
+            params: { limit },
+            timeout: 15_000,
+        });
+        return data;
+    }
 }
 
 export const ytMusicService = new YouTubeMusicService();

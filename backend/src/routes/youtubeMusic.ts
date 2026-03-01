@@ -20,6 +20,7 @@ import {
 import { getSystemSettings } from "../utils/systemSettings";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { trackMappingService } from "../services/trackMappingService";
 import { encrypt, decrypt } from "../utils/encryption";
 import {
     ytMusicSearchLimiter,
@@ -1175,6 +1176,28 @@ router.post(
                 parsed.data.tracks
             );
 
+            // Fire-and-forget: persist matched tracks as TrackYtMusic rows
+            // TrackMapping rows are created when the frontend sends trackIds
+            // via the track-mappings/batch endpoint or album-level fetch
+            Promise.resolve().then(async () => {
+                try {
+                    for (let i = 0; i < matches.length; i++) {
+                        const match = matches[i];
+                        if (!match) continue;
+                        const inputTrack = parsed.data.tracks[i];
+                        await trackMappingService.upsertTrackYtMusic({
+                            videoId: match.videoId,
+                            title: match.title,
+                            artist: inputTrack.artist,
+                            album: inputTrack.albumTitle || "",
+                            duration: match.duration,
+                        });
+                    }
+                } catch (err) {
+                    logger.warn("[YTMusic Route] Failed to persist gap-fill TrackYtMusic rows:", err);
+                }
+            });
+
             // Return matches keyed by index for easy lookup
             res.json({ matches });
         } catch (err: any) {
@@ -1182,6 +1205,169 @@ router.post(
             logger.error("[YTMusic Route] Batch match failed:", err);
             res.status(500).json({
                 error: "Failed to batch-match tracks",
+            });
+        }
+    }
+);
+
+// ── Public Stream Routes (no user OAuth required) ─────────────────
+// These endpoints use the "__public__" user_id sentinel to bypass
+// OAuth on the sidecar. yt-dlp extraction is unauthenticated.
+// Users must still be logged into Soundspan (requireAuthOrToken)
+// and YT Music must be admin-enabled (requireYtMusicEnabled).
+
+/**
+ * @openapi
+ * /api/ytmusic/stream-info-public/{videoId}:
+ *   get:
+ *     summary: Get stream metadata without YT Music OAuth
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Stream metadata
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
+router.get(
+    "/stream-info-public/:videoId",
+    requireAuthOrToken,
+    requireYtMusicEnabled,
+    ytMusicStreamLimiter,
+    async (req: Request, res: Response) => {
+        try {
+            const { videoId } = req.params;
+            const quality = normalizeYtMusicStreamQuality(
+                (req.query.quality as string) || "HIGH"
+            );
+
+            const info = await ytMusicService.getStreamInfo(
+                "__public__",
+                videoId,
+                quality
+            );
+
+            res.json({
+                videoId: info.videoId,
+                abr: info.abr,
+                acodec: info.acodec,
+                duration: info.duration,
+                content_type: info.content_type,
+            });
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                return res.status(404).json({ error: "Stream not found" });
+            }
+            if (err.response?.status === 451) {
+                return res.status(451).json({
+                    error: "age_restricted",
+                    message: "This content requires age verification and cannot be streamed via YouTube Music.",
+                });
+            }
+            logger.error("[YTMusic Route] Public stream info failed:", err);
+            res.status(500).json({
+                error: "Failed to get stream info",
+            });
+        }
+    }
+);
+
+/**
+ * @openapi
+ * /api/ytmusic/stream-public/{videoId}:
+ *   get:
+ *     summary: Proxy audio stream without YT Music OAuth
+ *     tags: [YouTube Music]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Audio stream bytes
+ *       206:
+ *         description: Partial content (range request)
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: YouTube Music integration is not enabled
+ */
+router.get(
+    "/stream-public/:videoId",
+    requireAuthOrToken,
+    requireYtMusicEnabled,
+    ytMusicStreamLimiter,
+    async (req: Request, res: Response) => {
+        try {
+            const { videoId } = req.params;
+            const quality = normalizeYtMusicStreamQuality(
+                (req.query.quality as string) || "HIGH"
+            );
+            const rangeHeader = req.headers.range;
+
+            const proxyRes = await ytMusicService.getStreamProxy(
+                "__public__",
+                videoId,
+                quality,
+                rangeHeader
+            );
+
+            res.status(proxyRes.status);
+
+            const forwardHeaders = [
+                "content-type",
+                "content-length",
+                "content-range",
+                "accept-ranges",
+            ];
+            for (const header of forwardHeaders) {
+                const value = proxyRes.headers[header];
+                if (value) res.setHeader(header, value);
+            }
+
+            proxyRes.data.on("error", (streamErr: Error) => {
+                logger.warn(
+                    `[YTMusic Route] Public upstream stream error for ${videoId}: ${streamErr.message}`
+                );
+                if (!res.headersSent) {
+                    res.status(502).json({ error: "Upstream stream failed" });
+                } else {
+                    res.end();
+                }
+            });
+            proxyRes.data.pipe(res);
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                return res.status(404).json({ error: "Stream not found" });
+            }
+            if (err.response?.status === 451) {
+                return res.status(451).json({
+                    error: "age_restricted",
+                    message: "This content requires age verification and cannot be streamed via YouTube Music.",
+                });
+            }
+            logger.error("[YTMusic Route] Public stream proxy failed:", err);
+            res.status(500).json({
+                error: "Failed to stream audio",
             });
         }
     }

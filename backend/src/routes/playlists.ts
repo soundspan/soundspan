@@ -243,6 +243,8 @@ router.get("/:id", async (req, res) => {
                                 },
                             },
                         },
+                        trackTidal: true,
+                        trackYtMusic: true,
                     },
                     orderBy: { sort: "asc" },
                 },
@@ -262,23 +264,189 @@ router.get("/:id", async (req, res) => {
         }
 
         // Format playlist items
-        const formattedItems = playlist.items.map((item) => ({
-            ...item,
-            type: "track" as const,
-            track: {
-                ...item.track,
-                album: {
-                    ...item.track.album,
-                    coverArt: item.track.album.coverUrl,
+        const formattedItems = playlist.items.map((item) => {
+            if (!item.track) {
+                if (item.trackTidal) {
+                    const tidalTrackId = Number(item.trackTidal.tidalId);
+                    const hasValidTidalId =
+                        Number.isFinite(tidalTrackId) && tidalTrackId > 0;
+
+                    return {
+                        id: item.id,
+                        playlistId: item.playlistId,
+                        trackId: item.trackId,
+                        trackTidalId: item.trackTidalId,
+                        trackYtMusicId: item.trackYtMusicId,
+                        sort: item.sort,
+                        type: "track" as const,
+                        provider: {
+                            source: "tidal" as const,
+                            label: "TIDAL",
+                            tidalTrackId: hasValidTidalId ? tidalTrackId : null,
+                            youtubeVideoId: null,
+                        },
+                        playback: hasValidTidalId
+                            ? {
+                                  isPlayable: true,
+                                  reason: null,
+                                  message: null,
+                              }
+                            : {
+                                  isPlayable: false,
+                                  reason: "missing_tidal_track_id",
+                                  message:
+                                      "Playback is unavailable because this TIDAL item is missing a valid track id.",
+                              },
+                        track: {
+                            id: hasValidTidalId
+                                ? `tidal:${tidalTrackId}`
+                                : `tidal:missing:${item.id}`,
+                            title: item.trackTidal.title,
+                            duration: item.trackTidal.duration,
+                            streamSource: "tidal" as const,
+                            ...(hasValidTidalId
+                                ? { tidalTrackId }
+                                : {}),
+                            album: {
+                                title:
+                                    item.trackTidal.album || "Unknown Album",
+                                coverArt: null,
+                                artist: {
+                                    name:
+                                        item.trackTidal.artist ||
+                                        "Unknown Artist",
+                                },
+                            },
+                        },
+                    };
+                }
+
+                if (item.trackYtMusic) {
+                    const videoId =
+                        typeof item.trackYtMusic.videoId === "string"
+                            ? item.trackYtMusic.videoId.trim()
+                            : "";
+                    const hasValidVideoId = videoId.length > 0;
+
+                    return {
+                        id: item.id,
+                        playlistId: item.playlistId,
+                        trackId: item.trackId,
+                        trackTidalId: item.trackTidalId,
+                        trackYtMusicId: item.trackYtMusicId,
+                        sort: item.sort,
+                        type: "track" as const,
+                        provider: {
+                            source: "youtube" as const,
+                            label: "YOUTUBE",
+                            tidalTrackId: null,
+                            youtubeVideoId: hasValidVideoId ? videoId : null,
+                        },
+                        playback: hasValidVideoId
+                            ? {
+                                  isPlayable: true,
+                                  reason: null,
+                                  message: null,
+                              }
+                            : {
+                                  isPlayable: false,
+                                  reason: "missing_youtube_video_id",
+                                  message:
+                                      "Playback is unavailable because this YouTube Music item is missing a video id.",
+                              },
+                        track: {
+                            id: hasValidVideoId
+                                ? `yt:${videoId}`
+                                : `yt:missing:${item.id}`,
+                            title: item.trackYtMusic.title,
+                            duration: item.trackYtMusic.duration,
+                            streamSource: "youtube" as const,
+                            ...(hasValidVideoId
+                                ? { youtubeVideoId: videoId }
+                                : {}),
+                            album: {
+                                title:
+                                    item.trackYtMusic.album || "Single",
+                                coverArt:
+                                    item.trackYtMusic.thumbnailUrl || null,
+                                artist: {
+                                    name:
+                                        item.trackYtMusic.artist ||
+                                        "Unknown Artist",
+                                },
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    id: item.id,
+                    playlistId: item.playlistId,
+                    trackId: item.trackId,
+                    trackTidalId: item.trackTidalId,
+                    trackYtMusicId: item.trackYtMusicId,
+                    sort: item.sort,
+                    type: "track" as const,
+                    provider: {
+                        source: "unknown" as const,
+                        label: "UNKNOWN",
+                        tidalTrackId: null,
+                        youtubeVideoId: null,
+                    },
+                    playback: {
+                        isPlayable: false,
+                        reason: "missing_provider_track",
+                        message:
+                            "Playback is unavailable because this playlist item no longer has an attached track source.",
+                    },
+                    track: null,
+                };
+            }
+
+            return {
+                id: item.id,
+                playlistId: item.playlistId,
+                trackId: item.trackId,
+                trackTidalId: item.trackTidalId,
+                trackYtMusicId: item.trackYtMusicId,
+                sort: item.sort,
+                type: "track" as const,
+                provider: {
+                    source: "local" as const,
+                    label: "LOCAL",
+                    tidalTrackId: null,
+                    youtubeVideoId: null,
                 },
-            },
-        }));
+                playback: {
+                    isPlayable: true,
+                    reason: null,
+                    message: null,
+                },
+                track: {
+                    ...item.track,
+                    album: {
+                        ...item.track.album,
+                        coverArt: item.track.album.coverUrl,
+                    },
+                },
+            };
+        });
 
         // Format pending tracks
         const formattedPending = playlist.pendingTracks.map((pending) => ({
             id: pending.id,
             type: "pending" as const,
             sort: pending.sort,
+            provider: {
+                source: "pending" as const,
+                label: "PENDING",
+            },
+            playback: {
+                isPlayable: false,
+                reason: "pending_import",
+                message:
+                    "Playback is unavailable until this track is matched and imported.",
+            },
             pending: {
                 id: pending.id,
                 artist: pending.spotifyArtist,

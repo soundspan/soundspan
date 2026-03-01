@@ -1581,9 +1581,13 @@ async def get_song(video_id: str, user_id: str = Query(...)):
 
 @app.get("/stream/{video_id}")
 async def get_stream_info(video_id: str, user_id: str = Query(...), quality: str = "HIGH"):
-    """Get stream URL info for a video (metadata only, no proxy)."""
-    # Verify user is authenticated before extracting
-    _get_ytmusic(user_id)
+    """Get stream URL info for a video (metadata only, no proxy).
+
+    When user_id is "__public__", skips OAuth verification.
+    """
+    # Skip OAuth check for public/unauthenticated streaming
+    if user_id != "__public__":
+        _get_ytmusic(user_id)
 
     result = await asyncio.to_thread(_get_stream_url_sync, user_id, video_id, quality)
     return {
@@ -1608,9 +1612,14 @@ async def proxy_stream(
     Proxy the audio stream from YouTube. The backend pipes this to the
     frontend player. Stream URLs are IP-locked to the server, so we
     must proxy.
+
+    When user_id is "__public__", skips OAuth verification (yt-dlp
+    extraction is unauthenticated). This enables free-tier streaming
+    for users without YT Music OAuth connected.
     """
-    # Verify user is authenticated
-    _get_ytmusic(user_id)
+    # Skip OAuth check for public/unauthenticated streaming
+    if user_id != "__public__":
+        _get_ytmusic(user_id)
 
     stream_info = await asyncio.to_thread(_get_stream_url_sync, user_id, video_id, quality)
     stream_url = stream_info["url"]
@@ -1796,6 +1805,121 @@ async def startup():
         log.info(f"Found {len(oauth_files)} user OAuth credential file(s)")
     else:
         log.info("No OAuth credentials found — users need to authenticate via settings")
+
+
+# ── Browse (unauthenticated) ────────────────────────────────────────
+
+@app.get("/charts")
+async def get_charts(country: str = "US"):
+    """Get YT Music charts (top songs, trending, etc.)."""
+    try:
+        yt = _get_public_ytmusic("native")
+        charts = yt.get_charts(country=country)
+
+        result = {}
+        # Extract top songs/videos if present
+        for section_key in ("songs", "videos", "trending", "artists"):
+            section = charts.get(section_key)
+            if section and isinstance(section, dict) and "items" in section:
+                items = []
+                for item in section["items"][:20]:
+                    artists = item.get("artists", [])
+                    entry = {
+                        "videoId": item.get("videoId"),
+                        "title": item.get("title"),
+                        "artist": artists[0].get("name") if artists else "Unknown",
+                        "thumbnailUrl": _best_thumbnail(item.get("thumbnails", [])),
+                    }
+                    if item.get("album"):
+                        entry["album"] = item["album"].get("name", "")
+                    items.append(entry)
+                result[section_key] = items
+        return result
+    except Exception as e:
+        log.error(f"Charts fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/moods-and-genres")
+async def get_moods_and_genres():
+    """Get YT Music mood/genre categories."""
+    try:
+        yt = _get_public_ytmusic("native")
+        categories = yt.get_mood_categories()
+
+        result = []
+        for cat_title, cat_items in categories.items():
+            entries = []
+            for item in cat_items:
+                entries.append({
+                    "title": item.get("title", ""),
+                    "params": item.get("params", ""),
+                })
+            result.append({"title": cat_title, "items": entries})
+        return result
+    except Exception as e:
+        log.error(f"Moods/genres fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/playlist/{playlist_id}")
+async def get_playlist(playlist_id: str, limit: int = 100):
+    """Get a public YT Music playlist with track details."""
+    try:
+        yt = _get_public_ytmusic("native")
+        playlist = yt.get_playlist(playlist_id, limit=limit)
+
+        tracks = []
+        for t in playlist.get("tracks", []):
+            artists = t.get("artists", [])
+            album = t.get("album", {}) or {}
+            tracks.append({
+                "videoId": t.get("videoId"),
+                "title": t.get("title"),
+                "artist": artists[0].get("name") if artists else "Unknown",
+                "artists": [a.get("name") for a in artists if a.get("name")],
+                "album": album.get("name", ""),
+                "duration": _parse_duration(t.get("duration", "")),
+                "thumbnailUrl": _best_thumbnail(t.get("thumbnails", [])),
+            })
+
+        return {
+            "id": playlist_id,
+            "title": playlist.get("title", ""),
+            "description": playlist.get("description", ""),
+            "trackCount": playlist.get("trackCount", len(tracks)),
+            "thumbnailUrl": _best_thumbnail(playlist.get("thumbnails", [])),
+            "tracks": tracks,
+        }
+    except Exception as e:
+        log.error(f"Playlist fetch failed for {playlist_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _best_thumbnail(thumbnails: list) -> Optional[str]:
+    """Pick the best available thumbnail URL."""
+    if not thumbnails:
+        return None
+    # Prefer medium/large resolution
+    for t in reversed(thumbnails):
+        if isinstance(t, dict) and t.get("url"):
+            return t["url"]
+    return thumbnails[0].get("url") if isinstance(thumbnails[0], dict) else None
+
+
+def _parse_duration(duration_str: str) -> int:
+    """Parse duration string like '3:45' into seconds."""
+    if not duration_str:
+        return 0
+    parts = duration_str.split(":")
+    try:
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except (ValueError, IndexError):
+        pass
+    return 0
 
 
 @app.on_event("shutdown")

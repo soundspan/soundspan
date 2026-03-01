@@ -364,7 +364,7 @@ describe("playlists route runtime", () => {
         expect(errRes.body).toEqual({ error: "Failed to get playlist" });
     });
 
-    it("formats playlist detail with merged track and pending items", async () => {
+    it("formats playlist detail with provider/playability metadata and merged items", async () => {
         prisma.playlist.findUnique.mockResolvedValueOnce({
             id: "pl-1",
             userId: "u1",
@@ -374,16 +374,71 @@ describe("playlists route runtime", () => {
             items: [
                 {
                     id: "pli-1",
+                    playlistId: "pl-1",
+                    trackId: "t-1",
+                    trackTidalId: null,
+                    trackYtMusicId: null,
                     sort: 2,
                     track: {
                         id: "t-1",
                         title: "Song",
+                        duration: 180,
                         album: {
                             title: "Album",
                             coverUrl: "native:albums/a1.jpg",
                             artist: { id: "a-1", name: "Artist", mbid: "mbid-a1" },
                         },
                     },
+                    trackTidal: null,
+                    trackYtMusic: null,
+                },
+                {
+                    id: "pli-2",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: "tt-1",
+                    trackYtMusicId: null,
+                    sort: 3,
+                    track: null,
+                    trackTidal: {
+                        id: "tt-1",
+                        tidalId: 991,
+                        title: "Tidal Song",
+                        artist: "Tidal Artist",
+                        album: "Tidal Album",
+                        duration: 245,
+                    },
+                    trackYtMusic: null,
+                },
+                {
+                    id: "pli-3",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-1",
+                    sort: 4,
+                    track: null,
+                    trackTidal: null,
+                    trackYtMusic: {
+                        id: "yt-1",
+                        videoId: "yt-video-7",
+                        title: "YT Song",
+                        artist: "YT Artist",
+                        album: "YT Album",
+                        duration: 199,
+                        thumbnailUrl: "https://yt/thumb.jpg",
+                    },
+                },
+                {
+                    id: "pli-4",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: null,
+                    sort: 5,
+                    track: null,
+                    trackTidal: null,
+                    trackYtMusic: null,
                 },
             ],
             pendingTracks: [
@@ -403,11 +458,41 @@ describe("playlists route runtime", () => {
         await getPlaylist(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(res.body.trackCount).toBe(1);
+        expect(res.body.trackCount).toBe(4);
         expect(res.body.pendingCount).toBe(1);
         expect(res.body.isOwner).toBe(true);
         expect(res.body.isHidden).toBe(true);
         expect(res.body.items[0].track.album.coverArt).toBe("native:albums/a1.jpg");
+        expect(res.body.items[0].provider.source).toBe("local");
+        expect(res.body.items[0].playback.isPlayable).toBe(true);
+
+        const tidalItem = res.body.items.find(
+            (entry: any) => entry.provider?.source === "tidal"
+        );
+        expect(tidalItem).toBeDefined();
+        expect(tidalItem.playback.isPlayable).toBe(true);
+        expect(tidalItem.track.streamSource).toBe("tidal");
+        expect(tidalItem.track.tidalTrackId).toBe(991);
+
+        const ytItem = res.body.items.find(
+            (entry: any) => entry.provider?.source === "youtube"
+        );
+        expect(ytItem).toBeDefined();
+        expect(ytItem.playback.isPlayable).toBe(true);
+        expect(ytItem.track.streamSource).toBe("youtube");
+        expect(ytItem.track.youtubeVideoId).toBe("yt-video-7");
+
+        const unknownItem = res.body.items.find(
+            (entry: any) => entry.provider?.source === "unknown"
+        );
+        expect(unknownItem).toBeDefined();
+        expect(unknownItem.playback.isPlayable).toBe(false);
+        expect(unknownItem.playback.message).toContain(
+            "no longer has an attached track source"
+        );
+
+        expect(res.body.pendingTracks[0].playback.isPlayable).toBe(false);
+        expect(res.body.pendingTracks[0].provider.source).toBe("pending");
         expect(res.body.mergedItems[0].type).toBe("pending");
         expect(res.body.mergedItems[1].type).toBe("track");
     });

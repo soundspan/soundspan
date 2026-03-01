@@ -30,6 +30,7 @@ import { tidalStreamingService } from "../services/tidalStreaming";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
 import { logger } from "../utils/logger";
+import { trackMappingService } from "../services/trackMappingService";
 
 const router = Router();
 const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
@@ -767,6 +768,28 @@ router.post(
                 userId,
                 parsed.data.tracks
             );
+
+            // Fire-and-forget: persist matched tracks as TrackTidal rows
+            Promise.resolve().then(async () => {
+                try {
+                    for (let i = 0; i < matches.length; i++) {
+                        const match = matches[i];
+                        if (!match) continue;
+                        const inputTrack = parsed.data.tracks[i];
+                        await trackMappingService.upsertTrackTidal({
+                            tidalId: match.id,
+                            title: match.title,
+                            artist: match.artist,
+                            album: inputTrack.albumTitle || "",
+                            duration: match.duration,
+                            isrc: match.isrc,
+                        });
+                    }
+                } catch (err) {
+                    logger.warn("[TIDAL-STREAM] Failed to persist gap-fill TrackTidal rows:", err);
+                }
+            });
+
             res.json({ matches });
         } catch (err: any) {
             logger.error("[TIDAL-STREAM] Batch match failed:", err.message);

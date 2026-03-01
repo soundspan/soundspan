@@ -346,6 +346,7 @@ model Track {
 
   cachedBy        CachedTrack[]
   likedBy         LikedTrack[]
+  mappings        TrackMapping[]
   moodBuckets     MoodBucket[]
   plays           Play[]
   playlistItems   PlaylistItem[]
@@ -443,17 +444,26 @@ model HiddenPlaylist {
 }
 
 model PlaylistItem {
-  id         String   @id @default(cuid())
-  playlistId String
-  trackId    String
-  sort       Int
-  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
-  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  playlistId     String
+  trackId        String?
+  trackTidalId   String?
+  trackYtMusicId String?
+  sort           Int
+  playlist       Playlist      @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track          Track?        @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  trackTidal     TrackTidal?   @relation(fields: [trackTidalId], references: [id], onDelete: SetNull)
+  trackYtMusic   TrackYtMusic? @relation(fields: [trackYtMusicId], references: [id], onDelete: SetNull)
 
   @@unique([playlistId, trackId])
   @@index([playlistId, sort])
+  @@index([trackTidalId])
+  @@index([trackYtMusicId])
 }
 
+/// @deprecated Use PlaylistItem with trackTidalId/trackYtMusicId instead.
+/// Retained for backward compatibility with legacy Spotify imports.
+/// No new rows should be written. Table will be dropped in a future migration.
 model PlaylistPendingTrack {
   id               String   @id @default(cuid())
   playlistId       String
@@ -1044,4 +1054,56 @@ model TrackEmbedding {
 
   @@index([modelVersion])
   @@map("track_embeddings")
+}
+
+model TrackTidal {
+  id            String         @id @default(cuid())
+  tidalId       Int            @unique
+  title         String
+  artist        String
+  album         String
+  duration      Int
+  isrc          String?
+  quality       String?
+  explicit      Boolean?
+  createdAt     DateTime       @default(now())
+  mappings      TrackMapping[]
+  playlistItems PlaylistItem[]
+
+  @@index([isrc])
+}
+
+model TrackYtMusic {
+  id            String         @id @default(cuid())
+  videoId       String         @unique
+  title         String
+  artist        String
+  album         String
+  duration      Int
+  thumbnailUrl  String?
+  createdAt     DateTime       @default(now())
+  mappings      TrackMapping[]
+  playlistItems PlaylistItem[]
+}
+
+model TrackMapping {
+  id             String        @id @default(cuid())
+  /// Active-row linkage uniqueness is enforced in SQL migrations:
+  /// - stale=false rows are unique by (trackId, trackTidalId, trackYtMusicId)
+  /// - at least one linkage key must be present
+  trackId        String?
+  trackTidalId   String?
+  trackYtMusicId String?
+  confidence     Float
+  source         String        // "gap-fill" | "isrc" | "import-match" | "manual"
+  stale          Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  track          Track?        @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  trackTidal     TrackTidal?   @relation(fields: [trackTidalId], references: [id], onDelete: SetNull)
+  trackYtMusic   TrackYtMusic? @relation(fields: [trackYtMusicId], references: [id], onDelete: SetNull)
+
+  @@index([trackId])
+  @@index([trackTidalId])
+  @@index([trackYtMusicId])
+  @@index([stale])
 }

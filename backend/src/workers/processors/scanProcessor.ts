@@ -542,6 +542,26 @@ export async function processScan(
             }
         }
 
+        // Reconcile TrackMapping rows — link remote-only mappings to newly scanned local tracks
+        if (shouldReconcile) {
+            try {
+                const { trackReconciliationService } = await import(
+                    "../../services/trackReconciliation"
+                );
+                const mappingResult = await trackReconciliationService.reconcile();
+                if (mappingResult.linked > 0) {
+                    logger.info(
+                        `[ScanJob ${job.id}] TrackMapping reconciliation: ${mappingResult.linked} remote mappings linked to local tracks`
+                    );
+                }
+            } catch (error) {
+                logger.error(
+                    `[ScanJob ${job.id}] TrackMapping reconciliation failed:`,
+                    error
+                );
+            }
+        }
+
         // Trigger mood tag collection for new tracks whose artists are already enriched
         // This ensures Last.fm mood tags are collected immediately after scan, not waiting 30s for background worker
         if (result.tracksAdded > 0) {

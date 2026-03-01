@@ -1,167 +1,78 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { spotifyService } from "../services/spotify";
-import { deezerService, DeezerPlaylistPreview, DeezerRadioStation } from "../services/deezer";
+import { deezerService } from "../services/deezer";
+import { ytMusicService } from "../services/youtubeMusic";
+import { getSystemSettings } from "../utils/systemSettings";
 
 const router = Router();
+
+// ── Simple TTL cache for YT Music browse data ──────────────────
+const YTMUSIC_BROWSE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const ytBrowseCache = new Map<string, { data: any; expiresAt: number }>();
+
+function getCachedOrNull<T>(key: string): T | null {
+    const entry = ytBrowseCache.get(key);
+    if (entry && entry.expiresAt > Date.now()) return entry.data as T;
+    if (entry) ytBrowseCache.delete(key);
+    return null;
+}
+
+function setCache(key: string, data: any): void {
+    ytBrowseCache.set(key, { data, expiresAt: Date.now() + YTMUSIC_BROWSE_TTL_MS });
+}
+
+const YTMUSIC_REGION = process.env.YTMUSIC_REGION || "US";
 
 // All routes require authentication
 router.use(requireAuthOrToken);
 
-/**
- * Unified playlist preview type
- */
-interface PlaylistPreview {
-    id: string;
-    source: "deezer" | "spotify";
-    type: "playlist" | "radio";
-    title: string;
-    description: string | null;
-    creator: string;
-    imageUrl: string | null;
-    trackCount: number;
-    url: string;
-}
+// ── Deprecated Deezer browse routes (410 Gone) ─────────────────
 
-/**
- * Convert Deezer playlist to unified format
- */
-function deezerPlaylistToUnified(playlist: DeezerPlaylistPreview): PlaylistPreview {
-    return {
-        id: playlist.id,
-        source: "deezer",
-        type: "playlist",
-        title: playlist.title,
-        description: playlist.description,
-        creator: playlist.creator,
-        imageUrl: playlist.imageUrl,
-        trackCount: playlist.trackCount,
-        url: `https://www.deezer.com/playlist/${playlist.id}`,
-    };
-}
-
-/**
- * Convert Deezer radio to unified format
- */
-function deezerRadioToUnified(radio: DeezerRadioStation): PlaylistPreview {
-    return {
-        id: radio.id,
-        source: "deezer",
-        type: "radio",
-        title: radio.title,
-        description: radio.description,
-        creator: "Deezer",
-        imageUrl: radio.imageUrl,
-        trackCount: 0, // Radio tracks are dynamic
-        url: `https://www.deezer.com/radio-${radio.id}`,
-    };
-}
+const GONE_MSG = "Deezer browse has been replaced by YouTube Music. Use /api/browse/ytmusic/* endpoints instead.";
 
 /**
  * @openapi
  * /api/browse/playlists/featured:
  *   get:
- *     summary: Get featured/chart playlists from Deezer
+ *     summary: Deprecated Deezer featured playlists endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
- *     parameters:
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *           maximum: 200
- *         description: Maximum number of playlists to return
  *     responses:
- *       200:
- *         description: Featured playlists retrieved successfully
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/playlists/featured", async (req, res) => {
-    try {
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        logger.debug(`[Browse] Fetching featured playlists (limit: ${limit})...`);
-
-        const playlists = await deezerService.getFeaturedPlaylists(limit);
-        logger.debug(`[Browse] Got ${playlists.length} Deezer playlists`);
-
-        res.json({
-            playlists: playlists.map(deezerPlaylistToUnified),
-            total: playlists.length,
-            source: "deezer",
-        });
-    } catch (error: any) {
-        logger.error("Browse featured playlists error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch playlists" });
-    }
-});
-
+router.get("/playlists/featured", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 /**
  * @openapi
  * /api/browse/playlists/search:
  *   get:
- *     summary: Search for playlists on Deezer
+ *     summary: Deprecated Deezer playlist search endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
- *     parameters:
- *       - in: query
- *         name: q
- *         required: true
- *         schema:
- *           type: string
- *           minLength: 2
- *         description: Search query (minimum 2 characters)
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *           maximum: 100
- *         description: Maximum number of results to return
  *     responses:
- *       200:
- *         description: Playlist search results
- *       400:
- *         description: Search query too short
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/playlists/search", async (req, res) => {
-    try {
-        const query = req.query.q as string;
-        if (!query || query.length < 2) {
-            return res.status(400).json({ error: "Search query must be at least 2 characters" });
-        }
-
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-        logger.debug(`[Browse] Searching playlists for "${query}"...`);
-
-        const playlists = await deezerService.searchPlaylists(query, limit);
-        logger.debug(`[Browse] Search "${query}": ${playlists.length} results`);
-
-        res.json({
-            playlists: playlists.map(deezerPlaylistToUnified),
-            total: playlists.length,
-            query,
-            source: "deezer",
-        });
-    } catch (error: any) {
-        logger.error("Browse search playlists error:", error);
-        res.status(500).json({ error: error.message || "Failed to search playlists" });
-    }
-});
-
+router.get("/playlists/search", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 /**
  * @openapi
  * /api/browse/playlists/{id}:
  *   get:
- *     summary: Get full details of a Deezer playlist
+ *     summary: Deprecated Deezer playlist details endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
@@ -172,109 +83,56 @@ router.get("/playlists/search", async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *         description: Deezer playlist ID
  *     responses:
- *       200:
- *         description: Playlist details retrieved successfully
- *       404:
- *         description: Playlist not found
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/playlists/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const playlist = await deezerService.getPlaylist(id);
-
-        if (!playlist) {
-            return res.status(404).json({ error: "Playlist not found" });
-        }
-
-        res.json({
-            ...playlist,
-            source: "deezer",
-            url: `https://www.deezer.com/playlist/${id}`,
-        });
-    } catch (error: any) {
-        logger.error("Playlist fetch error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch playlist" });
-    }
-});
-
+router.get("/playlists/:id", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 /**
  * @openapi
  * /api/browse/radios:
  *   get:
- *     summary: Get all radio stations (mood/theme based mixes)
+ *     summary: Deprecated Deezer radio list endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
- *       200:
- *         description: Radio stations retrieved successfully
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/radios", async (req, res) => {
-    try {
-        logger.debug("[Browse] Fetching radio stations...");
-        const radios = await deezerService.getRadioStations();
-
-        res.json({
-            radios: radios.map(deezerRadioToUnified),
-            total: radios.length,
-            source: "deezer",
-        });
-    } catch (error: any) {
-        logger.error("Browse radios error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch radios" });
-    }
-});
-
+router.get("/radios", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 /**
  * @openapi
  * /api/browse/radios/by-genre:
  *   get:
- *     summary: Get radio stations organized by genre
+ *     summary: Deprecated Deezer radios-by-genre endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
- *       200:
- *         description: Radio stations grouped by genre
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/radios/by-genre", async (req, res) => {
-    try {
-        logger.debug("[Browse] Fetching radios by genre...");
-        const genresWithRadios = await deezerService.getRadiosByGenre();
-
-        // Transform to include unified format
-        const result = genresWithRadios.map(genre => ({
-            id: genre.id,
-            name: genre.name,
-            radios: genre.radios.map(deezerRadioToUnified),
-        }));
-
-        res.json({
-            genres: result,
-            total: result.length,
-            source: "deezer",
-        });
-    } catch (error: any) {
-        logger.error("Browse radios by genre error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch radios" });
-    }
-});
-
+router.get("/radios/by-genre", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 /**
  * @openapi
  * /api/browse/radios/{id}:
  *   get:
- *     summary: Get tracks from a radio station
+ *     summary: Deprecated Deezer radio details endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
@@ -285,119 +143,38 @@ router.get("/radios/by-genre", async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *         description: Radio station ID
  *     responses:
- *       200:
- *         description: Radio station tracks in playlist format for import
- *       404:
- *         description: Radio station not found
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/radios/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-        logger.debug(`[Browse] Fetching radio ${id} tracks...`);
-        
-        const radioPlaylist = await deezerService.getRadioTracks(id);
-
-        if (!radioPlaylist) {
-            return res.status(404).json({ error: "Radio station not found" });
-        }
-
-        res.json({
-            ...radioPlaylist,
-            source: "deezer",
-            type: "radio",
-        });
-    } catch (error: any) {
-        logger.error("Radio tracks error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch radio tracks" });
-    }
-});
-
+router.get("/radios/:id", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 /**
  * @openapi
  * /api/browse/genres:
  *   get:
- *     summary: Get all available genres
+ *     summary: Deprecated Deezer genre list endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
- *       200:
- *         description: List of all available genres
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/genres", async (req, res) => {
-    try {
-        logger.debug("[Browse] Fetching genres...");
-        const genres = await deezerService.getGenres();
-
-        res.json({
-            genres,
-            total: genres.length,
-            source: "deezer",
-        });
-    } catch (error: any) {
-        logger.error("Browse genres error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch genres" });
-    }
-});
-
-/**
- * @openapi
- * /api/browse/genres/{id}:
- *   get:
- *     summary: Get content for a specific genre (playlists and radios)
- *     tags: [Browse]
- *     security:
- *       - sessionAuth: []
- *       - apiKeyAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: Genre ID
- *     responses:
- *       200:
- *         description: Genre content including playlists and radios
- *       400:
- *         description: Invalid genre ID
- *       401:
- *         description: Not authenticated
- */
-router.get("/genres/:id", async (req, res) => {
-    try {
-        const genreId = parseInt(req.params.id);
-        if (isNaN(genreId)) {
-            return res.status(400).json({ error: "Invalid genre ID" });
-        }
-
-        logger.debug(`[Browse] Fetching content for genre ${genreId}...`);
-        const content = await deezerService.getEditorialContent(genreId);
-
-        res.json({
-            genreId,
-            playlists: content.playlists.map(deezerPlaylistToUnified),
-            radios: content.radios.map(deezerRadioToUnified),
-            source: "deezer",
-        });
-    } catch (error: any) {
-        logger.error("Genre content error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch genre content" });
-    }
-});
-
+router.get("/genres", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 /**
  * @openapi
  * /api/browse/genres/{id}/playlists:
  *   get:
- *     summary: Get playlists for a specific genre
+ *     summary: Deprecated Deezer playlists-by-genre endpoint
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
@@ -407,49 +184,60 @@ router.get("/genres/:id", async (req, res) => {
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: Genre ID
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *           maximum: 50
- *         description: Maximum number of playlists to return
+ *           type: string
  *     responses:
- *       200:
- *         description: Genre playlists retrieved successfully
- *       404:
- *         description: Genre not found
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
  *       401:
  *         description: Not authenticated
  */
-router.get("/genres/:id/playlists", async (req, res) => {
-    try {
-        const genreId = parseInt(req.params.id);
-        const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+router.get("/genres/:id/playlists", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
+/**
+ * @openapi
+ * /api/browse/genres/{id}:
+ *   get:
+ *     summary: Deprecated Deezer genre details endpoint
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/genres/:id", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
+/**
+ * @openapi
+ * /api/browse/all:
+ *   get:
+ *     summary: Deprecated Deezer aggregate browse endpoint
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       410:
+ *         description: Deezer browse is deprecated; use `/api/browse/ytmusic/*`
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/all", (_req: Request, res: Response) =>
+    res.status(410).json({ error: GONE_MSG })
+);
 
-        // Get genre name first
-        const genres = await deezerService.getGenres();
-        const genre = genres.find(g => g.id === genreId);
-
-        if (!genre) {
-            return res.status(404).json({ error: "Genre not found" });
-        }
-
-        const playlists = await deezerService.getGenrePlaylists(genre.name, limit);
-
-        res.json({
-            playlists: playlists.map(deezerPlaylistToUnified),
-            total: playlists.length,
-            genre: genre.name,
-            source: "deezer",
-        });
-    } catch (error: any) {
-        logger.error("Genre playlists error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch genre playlists" });
-    }
-});
+// ── Retained: URL parse (supports Spotify + Deezer URLs for import) ──
 
 /**
  * @openapi
@@ -480,14 +268,14 @@ router.get("/genres/:id/playlists", async (req, res) => {
  *       401:
  *         description: Not authenticated
  */
-router.post("/playlists/parse", async (req, res) => {
+router.post("/playlists/parse", async (req: Request, res: Response) => {
     try {
         const { url } = req.body;
         if (!url) {
             return res.status(400).json({ error: "URL is required" });
         }
 
-        // Try Deezer first (our primary source)
+        // Try Deezer
         const deezerParsed = deezerService.parseUrl(url);
         if (deezerParsed && deezerParsed.type === "playlist") {
             return res.json({
@@ -498,7 +286,7 @@ router.post("/playlists/parse", async (req, res) => {
             });
         }
 
-        // Try Spotify (still supported for URL imports)
+        // Try Spotify
         const spotifyParsed = spotifyService.parseUrl(url);
         if (spotifyParsed && spotifyParsed.type === "playlist") {
             return res.json({
@@ -509,8 +297,8 @@ router.post("/playlists/parse", async (req, res) => {
             });
         }
 
-        return res.status(400).json({ 
-            error: "Invalid or unsupported URL. Please provide a Spotify or Deezer playlist URL." 
+        return res.status(400).json({
+            error: "Invalid or unsupported URL. Please provide a Spotify or Deezer playlist URL.",
         });
     } catch (error: any) {
         logger.error("Parse URL error:", error);
@@ -518,40 +306,156 @@ router.post("/playlists/parse", async (req, res) => {
     }
 });
 
+// ── YT Music Browse Routes ─────────────────────────────────────
+
 /**
  * @openapi
- * /api/browse/all:
+ * /api/browse/ytmusic/charts:
  *   get:
- *     summary: Get a combined view of featured content (playlists, genres)
+ *     summary: Get YT Music charts (top songs, trending, etc.)
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: country
+ *         schema:
+ *           type: string
+ *           default: US
+ *         description: Country code for charts
+ *     responses:
+ *       200:
+ *         description: Charts data with sections (songs, videos, trending, artists)
+ *       403:
+ *         description: YouTube Music is not enabled
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/ytmusic/charts", async (req: Request, res: Response) => {
+    try {
+        const settings = await getSystemSettings();
+        if (!settings.ytMusicEnabled) {
+            return res.status(403).json({ error: "YouTube Music integration is not enabled" });
+        }
+
+        const country = (req.query.country as string) || YTMUSIC_REGION;
+        const cacheKey = `charts:${country}`;
+
+        const cached = getCachedOrNull(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+
+        const charts = await ytMusicService.getCharts(country);
+        const result = { charts, country, source: "ytmusic" as const };
+        setCache(cacheKey, result);
+        res.json(result);
+    } catch (error: any) {
+        logger.error("[Browse] YT Music charts error:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch charts" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/browse/ytmusic/categories:
+ *   get:
+ *     summary: Get YT Music mood and genre categories
  *     tags: [Browse]
  *     security:
  *       - sessionAuth: []
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: Combined browse content including playlists and genres
+ *         description: List of mood/genre categories with browsable params
+ *       403:
+ *         description: YouTube Music is not enabled
  *       401:
  *         description: Not authenticated
  */
-router.get("/all", async (req, res) => {
+router.get("/ytmusic/categories", async (req: Request, res: Response) => {
     try {
-        logger.debug("[Browse] Fetching browse content (playlists + genres)...");
+        const settings = await getSystemSettings();
+        if (!settings.ytMusicEnabled) {
+            return res.status(403).json({ error: "YouTube Music integration is not enabled" });
+        }
 
-        // Only fetch playlists and genres - radios are now internal library-based
-        const [playlists, genres] = await Promise.all([
-            deezerService.getFeaturedPlaylists(200),
-            deezerService.getGenres(),
-        ]);
+        const cacheKey = "categories";
+        const cached = getCachedOrNull(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
 
-        res.json({
-            playlists: playlists.map(deezerPlaylistToUnified),
-            radios: [],
-            genres,
-            source: "deezer",
-        });
+        const categories = await ytMusicService.getMoodCategories();
+        const result = { categories, source: "ytmusic" as const };
+        setCache(cacheKey, result);
+        res.json(result);
     } catch (error: any) {
-        logger.error("Browse all error:", error);
-        res.status(500).json({ error: error.message || "Failed to fetch browse content" });
+        logger.error("[Browse] YT Music categories error:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch categories" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/browse/ytmusic/playlist/{id}:
+ *   get:
+ *     summary: Get a YT Music public playlist with track details
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: YT Music playlist ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *           maximum: 500
+ *         description: Maximum number of tracks to fetch
+ *     responses:
+ *       200:
+ *         description: Playlist details with tracks
+ *       403:
+ *         description: YouTube Music is not enabled
+ *       404:
+ *         description: Playlist not found
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/ytmusic/playlist/:id", async (req: Request, res: Response) => {
+    try {
+        const settings = await getSystemSettings();
+        if (!settings.ytMusicEnabled) {
+            return res.status(403).json({ error: "YouTube Music integration is not enabled" });
+        }
+
+        const { id } = req.params;
+        const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+        const cacheKey = `playlist:${id}:${limit}`;
+
+        const cached = getCachedOrNull(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+
+        const playlist = await ytMusicService.getBrowsePlaylist(id, limit);
+        const result = { ...playlist, source: "ytmusic" as const };
+        setCache(cacheKey, result);
+        res.json(result);
+    } catch (error: any) {
+        if (error.response?.status === 404) {
+            return res.status(404).json({ error: "Playlist not found" });
+        }
+        logger.error("[Browse] YT Music playlist error:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch playlist" });
     }
 });
 

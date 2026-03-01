@@ -257,14 +257,14 @@ router.post("/import", async (req, res) => {
             `[Spotify Import] Starting import for user ${userId}: ${playlistName}`
         );
         logger.debug(
-            `[Spotify Import] Downloading ${albumMbidsToDownload.length} albums`
+            `[Spotify Import] Resolution-only import: ignoring ${albumMbidsToDownload.length} selected download album(s)`
         );
 
         const job = await spotifyImportService.startImport(
             userId,
             spotifyPlaylistId,
             playlistName,
-            albumMbidsToDownload,
+            [],
             preview
         );
 

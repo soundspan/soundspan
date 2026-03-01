@@ -3975,7 +3975,7 @@ async function resolveCoverArtUrl(
         });
 
         const firstCover = playlist?.items
-            .map((item) => item.track.album.coverUrl)
+            .map((item) => item.track?.album.coverUrl ?? null)
             .find((coverUrl): coverUrl is string => Boolean(coverUrl));
         return firstCover ?? null;
     }
@@ -4057,7 +4057,7 @@ async function resolveCoverArtUrl(
     ]);
 
     const playlistCover = playlist?.items
-        .map((item) => item.track.album.coverUrl)
+        .map((item) => item.track?.album.coverUrl ?? null)
         .find((coverUrl): coverUrl is string => Boolean(coverUrl));
 
     return (
@@ -4786,11 +4786,11 @@ export async function handleGetPlaylists(req: Request, res: Response): Promise<v
                 playlists: {
                     playlist: playlists.map((playlist) => {
                         const duration = playlist.items.reduce(
-                            (sum, item) => sum + (item.track.duration ?? 0),
+                            (sum, item) => sum + (item.track?.duration ?? 0),
                             0,
                         );
                         const hasCover = playlist.items.some((item) =>
-                            Boolean(item.track.album.coverUrl),
+                            Boolean(item.track?.album.coverUrl),
                         );
                         return {
                             id: toSubsonicId("playlist", playlist.id),
@@ -4897,15 +4897,18 @@ export async function handleGetPlaylist(req: Request, res: Response): Promise<vo
             return;
         }
 
-        const entries = playlist.items.map((item) =>
-            formatSongForSubsonic(item.track),
+        const libraryTracks = playlist.items.flatMap((item) =>
+            item.track ? [item.track] : [],
         );
-        const duration = playlist.items.reduce(
-            (sum, item) => sum + (item.track.duration ?? 0),
+        const entries = libraryTracks.map((track) =>
+            formatSongForSubsonic(track),
+        );
+        const duration = libraryTracks.reduce(
+            (sum, track) => sum + (track.duration ?? 0),
             0,
         );
-        const hasCover = playlist.items.some((item) =>
-            Boolean(item.track.album.coverUrl),
+        const hasCover = libraryTracks.some((track) =>
+            Boolean(track.album.coverUrl),
         );
 
         sendSubsonicSuccess(

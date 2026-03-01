@@ -161,6 +161,7 @@ const SCHEDULER_JOB_TYPES = {
     downloadQueueReconcile: "download-queue-reconcile-startup",
     artistCountsBackfill: "artist-counts-backfill-startup",
     imageBackfill: "image-backfill-startup",
+    trackMappingReconcile: "track-mapping-reconcile",
 } as const;
 
 const SCHEDULER_JOB_IDS = {
@@ -177,6 +178,8 @@ const SCHEDULER_JOB_IDS = {
     downloadQueueReconcileStartup: "scheduler:download-queue-reconcile:startup",
     artistCountsBackfillStartup: "scheduler:artist-counts-backfill:startup",
     imageBackfillStartup: "scheduler:image-backfill:startup",
+    trackMappingReconcileStartup: "scheduler:track-mapping-reconcile:startup",
+    trackMappingReconcileRepeat: "scheduler:track-mapping-reconcile:repeat",
 } as const;
 
 async function runWithSchedulerClaim(
@@ -575,6 +578,29 @@ async function processImageBackfillJob(): Promise<void> {
     );
 }
 
+async function processTrackMappingReconcileJob(): Promise<void> {
+    await runWithSchedulerClaim(
+        "scheduler-claim:track-mapping-reconcile",
+        ONE_HOUR_MS,
+        "track mapping reconciliation",
+        async () => {
+            const { trackReconciliationService } = await import(
+                "../services/trackReconciliation"
+            );
+            const result = await trackReconciliationService.reconcile();
+            if (result.linked > 0) {
+                logger.info(
+                    `[TrackMappingReconcile] Linked ${result.linked} mappings to local tracks (${result.skipped} skipped)`
+                );
+            } else if (result.processed > 0) {
+                logger.debug(
+                    `[TrackMappingReconcile] No new links found (${result.processed} checked)`
+                );
+            }
+        }
+    );
+}
+
 async function registerSchedulerJobs(): Promise<void> {
     await schedulerQueue.isReady();
 
@@ -713,6 +739,26 @@ async function registerSchedulerJobs(): Promise<void> {
                 removeOnFail: 10,
             },
         },
+        {
+            type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
+            data: { mode: "startup" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.trackMappingReconcileStartup,
+                delay: 45_000,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
+            data: { mode: "repeat" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.trackMappingReconcileRepeat,
+                repeat: { every: 6 * ONE_HOUR_MS },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
     ];
 
     for (const job of schedulerJobs) {
@@ -766,6 +812,10 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
         case SCHEDULER_JOB_TYPES.imageBackfill:
         case "image-backfill":
             await processImageBackfillJob();
+            break;
+        case SCHEDULER_JOB_TYPES.trackMappingReconcile:
+        case "track-mapping-reconcile":
+            await processTrackMappingReconcileJob();
             break;
         default:
             logger.warn(

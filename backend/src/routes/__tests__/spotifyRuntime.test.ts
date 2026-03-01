@@ -399,7 +399,7 @@ describe("spotify route runtime", () => {
                 "u1",
                 "spotify-playlist-1",
                 "Spotify Import",
-                ["mbid-1", "mbid-2"],
+                [],
                 preview
             );
             expect(res.statusCode).toBe(200);
@@ -443,7 +443,7 @@ describe("spotify route runtime", () => {
                 "u1",
                 "deezer-proxy-id",
                 "Deezer Import",
-                ["mbid-9"],
+                [],
                 preview
             );
             expect(res.statusCode).toBe(200);
