@@ -8,10 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Persistent cross-provider track mapping support (`TrackMapping`, `TrackTidal`, `TrackYtMusic`) with deterministic selection rules and migration coverage.
+- New backend import and mapping APIs:
+  - `POST /api/import/preview`
+  - `POST /api/import/execute`
+  - `GET /api/track-mappings/album/:albumId`
+  - `POST /api/track-mappings/batch`
+- New playlist import runtime service (`PlaylistImportService`) with batched provider matching and persisted mapping upserts.
+- New reconciliation worker/service to refresh provider mappings after scans and on periodic schedule.
+- New frontend `/import` page for direct multi-provider preview + execute workflow with per-track provider resolution badges.
+- New browse provider tabs with optional TIDAL browse surface and explicit disconnected CTA state.
+- New mixed-provider playlist detail contract and UI indicators for provider source and playability.
+- New route-level integration coverage for import, mapping, YT browse, and public YT streaming endpoints.
+
 ### Changed
+
+- Spotify import execution path is now resolution-only and no longer triggers downloader/indexer acquisition runtime while preserving URL parse/preview behavior.
+- Playlist import execution now runs inside a transaction with duplicate-safe item writes.
+- Home featured browse sourcing moved off deprecated Deezer browse endpoints to YouTube Music-backed data.
+- Browse and playlist flows now provide actionable drill-down/detail navigation for chart and category content.
+- Refreshed repository and integration docs plus generated governance artifacts (route map, OpenAPI coverage, JSDoc coverage, and domain READMEs).
 
 ### Fixed
 
+- Fixed null-safety regressions for nullable `PlaylistItem.trackId` / `item.track` in playlist and Subsonic serializers.
+- Fixed track-mapping batch validation to reject orphan payloads without linkage keys.
+- Fixed nondeterministic mapping selection by enforcing active-linkage uniqueness and deterministic mapping ranking.
+- Fixed frontend TypeScript narrowing regressions in mixed-provider playlist handling and YT chart artist union handling.
 ## [1.2.1] - 2026-02-28
 
 ### Security
