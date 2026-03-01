@@ -134,41 +134,69 @@ export function useTidalGapFill(
         setLoading(true);
 
         const matchTracks = async () => {
-            const trackPayload = unownedTracks.map((track) => ({
-                artist: track.artist?.name || album?.artist?.name || "",
-                title: track.title,
-                albumTitle: album?.title,
-                duration:
-                    typeof track.duration === "number" && track.duration > 0
-                        ? track.duration
-                        : undefined,
-                isrc: track.isrc || undefined,
-            }));
+            const newMatches: Record<string, TidalMatch> = {};
 
+            // Step 1: Check persisted mappings (covers all users, survives refresh)
             try {
-                const { matches: batchMatches } =
-                    await api.matchTidalBatch(trackPayload);
-
+                const { mappings } = await api.getAlbumMappings(album.id);
                 if (cancelled) return;
 
-                const newMatches: Record<string, TidalMatch> = {};
-                batchMatches.forEach((match, idx) => {
-                    if (match && unownedTracks[idx]) {
-                        newMatches[unownedTracks[idx].id] = match;
+                for (const mapping of mappings) {
+                    if (mapping.trackTidal && mapping.trackId) {
+                        newMatches[mapping.trackId] = {
+                            id: mapping.trackTidal.tidalId,
+                            title: mapping.trackTidal.title,
+                            artist: mapping.trackTidal.artist,
+                            duration: mapping.trackTidal.duration,
+                            isrc: mapping.trackTidal.isrc,
+                        };
                     }
-                });
+                }
+            } catch {
+                // Persisted mappings unavailable — fall through to API call
+            }
 
-                _albumMatchCache.set(album.id, newMatches);
-                setMatches(newMatches);
-            } catch (err) {
-                sharedFrontendLogger.error("[TIDAL GapFill] Batch match failed:", err);
-                if (!cancelled) {
-                    _albumMatchCache.set(album.id, {});
-                    setMatches({});
+            if (cancelled) return;
+
+            // Step 2: Find tracks still unmatched after persisted lookup
+            const unmatchedTracks = unownedTracks.filter(
+                (t) => !newMatches[t.id]
+            );
+
+            // Step 3: Call match-batch only for tracks without persisted mappings
+            if (unmatchedTracks.length > 0) {
+                const trackPayload = unmatchedTracks.map((track) => ({
+                    artist: track.artist?.name || album?.artist?.name || "",
+                    title: track.title,
+                    albumTitle: album?.title,
+                    duration:
+                        typeof track.duration === "number" && track.duration > 0
+                            ? track.duration
+                            : undefined,
+                    isrc: track.isrc || undefined,
+                }));
+
+                try {
+                    const { matches: batchMatches } =
+                        await api.matchTidalBatch(trackPayload);
+
+                    if (cancelled) return;
+
+                    batchMatches.forEach((match, idx) => {
+                        if (match && unmatchedTracks[idx]) {
+                            newMatches[unmatchedTracks[idx].id] = match;
+                        }
+                    });
+                } catch (err) {
+                    sharedFrontendLogger.error("[TIDAL GapFill] Batch match failed:", err);
                 }
             }
 
-            if (!cancelled) setLoading(false);
+            if (!cancelled) {
+                _albumMatchCache.set(album.id, newMatches);
+                setMatches(newMatches);
+                setLoading(false);
+            }
         };
 
         matchTracks();

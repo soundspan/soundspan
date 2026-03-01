@@ -28,21 +28,10 @@ import {
     useTopPodcastsQuery,
     useAudiobooksQuery,
     useRefreshMixesMutation,
-    useFeaturedPlaylistsQuery,
+    useYtMusicFeaturedPlaylistsQuery,
+    type PlaylistPreview,
     queryKeys,
 } from "@/hooks/useQueries";
-
-interface PlaylistPreview {
-    id: string;
-    source: string;
-    type: string;
-    title: string;
-    description: string | null;
-    creator: string;
-    imageUrl: string | null;
-    trackCount: number;
-    url: string;
-}
 
 export interface UseHomeDataReturn {
     // Data sections
@@ -119,7 +108,7 @@ export function useHomeData(): UseHomeDataReturn {
     const { data: audiobooksData, isLoading: isLoadingAudiobooks } =
         useAudiobooksQuery({ limit: 10 });
     const { data: featuredPlaylistsData, isLoading: isBrowseLoading } =
-        useFeaturedPlaylistsQuery(20);
+        useYtMusicFeaturedPlaylistsQuery(20);
 
     // Mutation for refreshing mixes
     const { mutateAsync: refreshMixes, isPending: isRefreshingMixes } =

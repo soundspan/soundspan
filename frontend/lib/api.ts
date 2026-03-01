@@ -59,6 +59,44 @@ export interface AlbumRelease {
     rejections: string[];
 }
 
+export type ImportResolutionSource =
+    | "local"
+    | "youtube"
+    | "tidal"
+    | "unresolved";
+
+export interface PlaylistImportResolvedTrack {
+    index: number;
+    artist: string;
+    title: string;
+    album?: string;
+    trackId?: string;
+    trackYtMusicId?: string;
+    trackTidalId?: string;
+    source: ImportResolutionSource;
+    confidence: number;
+    duration?: number;
+}
+
+export interface PlaylistImportSummary {
+    total: number;
+    local: number;
+    youtube: number;
+    tidal: number;
+    unresolved: number;
+}
+
+export interface PlaylistImportPreviewResponse {
+    playlistName: string;
+    resolved: PlaylistImportResolvedTrack[];
+    summary: PlaylistImportSummary;
+}
+
+export interface PlaylistImportExecuteResponse {
+    playlistId: string;
+    summary: PlaylistImportSummary;
+}
+
 // New Mood Bucket Types (simplified mood system)
 export type MoodType =
     | "happy"
@@ -1708,6 +1746,19 @@ class ApiClient {
         }>("/downloads/availability");
     }
 
+    async previewPlaylistImport(
+        url: string
+    ): Promise<PlaylistImportPreviewResponse> {
+        return this.post("/import/preview", { url });
+    }
+
+    async executePlaylistImport(input: {
+        url: string;
+        name?: string;
+    }): Promise<PlaylistImportExecuteResponse> {
+        return this.post("/import/execute", input);
+    }
+
     async deleteDownload(id: string) {
         return this.request<{ success: boolean }>(`/downloads/${id}`, {
             method: "DELETE",
@@ -2897,8 +2948,9 @@ class ApiClient {
      * Like getStreamUrl(), this returns a synchronous URL string
      * that the audio engine can load directly.
      */
-    getYtMusicStreamUrl(videoId: string, quality?: string): string {
-        let url = `${this.getBaseUrl()}/api/ytmusic/stream/${videoId}`;
+    getYtMusicStreamUrl(videoId: string, quality?: string, usePublic?: boolean): string {
+        const endpoint = usePublic ? "stream-public" : "stream";
+        let url = `${this.getBaseUrl()}/api/ytmusic/${endpoint}/${videoId}`;
         const params = new URLSearchParams();
         if (quality) params.set("quality", quality);
         const token = this.getCurrentToken();
@@ -3112,6 +3164,43 @@ class ApiClient {
 
     async endListenGroup(groupId: string): Promise<ApiData> {
         return this.post(`/listen-together/${groupId}/end`);
+    }
+
+    // -----------------------------------------------------------------------
+    // Track Mappings (persisted gap-fill / provider resolution)
+    // -----------------------------------------------------------------------
+
+    async getAlbumMappings(albumId: string): Promise<{
+        mappings: Array<{
+            id: string;
+            trackId: string | null;
+            trackTidalId: string | null;
+            trackYtMusicId: string | null;
+            confidence: number;
+            source: string;
+            stale: boolean;
+            trackTidal: {
+                id: string;
+                tidalId: number;
+                title: string;
+                artist: string;
+                album: string;
+                duration: number;
+                isrc?: string;
+                quality?: string;
+            } | null;
+            trackYtMusic: {
+                id: string;
+                videoId: string;
+                title: string;
+                artist: string;
+                album: string;
+                duration: number;
+                thumbnailUrl?: string;
+            } | null;
+        }>;
+    }> {
+        return this.get(`/track-mappings/album/${albumId}`);
     }
 }
 

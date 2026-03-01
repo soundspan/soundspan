@@ -4882,7 +4882,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             if (currentTrack.streamSource === "tidal" && currentTrack.tidalTrackId) {
                 streamUrl = api.getTidalStreamUrl(currentTrack.tidalTrackId);
             } else if (currentTrack.streamSource === "youtube" && currentTrack.youtubeVideoId) {
-                streamUrl = api.getYtMusicStreamUrl(currentTrack.youtubeVideoId);
+                // Use public endpoint (no per-user OAuth required for yt-dlp)
+                streamUrl = api.getYtMusicStreamUrl(currentTrack.youtubeVideoId, undefined, true);
             } else {
                 streamUrl = api.getStreamUrl(currentTrack.id);
             }
@@ -5979,7 +5980,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             nextTrack.streamSource === "youtube" &&
             nextTrack.youtubeVideoId
         ) {
-            streamUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId);
+            streamUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId, undefined, true);
             format = "mp4";
         } else {
             streamUrl = api.getStreamUrl(nextTrack.id);

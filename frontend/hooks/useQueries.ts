@@ -103,10 +103,9 @@ export const queryKeys = {
     topPodcasts: (limit?: number, genreId?: number) =>
         ["podcasts", "top", limit, genreId] as const,
 
-    // Browse (Deezer playlists/radios)
-    browseAll: () => ["browse", "all"] as const,
-    browseFeatured: (limit?: number) => ["browse", "featured", limit] as const,
-    browseRadios: (limit?: number) => ["browse", "radios", limit] as const,
+    // Home browse feed
+    homeFeaturedPlaylists: (limit?: number) =>
+        ["home", "featured-playlists", limit] as const,
 };
 
 /**
@@ -1009,7 +1008,7 @@ export function useDeletePlaylistMutation() {
     });
 }
 
-interface PlaylistPreview {
+export interface PlaylistPreview {
     id: string;
     source: string;
     type: string;
@@ -1021,66 +1020,154 @@ interface PlaylistPreview {
     url: string;
 }
 
-interface Genre {
-    id: number;
-    name: string;
-    picture?: string;
+interface YtMusicChartArtist {
+    name?: string;
 }
 
-interface BrowseAllResponse {
-    playlists: PlaylistPreview[];
-    radios: PlaylistPreview[];
-    genres: Genre[];
+interface YtMusicChartThumbnail {
+    url?: string;
+}
+
+interface YtMusicChartEntry {
+    videoId?: string;
+    title?: string;
+    artist?: string;
+    artists?: Array<string | YtMusicChartArtist>;
+    album?: string | { title?: string; name?: string };
+    thumbnailUrl?: string | null;
+    thumbnails?: YtMusicChartThumbnail[];
+}
+
+function resolveChartArtist(item: YtMusicChartEntry): string {
+    if (item.artist?.trim()) return item.artist.trim();
+
+    if (Array.isArray(item.artists)) {
+        for (const artist of item.artists) {
+            if (typeof artist === "string" && artist.trim()) {
+                return artist.trim();
+            }
+            if (
+                artist &&
+                typeof artist === "object" &&
+                typeof artist.name === "string" &&
+                artist.name.trim()
+            ) {
+                return artist.name.trim();
+            }
+        }
+    }
+
+    return "YouTube Music";
+}
+
+function resolveChartAlbum(item: YtMusicChartEntry): string | null {
+    if (typeof item.album === "string" && item.album.trim()) {
+        return item.album.trim();
+    }
+
+    if (
+        item.album &&
+        typeof item.album === "object" &&
+        typeof item.album.title === "string" &&
+        item.album.title.trim()
+    ) {
+        return item.album.title.trim();
+    }
+
+    if (
+        item.album &&
+        typeof item.album === "object" &&
+        typeof item.album.name === "string" &&
+        item.album.name.trim()
+    ) {
+        return item.album.name.trim();
+    }
+
+    return null;
+}
+
+function resolveChartThumbnail(item: YtMusicChartEntry): string | null {
+    if (typeof item.thumbnailUrl === "string" && item.thumbnailUrl.trim()) {
+        return item.thumbnailUrl;
+    }
+
+    if (Array.isArray(item.thumbnails)) {
+        for (const thumbnail of item.thumbnails) {
+            if (typeof thumbnail?.url === "string" && thumbnail.url.trim()) {
+                return thumbnail.url;
+            }
+        }
+    }
+
+    return null;
+}
+
+export function mapYtMusicChartsToFeaturedPlaylists(
+    charts: Record<string, YtMusicChartEntry[]> | undefined,
+    limit: number
+): PlaylistPreview[] {
+    if (!charts || typeof charts !== "object" || limit <= 0) {
+        return [];
+    }
+
+    const sectionPriority = ["songs", "trending", "videos"];
+    const orderedSections = [
+        ...sectionPriority.filter((section) => Array.isArray(charts[section])),
+        ...Object.keys(charts).filter((section) => !sectionPriority.includes(section)),
+    ];
+
+    const featured: PlaylistPreview[] = [];
+    const seenVideoIds = new Set<string>();
+
+    for (const section of orderedSections) {
+        const entries = charts[section];
+        if (!Array.isArray(entries)) continue;
+
+        for (const entry of entries) {
+            const videoId =
+                typeof entry.videoId === "string" ? entry.videoId.trim() : "";
+            const title =
+                typeof entry.title === "string" ? entry.title.trim() : "";
+            if (!videoId || !title || seenVideoIds.has(videoId)) continue;
+
+            seenVideoIds.add(videoId);
+
+            const creator = resolveChartArtist(entry);
+            const album = resolveChartAlbum(entry);
+            featured.push({
+                id: videoId,
+                source: "ytmusic",
+                type: "track",
+                title,
+                description: album ? `${creator} - ${album}` : creator,
+                creator,
+                imageUrl: resolveChartThumbnail(entry),
+                trackCount: 1,
+                url: `https://music.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+            });
+
+            if (featured.length >= limit) {
+                return featured;
+            }
+        }
+    }
+
+    return featured;
 }
 
 /**
- * Hook to fetch all browse content (playlists, radios, genres) from Deezer
- *
- * @returns Query result with all browse content
+ * Hook to fetch home featured browse cards from YouTube Music charts.
+ * This intentionally avoids deprecated Deezer browse endpoints that now return 410.
  */
-export function useBrowseAllQuery() {
+export function useYtMusicFeaturedPlaylistsQuery(limit: number = 20) {
     return useQuery({
-        queryKey: queryKeys.browseAll(),
-        queryFn: async (): Promise<BrowseAllResponse> => {
-            return api.get<BrowseAllResponse>("/browse/all");
-        },
-        staleTime: 10 * 60 * 1000, // 10 minutes - playlists don't change often
-    });
-}
-
-/**
- * Hook to fetch featured playlists from Deezer
- *
- * @param limit - Maximum number of playlists to fetch
- * @returns Query result with featured playlists
- */
-export function useFeaturedPlaylistsQuery(limit: number = 50) {
-    return useQuery({
-        queryKey: queryKeys.browseFeatured(limit),
+        queryKey: queryKeys.homeFeaturedPlaylists(limit),
         queryFn: async (): Promise<PlaylistPreview[]> => {
-            const response = await api.get<{ playlists: PlaylistPreview[] }>(
-                `/browse/playlists/featured?limit=${limit}`,
-            );
-            return response.playlists;
-        },
-        staleTime: 10 * 60 * 1000, // 10 minutes
-    });
-}
+            const response = await api.get<{
+                charts: Record<string, YtMusicChartEntry[]>;
+            }>("/browse/ytmusic/charts");
 
-/**
- * Hook to fetch radio stations from Deezer
- *
- * @param limit - Maximum number of radios to fetch
- * @returns Query result with radio stations
- */
-export function useRadiosQuery(limit: number = 50) {
-    return useQuery({
-        queryKey: queryKeys.browseRadios(limit),
-        queryFn: async (): Promise<PlaylistPreview[]> => {
-            const response = await api.get<{ radios: PlaylistPreview[] }>(
-                `/browse/radios?limit=${limit}`,
-            );
-            return response.radios;
+            return mapYtMusicChartsToFeaturedPlaylists(response?.charts, limit);
         },
         staleTime: 10 * 60 * 1000, // 10 minutes
     });

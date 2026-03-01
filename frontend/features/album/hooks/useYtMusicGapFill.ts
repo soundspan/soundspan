@@ -44,7 +44,7 @@ async function getYtMusicAvailable(): Promise<boolean> {
     const loadStatus = async () => {
         try {
             const status = await api.getYtMusicStatus();
-            const available = status.enabled && status.available && status.authenticated;
+            const available = status.enabled && status.available;
             _ytStatusCache = createProviderStatusCacheEntry(available);
             return available;
         } catch {
@@ -142,43 +142,67 @@ export function useYtMusicGapFill(
         setLoading(true);
 
         const matchTracks = async () => {
-            // Build batch request — one entry per unowned track
-            const trackPayload = unownedTracks.map((track) => ({
-                artist: track.artist?.name || album?.artist?.name || "",
-                title: track.title,
-                albumTitle: album?.title,
-                duration:
-                    typeof track.duration === "number" && track.duration > 0
-                        ? track.duration
-                        : undefined,
-                isrc: track.isrc || undefined,
-            }));
+            const newMatches: Record<string, YtMusicMatch> = {};
 
+            // Step 1: Check persisted mappings (covers all users, survives refresh)
             try {
-                // Single batch call — sidecar runs all searches concurrently
-                const { matches: batchMatches } = await api.matchYtMusicBatch(trackPayload);
-
+                const { mappings } = await api.getAlbumMappings(album.id);
                 if (cancelled) return;
 
-                const newMatches: Record<string, YtMusicMatch> = {};
-                batchMatches.forEach((match, idx) => {
-                    if (match && unownedTracks[idx]) {
-                        newMatches[unownedTracks[idx].id] = match;
+                for (const mapping of mappings) {
+                    if (mapping.trackYtMusic && mapping.trackId) {
+                        newMatches[mapping.trackId] = {
+                            videoId: mapping.trackYtMusic.videoId,
+                            title: mapping.trackYtMusic.title,
+                            duration: mapping.trackYtMusic.duration,
+                        };
                     }
-                });
+                }
+            } catch {
+                // Persisted mappings unavailable — fall through to API call
+            }
 
-                // Store in global cache for instant revisits
-                _matchCache.set(album.id, newMatches);
-                setMatches(newMatches);
-            } catch (err) {
-                sharedFrontendLogger.error("[YTMusic Gap-Fill] Batch match failed:", err);
-                if (!cancelled) {
-                    _matchCache.set(album.id, {});
-                    setMatches({});
+            if (cancelled) return;
+
+            // Step 2: Find tracks still unmatched after persisted lookup
+            const unmatchedTracks = unownedTracks.filter(
+                (t) => !newMatches[t.id]
+            );
+
+            // Step 3: Call match-batch only for tracks without persisted mappings
+            if (unmatchedTracks.length > 0) {
+                const trackPayload = unmatchedTracks.map((track) => ({
+                    artist: track.artist?.name || album?.artist?.name || "",
+                    title: track.title,
+                    albumTitle: album?.title,
+                    duration:
+                        typeof track.duration === "number" && track.duration > 0
+                            ? track.duration
+                            : undefined,
+                    isrc: track.isrc || undefined,
+                }));
+
+                try {
+                    const { matches: batchMatches } = await api.matchYtMusicBatch(trackPayload);
+
+                    if (cancelled) return;
+
+                    batchMatches.forEach((match, idx) => {
+                        if (match && unmatchedTracks[idx]) {
+                            newMatches[unmatchedTracks[idx].id] = match;
+                        }
+                    });
+                } catch (err) {
+                    sharedFrontendLogger.error("[YTMusic Gap-Fill] Batch match failed:", err);
                 }
             }
 
-            if (!cancelled) setLoading(false);
+            if (!cancelled) {
+                // Store in global cache for instant revisits
+                _matchCache.set(album.id, newMatches);
+                setMatches(newMatches);
+                setLoading(false);
+            }
         };
 
         matchTracks();
