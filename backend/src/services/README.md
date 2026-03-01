@@ -56,6 +56,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/musicScanner.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |
+| `backend/src/services/playlistImportService.ts` | Core |
 | `backend/src/services/podcastCache.ts` | Core |
 | `backend/src/services/podcastDownload.ts` | Core |
 | `backend/src/services/programmaticPlaylistArtistCap.ts` | Core |
@@ -77,7 +78,9 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/staleJobCleanup.ts` | Core |
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
+| `backend/src/services/trackMappingService.ts` | Core |
 | `backend/src/services/trackPreference.ts` | Core |
+| `backend/src/services/trackReconciliation.ts` | Core |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeVocabulary.ts` | Core |
 | `backend/src/services/wikidata.ts` | Core |

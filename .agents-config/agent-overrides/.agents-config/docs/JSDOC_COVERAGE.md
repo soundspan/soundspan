@@ -12,16 +12,16 @@ Scope:
 | --- | --- | --- | --- | --- | --- |
 | Backend middleware | 4 | 7 | 7 | 0 | 100.0% |
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
-| Backend routes | 39 | 54 | 1 | 53 | 1.9% |
-| Backend services | 70 | 84 | 52 | 32 | 61.9% |
-| Backend utils | 31 | 79 | 57 | 22 | 72.2% |
+| Backend routes | 41 | 54 | 1 | 53 | 1.9% |
+| Backend services | 73 | 84 | 52 | 32 | 61.9% |
+| Backend utils | 32 | 86 | 72 | 14 | 83.7% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 73 | 76 | 11 | 65 | 14.5% |
 | Frontend features | 136 | 114 | 8 | 106 | 7.0% |
-| Frontend hooks | 25 | 89 | 59 | 30 | 66.3% |
+| Frontend hooks | 25 | 88 | 57 | 31 | 64.8% |
 | Frontend lib | 55 | 84 | 26 | 58 | 31.0% |
-| Frontend other | 63 | 61 | 6 | 55 | 9.8% |
-| **Total** | **520** | **676** | **244** | **432** | **36.1%** |
+| Frontend other | 64 | 67 | 6 | 61 | 9.0% |
+| **Total** | **527** | **688** | **257** | **431** | **37.4%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -60,18 +60,18 @@ Scope:
 | Backend routes | handleGetCoverArt | backend/src/routes/subsonic.ts:4480 |
 | Backend routes | handleGetPlaylists | backend/src/routes/subsonic.ts:4744 |
 | Backend routes | handleGetPlaylist | backend/src/routes/subsonic.ts:4825 |
-| Backend routes | handleCreatePlaylist | backend/src/routes/subsonic.ts:4943 |
-| Backend routes | handleUpdatePlaylist | backend/src/routes/subsonic.ts:5073 |
-| Backend routes | handleDeletePlaylist | backend/src/routes/subsonic.ts:5276 |
-| Backend routes | handleScrobble | backend/src/routes/subsonic.ts:5337 |
-| Backend routes | handleGetNowPlaying | backend/src/routes/subsonic.ts:5432 |
-| Backend routes | handleGetUser | backend/src/routes/subsonic.ts:5558 |
-| Backend routes | handleGetAvatar | backend/src/routes/subsonic.ts:5631 |
-| Backend routes | handleSetRating | backend/src/routes/subsonic.ts:5684 |
-| Backend routes | handleGetStarred2 | backend/src/routes/subsonic.ts:5944 |
-| Backend routes | handleGetStarred | backend/src/routes/subsonic.ts:5969 |
-| Backend routes | handleStar | backend/src/routes/subsonic.ts:5993 |
-| Backend routes | handleUnstar | backend/src/routes/subsonic.ts:6100 |
+| Backend routes | handleCreatePlaylist | backend/src/routes/subsonic.ts:4946 |
+| Backend routes | handleUpdatePlaylist | backend/src/routes/subsonic.ts:5076 |
+| Backend routes | handleDeletePlaylist | backend/src/routes/subsonic.ts:5279 |
+| Backend routes | handleScrobble | backend/src/routes/subsonic.ts:5340 |
+| Backend routes | handleGetNowPlaying | backend/src/routes/subsonic.ts:5435 |
+| Backend routes | handleGetUser | backend/src/routes/subsonic.ts:5561 |
+| Backend routes | handleGetAvatar | backend/src/routes/subsonic.ts:5634 |
+| Backend routes | handleSetRating | backend/src/routes/subsonic.ts:5687 |
+| Backend routes | handleGetStarred2 | backend/src/routes/subsonic.ts:5947 |
+| Backend routes | handleGetStarred | backend/src/routes/subsonic.ts:5972 |
+| Backend routes | handleStar | backend/src/routes/subsonic.ts:5996 |
+| Backend routes | handleUnstar | backend/src/routes/subsonic.ts:6103 |
 | Backend routes | handlePing | backend/src/routes/subsonic.ts:740 |
 | Backend routes | handleGetLicense | backend/src/routes/subsonic.ts:745 |
 | Backend routes | handleGetOpenSubsonicExtensions | backend/src/routes/subsonic.ts:760 |
@@ -114,9 +114,8 @@ Scope:
 | Backend services | publishSocialPresenceUpdate | backend/src/services/socialPresenceEvents.ts:28 |
 | Backend utils | DependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:114 |
 | Backend utils | createDependencyReadinessTracker | backend/src/utils/dependencyReadiness.ts:192 |
-| Backend utils | parseEnvInt | backend/src/utils/envParsers.ts:1 |
-| Backend utils | parseEnvCsv | backend/src/utils/envParsers.ts:13 |
-| Backend utils | isEnvFlagEnabled | backend/src/utils/envParsers.ts:9 |
+| Backend utils | isEnvFlagEnabled | backend/src/utils/envParsers.ts:12 |
+| Backend utils | parseEnvCsv | backend/src/utils/envParsers.ts:16 |
 | Backend utils | EnvFileSyncSkippedError | backend/src/utils/envWriter.ts:15 |
 | Backend utils | createLogger | backend/src/utils/logger.ts:125 |
 | Backend utils | logErrorWithContext | backend/src/utils/logger.ts:171 |
@@ -125,13 +124,6 @@ Scope:
 | Backend utils | SubsonicIdError | backend/src/utils/subsonicIds.ts:17 |
 | Backend utils | toSubsonicId | backend/src/utils/subsonicIds.ts:24 |
 | Backend utils | buildArtistIndexes | backend/src/utils/subsonicIndexes.ts:27 |
-| Backend utils | resolveTrackPathWithinRoot | backend/src/utils/subsonicMedia.ts:36 |
-| Backend utils | parseCoverArtSize | backend/src/utils/subsonicMedia.ts:56 |
-| Backend utils | isPublicCoverArtUrl | backend/src/utils/subsonicMedia.ts:69 |
-| Backend utils | resolveSubsonicStreamQuality | backend/src/utils/subsonicMedia.ts:7 |
-| Backend utils | getResponseFormat | backend/src/utils/subsonicResponse.ts:41 |
-| Backend utils | sendSubsonicSuccess | backend/src/utils/subsonicResponse.ts:51 |
-| Backend utils | sendSubsonicError | backend/src/utils/subsonicResponse.ts:67 |
 | Backend utils | invalidateSystemSettingsCache | backend/src/utils/systemSettings.ts:13 |
 | Backend utils | getSystemSettings | backend/src/utils/systemSettings.ts:41 |
 | Backend workers | cleanupDiscoveryTracks | backend/src/workers/cleanupDiscovery.ts:6 |
@@ -177,7 +169,7 @@ Scope:
 | Frontend components | KeyboardShortcutsTooltip | frontend/components/player/KeyboardShortcutsTooltip.tsx:6 |
 | Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:23 |
 | Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:100 |
-| Frontend components | PlaybackQualityBadge | frontend/components/player/PlaybackQualityBadge.tsx:37 |
+| Frontend components | PlaybackQualityBadge | frontend/components/player/PlaybackQualityBadge.tsx:38 |
 | Frontend components | PlaybackQualityBadgeWithStats | frontend/components/player/PlaybackQualityBadgeWithStats.tsx:56 |
 | Frontend components | PlayerModeWrapper | frontend/components/player/PlayerModeWrapper.tsx:6 |
 | Frontend components | SeekSlider | frontend/components/player/SeekSlider.tsx:35 |
@@ -277,3 +269,11 @@ Scope:
 | Frontend features | getQualityBadge | frontend/features/search/components/SoulseekSongsList.tsx:19 |
 | Frontend features | SoulseekSongsList | frontend/features/search/components/SoulseekSongsList.tsx:67 |
 | Frontend features | TopResult | frontend/features/search/components/TopResult.tsx:12 |
+| Frontend features | TVSearchInput | frontend/features/search/components/TVSearchInput.tsx:12 |
+| Frontend features | useSearchData | frontend/features/search/hooks/useSearchData.ts:24 |
+| Frontend features | useSoulseekSearch | frontend/features/search/hooks/useSoulseekSearch.ts:20 |
+| Frontend features | AccountSection | frontend/features/settings/components/sections/AccountSection.tsx:21 |
+| Frontend features | AIServicesSection | frontend/features/settings/components/sections/AIServicesSection.tsx:15 |
+| Frontend features | AudiobookshelfSection | frontend/features/settings/components/sections/AudiobookshelfSection.tsx:15 |
+| Frontend features | CacheSection | frontend/features/settings/components/sections/CacheSection.tsx:147 |
+| Frontend features | DownloadPreferencesSection | frontend/features/settings/components/sections/DownloadPreferencesSection.tsx:12 |

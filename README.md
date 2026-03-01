@@ -24,7 +24,7 @@ soundspan is built for people who want streaming convenience without giving up o
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
 - Synced lyrics, source/quality badges, and overhauled desktop/mobile/overlay player flows
 - Multiple users with isolated libraries, admin roles, optional 2FA, and Listen Together group sessions
-- Deezer previews plus Spotify/Deezer playlist import flows
+- Deezer previews plus Spotify/Deezer playlist import flows and provider track mapping APIs
 - OpenSubsonic-compatible `/rest` API surface for third-party client access
 
 <a href="assets/screenshots/desktop-library.png"><img src="assets/screenshots/desktop-library.png" width="750" alt="Library view"/></a>
@@ -96,6 +96,17 @@ soundspan supports optional integrations for discovery, downloads, and client co
 - OpenSubsonic-compatible `/rest` API
 
 Full setup guides are documented in [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+
+### Integration API quick reference
+
+All integration endpoints below require soundspan auth (session or API key where supported) and admin-enabled integrations.
+
+| Area | Endpoints |
+| --- | --- |
+| YouTube Music browse (OAuth-free) | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id` |
+| YouTube Music public stream (OAuth-free) | `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId` |
+| YouTube Music search/match (OAuth-free sidecar clients) | `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch` |
+| Mapping/import APIs | `POST /api/browse/playlists/parse`, `GET /api/track-mappings/album/:albumId`, `POST /api/track-mappings/batch`, `POST /api/import/preview`, `POST /api/import/execute` |
 
 ---
 

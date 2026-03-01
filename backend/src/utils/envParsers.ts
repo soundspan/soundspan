@@ -1,3 +1,6 @@
+/**
+ * Parses a base-10 integer from an env var, using `fallback` when the value is empty.
+ */
 export function parseEnvInt(value: string | undefined, fallback: number): number {
     const source =
         typeof value === "string" && value.length > 0

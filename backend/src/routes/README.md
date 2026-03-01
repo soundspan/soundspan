@@ -32,6 +32,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/offline.ts` | `/api/offline` |
 | `backend/src/routes/onboarding.ts` | `/api/onboarding` |
 | `backend/src/routes/playbackState.ts` | `/api/playback-state` |
+| `backend/src/routes/playlistImport.ts` | `/api/import` |
 | `backend/src/routes/playlists.ts` | `/api/playlists` |
 | `backend/src/routes/plays.ts` | `/api/plays` |
 | `backend/src/routes/podcasts.ts` | `/api/podcasts` |
@@ -48,6 +49,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/system.ts` | `/api/system` |
 | `backend/src/routes/systemSettings.ts` | `/api/system-settings` |
 | `backend/src/routes/tidalStreaming.ts` | `/api/tidal-streaming` |
+| `backend/src/routes/trackMappings.ts` | `/api/track-mappings` |
 | `backend/src/routes/vibe.ts` | `/api/vibe` |
 | `backend/src/routes/webhooks.ts` | `/api/webhooks` |
 | `backend/src/routes/youtubeMusic.ts` | `/api/ytmusic` |
