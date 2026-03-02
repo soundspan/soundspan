@@ -88,11 +88,17 @@ describe("organizeSingles worker", () => {
         });
 
         delete process.env.MUSIC_PATH;
-        await expect(module.queueOrganizeSingles()).resolves.toBeUndefined();
-        expect(logger.error).toHaveBeenCalledWith(
-            "[ORGANIZE] Organization failed:",
-            "MUSIC_PATH is not set. Cannot organize downloads."
-        );
+        const previousCwd = process.cwd();
+        process.chdir(tmpRoot);
+        try {
+            await expect(module.queueOrganizeSingles()).resolves.toBeUndefined();
+            expect(logger.error).toHaveBeenCalledWith(
+                "[ORGANIZE] Organization failed:",
+                "MUSIC_PATH is not set. Cannot organize downloads."
+            );
+        } finally {
+            process.chdir(previousCwd);
+        }
     });
 
     it("skips migration work when marker already exists", async () => {

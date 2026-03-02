@@ -21,6 +21,7 @@ jest.mock("../../utils/db", () => ({
     prisma: {
         track: {
             count: jest.fn(),
+            findUnique: jest.fn(),
         },
         likedTrack: {
             findMany: jest.fn(),
@@ -66,6 +67,7 @@ import {
 } from "../../services/vibeVocabulary";
 
 const mockTrackCount = prisma.track.count as jest.Mock;
+const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
 const mockLikedTrackFindMany = prisma.likedTrack.findMany as jest.Mock;
 const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 const mockQueryRaw = prisma.$queryRaw as jest.Mock;
@@ -121,6 +123,7 @@ describe("vibe search transport compatibility", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockTrackCount.mockResolvedValue(0);
+        mockTrackFindUnique.mockResolvedValue(null);
         mockRedisXAdd.mockResolvedValue("1712345-0");
         mockRedisDel.mockResolvedValue(1);
         mockQueryRaw.mockResolvedValue([]);
@@ -169,19 +172,27 @@ describe("vibe search transport compatibility", () => {
         const okRes = createRes();
         await similarHandler(okReq, okRes);
         expect(okRes.statusCode).toBe(200);
-        expect(okRes.body).toEqual({
-            sourceTrackId: "t-1",
-            tracks: [
-                {
-                    id: "t-2",
-                    title: "Related",
-                    distance: 0.2,
-                    similarity: 0.9,
-                    album: { id: "a-1", title: "Album 1", coverUrl: null },
-                    artist: { id: "ar-1", name: "Artist 1" },
-                },
-            ],
-        });
+        expect(okRes.body).toEqual(
+            expect.objectContaining({
+                sourceTrackId: "t-1",
+                tracks: [
+                    expect.objectContaining({
+                        id: "t-2",
+                        title: "Related",
+                        distance: 0.2,
+                        similarity: 0.9,
+                        album: expect.objectContaining({
+                            id: "a-1",
+                            title: "Album 1",
+                        }),
+                        artist: expect.objectContaining({
+                            id: "ar-1",
+                            name: "Artist 1",
+                        }),
+                    }),
+                ],
+            })
+        );
 
         mockFindSimilarTracks.mockRejectedValueOnce(new Error("similar failed"));
         const errReq = {

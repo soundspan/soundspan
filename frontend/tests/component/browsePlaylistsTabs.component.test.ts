@@ -110,6 +110,7 @@ mock.module("lucide-react", {
         Lock: Icon,
         CheckCircle2: Icon,
         ArrowRight: Icon,
+        Home: Icon,
     },
 });
 

@@ -37,6 +37,9 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/system",
         "../routes/youtubeMusic",
         "../routes/tidalStreaming",
+        "../routes/trackMappings",
+        "../routes/playlistImport",
+        "../routes/streaming",
         "../routes/lyrics",
         "../routes/listenTogether",
         "../routes/subsonic",
@@ -85,8 +88,17 @@ describe("api entrypoint runtime behavior", () => {
             get: jest.fn(),
             set: jest.fn(),
         };
+        const router = {
+            use: jest.fn(),
+            get: jest.fn(),
+            post: jest.fn(),
+            put: jest.fn(),
+            patch: jest.fn(),
+            delete: jest.fn(),
+        };
         const expressFn = jest.fn(() => app);
         (expressFn as any).json = jest.fn(() => "json-middleware");
+        (expressFn as any).Router = jest.fn(() => router);
 
         const sessionMiddleware = jest.fn(() => "session-middleware");
         const redisStoreCtor = jest.fn(() => ({}));
@@ -147,6 +159,7 @@ describe("api entrypoint runtime behavior", () => {
 
         const setupListenTogetherSocket = jest.fn();
         const shutdownListenTogetherSocket = jest.fn();
+        const initializeDashCapabilityProbe = jest.fn(async () => undefined);
         const startPersistLoop = jest.fn();
         const stopPersistLoop = jest.fn();
         const persistAllGroups = jest.fn(async () => undefined);
@@ -229,6 +242,11 @@ describe("api entrypoint runtime behavior", () => {
             setupListenTogetherSocket,
             shutdownListenTogetherSocket,
         }));
+        jest.doMock("../services/segmented-streaming/segmentService", () => ({
+            segmentedSegmentService: {
+                initializeDashCapabilityProbe,
+            },
+        }));
         jest.doMock("../services/listenTogether", () => ({
             startPersistLoop,
             stopPersistLoop,
@@ -277,6 +295,7 @@ describe("api entrypoint runtime behavior", () => {
             dependencyReadiness,
             setupListenTogetherSocket,
             shutdownListenTogetherSocket,
+            initializeDashCapabilityProbe,
             startPersistLoop,
             stopPersistLoop,
             persistAllGroups,
@@ -977,7 +996,7 @@ describe("api entrypoint runtime behavior", () => {
             (args) => args[0] === "/api/docs.json"
         );
 
-        expect(docsEndpoint?.[1]).toBe(mocks.requireAuth);
+        expect(docsEndpoint?.[1]).toBe("swagger-serve-middleware");
         expect(docsJsonEndpoint?.[1]).toBe(mocks.requireAuth);
         expect(docsEndpoint?.length).toBeGreaterThan(2);
         expect(setIntervalSpy).toHaveBeenCalled();

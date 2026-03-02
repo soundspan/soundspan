@@ -31,6 +31,7 @@ jest.mock("../../utils/db", () => ({
             findUnique: jest.fn(),
             update: jest.fn(),
         },
+        $queryRaw: jest.fn(),
     },
 }));
 
@@ -43,6 +44,7 @@ const mockUserSettingsCreate = prisma.userSettings.create as jest.Mock;
 const mockUserSettingsUpsert = prisma.userSettings.upsert as jest.Mock;
 const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
 const mockUserUpdate = prisma.user.update as jest.Mock;
+const mockPrismaQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockStaleJobCleanup = staleJobCleanupService.cleanupAll as jest.Mock;
 
 function getGetHandler(path: string) {
@@ -84,6 +86,7 @@ describe("settings displayName compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPrismaQueryRaw.mockResolvedValue([{ count: BigInt(0) }]);
     });
 
     it("returns displayName alongside user settings", async () => {
