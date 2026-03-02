@@ -87,7 +87,6 @@ export function FullPlayer() {
         toggleRepeat,
         startVibeMode,
         stopVibeMode,
-        playTracks,
         setUpcoming,
     } = useAudioControls();
     const preferenceTrackId =

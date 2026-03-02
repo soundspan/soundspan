@@ -75,6 +75,9 @@ export function invalidateTidalStatusCache() {
 // ── Global match cache (keyed by albumId) ─────────────────────────
 const _albumMatchCache = new Map<string, Record<string, TidalMatch>>();
 
+/**
+ * Executes useTidalGapFill.
+ */
 export function useTidalGapFill(
     album: Album | null | undefined,
     source?: AlbumSource
@@ -88,6 +91,7 @@ export function useTidalGapFill(
     const [isStatusResolved, setIsStatusResolved] = useState(
         _tidalStatusCache !== null
     );
+    const albumTracks = album?.tracks;
 
     // Check TIDAL availability (uses global cache)
     useEffect(() => {
@@ -105,33 +109,43 @@ export function useTidalGapFill(
 
     // Identify unowned tracks that need matching
     const unownedTracks = useMemo(() => {
-        if (!tidalAvailable || !album?.tracks) return [];
+        if (!tidalAvailable || !albumTracks) return [];
 
         // For discovery albums, ALL tracks need matching
-        if (source === "discovery") return album.tracks;
+        if (source === "discovery") return albumTracks;
 
         // For library albums, only tracks without a local file need matching
-        return album.tracks.filter(
+        return albumTracks.filter(
             (t) => !t.filePath
         );
-    }, [album?.tracks, album?.id, source, tidalAvailable]);
+    }, [albumTracks, source, tidalAvailable]);
 
     // Match unowned tracks against TIDAL (single batch call)
     useEffect(() => {
         if (!unownedTracks.length || !album?.id) return;
         if (matchedAlbumIdRef.current === album.id) return;
 
+        let cancelled = false;
         // Check global cache first — instant on revisit
         const cached = _albumMatchCache.get(album.id);
         if (cached) {
             matchedAlbumIdRef.current = album.id;
-            setMatches(cached);
-            return;
+            queueMicrotask(() => {
+                if (!cancelled) {
+                    setMatches(cached);
+                }
+            });
+            return () => {
+                cancelled = true;
+            };
         }
 
-        let cancelled = false;
         matchedAlbumIdRef.current = album.id;
-        setLoading(true);
+        queueMicrotask(() => {
+            if (!cancelled) {
+                setLoading(true);
+            }
+        });
 
         const matchTracks = async () => {
             const newMatches: Record<string, TidalMatch> = {};
@@ -208,10 +222,10 @@ export function useTidalGapFill(
 
     // Produce enriched tracks with streamSource + tidalTrackId
     const enrichedTracks = useMemo((): Track[] | undefined => {
-        if (!album?.tracks) return undefined;
-        if (Object.keys(matches).length === 0) return album.tracks;
+        if (!albumTracks) return undefined;
+        if (Object.keys(matches).length === 0) return albumTracks;
 
-        return album.tracks.map((track) => {
+        return albumTracks.map((track) => {
             const match = matches[track.id];
             if (match) {
                 return {
@@ -224,7 +238,7 @@ export function useTidalGapFill(
             }
             return track;
         });
-    }, [album?.tracks, matches]);
+    }, [albumTracks, matches]);
 
     const hasQueuedMatchWork =
         !!album?.id &&

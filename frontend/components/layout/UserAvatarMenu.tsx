@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Settings, LogOut, RefreshCw, Shield } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
@@ -11,6 +12,9 @@ import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Renders the UserAvatarMenu component.
+ */
 export function UserAvatarMenu() {
     const { user, logout } = useAuth();
     const { toast } = useToast();
@@ -111,12 +115,15 @@ export function UserAvatarMenu() {
                 title={displayName}
             >
                 {user && !imgError ? (
-                    <img
+                    <Image
                         key={imgKey}
                         src={`${api.getProfilePictureUrl(user.id)}&_k=${imgKey}`}
                         alt={displayName}
+                        width={36}
+                        height={36}
                         className="w-full h-full object-cover"
                         onError={() => setImgError(true)}
+                        unoptimized
                     />
                 ) : (
                     <span className="w-full h-full bg-white/10 text-white/80 text-xs font-semibold flex items-center justify-center">

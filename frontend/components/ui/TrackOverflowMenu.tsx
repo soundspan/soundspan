@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { useAudioState, Track } from "@/lib/audio-state-context";
+import type { Track } from "@/lib/audio-state-context";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { getArtistHref } from "@/utils/artistRoute";
 import { useRouter } from "next/navigation";
@@ -41,6 +41,9 @@ interface TrackOverflowMenuProps {
     isInListenTogetherGroup?: boolean;
 }
 
+/**
+ * Renders the TrackOverflowMenu component.
+ */
 export function TrackOverflowMenu({
     track,
     showPlayNext = true,
@@ -62,7 +65,6 @@ export function TrackOverflowMenu({
     const menuRef = useRef<HTMLDivElement | null>(null);
     const router = useRouter();
     const controls = useAudioControls();
-    const { playbackType } = useAudioState();
 
     // Determine if track is local (for Listen Together guard)
     const isStreamOnly = track.streamSource === "tidal" || track.streamSource === "youtube";

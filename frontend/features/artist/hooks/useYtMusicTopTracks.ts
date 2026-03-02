@@ -48,6 +48,9 @@ async function getYtMusicAvailable(): Promise<boolean> {
 // ── Global match cache for artist top tracks ──────────────────────
 const _artistMatchCache = new Map<string, Record<string, YtMusicMatch>>();
 
+/**
+ * Executes useYtMusicTopTracks.
+ */
 export function useYtMusicTopTracks(artist: Artist | null | undefined) {
     const [matches, setMatches] = useState<Record<string, YtMusicMatch>>({});
     const [loading, setLoading] = useState(false);
@@ -61,6 +64,7 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
 
     // Discovery artists only have mbid, not id — use either as a stable key.
     const artistKey = artist?.id || artist?.mbid || null;
+    const topTracks = artist?.topTracks;
 
     // Check YTMusic availability (uses global cache)
     useEffect(() => {
@@ -79,33 +83,43 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
     // Identify unowned tracks that need matching
     // Skip any tracks already enriched by TIDAL (TIDAL takes priority)
     const unownedTracks = useMemo(() => {
-        if (!ytMusicAvailable || !artist?.topTracks) return [];
+        if (!ytMusicAvailable || !topTracks) return [];
 
-        return artist.topTracks.filter(
+        return topTracks.filter(
             (t) =>
                 t.streamSource !== "tidal" &&
                 (!t.album?.id ||
                     !t.album?.title ||
                     t.album.title === "Unknown Album")
         );
-    }, [artist?.topTracks, artistKey, ytMusicAvailable]);
+    }, [topTracks, ytMusicAvailable]);
 
     // Match unowned tracks against YTMusic (single batch call)
     useEffect(() => {
         if (!unownedTracks.length || !artistKey) return;
         if (matchedArtistIdRef.current === artistKey) return;
 
+        let cancelled = false;
         // Check global cache first — instant on revisit
         const cached = _artistMatchCache.get(artistKey);
         if (cached) {
             matchedArtistIdRef.current = artistKey;
-            setMatches(cached);
-            return;
+            queueMicrotask(() => {
+                if (!cancelled) {
+                    setMatches(cached);
+                }
+            });
+            return () => {
+                cancelled = true;
+            };
         }
 
-        let cancelled = false;
         matchedArtistIdRef.current = artistKey;
-        setLoading(true);
+        queueMicrotask(() => {
+            if (!cancelled) {
+                setLoading(true);
+            }
+        });
 
         const matchTracks = async () => {
             const trackPayload = unownedTracks.map((track) => ({
@@ -154,10 +168,10 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
     // Produce enriched top-tracks with streamSource + youtubeVideoId
     // Preserve any existing TIDAL enrichment — don't overwrite
     const enrichedTopTracks = useMemo((): Track[] | undefined => {
-        if (!artist?.topTracks) return undefined;
-        if (Object.keys(matches).length === 0) return artist.topTracks;
+        if (!topTracks) return undefined;
+        if (Object.keys(matches).length === 0) return topTracks;
 
-        return artist.topTracks.map((track) => {
+        return topTracks.map((track) => {
             // Don't overwrite TIDAL-enriched tracks
             if (track.streamSource === "tidal") return track;
             const match = matches[track.id];
@@ -172,7 +186,7 @@ export function useYtMusicTopTracks(artist: Artist | null | undefined) {
             }
             return track;
         });
-    }, [artist?.topTracks, matches]);
+    }, [topTracks, matches]);
 
     const hasQueuedMatchWork =
         !!artistKey &&

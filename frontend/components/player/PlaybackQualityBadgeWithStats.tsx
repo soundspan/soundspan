@@ -53,6 +53,9 @@ function StatRow({
     );
 }
 
+/**
+ * Renders the PlaybackQualityBadgeWithStats component.
+ */
 export function PlaybackQualityBadgeWithStats({
     badge,
     size,
@@ -62,7 +65,7 @@ export function PlaybackQualityBadgeWithStats({
     const containerRef = useRef<HTMLDivElement>(null);
     const isMobile = useIsMobile();
 
-    const { currentTrack, playbackType } = useAudioState();
+    const { currentTrack } = useAudioState();
     const { streamProfile } = useAudioPlayback();
     const { tidalQuality, localQuality, bitrate, codec } = useStreamBitrate();
 
