@@ -76,3 +76,26 @@ test("does not trigger when repeat mode is enabled", () => {
         false
     );
 });
+
+test("does not trigger when the queue length is zero or negative", () => {
+    assert.equal(
+        shouldAutoMatchVibeAtQueueEnd({
+            playbackType: "track",
+            queueLength: 0,
+            currentIndex: 0,
+            repeatMode: "off",
+            isListenTogether: false,
+        }),
+        false
+    );
+    assert.equal(
+        shouldAutoMatchVibeAtQueueEnd({
+            playbackType: "track",
+            queueLength: -2,
+            currentIndex: 0,
+            repeatMode: "off",
+            isListenTogether: false,
+        }),
+        false
+    );
+});

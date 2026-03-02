@@ -50,3 +50,62 @@ test("recovery policy clamps local position to non-negative when server has no r
     assert.equal(decision.shouldPlay, true);
     assert.equal(decision.authority, "local");
 });
+
+test("recovery policy ignores non-finite server resume values", () => {
+    const decision = resolveLocalAuthoritativeRecovery(
+        {
+            positionSec: 0,
+            shouldPlay: false,
+        },
+        {
+            resumeAtSec: Number.POSITIVE_INFINITY,
+            shouldPlay: true,
+        },
+    );
+
+    assert.equal(decision.resumeAtSec, 0);
+    assert.equal(decision.shouldPlay, false);
+    assert.equal(decision.authority, "local");
+});
+
+test("recovery policy keeps local authority when server resume is not positive", () => {
+    const decision = resolveLocalAuthoritativeRecovery(
+        {
+            positionSec: 0,
+            shouldPlay: true,
+        },
+        {
+            resumeAtSec: 0,
+            shouldPlay: false,
+        },
+    );
+
+    assert.equal(decision.resumeAtSec, 0);
+    assert.equal(decision.shouldPlay, true);
+    assert.equal(decision.authority, "local");
+});
+
+test("recovery policy falls back to zero if server resume changes between reads", () => {
+    let readCount = 0;
+    const volatileServer: { resumeAtSec?: number } = {};
+
+    Object.defineProperty(volatileServer, "resumeAtSec", {
+        get() {
+            readCount += 1;
+            return readCount === 1 ? 42 : undefined;
+        },
+    });
+
+    const decision = resolveLocalAuthoritativeRecovery(
+        {
+            positionSec: 0,
+            shouldPlay: true,
+        },
+        volatileServer,
+    );
+
+    assert.equal(decision.resumeAtSec, 0);
+    assert.equal(decision.shouldPlay, true);
+    assert.equal(decision.authority, "local");
+    assert.equal(readCount, 2);
+});

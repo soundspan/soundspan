@@ -1,6 +1,24 @@
 import { NextFunction, Request, Response } from "express";
 import { createHash } from "crypto";
 
+type RateLimitOptions = {
+    keyGenerator: (req: Request) => string;
+};
+
+const mockRateLimit = jest.fn((options: RateLimitOptions) => {
+    const middleware = jest.fn();
+    (middleware as any).__options = options;
+    return middleware;
+});
+
+const mockIpKeyGenerator = jest.fn((ip: string) => `ip:${ip}`);
+
+jest.mock("express-rate-limit", () => ({
+    __esModule: true,
+    default: mockRateLimit,
+    ipKeyGenerator: mockIpKeyGenerator,
+}));
+
 jest.mock("../../utils/db", () => ({
     prisma: {
         user: {
@@ -38,7 +56,7 @@ import bcrypt from "bcrypt";
 import { prisma } from "../../utils/db";
 import { decrypt } from "../../utils/encryption";
 import { sendSubsonicError } from "../../utils/subsonicResponse";
-import { requireSubsonicAuth } from "../subsonicAuth";
+import { requireSubsonicAuth, subsonicRateLimiter } from "../subsonicAuth";
 
 function buildReq(query: Record<string, string>): Request {
     return { query } as unknown as Request;
@@ -76,6 +94,28 @@ describe("requireSubsonicAuth", () => {
             "Required parameter 'v' (version) is missing",
             "json",
             undefined,
+        );
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it("includes callback query parameter in subsonic error payloads", async () => {
+        await requireSubsonicAuth(
+            buildReq({
+                c: "client",
+                u: "alice",
+                p: "secret",
+                callback: "jsonpCallback",
+            }),
+            buildRes(),
+            next,
+        );
+
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            10,
+            "Required parameter 'v' (version) is missing",
+            "json",
+            "jsonpCallback",
         );
         expect(next).not.toHaveBeenCalled();
     });
@@ -476,6 +516,109 @@ describe("requireSubsonicAuth", () => {
             undefined,
         );
         expect(next).not.toHaveBeenCalled();
+    });
+
+    it("rejects apiKey auth when provided username does not match key owner", async () => {
+        mockApiKeyFindUnique.mockResolvedValue({
+            id: "key-1",
+            user: {
+                id: "u1",
+                username: "alice",
+                role: "user",
+            },
+        });
+
+        await requireSubsonicAuth(
+            buildReq({
+                v: "1.16.1",
+                c: "client",
+                apiKey: "apikey-secret",
+                u: "bob",
+            }),
+            buildRes(),
+            next,
+        );
+
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            40,
+            "Wrong username or password",
+            "json",
+            undefined,
+        );
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it("authenticates apiKey mode even when lastUsed update fails", async () => {
+        mockApiKeyFindUnique.mockResolvedValue({
+            id: "key-1",
+            user: {
+                id: "u1",
+                username: "alice",
+                role: "user",
+            },
+        });
+        mockApiKeyUpdate.mockRejectedValueOnce(new Error("write failed"));
+
+        const req = buildReq({
+            v: "1.16.1",
+            c: "symfonium",
+            apiKey: "apikey-secret",
+        });
+
+        await requireSubsonicAuth(req, buildRes(), next);
+
+        expect((req as any).user).toEqual({
+            id: "u1",
+            username: "alice",
+            role: "user",
+        });
+        expect(mockSendError).not.toHaveBeenCalled();
+        expect(next).toHaveBeenCalled();
+    });
+
+    it("returns wrong credentials when password auth targets an unknown user", async () => {
+        mockFindUnique.mockResolvedValue(null);
+
+        await requireSubsonicAuth(
+            buildReq({
+                u: "missing-user",
+                v: "1.16.1",
+                c: "client",
+                p: "secret",
+            }),
+            buildRes(),
+            next,
+        );
+
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            40,
+            "Wrong username or password",
+            "json",
+            undefined,
+        );
+        expect(mockCompare).not.toHaveBeenCalled();
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it("builds rate-limit keys from normalized IP and optional username", () => {
+        const keyGenerator = (subsonicRateLimiter as any).__options
+            .keyGenerator as (req: Request) => string;
+
+        const withUsername = keyGenerator({
+            ip: "127.0.0.1",
+            query: { u: "alice" },
+        } as unknown as Request);
+        const withoutUsername = keyGenerator({
+            ip: undefined,
+            query: { u: 123 },
+        } as unknown as Request);
+
+        expect(mockIpKeyGenerator).toHaveBeenNthCalledWith(1, "127.0.0.1");
+        expect(mockIpKeyGenerator).toHaveBeenNthCalledWith(2, "");
+        expect(withUsername).toBe("subsonic:ip:127.0.0.1:alice");
+        expect(withoutUsername).toBe("subsonic:ip::");
     });
 
     it("rejects when apiKey and password/token auth are both provided", async () => {

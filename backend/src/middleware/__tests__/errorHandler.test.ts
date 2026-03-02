@@ -131,4 +131,19 @@ describe("errorHandler middleware", () => {
             stack: "dev-stack",
         });
     });
+
+    it("falls back to generic error text in development when Error.message is empty", async () => {
+        const dev = await loadHandler("development");
+        const res = createResponse();
+        const err = new Error("");
+        err.stack = "empty-message-stack";
+
+        dev.errorHandler(err, {} as any, res, jest.fn());
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "Internal server error",
+            stack: "empty-message-stack",
+        });
+    });
 });

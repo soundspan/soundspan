@@ -87,3 +87,16 @@ test("handles empty shuffle indices in shuffle mode gracefully", () => {
     // With empty shuffle indices, should return empty (caller regenerates)
     assert.deepEqual(result.newShuffleIndices, []);
 });
+
+test("inserts at shuffle start when current index is absent from shuffle order", () => {
+    const result = computePlayNowInsertion({
+        queue: ["A", "B", "C", "D"],
+        currentIndex: 2,
+        isShuffle: true,
+        shuffleIndices: [0, 1, 3],
+    });
+
+    assert.equal(result.insertAt, 3);
+    assert.equal(result.newCurrentIndex, 3);
+    assert.deepEqual(result.newShuffleIndices, [3, 0, 1, 4]);
+});
