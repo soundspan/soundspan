@@ -1022,6 +1022,45 @@ class YouTubeMusicService {
         return data;
     }
 
+    async getHome(
+        limit: number = 6
+    ): Promise<
+        Array<{
+            title: string;
+            contents: Array<{
+                playlistId?: string;
+                videoId?: string;
+                browseId?: string;
+                title: string;
+                thumbnailUrl: string | null;
+                subtitle: string;
+            }>;
+        }>
+    > {
+        const { data } = await this.client.get("/home", {
+            params: { limit },
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    async getMoodPlaylists(
+        params: string
+    ): Promise<
+        Array<{
+            playlistId: string;
+            title: string;
+            thumbnailUrl: string | null;
+            author: string;
+        }>
+    > {
+        const { data } = await this.client.get("/mood-playlists", {
+            params: { params },
+            timeout: 15_000,
+        });
+        return data;
+    }
+
     async getBrowsePlaylist(
         playlistId: string,
         limit: number = 100

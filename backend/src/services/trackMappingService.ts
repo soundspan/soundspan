@@ -1,7 +1,10 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
-const log = logger.child("TrackMappingService");
+const log =
+    typeof (logger as { child?: unknown }).child === "function"
+        ? logger.child("TrackMappingService")
+        : logger;
 
 const SOURCE_PRIORITY: Record<CreateMappingData["source"], number> = {
     manual: 4,

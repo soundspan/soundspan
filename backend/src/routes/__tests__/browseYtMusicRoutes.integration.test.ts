@@ -49,6 +49,11 @@ jest.mock("../../services/youtubeMusic", () => ({
     },
 }));
 
+const mockGetSystemSettings = jest.fn();
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
+}));
+
 import { ytMusicService } from "../../services/youtubeMusic";
 import router from "../browse";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
@@ -64,6 +69,7 @@ describe("browse ytmusic routes integration", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockGetSystemSettings.mockResolvedValue({ ytMusicEnabled: true });
     });
 
     it("requires auth for GET /api/browse/ytmusic/charts", async () => {

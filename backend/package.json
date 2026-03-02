@@ -16,6 +16,7 @@
         "db:studio": "prisma studio",
         "seed:user": "tsx seeds/createUser.ts",
         "pretest": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
+        "pretest:coverage": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
         "test": "jest",
         "test:coverage": "jest --coverage --coverageReporters=text-summary --coverageReporters=json-summary --coverageReporters=lcov --json --outputFile=coverage/jest-results.json",
         "test:smoke": "tsx scripts/smoke.ts",

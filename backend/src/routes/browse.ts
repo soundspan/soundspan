@@ -10,6 +10,12 @@ const router = Router();
 
 // ── Simple TTL cache for YT Music browse data ──────────────────
 const YTMUSIC_BROWSE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const YTMUSIC_BROWSE_MAX_CACHE_ENTRIES = 256;
+const YTMUSIC_HOME_DEFAULT_LIMIT = 6;
+const YTMUSIC_HOME_MAX_LIMIT = 20;
+const YTMUSIC_PLAYLIST_DEFAULT_LIMIT = 100;
+const YTMUSIC_PLAYLIST_MAX_LIMIT = 500;
+const YTMUSIC_MOOD_PARAMS_MAX_LENGTH = 512;
 const ytBrowseCache = new Map<string, { data: any; expiresAt: number }>();
 
 function getCachedOrNull<T>(key: string): T | null {
@@ -20,7 +26,74 @@ function getCachedOrNull<T>(key: string): T | null {
 }
 
 function setCache(key: string, data: any): void {
+    pruneExpiredCacheEntries();
     ytBrowseCache.set(key, { data, expiresAt: Date.now() + YTMUSIC_BROWSE_TTL_MS });
+    trimCacheIfNeeded();
+}
+
+function trimCacheIfNeeded(): void {
+    while (ytBrowseCache.size > YTMUSIC_BROWSE_MAX_CACHE_ENTRIES) {
+        const oldestKey = ytBrowseCache.keys().next().value;
+        if (!oldestKey) return;
+        ytBrowseCache.delete(oldestKey);
+    }
+}
+
+function pruneExpiredCacheEntries(now = Date.now()): void {
+    for (const [key, entry] of ytBrowseCache.entries()) {
+        if (entry.expiresAt <= now) {
+            ytBrowseCache.delete(key);
+        }
+    }
+}
+
+function parseBoundedInt(
+    value: unknown,
+    fallback: number,
+    min: number,
+    max: number
+): number {
+    if (typeof value !== "string") {
+        return fallback;
+    }
+
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+
+    return Math.min(max, Math.max(min, parsed));
+}
+
+function parseMoodParams(value: unknown): string | null {
+    if (typeof value !== "string") {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > YTMUSIC_MOOD_PARAMS_MAX_LENGTH) {
+        return null;
+    }
+
+    return trimmed;
+}
+
+function resolveHttpStatusFromError(error: any): number | null {
+    const status = error?.response?.status;
+    if (typeof status === "number" && status >= 400 && status <= 599) {
+        return status;
+    }
+    return null;
+}
+
+async function ensureYtMusicEnabled(res: Response): Promise<boolean> {
+    const settings = await getSystemSettings();
+    if (!settings?.ytMusicEnabled) {
+        res.status(403).json({ error: "YouTube Music integration is not enabled" });
+        return false;
+    }
+
+    return true;
 }
 
 const YTMUSIC_REGION = process.env.YTMUSIC_REGION || "US";
@@ -327,16 +400,13 @@ router.post("/playlists/parse", async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Charts data with sections (songs, videos, trending, artists)
- *       403:
- *         description: YouTube Music is not enabled
  *       401:
  *         description: Not authenticated
  */
 router.get("/ytmusic/charts", async (req: Request, res: Response) => {
     try {
-        const settings = await getSystemSettings();
-        if (!settings.ytMusicEnabled) {
-            return res.status(403).json({ error: "YouTube Music integration is not enabled" });
+        if (!(await ensureYtMusicEnabled(res))) {
+            return;
         }
 
         const country = (req.query.country as string) || YTMUSIC_REGION;
@@ -369,16 +439,13 @@ router.get("/ytmusic/charts", async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: List of mood/genre categories with browsable params
- *       403:
- *         description: YouTube Music is not enabled
  *       401:
  *         description: Not authenticated
  */
 router.get("/ytmusic/categories", async (req: Request, res: Response) => {
     try {
-        const settings = await getSystemSettings();
-        if (!settings.ytMusicEnabled) {
-            return res.status(403).json({ error: "YouTube Music integration is not enabled" });
+        if (!(await ensureYtMusicEnabled(res))) {
+            return;
         }
 
         const cacheKey = "categories";
@@ -394,6 +461,130 @@ router.get("/ytmusic/categories", async (req: Request, res: Response) => {
     } catch (error: any) {
         logger.error("[Browse] YT Music categories error:", error);
         res.status(500).json({ error: error.message || "Failed to fetch categories" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/browse/ytmusic/home:
+ *   get:
+ *     summary: Get YT Music home shelves (featured/curated content)
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 6
+ *         description: Number of shelves to fetch
+ *     responses:
+ *       200:
+ *         description: Array of shelves with contents
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/ytmusic/home", async (req: Request, res: Response) => {
+    try {
+        if (!(await ensureYtMusicEnabled(res))) {
+            return;
+        }
+
+        const limit = parseBoundedInt(
+            req.query.limit,
+            YTMUSIC_HOME_DEFAULT_LIMIT,
+            1,
+            YTMUSIC_HOME_MAX_LIMIT
+        );
+        const cacheKey = `home:${limit}`;
+
+        const cached = getCachedOrNull(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+
+        const shelves = await ytMusicService.getHome(limit);
+        const result = { shelves, source: "ytmusic" as const };
+        setCache(cacheKey, result);
+        res.json(result);
+    } catch (error: any) {
+        const status = resolveHttpStatusFromError(error);
+        if (status && status >= 400 && status < 500) {
+            return res.status(status).json({
+                error:
+                    typeof error?.response?.data?.detail === "string"
+                        ? error.response.data.detail
+                        : "Invalid request for home content",
+            });
+        }
+        logger.error("[Browse] YT Music home error:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch home content" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/browse/ytmusic/mood-playlists:
+ *   get:
+ *     summary: Get playlists for a specific mood/genre category
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: params
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Category params string from mood categories endpoint
+ *     responses:
+ *       200:
+ *         description: Array of playlists for the mood category
+ *       400:
+ *         description: Missing params
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/ytmusic/mood-playlists", async (req: Request, res: Response) => {
+    try {
+        if (!(await ensureYtMusicEnabled(res))) {
+            return;
+        }
+
+        const params = parseMoodParams(req.query.params);
+        if (!params) {
+            return res.status(400).json({
+                error:
+                    "params query parameter is required and must be a non-empty string up to 512 characters",
+            });
+        }
+
+        const cacheKey = `mood-playlists:${params}`;
+
+        const cached = getCachedOrNull(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+
+        const playlists = await ytMusicService.getMoodPlaylists(params);
+        const result = { playlists, source: "ytmusic" as const };
+        setCache(cacheKey, result);
+        res.json(result);
+    } catch (error: any) {
+        const status = resolveHttpStatusFromError(error);
+        if (status && status >= 400 && status < 500) {
+            return res.status(status).json({
+                error:
+                    typeof error?.response?.data?.detail === "string"
+                        ? error.response.data.detail
+                        : "Invalid request for mood playlists",
+            });
+        }
+        logger.error("[Browse] YT Music mood playlists error:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch mood playlists" });
     }
 });
 
@@ -423,8 +614,6 @@ router.get("/ytmusic/categories", async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Playlist details with tracks
- *       403:
- *         description: YouTube Music is not enabled
  *       404:
  *         description: Playlist not found
  *       401:
@@ -432,13 +621,17 @@ router.get("/ytmusic/categories", async (req: Request, res: Response) => {
  */
 router.get("/ytmusic/playlist/:id", async (req: Request, res: Response) => {
     try {
-        const settings = await getSystemSettings();
-        if (!settings.ytMusicEnabled) {
-            return res.status(403).json({ error: "YouTube Music integration is not enabled" });
+        if (!(await ensureYtMusicEnabled(res))) {
+            return;
         }
 
         const { id } = req.params;
-        const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+        const limit = parseBoundedInt(
+            req.query.limit,
+            YTMUSIC_PLAYLIST_DEFAULT_LIMIT,
+            1,
+            YTMUSIC_PLAYLIST_MAX_LIMIT
+        );
         const cacheKey = `playlist:${id}:${limit}`;
 
         const cached = getCachedOrNull(cacheKey);

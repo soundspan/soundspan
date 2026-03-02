@@ -34,6 +34,11 @@ jest.mock("../../services/youtubeMusic", () => ({
     ytMusicService: {},
 }));
 
+const mockGetSystemSettings = jest.fn();
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
+}));
+
 import router from "../browse";
 import { createMockJsonResponse } from "./helpers/mockJsonResponse";
 
@@ -71,6 +76,7 @@ describe("browse route runtime", () => {
         jest.clearAllMocks();
         deezerService.parseUrl.mockReturnValue(null);
         spotifyService.parseUrl.mockReturnValue(null);
+        mockGetSystemSettings.mockResolvedValue({ ytMusicEnabled: true });
     });
 
     it("returns 410 for deprecated Deezer browse endpoints", async () => {
