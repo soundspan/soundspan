@@ -1080,10 +1080,11 @@ mock.module("@soundspan/media-metadata-contract", {
 let orchestratorComponent: (() => null) | null = null;
 
 before(async () => {
-    const module = await import(
+    const orchestratorModule = await import(
         "../../components/player/AudioPlaybackOrchestrator.tsx"
     );
-    orchestratorComponent = module.AudioPlaybackOrchestrator as unknown as () => null;
+    orchestratorComponent =
+        orchestratorModule.AudioPlaybackOrchestrator as unknown as () => null;
 });
 
 beforeEach(() => {

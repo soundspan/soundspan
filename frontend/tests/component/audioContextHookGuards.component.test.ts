@@ -47,9 +47,9 @@ test("useAudioControls resolves within provider stack", async () => {
         "../../lib/audio-controls-context.tsx"
     );
 
-    let captured: ReturnType<typeof useAudioControls> | null = null;
+    const capturedRef = { current: null as ReturnType<typeof useAudioControls> | null };
     const HookProbe = () => {
-        captured = useAudioControls();
+        capturedRef.current = useAudioControls();
         return React.createElement("div", null, "controls-ready");
     };
 
@@ -70,10 +70,10 @@ test("useAudioControls resolves within provider stack", async () => {
     );
 
     assert.ok(html.includes("controls-ready"));
-    assert.ok(captured);
-    assert.equal(typeof captured.playTrack, "function");
-    assert.equal(typeof captured.next, "function");
-    assert.equal(typeof captured.seek, "function");
+    assert.ok(capturedRef.current);
+    assert.equal(typeof capturedRef.current.playTrack, "function");
+    assert.equal(typeof capturedRef.current.next, "function");
+    assert.equal(typeof capturedRef.current.seek, "function");
 });
 
 test("audio-controls helper exports cover queue and listen-together session branches", async () => {
@@ -273,9 +273,9 @@ test("useAudioPlayback resolves within provider stack", async () => {
         "../../lib/audio-playback-context.tsx"
     );
 
-    let captured: ReturnType<typeof useAudioPlayback> | null = null;
+    const capturedRef = { current: null as ReturnType<typeof useAudioPlayback> | null };
     const HookProbe = () => {
-        captured = useAudioPlayback();
+        capturedRef.current = useAudioPlayback();
         return React.createElement("div", null, "playback-ready");
     };
 
@@ -292,10 +292,10 @@ test("useAudioPlayback resolves within provider stack", async () => {
     );
 
     assert.ok(html.includes("playback-ready"));
-    assert.ok(captured);
-    assert.equal(typeof captured.setCurrentTime, "function");
-    assert.equal(typeof captured.setCurrentTimeFromEngine, "function");
-    assert.equal(typeof captured.clearAudioError, "function");
+    assert.ok(capturedRef.current);
+    assert.equal(typeof capturedRef.current.setCurrentTime, "function");
+    assert.equal(typeof capturedRef.current.setCurrentTimeFromEngine, "function");
+    assert.equal(typeof capturedRef.current.clearAudioError, "function");
 });
 
 test("useListenTogether resolves within provider with deterministic mocked dependencies", async () => {
@@ -404,9 +404,9 @@ test("useListenTogether resolves within provider with deterministic mocked depen
         "../../lib/listen-together-context.tsx"
     );
 
-    let captured: ReturnType<typeof useListenTogether> | null = null;
+    const capturedRef = { current: null as ReturnType<typeof useListenTogether> | null };
     const HookProbe = () => {
-        captured = useListenTogether();
+        capturedRef.current = useListenTogether();
         return React.createElement("div", null, "listen-together-ready");
     };
 
@@ -419,11 +419,11 @@ test("useListenTogether resolves within provider with deterministic mocked depen
     );
 
     assert.ok(html.includes("listen-together-ready"));
-    assert.ok(captured);
-    assert.equal(captured.isInGroup, false);
-    assert.equal(captured.socketRouteStatus, "checking");
-    assert.equal(typeof captured.syncNext, "function");
-    assert.equal(typeof captured.syncSetTrack, "function");
+    assert.ok(capturedRef.current);
+    assert.equal(capturedRef.current.isInGroup, false);
+    assert.equal(capturedRef.current.socketRouteStatus, "checking");
+    assert.equal(typeof capturedRef.current.syncNext, "function");
+    assert.equal(typeof capturedRef.current.syncSetTrack, "function");
 
     assert.equal(resolveListenTogetherMembershipPendingState(null), false);
     assert.equal(resolveListenTogetherMembershipPendingState("create"), true);
