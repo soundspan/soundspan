@@ -1,3 +1,6 @@
+/**
+ * Executes shouldAttemptSegmentedRecoveryOnUnexpectedPause.
+ */
 export function shouldAttemptSegmentedRecoveryOnUnexpectedPause(
     bufferedAheadSec: number | null,
     maxBufferedAheadSec: number,
@@ -27,6 +30,9 @@ export interface SegmentedHandoffRecoveryStartupEligibility {
     minimumStablePlaybackMs: number;
 }
 
+/**
+ * Executes resolveSegmentedHandoffRecoveryStartupEligibility.
+ */
 export function resolveSegmentedHandoffRecoveryStartupEligibility(
     input: SegmentedHandoffRecoveryStartupEligibilityInput,
 ): SegmentedHandoffRecoveryStartupEligibility {
@@ -78,8 +84,8 @@ export interface SegmentedStartupRecoveryStageAttempts {
     engine_load: number;
 }
 
-export interface SegmentedStartupRecoveryStageLimits
-    extends SegmentedStartupRecoveryStageAttempts {}
+export type SegmentedStartupRecoveryStageLimits =
+    SegmentedStartupRecoveryStageAttempts;
 
 export interface SegmentedStartupRecoveryBackoffInput {
     attempt: number;
@@ -115,6 +121,9 @@ export interface SegmentedStartupRecoveryDecision {
     delayMs: number | null;
 }
 
+/**
+ * Executes createEmptySegmentedStartupRecoveryStageAttempts.
+ */
 export function createEmptySegmentedStartupRecoveryStageAttempts(): SegmentedStartupRecoveryStageAttempts {
     return {
         session_create: 0,
@@ -123,6 +132,9 @@ export function createEmptySegmentedStartupRecoveryStageAttempts(): SegmentedSta
     };
 }
 
+/**
+ * Executes resolveSegmentedStartupRecoveryBackoffDelayMs.
+ */
 export function resolveSegmentedStartupRecoveryBackoffDelayMs(
     input: SegmentedStartupRecoveryBackoffInput,
 ): number {
@@ -142,6 +154,9 @@ export function resolveSegmentedStartupRecoveryBackoffDelayMs(
     return Math.round(backoffDelayMs + jitterMs);
 }
 
+/**
+ * Executes resolveSegmentedStartupRecoveryDecision.
+ */
 export function resolveSegmentedStartupRecoveryDecision(
     input: SegmentedStartupRecoveryDecisionInput,
 ): SegmentedStartupRecoveryDecision {
