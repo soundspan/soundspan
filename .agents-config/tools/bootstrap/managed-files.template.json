@@ -7,58 +7,12 @@
   },
   "profiles": [
     "base",
-    "node-web"
+    "typescript",
+    "typescript-openapi",
+    "javascript",
+    "python"
   ],
-  "overrideRoot": ".agents-config/agent-overrides",
   "managed_files": [
-    {
-      "path": ".agents-config/templates/agents/CONTINUITY.md",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/templates/agents/EXECUTION_QUEUE.json",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/templates/agents/EXECUTION_ARCHIVE_INDEX.json",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/templates/agents/archives/.gitkeep",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/templates/agents/index/.gitkeep",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/templates/agents/plans/current/.gitkeep",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/templates/agents/plans/deferred/.gitkeep",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/templates/agents/plans/archived/.gitkeep",
-      "profiles": [
-        "base"
-      ]
-    },
     {
       "path": "CLAUDE.md",
       "source_path": ".agents-config/templates/CLAUDE.md",
@@ -69,41 +23,247 @@
     },
     {
       "path": "AGENTS.md",
-      "source_path": ".agents-config/AGENTS_TEMPLATE.md",
+      "source_path": ".agents-config/templates/AGENTS.md",
       "profiles": [
         "base"
       ],
       "allow_override": true
+    },
+    {
+      "path": ".agents-config/OWNERSHIP.md",
+      "profiles": [
+        "base"
+      ]
     },
     {
       "path": ".agents-config/docs/AGENT_RULES.md",
       "profiles": [
         "base"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "required_sections": [
+          "## Rule ID Catalog (Machine Cross-Reference)",
+          "## Global Operating Agreements (All LLMs)",
+          "## Policy-as-Code Enforcement"
+        ]
+      }
     },
     {
       "path": ".agents-config/docs/AGENT_CONTEXT.md",
       "profiles": [
         "base"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "placeholder_patterns": [
+          "Replace this section",
+          "<license>",
+          "<org>/<repo>",
+          "Describe the high-level runtime topology and request/data flow here.",
+          "Document the primary runtime stack by domain.",
+          "Document canonical code locations and boundaries.",
+          "Document local coding and architecture conventions",
+          "Track reusable abstractions and where to find them.",
+          "Document schema ownership, migration process, and operational constraints.",
+          "Document canonical test layout and commands by domain.",
+          "Document local infrastructure and app startup commands.",
+          "Document frequent contributor workflows, for example:"
+        ],
+        "placeholder_failure_mode": "warn",
+        "required_sections": [
+          "## Project Overview",
+          "## Architecture",
+          "## Tech Stack",
+          "## Project Structure",
+          "## Key Conventions",
+          "## Reuse and Consolidation Atlas",
+          "## Fork Documentation Maintenance",
+          "## Delivery Gates",
+          "## Database",
+          "## Testing",
+          "## Local Testing Bootstrap",
+          "## Common Tasks"
+        ]
+      }
     },
     {
       "path": ".agents-config/docs/CONTEXT_INDEX.json",
       "profiles": [
         "base"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "json_required_paths",
+        "seed_missing_paths_from_template": true,
+        "required_paths": [
+          {
+            "path": "metadata",
+            "type": "object"
+          },
+          {
+            "path": "metadata.id",
+            "type": "string"
+          },
+          {
+            "path": "metadata.version",
+            "type": "string"
+          },
+          {
+            "path": "startupReadOrder",
+            "type": "array",
+            "min_items": 1
+          },
+          {
+            "path": "primaryContracts",
+            "type": "object"
+          },
+          {
+            "path": "primaryContracts.bootstrapFile",
+            "type": "string"
+          },
+          {
+            "path": "primaryContracts.rulesFile",
+            "type": "string"
+          },
+          {
+            "path": "primaryContracts.contextFile",
+            "type": "string"
+          },
+          {
+            "path": "primaryContracts.policyFile",
+            "type": "string"
+          },
+          {
+            "path": "primaryContracts.projectToolingConfigFile",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts",
+            "type": "object"
+          },
+          {
+            "path": "sessionArtifacts.executionQueueFile",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.memoryFile",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.memoryTopicsRoot",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.sessionLogFile",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.sessionBriefJsonFile",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.archiveRoot",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.archiveIndexFile",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.plansRoot",
+            "type": "string"
+          },
+          {
+            "path": "sessionArtifacts.planRoots",
+            "type": "array",
+            "min_items": 1
+          },
+          {
+            "path": "sessionArtifacts.policyContractPath",
+            "type": "string"
+          },
+          {
+            "path": "ruleCatalog",
+            "type": "object"
+          },
+          {
+            "path": "canonicalRules",
+            "type": "object"
+          },
+          {
+            "path": "rulesSections",
+            "type": "array",
+            "min_items": 1
+          },
+          {
+            "path": "contextSections",
+            "type": "array",
+            "min_items": 1
+          },
+          {
+            "path": "commands",
+            "type": "object"
+          },
+          {
+            "path": "commands.agentSync",
+            "type": "string"
+          },
+          {
+            "path": "commands.releaseNotes",
+            "type": "string"
+          },
+          {
+            "path": "commands.projectToolingFile",
+            "type": "string"
+          },
+          {
+            "path": "profiles",
+            "type": "object"
+          },
+          {
+            "path": "profiles.availableProfiles",
+            "type": "array",
+            "min_items": 1
+          },
+          {
+            "path": "profiles.activeProfiles",
+            "type": "array",
+            "min_items": 1
+          }
+        ],
+        "forbidden_paths": [
+          "orchestratorSubagent",
+          "managedFilesCanonical",
+          "profiles.requiredRuleIdsByProfile",
+          "profiles.requiredCommandKeysByProfile",
+          "sessionArtifacts.queueScopedRead",
+          "sessionArtifacts.archiveOnComplete",
+          "sessionArtifacts.planQueueSync",
+          "sessionArtifacts.planMachineContract",
+          "sessionArtifacts.archivedPlanSync",
+          "sessionArtifacts.stalePlanReferenceCheck",
+          "sessionArtifacts.queueQualityGate",
+          "sessionArtifacts.workspaceLayout",
+          "sessionArtifacts.sessionBriefContract"
+        ]
+      }
     },
     {
       "path": ".agents-config/contracts/rules/canonical-ruleset.json",
       "profiles": [
         "base"
-      ]
+      ],
+      "allow_override": true
     },
     {
-      "path": ".agents-config/agent-overrides/rule-overrides.schema.json",
+      "path": ".agents-config/rule-overrides.schema.json",
       "profiles": [
         "base"
       ]
@@ -113,7 +273,29 @@
       "profiles": [
         "base"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "json_required_paths",
+        "seed_missing_paths_from_template": true,
+        "required_paths": [
+          {
+            "path": "metadata",
+            "type": "object"
+          },
+          {
+            "path": "contracts",
+            "type": "object"
+          },
+          {
+            "path": "contracts.managedFilesCanonical",
+            "type": "object"
+          },
+          {
+            "path": "checks",
+            "type": "object"
+          }
+        ]
+      }
     },
     {
       "path": ".agents-config/scripts/enforce-agent-policies.mjs",
@@ -149,8 +331,14 @@
       "path": ".agents-config/scripts/generate-release-notes.mjs",
       "profiles": [
         "base"
+      ]
+    },
+    {
+      "path": ".agents-config/config/project-tooling.json",
+      "profiles": [
+        "base"
       ],
-      "allow_override": true
+      "authority": "project"
     },
     {
       "path": ".agents-config/scripts/release-version-sync.mjs",
@@ -181,10 +369,33 @@
       "profiles": [
         "base"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "required_sections": [
+          "## Release Summary",
+          "## Fixed",
+          "## Added",
+          "## Changed",
+          "## Admin/Operations",
+          "## Deployment and Distribution",
+          "## Breaking Changes",
+          "## Known Issues",
+          "## Compatibility and Migration",
+          "## Full Changelog"
+        ]
+      }
     },
     {
       "path": ".agents-config/tools/bootstrap/bootstrap.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/tools/bootstrap/bootstrap-runtime.mjs",
       "profiles": [
         "base"
       ]
@@ -208,25 +419,25 @@
       ]
     },
     {
+      "path": ".agents-config/tools/bootstrap/agent-sync.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
       "path": ".agents-config/tools/bootstrap/check-template-impact.mjs",
       "profiles": [
         "base"
       ]
     },
     {
+      "path": ".agents-config/tools/bootstrap/generate-ownership-matrix.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
       "path": ".agents-config/tools/rules/verify-canonical-ruleset.mjs",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/tools/index/indexer.mjs",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
-      "path": ".agents-config/tools/index/index.config.json",
       "profiles": [
         "base"
       ]
@@ -240,132 +451,188 @@
     {
       "path": ".agents-config/docs/FEATURE_INDEX.json",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "json_required_paths",
+        "seed_missing_paths_from_template": true,
+        "required_paths": [
+          {
+            "path": "metadata",
+            "type": "object"
+          },
+          {
+            "path": "sources",
+            "type": "object"
+          },
+          {
+            "path": "coverage",
+            "type": "object"
+          },
+          {
+            "path": "coverage.frontend_feature_dirs",
+            "type": "array"
+          },
+          {
+            "path": "coverage.verification_rules",
+            "type": "array",
+            "min_items": 1
+          },
+          {
+            "path": "features",
+            "type": "array"
+          }
+        ]
+      }
     },
     {
       "path": ".agents-config/docs/TEST_MATRIX.md",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
-      "allow_override": true
-    },
-    {
-      "path": ".agents-config/docs/ROUTE_MAP.md",
-      "profiles": [
-        "node-web"
-      ],
-      "allow_override": true
-    },
-    {
-      "path": ".agents-config/docs/JSDOC_COVERAGE.md",
-      "profiles": [
-        "node-web"
-      ],
-      "allow_override": true
-    },
-    {
-      "path": ".agents-config/docs/OPENAPI_COVERAGE.md",
-      "profiles": [
-        "node-web"
-      ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "required_sections": [
+          "## Usage Rule",
+          "## Fast Commands",
+          "## Feature-to-Test Map",
+          "## Update Triggers",
+          "## Verification Workflow"
+        ]
+      }
     },
     {
       "path": ".agents-config/docs/LOGGING_STANDARDS.md",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
-      "allow_override": true
-    },
-    {
-      "path": ".agents-config/docs/README.md",
-      "profiles": [
-        "node-web"
-      ]
-    },
-    {
-      "path": ".agents-config/docs/REPO_INDEXING.md",
-      "profiles": [
-        "node-web"
-      ],
-      "allow_override": true,
-      "override_path": ".agents-config/agent-overrides/.agents-config/docs/REPO_INDEXING.replace.md"
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "required_sections": [
+          "## Shared Principles",
+          "## Frontend Contract",
+          "## Backend Contract",
+          "## Python Sidecar Contract",
+          "## Enforcement",
+          "## Migration to 100% Coverage"
+        ]
+      }
     },
     {
       "path": "backend/src/routes/README.md",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "required_sections": [
+          "## Start Here",
+          "## Mounted Route Modules",
+          "## Update Rule"
+        ]
+      }
     },
     {
       "path": "backend/src/services/README.md",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "required_sections": [
+          "## Start Here",
+          "## Service Modules",
+          "## Update Rule"
+        ]
+      }
     },
     {
       "path": "frontend/features/README.md",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
-      "allow_override": true
+      "authority": "structured",
+      "structure_contract": {
+        "kind": "markdown_sections",
+        "ordered": true,
+        "seed_missing_sections": true,
+        "required_sections": [
+          "## Start Here",
+          "## Feature Domains",
+          "## Update Rule"
+        ]
+      }
     },
     {
       "path": ".agents-config/tools/docs/feature-index-check.mjs",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": ".agents-config/tools/docs/generate-route-map.mjs",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": ".agents-config/tools/docs/generate-domain-readmes.mjs",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": ".agents-config/tools/docs/generate-jsdoc-coverage.mjs",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": ".agents-config/tools/docs/generate-openapi-coverage.mjs",
       "profiles": [
-        "node-web"
+        "typescript-openapi"
       ]
     },
     {
       "path": ".agents-config/scripts/verify-logging-compliance.mjs",
       "profiles": [
-        "node-web"
-      ],
-      "allow_override": true
+        "typescript",
+        "javascript"
+      ]
     },
     {
       "path": ".agents-config/policies/logging-compliance-baseline.json",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
-      "allow_override": true
+      "authority": "project"
     }
   ],
   "meaningful_paths": [
-    {
-      "path": ".agents-config/templates/agents/",
-      "profiles": [
-        "base"
-      ]
-    },
     {
       "path": "CLAUDE.md",
       "profiles": [
@@ -374,6 +641,12 @@
     },
     {
       "path": "AGENTS.md",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/OWNERSHIP.md",
       "profiles": [
         "base"
       ]
@@ -403,7 +676,7 @@
       ]
     },
     {
-      "path": ".agents-config/agent-overrides/rule-overrides.schema.json",
+      "path": ".agents-config/rule-overrides.schema.json",
       "profiles": [
         "base"
       ]
@@ -446,6 +719,12 @@
     },
     {
       "path": ".agents-config/scripts/generate-release-notes.mjs",
+      "profiles": [
+        "base"
+      ]
+    },
+    {
+      "path": ".agents-config/config/project-tooling.json",
       "profiles": [
         "base"
       ]
@@ -493,12 +772,6 @@
       ]
     },
     {
-      "path": ".agents-config/tools/index/",
-      "profiles": [
-        "base"
-      ]
-    },
-    {
       "path": ".github/workflows/pr-checks.yml",
       "profiles": [
         "base"
@@ -507,67 +780,58 @@
     {
       "path": ".agents-config/docs/FEATURE_INDEX.json",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": ".agents-config/docs/TEST_MATRIX.md",
       "profiles": [
-        "node-web"
-      ]
-    },
-    {
-      "path": ".agents-config/docs/ROUTE_MAP.md",
-      "profiles": [
-        "node-web"
-      ]
-    },
-    {
-      "path": ".agents-config/docs/JSDOC_COVERAGE.md",
-      "profiles": [
-        "node-web"
-      ]
-    },
-    {
-      "path": ".agents-config/docs/OPENAPI_COVERAGE.md",
-      "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": ".agents-config/docs/LOGGING_STANDARDS.md",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": "backend/src/routes/",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": "backend/src/services/",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": "frontend/features/",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     },
     {
       "path": ".agents-config/tools/docs/",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript",
+        "typescript-openapi"
       ]
     },
     {
       "path": ".agents-config/scripts/verify-logging-compliance.mjs",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ]
     }
   ],
@@ -575,13 +839,11 @@
     "default_authority": "template",
     "allowed_authorities": [
       "template",
-      "project"
+      "project",
+      "structured"
     ],
     "override_mode": "explicit_allowlist",
     "override_reserved_paths": [
-      "rule-overrides.schema.json",
-      "rule-overrides.json",
-      "README.md",
       ".gitkeep"
     ]
   }

@@ -1,17 +1,24 @@
 {
   "metadata": {
     "id": "canonical-ruleset",
-    "version": "2026-02-26.02",
+    "version": "2026-03-02.01",
     "description": "Canonical governance rule catalog used for policy and drift checks.",
     "generated_from": [
       ".agents-config/policies/agent-governance.json",
       ".agents-config/docs/AGENT_RULES.md"
     ],
+    "active_profiles": [
+      "base",
+      "typescript",
+      "typescript-openapi",
+      "python"
+    ],
     "lineage": {
-      "policy_required_ids_sha256": "9803ce4b56484f98f595889664038e2c8a02a6ef6705a81010a84467a95f2c06",
+      "policy_required_ids_sha256": "4f5fe7e9f9064ccf8df08e58ed08e8538ae56c6ee5f1407789dcd3d4444abaa5",
+      "policy_active_profiles_sha256": "bb34af3030a0827e4dbe4f897439c0b4b2b8c3f06357df3c650a2b1216399f99",
       "policy_orchestrator_rules_sha256": "5d6bae98890860e9cc1118216be111b377a40c9e3553f4e457eac8e2d29888d2",
-      "rules_doc_catalog_sha256": "8103e382041df5262ba97041894a18b729d25f551645383f307979f67247706c",
-      "canonical_rules_sha256": "beb3cd9e71fac69316712aff33e214e983f93ac076a9144ba90233b92731fb05"
+      "rules_doc_catalog_sha256": "d9823c86aa57627101707a0b7fa8551113f0b5afc0fb6335eed919c1e893945f",
+      "canonical_rules_sha256": "0af5a13433f0631271586cf6020f2dc3456413fb806a53b1e0f9c7b4870b182c"
     }
   },
   "rules": [
@@ -145,7 +152,7 @@
     },
     {
       "id": "rule_continuity_required",
-      "statement": "Read and maintain `.agents/CONTINUITY.md` as canonical continuity context.",
+      "statement": "Use `.agents/MEMORY.md` as the canonical memory reference point and submemory index, and route timestamped implementation traces to `.agents/SESSION_LOG.md`.",
       "category": "governance",
       "severity": "error",
       "overrideable": false,
@@ -154,14 +161,6 @@
     {
       "id": "rule_post_compaction_rebootstrap",
       "statement": "Treat compaction recovery as full startup and run preflight.",
-      "category": "governance",
-      "severity": "error",
-      "overrideable": false,
-      "source": "docs.ruleCatalog"
-    },
-    {
-      "id": "rule_repo_index_preflight_gate",
-      "statement": "Require preflight index readiness checks (always re-index, then strict verify) before implementation starts.",
       "category": "governance",
       "severity": "error",
       "overrideable": false,
@@ -185,7 +184,7 @@
     },
     {
       "id": "rule_local_rule_overrides_contract_required",
-      "statement": "Allow local-only override IDs only through `.agents-config/agent-overrides/rule-overrides.json`, validated against `.agents-config/agent-overrides/rule-overrides.schema.json`.",
+      "statement": "Allow local-only override IDs only through `.agents-config/rule-overrides.json`, validated against `.agents-config/rule-overrides.schema.json`.",
       "category": "governance",
       "severity": "error",
       "overrideable": false,
@@ -193,7 +192,7 @@
     },
     {
       "id": "rule_managed_files_known_overrides_only",
-      "statement": "Permit managed-file override payloads only for explicitly allowlisted entries (`allow_override=true`) and fail unknown `.agents-config/agent-overrides/**` payload files.",
+      "statement": "Permit managed-file override payloads only for explicitly allowlisted template-authority entries (`allow_override=true`), enforce one override mode per managed path, and fail unknown/non-allowlisted payload files (adjacent `.override`/`.append`) including deprecated `.replace` naming.",
       "category": "governance",
       "severity": "error",
       "overrideable": false,
@@ -256,22 +255,6 @@
       "source": "docs.ruleCatalog"
     },
     {
-      "id": "rule_feature_index_required",
-      "statement": "Maintain `.agents-config/docs/FEATURE_INDEX.json` as the canonical machine-readable feature map.",
-      "category": ".agents-config/docs",
-      "severity": "error",
-      "overrideable": true,
-      "source": "docs.ruleCatalog"
-    },
-    {
-      "id": "rule_test_matrix_required",
-      "statement": "Maintain `.agents-config/docs/TEST_MATRIX.md` as the canonical targeted test-command matrix.",
-      "category": ".agents-config/docs",
-      "severity": "error",
-      "overrideable": true,
-      "source": "docs.ruleCatalog"
-    },
-    {
       "id": "rule_release_notes_template_required",
       "statement": "Enforce canonical release-notes template + generator workflow, section order, and plain-English non-jargon summaries through policy checks.",
       "category": "release",
@@ -285,14 +268,6 @@
       "category": "release",
       "severity": "error",
       "overrideable": false,
-      "source": "docs.ruleCatalog"
-    },
-    {
-      "id": "rule_logging_contract_required",
-      "statement": "Maintain `.agents-config/docs/LOGGING_STANDARDS.md` and enforce logging compliance checks across frontend/backend/python runtime code.",
-      "category": "logging",
-      "severity": "error",
-      "overrideable": true,
       "source": "docs.ruleCatalog"
     },
     {
@@ -448,6 +423,22 @@
       "source": "policy.orchestratorSubagent.rules"
     },
     {
+      "id": "rule_feature_index_required",
+      "statement": "Maintain `.agents-config/docs/FEATURE_INDEX.json` as the canonical machine-readable feature map.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_test_matrix_required",
+      "statement": "Maintain `.agents-config/docs/TEST_MATRIX.md` as the canonical targeted test-command matrix.",
+      "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
       "id": "rule_route_map_required",
       "statement": "Maintain `.agents-config/docs/ROUTE_MAP.md` as the canonical generated backend/frontend route map.",
       "category": ".agents-config/docs",
@@ -467,6 +458,14 @@
       "id": "rule_jsdoc_coverage_required",
       "statement": "Maintain `.agents-config/docs/JSDOC_COVERAGE.md` as the generated exported-symbol documentation drift tracker.",
       "category": ".agents-config/docs",
+      "severity": "error",
+      "overrideable": true,
+      "source": "docs.ruleCatalog"
+    },
+    {
+      "id": "rule_logging_contract_required",
+      "statement": "Maintain `.agents-config/docs/LOGGING_STANDARDS.md` and enforce logging compliance checks across frontend/backend/python runtime code.",
+      "category": "logging",
       "severity": "error",
       "overrideable": true,
       "source": "docs.ruleCatalog"

@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-agent-governance",
-    "version": "2026-02-26.02",
+    "version": "2026-03-02.01",
     "description": "Executable governance checks for reusable multi-repository agent workflows."
   },
   "contracts": {
@@ -20,7 +20,7 @@
         ".agents-config/docs/CONTEXT_INDEX.json",
         ".agents-config/docs/AGENT_CONTEXT.md",
         ".agents/EXECUTION_QUEUE.json",
-        ".agents/CONTINUITY.md"
+        ".agents/MEMORY.md"
       ],
       "precedenceOrder": [
         "user_instruction",
@@ -38,10 +38,9 @@
         "sessionArtifacts",
         "ruleCatalog",
         "canonicalRules",
-        "managedFilesCanonical",
-        "orchestratorSubagent",
         "rulesSections",
         "contextSections",
+        "profiles",
         "commands"
       ],
       "requiredStartupReadOrder": [
@@ -50,48 +49,71 @@
         ".agents-config/docs/CONTEXT_INDEX.json",
         ".agents-config/docs/AGENT_CONTEXT.md",
         ".agents/EXECUTION_QUEUE.json",
-        ".agents/CONTINUITY.md"
+        ".agents/MEMORY.md"
       ],
       "requiredCommandKeys": [
         "policyCheck",
         "sessionPreflight",
         "agentPayloadStub",
         "queueLifecycle",
-        "indexBuild",
-        "indexVerify",
-        "featureIndexVerify",
-        "routeMapGenerate",
-        "routeMapVerify",
-        "domainReadmesGenerate",
-        "domainReadmesVerify",
-        "jsdocCoverageGenerate",
-        "jsdocCoverageVerify",
-        "openapiCoverageGenerate",
-        "openapiCoverageVerify",
-        "loggingComplianceGenerate",
-        "loggingComplianceVerify",
-        "indexQueryStrictFresh",
         "releasePrepare",
         "releaseVerify",
         "releaseNotes",
         "changelogFile",
-        "featureIndexFile",
-        "testMatrixFile",
-        "routeMapFile",
-        "jsdocCoverageFile",
-        "openapiCoverageFile",
-        "loggingStandardsFile",
-        "routesReadmeFile",
-        "servicesReadmeFile",
-        "frontendFeaturesReadmeFile",
         "canonicalRulesVerify",
         "canonicalRulesSync",
+        "agentSync",
         "agentManaged",
         "agentManagedFix",
         "templateImpactCheck",
         "policyCheckCi",
         "releaseContractCheck"
-      ]
+      ],
+      "requiredCommandKeysByProfile": {
+        "typescript": [
+          "featureIndexVerify",
+          "routeMapGenerate",
+          "routeMapVerify",
+          "domainReadmesGenerate",
+          "domainReadmesVerify",
+          "jsdocCoverageGenerate",
+          "jsdocCoverageVerify",
+          "loggingComplianceGenerate",
+          "loggingComplianceVerify",
+          "featureIndexFile",
+          "testMatrixFile",
+          "routeMapFile",
+          "jsdocCoverageFile",
+          "loggingStandardsFile",
+          "routesReadmeFile",
+          "servicesReadmeFile",
+          "frontendFeaturesReadmeFile"
+        ],
+        "javascript": [
+          "featureIndexVerify",
+          "routeMapGenerate",
+          "routeMapVerify",
+          "domainReadmesGenerate",
+          "domainReadmesVerify",
+          "jsdocCoverageGenerate",
+          "jsdocCoverageVerify",
+          "loggingComplianceGenerate",
+          "loggingComplianceVerify",
+          "featureIndexFile",
+          "testMatrixFile",
+          "routeMapFile",
+          "jsdocCoverageFile",
+          "loggingStandardsFile",
+          "routesReadmeFile",
+          "servicesReadmeFile",
+          "frontendFeaturesReadmeFile"
+        ],
+        "typescript-openapi": [
+          "openapiCoverageGenerate",
+          "openapiCoverageVerify",
+          "openapiCoverageFile"
+        ]
+      }
     },
     "releaseNotes": {
       "sourceOfTruthFile": "CHANGELOG.md",
@@ -110,7 +132,7 @@
       "generatorScript": ".agents-config/scripts/generate-release-notes.mjs",
       "npmScriptName": "release:notes",
       "npmScriptCommand": "node .agents-config/scripts/generate-release-notes.mjs",
-      "commandExample": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+      "commandExample": "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>] [--summary <text>] [--known-issue <text>] [--compat-note <text>]",
       "plainEnglishSummariesRequired": true,
       "requiredSections": [
         "## Release Summary",
@@ -190,7 +212,8 @@
       "frontendFeatureRoot": "frontend/features",
       "enforceFrontendFeatureCoverage": true,
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
       "enabled": true
     },
@@ -205,14 +228,14 @@
         "## Verification Workflow"
       ],
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
       "enabled": true
     },
     "sessionArtifacts": {
       "executionQueueFile": ".agents/EXECUTION_QUEUE.json",
       "sessionBriefJsonFile": ".agents/SESSION_BRIEF.json",
-      "continuityFile": ".agents/CONTINUITY.md",
       "archiveRoot": ".agents/archives",
       "archiveIndexFile": ".agents/EXECUTION_ARCHIVE_INDEX.json",
       "archiveShardBy": "feature_id",
@@ -404,21 +427,12 @@
       "stalePlanReferenceScanRoots": [
         ".agents/plans"
       ],
-      "repositoryIndexPreflight": {
-        "enabled": true,
-        "buildIfMissing": true,
-        "reindexBeforeVerify": true,
-        "verifyStrict": true,
-        "failureMode": "fail",
-        "closeoutVerifyIfPossible": true
-      },
       "sessionBriefRequiredFields": [
         "generated_at",
         "policy",
         "scope",
         "queue_file",
         "archive_index_file",
-        "index_readiness",
         "queue_read_contract",
         "queue_overview",
         "startup_attestation",
@@ -565,7 +579,10 @@
         "completeItemMissingCompletedAtIds",
         "completeItemMissingEvidenceIds"
       ],
-      "completionEvidenceVerificationPrefix": "verify:"
+      "completionEvidenceVerificationPrefix": "verify:",
+      "memoryFile": ".agents/MEMORY.md",
+      "memoryTopicsRoot": ".agents/memory",
+      "sessionLogFile": ".agents/SESSION_LOG.md"
     },
     "workspaceLayout": {
       "canonicalRepoRoot": ".",
@@ -580,8 +597,8 @@
     },
     "canonicalRules": {
       "file": ".agents-config/contracts/rules/canonical-ruleset.json",
-      "overrideSchemaFile": ".agents-config/agent-overrides/rule-overrides.schema.json",
-      "optionalOverrideFile": ".agents-config/agent-overrides/rule-overrides.json",
+      "overrideSchemaFile": ".agents-config/rule-overrides.schema.json",
+      "optionalOverrideFile": ".agents-config/rule-overrides.json",
       "verifyScript": ".agents-config/tools/rules/verify-canonical-ruleset.mjs",
       "npmVerifyScriptName": "rules:canonical:verify",
       "npmVerifyScriptCommand": "node .agents-config/tools/rules/verify-canonical-ruleset.mjs --check",
@@ -616,7 +633,6 @@
         "rule_policy_sync_required",
         "rule_continuity_required",
         "rule_post_compaction_rebootstrap",
-        "rule_repo_index_preflight_gate",
         "rule_context_index_drift_guard",
         "rule_canonical_ruleset_contract_required",
         "rule_local_rule_overrides_contract_required",
@@ -628,11 +644,8 @@
         "rule_tdd_default",
         "rule_coverage_default_100",
         "rule_scope_completeness_gate",
-        "rule_feature_index_required",
-        "rule_test_matrix_required",
         "rule_release_notes_template_required",
         "rule_release_notes_changelog_source_required",
-        "rule_logging_contract_required",
         "orch_hybrid_instruction_contract",
         "orch_scope_tightness",
         "orch_machine_payload_authoritative",
@@ -651,12 +664,29 @@
         "orch_concise_subagent_briefs",
         "orch_spec_refined_plan_verbosity",
         "orch_codex_model_default",
-        "orch_claude_model_default",
-        "rule_route_map_required",
-        "rule_domain_readmes_required",
-        "rule_jsdoc_coverage_required",
-        "rule_openapi_endpoint_docs_required"
-      ]
+        "orch_claude_model_default"
+      ],
+      "requiredIdsByProfile": {
+        "typescript": [
+          "rule_feature_index_required",
+          "rule_test_matrix_required",
+          "rule_route_map_required",
+          "rule_domain_readmes_required",
+          "rule_jsdoc_coverage_required",
+          "rule_logging_contract_required"
+        ],
+        "javascript": [
+          "rule_feature_index_required",
+          "rule_test_matrix_required",
+          "rule_route_map_required",
+          "rule_domain_readmes_required",
+          "rule_jsdoc_coverage_required",
+          "rule_logging_contract_required"
+        ],
+        "typescript-openapi": [
+          "rule_openapi_endpoint_docs_required"
+        ]
+      }
     },
     "orchestratorSubagent": {
       "machinePayloadRequiredFields": [
@@ -831,7 +861,8 @@
         "## Frontend API Route Handler Map"
       ],
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
       "enabled": true
     },
@@ -849,7 +880,8 @@
       "requiredSection": "## Start Here",
       "frontendFeatureRoot": "frontend/features",
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
       "enabled": true
     },
@@ -866,11 +898,12 @@
         "## Missing Exported Symbols (Top 250)"
       ],
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
       "enabled": true,
-      "minimumTotalCoveragePercent": 36.1,
-      "maximumMissingExportedSymbols": 432
+      "minimumTotalCoveragePercent": 100,
+      "maximumMissingExportedSymbols": 0
     },
     "openapiCoverage": {
       "file": ".agents-config/docs/OPENAPI_COVERAGE.md",
@@ -888,12 +921,12 @@
         "## Missing OpenAPI Endpoint Docs"
       ],
       "profiles": [
-        "node-web"
+        "typescript-openapi"
       ],
       "enabled": true,
-      "minimumTotalCoveragePercent": 90.3,
-      "maximumMissingEndpoints": 34,
-      "maximumUndocumentableEndpoints": 65
+      "minimumTotalCoveragePercent": 100,
+      "maximumMissingEndpoints": 0,
+      "maximumUndocumentableEndpoints": 0
     },
     "loggingStandards": {
       "standardsFile": ".agents-config/docs/LOGGING_STANDARDS.md",
@@ -923,7 +956,8 @@
         "npm run logging:compliance:verify"
       ],
       "profiles": [
-        "node-web"
+        "typescript",
+        "javascript"
       ],
       "enabled": true
     },
@@ -943,11 +977,16 @@
     "profiles": {
       "availableProfiles": [
         "base",
-        "node-web"
+        "typescript",
+        "typescript-openapi",
+        "javascript",
+        "python"
       ],
       "activeProfiles": [
         "base",
-        "node-web"
+        "typescript",
+        "typescript-openapi",
+        "python"
       ]
     },
     "managedFilesCanonical": {
@@ -957,17 +996,23 @@
       "defaultAuthority": "template",
       "allowedAuthorities": [
         "template",
-        "project"
+        "project",
+        "structured"
       ],
       "overrideMode": "explicit_allowlist",
       "overrideReservedPaths": [
-        "rule-overrides.schema.json",
-        "rule-overrides.json",
-        "README.md",
         ".gitkeep"
       ],
       "entryAllowOverrideField": "allow_override",
       "entryAuthorityField": "authority",
+      "entryStructureContractField": "structure_contract",
+      "markdownPlaceholderPatternsField": "placeholder_patterns",
+      "markdownPlaceholderFailureModeField": "placeholder_failure_mode",
+      "allowOverrideTemplateAuthorityOnly": true,
+      "overrideModeExclusivity": "single_mode_per_managed_path",
+      "deprecatedOverrideSuffixes": [
+        ".replace"
+      ],
       "checkCommand": "npm run agent:managed -- --mode check",
       "fixCommand": "npm run agent:managed -- --fix --recheck",
       "contextIndexSection": "managedFilesCanonical",
@@ -995,21 +1040,46 @@
           "## Canonical Sources and Precedence",
           "Machine-readable canonical policy: `.agents-config/policies/agent-governance.json`",
           "Canonical rule catalog: `.agents-config/contracts/rules/canonical-ruleset.json`",
-          "Local rule override schema: `.agents-config/agent-overrides/rule-overrides.schema.json`",
+          "Local rule override schema: `.agents-config/rule-overrides.schema.json`",
           "## Session Context Artifacts",
           "Shared queue authority for orchestrator and subagents: `.agents/EXECUTION_QUEUE.json` (single source of truth)",
+          "Memory ledger: `.agents/MEMORY.md`",
+          "Session implementation log: `.agents/SESSION_LOG.md`",
+          "Submemory convention: each memory directory uses a short ID (`mNNN`) and stores freeform content in `_submemory.md`.",
           "## Orchestrator/Subagent Contract Pointer",
           "## Policy-as-Code Enforcement",
           "npm run rules:canonical:verify",
+          "Profile-scoped governance artifacts and command requirements are enforced from active policy profiles.",
+          "must delegate discovery and implementation work to subagents whenever possible",
+          "Subagent assignments must be strict and atomic with clear objective, context, acceptance criteria, and verification expectations.",
+          "Release/close subagents immediately once they are complete or no longer actively executing delegated work.",
+          "## Quick Reference (Startup)",
+          "## Full Contract Reference"
+        ]
+      },
+      {
+        "file": "AGENTS.md",
+        "profiles": [
+          "typescript",
+          "javascript"
+        ],
+        "snippets": [
           ".agents-config/docs/FEATURE_INDEX.json",
           ".agents-config/docs/TEST_MATRIX.md",
           ".agents-config/docs/ROUTE_MAP.md",
           ".agents-config/docs/JSDOC_COVERAGE.md",
-          ".agents-config/docs/OPENAPI_COVERAGE.md",
           ".agents-config/docs/LOGGING_STANDARDS.md",
-          "must delegate discovery and implementation work to subagents whenever possible",
-          "Subagent assignments must be strict and atomic with clear objective, context, acceptance criteria, and verification expectations.",
-          "Release/close subagents immediately once they are complete or no longer actively executing delegated work."
+          "Profile-scoped for `typescript` and `javascript`: `npm run feature-index:verify`, `npm run route-map:verify`, `npm run domain-readmes:verify`, `npm run jsdoc-coverage:verify`, and `npm run logging:compliance:verify`."
+        ]
+      },
+      {
+        "file": "AGENTS.md",
+        "profiles": [
+          "typescript-openapi"
+        ],
+        "snippets": [
+          ".agents-config/docs/OPENAPI_COVERAGE.md",
+          "Profile-scoped for `typescript-openapi`: `npm run openapi-coverage:verify`."
         ]
       },
       {
@@ -1021,18 +1091,45 @@
           "`rule_canonical_ruleset_contract_required`",
           "`rule_canonical_agents_root`",
           "`rule_worktree_root_required`",
-          "`rule_logging_contract_required`",
-          "`rule_openapi_endpoint_docs_required`",
           "### Accuracy, Recency, and Sourcing (Required)",
           "### Context7 MCP and Web Search Policy",
           "### Container-First Policy (Required)",
           "### Session Artifact Contracts (Required)",
-          "### CONTINUITY.md Contract (Required)",
+          "### MEMORY.md and SESSION_LOG.md Contracts (Required)",
+          "curated semantic memory",
+          "Route implementation traces to `.agents/SESSION_LOG.md`, not `.agents/MEMORY.md`.",
+          "- `- mNNN | .agents/memory/mNNN/_submemory.md | One sentence description.`",
           "### Post-Compaction Startup Checklist (Required)",
           "### Definition of Done",
           "strict atomic subagent tasks with explicit objective, inputs, acceptance criteria, and verification",
           "Idle or completed subagents must be released/closed immediately",
-          "Delegate discovery and implementation work to subagents whenever possible"
+          "Delegate discovery and implementation work to subagents whenever possible",
+          "Profile-scoped rule IDs (enforced only when the profile is active):",
+          "`python`:"
+        ]
+      },
+      {
+        "file": ".agents-config/docs/AGENT_RULES.md",
+        "profiles": [
+          "typescript",
+          "javascript"
+        ],
+        "snippets": [
+          "`rule_feature_index_required`",
+          "`rule_test_matrix_required`",
+          "`rule_route_map_required`",
+          "`rule_domain_readmes_required`",
+          "`rule_jsdoc_coverage_required`",
+          "`rule_logging_contract_required`"
+        ]
+      },
+      {
+        "file": ".agents-config/docs/AGENT_RULES.md",
+        "profiles": [
+          "typescript-openapi"
+        ],
+        "snippets": [
+          "`rule_openapi_endpoint_docs_required`"
         ]
       },
       {
@@ -1046,14 +1143,12 @@
           "## Key Conventions",
           "## Reuse and Consolidation Atlas",
           "## Fork Documentation Maintenance",
-          "## Full-Stack Delivery Gates",
+          "## Delivery Gates",
           "## Database",
-          "## Streaming Integration",
           "## Testing",
           "## Local Testing Bootstrap",
           "## Common Tasks",
-          "Treat `CHANGELOG.md` as the release-notes source of truth.",
-          "Keep `.agents-config/docs/FEATURE_INDEX.json`, `.agents-config/docs/TEST_MATRIX.md`, `.agents-config/docs/ROUTE_MAP.md`, `.agents-config/docs/JSDOC_COVERAGE.md`, `.agents-config/docs/OPENAPI_COVERAGE.md`, and `.agents-config/docs/LOGGING_STANDARDS.md` current."
+          "Treat `CHANGELOG.md` as the release-notes source of truth."
         ]
       },
       {
@@ -1065,23 +1160,6 @@
           "Helm chart reference: `soundspan/soundspan`",
           "helm repo add soundspan https://soundspan.github.io/soundspan",
           "helm upgrade --install soundspan soundspan/soundspan --version {{VERSION}}"
-        ]
-      },
-      {
-        "file": ".agents-config/docs/README.md",
-        "profiles": [
-          "node-web"
-        ],
-        "snippets": [
-          "[`FEATURE_INDEX.json`](FEATURE_INDEX.json)",
-          "[`TEST_MATRIX.md`](TEST_MATRIX.md)",
-          "[`ROUTE_MAP.md`](ROUTE_MAP.md)",
-          "[`JSDOC_COVERAGE.md`](JSDOC_COVERAGE.md)",
-          "[`OPENAPI_COVERAGE.md`](OPENAPI_COVERAGE.md)",
-          "[`LOGGING_STANDARDS.md`](LOGGING_STANDARDS.md)",
-          "[`../backend/src/routes/README.md`](../backend/src/routes/README.md)",
-          "[`../backend/src/services/README.md`](../backend/src/services/README.md)",
-          "[`../frontend/features/README.md`](../frontend/features/README.md)"
         ]
       },
       {
@@ -1109,22 +1187,39 @@
           "\"agent:queue:close-feature\"",
           "\"rules:canonical:verify\"",
           "\"rules:canonical:sync\"",
-          "\"feature-index:verify\"",
           "\"release:prepare\"",
           "\"release:verify\"",
           "\"release:notes\"",
+          "\"policy:check:ci\"",
+          "\"release:contract:check\""
+        ]
+      },
+      {
+        "file": "package.json",
+        "profiles": [
+          "typescript",
+          "javascript"
+        ],
+        "snippets": [
+          "\"feature-index:verify\"",
           "\"route-map:generate\"",
           "\"route-map:verify\"",
           "\"domain-readmes:generate\"",
           "\"domain-readmes:verify\"",
           "\"jsdoc-coverage:generate\"",
           "\"jsdoc-coverage:verify\"",
-          "\"openapi-coverage:generate\"",
-          "\"openapi-coverage:verify\"",
           "\"logging:compliance:generate\"",
-          "\"logging:compliance:verify\"",
-          "\"policy:check:ci\"",
-          "\"release:contract:check\""
+          "\"logging:compliance:verify\""
+        ]
+      },
+      {
+        "file": "package.json",
+        "profiles": [
+          "typescript-openapi"
+        ],
+        "snippets": [
+          "\"openapi-coverage:generate\"",
+          "\"openapi-coverage:verify\""
         ]
       }
     ],
@@ -1132,6 +1227,8 @@
       {
         "file": "AGENTS.md",
         "sections": [
+          "## Quick Reference (Startup)",
+          "## Full Contract Reference",
           "## Required Startup Order",
           "## Canonical Sources and Precedence",
           "## Session Context Artifacts",
@@ -1150,7 +1247,7 @@
           "### CLI Worktree Parallelism (Required)",
           "### Orchestrator/Subagent Instruction Contract (Required)",
           "### Session Artifact Contracts (Required)",
-          "### CONTINUITY.md Contract (Required)",
+          "### MEMORY.md and SESSION_LOG.md Contracts (Required)",
           "### Post-Compaction Startup Checklist (Required)",
           "### Definition of Done"
         ]
@@ -1165,9 +1262,8 @@
           "## Key Conventions",
           "## Reuse and Consolidation Atlas",
           "## Fork Documentation Maintenance",
-          "## Full-Stack Delivery Gates",
+          "## Delivery Gates",
           "## Database",
-          "## Streaming Integration",
           "## Testing",
           "## Local Testing Bootstrap",
           "## Common Tasks"
@@ -1191,7 +1287,8 @@
       {
         "file": ".agents-config/docs/TEST_MATRIX.md",
         "profiles": [
-          "node-web"
+          "typescript",
+          "javascript"
         ],
         "sections": [
           "# Test Matrix",
@@ -1205,7 +1302,8 @@
       {
         "file": ".agents-config/docs/JSDOC_COVERAGE.md",
         "profiles": [
-          "node-web"
+          "typescript",
+          "javascript"
         ],
         "sections": [
           "# JSDoc Coverage Baseline",
@@ -1216,7 +1314,7 @@
       {
         "file": ".agents-config/docs/OPENAPI_COVERAGE.md",
         "profiles": [
-          "node-web"
+          "typescript-openapi"
         ],
         "sections": [
           "# OpenAPI Endpoint Coverage Baseline",
@@ -1225,20 +1323,27 @@
         ]
       },
       {
-        "file": ".agents/CONTINUITY.md",
+        "file": ".agents/MEMORY.md",
         "optional": false,
         "sections": [
-          "## [PLANS]",
-          "## [DECISIONS]",
-          "## [PROGRESS]",
-          "## [DISCOVERIES]",
-          "## [OUTCOMES]"
+          "## User Directives",
+          "## Architecture Decisions",
+          "## Known Gotchas",
+          "## Submemory Index"
+        ]
+      },
+      {
+        "file": ".agents/SESSION_LOG.md",
+        "optional": false,
+        "sections": [
+          "## [ENTRIES]"
         ]
       },
       {
         "file": ".agents-config/docs/ROUTE_MAP.md",
         "profiles": [
-          "node-web"
+          "typescript",
+          "javascript"
         ],
         "sections": [
           "# Route Map",
@@ -1250,7 +1355,8 @@
       {
         "file": "backend/src/routes/README.md",
         "profiles": [
-          "node-web"
+          "typescript",
+          "javascript"
         ],
         "sections": [
           "# Backend Routes",
@@ -1262,7 +1368,8 @@
       {
         "file": "backend/src/services/README.md",
         "profiles": [
-          "node-web"
+          "typescript",
+          "javascript"
         ],
         "sections": [
           "# Backend Services",
@@ -1274,7 +1381,8 @@
       {
         "file": "frontend/features/README.md",
         "profiles": [
-          "node-web"
+          "typescript",
+          "javascript"
         ],
         "sections": [
           "# Frontend Features",
@@ -1290,7 +1398,7 @@
         "sequence": [
           "1. Re-read `AGENTS.md`, `.agents-config/docs/AGENT_RULES.md`, `.agents-config/docs/CONTEXT_INDEX.json`, and `.agents-config/docs/AGENT_CONTEXT.md`.",
           "2. Confirm branch + workspace state (`git rev-parse --abbrev-ref HEAD`, `git status --short`).",
-          "3. Load `.agents/EXECUTION_QUEUE.json` and `.agents/CONTINUITY.md`; both are required startup artifacts.",
+          "3. Load `.agents/EXECUTION_QUEUE.json` and `.agents/MEMORY.md`; both are required startup artifacts.",
           "4. Run `npm run agent:preflight` to regenerate `.agents/SESSION_BRIEF.json`.",
           "5. Re-confirm active user scope, exclusions, and acceptance criteria from the latest user instruction.",
           "6. Publish a short resume plan naming the exact next atomic task before editing code."
@@ -1312,17 +1420,24 @@
         ]
       }
     ],
-    "continuityEntryFormat": {
-      "file": ".agents/CONTINUITY.md",
+    "sessionLogEntryFormat": {
+      "file": ".agents/SESSION_LOG.md",
       "optional": false,
       "sectionHeaders": [
-        "## [PLANS]",
-        "## [DECISIONS]",
-        "## [PROGRESS]",
-        "## [DISCOVERIES]",
-        "## [OUTCOMES]"
+        "## [ENTRIES]"
       ],
       "entryRegex": "^- \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?Z \\[(USER|CODE|TOOL|ASSUMPTION|MILESTONE)\\] .+"
+    },
+    "memoryIndexContract": {
+      "file": ".agents/MEMORY.md",
+      "optional": false,
+      "sectionHeader": "## Submemory Index",
+      "noneEntry": "- None recorded.",
+      "entryRegex": "^- (?<id>m[0-9]{3}) \\| (?<path>\\.agents\\/memory\\/m[0-9]{3}\\/_submemory\\.md) \\| (?<description>[^\\r\\n]+[.!?])$",
+      "directoryRoot": ".agents/memory",
+      "directoryNameRegex": "^m[0-9]{3}$",
+      "submemoryFileName": "_submemory.md",
+      "descriptionMinLength": 12
     },
     "disallowedTrackedPathPrefixes": [
       {
@@ -1350,6 +1465,22 @@
         "pattern": "gh[pousr]_[A-Za-z0-9]{30,255}",
         "message": "Potential GitHub token detected in tracked content; remove secrets from source control.",
         "excludePaths": []
+      }
+    ],
+    "placeholderMarkers": [
+      {
+        "file": ".agents-config/docs/AGENT_CONTEXT.md",
+        "patterns": [
+          "Replace this section",
+          "<license>",
+          "<org>/<repo>"
+        ],
+        "sectionHeadingRegex": "^##\\s+.+$",
+        "failureMode": "warn",
+        "message": "AGENT_CONTEXT.md still contains unresolved template placeholder text. Replace placeholders with project-specific context.",
+        "skipWhenBootstrapFileIs": [
+          "AGENTS.md"
+        ]
       }
     ]
   }

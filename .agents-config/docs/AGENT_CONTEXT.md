@@ -352,7 +352,7 @@ For this repository, documentation updates are part of the definition of done fo
 - Legacy root context files (`*_PLAN.md`, `LLM_SESSION_HANDOFF.md`, `PROMPT_HISTORY.md`) should be migrated into feature directories under `.agents/plans/current/` or `.agents/plans/archived/` when encountered.
 - When adding/changing agent process expectations, update `AGENTS.md`, `.agents-config/docs/AGENT_RULES.md`, `.agents-config/policies/agent-governance.json`, and `.agents-config/scripts/enforce-agent-policies.mjs` in the same change set.
 
-## Full-Stack Delivery Gates
+## Delivery Gates
 
 For any feature or fix that touches API contracts, auth flows, routing/proxying, external clients, or service-to-service communication, treat implementation as full-stack by default.
 

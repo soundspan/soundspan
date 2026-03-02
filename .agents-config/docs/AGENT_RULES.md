@@ -24,36 +24,49 @@ These IDs are stable cross-references for enforceable behavior and map to policy
 - `rule_scope_tight_no_overbroad_refactor`: Keep changes narrowly scoped unless the user explicitly requests broad refactors.
 - `rule_hybrid_machine_human_contract`: Use machine-readable contracts as authority with concise human nuance addenda when needed.
 - `rule_policy_sync_required`: When process expectations change, update policy + enforcement + human docs together.
-- `rule_continuity_required`: Read and maintain `.agents/CONTINUITY.md` as canonical continuity context.
+- `rule_continuity_required`: Use `.agents/MEMORY.md` as the canonical memory reference point and submemory index, and route timestamped implementation traces to `.agents/SESSION_LOG.md`.
 - `rule_post_compaction_rebootstrap`: Treat compaction recovery as full startup and run preflight.
-- `rule_repo_index_preflight_gate`: Require preflight index readiness checks (always re-index, then strict verify) before implementation starts.
 - `rule_context_index_drift_guard`: Keep `.agents-config/docs/CONTEXT_INDEX.json` synchronized with policy/documentation contracts and fail checks on drift.
 - `rule_canonical_ruleset_contract_required`: Maintain canonical rule IDs/statements in `.agents-config/contracts/rules/canonical-ruleset.json` with hash lineage tied to policy and rules docs.
-- `rule_local_rule_overrides_contract_required`: Allow local-only override IDs only through `.agents-config/agent-overrides/rule-overrides.json`, validated against `.agents-config/agent-overrides/rule-overrides.schema.json`.
+- `rule_local_rule_overrides_contract_required`: Allow local-only override IDs only through `.agents-config/rule-overrides.json`, validated against `.agents-config/rule-overrides.schema.json`.
 - `rule_managed_files_canonical_contract_required`: Keep managed workflow manifests (`.agents-config/agent-managed.json` and `.agents-config/tools/bootstrap/managed-files.template.json`) canonical with explicit `canonical_contract` defaults and authority modes.
-- `rule_managed_files_known_overrides_only`: Permit managed-file override payloads only for explicitly allowlisted entries (`allow_override=true`) and fail unknown `.agents-config/agent-overrides/**` payload files.
+- `rule_managed_files_known_overrides_only`: Permit managed-file override payloads only for explicitly allowlisted template-authority entries (`allow_override=true`), enforce one override mode per managed path, and fail unknown/non-allowlisted payload files (adjacent `.override`/`.append`) including deprecated `.replace` naming.
 - `rule_canonical_agents_root`: Treat `.agents` as the canonical project-local agent-context path; bootstrap defaults to external workfiles mode where `.agents` symlinks to `<agents-workfiles-path>/<project-id>` (default path `../agents-workfiles`), and local `.agents` mode is explicit via `--agents-mode local`.
 - `rule_worktree_root_required`: Keep all non-primary Git worktrees under `../<repo-name>.worktrees`.
 - `rule_agents_semantic_merge_required`: `.agents/**` is shared multi-session state; every `.agents/**` edit must be semantically merged against latest on-disk state.
 - `rule_tdd_default`: Prefer true TDD and document deviations when strict TDD is impractical.
 - `rule_coverage_default_100`: Treat 100% coverage as default bar unless user-approved exception exists.
 - `rule_scope_completeness_gate`: Explicitly map outcomes to all in-scope user requests before closeout.
+
+Profile-scoped rule IDs (enforced only when the profile is active):
+
+`typescript`/`javascript`:
 - `rule_feature_index_required`: Maintain `.agents-config/docs/FEATURE_INDEX.json` as the canonical machine-readable feature map.
 - `rule_test_matrix_required`: Maintain `.agents-config/docs/TEST_MATRIX.md` as the canonical targeted test-command matrix.
 - `rule_route_map_required`: Maintain `.agents-config/docs/ROUTE_MAP.md` as the canonical generated backend/frontend route map.
 - `rule_domain_readmes_required`: Maintain per-domain start-here READMEs in `backend/src/routes`, `backend/src/services`, and `frontend/features/*`.
 - `rule_jsdoc_coverage_required`: Maintain `.agents-config/docs/JSDOC_COVERAGE.md` as the generated exported-symbol documentation drift tracker.
-- `rule_openapi_endpoint_docs_required`: Maintain `.agents-config/docs/OPENAPI_COVERAGE.md` as the generated OpenAPI endpoint/spec coverage drift tracker.
 - `rule_logging_contract_required`: Maintain `.agents-config/docs/LOGGING_STANDARDS.md` and enforce logging compliance checks across frontend/backend/python runtime code.
+
+`typescript-openapi`:
+- `rule_openapi_endpoint_docs_required`: Maintain `.agents-config/docs/OPENAPI_COVERAGE.md` as the generated OpenAPI endpoint/spec coverage drift tracker.
+
+`python`:
+- No additional profile-specific rule IDs are currently required beyond base contracts.
+
+Global rule IDs (all profiles):
+
 - `rule_release_notes_template_required`: Enforce canonical release-notes template + generator workflow, section order, and plain-English non-jargon summaries through policy checks.
 - `rule_release_notes_changelog_source_required`: Treat `CHANGELOG.md` as release-notes source of truth and rotate `Unreleased` during `release:prepare`.
 - `orch_single_orchestrator_authority`: Enforce exactly one orchestrator context owner per session; subagents do not orchestrate.
-- `orch_operator_subagent_default`: Delegate discovery and implementation work to subagents whenever possible.
-- `orch_subagent_delegation_required_when_possible`: Subagent delegation is mandatory whenever delegation is feasible.
+- `orch_operator_subagent_default`: Delegate discovery and implementation work to subagents whenever possible; orchestrators retain decision authority and coordination only.
+- `orch_subagent_delegation_required_when_possible`: Subagent delegation is mandatory whenever delegation is feasible, including both investigation/discovery and implementation execution.
 - `orch_release_idle_subagents_required`: Idle subagents must be released once they are no longer actively executing work.
 - `orch_concise_subagent_briefs`: Enforce concise subagent payload/addendum shape with explicit verbosity budgets.
 - `orch_spec_refined_plan_verbosity`: Enforce concise spec outline/refined spec/implementation-plan verbosity ladder.
-- `orch_claude_model_default`: Claude model routing is role/risk-based and may delegate to Codex subagents where configured.
+- `orch_claude_model_default`: Claude model routing is role/risk-based: orchestrator uses `claude-opus-4-6`, subagents use `claude-opus-4-6` (or `claude-sonnet-4-6` for lighter tasks), and `claude-haiku-4-5` is reserved for low-risk loops. Claude orchestrators may delegate to Codex subagents via `codex exec`.
+
+Framework-specific rule IDs are profile-scoped in policy contracts.
 
 ## Global Operating Agreements (All LLMs)
 
@@ -104,30 +117,32 @@ These rules are cross-agent defaults for this workspace and apply unless the use
 - Prepare releases with `npm run release:prepare -- --version <X.Y.Z>` before generating release notes.
 - `release:prepare` must promote `## [Unreleased]` into `## [<version>] - <date>` and recreate a fresh empty `## [Unreleased]` scaffold with `### Added`, `### Changed`, and `### Fixed`.
 - Treat `.agents-config/docs/RELEASE_NOTES_TEMPLATE.md` as the canonical release-notes structure.
-- Generate release notes with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`.
+- Generate release notes with `npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>] [--summary <text>] [--known-issue <text>] [--compat-note <text>]`.
+- `release:notes` validates `--version` as semver without a `v` prefix and requires `--from`/`--to` to resolve as commit refs.
+- `release:notes` resolves repo web URL from `git remote.origin.url`, then falls back to `.agents-config/config/project-tooling.json.releaseNotes.defaultRepoWebUrl` when needed.
 - `release:notes` must read Fixed/Added/Changed/Admin/Breaking bullets from the matching `CHANGELOG.md` version section.
 - Keep section order fixed: `Release Summary`, `Fixed`, `Added`, `Changed`, `Admin/Operations`, `Deployment and Distribution`, `Breaking Changes`, `Known Issues`, `Compatibility and Migration`, `Full Changelog`.
 - Summarize release-note items in plain English for operators/users; do not copy raw commit-jargon wording as release-note bullets.
 - Use exact Helm release references in release notes:
-  - repository URL: `https://soundspan.github.io/soundspan`
+  - repository URL: `https://example.github.io/project`
   - chart name: `project`
-  - chart reference: `soundspan/soundspan`
+  - chart reference: `project/project`
 
 ### Feature and Test Discoverability (Required)
 
-- Treat `.agents-config/docs/FEATURE_INDEX.json` as the canonical machine-readable feature map and ownership/findability index.
-- Treat `.agents-config/docs/TEST_MATRIX.md` as the canonical map from feature domains to targeted test commands.
-- Treat `.agents-config/docs/ROUTE_MAP.md` as the canonical generated map for backend endpoints and frontend routes.
-- Keep `.agents-config/docs/JSDOC_COVERAGE.md` current via `npm run jsdoc-coverage:verify` whenever exported-symbol surface changes.
-- Keep `.agents-config/docs/OPENAPI_COVERAGE.md` current via `npm run openapi-coverage:verify` whenever OpenAPI spec or route surface changes.
-- Regenerate route map artifacts with `npm run route-map:generate` whenever backend route handlers, route mounts, or frontend app routes change.
-- Maintain per-domain start-here READMEs in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md`.
-- Whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted entry in `.agents-config/docs/FEATURE_INDEX.json`.
-- Whenever test entrypoints or reliable targeted commands change, update `.agents-config/docs/TEST_MATRIX.md` in the same change set.
+- For `typescript` and `javascript` profiles, treat `.agents-config/docs/FEATURE_INDEX.json` as the canonical machine-readable feature map and ownership/findability index.
+- For `typescript` and `javascript` profiles, treat `.agents-config/docs/TEST_MATRIX.md` as the canonical map from feature domains to targeted test commands.
+- For `typescript` and `javascript` profiles, treat `.agents-config/docs/ROUTE_MAP.md` as the canonical generated map for backend endpoints and frontend routes.
+- For `typescript` and `javascript` profiles, keep `.agents-config/docs/JSDOC_COVERAGE.md` current via `npm run jsdoc-coverage:verify` whenever exported-symbol surface changes.
+- For `typescript-openapi` profile, keep `.agents-config/docs/OPENAPI_COVERAGE.md` current via `npm run openapi-coverage:verify` whenever OpenAPI spec or route surface changes.
+- For `typescript` and `javascript` profiles, regenerate route map artifacts with `npm run route-map:generate` whenever backend route handlers, route mounts, or frontend app routes change.
+- For `typescript` and `javascript` profiles, maintain per-domain start-here READMEs in `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md`.
+- For `typescript` and `javascript` profiles, whenever a feature is introduced, changed significantly, or removed, update or explicitly verify the impacted entry in `.agents-config/docs/FEATURE_INDEX.json`.
+- For `typescript` and `javascript` profiles, whenever test entrypoints or reliable targeted commands change, update `.agents-config/docs/TEST_MATRIX.md` in the same change set.
 
 ### Logging Standards Contract (Required)
 
-- Treat `.agents-config/docs/LOGGING_STANDARDS.md` as the canonical logging policy for frontend, backend, and Python sidecars.
+- For `typescript` and `javascript` profiles, treat `.agents-config/docs/LOGGING_STANDARDS.md` as the canonical logging policy for frontend, backend, and Python sidecars.
 - Everything in project runtime code should be logged appropriately with shared logging helpers; do not leave silent failure paths or raw logging drift.
 - Use shared logging helpers by default:
   - frontend: `frontend/lib/logger.ts`
@@ -137,6 +152,8 @@ These rules are cross-agent defaults for this workspace and apply unless the use
 - Enforce raw logging drift checks with:
   - `npm run logging:compliance:verify` (strict)
   - `npm run logging:compliance:generate` (baseline refresh after intentional migrations)
+- Logging compliance verification scans tracked files from `git ls-files`, excludes test/script/helper logger paths, and supports inline allow markers (`logging-allow: raw`) on the same or previous line for intentional exceptions.
+- Logging baseline metadata identity is project-owned via `.agents-config/config/project-tooling.json.loggingCompliance.baselineMetadataId`.
 
 ### Container-First Policy (Required)
 
@@ -167,7 +184,7 @@ At task start, explicitly determine:
 ### CLI Worktree Parallelism (Required)
 
 - When operating in an agent CLI (for example Codex CLI or Claude Code CLI), prefer Git worktrees for non-trivial parallelizable tasks instead of stacking unrelated edits in one working tree.
-- For non-trivial work, prefer operator/subagent execution and parallel agents/subagents for independent task slices when available.
+- Whenever delegation is feasible, prefer operator/subagent execution and parallel agents/subagents for independent task slices when available.
 - Bootstrap defaults to external workfiles mode: `.agents` is a symlink to `<agents-workfiles-path>/<project-id>` (default path `../agents-workfiles`).
 - Local `.agents` directory mode is allowed only when bootstrap is explicitly set to `--agents-mode local`.
 - Treat `.agents/**` as shared multi-writer state; reconcile concurrent edits using semantic merges instead of blind overwrite.
@@ -179,9 +196,12 @@ At task start, explicitly determine:
 
 - Treat `.agents-config/agent-managed.json` and `.agents-config/tools/bootstrap/managed-files.template.json` as canonical machine-readable workflow surface declarations.
 - Keep `canonical_contract.default_authority` as `template` and explicitly declare any non-template behavior using the per-entry `authority` field.
-- Override payload files live under `.agents-config/agent-overrides/<managed-path>` and are valid only when the managed entry sets `allow_override=true`.
-- Bootstrap should seed allowlisted override payloads for rewritten files only when local content diverges from template source.
-- Unknown or non-allowlisted `.agents-config/agent-overrides/**` payload files must fail `npm run agent:managed -- --mode check`.
+- Override payload files are adjacent to managed files by default (`<managed-file>.override.<ext>` for full replacement, `<managed-file>.append.<ext>` for additive merge) and are valid only when the managed entry sets `allow_override=true` on a template-authority entry.
+- Bootstrap must not auto-seed managed override payloads; overrides are opt-in local artifacts (`.override`/`.append`) when local divergence is intentional.
+- Do not keep both override modes for one managed path (`.override` and `.append` simultaneously).
+- Unknown or non-allowlisted override payload files (adjacent `.override`/`.append`) must fail `npm run agent:managed -- --mode check`; deprecated `.replace` naming is rejected.
+- Structured markdown contracts can declare `placeholder_patterns` with `placeholder_failure_mode` (`warn` or `fail`) to detect unfilled template placeholders in required sections.
+- Structured JSON contracts can declare `forbidden_paths` so managed sync removes deprecated machine-only keys while keeping required project-local structure intact.
 
 ### Orchestrator/Subagent Instruction Contract (Required)
 
@@ -213,8 +233,8 @@ Machine vs human guidance split for orchestration:
 - Machine-readable payload/config drives execution and validation.
 - Human-readable addendum captures nuance, rationale, and caveats not encoded in schema fields.
 - One orchestrator agent owns cross-task coordination/context in a session; subagents execute delegated atomic tasks and do not recursively orchestrate.
-- Delegate discovery and implementation work to subagents whenever possible.
-- Subagent assignments must be strict atomic subagent tasks with explicit objective, inputs, acceptance criteria, and verification.
+- Operator/subagent delegation is mandatory whenever possible for both discovery and implementation work; direct single-agent execution is only for trivial coordination/meta steps or explicit infeasibility cases.
+- Orchestrators make complex decisions, then delegate investigation and implementation as strict atomic subagent tasks with explicit objective, inputs, acceptance criteria, and verification.
 - Idle or completed subagents must be released/closed immediately once they are no longer actively executing delegated work.
 - Subagent payload brevity is mandatory: one concrete objective, bounded context input, bounded completion summary.
 - Spec outline, refined spec, and detailed implementation plan sections must follow policy-defined verbosity budgets.
@@ -222,6 +242,11 @@ Machine vs human guidance split for orchestration:
   - orchestrator: `gpt-5.3-codex` with `xhigh` reasoning effort,
   - subagents: `gpt-5.3-codex` with `high` reasoning effort,
   - low-risk loops only (`single-file edits`, `grep/triage`, `draft rewrites`): `gpt-5.3-codex-spark`.
+- Claude model routing defaults are role/risk specific:
+  - orchestrator: `claude-opus-4-6`,
+  - subagents: `claude-opus-4-6` (or `claude-sonnet-4-6` for lighter tasks),
+  - low-risk loops only: `claude-haiku-4-5`.
+- Claude orchestrators may delegate to Codex subagents via `codex exec` (preferred) or interactive `codex` session.
 - Default CLI routing is policy-defined: Codex agents via `codex` CLI and Claude agents via `claude` CLI unless user-overridden.
 - Spark low-risk loops require explicit verification commands in the delegated payload/result workflow.
 
@@ -232,40 +257,49 @@ Critical agent/process rules are enforced by executable checks instead of prose-
 - Policy manifest (canonical enforceable contracts + checks): `.agents-config/policies/agent-governance.json`
 - Enforcement runner: `.agents-config/scripts/enforce-agent-policies.mjs`
 - Local command: `node .agents-config/scripts/enforce-agent-policies.mjs`
+- CI-safe policy command: `npm run policy:check:ci`
 - Session preflight command: `npm run agent:preflight`
 - Canonical ruleset verify command: `npm run rules:canonical:verify`
 - Canonical ruleset sync command: `npm run rules:canonical:sync`
+- `.agents-config/contracts/rules/canonical-ruleset.json` is template-managed; when local profile/policy derivation diverges, `rules:canonical:sync` refreshes adjacent override payload `.agents-config/contracts/rules/canonical-ruleset.override.json`.
+- Full downstream sync/fix/verify command: `npm run agent:sync`
 - Managed workflow command (check): `npm run agent:managed -- --mode check`
 - Managed workflow command (fix + recheck): `npm run agent:managed -- --fix --recheck`
-- Managed workflow canonical contract source: `.agents-config/agent-managed.json` + `.agents-config/tools/bootstrap/managed-files.template.json` (`canonical_contract`, per-entry `allow_override`).
+- Use `agent:sync` when pulling template updates, refreshing profiles/scripts, or changing template refs.
+- Use `agent:managed -- --fix --recheck` only when manifest/template source settings are already correct and only managed drift needs repair.
+- Managed workflow canonical contract source: `.agents-config/agent-managed.json` + `.agents-config/tools/bootstrap/managed-files.template.json` (`canonical_contract`, per-entry `authority`, `allow_override`, and `structure_contract`).
 - Template-impact declaration gate: `npm run agent:template-impact:check -- --base-ref origin/<base-branch>`
 - Logging compliance command: `npm run logging:compliance:verify`
-- CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code` (runs before frontend lint/docker build checks)
+- OpenAPI coverage command: `npm run openapi-coverage:verify`
+- Release runtime contract command: `npm run release:contract:check`
+- CI gate: `.github/workflows/pr-checks.yml` job `policy-as-code` (policy + managed drift + template-impact + release-runtime checks)
 - CI template gate: meaningful workflow-path changes require `Template-Impact` PR metadata (`yes` + `Template-Ref`, or `none` + `Template-Impact-Reason`).
 
 When policy expectations change, update all relevant governance artifacts in the same change set:
 
-1. `AGENTS.md` (bootstrap contract)
+1. `.agents-config/templates/AGENTS.md` (bootstrap contract)
 2. `.agents-config/docs/AGENT_RULES.md` (human-readable rules contract)
 3. `.agents-config/docs/AGENT_CONTEXT.md` (human-readable context contract, when impacted)
 4. `.agents-config/docs/CONTEXT_INDEX.json` (machine-readable context map)
 5. `.agents-config/agent-managed.json` and `.agents-config/tools/bootstrap/managed-files.template.json` (managed workflow canonical contract + downstream seed)
-6. `.agents-config/docs/FEATURE_INDEX.json` (machine-readable feature map, when impacted)
-7. `.agents-config/docs/TEST_MATRIX.md` (targeted test command map, when impacted)
-8. `.agents-config/docs/ROUTE_MAP.md` (generated backend/frontend route map, when impacted)
-9. `.agents-config/docs/JSDOC_COVERAGE.md` (generated exported-symbol JSDoc coverage tracker, when impacted)
-10. `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md` (domain start-here guides, when impacted)
-11. `.agents-config/policies/agent-governance.json` (machine-readable source of truth)
-12. `.agents-config/scripts/enforce-agent-policies.mjs` (enforcement logic)
+6. `.agents-config/config/project-tooling.json` (project-owned tooling defaults consumed by template-managed scripts, when impacted)
+7. `.agents-config/docs/FEATURE_INDEX.json` (machine-readable feature map, when impacted)
+8. `.agents-config/docs/TEST_MATRIX.md` (targeted test command map, when impacted)
+9. `.agents-config/docs/ROUTE_MAP.md` (generated backend/frontend route map, when impacted)
+10. `.agents-config/docs/JSDOC_COVERAGE.md` (generated exported-symbol JSDoc coverage tracker, when impacted)
+11. `.agents-config/docs/OPENAPI_COVERAGE.md` (generated OpenAPI endpoint/spec coverage tracker, when impacted)
+12. `backend/src/routes/README.md`, `backend/src/services/README.md`, and `frontend/features/*/README.md` (domain start-here guides, when impacted)
+13. `.agents-config/policies/agent-governance.json` (machine-readable source of truth)
+14. `.agents-config/scripts/enforce-agent-policies.mjs` (enforcement logic)
 
 ## LLM Continuity and Execution Discipline
 
 ### Persistent Rules
 
-- If the user adds or changes a process rule, update `AGENTS.md` and `.agents-config/docs/AGENT_RULES.md` in the same change set and enforce it via policy-as-code (`.agents-config/policies/agent-governance.json` and `.agents-config/scripts/enforce-agent-policies.mjs`).
+- If the user adds or changes a process rule, update `.agents-config/templates/AGENTS.md` and `.agents-config/docs/AGENT_RULES.md` in the same change set and enforce it via policy-as-code (`.agents-config/policies/agent-governance.json` and `.agents-config/scripts/enforce-agent-policies.mjs`).
 - Work exhaustively with zero guesswork: if a required fact is unknown, explicitly look it up/verify it before proceeding.
 - Do not trim or skip relevant context; preserve complete context for correctness-critical work unless the user explicitly asks to narrow scope.
-- Record material findings/decisions in persistent context artifacts (`.agents/CONTINUITY.md`, `.agents/EXECUTION_QUEUE.json`, and plan files) to survive context compaction.
+- Record material findings/decisions in persistent context artifacts (`.agents/MEMORY.md`, `.agents/SESSION_LOG.md`, `.agents/EXECUTION_QUEUE.json`, and plan files) to survive context compaction.
 - Reuse shared abstractions by default; avoid duplicate logic when common helpers/hooks/services are available.
 - Keep changes small, readable, and scoped; avoid large refactors unless explicitly requested.
 - No fallback code and no dummy implementations; fail fast instead of masking broken paths.
@@ -347,7 +381,7 @@ When policy expectations change, update all relevant governance artifacts in the
 - Complete this checklist in order:
   1. Re-read `AGENTS.md`, `.agents-config/docs/AGENT_RULES.md`, `.agents-config/docs/CONTEXT_INDEX.json`, and `.agents-config/docs/AGENT_CONTEXT.md`.
   2. Confirm branch + workspace state (`git rev-parse --abbrev-ref HEAD`, `git status --short`).
-  3. Load `.agents/EXECUTION_QUEUE.json` and `.agents/CONTINUITY.md`; both are required startup artifacts.
+  3. Load `.agents/EXECUTION_QUEUE.json` and `.agents/MEMORY.md`; both are required startup artifacts.
   4. Run `npm run agent:preflight` to regenerate `.agents/SESSION_BRIEF.json`.
   5. Re-confirm active user scope, exclusions, and acceptance criteria from the latest user instruction.
   6. Publish a short resume plan naming the exact next atomic task before editing code.
@@ -411,23 +445,16 @@ When policy expectations change, update all relevant governance artifacts in the
   - when a feature/top-level queue enters `complete`, archive the feature snapshot and reset hot queue state from `complete`.
   - maintain `.agents/EXECUTION_ARCHIVE_INDEX.json` as lookup metadata for archived records.
   - do not read archive shards during normal startup; load archive files only for explicit historical/regression lookup.
-- Repository index readiness gate:
-  - `npm run agent:preflight` must check branch/worktree index readiness.
-  - `npm run agent:preflight` must re-index the active namespaced index before readiness verification.
-  - After re-indexing, preflight runs strict verify before implementation starts.
-  - If re-index or strict verify fails, treat it as a blocking failure unless policy explicitly sets warn mode.
-- End-of-task index verification:
-  - When feasible, run `npm run index:verify` before final handoff.
-  - If verify reports drift, run `npm run index:build` and re-run verify in the same session.
 - CONTEXT_INDEX drift guard:
-  - Keep `.agents-config/docs/CONTEXT_INDEX.json` synchronized with `AGENTS.md`, policy contracts, and command map entries.
+  - Keep `.agents-config/docs/CONTEXT_INDEX.json` synchronized with `.agents-config/templates/AGENTS.md`, policy contracts, and command map entries.
   - Policy checks must fail if `.agents-config/docs/CONTEXT_INDEX.json` paths/headings/commands drift from canonical contracts.
 - Idempotency contract:
   - `id` and `idempotency_key` must be stable and unique per item.
   - retries/restarts must update the same queue item identity rather than creating duplicate logical work.
 - Consolidation boundary:
   - `.agents/EXECUTION_QUEUE.json` is authoritative for atomic execution state.
-  - `.agents/CONTINUITY.md` records decisions/outcomes/history, not queue status.
+  - `.agents/MEMORY.md` records durable decisions/outcomes/history, not queue status.
+  - `.agents/SESSION_LOG.md` records implementation trace entries, not queue status.
 - `PLAN.json` files are machine-authoritative plan lifecycle and narrative-context records.
 - Optional `PLAN.md` files are legacy historical context and must not be treated as authoritative state.
 - Stale-link hygiene:
@@ -435,25 +462,28 @@ When policy expectations change, update all relevant governance artifacts in the
 - Treat `.agents/SESSION_BRIEF.json` as a required generated artifact from preflight, not a hand-authored policy source.
 - Validate `.agents/SESSION_BRIEF.json` schema and freshness; stale or missing briefs are CI/local failures until refreshed via preflight.
 
-### CONTINUITY.md Contract (Required)
+### MEMORY.md and SESSION_LOG.md Contracts (Required)
 
-Maintain one canonical continuity file for this workspace: `.agents/CONTINUITY.md`.
+Maintain one canonical memory file for this workspace: `.agents/MEMORY.md`.
+Maintain one canonical session trace file for this workspace: `.agents/SESSION_LOG.md`.
 
-- Read `.agents/CONTINUITY.md` at the start of every assistant turn before acting.
-- Treat `.agents/CONTINUITY.md` as canonical context after compaction; do not rely on prior chat/tool output unless reflected there.
-- Update it only when there is a meaningful delta in:
-  - `[PLANS]`
-  - `[DECISIONS]`
-  - `[PROGRESS]`
-  - `[DISCOVERIES]`
-  - `[OUTCOMES]`
-- Keep continuity entries factual only (no transcripts, no raw logs).
-- Every continuity entry must include:
-  - ISO timestamp (for example `2026-01-13T09:42Z`)
-  - provenance tag: `[USER]`, `[CODE]`, `[TOOL]`, or `[ASSUMPTION]`
-  - `UNCONFIRMED` label when uncertain (never guess)
-- If a fact changes, add a superseding entry; do not silently rewrite history.
-- Keep the file short and high-signal; compress older detail into `[MILESTONE]` bullets when it grows.
+- Read `.agents/MEMORY.md` at session start and after any context compaction before implementation.
+- Do not require re-reading `.agents/MEMORY.md` every turn when no compaction/reset occurred.
+- Treat `.agents/MEMORY.md` as canonical context after compaction; do not rely on prior chat/tool output unless reflected there.
+- `.agents/MEMORY.md` is curated semantic memory and the reference point for all memory artifacts, not an append-only transcript.
+- Keep `.agents/MEMORY.md` bounded and high-signal; edit/remove stale items instead of appending history forever.
+- Structure `.agents/MEMORY.md` with curated sections:
+  - `## User Directives`
+  - `## Architecture Decisions`
+  - `## Known Gotchas`
+  - `## Submemory Index`
+- `## Submemory Index` is the lookup table for memory directories so agents can find one memory without reading all memory files.
+- Submemory index entry format (one line per memory):
+  - `- mNNN | .agents/memory/mNNN/_submemory.md | One sentence description.`
+- Submemory directory naming is required to be short and consistent: `mNNN` (for example `m001`, `m014`).
+- Each submemory directory must contain `_submemory.md` as the canonical freeform memory file.
+- Route implementation traces to `.agents/SESSION_LOG.md`, not `.agents/MEMORY.md`.
+- Keep `.agents/SESSION_LOG.md` under `## [ENTRIES]` and append timestamp/provenance entries using policy-enforced format.
 
 ### Definition of Done
 
@@ -464,9 +494,8 @@ A task is done when all of the following are true:
   - build attempted when code changed,
   - linting run when code changed,
   - tests/typecheck run as applicable,
-  - `npm run index:verify` run when index-backed retrieval was used or index-governance artifacts changed (with rebuild + re-verify if drifted),
   - remaining warnings/errors are either fixed or explicitly listed as out-of-scope.
 - Documentation is updated for impacted areas.
 - Follow-ups are listed for intentionally deferred work.
-- `.agents/CONTINUITY.md` is updated when goal/state/decisions materially changed.
+- `.agents/MEMORY.md` is curated to reflect active directives/decisions/gotchas, and `.agents/SESSION_LOG.md` reflects implementation trace activity.
 - Scope-completeness check is reported against the user request, with no in-scope requested item left unaccounted for.

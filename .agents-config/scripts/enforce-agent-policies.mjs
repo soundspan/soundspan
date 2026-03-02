@@ -337,8 +337,124 @@ function checkRequiredSequenceSnippets(config) {
   }
 }
 
-function checkContinuityEntryFormat(config) {
-  const rule = config?.checks?.continuityEntryFormat;
+function checkPlaceholderMarkers(config) {
+  const rules = config?.checks?.placeholderMarkers ?? [];
+  const activeProfiles = getActiveProfiles(config);
+  const activeBootstrapFile = toNonEmptyString(
+    config?.contracts?.documentationModel?.bootstrapFile,
+  );
+
+  for (let ruleIndex = 0; ruleIndex < rules.length; ruleIndex += 1) {
+    const rule = rules[ruleIndex];
+    if (!profileScopeIsActive(activeProfiles, rule?.profiles)) {
+      continue;
+    }
+
+    const skipBootstrapFiles = normalizeStringArray(rule?.skipWhenBootstrapFileIs);
+    if (
+      activeBootstrapFile &&
+      skipBootstrapFiles.length > 0 &&
+      skipBootstrapFiles.includes(activeBootstrapFile)
+    ) {
+      continue;
+    }
+
+    const content = readFileIfPresent(rule?.file, Boolean(rule?.optional));
+    if (content === null) {
+      continue;
+    }
+
+    const literalPatterns = normalizeStringArray(rule?.patterns);
+    const regexPatternTexts = normalizeStringArray(rule?.regexPatterns);
+    const compiledRegexPatterns = compileRegexPatternList(
+      regexPatternTexts,
+      `checks.placeholderMarkers[${ruleIndex}].regexPatterns`,
+    );
+
+    if (literalPatterns.length === 0 && compiledRegexPatterns.length === 0) {
+      addWarning(
+        `placeholderMarkers rule for ${rule?.file ?? "<unknown>"} has no patterns.`,
+      );
+      continue;
+    }
+
+    const sectionHeadingRegexPattern =
+      toNonEmptyString(rule?.sectionHeadingRegex) ?? "^##\\s+.+$";
+    let sectionHeadingRegex = null;
+    try {
+      sectionHeadingRegex = new RegExp(sectionHeadingRegexPattern);
+    } catch (error) {
+      addFailure(
+        `checks.placeholderMarkers[${ruleIndex}].sectionHeadingRegex is invalid: ${error.message}`,
+      );
+      continue;
+    }
+
+    const failureMode = toNonEmptyString(rule?.failureMode) ?? "warn";
+    if (!["warn", "fail"].includes(failureMode)) {
+      addFailure(
+        `checks.placeholderMarkers[${ruleIndex}].failureMode must be either "warn" or "fail".`,
+      );
+      continue;
+    }
+
+    const lines = content.split(/\r?\n/);
+    const matches = [];
+    let activeSection = "(top-level)";
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex];
+      const trimmed = line.trim();
+      if (sectionHeadingRegex.test(trimmed)) {
+        activeSection = trimmed;
+      }
+
+      const literalMatch = literalPatterns.find((pattern) => line.includes(pattern));
+      let regexMatch = null;
+      if (!literalMatch) {
+        regexMatch = compiledRegexPatterns.find((pattern) => pattern.test(line)) ?? null;
+      }
+
+      if (!literalMatch && !regexMatch) {
+        continue;
+      }
+
+      matches.push({
+        section: activeSection,
+        line: lineIndex + 1,
+        matchedPattern: literalMatch ?? regexMatch.toString(),
+      });
+    }
+
+    if (matches.length === 0) {
+      continue;
+    }
+
+    const sectionSummary = [...new Set(matches.map((entry) => entry.section))]
+      .slice(0, 8)
+      .join(", ");
+    const matchSummary = matches
+      .slice(0, 5)
+      .map(
+        (entry) =>
+          `${entry.section} (line ${entry.line}, pattern ${entry.matchedPattern})`,
+      )
+      .join("; ");
+    const baseMessage =
+      toNonEmptyString(rule?.message) ??
+      `Placeholder marker detected in ${rule?.file ?? "<unknown>"}.`;
+    const combinedMessage = `${baseMessage} Sections: ${sectionSummary}. Sample matches: ${matchSummary}.`;
+
+    if (failureMode === "fail") {
+      addFailure(combinedMessage);
+    } else {
+      addWarning(combinedMessage);
+    }
+  }
+}
+
+function checkSessionLogEntryFormat(config) {
+  const rule = config?.checks?.sessionLogEntryFormat;
   if (!rule) {
     return;
   }
@@ -374,7 +490,227 @@ function checkContinuityEntryFormat(config) {
 
     if (!entryRegex.test(trimmed)) {
       addFailure(
-        `Invalid continuity entry format in ${rule.file}:${i + 1}: ${trimmed}`,
+        `Invalid session log entry format in ${rule.file}:${i + 1}: ${trimmed}`,
+      );
+    }
+  }
+}
+
+function checkMemoryIndexContract(config) {
+  const rule = config?.checks?.memoryIndexContract;
+  if (!rule) {
+    return;
+  }
+
+  const memoryContent = readFileIfPresent(rule.file, Boolean(rule.optional));
+  if (memoryContent === null) {
+    return;
+  }
+
+  const sectionHeader = toNonEmptyString(rule.sectionHeader);
+  if (!sectionHeader) {
+    addFailure("checks.memoryIndexContract.sectionHeader must be a non-empty string.");
+    return;
+  }
+  const noneEntry = toNonEmptyString(rule.noneEntry) ?? "- None recorded.";
+  const entryRegexText = toNonEmptyString(rule.entryRegex);
+  if (!entryRegexText) {
+    addFailure("checks.memoryIndexContract.entryRegex must be a non-empty regex string.");
+    return;
+  }
+  const directoryRoot = toNonEmptyString(rule.directoryRoot) ?? ".agents/memory";
+  const directoryNameRegexText =
+    toNonEmptyString(rule.directoryNameRegex) ?? "^m[0-9]{3}$";
+  const submemoryFileName = toNonEmptyString(rule.submemoryFileName) ?? "_submemory.md";
+  const descriptionMinLength =
+    Number.isInteger(rule.descriptionMinLength) && rule.descriptionMinLength >= 1
+      ? rule.descriptionMinLength
+      : 12;
+
+  let entryRegex;
+  let directoryNameRegex;
+  try {
+    entryRegex = new RegExp(entryRegexText);
+  } catch (error) {
+    addFailure(
+      `checks.memoryIndexContract.entryRegex is invalid: ${error.message}`,
+    );
+    return;
+  }
+  try {
+    directoryNameRegex = new RegExp(directoryNameRegexText);
+  } catch (error) {
+    addFailure(
+      `checks.memoryIndexContract.directoryNameRegex is invalid: ${error.message}`,
+    );
+    return;
+  }
+
+  const lines = memoryContent.split(/\r?\n/);
+  let sectionStart = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].trim() === sectionHeader) {
+      sectionStart = i + 1;
+      break;
+    }
+  }
+  if (sectionStart === -1) {
+    addFailure(`${rule.file} is missing required section header: ${sectionHeader}`);
+    return;
+  }
+
+  const indexEntries = [];
+  for (let i = sectionStart; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith("## ")) {
+      break;
+    }
+    if (!trimmed.startsWith("- ")) {
+      continue;
+    }
+    indexEntries.push({ line: i + 1, text: trimmed });
+  }
+
+  if (indexEntries.length === 0) {
+    addFailure(
+      `${rule.file} ${sectionHeader} must contain at least one bullet entry (or ${noneEntry}).`,
+    );
+    return;
+  }
+
+  const directoryRootResolved = agentsAwareReadResolver(directoryRoot);
+  if (!fs.existsSync(directoryRootResolved)) {
+    addFailure(`${directoryRoot} must exist.`);
+    return;
+  }
+  if (!fs.statSync(directoryRootResolved).isDirectory()) {
+    addFailure(`${directoryRoot} must be a directory.`);
+    return;
+  }
+
+  const submemoryDirectories = fs
+    .readdirSync(directoryRootResolved, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  for (const directoryName of submemoryDirectories) {
+    if (!directoryNameRegex.test(directoryName)) {
+      addFailure(
+        `Invalid submemory directory name under ${directoryRoot}: ${directoryName} (expected ${directoryNameRegexText}).`,
+      );
+    }
+
+    const directoryPath = path.resolve(directoryRootResolved, directoryName);
+    const files = fs
+      .readdirSync(directoryPath, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name);
+
+    if (!files.includes(submemoryFileName)) {
+      addFailure(
+        `${directoryRoot}/${directoryName} must contain ${submemoryFileName}.`,
+      );
+    }
+
+    for (const fileName of files) {
+      if (fileName !== submemoryFileName) {
+        addFailure(
+          `${directoryRoot}/${directoryName} has invalid file "${fileName}"; submemory files must be named ${submemoryFileName}.`,
+        );
+      }
+    }
+  }
+
+  const isNoneRecordedEntry =
+    indexEntries.length === 1 && indexEntries[0].text === noneEntry;
+  if (isNoneRecordedEntry) {
+    if (submemoryDirectories.length > 0) {
+      addFailure(
+        `${rule.file} uses ${noneEntry} but ${directoryRoot} contains submemory directories.`,
+      );
+    }
+    return;
+  }
+
+  const indexedIds = new Set();
+  for (const entry of indexEntries) {
+    const match = entry.text.match(entryRegex);
+    if (!match) {
+      addFailure(
+        `Invalid submemory index entry format in ${rule.file}:${entry.line}: ${entry.text}`,
+      );
+      continue;
+    }
+
+    const id = toNonEmptyString(match.groups?.id);
+    const indexedPath = toNonEmptyString(match.groups?.path);
+    const description = toNonEmptyString(match.groups?.description);
+    if (!id || !indexedPath || !description) {
+      addFailure(
+        `Submemory index entry in ${rule.file}:${entry.line} must include id/path/description.`,
+      );
+      continue;
+    }
+
+    if (description.length < descriptionMinLength) {
+      addFailure(
+        `Submemory index entry description too short in ${rule.file}:${entry.line}; expected at least ${descriptionMinLength} characters.`,
+      );
+    }
+
+    if (!directoryNameRegex.test(id)) {
+      addFailure(
+        `Submemory index id in ${rule.file}:${entry.line} must match ${directoryNameRegexText} (found ${id}).`,
+      );
+    }
+
+    if (indexedIds.has(id)) {
+      addFailure(`Duplicate submemory index id in ${rule.file}: ${id}`);
+      continue;
+    }
+    indexedIds.add(id);
+
+    const expectedPath = `${directoryRoot}/${id}/${submemoryFileName}`;
+    if (indexedPath !== expectedPath) {
+      addFailure(
+        `Submemory index path mismatch in ${rule.file}:${entry.line}; expected ${expectedPath} (found ${indexedPath}).`,
+      );
+    }
+
+    const resolvedIndexedPath = agentsAwareReadResolver(indexedPath);
+    if (!fs.existsSync(resolvedIndexedPath)) {
+      addFailure(
+        `Submemory path referenced in ${rule.file}:${entry.line} is missing: ${indexedPath}`,
+      );
+      continue;
+    }
+    if (!fs.statSync(resolvedIndexedPath).isFile()) {
+      addFailure(
+        `Submemory path referenced in ${rule.file}:${entry.line} must be a file: ${indexedPath}`,
+      );
+    }
+
+    const directoryPath = path.dirname(resolvedIndexedPath);
+    const directoryName = path.basename(directoryPath);
+    if (directoryName !== id) {
+      addFailure(
+        `Submemory path/id mismatch in ${rule.file}:${entry.line}; expected parent dir ${id} (found ${directoryName}).`,
+      );
+    }
+
+    const relativeToRoot = toPosixPath(path.relative(directoryRootResolved, directoryPath));
+    if (relativeToRoot !== id) {
+      addFailure(
+        `Submemory path in ${rule.file}:${entry.line} must be directly under ${directoryRoot}.`,
+      );
+    }
+  }
+
+  for (const directoryName of submemoryDirectories) {
+    if (!indexedIds.has(directoryName)) {
+      addFailure(
+        `Missing submemory index entry in ${rule.file} for directory ${directoryRoot}/${directoryName}.`,
       );
     }
   }
@@ -547,7 +883,7 @@ function checkDocumentationModelContract(config) {
     ".agents-config/docs/CONTEXT_INDEX.json",
     ".agents-config/docs/AGENT_CONTEXT.md",
     ".agents/EXECUTION_QUEUE.json",
-    ".agents/CONTINUITY.md",
+    ".agents/MEMORY.md",
   ];
 
   checkExactOrderedArray({
@@ -667,7 +1003,30 @@ function getActiveProfiles(config) {
   if (configuredProfiles.length > 0) {
     return new Set(configuredProfiles);
   }
-  return new Set(["base", "node-web"]);
+  return new Set([
+    "base",
+    "typescript",
+    "typescript-openapi",
+    "javascript",
+    "python",
+  ]);
+}
+
+function getAvailableProfiles(config) {
+  const profilesContract = config?.contracts?.profiles;
+  const configuredProfiles = normalizeStringArray(
+    profilesContract?.availableProfiles,
+  );
+  if (configuredProfiles.length > 0) {
+    return configuredProfiles;
+  }
+  return [
+    "base",
+    "typescript",
+    "typescript-openapi",
+    "javascript",
+    "python",
+  ];
 }
 
 function normalizeStringArray(value) {
@@ -713,6 +1072,65 @@ function profileScopeIsActive(activeProfiles, requiredProfiles) {
     return true;
   }
   return required.some((profile) => activeProfiles.has(profile));
+}
+
+function resolveProfileScopedRequiredStrings({
+  config,
+  baseValues,
+  baseFieldPath,
+  byProfileValues,
+  byProfileFieldPath,
+}) {
+  const requiredBaseValues = validateStringArray(baseValues, baseFieldPath);
+  const activeProfiles = getActiveProfiles(config);
+  const availableProfiles = new Set(getAvailableProfiles(config));
+  const requiredProfileValuesByProfile = new Map();
+
+  if (byProfileValues !== undefined) {
+    if (!isPlainObject(byProfileValues)) {
+      addFailure(`${byProfileFieldPath} must be an object when provided.`);
+    } else {
+      for (const [profile, values] of Object.entries(byProfileValues)) {
+        if (!availableProfiles.has(profile)) {
+          addFailure(
+            `${byProfileFieldPath} contains unknown profile "${profile}".`,
+          );
+          continue;
+        }
+        const normalizedValues = validateStringArray(
+          values,
+          `${byProfileFieldPath}.${profile}`,
+        );
+        requiredProfileValuesByProfile.set(profile, normalizedValues);
+      }
+    }
+  }
+
+  const combinedValues = [];
+  const seenValues = new Set();
+  const appendUnique = (value) => {
+    if (seenValues.has(value)) {
+      return;
+    }
+    seenValues.add(value);
+    combinedValues.push(value);
+  };
+
+  for (const value of requiredBaseValues) {
+    appendUnique(value);
+  }
+
+  for (const profile of activeProfiles) {
+    for (const value of requiredProfileValuesByProfile.get(profile) ?? []) {
+      appendUnique(value);
+    }
+  }
+
+  return {
+    requiredBaseValues,
+    requiredProfileValuesByProfile,
+    requiredValues: combinedValues,
+  };
 }
 
 function isContractEnabled(config, contract) {
@@ -1723,6 +2141,9 @@ function checkContextIndexContract(config) {
     addFailure(`${contractPath} is required and must be an object.`);
     return;
   }
+  if (!isContractEnabled(config, contract)) {
+    return;
+  }
 
   if (contract.indexFile !== ".agents-config/docs/CONTEXT_INDEX.json") {
     addFailure(
@@ -1761,6 +2182,13 @@ function checkContextIndexContract(config) {
       preflightFile:
         toNonEmptyString(documentationModel.sessionPreflightScript) ??
         ".agents-config/scripts/agent-session-preflight.mjs",
+      managedManifestFile:
+        toNonEmptyString(config?.contracts?.managedFilesCanonical?.manifestFile) ??
+        ".agents-config/agent-managed.json",
+      managedManifestTemplateFile:
+        toNonEmptyString(config?.contracts?.managedFilesCanonical?.manifestTemplateFile) ??
+        ".agents-config/tools/bootstrap/managed-files.template.json",
+      projectToolingConfigFile: ".agents-config/config/project-tooling.json",
     };
 
     for (const [fieldName, expectedValue] of Object.entries(
@@ -1791,7 +2219,7 @@ function checkContextIndexContract(config) {
     ".agents-config/docs/CONTEXT_INDEX.json",
     ".agents-config/docs/AGENT_CONTEXT.md",
     ".agents/EXECUTION_QUEUE.json",
-    ".agents/CONTINUITY.md",
+    ".agents/MEMORY.md",
   ];
 
   checkExactOrderedArray({
@@ -1806,9 +2234,18 @@ function checkContextIndexContract(config) {
     pathName: `${contract.indexFile}.startupReadOrder`,
   });
 
-  const requiredCommandKeys = validateStringArray(
-    contract.requiredCommandKeys,
-    `${contractPath}.requiredCommandKeys`,
+  if (!isPlainObject(contract.requiredCommandKeysByProfile)) {
+    addFailure(`${contractPath}.requiredCommandKeysByProfile must be an object.`);
+  }
+
+  const { requiredValues: requiredCommandKeys } = resolveProfileScopedRequiredStrings(
+    {
+      config,
+      baseValues: contract.requiredCommandKeys,
+      baseFieldPath: `${contractPath}.requiredCommandKeys`,
+      byProfileValues: contract.requiredCommandKeysByProfile,
+      byProfileFieldPath: `${contractPath}.requiredCommandKeysByProfile`,
+    },
   );
 
   if (!index.commands || typeof index.commands !== "object") {
@@ -1822,6 +2259,47 @@ function checkContextIndexContract(config) {
     }
   }
 
+  if (!isPlainObject(index.profiles)) {
+    addFailure(`${contract.indexFile}.profiles must be an object.`);
+  } else {
+    const profilesContract = config?.contracts?.profiles;
+    const expectedAvailableProfiles = normalizeStringArray(
+      profilesContract?.availableProfiles,
+    );
+    if (expectedAvailableProfiles.length > 0) {
+      checkExactOrderedArray({
+        value: index.profiles.availableProfiles,
+        expected: expectedAvailableProfiles,
+        pathName: `${contract.indexFile}.profiles.availableProfiles`,
+      });
+    }
+
+    const expectedActiveProfiles = normalizeStringArray(
+      profilesContract?.activeProfiles,
+    );
+    if (expectedActiveProfiles.length > 0) {
+      checkExactOrderedArray({
+        value: index.profiles.activeProfiles,
+        expected: expectedActiveProfiles,
+        pathName: `${contract.indexFile}.profiles.activeProfiles`,
+      });
+    }
+
+    // Profile-scoped required rule IDs/command keys are policy-only contracts.
+
+    const disallowedProfileContractKeys = [
+      "requiredRuleIdsByProfile",
+      "requiredCommandKeysByProfile",
+    ];
+    for (const key of disallowedProfileContractKeys) {
+      if (key in index.profiles) {
+        addFailure(
+          `${contract.indexFile}.profiles.${key} must not be present; keep profile requirement maps in contracts.ruleCatalog/contracts.contextIndex of policy.`,
+        );
+      }
+    }
+  }
+
   if (!index.sessionArtifacts || typeof index.sessionArtifacts !== "object") {
     addFailure(`${contract.indexFile}.sessionArtifacts must be an object.`);
   } else {
@@ -1830,9 +2308,15 @@ function checkContextIndexContract(config) {
       executionQueueFile:
         toNonEmptyString(sessionArtifactsContract.executionQueueFile) ??
         ".agents/EXECUTION_QUEUE.json",
-      continuityFile:
-        toNonEmptyString(sessionArtifactsContract.continuityFile) ??
-        ".agents/CONTINUITY.md",
+      memoryFile:
+        toNonEmptyString(sessionArtifactsContract.memoryFile) ??
+        ".agents/MEMORY.md",
+      memoryTopicsRoot:
+        toNonEmptyString(sessionArtifactsContract.memoryTopicsRoot) ??
+        ".agents/memory",
+      sessionLogFile:
+        toNonEmptyString(sessionArtifactsContract.sessionLogFile) ??
+        ".agents/SESSION_LOG.md",
       sessionBriefJsonFile:
         toNonEmptyString(sessionArtifactsContract.sessionBriefJsonFile) ??
         ".agents/SESSION_BRIEF.json",
@@ -1861,19 +2345,24 @@ function checkContextIndexContract(config) {
       }
     }
 
-    const requiredSessionArtifactFields = [
-      "executionQueueFile",
-      "continuityFile",
-      "sessionBriefJsonFile",
-      "archiveRoot",
-      "archiveIndexFile",
-      "archiveShardBy",
-      "archiveFormat",
-      "archiveReadPolicy",
+    checkExactOrderedArray({
+      value: index.sessionArtifacts.planRoots,
+      expected: normalizeStringArray(sessionArtifactsContract.planRoots),
+      pathName: `${contract.indexFile}.sessionArtifacts.planRoots`,
+    });
+
+    if (
+      toNonEmptyString(index.sessionArtifacts.policyContractPath) !==
+      "contracts.sessionArtifacts"
+    ) {
+      addFailure(
+        `${contract.indexFile}.sessionArtifacts.policyContractPath must equal "contracts.sessionArtifacts".`,
+      );
+    }
+
+    const disallowedSessionArtifactKeys = [
       "queueScopedRead",
       "archiveOnComplete",
-      "plansRoot",
-      "planRoots",
       "planQueueSync",
       "planMachineContract",
       "archivedPlanSync",
@@ -1881,1121 +2370,27 @@ function checkContextIndexContract(config) {
       "queueQualityGate",
       "workspaceLayout",
       "sessionBriefContract",
-      "repositoryIndexPreflight",
     ];
-
-    for (const fieldName of requiredSessionArtifactFields) {
-      if (!(fieldName in index.sessionArtifacts)) {
+    for (const key of disallowedSessionArtifactKeys) {
+      if (key in index.sessionArtifacts) {
         addFailure(
-          `${contract.indexFile}.sessionArtifacts is missing required field ${fieldName}.`,
+          `${contract.indexFile}.sessionArtifacts.${key} must not be present; keep deep machine contracts in policy only.`,
         );
-      }
-    }
-
-    if (
-      index.sessionArtifacts.queueScopedRead &&
-      typeof index.sessionArtifacts.queueScopedRead === "object"
-    ) {
-      const queueScopedRead = index.sessionArtifacts.queueScopedRead;
-      for (const fieldName of [
-        "requiredTopLevelFields",
-        "itemSelectorFields",
-        "maxItemsPerRead",
-      ]) {
-        if (!(fieldName in queueScopedRead)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.queueScopedRead is missing required field ${fieldName}.`,
-          );
-        }
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.queueScopedRead must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.archiveOnComplete &&
-      typeof index.sessionArtifacts.archiveOnComplete === "object"
-    ) {
-      const archiveOnComplete = index.sessionArtifacts.archiveOnComplete;
-      for (const fieldName of ["itemStates", "queueStates", "forbidCompleteInHotQueue"]) {
-        if (!(fieldName in archiveOnComplete)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.archiveOnComplete is missing required field ${fieldName}.`,
-          );
-        }
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.archiveOnComplete must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.planQueueSync &&
-      typeof index.sessionArtifacts.planQueueSync === "object"
-    ) {
-      const planQueueSync = index.sessionArtifacts.planQueueSync;
-      for (const fieldName of ["enabled", "planFileName", "roots", "stateByRoot"]) {
-        if (!(fieldName in planQueueSync)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.planQueueSync is missing required field ${fieldName}.`,
-          );
-        }
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.planQueueSync must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.planMachineContract &&
-      typeof index.sessionArtifacts.planMachineContract === "object"
-    ) {
-      const planMachineContract = index.sessionArtifacts.planMachineContract;
-      for (const fieldName of [
-        "enabled",
-        "planFileName",
-        "machineFileName",
-        "schemaVersion",
-        "roots",
-        "requiredTopLevelFields",
-        "requiredPlanningStages",
-        "requiredNarrativeFields",
-        "preSpecOutlineRequiredFields",
-        "statusesRequiringNonEmptyPreSpecNonGoals",
-        "statusesRequiringNarrativeContent",
-        "narrativeMinLength",
-        "preSpecOutlineMinLength",
-        "narrativeMinSteps",
-        "specOutlineListFieldName",
-        "refinedSpecListFieldName",
-        "specOutlineEntryRequiredFields",
-        "refinedSpecEntryRequiredFields",
-        "statusesRequiringSpecOutlineEntries",
-        "statusesRequiringRefinedSpecEntries",
-        "specOutlineMinEntries",
-        "refinedSpecMinEntries",
-        "implementationStepsFieldName",
-        "allowedNarrativeStepStatuses",
-        "narrativeStepRequiredFields",
-        "narrativeStepOptionalFields",
-        "implementationStepDeliverableDenyPatterns",
-        "implementationStepAcceptanceCriteriaMinCount",
-        "stepStatusesRequiringAcceptanceCriteria",
-        "stepStatusesRequiringNonEmptyCompletionSummary",
-        "implementationCompletionSummaryRequiredFields",
-        "allowedPlanningStageStates",
-        "allowedSubagentRequirements",
-        "requiredSubagentFields",
-        "statusesRequiringLastExecutor",
-        "allowedStatusByRoot",
-        "statusCoherence",
-      ]) {
-        if (!(fieldName in planMachineContract)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.planMachineContract is missing required field ${fieldName}.`,
-          );
-        }
-      }
-
-      const expectedPlanFileName =
-        toNonEmptyString(sessionArtifactsContract.planQueueSyncPlanFileName) ?? "PLAN.json";
-      if (toNonEmptyString(planMachineContract.planFileName) !== expectedPlanFileName) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.planFileName must equal contracts.sessionArtifacts.planQueueSyncPlanFileName.`,
-        );
-      }
-      const expectedMachineFileName =
-        toNonEmptyString(sessionArtifactsContract.planMachineFileName) ?? "PLAN.json";
-      if (toNonEmptyString(planMachineContract.machineFileName) !== expectedMachineFileName) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.machineFileName must equal contracts.sessionArtifacts.planMachineFileName.`,
-        );
-      }
-      const expectedSchemaVersion =
-        toNonEmptyString(sessionArtifactsContract.planMachineSchemaVersion) ?? "1.0";
-      if (toNonEmptyString(planMachineContract.schemaVersion) !== expectedSchemaVersion) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.schemaVersion must equal contracts.sessionArtifacts.planMachineSchemaVersion.`,
-        );
-      }
-
-      checkExactOrderedArray({
-        value: planMachineContract.roots,
-        expected: normalizeStringArray(sessionArtifactsContract.planMachineRoots),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.roots`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.requiredTopLevelFields,
-        expected: normalizeStringArray(sessionArtifactsContract.planMachineRequiredTopLevelFields),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.requiredTopLevelFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.requiredPlanningStages,
-        expected: normalizeStringArray(sessionArtifactsContract.planMachineRequiredPlanningStages),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.requiredPlanningStages`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.requiredNarrativeFields,
-        expected: normalizeStringArray(sessionArtifactsContract.planMachineRequiredNarrativeFields),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.requiredNarrativeFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.preSpecOutlineRequiredFields,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachinePreSpecOutlineRequiredFields,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.preSpecOutlineRequiredFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.statusesRequiringNonEmptyPreSpecNonGoals,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineStatusesRequiringNonEmptyPreSpecNonGoals,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.statusesRequiringNonEmptyPreSpecNonGoals`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.statusesRequiringNarrativeContent,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineStatusesRequiringNarrativeContent,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.statusesRequiringNarrativeContent`,
-      });
-      const expectedNarrativeMinLength =
-        Number.isInteger(sessionArtifactsContract.planMachineNarrativeMinLength) &&
-        sessionArtifactsContract.planMachineNarrativeMinLength >= 1
-          ? sessionArtifactsContract.planMachineNarrativeMinLength
-          : 24;
-      if (
-        !Number.isInteger(planMachineContract.narrativeMinLength) ||
-        planMachineContract.narrativeMinLength !== expectedNarrativeMinLength
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.narrativeMinLength must equal contracts.sessionArtifacts.planMachineNarrativeMinLength.`,
-        );
-      }
-      const expectedPreSpecOutlineMinLength =
-        Number.isInteger(sessionArtifactsContract.planMachinePreSpecOutlineMinLength) &&
-        sessionArtifactsContract.planMachinePreSpecOutlineMinLength >= 1
-          ? sessionArtifactsContract.planMachinePreSpecOutlineMinLength
-          : 24;
-      if (
-        !Number.isInteger(planMachineContract.preSpecOutlineMinLength) ||
-        planMachineContract.preSpecOutlineMinLength !== expectedPreSpecOutlineMinLength
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.preSpecOutlineMinLength must equal contracts.sessionArtifacts.planMachinePreSpecOutlineMinLength.`,
-        );
-      }
-      const expectedNarrativeMinSteps =
-        Number.isInteger(sessionArtifactsContract.planMachineNarrativeMinSteps) &&
-        sessionArtifactsContract.planMachineNarrativeMinSteps >= 0
-          ? sessionArtifactsContract.planMachineNarrativeMinSteps
-          : 1;
-      if (
-        !Number.isInteger(planMachineContract.narrativeMinSteps) ||
-        planMachineContract.narrativeMinSteps !== expectedNarrativeMinSteps
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.narrativeMinSteps must equal contracts.sessionArtifacts.planMachineNarrativeMinSteps.`,
-        );
-      }
-      if (
-        toNonEmptyString(planMachineContract.specOutlineListFieldName) !==
-        (toNonEmptyString(sessionArtifactsContract.planMachineSpecOutlineListFieldName) ??
-          "full_spec_outline")
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.specOutlineListFieldName must equal contracts.sessionArtifacts.planMachineSpecOutlineListFieldName.`,
-        );
-      }
-      if (
-        toNonEmptyString(planMachineContract.refinedSpecListFieldName) !==
-        (toNonEmptyString(sessionArtifactsContract.planMachineRefinedSpecListFieldName) ??
-          "full_refined_spec")
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.refinedSpecListFieldName must equal contracts.sessionArtifacts.planMachineRefinedSpecListFieldName.`,
-        );
-      }
-      checkExactOrderedArray({
-        value: planMachineContract.specOutlineEntryRequiredFields,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineSpecOutlineEntryRequiredFields,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.specOutlineEntryRequiredFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.refinedSpecEntryRequiredFields,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineRefinedSpecEntryRequiredFields,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.refinedSpecEntryRequiredFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.statusesRequiringSpecOutlineEntries,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineStatusesRequiringSpecOutlineEntries,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.statusesRequiringSpecOutlineEntries`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.statusesRequiringRefinedSpecEntries,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineStatusesRequiringRefinedSpecEntries,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.statusesRequiringRefinedSpecEntries`,
-      });
-      const expectedSpecOutlineMinEntries =
-        Number.isInteger(sessionArtifactsContract.planMachineSpecOutlineMinEntries) &&
-        sessionArtifactsContract.planMachineSpecOutlineMinEntries >= 1
-          ? sessionArtifactsContract.planMachineSpecOutlineMinEntries
-          : 1;
-      if (
-        !Number.isInteger(planMachineContract.specOutlineMinEntries) ||
-        planMachineContract.specOutlineMinEntries !== expectedSpecOutlineMinEntries
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.specOutlineMinEntries must equal contracts.sessionArtifacts.planMachineSpecOutlineMinEntries.`,
-        );
-      }
-      const expectedRefinedSpecMinEntries =
-        Number.isInteger(sessionArtifactsContract.planMachineRefinedSpecMinEntries) &&
-        sessionArtifactsContract.planMachineRefinedSpecMinEntries >= 1
-          ? sessionArtifactsContract.planMachineRefinedSpecMinEntries
-          : 1;
-      if (
-        !Number.isInteger(planMachineContract.refinedSpecMinEntries) ||
-        planMachineContract.refinedSpecMinEntries !== expectedRefinedSpecMinEntries
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.refinedSpecMinEntries must equal contracts.sessionArtifacts.planMachineRefinedSpecMinEntries.`,
-        );
-      }
-      if (
-        toNonEmptyString(planMachineContract.implementationStepsFieldName) !==
-        (toNonEmptyString(sessionArtifactsContract.planMachineImplementationStepsFieldName) ??
-          "steps")
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.implementationStepsFieldName must equal contracts.sessionArtifacts.planMachineImplementationStepsFieldName.`,
-        );
-      }
-      checkExactOrderedArray({
-        value: planMachineContract.allowedNarrativeStepStatuses,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineAllowedNarrativeStepStatuses,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.allowedNarrativeStepStatuses`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.narrativeStepRequiredFields,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineNarrativeStepRequiredFields,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.narrativeStepRequiredFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.narrativeStepOptionalFields,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineNarrativeStepOptionalFields,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.narrativeStepOptionalFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.implementationStepDeliverableDenyPatterns,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineImplementationStepDeliverableDenyPatterns,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.implementationStepDeliverableDenyPatterns`,
-      });
-      const expectedAcceptanceCriteriaMinCount =
-        Number.isInteger(sessionArtifactsContract.planMachineImplementationStepAcceptanceCriteriaMinCount) &&
-        sessionArtifactsContract.planMachineImplementationStepAcceptanceCriteriaMinCount >= 1
-          ? sessionArtifactsContract.planMachineImplementationStepAcceptanceCriteriaMinCount
-          : 1;
-      if (
-        !Number.isInteger(planMachineContract.implementationStepAcceptanceCriteriaMinCount) ||
-        planMachineContract.implementationStepAcceptanceCriteriaMinCount !==
-          expectedAcceptanceCriteriaMinCount
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.implementationStepAcceptanceCriteriaMinCount must equal contracts.sessionArtifacts.planMachineImplementationStepAcceptanceCriteriaMinCount.`,
-        );
-      }
-      checkExactOrderedArray({
-        value: planMachineContract.stepStatusesRequiringAcceptanceCriteria,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineStepStatusesRequiringAcceptanceCriteria,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.stepStatusesRequiringAcceptanceCriteria`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.stepStatusesRequiringNonEmptyCompletionSummary,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineStepStatusesRequiringNonEmptyCompletionSummary,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.stepStatusesRequiringNonEmptyCompletionSummary`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.implementationCompletionSummaryRequiredFields,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineImplementationCompletionSummaryRequiredFields,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.implementationCompletionSummaryRequiredFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.allowedPlanningStageStates,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineAllowedPlanningStageStates,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.allowedPlanningStageStates`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.allowedSubagentRequirements,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineAllowedSubagentRequirements,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.allowedSubagentRequirements`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.requiredSubagentFields,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineRequiredSubagentFields,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.requiredSubagentFields`,
-      });
-      checkExactOrderedArray({
-        value: planMachineContract.statusesRequiringLastExecutor,
-        expected: normalizeStringArray(
-          sessionArtifactsContract.planMachineStatusesRequiringLastExecutor,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.statusesRequiringLastExecutor`,
-      });
-
-      const expectedAllowedByRoot =
-        sessionArtifactsContract.planMachineAllowedStatusByRoot &&
-        typeof sessionArtifactsContract.planMachineAllowedStatusByRoot === "object"
-          ? sessionArtifactsContract.planMachineAllowedStatusByRoot
-          : {};
-      const actualAllowedByRoot =
-        planMachineContract.allowedStatusByRoot &&
-        typeof planMachineContract.allowedStatusByRoot === "object"
-          ? planMachineContract.allowedStatusByRoot
-          : {};
-      for (const rootPath of normalizeStringArray(sessionArtifactsContract.planMachineRoots)) {
-        checkExactOrderedArray({
-          value: actualAllowedByRoot[rootPath],
-          expected: normalizeStringArray(expectedAllowedByRoot[rootPath]),
-          pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.allowedStatusByRoot.${rootPath}`,
-        });
-      }
-
-      const expectedStatusCoherence =
-        sessionArtifactsContract.planMachineStatusCoherence &&
-        typeof sessionArtifactsContract.planMachineStatusCoherence === "object"
-          ? sessionArtifactsContract.planMachineStatusCoherence
-          : {};
-      const actualStatusCoherence =
-        planMachineContract.statusCoherence &&
-        typeof planMachineContract.statusCoherence === "object"
-          ? planMachineContract.statusCoherence
-          : {};
-      if (
-        actualStatusCoherence.requireInProgressPlanStatusWhenAnyStepInProgress !==
-        expectedStatusCoherence.requireInProgressPlanStatusWhenAnyStepInProgress
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.planMachineContract.statusCoherence.requireInProgressPlanStatusWhenAnyStepInProgress must equal contracts.sessionArtifacts.planMachineStatusCoherence.requireInProgressPlanStatusWhenAnyStepInProgress.`,
-        );
-      }
-      checkExactOrderedArray({
-        value: actualStatusCoherence.statusesRequiringAllImplementationStepsComplete,
-        expected: normalizeStringArray(
-          expectedStatusCoherence.statusesRequiringAllImplementationStepsComplete,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.statusCoherence.statusesRequiringAllImplementationStepsComplete`,
-      });
-      checkExactOrderedArray({
-        value: actualStatusCoherence.statusesForbiddingInProgressImplementationSteps,
-        expected: normalizeStringArray(
-          expectedStatusCoherence.statusesForbiddingInProgressImplementationSteps,
-        ),
-        pathName: `${contract.indexFile}.sessionArtifacts.planMachineContract.statusCoherence.statusesForbiddingInProgressImplementationSteps`,
-      });
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.planMachineContract must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.archivedPlanSync &&
-      typeof index.sessionArtifacts.archivedPlanSync === "object"
-    ) {
-      const archivedPlanSync = index.sessionArtifacts.archivedPlanSync;
-      for (const fieldName of [
-        "enabled",
-        "root",
-        "planFileName",
-        "archiveKeyPrefix",
-        "indexKind",
-      ]) {
-        if (!(fieldName in archivedPlanSync)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.archivedPlanSync is missing required field ${fieldName}.`,
-          );
-        }
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.archivedPlanSync must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.stalePlanReferenceCheck &&
-      typeof index.sessionArtifacts.stalePlanReferenceCheck === "object"
-    ) {
-      const stalePlanReferenceCheck = index.sessionArtifacts.stalePlanReferenceCheck;
-      for (const fieldName of ["enabled", "failureMode", "scanRoots"]) {
-        if (!(fieldName in stalePlanReferenceCheck)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.stalePlanReferenceCheck is missing required field ${fieldName}.`,
-          );
-        }
-      }
-      const failureMode = toNonEmptyString(stalePlanReferenceCheck.failureMode);
-      if (!failureMode || !["warn", "fail"].includes(failureMode)) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.stalePlanReferenceCheck.failureMode must be either "warn" or "fail".`,
-        );
-      } else if (failureMode !== "fail") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.stalePlanReferenceCheck.failureMode must equal "fail".`,
-        );
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.stalePlanReferenceCheck must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.sessionBriefContract &&
-      typeof index.sessionArtifacts.sessionBriefContract === "object"
-    ) {
-      const sessionBriefContract = index.sessionArtifacts.sessionBriefContract;
-      for (const fieldName of ["requiredFields", "freshnessHoursWarning", "freshnessFailureMode"]) {
-        if (!(fieldName in sessionBriefContract)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.sessionBriefContract is missing required field ${fieldName}.`,
-          );
-        }
-      }
-      const freshnessFailureMode = toNonEmptyString(
-        sessionBriefContract.freshnessFailureMode,
-      );
-      if (!freshnessFailureMode || !["warn", "fail"].includes(freshnessFailureMode)) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.sessionBriefContract.freshnessFailureMode must be either "warn" or "fail".`,
-        );
-      } else if (freshnessFailureMode !== "fail") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.sessionBriefContract.freshnessFailureMode must equal "fail".`,
-        );
-      }
-
-      const sessionBriefRequiredFields = validateStringArray(
-        sessionBriefContract.requiredFields,
-        `${contract.indexFile}.sessionArtifacts.sessionBriefContract.requiredFields`,
-      );
-      const expectedSessionBriefRequiredFields = Array.isArray(
-        config?.contracts?.sessionArtifacts?.sessionBriefRequiredFields,
-      )
-        ? config.contracts.sessionArtifacts.sessionBriefRequiredFields
-            .filter((fieldName) => typeof fieldName === "string")
-            .map((fieldName) => fieldName.trim())
-            .filter((fieldName) => fieldName.length > 0)
-        : [];
-      for (const expectedFieldName of expectedSessionBriefRequiredFields) {
-        if (!sessionBriefRequiredFields.includes(expectedFieldName)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.sessionBriefContract.requiredFields is missing ${expectedFieldName}.`,
-          );
-        }
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.sessionBriefContract must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.repositoryIndexPreflight &&
-      typeof index.sessionArtifacts.repositoryIndexPreflight === "object"
-    ) {
-      const repositoryIndexPreflight =
-        index.sessionArtifacts.repositoryIndexPreflight;
-      for (const fieldName of [
-        "enabled",
-        "buildIfMissing",
-        "reindexBeforeVerify",
-        "verifyStrict",
-        "failureMode",
-        "closeoutVerifyIfPossible",
-      ]) {
-        if (!(fieldName in repositoryIndexPreflight)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight is missing required field ${fieldName}.`,
-          );
-        }
-      }
-
-      if (typeof repositoryIndexPreflight.enabled !== "boolean") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.enabled must be a boolean.`,
-        );
-      }
-      if (typeof repositoryIndexPreflight.buildIfMissing !== "boolean") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.buildIfMissing must be a boolean.`,
-        );
-      }
-      if (typeof repositoryIndexPreflight.reindexBeforeVerify !== "boolean") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.reindexBeforeVerify must be a boolean.`,
-        );
-      }
-      if (typeof repositoryIndexPreflight.verifyStrict !== "boolean") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.verifyStrict must be a boolean.`,
-        );
-      }
-      if (
-        typeof repositoryIndexPreflight.closeoutVerifyIfPossible !== "boolean"
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.closeoutVerifyIfPossible must be a boolean.`,
-        );
-      }
-
-      const repositoryIndexFailureMode = toNonEmptyString(
-        repositoryIndexPreflight.failureMode,
-      );
-      if (
-        !repositoryIndexFailureMode ||
-        !["warn", "fail"].includes(repositoryIndexFailureMode)
-      ) {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.failureMode must be either "warn" or "fail".`,
-        );
-      }
-
-      const contractRepositoryIndexPreflight =
-        sessionArtifactsContract &&
-        typeof sessionArtifactsContract === "object" &&
-        sessionArtifactsContract.repositoryIndexPreflight &&
-        typeof sessionArtifactsContract.repositoryIndexPreflight === "object"
-          ? sessionArtifactsContract.repositoryIndexPreflight
-          : null;
-      if (contractRepositoryIndexPreflight) {
-        for (const fieldName of [
-          "enabled",
-          "buildIfMissing",
-          "reindexBeforeVerify",
-          "verifyStrict",
-          "failureMode",
-          "closeoutVerifyIfPossible",
-        ]) {
-          if (
-            repositoryIndexPreflight[fieldName] !==
-            contractRepositoryIndexPreflight[fieldName]
-          ) {
-            addFailure(
-              `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight.${fieldName} must equal contracts.sessionArtifacts.repositoryIndexPreflight.${fieldName}.`,
-            );
-          }
-        }
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.repositoryIndexPreflight must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.queueQualityGate &&
-      typeof index.sessionArtifacts.queueQualityGate === "object"
-    ) {
-      const queueQualityGate = index.sessionArtifacts.queueQualityGate;
-      for (const fieldName of ["failureMode", "failureRules", "verificationEvidencePrefix"]) {
-        if (!(fieldName in queueQualityGate)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.queueQualityGate is missing required field ${fieldName}.`,
-          );
-        }
-      }
-      const failureMode = toNonEmptyString(queueQualityGate.failureMode);
-      if (failureMode !== "fail") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.queueQualityGate.failureMode must equal "fail".`,
-        );
-      }
-      const failureRules = validateStringArray(
-        queueQualityGate.failureRules,
-        `${contract.indexFile}.sessionArtifacts.queueQualityGate.failureRules`,
-      );
-      const requiredFailureRules = [
-        "missingTopLevelDeferredReason",
-        "missingTopLevelScope",
-        "missingTopLevelAcceptance",
-        "deferredItemIds",
-        "activeOrCompleteMissingStartIds",
-        "completeItemMissingCompletedAtIds",
-        "completeItemMissingEvidenceIds",
-      ];
-      for (const requiredRule of requiredFailureRules) {
-        if (!failureRules.includes(requiredRule)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.queueQualityGate.failureRules must include ${requiredRule}.`,
-          );
-        }
-      }
-      if (toNonEmptyString(queueQualityGate.verificationEvidencePrefix) !== "verify:") {
-        addFailure(
-          `${contract.indexFile}.sessionArtifacts.queueQualityGate.verificationEvidencePrefix must equal "verify:".`,
-        );
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.queueQualityGate must be an object.`,
-      );
-    }
-
-    if (
-      index.sessionArtifacts.workspaceLayout &&
-      typeof index.sessionArtifacts.workspaceLayout === "object"
-    ) {
-      const indexWorkspaceLayout = index.sessionArtifacts.workspaceLayout;
-      const contractWorkspaceLayout =
-        config?.contracts?.workspaceLayout && typeof config.contracts.workspaceLayout === "object"
-          ? config.contracts.workspaceLayout
-          : null;
-      for (const fieldName of [
-        "canonicalRepoRoot",
-        "canonicalAgentsRoot",
-        "worktreesRoot",
-      ]) {
-        if (!(fieldName in indexWorkspaceLayout)) {
-          addFailure(
-            `${contract.indexFile}.sessionArtifacts.workspaceLayout is missing required field ${fieldName}.`,
-          );
-        }
-      }
-      if (contractWorkspaceLayout) {
-        const expectedBooleanByField = {
-          semanticMergeRequired: contractWorkspaceLayout.requireSemanticMergeForAgents,
-          semanticMergeOnAgentsEditRequired:
-            contractWorkspaceLayout.requireSemanticMergeOnAgentsEdit,
-          worktreeAgentsSymlinkRequired:
-            contractWorkspaceLayout.requireWorktreeAgentsSymlink,
-        };
-        for (const fieldName of [
-          "canonicalRepoRoot",
-          "canonicalAgentsRoot",
-          "worktreesRoot",
-        ]) {
-          if (indexWorkspaceLayout[fieldName] !== contractWorkspaceLayout[fieldName]) {
-            addFailure(
-              `${contract.indexFile}.sessionArtifacts.workspaceLayout.${fieldName} must equal contracts.workspaceLayout.${fieldName}.`,
-            );
-          }
-        }
-        for (const [fieldName, expectedValue] of Object.entries(
-          expectedBooleanByField,
-        )) {
-          if (indexWorkspaceLayout[fieldName] !== expectedValue) {
-            addFailure(
-              `${contract.indexFile}.sessionArtifacts.workspaceLayout.${fieldName} must equal ${expectedValue}.`,
-            );
-          }
-        }
-      }
-    } else {
-      addFailure(
-        `${contract.indexFile}.sessionArtifacts.workspaceLayout must be an object.`,
-      );
-    }
-  }
-
-  if (!index.orchestratorSubagent || typeof index.orchestratorSubagent !== "object") {
-    addFailure(`${contract.indexFile}.orchestratorSubagent must be an object.`);
-  } else {
-    const policyOrchestratorSubagent = config?.contracts?.orchestratorSubagent ?? {};
-    const policyPath = toNonEmptyString(index.orchestratorSubagent.policyPath);
-    if (policyPath !== "contracts.orchestratorSubagent") {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.policyPath must equal "contracts.orchestratorSubagent".`,
-      );
-    }
-
-    if (index.orchestratorSubagent.singleOrchestratorOnly !== true) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.singleOrchestratorOnly must be true.`,
-      );
-    }
-    if (index.orchestratorSubagent.allowSubagentDelegation !== false) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.allowSubagentDelegation must be false.`,
-      );
-    }
-    const defaultPattern = toNonEmptyString(index.orchestratorSubagent.defaultPattern);
-    if (defaultPattern !== "operator_subagent_required_when_possible") {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.defaultPattern must equal "operator_subagent_required_when_possible".`,
-      );
-    }
-    if (index.orchestratorSubagent.subagentDelegationRequiredWhenPossible !== true) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.subagentDelegationRequiredWhenPossible must be true.`,
-      );
-    }
-    if (index.orchestratorSubagent.delegationForDiscoveryRequiredWhenPossible !== true) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.delegationForDiscoveryRequiredWhenPossible must be true.`,
-      );
-    }
-    if (index.orchestratorSubagent.delegationForImplementationRequiredWhenPossible !== true) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.delegationForImplementationRequiredWhenPossible must be true.`,
-      );
-    }
-    if (index.orchestratorSubagent.strictAtomicTaskBriefsRequired !== true) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.strictAtomicTaskBriefsRequired must be true.`,
-      );
-    }
-    if (index.orchestratorSubagent.closeSubagentOnCompletionRequired !== true) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.closeSubagentOnCompletionRequired must be true.`,
-      );
-    }
-    if (index.orchestratorSubagent.idleSubagentReleaseRequired !== true) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.idleSubagentReleaseRequired must be true.`,
-      );
-    }
-    const idleSubagentMaxIdleMinutes = index.orchestratorSubagent.idleSubagentMaxIdleMinutes;
-    if (!Number.isInteger(idleSubagentMaxIdleMinutes) || idleSubagentMaxIdleMinutes < 1) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.idleSubagentMaxIdleMinutes must be a positive integer.`,
-      );
-    }
-    const policyIdleMax =
-      policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-        ? policyOrchestratorSubagent.idleSubagentMaxIdleMinutes
-        : undefined;
-    if (Number.isInteger(policyIdleMax) && idleSubagentMaxIdleMinutes !== policyIdleMax) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.idleSubagentMaxIdleMinutes must equal contracts.orchestratorSubagent.idleSubagentMaxIdleMinutes.`,
-      );
-    }
-    const policyDiscoveryDelegationRequired =
-      policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-        ? policyOrchestratorSubagent.delegationForDiscoveryRequiredWhenPossible
-        : undefined;
-    if (
-      typeof policyDiscoveryDelegationRequired === "boolean" &&
-      index.orchestratorSubagent.delegationForDiscoveryRequiredWhenPossible !==
-        policyDiscoveryDelegationRequired
-    ) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.delegationForDiscoveryRequiredWhenPossible must equal contracts.orchestratorSubagent.delegationForDiscoveryRequiredWhenPossible.`,
-      );
-    }
-    const policyImplementationDelegationRequired =
-      policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-        ? policyOrchestratorSubagent.delegationForImplementationRequiredWhenPossible
-        : undefined;
-    if (
-      typeof policyImplementationDelegationRequired === "boolean" &&
-      index.orchestratorSubagent.delegationForImplementationRequiredWhenPossible !==
-        policyImplementationDelegationRequired
-    ) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.delegationForImplementationRequiredWhenPossible must equal contracts.orchestratorSubagent.delegationForImplementationRequiredWhenPossible.`,
-      );
-    }
-    const policyStrictAtomicTaskBriefsRequired =
-      policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-        ? policyOrchestratorSubagent.strictAtomicTaskBriefsRequired
-        : undefined;
-    if (
-      typeof policyStrictAtomicTaskBriefsRequired === "boolean" &&
-      index.orchestratorSubagent.strictAtomicTaskBriefsRequired !==
-        policyStrictAtomicTaskBriefsRequired
-    ) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.strictAtomicTaskBriefsRequired must equal contracts.orchestratorSubagent.strictAtomicTaskBriefsRequired.`,
-      );
-    }
-    const policyCloseSubagentOnCompletionRequired =
-      policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-        ? policyOrchestratorSubagent.closeSubagentOnCompletionRequired
-        : undefined;
-    if (
-      typeof policyCloseSubagentOnCompletionRequired === "boolean" &&
-      index.orchestratorSubagent.closeSubagentOnCompletionRequired !==
-        policyCloseSubagentOnCompletionRequired
-    ) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.closeSubagentOnCompletionRequired must equal contracts.orchestratorSubagent.closeSubagentOnCompletionRequired.`,
-      );
-    }
-
-    if (
-      !index.orchestratorSubagent.modelRouting ||
-      typeof index.orchestratorSubagent.modelRouting !== "object"
-    ) {
-      addFailure(`${contract.indexFile}.orchestratorSubagent.modelRouting must be an object.`);
-    } else {
-      const expectedRouting = {
-        orchestrator: "gpt-5.3-codex",
-        subagent: "gpt-5.3-codex",
-        lowRiskLoop: "gpt-5.3-codex-spark",
-      };
-      const policyRouting =
-        policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-          ? policyOrchestratorSubagent.defaultModelRouting
-          : null;
-
-      for (const [fieldName, expectedValue] of Object.entries(expectedRouting)) {
-        const indexValue = toNonEmptyString(index.orchestratorSubagent.modelRouting[fieldName]);
-        if (indexValue !== expectedValue) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.modelRouting.${fieldName} must equal "${expectedValue}".`,
-          );
-        }
-
-        const policyValue =
-          policyRouting && typeof policyRouting === "object"
-            ? toNonEmptyString(policyRouting[fieldName])
-            : null;
-        if (policyValue && indexValue !== policyValue) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.modelRouting.${fieldName} must equal contracts.orchestratorSubagent.defaultModelRouting.${fieldName}.`,
-          );
-        }
-      }
-    }
-
-    if (
-      !index.orchestratorSubagent.reasoningEffortRouting ||
-      typeof index.orchestratorSubagent.reasoningEffortRouting !== "object"
-    ) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.reasoningEffortRouting must be an object.`,
-      );
-    } else {
-      const expectedEffort = {
-        orchestrator: "xhigh",
-        subagent: "high",
-        lowRiskLoop: "medium",
-      };
-      const policyEffort =
-        policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-          ? policyOrchestratorSubagent.defaultReasoningEffortRouting
-          : null;
-
-      for (const [fieldName, expectedValue] of Object.entries(expectedEffort)) {
-        const indexValue = toNonEmptyString(
-          index.orchestratorSubagent.reasoningEffortRouting[fieldName],
-        );
-        if (indexValue !== expectedValue) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.reasoningEffortRouting.${fieldName} must equal "${expectedValue}".`,
-          );
-        }
-
-        const policyValue =
-          policyEffort && typeof policyEffort === "object"
-            ? toNonEmptyString(policyEffort[fieldName])
-            : null;
-        if (policyValue && indexValue !== policyValue) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.reasoningEffortRouting.${fieldName} must equal contracts.orchestratorSubagent.defaultReasoningEffortRouting.${fieldName}.`,
-          );
-        }
-      }
-    }
-
-    if (
-      !index.orchestratorSubagent.claudeModelRouting ||
-      typeof index.orchestratorSubagent.claudeModelRouting !== "object"
-    ) {
-      addFailure(`${contract.indexFile}.orchestratorSubagent.claudeModelRouting must be an object.`);
-    } else {
-      const expectedClaudeRouting = {
-        orchestrator: "claude-opus-4-6",
-        subagent: "claude-opus-4-6",
-        alternativeSubagent: "claude-sonnet-4-6",
-        lowRiskLoop: "claude-haiku-4-5",
-      };
-      const policyClaudeRouting =
-        policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-          ? policyOrchestratorSubagent.claudeModelRouting
-          : null;
-
-      for (const [fieldName, expectedValue] of Object.entries(expectedClaudeRouting)) {
-        const indexValue = toNonEmptyString(index.orchestratorSubagent.claudeModelRouting[fieldName]);
-        if (indexValue !== expectedValue) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.claudeModelRouting.${fieldName} must equal "${expectedValue}".`,
-          );
-        }
-
-        const policyValue =
-          policyClaudeRouting && typeof policyClaudeRouting === "object"
-            ? toNonEmptyString(policyClaudeRouting[fieldName])
-            : null;
-        if (policyValue && indexValue !== policyValue) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.claudeModelRouting.${fieldName} must equal contracts.orchestratorSubagent.claudeModelRouting.${fieldName}.`,
-          );
-        }
-      }
-    }
-
-    if (
-      !index.orchestratorSubagent.lowRiskSparkPolicy ||
-      typeof index.orchestratorSubagent.lowRiskSparkPolicy !== "object"
-    ) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy must be an object.`,
-      );
-    } else {
-      const sparkPolicy = index.orchestratorSubagent.lowRiskSparkPolicy;
-      const policySparkPolicy =
-        policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-          ? policyOrchestratorSubagent.lowRiskSparkPolicy
-          : null;
-      const taskClasses = validateStringArray(
-        sparkPolicy.allowedTaskClasses,
-        `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.allowedTaskClasses`,
-      );
-      checkRequiredFieldList({
-        fieldName: "allowedTaskClasses",
-        actualFields: taskClasses,
-        requiredFields: ["single_file_edit", "grep_triage", "draft_rewrite"],
-        contractPath: `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy`,
-      });
-
-      if (sparkPolicy.explicitVerificationCommandsRequired !== true) {
-        addFailure(
-          `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.explicitVerificationCommandsRequired must be true.`,
-        );
-      }
-      if (sparkPolicy.minimumVerificationCommands !== 1) {
-        addFailure(
-          `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.minimumVerificationCommands must equal 1.`,
-        );
-      }
-
-      const requiredCommands = validateStringArray(
-        sparkPolicy.requiredVerificationCommands,
-        `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.requiredVerificationCommands`,
-      );
-      if (!requiredCommands.includes("node .agents-config/scripts/enforce-agent-policies.mjs")) {
-        addFailure(
-          `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.requiredVerificationCommands must include node .agents-config/scripts/enforce-agent-policies.mjs.`,
-        );
-      }
-      const requiredEvidencePrefix = toNonEmptyString(
-        sparkPolicy.requiredEvidencePrefix,
-      );
-      if (requiredEvidencePrefix !== "verify:") {
-        addFailure(
-          `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.requiredEvidencePrefix must equal "verify:".`,
-        );
-      }
-
-      if (policySparkPolicy && typeof policySparkPolicy === "object") {
-        const policyMinimum = policySparkPolicy.minimumVerificationCommands;
-        if (
-          Number.isInteger(policyMinimum) &&
-          sparkPolicy.minimumVerificationCommands !== policyMinimum
-        ) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.minimumVerificationCommands must equal contracts.orchestratorSubagent.lowRiskSparkPolicy.minimumVerificationCommands.`,
-          );
-        }
-
-        const policyRequiredCommands = validateStringArray(
-          policySparkPolicy.requiredVerificationCommands,
-          `${contractPath}.orchestratorSubagent.lowRiskSparkPolicy.requiredVerificationCommands`,
-        );
-        for (const command of policyRequiredCommands) {
-          if (!requiredCommands.includes(command)) {
-            addFailure(
-              `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.requiredVerificationCommands must include contracts.orchestratorSubagent.lowRiskSparkPolicy.requiredVerificationCommands value ${command}.`,
-            );
-          }
-        }
-        const policyEvidencePrefix = toNonEmptyString(policySparkPolicy.requiredEvidencePrefix);
-        if (policyEvidencePrefix && requiredEvidencePrefix !== policyEvidencePrefix) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.lowRiskSparkPolicy.requiredEvidencePrefix must equal contracts.orchestratorSubagent.lowRiskSparkPolicy.requiredEvidencePrefix.`,
-          );
-        }
-      }
-    }
-
-    if (
-      !index.orchestratorSubagent.verbosityBudgets ||
-      typeof index.orchestratorSubagent.verbosityBudgets !== "object"
-    ) {
-      addFailure(
-        `${contract.indexFile}.orchestratorSubagent.verbosityBudgets must be an object.`,
-      );
-    } else {
-      const budgetFields = [
-        "subagentObjectiveMaxWords",
-        "subagentInputContextMaxWords",
-        "subagentSummaryMaxWords",
-        "specOutlineMaxWords",
-        "refinedSpecMaxWords",
-        "implementationTaskMaxWords",
-      ];
-      const policyBudgets =
-        policyOrchestratorSubagent && typeof policyOrchestratorSubagent === "object"
-          ? policyOrchestratorSubagent.verbosityBudgets
-          : null;
-
-      for (const fieldName of budgetFields) {
-        const indexValue = index.orchestratorSubagent.verbosityBudgets[fieldName];
-        if (!Number.isInteger(indexValue) || indexValue <= 0) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.verbosityBudgets.${fieldName} must be a positive integer.`,
-          );
-        }
-
-        const policyValue =
-          policyBudgets && typeof policyBudgets === "object"
-            ? policyBudgets[fieldName]
-            : undefined;
-        if (Number.isInteger(policyValue) && indexValue !== policyValue) {
-          addFailure(
-            `${contract.indexFile}.orchestratorSubagent.verbosityBudgets.${fieldName} must equal contracts.orchestratorSubagent.verbosityBudgets.${fieldName}.`,
-          );
-        }
       }
     }
   }
 
+  if ("orchestratorSubagent" in index) {
+    addFailure(
+      `${contract.indexFile}.orchestratorSubagent must not be present; use contracts.orchestratorSubagent in policy as canonical source.`,
+    );
+  }
+
+  if ("managedFilesCanonical" in index) {
+    addFailure(
+      `${contract.indexFile}.managedFilesCanonical must not be present; use contracts.managedFilesCanonical in policy as canonical source.`,
+    );
+  }
   if (!Array.isArray(index.rulesSections)) {
     addFailure(`${contract.indexFile}.rulesSections must be an array.`);
   } else {
@@ -3063,7 +2458,7 @@ function checkReleaseNotesContract(config) {
     npmScriptName: "release:notes",
     npmScriptCommand: "node .agents-config/scripts/generate-release-notes.mjs",
     commandExample:
-      "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]",
+      "npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>] [--summary <text>] [--known-issue <text>] [--compat-note <text>]",
   };
 
   for (const [fieldName, expectedValue] of Object.entries(requiredStrings)) {
@@ -4645,7 +4040,9 @@ function checkSessionArtifactsContract(config) {
   const requiredStrings = {
     executionQueueFile: ".agents/EXECUTION_QUEUE.json",
     sessionBriefJsonFile: ".agents/SESSION_BRIEF.json",
-    continuityFile: ".agents/CONTINUITY.md",
+    memoryFile: ".agents/MEMORY.md",
+    memoryTopicsRoot: ".agents/memory",
+    sessionLogFile: ".agents/SESSION_LOG.md",
     archiveRoot: ".agents/archives",
     archiveIndexFile: ".agents/EXECUTION_ARCHIVE_INDEX.json",
     archiveShardBy: "feature_id",
@@ -4663,70 +4060,6 @@ function checkSessionArtifactsContract(config) {
     if (actualValue !== expectedValue) {
       addFailure(
         `${contractPath}.${fieldName} must equal \"${expectedValue}\" (found \"${actualValue}\").`,
-      );
-    }
-  }
-
-  const repositoryIndexPreflight = contract.repositoryIndexPreflight;
-  if (!repositoryIndexPreflight || typeof repositoryIndexPreflight !== "object") {
-    addFailure(`${contractPath}.repositoryIndexPreflight must be an object.`);
-  } else {
-    for (const fieldName of [
-      "enabled",
-      "buildIfMissing",
-      "reindexBeforeVerify",
-      "verifyStrict",
-      "failureMode",
-      "closeoutVerifyIfPossible",
-    ]) {
-      if (!(fieldName in repositoryIndexPreflight)) {
-        addFailure(
-          `${contractPath}.repositoryIndexPreflight is missing field ${fieldName}.`,
-        );
-      }
-    }
-
-    if (typeof repositoryIndexPreflight.enabled !== "boolean") {
-      addFailure(`${contractPath}.repositoryIndexPreflight.enabled must be a boolean.`);
-    }
-    if (typeof repositoryIndexPreflight.buildIfMissing !== "boolean") {
-      addFailure(
-        `${contractPath}.repositoryIndexPreflight.buildIfMissing must be a boolean.`,
-      );
-    }
-    if (typeof repositoryIndexPreflight.reindexBeforeVerify !== "boolean") {
-      addFailure(
-        `${contractPath}.repositoryIndexPreflight.reindexBeforeVerify must be a boolean.`,
-      );
-    } else if (repositoryIndexPreflight.reindexBeforeVerify !== true) {
-      addFailure(
-        `${contractPath}.repositoryIndexPreflight.reindexBeforeVerify must equal true.`,
-      );
-    }
-    if (typeof repositoryIndexPreflight.verifyStrict !== "boolean") {
-      addFailure(
-        `${contractPath}.repositoryIndexPreflight.verifyStrict must be a boolean.`,
-      );
-    }
-    if (typeof repositoryIndexPreflight.closeoutVerifyIfPossible !== "boolean") {
-      addFailure(
-        `${contractPath}.repositoryIndexPreflight.closeoutVerifyIfPossible must be a boolean.`,
-      );
-    }
-
-    const repositoryIndexFailureMode = toNonEmptyString(
-      repositoryIndexPreflight.failureMode,
-    );
-    if (
-      !repositoryIndexFailureMode ||
-      !["warn", "fail"].includes(repositoryIndexFailureMode)
-    ) {
-      addFailure(
-        `${contractPath}.repositoryIndexPreflight.failureMode must be either "warn" or "fail".`,
-      );
-    } else if (repositoryIndexFailureMode !== "fail") {
-      addFailure(
-        `${contractPath}.repositoryIndexPreflight.failureMode must equal "fail".`,
       );
     }
   }
@@ -5582,7 +4915,6 @@ function checkSessionArtifactsContract(config) {
       "scope",
       "queue_file",
       "archive_index_file",
-      "index_readiness",
       "queue_read_contract",
       "queue_overview",
       "startup_attestation",
@@ -6691,7 +6023,19 @@ function checkSessionArtifactsContract(config) {
     }
   }
 
-  readFileIfPresent(contract.continuityFile, false);
+  readFileIfPresent(contract.memoryFile, false);
+  readFileIfPresent(contract.sessionLogFile, false);
+  const memoryTopicsRoot = toNonEmptyString(contract.memoryTopicsRoot);
+  if (!memoryTopicsRoot) {
+    addFailure(`${contractPath}.memoryTopicsRoot must be a non-empty string.`);
+  } else {
+    const memoryTopicsRootResolved = resolveContractPath(memoryTopicsRoot);
+    if (!fs.existsSync(memoryTopicsRootResolved)) {
+      addFailure(`${memoryTopicsRoot} must exist.`);
+    } else if (!fs.statSync(memoryTopicsRootResolved).isDirectory()) {
+      addFailure(`${memoryTopicsRoot} must be a directory.`);
+    }
+  }
 }
 
 function checkManagedFilesCanonicalContract(config) {
@@ -6712,10 +6056,19 @@ function checkManagedFilesCanonicalContract(config) {
   const overrideMode = toNonEmptyString(contract.overrideMode);
   const entryAllowOverrideField = toNonEmptyString(contract.entryAllowOverrideField);
   const entryAuthorityField = toNonEmptyString(contract.entryAuthorityField);
+  const entryStructureContractField = toNonEmptyString(contract.entryStructureContractField);
+  const markdownPlaceholderPatternsField = toNonEmptyString(
+    contract.markdownPlaceholderPatternsField,
+  );
+  const markdownPlaceholderFailureModeField = toNonEmptyString(
+    contract.markdownPlaceholderFailureModeField,
+  );
+  const allowOverrideTemplateAuthorityOnly =
+    contract.allowOverrideTemplateAuthorityOnly === true;
+  const overrideModeExclusivity = toNonEmptyString(contract.overrideModeExclusivity);
+  const deprecatedOverrideSuffixes = normalizeStringArray(contract.deprecatedOverrideSuffixes);
   const npmScriptName = toNonEmptyString(contract.npmScriptName);
   const npmScriptCommand = toNonEmptyString(contract.npmScriptCommand);
-  const contextIndexSection =
-    toNonEmptyString(contract.contextIndexSection) ?? "managedFilesCanonical";
   const contextIndexCheckCommandKey =
     toNonEmptyString(contract.contextIndexCheckCommandKey) ?? "agentManaged";
   const contextIndexFixCommandKey =
@@ -6746,6 +6099,32 @@ function checkManagedFilesCanonicalContract(config) {
   if (entryAuthorityField !== "authority") {
     addFailure(`${contractPath}.entryAuthorityField must equal "authority".`);
   }
+  if (entryStructureContractField !== "structure_contract") {
+    addFailure(
+      `${contractPath}.entryStructureContractField must equal "structure_contract".`,
+    );
+  }
+  if (markdownPlaceholderPatternsField !== "placeholder_patterns") {
+    addFailure(
+      `${contractPath}.markdownPlaceholderPatternsField must equal "placeholder_patterns".`,
+    );
+  }
+  if (markdownPlaceholderFailureModeField !== "placeholder_failure_mode") {
+    addFailure(
+      `${contractPath}.markdownPlaceholderFailureModeField must equal "placeholder_failure_mode".`,
+    );
+  }
+  if (!allowOverrideTemplateAuthorityOnly) {
+    addFailure(`${contractPath}.allowOverrideTemplateAuthorityOnly must be true.`);
+  }
+  if (overrideModeExclusivity !== "single_mode_per_managed_path") {
+    addFailure(
+      `${contractPath}.overrideModeExclusivity must equal "single_mode_per_managed_path".`,
+    );
+  }
+  if (!deprecatedOverrideSuffixes.includes(".replace")) {
+    addFailure(`${contractPath}.deprecatedOverrideSuffixes must include ".replace".`);
+  }
   if (npmScriptName !== "agent:managed") {
     addFailure(`${contractPath}.npmScriptName must equal "agent:managed".`);
   }
@@ -6767,7 +6146,7 @@ function checkManagedFilesCanonicalContract(config) {
 
   const allowedAuthorities = normalizeStringArray(contract.allowedAuthorities);
   const allowedAuthoritySet = new Set(allowedAuthorities);
-  for (const requiredAuthority of ["template", "project"]) {
+  for (const requiredAuthority of ["template", "project", "structured"]) {
     if (!allowedAuthoritySet.has(requiredAuthority)) {
       addFailure(
         `${contractPath}.allowedAuthorities is missing required value: ${requiredAuthority}.`,
@@ -6776,12 +6155,7 @@ function checkManagedFilesCanonicalContract(config) {
   }
 
   const overrideReservedPaths = normalizeStringArray(contract.overrideReservedPaths);
-  const requiredOverrideReservedPaths = [
-    "rule-overrides.schema.json",
-    "rule-overrides.json",
-    "README.md",
-    ".gitkeep",
-  ];
+  const requiredOverrideReservedPaths = [".gitkeep"];
   for (const requiredPath of requiredOverrideReservedPaths) {
     if (!overrideReservedPaths.includes(requiredPath)) {
       addFailure(
@@ -6805,17 +6179,18 @@ function checkManagedFilesCanonicalContract(config) {
   }
 
   const contextContract = config?.contracts?.contextIndex;
-  const requiredTopLevelKeys = normalizeStringArray(contextContract?.requiredTopLevelKeys);
-  if (!requiredTopLevelKeys.includes(contextIndexSection)) {
-    addFailure(
-      `contracts.contextIndex.requiredTopLevelKeys must include ${contextIndexSection}.`,
-    );
-  }
-
-  const requiredCommandKeys = normalizeStringArray(contextContract?.requiredCommandKeys);
+  const { requiredValues: requiredCommandKeys } = resolveProfileScopedRequiredStrings({
+    config,
+    baseValues: contextContract?.requiredCommandKeys,
+    baseFieldPath: "contracts.contextIndex.requiredCommandKeys",
+    byProfileValues: contextContract?.requiredCommandKeysByProfile,
+    byProfileFieldPath: "contracts.contextIndex.requiredCommandKeysByProfile",
+  });
   for (const commandKey of [contextIndexCheckCommandKey, contextIndexFixCommandKey]) {
     if (!requiredCommandKeys.includes(commandKey)) {
-      addFailure(`contracts.contextIndex.requiredCommandKeys must include ${commandKey}.`);
+      addFailure(
+        `contracts.contextIndex required command keys must include ${commandKey} for active profiles.`,
+      );
     }
   }
 
@@ -6823,75 +6198,6 @@ function checkManagedFilesCanonicalContract(config) {
     toNonEmptyString(contextContract?.indexFile) ?? ".agents-config/docs/CONTEXT_INDEX.json";
   const contextIndex = readJsonIfPresent(contextIndexPath);
   if (contextIndex && typeof contextIndex === "object") {
-    const section = contextIndex[contextIndexSection];
-    if (!section || typeof section !== "object") {
-      addFailure(`${contextIndexPath}.${contextIndexSection} must be an object.`);
-    } else {
-      if (section.manifestFile !== manifestFile) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.manifestFile must equal ${JSON.stringify(manifestFile)}.`,
-        );
-      }
-      if (section.manifestTemplateFile !== manifestTemplateFile) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.manifestTemplateFile must equal ${JSON.stringify(manifestTemplateFile)}.`,
-        );
-      }
-      if (section.canonicalContractField !== canonicalContractField) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.canonicalContractField must equal ${JSON.stringify(canonicalContractField)}.`,
-        );
-      }
-      if (section.defaultAuthority !== defaultAuthority) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.defaultAuthority must equal ${JSON.stringify(defaultAuthority)}.`,
-        );
-      }
-      if (section.overrideMode !== overrideMode) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.overrideMode must equal ${JSON.stringify(overrideMode)}.`,
-        );
-      }
-      if (section.entryAllowOverrideField !== entryAllowOverrideField) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.entryAllowOverrideField must equal ${JSON.stringify(entryAllowOverrideField)}.`,
-        );
-      }
-      if (section.entryAuthorityField !== entryAuthorityField) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.entryAuthorityField must equal ${JSON.stringify(entryAuthorityField)}.`,
-        );
-      }
-      if (section.checkCommandKey !== contextIndexCheckCommandKey) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.checkCommandKey must equal ${JSON.stringify(contextIndexCheckCommandKey)}.`,
-        );
-      }
-      if (section.fixCommandKey !== contextIndexFixCommandKey) {
-        addFailure(
-          `${contextIndexPath}.${contextIndexSection}.fixCommandKey must equal ${JSON.stringify(contextIndexFixCommandKey)}.`,
-        );
-      }
-
-      const sectionAllowedAuthorities = normalizeStringArray(section.allowedAuthorities);
-      for (const requiredAuthority of ["template", "project"]) {
-        if (!sectionAllowedAuthorities.includes(requiredAuthority)) {
-          addFailure(
-            `${contextIndexPath}.${contextIndexSection}.allowedAuthorities must include ${requiredAuthority}.`,
-          );
-        }
-      }
-
-      const sectionReservedPaths = normalizeStringArray(section.overrideReservedPaths);
-      for (const requiredPath of requiredOverrideReservedPaths) {
-        if (!sectionReservedPaths.includes(requiredPath)) {
-          addFailure(
-            `${contextIndexPath}.${contextIndexSection}.overrideReservedPaths must include ${requiredPath}.`,
-          );
-        }
-      }
-    }
-
     if (!contextIndex.commands || typeof contextIndex.commands !== "object") {
       addFailure(`${contextIndexPath}.commands must be an object.`);
     } else {
@@ -6935,7 +6241,7 @@ function checkManagedFilesCanonicalContract(config) {
     const manifestAllowedAuthorities = normalizeStringArray(
       manifestContract.allowed_authorities,
     );
-    for (const requiredAuthority of ["template", "project"]) {
+    for (const requiredAuthority of ["template", "project", "structured"]) {
       if (!manifestAllowedAuthorities.includes(requiredAuthority)) {
         addFailure(
           `${filePath}.${canonicalContractField}.allowed_authorities must include ${requiredAuthority}.`,
@@ -6989,6 +6295,145 @@ function checkManagedFilesCanonicalContract(config) {
         );
       }
 
+      const hasStructureContract = Object.prototype.hasOwnProperty.call(
+        entry,
+        "structure_contract",
+      );
+      if (authority === "structured") {
+        const structureContract = entry.structure_contract;
+        if (
+          !structureContract ||
+          typeof structureContract !== "object" ||
+          Array.isArray(structureContract)
+        ) {
+          addFailure(
+            `${filePath}.managed_files[${index}].structure_contract is required when ${entryAuthorityField}=structured.`,
+          );
+        } else {
+          const kind = toNonEmptyString(structureContract.kind);
+          if (!["markdown_sections", "json_required_paths"].includes(kind ?? "")) {
+            addFailure(
+              `${filePath}.managed_files[${index}].structure_contract.kind must be markdown_sections or json_required_paths.`,
+            );
+          } else if (kind === "markdown_sections") {
+            const requiredSections = Array.isArray(structureContract.required_sections)
+              ? structureContract.required_sections
+              : [];
+            if (requiredSections.length === 0) {
+              addFailure(
+                `${filePath}.managed_files[${index}].structure_contract.required_sections must be a non-empty array.`,
+              );
+            } else {
+              for (const sectionHeading of requiredSections) {
+                const value = toNonEmptyString(sectionHeading);
+                if (!value || !value.startsWith("##")) {
+                  addFailure(
+                    `${filePath}.managed_files[${index}].structure_contract.required_sections entries must be markdown headings beginning with ##.`,
+                  );
+                  break;
+                }
+              }
+            }
+
+            const hasPlaceholderPatterns = Object.prototype.hasOwnProperty.call(
+              structureContract,
+              "placeholder_patterns",
+            );
+            if (hasPlaceholderPatterns) {
+              const placeholderPatterns = Array.isArray(structureContract.placeholder_patterns)
+                ? structureContract.placeholder_patterns
+                : null;
+              if (!placeholderPatterns || placeholderPatterns.length === 0) {
+                addFailure(
+                  `${filePath}.managed_files[${index}].structure_contract.placeholder_patterns must be a non-empty array when set.`,
+                );
+              } else {
+                for (const patternText of placeholderPatterns) {
+                  if (!toNonEmptyString(patternText)) {
+                    addFailure(
+                      `${filePath}.managed_files[${index}].structure_contract.placeholder_patterns entries must be non-empty strings.`,
+                    );
+                    break;
+                  }
+                }
+              }
+            }
+            if (
+              Object.prototype.hasOwnProperty.call(
+                structureContract,
+                "placeholder_failure_mode",
+              )
+            ) {
+              const mode = toNonEmptyString(structureContract.placeholder_failure_mode);
+              if (!["warn", "fail"].includes(mode ?? "")) {
+                addFailure(
+                  `${filePath}.managed_files[${index}].structure_contract.placeholder_failure_mode must be warn or fail when set.`,
+                );
+              } else if (!hasPlaceholderPatterns) {
+                addFailure(
+                  `${filePath}.managed_files[${index}].structure_contract.placeholder_failure_mode requires structure_contract.placeholder_patterns.`,
+                );
+              }
+            }
+          } else if (kind === "json_required_paths") {
+            const requiredPaths = Array.isArray(structureContract.required_paths)
+              ? structureContract.required_paths
+              : [];
+            if (requiredPaths.length === 0) {
+              addFailure(
+                `${filePath}.managed_files[${index}].structure_contract.required_paths must be a non-empty array.`,
+              );
+            } else {
+              for (const pathRule of requiredPaths) {
+                if (!pathRule || typeof pathRule !== "object" || Array.isArray(pathRule)) {
+                  addFailure(
+                    `${filePath}.managed_files[${index}].structure_contract.required_paths entries must be objects.`,
+                  );
+                  break;
+                }
+                const pathValue = toNonEmptyString(pathRule.path);
+                const typeValue = toNonEmptyString(pathRule.type);
+                if (!pathValue) {
+                  addFailure(
+                    `${filePath}.managed_files[${index}].structure_contract.required_paths entries must define non-empty path values.`,
+                  );
+                  break;
+                }
+                if (!["object", "array", "string", "number", "boolean"].includes(typeValue ?? "")) {
+                  addFailure(
+                    `${filePath}.managed_files[${index}].structure_contract.required_paths path ${pathValue} must define type object|array|string|number|boolean.`,
+                  );
+                  break;
+                }
+                if (
+                  Object.prototype.hasOwnProperty.call(pathRule, "min_items") &&
+                  pathRule.min_items !== null &&
+                  pathRule.min_items !== undefined
+                ) {
+                  const minItems = Number(pathRule.min_items);
+                  if (!Number.isInteger(minItems) || minItems < 0) {
+                    addFailure(
+                      `${filePath}.managed_files[${index}].structure_contract.required_paths path ${pathValue} min_items must be a non-negative integer.`,
+                    );
+                    break;
+                  }
+                  if (typeValue !== "array") {
+                    addFailure(
+                      `${filePath}.managed_files[${index}].structure_contract.required_paths path ${pathValue} cannot set min_items unless type=array.`,
+                    );
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if (hasStructureContract) {
+        addFailure(
+          `${filePath}.managed_files[${index}].structure_contract is only valid when ${entryAuthorityField}=structured.`,
+        );
+      }
+
       if (entry[entryAllowOverrideField] === true) {
         allowOverrideCount += 1;
         if (authority !== "template") {
@@ -7022,15 +6467,15 @@ function checkCanonicalRulesContract(config, repoRoot, activeConfigPath) {
   const overrideSchemaFile = toNonEmptyString(contract.overrideSchemaFile);
   const overrideFile =
     toNonEmptyString(contract.optionalOverrideFile) ??
-    ".agents-config/agent-overrides/rule-overrides.json";
+    ".agents-config/rule-overrides.json";
   const verifyScript = toNonEmptyString(contract.verifyScript);
 
   if (canonicalFile !== ".agents-config/contracts/rules/canonical-ruleset.json") {
     addFailure(`${contractPath}.file must equal ".agents-config/contracts/rules/canonical-ruleset.json".`);
   }
-  if (overrideSchemaFile !== ".agents-config/agent-overrides/rule-overrides.schema.json") {
+  if (overrideSchemaFile !== ".agents-config/rule-overrides.schema.json") {
     addFailure(
-      `${contractPath}.overrideSchemaFile must equal ".agents-config/agent-overrides/rule-overrides.schema.json".`,
+      `${contractPath}.overrideSchemaFile must equal ".agents-config/rule-overrides.schema.json".`,
     );
   }
   if (verifyScript !== ".agents-config/tools/rules/verify-canonical-ruleset.mjs") {
@@ -7159,7 +6604,7 @@ function checkCanonicalRulesContract(config, repoRoot, activeConfigPath) {
     rulesFile,
     canonicalFile: canonicalFile ?? ".agents-config/contracts/rules/canonical-ruleset.json",
     overridesSchemaFile:
-      overrideSchemaFile ?? ".agents-config/agent-overrides/rule-overrides.schema.json",
+      overrideSchemaFile ?? ".agents-config/rule-overrides.schema.json",
     overridesFile: overrideFile,
     mode: "check",
   });
@@ -7191,7 +6636,9 @@ const POLICY_ENFORCEMENT_CHECK_IDS = new Set([
   "checkRequiredTextSnippets",
   "checkRequiredMarkdownSections",
   "checkRequiredSequenceSnippets",
-  "checkContinuityEntryFormat",
+  "checkPlaceholderMarkers",
+  "checkSessionLogEntryFormat",
+  "checkMemoryIndexContract",
   "checkForbiddenTextPatterns",
   "checkDisallowedTrackedPathPrefixes",
   "checkPolicyRuleQuality",
@@ -7219,12 +6666,14 @@ function inferRuleEnforcementChecks(ruleId) {
       "rule_plan_placeholder_deliverables_forbidden",
       "rule_plan_complete_step_summary_required",
       "rule_plan_status_coherence_required",
-      "rule_continuity_required",
       "rule_post_compaction_rebootstrap",
-      "rule_repo_index_preflight_gate",
     ].includes(ruleId)
   ) {
     return ["checkSessionArtifactsContract"];
+  }
+
+  if (ruleId === "rule_continuity_required") {
+    return ["checkSessionArtifactsContract", "checkMemoryIndexContract"];
   }
 
   if (ruleId === "rule_startup_read_order") {
@@ -7323,10 +6772,22 @@ function checkRuleCatalogContract(config) {
     return;
   }
 
-  const requiredIds = validateStringArray(
-    contract.requiredIds,
-    `${contractPath}.requiredIds`,
-  );
+  if (!isPlainObject(contract.requiredIdsByProfile)) {
+    addFailure(`${contractPath}.requiredIdsByProfile must be an object.`);
+  }
+
+  const { requiredValues: requiredIds } = resolveProfileScopedRequiredStrings({
+    config,
+    baseValues: contract.requiredIds,
+    baseFieldPath: `${contractPath}.requiredIds`,
+    byProfileValues: contract.requiredIdsByProfile,
+    byProfileFieldPath: `${contractPath}.requiredIdsByProfile`,
+  });
+  if (requiredIds.length === 0) {
+    addFailure(
+      `${contractPath} must define at least one required rule id across base and active profile scopes.`,
+    );
+  }
 
   const rulesContent = readFileIfPresent(contract.file);
   if (rulesContent === null) {
@@ -7342,14 +6803,14 @@ function checkRuleCatalogContract(config) {
     const enforcingChecks = inferRuleEnforcementChecks(id);
     if (enforcingChecks.length === 0) {
       addFailure(
-        `${contractPath}.requiredIds entry ${id} has no enforcement-check mapping; update inferRuleEnforcementChecks.`,
+        `${contractPath} required rule id ${id} has no enforcement-check mapping; update inferRuleEnforcementChecks.`,
       );
       continue;
     }
     for (const checkId of enforcingChecks) {
       if (!POLICY_ENFORCEMENT_CHECK_IDS.has(checkId)) {
         addFailure(
-          `${contractPath}.requiredIds entry ${id} maps to unknown enforcement check ${checkId}.`,
+          `${contractPath} required rule id ${id} maps to unknown enforcement check ${checkId}.`,
         );
       }
     }
@@ -7694,18 +7155,6 @@ function checkOrchestratorSubagentContracts(config) {
     }
   }
 
-  const bootstrapFilePath =
-    toNonEmptyString(config?.contracts?.documentationModel?.bootstrapFile) ?? "AGENTS.md";
-  const agentsContent = readFileIfPresent(bootstrapFilePath);
-  if (agentsContent !== null) {
-    for (const requiredRuleId of requiredRuleIds) {
-      const idSnippet = `\`${requiredRuleId}\``;
-      if (!agentsContent.includes(idSnippet)) {
-        addFailure(`${bootstrapFilePath} must reference contract id ${idSnippet}.`);
-      }
-    }
-  }
-
   const rulesContent = readFileIfPresent(".agents-config/docs/AGENT_RULES.md");
   if (rulesContent !== null) {
     for (const requiredRuleId of requiredRuleIds) {
@@ -7775,6 +7224,36 @@ function checkPolicyRuleQuality(config) {
       seen.add(snippet);
     }
   }
+
+  const placeholderRules = config?.checks?.placeholderMarkers ?? [];
+  for (const rule of placeholderRules) {
+    const patterns = normalizeStringArray(rule?.patterns);
+    const regexPatterns = normalizeStringArray(rule?.regexPatterns);
+    if (patterns.length === 0 && regexPatterns.length === 0) {
+      addWarning(`placeholderMarkers rule for ${rule.file} has no patterns.`);
+      continue;
+    }
+
+    const seen = new Set();
+    for (const pattern of patterns) {
+      if (seen.has(pattern)) {
+        addWarning(
+          `Duplicate placeholder literal pattern in policy config for ${rule.file}: ${pattern}`,
+        );
+      }
+      seen.add(pattern);
+    }
+
+    const seenRegex = new Set();
+    for (const pattern of regexPatterns) {
+      if (seenRegex.has(pattern)) {
+        addWarning(
+          `Duplicate placeholder regex pattern in policy config for ${rule.file}: ${pattern}`,
+        );
+      }
+      seenRegex.add(pattern);
+    }
+  }
 }
 
 function runPolicyChecks(activeConfigPath = configPath, options = {}) {
@@ -7829,7 +7308,9 @@ function runPolicyChecks(activeConfigPath = configPath, options = {}) {
   checkRequiredTextSnippets(config);
   checkRequiredMarkdownSections(config);
   checkRequiredSequenceSnippets(config);
-  checkContinuityEntryFormat(config);
+  checkPlaceholderMarkers(config);
+  checkSessionLogEntryFormat(config);
+  checkMemoryIndexContract(config);
   checkForbiddenTextPatterns(config, trackedFiles, trackedFilesReliable);
   checkDisallowedTrackedPathPrefixes(config, trackedFiles, trackedFilesReliable);
 

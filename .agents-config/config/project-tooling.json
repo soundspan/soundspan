@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "id": "soundspan-tooling-config",
+    "version": "2026-03-02.01",
+    "description": "Project-owned overrides consumed by template-managed tooling scripts."
+  },
+  "releaseNotes": {
+    "defaultRepoWebUrl": "https://github.com/soundspan/soundspan"
+  },
+  "loggingCompliance": {
+    "baselineMetadataId": "soundspan-logging-compliance-baseline"
+  }
+}

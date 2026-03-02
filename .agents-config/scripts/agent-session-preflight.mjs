@@ -94,19 +94,6 @@ function normalizeStringList(value, limit = 20) {
   return output;
 }
 
-function isMissingIndexArtifactsPayload(payload) {
-  if (!payload || typeof payload !== "object") {
-    return false;
-  }
-
-  const errors = normalizeStringList(payload.errors, 50);
-  if (errors.length === 0) {
-    return false;
-  }
-
-  return errors.every((error) => /^Missing [A-Za-z0-9._-]+$/.test(error));
-}
-
 function runRepositoryIndexReadiness({
   enabled,
   verifyStrict,
@@ -115,197 +102,42 @@ function runRepositoryIndexReadiness({
   closeoutVerifyIfPossible,
   failureMode,
 }) {
-  const verifyArgs = [".agents-config/tools/index/indexer.mjs", "verify"];
-  if (verifyStrict) {
-    verifyArgs.push("--strict");
-  }
-  verifyArgs.push("--json");
-
-  const summary = {
-    enabled,
+  return {
+    enabled: false,
     verify_strict: verifyStrict,
     build_if_missing: buildIfMissing,
     reindex_before_verify: reindexBeforeVerify,
     closeout_verify_if_possible: closeoutVerifyIfPossible,
     failure_mode: failureMode,
-    preflight_state: enabled ? "pending" : "disabled",
+    preflight_state: "disabled",
     index_present: null,
     output_dir: null,
     check_error: null,
     verify: {
-      command: `node ${verifyArgs.join(" ")}`,
-      state: "not_run",
+      command: null,
+      state: "disabled",
       exit_status: null,
       status: null,
       warnings: [],
       errors: [],
     },
     build: {
-      command: "node .agents-config/tools/index/indexer.mjs build --json",
-      state: "not_run",
+      command: null,
+      state: "disabled",
       exit_status: null,
       status: null,
       warnings: [],
       errors: [],
     },
     verify_after_build: {
-      command: `node ${verifyArgs.join(" ")}`,
-      state: "not_run",
+      command: null,
+      state: "disabled",
       exit_status: null,
       status: null,
       warnings: [],
       errors: [],
     },
   };
-
-  if (!enabled) {
-    return summary;
-  }
-
-  if (reindexBeforeVerify) {
-    const buildResult = runCommandSafe("node", [
-      ".agents-config/tools/index/indexer.mjs",
-      "build",
-      "--json",
-    ]);
-    const buildPayload = parseJsonSafe(buildResult.stdout);
-
-    summary.build.state = buildResult.ok ? "pass" : "fail";
-    summary.build.exit_status = buildResult.status;
-    summary.build.status = toNonEmptyString(buildPayload?.status) ?? (buildResult.ok ? "ok" : "error");
-    summary.build.warnings = normalizeStringList(buildPayload?.warnings);
-    summary.build.errors = normalizeStringList(buildPayload?.errors);
-    summary.output_dir = toNonEmptyString(buildPayload?.output_dir);
-
-    if (!buildResult.ok) {
-      const buildFailureSummary =
-        summary.build.errors[0] ??
-        summarizeErrorText(buildResult.stderr) ??
-        summarizeErrorText(buildResult.stdout);
-      summary.preflight_state = "fail";
-      summary.check_error = buildFailureSummary ?? "Repository index build failed.";
-      return summary;
-    }
-
-    const verifyAfterBuildResult = runCommandSafe("node", verifyArgs);
-    const verifyAfterBuildPayload = parseJsonSafe(verifyAfterBuildResult.stdout);
-    summary.verify_after_build.state = verifyAfterBuildResult.ok ? "pass" : "fail";
-    summary.verify_after_build.exit_status = verifyAfterBuildResult.status;
-    summary.verify_after_build.status =
-      toNonEmptyString(verifyAfterBuildPayload?.status) ??
-      (verifyAfterBuildResult.ok ? "ok" : "error");
-    summary.verify_after_build.warnings = normalizeStringList(
-      verifyAfterBuildPayload?.warnings,
-    );
-    summary.verify_after_build.errors = normalizeStringList(
-      verifyAfterBuildPayload?.errors,
-    );
-    if (!summary.output_dir) {
-      summary.output_dir = toNonEmptyString(verifyAfterBuildPayload?.output_dir);
-    }
-
-    if (!verifyAfterBuildResult.ok) {
-      const verifyAfterBuildFailureSummary =
-        summary.verify_after_build.errors[0] ??
-        summarizeErrorText(verifyAfterBuildResult.stderr) ??
-        summarizeErrorText(verifyAfterBuildResult.stdout);
-      summary.preflight_state = "fail";
-      summary.check_error =
-        verifyAfterBuildFailureSummary ??
-        "Repository index verify failed after build.";
-      return summary;
-    }
-
-    summary.index_present = true;
-    summary.preflight_state = "built_and_verified";
-    return summary;
-  }
-
-  const verifyResult = runCommandSafe("node", verifyArgs);
-  const verifyPayload = parseJsonSafe(verifyResult.stdout);
-  summary.verify.state = verifyResult.ok ? "pass" : "fail";
-  summary.verify.exit_status = verifyResult.status;
-  summary.verify.status = toNonEmptyString(verifyPayload?.status) ?? (verifyResult.ok ? "ok" : "error");
-  summary.verify.warnings = normalizeStringList(verifyPayload?.warnings);
-  summary.verify.errors = normalizeStringList(verifyPayload?.errors);
-  summary.output_dir = toNonEmptyString(verifyPayload?.output_dir);
-
-  if (verifyResult.ok) {
-    summary.index_present = true;
-    summary.preflight_state = "ready";
-    return summary;
-  }
-
-  const verifyFailureSummary =
-    summary.verify.errors[0] ??
-    summarizeErrorText(verifyResult.stderr) ??
-    summarizeErrorText(verifyResult.stdout);
-
-  const missingIndexArtifacts = isMissingIndexArtifactsPayload(verifyPayload);
-  summary.index_present = !missingIndexArtifacts;
-
-  if (!missingIndexArtifacts || !buildIfMissing) {
-    summary.preflight_state = "fail";
-    summary.check_error = verifyFailureSummary ?? "Repository index strict verify failed.";
-    return summary;
-  }
-
-  summary.verify.state = "missing";
-  const buildResult = runCommandSafe("node", [
-    ".agents-config/tools/index/indexer.mjs",
-    "build",
-    "--json",
-  ]);
-  const buildPayload = parseJsonSafe(buildResult.stdout);
-
-  summary.build.state = buildResult.ok ? "pass" : "fail";
-  summary.build.exit_status = buildResult.status;
-  summary.build.status = toNonEmptyString(buildPayload?.status) ?? (buildResult.ok ? "ok" : "error");
-  summary.build.warnings = normalizeStringList(buildPayload?.warnings);
-  summary.build.errors = normalizeStringList(buildPayload?.errors);
-
-  if (!buildResult.ok) {
-    const buildFailureSummary =
-      summary.build.errors[0] ??
-      summarizeErrorText(buildResult.stderr) ??
-      summarizeErrorText(buildResult.stdout);
-    summary.preflight_state = "fail";
-    summary.check_error = buildFailureSummary ?? "Repository index build failed.";
-    return summary;
-  }
-
-  const verifyAfterBuildResult = runCommandSafe("node", verifyArgs);
-  const verifyAfterBuildPayload = parseJsonSafe(verifyAfterBuildResult.stdout);
-  summary.verify_after_build.state = verifyAfterBuildResult.ok ? "pass" : "fail";
-  summary.verify_after_build.exit_status = verifyAfterBuildResult.status;
-  summary.verify_after_build.status =
-    toNonEmptyString(verifyAfterBuildPayload?.status) ??
-    (verifyAfterBuildResult.ok ? "ok" : "error");
-  summary.verify_after_build.warnings = normalizeStringList(
-    verifyAfterBuildPayload?.warnings,
-  );
-  summary.verify_after_build.errors = normalizeStringList(
-    verifyAfterBuildPayload?.errors,
-  );
-  if (!summary.output_dir) {
-    summary.output_dir = toNonEmptyString(verifyAfterBuildPayload?.output_dir);
-  }
-
-  if (!verifyAfterBuildResult.ok) {
-    const verifyAfterBuildFailureSummary =
-      summary.verify_after_build.errors[0] ??
-      summarizeErrorText(verifyAfterBuildResult.stderr) ??
-      summarizeErrorText(verifyAfterBuildResult.stdout);
-    summary.preflight_state = "fail";
-    summary.check_error =
-      verifyAfterBuildFailureSummary ??
-      "Repository index verify failed after build.";
-    return summary;
-  }
-
-  summary.index_present = true;
-  summary.preflight_state = "built_and_verified";
-  return summary;
 }
 
 function findRepoRootByGitDir(startDir) {
@@ -2446,26 +2278,6 @@ function main() {
   const stalePlanReferenceScanRoots = normalizeStringArray(
     sessionArtifacts.stalePlanReferenceScanRoots ?? [".agents/plans"],
   );
-  const repositoryIndexPreflightConfig =
-    sessionArtifacts.repositoryIndexPreflight &&
-    typeof sessionArtifacts.repositoryIndexPreflight === "object"
-      ? sessionArtifacts.repositoryIndexPreflight
-      : {};
-  const repositoryIndexPreflightEnabled =
-    repositoryIndexPreflightConfig.enabled !== false;
-  const repositoryIndexBuildIfMissing =
-    repositoryIndexPreflightConfig.buildIfMissing !== false;
-  const repositoryIndexReindexBeforeVerify =
-    repositoryIndexPreflightConfig.reindexBeforeVerify !== false;
-  const repositoryIndexVerifyStrict =
-    repositoryIndexPreflightConfig.verifyStrict !== false;
-  const repositoryIndexFailureModeCandidate =
-    toNonEmptyString(repositoryIndexPreflightConfig.failureMode) ?? "fail";
-  const repositoryIndexFailureMode =
-    repositoryIndexFailureModeCandidate === "warn" ? "warn" : "fail";
-  const repositoryIndexCloseoutVerifyIfPossible =
-    repositoryIndexPreflightConfig.closeoutVerifyIfPossible !== false;
-
   const executionQueuePath =
     sessionArtifacts.executionQueueFile ?? ".agents/EXECUTION_QUEUE.json";
   const sessionBriefJsonPath =
@@ -2541,12 +2353,12 @@ function main() {
   ensureDir(resolveArtifactPath(archiveRoot));
 
   const repositoryIndexReadiness = runRepositoryIndexReadiness({
-    enabled: repositoryIndexPreflightEnabled,
-    verifyStrict: repositoryIndexVerifyStrict,
-    buildIfMissing: repositoryIndexBuildIfMissing,
-    reindexBeforeVerify: repositoryIndexReindexBeforeVerify,
-    closeoutVerifyIfPossible: repositoryIndexCloseoutVerifyIfPossible,
-    failureMode: repositoryIndexFailureMode,
+    enabled: false,
+    verifyStrict: false,
+    buildIfMissing: false,
+    reindexBeforeVerify: false,
+    closeoutVerifyIfPossible: false,
+    failureMode: "fail",
   });
 
   const agentsStateLockFile = path.resolve(canonicalAgentsRoot, ".state.lock");
@@ -4388,36 +4200,6 @@ function main() {
       `Worktree .agents symlink created at ${workspaceLayoutInfo.local_agents_path} -> ${workspaceLayoutInfo.canonical_agents_root}`,
     );
   }
-  if (
-    repositoryIndexReadiness.enabled &&
-    repositoryIndexReadiness.preflight_state === "built_and_verified"
-  ) {
-    if (repositoryIndexReadiness.reindex_before_verify) {
-      nextActions.push(
-        "Repository index was re-indexed and strict-verified by preflight",
-      );
-    } else {
-      nextActions.push(
-        "Repository index was missing for current branch/worktree namespace and was built + strict-verified by preflight",
-      );
-    }
-  }
-  if (
-    repositoryIndexReadiness.enabled &&
-    repositoryIndexReadiness.preflight_state === "fail"
-  ) {
-    nextActions.push(
-      "Fix repository index readiness before implementation (`npm run index:verify`; if missing/stale, run `npm run index:build` and re-run verify)",
-    );
-  }
-  if (
-    repositoryIndexReadiness.enabled &&
-    repositoryIndexReadiness.closeout_verify_if_possible
-  ) {
-    nextActions.push(
-      "Before final handoff when feasible, run `npm run index:verify` and rebuild (`npm run index:build`) if drift is reported",
-    );
-  }
   if (gitStatusShort.length > 0 && !gitStatusShort[0].startsWith("UNAVAILABLE:")) {
     nextActions.push("Review current git working tree before new edits");
   }
@@ -4623,18 +4405,6 @@ function main() {
       (policyCheckState === "unavailable"
         ? "Policy check unavailable."
         : "Policy check failed.");
-    console.error(details);
-    process.exit(1);
-  }
-
-  if (
-    repositoryIndexReadiness.enabled &&
-    repositoryIndexReadiness.preflight_state === "fail" &&
-    repositoryIndexFailureMode === "fail"
-  ) {
-    const details =
-      repositoryIndexReadiness.check_error ??
-      "Repository index readiness check failed during preflight.";
     console.error(details);
     process.exit(1);
   }

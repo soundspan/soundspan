@@ -9,8 +9,9 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_POLICY_FILE = ".agents-config/policies/agent-governance.json";
 const DEFAULT_RULES_FILE = ".agents-config/docs/AGENT_RULES.md";
 const DEFAULT_CANONICAL_FILE = ".agents-config/contracts/rules/canonical-ruleset.json";
-const DEFAULT_OVERRIDES_SCHEMA_FILE = ".agents-config/agent-overrides/rule-overrides.schema.json";
-const DEFAULT_OVERRIDES_FILE = ".agents-config/agent-overrides/rule-overrides.json";
+const DEFAULT_OVERRIDES_SCHEMA_FILE = ".agents-config/rule-overrides.schema.json";
+const DEFAULT_OVERRIDES_FILE = ".agents-config/rule-overrides.json";
+const DEFAULT_MANAGED_MANIFEST_FILE = ".agents-config/agent-managed.json";
 const CATEGORY_VALUES = new Set([
   "governance",
   "execution",
@@ -41,6 +42,51 @@ function toNonEmptyString(value) {
 
 function normalizePath(input) {
   return input.split(path.sep).join("/");
+}
+
+function deriveAdjacentOverridePath(filePath) {
+  const normalized = normalizePath(filePath);
+  const index = normalized.lastIndexOf(".");
+  if (index <= 0 || index === normalized.length - 1) {
+    return `${normalized}.override`;
+  }
+  return `${normalized.slice(0, index)}.override${normalized.slice(index)}`;
+}
+
+function resolveCanonicalManagedInfo(repoRoot, canonicalFile) {
+  const manifestPath = path.resolve(repoRoot, DEFAULT_MANAGED_MANIFEST_FILE);
+  if (!fs.existsSync(manifestPath)) {
+    return {
+      allowOverride: false,
+      authority: "template",
+      isTemplateSourceRepo: false,
+    };
+  }
+
+  try {
+    const manifest = readJson(manifestPath);
+    const managedFiles = Array.isArray(manifest?.managed_files) ? manifest.managed_files : [];
+    const canonicalEntry = managedFiles.find(
+      (entry) => normalizePath(toNonEmptyString(entry?.path) ?? "") === normalizePath(canonicalFile),
+    );
+    const defaultAuthority = toNonEmptyString(manifest?.canonical_contract?.default_authority) ?? "template";
+    const authority = toNonEmptyString(canonicalEntry?.authority) ?? defaultAuthority;
+    const allowOverride = canonicalEntry?.allow_override === true;
+    const localPath = normalizePath(toNonEmptyString(manifest?.template?.localPath) ?? "");
+    const isTemplateSourceRepo = localPath === ".";
+
+    return {
+      allowOverride,
+      authority,
+      isTemplateSourceRepo,
+    };
+  } catch (_error) {
+    return {
+      allowOverride: false,
+      authority: "template",
+      isTemplateSourceRepo: false,
+    };
+  }
 }
 
 function resolveRepoRoot() {
@@ -220,6 +266,97 @@ function normalizeArrayOfStrings(value) {
   return out;
 }
 
+function normalizeUniqueArrayOfStrings(value) {
+  const seen = new Set();
+  const out = [];
+  for (const entry of normalizeArrayOfStrings(value)) {
+    if (seen.has(entry)) {
+      continue;
+    }
+    seen.add(entry);
+    out.push(entry);
+  }
+  return out;
+}
+
+function getAvailableProfiles(policy) {
+  const availableProfiles = normalizeUniqueArrayOfStrings(
+    policy?.contracts?.profiles?.availableProfiles,
+  );
+  if (availableProfiles.length > 0) {
+    return availableProfiles;
+  }
+  return ["base", "typescript", "typescript-openapi", "javascript", "python"];
+}
+
+function getActiveProfiles(policy) {
+  const activeProfiles = normalizeUniqueArrayOfStrings(
+    policy?.contracts?.profiles?.activeProfiles,
+  );
+  if (activeProfiles.length > 0) {
+    return activeProfiles;
+  }
+  return getAvailableProfiles(policy);
+}
+
+function resolveProfileScopedRequiredRuleIds(policy, errors) {
+  const ruleCatalog = policy?.contracts?.ruleCatalog;
+  const requiredIds = normalizeUniqueArrayOfStrings(ruleCatalog?.requiredIds);
+  const availableProfiles = new Set(getAvailableProfiles(policy));
+  const activeProfiles = getActiveProfiles(policy);
+  const requiredIdsByProfile = new Map();
+  const rawRequiredIdsByProfile = ruleCatalog?.requiredIdsByProfile;
+
+  if (rawRequiredIdsByProfile !== undefined) {
+    if (
+      !rawRequiredIdsByProfile ||
+      typeof rawRequiredIdsByProfile !== "object" ||
+      Array.isArray(rawRequiredIdsByProfile)
+    ) {
+      errors.push("Policy contract contracts.ruleCatalog.requiredIdsByProfile must be an object when present.");
+    } else {
+      for (const [profile, ids] of Object.entries(rawRequiredIdsByProfile)) {
+        if (!availableProfiles.has(profile)) {
+          errors.push(
+            `Policy contract contracts.ruleCatalog.requiredIdsByProfile contains unknown profile: ${profile}`,
+          );
+          continue;
+        }
+        requiredIdsByProfile.set(profile, normalizeUniqueArrayOfStrings(ids));
+      }
+    }
+  }
+
+  const combinedIds = [];
+  const seenIds = new Set();
+  const appendUnique = (id) => {
+    if (seenIds.has(id)) {
+      return;
+    }
+    seenIds.add(id);
+    combinedIds.push(id);
+  };
+  for (const id of requiredIds) {
+    appendUnique(id);
+  }
+  for (const profile of activeProfiles) {
+    for (const id of requiredIdsByProfile.get(profile) ?? []) {
+      appendUnique(id);
+    }
+  }
+
+  if (combinedIds.length === 0) {
+    errors.push(
+      "Policy contract contracts.ruleCatalog.requiredIds (plus active profile scoped IDs) is missing or empty.",
+    );
+  }
+
+  return {
+    requiredIds: combinedIds,
+    activeProfiles,
+  };
+}
+
 function buildExpectedCanonical({
   policy,
   ruleCatalogStatements,
@@ -228,10 +365,10 @@ function buildExpectedCanonical({
   const errors = [];
   const warnings = [];
 
-  const requiredIds = normalizeArrayOfStrings(policy?.contracts?.ruleCatalog?.requiredIds);
-  if (requiredIds.length === 0) {
-    errors.push("Policy contract contracts.ruleCatalog.requiredIds is missing or empty.");
-  }
+  const { requiredIds, activeProfiles } = resolveProfileScopedRequiredRuleIds(
+    policy,
+    errors,
+  );
 
   const orchestratorRulesRaw = Array.isArray(policy?.contracts?.orchestratorSubagent?.rules)
     ? policy.contracts.orchestratorSubagent.rules
@@ -272,11 +409,12 @@ function buildExpectedCanonical({
         ? "policy.orchestratorSubagent.rules"
         : statementFromDocs
           ? "docs.ruleCatalog"
-          : "policy.ruleCatalog.requiredIds",
+          : "policy.ruleCatalog.requiredIds(+ByProfile)",
     });
   }
 
   const policyRequiredIdsHash = sha256(JSON.stringify(requiredIds));
+  const policyActiveProfilesHash = sha256(JSON.stringify(activeProfiles));
   const policyOrchestratorRulesHash = sha256(
     JSON.stringify(
       orchestratorRulesRaw
@@ -311,8 +449,10 @@ function buildExpectedCanonical({
       toNonEmptyString(existingMetadata.description) ??
       "Canonical governance rule catalog used for policy and drift checks.",
     generated_from: [DEFAULT_POLICY_FILE, DEFAULT_RULES_FILE],
+    active_profiles: activeProfiles,
     lineage: {
       policy_required_ids_sha256: policyRequiredIdsHash,
+      policy_active_profiles_sha256: policyActiveProfilesHash,
       policy_orchestrator_rules_sha256: policyOrchestratorRulesHash,
       rules_doc_catalog_sha256: docCatalogHash,
       canonical_rules_sha256: canonicalRulesHash,
@@ -325,6 +465,7 @@ function buildExpectedCanonical({
       rules,
     },
     requiredIds,
+    activeProfiles,
     errors,
     warnings,
   };
@@ -362,12 +503,17 @@ function validateCanonicalRules({
         errors.push(`canonical.metadata.generated_from must include ${requiredSource}.`);
       }
     }
+    const activeProfiles = normalizeArrayOfStrings(metadata.active_profiles);
+    if (activeProfiles.length === 0) {
+      errors.push("canonical.metadata.active_profiles must be a non-empty string array.");
+    }
     const lineage = metadata.lineage;
     if (!lineage || typeof lineage !== "object") {
       errors.push("canonical.metadata.lineage must be an object.");
     } else {
       for (const fieldName of [
         "policy_required_ids_sha256",
+        "policy_active_profiles_sha256",
         "policy_orchestrator_rules_sha256",
         "rules_doc_catalog_sha256",
         "canonical_rules_sha256",
@@ -653,8 +799,15 @@ export function verifyCanonicalRuleset({
   const absolutePolicyFile = path.resolve(repoRoot, policyFile);
   const absoluteRulesFile = path.resolve(repoRoot, rulesFile);
   const absoluteCanonicalFile = path.resolve(repoRoot, canonicalFile);
+  const canonicalOverrideFile = deriveAdjacentOverridePath(canonicalFile);
+  const absoluteCanonicalOverrideFile = path.resolve(repoRoot, canonicalOverrideFile);
   const absoluteOverridesSchemaFile = path.resolve(repoRoot, overridesSchemaFile);
   const absoluteOverridesFile = path.resolve(repoRoot, overridesFile);
+  const managedInfo = resolveCanonicalManagedInfo(repoRoot, canonicalFile);
+  const useCanonicalOverride =
+    managedInfo.allowOverride === true &&
+    managedInfo.authority === "template" &&
+    managedInfo.isTemplateSourceRepo !== true;
 
   if (!fs.existsSync(absolutePolicyFile)) {
     errors.push(`Missing policy file: ${policyFile}`);
@@ -686,29 +839,43 @@ export function verifyCanonicalRuleset({
   const rulesMarkdown = fs.readFileSync(absoluteRulesFile, "utf8");
   const ruleCatalogStatements = parseRuleCatalogStatements(rulesMarkdown);
   const canonicalBaseline = readJsonIfPresent(absoluteCanonicalFile);
+  const canonicalOverrideBaseline = useCanonicalOverride
+    ? readJsonIfPresent(absoluteCanonicalOverrideFile)
+    : null;
+  const canonicalBaselineForMetadata = canonicalOverrideBaseline ?? canonicalBaseline;
 
   const expectedResult = buildExpectedCanonical({
     policy,
     ruleCatalogStatements,
-    canonicalBaseline,
+    canonicalBaseline: canonicalBaselineForMetadata,
   });
   errors.push(...expectedResult.errors);
   warnings.push(...expectedResult.warnings);
 
   const expectedCanonical = expectedResult.expectedCanonical;
   const requiredIds = expectedResult.requiredIds;
-  let canonical = canonicalBaseline;
+  const activeProfiles = expectedResult.activeProfiles;
+  let canonical = canonicalOverrideBaseline ?? canonicalBaseline;
+  let generatedPath = null;
+  let effectiveCanonicalFile =
+    canonicalOverrideBaseline !== null ? canonicalOverrideFile : canonicalFile;
 
   if (mode === "write") {
-    ensureParentDir(absoluteCanonicalFile);
-    fs.writeFileSync(
-      absoluteCanonicalFile,
-      `${JSON.stringify(expectedCanonical, null, 2)}\n`,
-      "utf8",
-    );
-    canonical = readJson(absoluteCanonicalFile);
+    const writePathAbs = useCanonicalOverride ? absoluteCanonicalOverrideFile : absoluteCanonicalFile;
+    const writePathRel = useCanonicalOverride ? canonicalOverrideFile : canonicalFile;
+    ensureParentDir(writePathAbs);
+    fs.writeFileSync(writePathAbs, `${JSON.stringify(expectedCanonical, null, 2)}\n`, "utf8");
+    canonical = readJson(writePathAbs);
+    generatedPath = normalizePath(path.relative(repoRoot, writePathAbs));
+    effectiveCanonicalFile = writePathRel;
   } else if (!canonical) {
-    errors.push(`Missing canonical ruleset file: ${canonicalFile}`);
+    if (useCanonicalOverride) {
+      errors.push(
+        `Missing canonical ruleset file: expected ${canonicalFile} or ${canonicalOverrideFile}.`,
+      );
+    } else {
+      errors.push(`Missing canonical ruleset file: ${canonicalFile}`);
+    }
   }
 
   if (canonical) {
@@ -750,15 +917,19 @@ export function verifyCanonicalRuleset({
     errors,
     warnings,
     generated: mode === "write",
+    generatedPath,
     paths: {
       policyFile: normalizePath(path.relative(repoRoot, absolutePolicyFile)),
       rulesFile: normalizePath(path.relative(repoRoot, absoluteRulesFile)),
       canonicalFile: normalizePath(path.relative(repoRoot, absoluteCanonicalFile)),
+      canonicalOverrideFile: normalizePath(path.relative(repoRoot, absoluteCanonicalOverrideFile)),
+      effectiveCanonicalFile: normalizePath(effectiveCanonicalFile),
       overridesSchemaFile: normalizePath(path.relative(repoRoot, absoluteOverridesSchemaFile)),
       overridesFile: normalizePath(path.relative(repoRoot, absoluteOverridesFile)),
     },
     counts: {
       requiredRuleIds: requiredIds.length,
+      activeProfiles: activeProfiles.length,
       ruleCatalogStatements: ruleCatalogStatements.size,
     },
   };
@@ -772,14 +943,14 @@ function printResult(result, { json = false, quiet = false } = {}) {
 
   const prefix = result.ok ? "[PASS]" : "[FAIL]";
   console.log(
-    `${prefix} canonical ruleset verification (${result.mode}) :: ${result.paths.canonicalFile}`,
+    `${prefix} canonical ruleset verification (${result.mode}) :: ${result.paths.effectiveCanonicalFile}`,
   );
   if (result.generated) {
-    console.log(`Wrote canonical ruleset: ${result.paths.canonicalFile}`);
+    console.log(`Wrote canonical ruleset: ${result.generatedPath ?? result.paths.effectiveCanonicalFile}`);
   }
   if (!quiet) {
     console.log(
-      `Required rule IDs: ${result.counts.requiredRuleIds}, documented catalog statements: ${result.counts.ruleCatalogStatements}`,
+      `Required rule IDs: ${result.counts.requiredRuleIds}, active profiles: ${result.counts.activeProfiles}, documented catalog statements: ${result.counts.ruleCatalogStatements}`,
     );
   }
   for (const warning of result.warnings) {

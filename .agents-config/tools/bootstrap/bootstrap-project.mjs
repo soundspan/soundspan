@@ -4,8 +4,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const SUPPORTED_PROFILES = new Set(["base", "node-web"]);
+const SUPPORTED_PROFILE_LIST = [
+  "base",
+  "typescript",
+  "typescript-openapi",
+  "javascript",
+  "python",
+];
+const SUPPORTED_PROFILES = new Set(SUPPORTED_PROFILE_LIST);
 const DEFAULT_PROFILES = ["base"];
+const SUPPORTED_BOOTSTRAP_MODES = new Set(["new", "existing"]);
 const SUPPORTED_AGENTS_MODES = new Set(["external", "local"]);
 const DEFAULT_AGENTS_WORKFILES_PATH = "../agents-workfiles";
 const REQUIRED_GITIGNORE_SNIPPETS = [".agents", ".agents/", ".agents/**"];
@@ -26,13 +34,24 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 ### Fixed
 - None.
 `;
-const NODE_WEB_PROFILE_CONTRACTS = [
+const CONTRACT_PROFILE_REQUIREMENTS = {
+  featureIndex: ["typescript", "javascript"],
+  testMatrix: ["typescript", "javascript"],
+  routeMap: ["typescript", "javascript"],
+  domainReadmes: ["typescript", "javascript"],
+  jsdocCoverage: ["typescript", "javascript"],
+  openapiCoverage: ["typescript-openapi"],
+  loggingStandards: ["typescript", "javascript"],
+};
+const PRESERVED_POLICY_TEMPLATE_CONTRACT_KEYS = [
+  "workspaceLayout",
   "featureIndex",
-  "testMatrix",
-  "routeMap",
-  "domainReadmes",
-  "jsdocCoverage",
-  "loggingStandards",
+  "releaseNotes",
+  "releaseVersion",
+  "ruleCatalog",
+  "contextIndex",
+  "managedFilesCanonical",
+  "canonicalRules",
 ];
 
 const FILES = {
@@ -40,12 +59,10 @@ const FILES = {
   contextIndex: ".agents-config/docs/CONTEXT_INDEX.json",
   featureIndex: ".agents-config/docs/FEATURE_INDEX.json",
   loggingBaseline: ".agents-config/policies/logging-compliance-baseline.json",
+  toolingConfig: ".agents-config/config/project-tooling.json",
   packageJson: "package.json",
   packageLock: "package-lock.json",
   releaseTemplate: ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md",
-  generateReleaseNotes: ".agents-config/scripts/generate-release-notes.mjs",
-  verifyLoggingCompliance: ".agents-config/scripts/verify-logging-compliance.mjs",
-  indexConfig: ".agents-config/tools/index/index.config.json",
   agentsDoc: "AGENTS.md",
   rulesDoc: ".agents-config/docs/AGENT_RULES.md",
   contextDoc: ".agents-config/docs/AGENT_CONTEXT.md",
@@ -86,55 +103,52 @@ function toPosixPath(filePath) {
   return filePath.split(path.sep).join("/");
 }
 
-function normalizeRelativePath(filePath) {
-  const normalized = path.posix
-    .normalize(toPosixPath(filePath))
-    .replace(/^\.\//, "");
-  if (normalized === ".") {
-    return "";
-  }
-  return normalized;
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function assertSafeRepoRelativePath(candidatePath, label) {
-  const normalized = normalizeRelativePath(candidatePath);
-  if (
-    normalized === ".." ||
-    normalized.startsWith("../") ||
-    normalized.split("/").includes("..")
-  ) {
-    fail(`${label} must remain inside the repository root (received: ${candidatePath}).`);
-  }
+function cloneJsonValue(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
-function resolveManagedOverrideRepoPath({ entry, targetRelativePath, overrideRoot }) {
-  const explicitOverridePath = toNonEmptyString(entry?.override_path);
-  if (explicitOverridePath) {
-    if (path.isAbsolute(explicitOverridePath)) {
-      fail(
-        `Managed entry ${JSON.stringify(entry?.path ?? "<unknown>")} uses absolute override_path; use a repo-relative path.`,
-      );
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out = [];
+  const seen = new Set();
+  for (const entry of value) {
+    const text = toNonEmptyString(entry);
+    if (!text || seen.has(text)) {
+      continue;
     }
-    assertSafeRepoRelativePath(
-      explicitOverridePath,
-      `Managed entry ${JSON.stringify(entry?.path ?? "<unknown>")} override_path`,
-    );
-    return normalizeRelativePath(explicitOverridePath);
+    seen.add(text);
+    out.push(text);
   }
+  return out;
+}
 
-  const normalizedOverrideRoot = toNonEmptyString(overrideRoot)
-    ? normalizeRelativePath(overrideRoot)
-    : "";
-  if (normalizedOverrideRoot) {
-    assertSafeRepoRelativePath(normalizedOverrideRoot, "overrideRoot");
+function normalizeProfileKeyedStringArrayMap(value) {
+  if (!isPlainObject(value)) {
+    return {};
   }
-  if (!normalizedOverrideRoot) {
-    return null;
+  const out = {};
+  for (const [key, entries] of Object.entries(value)) {
+    const normalizedEntries = normalizeStringArray(entries);
+    if (normalizedEntries.length === 0) {
+      continue;
+    }
+    out[key] = normalizedEntries;
   }
+  return out;
+}
 
-  return normalizeRelativePath(
-    path.posix.join(normalizedOverrideRoot, normalizeRelativePath(targetRelativePath)),
-  );
+function mergeProfileKeyedStringArrayMap({ templateMap, existingMap }) {
+  const merged = isPlainObject(existingMap) ? cloneJsonValue(existingMap) : {};
+  for (const [profile, entries] of Object.entries(templateMap)) {
+    merged[profile] = [...entries];
+  }
+  return merged;
 }
 
 function validateProjectId(projectId) {
@@ -178,19 +192,15 @@ function parseProfiles(rawProfiles) {
     fail('The "base" profile is required.');
   }
 
-  return unique;
+  return normalizeProfileDependencies(unique);
 }
 
-function managedEntryIsActive(entry, activeProfiles) {
-  const requiredProfiles = Array.isArray(entry?.profiles)
-    ? entry.profiles.map((profile) => toNonEmptyString(profile)).filter(Boolean)
-    : [];
-
-  if (requiredProfiles.length === 0) {
-    return true;
+function normalizeProfileDependencies(profiles) {
+  const normalized = [...profiles];
+  if (normalized.includes("typescript-openapi") && !normalized.includes("typescript")) {
+    normalized.push("typescript");
   }
-
-  return requiredProfiles.some((profile) => activeProfiles.has(profile));
+  return normalized;
 }
 
 function normalizeAgentsMode(rawMode) {
@@ -201,6 +211,16 @@ function normalizeAgentsMode(rawMode) {
   if (!SUPPORTED_AGENTS_MODES.has(mode)) {
     fail(
       `Unknown --agents-mode "${mode}". Supported: ${[...SUPPORTED_AGENTS_MODES].join(", ")}`,
+    );
+  }
+  return mode;
+}
+
+function normalizeBootstrapMode(rawMode) {
+  const mode = toNonEmptyString(rawMode) ?? "new";
+  if (!SUPPORTED_BOOTSTRAP_MODES.has(mode)) {
+    fail(
+      `Unknown --bootstrap-mode "${mode}". Supported: ${[...SUPPORTED_BOOTSTRAP_MODES].join(", ")}`,
     );
   }
   return mode;
@@ -222,6 +242,7 @@ function parseArgs(argv) {
     templateRepo: "BonzTM/agents-template",
     templateRef: "main",
     templateLocalPath: "../agents-template",
+    bootstrapMode: "new",
     skipPreflight: false,
   };
 
@@ -285,6 +306,9 @@ function parseArgs(argv) {
       case "template-local-path":
         options.templateLocalPath = value.trim();
         break;
+      case "bootstrap-mode":
+        options.bootstrapMode = value.trim();
+        break;
       default:
         fail(`Unknown flag: --${key}`);
     }
@@ -306,6 +330,64 @@ function readJsonIfPresent(filePath) {
 
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function writeJsonIfChanged(filePath, previousValue, nextValue) {
+  if (JSON.stringify(previousValue) === JSON.stringify(nextValue)) {
+    return false;
+  }
+  writeJson(filePath, nextValue);
+  return true;
+}
+
+function buildManagedEntryIndex(manifest) {
+  const index = new Map();
+  const managedEntries = Array.isArray(manifest?.managed_files) ? manifest.managed_files : [];
+  for (const entry of managedEntries) {
+    const entryPath = toNonEmptyString(entry?.path);
+    if (!entryPath) {
+      continue;
+    }
+    const normalizedPath = toPosixPath(entryPath);
+    const sourcePath = toPosixPath(toNonEmptyString(entry?.source_path) ?? entryPath);
+    const authority = toNonEmptyString(entry?.authority) ?? "template";
+    index.set(normalizedPath, { sourcePath, authority });
+  }
+  return index;
+}
+
+function shouldPreserveExistingNonTemplateManagedFile({
+  bootstrapMode,
+  managedEntryIndex,
+  repoRoot,
+  templateRoot,
+  targetRelativePath,
+}) {
+  if (bootstrapMode !== "existing") {
+    return false;
+  }
+
+  const normalizedTargetPath = toPosixPath(targetRelativePath);
+  const entry = managedEntryIndex.get(normalizedTargetPath);
+  if (!entry || entry.authority === "template") {
+    return false;
+  }
+
+  const targetPath = path.resolve(repoRoot, normalizedTargetPath);
+  if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
+    return false;
+  }
+
+  if (!templateRoot) {
+    return true;
+  }
+
+  const templateSourcePath = path.resolve(templateRoot, entry.sourcePath);
+  if (!fs.existsSync(templateSourcePath) || !fs.statSync(templateSourcePath).isFile()) {
+    return true;
+  }
+
+  return fs.readFileSync(targetPath, "utf8") !== fs.readFileSync(templateSourcePath, "utf8");
 }
 
 function deepReplaceStrings(value, replacements) {
@@ -499,7 +581,6 @@ function ensureAgentsSeedFiles({ repoRoot, canonicalAgentsRootAbs, agentsMode })
     agentsMode,
     nowIso: now,
   });
-  const enabledModeLabel = agentsMode === "local" ? "local" : "external";
 
   writeFileIfMissing(
     path.resolve(canonicalAgentsRootAbs, "EXECUTION_QUEUE.json"),
@@ -542,11 +623,17 @@ function ensureAgentsSeedFiles({ repoRoot, canonicalAgentsRootAbs, agentsMode })
   );
 
   writeFileIfMissing(
-    path.resolve(canonicalAgentsRootAbs, "CONTINUITY.md"),
-    `# CONTINUITY\n\n## [PLANS]\n- ${now} [TOOL] Initialize continuity baseline.\n\n## [DECISIONS]\n- ${now} [CODE] ${enabledModeLabel} canonical agents root enabled for this project.\n\n## [PROGRESS]\n- ${now} [TOOL] Baseline continuity initialized.\n\n## [DISCOVERIES]\n- ${now} [TOOL] None.\n\n## [OUTCOMES]\n- ${now} [TOOL] Ready for preflight.\n`,
+    path.resolve(canonicalAgentsRootAbs, "MEMORY.md"),
+    "# MEMORY\n\n## User Directives\n- None recorded.\n\n## Architecture Decisions\n- None recorded.\n\n## Known Gotchas\n- None recorded.\n\n## Submemory Index\n- None recorded.\n",
+  );
+
+  writeFileIfMissing(
+    path.resolve(canonicalAgentsRootAbs, "SESSION_LOG.md"),
+    `# SESSION_LOG\n\n## [ENTRIES]\n- ${now} [TOOL] Session log initialized.\n`,
   );
 
   ensureDir(path.resolve(canonicalAgentsRootAbs, "archives"));
+  ensureDir(path.resolve(canonicalAgentsRootAbs, "memory"));
   ensureDir(path.resolve(canonicalAgentsRootAbs, "plans/current"));
   ensureDir(path.resolve(canonicalAgentsRootAbs, "plans/deferred"));
   ensureDir(path.resolve(canonicalAgentsRootAbs, "plans/archived"));
@@ -588,129 +675,176 @@ function rewriteTextToken(filePath, replacements) {
   fs.writeFileSync(filePath, text, "utf8");
 }
 
-function rewriteTextRegex(filePath, pattern, replacement) {
-  const text = fs.readFileSync(filePath, "utf8");
-  const next = text.replace(pattern, replacement);
-  fs.writeFileSync(filePath, next, "utf8");
-}
-
-function setNodeWebContractState(policy, profiles) {
-  if (!policy.contracts || typeof policy.contracts !== "object") {
+function updateReleaseNotesRequiredTextSnippet(
+  policy,
+  { repoName, helmRepoUrl, helmChartName, helmRepoName, helmReleaseName },
+) {
+  if (!Array.isArray(policy?.checks?.requiredTextSnippets)) {
     return;
   }
-
-  const nodeWebEnabled = profiles.includes("node-web");
-
-  policy.contracts.profiles = {
-    availableProfiles: [...SUPPORTED_PROFILES],
-    activeProfiles: profiles,
-  };
-
-  for (const contractName of NODE_WEB_PROFILE_CONTRACTS) {
-    const contract = policy.contracts[contractName];
-    if (!contract || typeof contract !== "object") {
+  for (const entry of policy.checks.requiredTextSnippets) {
+    if (entry?.file !== ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md" || !Array.isArray(entry.snippets)) {
       continue;
     }
-    contract.profiles = ["node-web"];
-    contract.enabled = nodeWebEnabled;
+    entry.snippets = [
+      `# ${repoName} {{VERSION}} Release Notes`,
+      `Helm chart repository: \`${helmRepoUrl}\``,
+      `Helm chart name: \`${helmChartName}\``,
+      `Helm chart reference: \`${helmRepoName}/${helmChartName}\``,
+      `helm repo add ${helmRepoName} ${helmRepoUrl}`,
+      `helm upgrade --install ${helmReleaseName} ${helmRepoName}/${helmChartName} --version {{VERSION}}`,
+    ];
   }
 }
 
-function applyProfiles({ policy, contextIndex, profiles }) {
-  setNodeWebContractState(policy, profiles);
+function resolveTemplatePolicyChecks({
+  templateRoot,
+  replacements,
+  downstreamDocFileReplacements,
+}) {
+  if (!templateRoot) {
+    return null;
+  }
 
-  contextIndex.profiles = {
-    availableProfiles: [...SUPPORTED_PROFILES],
-    activeProfiles: profiles,
+  const templatePolicyPath = path.resolve(templateRoot, FILES.policy);
+  if (!fs.existsSync(templatePolicyPath) || !fs.statSync(templatePolicyPath).isFile()) {
+    return null;
+  }
+
+  const templatePolicy = readJson(templatePolicyPath);
+  const rewrittenTemplatePolicy = deepReplaceStrings(
+    deepReplaceStrings(templatePolicy, replacements),
+    downstreamDocFileReplacements,
+  );
+  if (!isPlainObject(rewrittenTemplatePolicy?.checks)) {
+    return null;
+  }
+
+  return cloneJsonValue(rewrittenTemplatePolicy.checks);
+}
+
+function resolveTemplateProfileContractDefaults({ templateRoot, fallbackPolicy }) {
+  let templatePolicy = null;
+  if (templateRoot) {
+    const templatePolicyPath = path.resolve(templateRoot, FILES.policy);
+    if (fs.existsSync(templatePolicyPath) && fs.statSync(templatePolicyPath).isFile()) {
+      templatePolicy = readJson(templatePolicyPath);
+    }
+  }
+
+  const sourcePolicy =
+    isPlainObject(templatePolicy?.contracts) || !fallbackPolicy ? templatePolicy : fallbackPolicy;
+  const sourceRuleCatalog = isPlainObject(sourcePolicy?.contracts?.ruleCatalog)
+    ? sourcePolicy.contracts.ruleCatalog
+    : {};
+  const sourceContextIndex = isPlainObject(sourcePolicy?.contracts?.contextIndex)
+    ? sourcePolicy.contracts.contextIndex
+    : {};
+
+  return {
+    requiredRuleIds: normalizeStringArray(sourceRuleCatalog.requiredIds),
+    requiredIdsByProfile: normalizeProfileKeyedStringArrayMap(sourceRuleCatalog.requiredIdsByProfile),
+    requiredCommandKeys: normalizeStringArray(sourceContextIndex.requiredCommandKeys),
+    requiredCommandKeysByProfile: normalizeProfileKeyedStringArrayMap(
+      sourceContextIndex.requiredCommandKeysByProfile,
+    ),
   };
 }
 
-function syncAllowlistedManagedOverrides({
-  repoRoot,
-  managedManifest,
-  templateLocalPathOverride,
-}) {
-  if (!managedManifest || typeof managedManifest !== "object") {
+function setContractProfileState(policy, profiles, templateProfileContractDefaults) {
+  if (!isPlainObject(policy?.contracts)) {
     return;
   }
 
-  const overrideRoot =
-    toNonEmptyString(managedManifest.overrideRoot) ?? ".agents-config/agent-overrides";
-  const overrideRootAbs = path.resolve(repoRoot, overrideRoot);
+  const contracts = policy.contracts;
+  const existingProfilesContract = isPlainObject(contracts.profiles) ? contracts.profiles : {};
+  contracts.profiles = {
+    ...existingProfilesContract,
+    availableProfiles: [...SUPPORTED_PROFILE_LIST],
+    activeProfiles: [...profiles],
+  };
 
-  const activeProfileValues = Array.isArray(managedManifest.profiles)
-    ? managedManifest.profiles.map((profile) => toNonEmptyString(profile)).filter(Boolean)
-    : [];
-  const activeProfiles = new Set(
-    activeProfileValues.length > 0 ? activeProfileValues : DEFAULT_PROFILES,
+  const ruleCatalogContract = isPlainObject(contracts.ruleCatalog) ? contracts.ruleCatalog : {};
+  const contextIndexContract = isPlainObject(contracts.contextIndex) ? contracts.contextIndex : {};
+  const templateRequiredRuleIds = normalizeStringArray(templateProfileContractDefaults?.requiredRuleIds);
+  const templateRequiredCommandKeys = normalizeStringArray(
+    templateProfileContractDefaults?.requiredCommandKeys,
+  );
+  const templateRequiredIdsByProfile = normalizeProfileKeyedStringArrayMap(
+    templateProfileContractDefaults?.requiredIdsByProfile,
+  );
+  const templateRequiredCommandKeysByProfile = normalizeProfileKeyedStringArrayMap(
+    templateProfileContractDefaults?.requiredCommandKeysByProfile,
+  );
+  const existingRequiredIdsByProfile = normalizeProfileKeyedStringArrayMap(
+    ruleCatalogContract.requiredIdsByProfile,
+  );
+  const existingRequiredCommandKeysByProfile = normalizeProfileKeyedStringArrayMap(
+    contextIndexContract.requiredCommandKeysByProfile,
   );
 
-  const templateLocalPath =
-    toNonEmptyString(templateLocalPathOverride) ??
-    toNonEmptyString(managedManifest?.template?.localPath);
-  const templateRoot = templateLocalPath
-    ? path.resolve(repoRoot, templateLocalPath)
-    : null;
-  const templateAvailable = Boolean(templateRoot && fs.existsSync(templateRoot));
+  ruleCatalogContract.requiredIds =
+    templateRequiredRuleIds.length > 0
+      ? [...templateRequiredRuleIds]
+      : normalizeStringArray(ruleCatalogContract.requiredIds);
+  ruleCatalogContract.requiredIdsByProfile = mergeProfileKeyedStringArrayMap({
+    templateMap: templateRequiredIdsByProfile,
+    existingMap: existingRequiredIdsByProfile,
+  });
 
-  const entries = Array.isArray(managedManifest.managed_files)
-    ? managedManifest.managed_files
-    : [];
+  contextIndexContract.requiredCommandKeys =
+    templateRequiredCommandKeys.length > 0
+      ? [...templateRequiredCommandKeys]
+      : normalizeStringArray(contextIndexContract.requiredCommandKeys);
+  contextIndexContract.requiredCommandKeysByProfile = mergeProfileKeyedStringArrayMap({
+    templateMap: templateRequiredCommandKeysByProfile,
+    existingMap: existingRequiredCommandKeysByProfile,
+  });
 
-  for (const entry of entries) {
-    if (!managedEntryIsActive(entry, activeProfiles)) {
+  contracts.ruleCatalog = ruleCatalogContract;
+  contracts.contextIndex = contextIndexContract;
+
+  for (const [contractName, contractProfiles] of Object.entries(CONTRACT_PROFILE_REQUIREMENTS)) {
+    const contract = contracts[contractName];
+    if (!isPlainObject(contract)) {
       continue;
     }
-    if (entry?.allow_override !== true) {
-      continue;
-    }
+    contract.profiles = [...contractProfiles];
+    contract.enabled = contractProfiles.some((profile) => profiles.includes(profile));
+  }
+}
 
-    const targetRelativePath = toNonEmptyString(entry?.path);
-    if (!targetRelativePath) {
-      continue;
-    }
+function setContextIndexProfileState({ contextIndex, profiles }) {
+  const existingProfiles = isPlainObject(contextIndex?.profiles) ? contextIndex.profiles : {};
 
-    const targetPath = path.resolve(repoRoot, targetRelativePath);
-    if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
-      continue;
-    }
+  contextIndex.profiles = {
+    ...existingProfiles,
+    availableProfiles: [...SUPPORTED_PROFILE_LIST],
+    activeProfiles: [...profiles],
+  };
+}
 
-    const sourceRelativePath = toNonEmptyString(entry?.source_path) ?? targetRelativePath;
-    const targetContent = fs.readFileSync(targetPath, "utf8");
-
-    let shouldWriteOverride = true;
-    if (templateAvailable) {
-      const templateSourcePath = path.resolve(templateRoot, sourceRelativePath);
-      if (fs.existsSync(templateSourcePath) && fs.statSync(templateSourcePath).isFile()) {
-        const templateContent = fs.readFileSync(templateSourcePath, "utf8");
-        shouldWriteOverride = targetContent !== templateContent;
-      }
-    }
-
-    const overrideRelativePath = resolveManagedOverrideRepoPath({
-      entry,
-      targetRelativePath,
-      overrideRoot,
-    });
-    if (!overrideRelativePath) {
-      continue;
-    }
-    const overridePath = path.resolve(repoRoot, overrideRelativePath);
-
-    if (!shouldWriteOverride) {
-      if (fs.existsSync(overridePath) && fs.statSync(overridePath).isFile()) {
-        fs.unlinkSync(overridePath);
-      }
-      continue;
-    }
-
-    ensureDir(path.dirname(overridePath));
-    fs.writeFileSync(overridePath, targetContent, "utf8");
+function syncPreservedPolicyContractsFromTemplate({
+  targetPolicy,
+  rewrittenTemplatePolicy,
+}) {
+  if (!isPlainObject(targetPolicy?.contracts) || !isPlainObject(rewrittenTemplatePolicy?.contracts)) {
+    return;
   }
 
-  if (toNonEmptyString(overrideRoot)) {
-    ensureDir(overrideRootAbs);
+  for (const contractKey of PRESERVED_POLICY_TEMPLATE_CONTRACT_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(rewrittenTemplatePolicy.contracts, contractKey)) {
+      continue;
+    }
+    targetPolicy.contracts[contractKey] = cloneJsonValue(
+      rewrittenTemplatePolicy.contracts[contractKey],
+    );
   }
+}
+
+function applyProfiles({ policy, contextIndex, profiles, templateProfileContractDefaults }) {
+  setContractProfileState(policy, profiles, templateProfileContractDefaults);
+  setContextIndexProfileState({ contextIndex, profiles });
 }
 
 function runPreflight(repoRoot) {
@@ -726,6 +860,7 @@ function runPreflight(repoRoot) {
 function main() {
   const repoRoot = resolveRepoRoot();
   const args = parseArgs(process.argv.slice(2));
+  const bootstrapMode = normalizeBootstrapMode(args.bootstrapMode);
 
   validateProjectId(args.projectId);
 
@@ -761,6 +896,8 @@ function main() {
   const templateRepo = toNonEmptyString(args.templateRepo) ?? "BonzTM/agents-template";
   const templateRef = toNonEmptyString(args.templateRef) ?? "main";
   const templateLocalPath = toNonEmptyString(args.templateLocalPath) ?? "../agents-template";
+  const templateRootCandidate = path.resolve(repoRoot, templateLocalPath);
+  const templateRoot = fs.existsSync(templateRootCandidate) ? templateRootCandidate : null;
 
   const agentsRootInfo = resolveCanonicalAgentsRoot({
     repoRoot,
@@ -776,27 +913,33 @@ function main() {
   const contextIndexPath = path.resolve(repoRoot, FILES.contextIndex);
   const featureIndexPath = path.resolve(repoRoot, FILES.featureIndex);
   const loggingBaselinePath = path.resolve(repoRoot, FILES.loggingBaseline);
+  const toolingConfigPath = path.resolve(repoRoot, FILES.toolingConfig);
   const managedTemplatePath = path.resolve(repoRoot, FILES.managedTemplate);
-  const nodeWebEnabled = profiles.includes("node-web");
+  const webDocsProfilesEnabled = profiles.includes("typescript") || profiles.includes("javascript");
 
   const policy = readJson(policyPath);
   const contextIndex = readJson(contextIndexPath);
   const featureIndex = readJsonIfPresent(featureIndexPath);
   const loggingBaseline = readJsonIfPresent(loggingBaselinePath);
+  const toolingConfig = readJsonIfPresent(toolingConfigPath);
   const managedTemplate = readJson(managedTemplatePath);
+  const managedEntryIndex = buildManagedEntryIndex(managedTemplate);
+  const preservedProjectManagedPaths = new Set();
   const packageJson = readJson(path.resolve(repoRoot, FILES.packageJson));
   const packageLock = readJson(path.resolve(repoRoot, FILES.packageLock));
-  const indexConfigPath = path.resolve(repoRoot, FILES.indexConfig);
-  const indexConfig = readJsonIfPresent(indexConfigPath);
-  if (indexConfig === null) {
-    fail(`Missing required file: ${FILES.indexConfig}`);
-  }
+  const templateProfileContractDefaults = resolveTemplateProfileContractDefaults({
+    templateRoot,
+    fallbackPolicy: policy,
+  });
 
-  if (nodeWebEnabled && featureIndex === null) {
-    fail(`Missing required file for node-web profile: ${FILES.featureIndex}`);
+  if (webDocsProfilesEnabled && featureIndex === null) {
+    fail(`Missing required file for typescript/javascript profiles: ${FILES.featureIndex}`);
   }
-  if (nodeWebEnabled && loggingBaseline === null) {
-    fail(`Missing required file for node-web profile: ${FILES.loggingBaseline}`);
+  if (webDocsProfilesEnabled && loggingBaseline === null) {
+    fail(`Missing required file for typescript/javascript profiles: ${FILES.loggingBaseline}`);
+  }
+  if (toolingConfig === null) {
+    fail(`Missing required file for base profile: ${FILES.toolingConfig}`);
   }
 
   const replacements = new Map([
@@ -810,19 +953,28 @@ function main() {
     ["agents-template-context-index", `${projectId}-agent-context-index`],
     ["agents-template-feature-index", `${projectId}-feature-index`],
     ["agents-template-logging-compliance-baseline", `${projectId}-logging-compliance-baseline`],
+    ["agents-template-tooling-config", `${projectId}-tooling-config`],
     ["https://example.github.io/project", helmRepoUrl],
     ["project/project", `${helmRepoName}/${helmChartName}`],
     ["charts/project", `charts/${helmChartName}`],
   ]);
   const downstreamDocFileReplacements = new Map([
-    [".agents-config/AGENTS_TEMPLATE.md", "AGENTS.md"],
+    [".agents-config/templates/AGENTS.md", "AGENTS.md"],
     [".agents-config/templates/CLAUDE.md", "CLAUDE.md"],
   ]);
+  const templatePolicyChecks = resolveTemplatePolicyChecks({
+    templateRoot,
+    replacements,
+    downstreamDocFileReplacements,
+  });
 
   const rewrittenPolicy = deepReplaceStrings(
     deepReplaceStrings(policy, replacements),
     downstreamDocFileReplacements,
   );
+  if (templatePolicyChecks) {
+    rewrittenPolicy.checks = cloneJsonValue(templatePolicyChecks);
+  }
   rewrittenPolicy.metadata.id = `${projectId}-agent-governance`;
   rewrittenPolicy.contracts.workspaceLayout = {
     ...rewrittenPolicy.contracts.workspaceLayout,
@@ -853,38 +1005,19 @@ function main() {
       "app",
     ],
   };
-  if (Array.isArray(rewrittenPolicy.checks?.requiredTextSnippets)) {
-    for (const entry of rewrittenPolicy.checks.requiredTextSnippets) {
-      if (entry?.file !== ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md" || !Array.isArray(entry.snippets)) {
-        continue;
-      }
-
-      entry.snippets = [
-        `# ${repoName} {{VERSION}} Release Notes`,
-        `Helm chart repository: \`${helmRepoUrl}\``,
-        `Helm chart name: \`${helmChartName}\``,
-        `Helm chart reference: \`${helmRepoName}/${helmChartName}\``,
-        `helm repo add ${helmRepoName} ${helmRepoUrl}`,
-        `helm upgrade --install ${helmReleaseName} ${helmRepoName}/${helmChartName} --version {{VERSION}}`,
-      ];
-    }
-  }
+  updateReleaseNotesRequiredTextSnippet(rewrittenPolicy, {
+    repoName,
+    helmRepoUrl,
+    helmChartName,
+    helmRepoName,
+    helmReleaseName,
+  });
 
   const rewrittenContextIndex = deepReplaceStrings(
     deepReplaceStrings(contextIndex, replacements),
     downstreamDocFileReplacements,
   );
   rewrittenContextIndex.metadata.id = `${projectId}-agent-context-index`;
-  rewrittenContextIndex.sessionArtifacts.workspaceLayout = {
-    ...rewrittenContextIndex.sessionArtifacts.workspaceLayout,
-    canonicalRepoRoot: ".",
-    canonicalAgentsRoot: canonicalAgentsRootRel,
-    worktreesRoot: canonicalWorktreesRootRel,
-    localAgentsPath: ".agents",
-    semanticMergeRequired: true,
-    semanticMergeOnAgentsEditRequired: true,
-    worktreeAgentsSymlinkRequired: true,
-  };
 
   const rewrittenFeatureIndex =
     featureIndex === null ? null : deepReplaceStrings(featureIndex, replacements);
@@ -896,6 +1029,25 @@ function main() {
     loggingBaseline === null ? null : deepReplaceStrings(loggingBaseline, replacements);
   if (rewrittenLoggingBaseline) {
     rewrittenLoggingBaseline.metadata.id = `${projectId}-logging-compliance-baseline`;
+  }
+  const rewrittenToolingConfig =
+    toolingConfig === null ? null : deepReplaceStrings(toolingConfig, replacements);
+  if (rewrittenToolingConfig) {
+    rewrittenToolingConfig.metadata =
+      isPlainObject(rewrittenToolingConfig.metadata) ? rewrittenToolingConfig.metadata : {};
+    rewrittenToolingConfig.metadata.id = `${projectId}-tooling-config`;
+    rewrittenToolingConfig.releaseNotes = isPlainObject(rewrittenToolingConfig.releaseNotes)
+      ? rewrittenToolingConfig.releaseNotes
+      : {};
+    rewrittenToolingConfig.releaseNotes.defaultRepoWebUrl =
+      `https://github.com/${repoOwner}/${repoName}`;
+    rewrittenToolingConfig.loggingCompliance = isPlainObject(
+      rewrittenToolingConfig.loggingCompliance,
+    )
+      ? rewrittenToolingConfig.loggingCompliance
+      : {};
+    rewrittenToolingConfig.loggingCompliance.baselineMetadataId =
+      `${projectId}-logging-compliance-baseline`;
   }
 
   const rewrittenManagedManifest = deepReplaceStrings(managedTemplate, replacements);
@@ -913,30 +1065,93 @@ function main() {
     policy: rewrittenPolicy,
     contextIndex: rewrittenContextIndex,
     profiles,
+    templateProfileContractDefaults,
   });
+
+  const preserveNonTemplateManaged = (targetRelativePath) => {
+    const shouldPreserve = shouldPreserveExistingNonTemplateManagedFile({
+      bootstrapMode,
+      managedEntryIndex,
+      repoRoot,
+      templateRoot,
+      targetRelativePath,
+    });
+    if (shouldPreserve) {
+      preservedProjectManagedPaths.add(toPosixPath(targetRelativePath));
+    }
+    return shouldPreserve;
+  };
 
   packageJson.name = packageName;
   packageLock.name = packageName;
   if (packageLock.packages && packageLock.packages[""]) {
     packageLock.packages[""].name = packageName;
   }
-  indexConfig.outputDir = ".agents/index/project-v1";
 
-  writeJson(policyPath, rewrittenPolicy);
-  writeJson(contextIndexPath, rewrittenContextIndex);
-  if (rewrittenFeatureIndex) {
+  const preservePolicy = preserveNonTemplateManaged(FILES.policy);
+  const preserveContextIndex = preserveNonTemplateManaged(FILES.contextIndex);
+
+  const policyToWrite = preservePolicy ? cloneJsonValue(policy) : rewrittenPolicy;
+  if (preservePolicy) {
+    if (isPlainObject(rewrittenPolicy?.metadata)) {
+      policyToWrite.metadata = {
+        ...(isPlainObject(policyToWrite?.metadata) ? policyToWrite.metadata : {}),
+        ...cloneJsonValue(rewrittenPolicy.metadata),
+      };
+    }
+    if (templatePolicyChecks) {
+      policyToWrite.checks = cloneJsonValue(templatePolicyChecks);
+    }
+    syncPreservedPolicyContractsFromTemplate({
+      targetPolicy: policyToWrite,
+      rewrittenTemplatePolicy: rewrittenPolicy,
+    });
+    setContractProfileState(policyToWrite, profiles, templateProfileContractDefaults);
+    updateReleaseNotesRequiredTextSnippet(policyToWrite, {
+      repoName,
+      helmRepoUrl,
+      helmChartName,
+      helmRepoName,
+      helmReleaseName,
+    });
+  }
+
+  const contextIndexToWrite = preserveContextIndex
+    ? cloneJsonValue(contextIndex)
+    : rewrittenContextIndex;
+  if (preserveContextIndex) {
+    setContextIndexProfileState({
+      contextIndex: contextIndexToWrite,
+      policy: policyToWrite,
+      profiles,
+    });
+  }
+
+  if (preservePolicy) {
+    writeJsonIfChanged(policyPath, policy, policyToWrite);
+  } else {
+    writeJson(policyPath, policyToWrite);
+  }
+  if (preserveContextIndex) {
+    writeJsonIfChanged(contextIndexPath, contextIndex, contextIndexToWrite);
+  } else {
+    writeJson(contextIndexPath, contextIndexToWrite);
+  }
+  if (rewrittenFeatureIndex && !preserveNonTemplateManaged(FILES.featureIndex)) {
     writeJson(featureIndexPath, rewrittenFeatureIndex);
   }
-  if (rewrittenLoggingBaseline) {
+  if (rewrittenLoggingBaseline && !preserveNonTemplateManaged(FILES.loggingBaseline)) {
     writeJson(loggingBaselinePath, rewrittenLoggingBaseline);
+  }
+  if (rewrittenToolingConfig && !preserveNonTemplateManaged(FILES.toolingConfig)) {
+    writeJson(toolingConfigPath, rewrittenToolingConfig);
   }
   writeJson(path.resolve(repoRoot, FILES.managedManifest), rewrittenManagedManifest);
   writeJson(path.resolve(repoRoot, FILES.packageJson), packageJson);
   writeJson(path.resolve(repoRoot, FILES.packageLock), packageLock);
-  writeJson(indexConfigPath, indexConfig);
 
   const releaseTemplatePath = path.resolve(repoRoot, FILES.releaseTemplate);
-  if (fs.existsSync(releaseTemplatePath)) {
+  if (fs.existsSync(releaseTemplatePath) && !preserveNonTemplateManaged(FILES.releaseTemplate)) {
     rewriteReleaseTemplate(releaseTemplatePath, {
       repoName,
       dockerImage,
@@ -948,24 +1163,6 @@ function main() {
     });
   }
 
-  const generateReleaseNotesPath = path.resolve(repoRoot, FILES.generateReleaseNotes);
-  if (fs.existsSync(generateReleaseNotesPath)) {
-    rewriteTextRegex(
-      generateReleaseNotesPath,
-      /const DEFAULT_REPO_WEB_URL = "https:\/\/github\.com\/[^"]+";/,
-      `const DEFAULT_REPO_WEB_URL = "https://github.com/${repoOwner}/${repoName}";`,
-    );
-  }
-
-  const verifyLoggingCompliancePath = path.resolve(repoRoot, FILES.verifyLoggingCompliance);
-  if (fs.existsSync(verifyLoggingCompliancePath)) {
-    rewriteTextRegex(
-      verifyLoggingCompliancePath,
-      /id: "[^"]+-logging-compliance-baseline"/,
-      `id: "${projectId}-logging-compliance-baseline"`,
-    );
-  }
-
   const agentDocReplacements = [
     ["../agents-workfiles/agents-template", canonicalAgentsRootRel],
     ["../agents-workfiles/<project-id>", canonicalAgentsRootRel],
@@ -973,7 +1170,7 @@ function main() {
     ["../agent-workfiles/<project-id>", canonicalAgentsRootRel],
     ["../agents-workfiles/project-template", canonicalAgentsRootRel],
     ["../agent-workfiles/project-template", canonicalAgentsRootRel],
-    [".agents-config/AGENTS_TEMPLATE.md", "AGENTS.md"],
+    [".agents-config/templates/AGENTS.md", "AGENTS.md"],
     [".agents-config/templates/CLAUDE.md", "CLAUDE.md"],
   ];
   for (const docPath of [FILES.agentsDoc, FILES.rulesDoc, FILES.contextDoc, FILES.readme]) {
@@ -981,14 +1178,11 @@ function main() {
     if (!fs.existsSync(absoluteDocPath)) {
       continue;
     }
+    if (preserveNonTemplateManaged(docPath)) {
+      continue;
+    }
     rewriteTextToken(absoluteDocPath, agentDocReplacements);
   }
-
-  syncAllowlistedManagedOverrides({
-    repoRoot,
-    managedManifest: rewrittenManagedManifest,
-    templateLocalPathOverride: templateLocalPath,
-  });
 
   ensureDir(path.resolve(repoRoot, canonicalWorktreesRootRel));
   ensureAgentsStorage({ repoRoot, canonicalAgentsRootAbs, agentsMode });
@@ -1005,6 +1199,9 @@ function main() {
   console.log(`- Template source: ${templateRepo}@${templateRef} (local fallback: ${templateLocalPath})`);
   console.log(`- Repo URL default: https://github.com/${repoOwner}/${repoName}`);
   console.log(`- Helm repo URL: ${helmRepoUrl}`);
+  if (preservedProjectManagedPaths.size > 0) {
+    console.log(`- preserved existing project-managed files: ${preservedProjectManagedPaths.size}`);
+  }
 
   if (!args.skipPreflight) {
     runPreflight(repoRoot);
