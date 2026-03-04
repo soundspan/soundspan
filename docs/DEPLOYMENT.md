@@ -245,27 +245,30 @@ npm run release:prepare -- --version 1.6.0
 ```
 
 This updates and verifies:
+- `package.json` + `package-lock.json`
 - `frontend/package.json` + `frontend/package-lock.json`
 - `backend/package.json` + `backend/package-lock.json`
 - `charts/soundspan/Chart.yaml` (`version` + `appVersion`)
 - `charts/soundspan/values.yaml` image tags for release images
+- `CHANGELOG.md` (`[Unreleased]` promotion + scaffold reset)
 
 It also validates hard-coded package names:
+- `soundspan`
 - `soundspan-frontend`
 - `soundspan-backend`
 
 2. Commit and push the release prep:
 
 ```bash
-git add frontend/package.json frontend/package-lock.json backend/package.json backend/package-lock.json charts/soundspan/Chart.yaml charts/soundspan/values.yaml
+git add package.json package-lock.json frontend/package.json frontend/package-lock.json backend/package.json backend/package-lock.json charts/soundspan/Chart.yaml charts/soundspan/values.yaml CHANGELOG.md
 git commit -m "chore(release): prepare 1.6.0"
 git push origin main
 ```
 
-3. Generate release notes from the previous release tag to the release tag:
+3. Generate release notes from the previous release tag to the release commit:
 
 ```bash
-npm run release:notes -- --version 1.6.0 --from 1.5.0 --to 1.6.0 --output /tmp/soundspan-1.6.0-release-notes.md
+npm run release:notes -- --version 1.6.0 --from 1.5.0 --to main --output /tmp/soundspan-1.6.0-release-notes.md
 ```
 
 Helm release reference for notes and operator docs:

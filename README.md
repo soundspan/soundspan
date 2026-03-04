@@ -13,7 +13,7 @@ soundspan is built for people who want streaming convenience without giving up o
 
 > Gratitude: soundspan began from the foundation created by [`Chevron7Locked/kima-hub`](https://github.com/Chevron7Locked/kima-hub). Thank you for the original project and momentum!
 
-<a href="assets/screenshots/desktop-home.png"><img src="assets/screenshots/desktop-home.png" width="750"/></a>
+<a href="assets/screenshots/web-home.png"><img src="assets/screenshots/web-home.png" width="750"/></a>
 
 ---
 
@@ -30,11 +30,11 @@ soundspan is built for people who want streaming convenience without giving up o
 - Deezer previews plus Spotify/Deezer playlist import flows and provider track mapping APIs
 - OpenSubsonic-compatible `/rest` API surface for third-party client access
 
-<a href="assets/screenshots/desktop-library.png"><img src="assets/screenshots/desktop-library.png" width="750" alt="Library view"/></a>
+<a href="assets/screenshots/web-library.png"><img src="assets/screenshots/web-library.png" width="750" alt="Library view"/></a>
 
-<a href="assets/screenshots/desktop-mood-mixer.png"><img src="assets/screenshots/desktop-mood-mixer.png" width="750" alt="Mood mixer"/></a>
+<a href="assets/screenshots/web-mood-mixer.png"><img src="assets/screenshots/web-mood-mixer.png" width="750" alt="Mood mixer"/></a>
 
-<a href="assets/screenshots/desktop-player-lyrics.png"><img src="assets/screenshots/desktop-player-lyrics.png" width="750" alt="Player overlay with lyrics and quality badges"/></a>
+<a href="assets/screenshots/web-player-lyrics.png"><img src="assets/screenshots/web-player-lyrics.png" width="750" alt="Player overlay with lyrics and quality badges"/></a>
 
 For the full feature list and release notes, see [`CHANGELOG.md`](CHANGELOG.md).
 

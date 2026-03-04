@@ -29,6 +29,8 @@ function fail(message) {
 }
 
 function parseArgs(argv) {
+  const booleanFlags = new Set(["write", "check"]);
+  const valueFlags = new Set(["version"]);
   const options = new Map();
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -41,9 +43,16 @@ function parseArgs(argv) {
       fail("Invalid empty flag.");
     }
 
-    if (key === "write" || key === "check") {
+    if (booleanFlags.has(key)) {
+      if (options.has(key)) {
+        fail(`Duplicate flag: --${key}`);
+      }
       options.set(key, "true");
       continue;
+    }
+
+    if (!valueFlags.has(key)) {
+      fail(`Unknown flag: --${key}`);
     }
 
     const value = argv[index + 1];
@@ -51,6 +60,9 @@ function parseArgs(argv) {
       fail(`Missing value for --${key}`);
     }
 
+    if (options.has(key)) {
+      fail(`Duplicate flag: --${key}`);
+    }
     options.set(key, value.trim());
     index += 1;
   }

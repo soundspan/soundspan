@@ -13,6 +13,7 @@ import {
 
 const TEMPLATE_PATH = ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md";
 const RELEASE_VERIFY_SCRIPT = ".agents-config/scripts/release-version-sync.mjs";
+const RELEASE_NOTES_SCRIPT = ".agents-config/scripts/generate-release-notes.mjs";
 const REQUIRED_TEMPLATE_SECTIONS = [
   "## Release Summary",
   "## Fixed",
@@ -81,7 +82,7 @@ function ensureUnreleasedShape(parsed) {
   }
 }
 
-function resolveLatestReleaseVersion(parsed) {
+function resolveLatestReleaseSection(parsed) {
   const releaseSection = parsed.sections.find(
     (section) => section && section.key && section.key !== "Unreleased",
   );
@@ -95,7 +96,7 @@ function resolveLatestReleaseVersion(parsed) {
       `${CHANGELOG_PATH} first released section key must be semver (found: ${releaseSection.key}).`,
     );
   }
-  return releaseSection.key;
+  return releaseSection;
 }
 
 function runReleaseVerify(version) {
@@ -111,6 +112,43 @@ function runReleaseVerify(version) {
         details || "unknown failure"
       }`,
     );
+  }
+}
+
+function runReleaseNotesContractCheck(version, expectedDate) {
+  const result = spawnSync(
+    "node",
+    [
+      RELEASE_NOTES_SCRIPT,
+      "--version",
+      version,
+      "--from",
+      "HEAD",
+      "--to",
+      "HEAD",
+    ],
+    { encoding: "utf8" },
+  );
+  if (result.error || result.status !== 0) {
+    const details = (result.stderr ?? "").trim() || (result.stdout ?? "").trim();
+    fail(
+      `Release notes contract generation failed for version ${version}: ${
+        details || "unknown failure"
+      }`,
+    );
+  }
+
+  const output = result.stdout ?? "";
+  if (expectedDate && !output.includes(`Release Notes - ${expectedDate}`)) {
+    fail(
+      `Release notes output date mismatch for ${version}. Expected release date ${expectedDate} from ${CHANGELOG_PATH}.`,
+    );
+  }
+
+  const compareLine = output.match(/^- Compare changes:\s*(.+)$/m)?.[1]?.trim() ?? null;
+  const fullLine = output.match(/^- Full changelog:\s*(.+)$/m)?.[1]?.trim() ?? null;
+  if (compareLine && fullLine && compareLine === fullLine) {
+    fail("Release notes output uses the same URL for compare and full changelog links.");
   }
 }
 
@@ -147,11 +185,15 @@ function main() {
   }
 
   ensureUnreleasedShape(parsed);
-  const latestVersion = resolveLatestReleaseVersion(parsed);
-  runReleaseVerify(latestVersion);
+  const latestReleaseSection = resolveLatestReleaseSection(parsed);
+  runReleaseVerify(latestReleaseSection.key);
+  runReleaseNotesContractCheck(
+    latestReleaseSection.key,
+    latestReleaseSection.date ?? null,
+  );
 
   console.log(
-    `Release contract check passed (template + changelog + release runtime verified against ${latestVersion}).`,
+    `Release contract check passed (template + changelog + release runtime verified against ${latestReleaseSection.key}).`,
   );
 }
 

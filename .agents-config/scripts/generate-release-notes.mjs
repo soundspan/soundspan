@@ -15,6 +15,16 @@ import {
 const TEMPLATE_PATH = ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md";
 const TOOLING_CONFIG_PATH = ".agents-config/config/project-tooling.json";
 const DEFAULT_REPO_WEB_URL_FALLBACK = "https://github.com/example/project";
+const REPEATABLE_FLAGS = new Set(["known-issue", "compat-note"]);
+const SINGLE_VALUE_FLAGS = new Set(["version", "from", "to", "output", "summary"]);
+const RELEASE_CATEGORY_ALIASES = {
+  fixed: ["Fixed", "Fixes"],
+  added: ["Added", "New"],
+  changed: ["Changed", "Updated"],
+  admin: ["Admin/Operations", "Admin", "Operations", "Database Migrations"],
+  breaking: ["Breaking Changes", "Breaking"],
+  security: ["Security"],
+};
 
 function fail(message) {
   console.error(message);
@@ -23,6 +33,10 @@ function fail(message) {
 
 function toNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeHeading(name) {
+  return String(name ?? "").trim().toLowerCase();
 }
 
 function runCommand(command, args) {
@@ -46,7 +60,6 @@ function parseArgs(argv) {
     knownIssues: [],
     compatibilityNotes: [],
   };
-  const repeatableFlags = new Set(["known-issue", "compat-note"]);
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -59,13 +72,17 @@ function parseArgs(argv) {
       fail("Invalid empty flag.");
     }
 
+    if (!REPEATABLE_FLAGS.has(key) && !SINGLE_VALUE_FLAGS.has(key)) {
+      fail(`Unknown flag: --${key}`);
+    }
+
     const value = argv[index + 1];
     if (!value || value.startsWith("--")) {
       fail(`Missing value for --${key}`);
     }
     index += 1;
 
-    if (repeatableFlags.has(key)) {
+    if (REPEATABLE_FLAGS.has(key)) {
       if (key === "known-issue") {
         options.knownIssues.push(value.trim());
       } else if (key === "compat-note") {
@@ -189,6 +206,9 @@ function buildReleaseSummary(counts, manualSummary) {
   if (counts.fixed > 0) {
     parts.push(formatCount(counts.fixed, "fix", "fixes"));
   }
+  if (counts.security > 0) {
+    parts.push(formatCount(counts.security, "security update", "security updates"));
+  }
   if (counts.added > 0) {
     parts.push(formatCount(counts.added, "addition", "additions"));
   }
@@ -215,6 +235,12 @@ function formatBulletBlock(items, emptyLabel) {
   return items.join("\n");
 }
 
+function normalizeSecurityBullets(items) {
+  return items.map((item) =>
+    item.startsWith("- ") ? `- [Security] ${item.slice(2)}` : item,
+  );
+}
+
 function loadReleaseItemsFromChangelog(version) {
   let parsed;
   try {
@@ -231,24 +257,52 @@ function loadReleaseItemsFromChangelog(version) {
   }
 
   const bulletsByHeading = extractSectionBullets(releaseSection.section.body);
-  const fixed = pickBulletsByHeadingAliases(bulletsByHeading, ["Fixed", "Fixes"]);
-  const added = pickBulletsByHeadingAliases(bulletsByHeading, ["Added", "New"]);
-  const changed = pickBulletsByHeadingAliases(bulletsByHeading, [
-    "Changed",
-    "Updated",
-  ]);
-  const admin = pickBulletsByHeadingAliases(bulletsByHeading, [
-    "Admin/Operations",
-    "Admin",
-    "Operations",
-  ]);
-  const breaking = pickBulletsByHeadingAliases(bulletsByHeading, [
-    "Breaking Changes",
-    "Breaking",
-  ]);
+  const supportedHeadings = new Set(
+    Object.values(RELEASE_CATEGORY_ALIASES)
+      .flat()
+      .map((alias) => normalizeHeading(alias)),
+  );
+  const unsupportedHeadings = [];
+  for (const [heading, items] of bulletsByHeading.entries()) {
+    if (items.length > 0 && !supportedHeadings.has(normalizeHeading(heading))) {
+      unsupportedHeadings.push(heading);
+    }
+  }
+  if (unsupportedHeadings.length > 0) {
+    fail(
+      `${CHANGELOG_PATH} section [${version}] contains unsupported heading(s) with bullets: ${unsupportedHeadings.join(", ")}.`,
+    );
+  }
+
+  const fixed = pickBulletsByHeadingAliases(
+    bulletsByHeading,
+    RELEASE_CATEGORY_ALIASES.fixed,
+  );
+  const security = pickBulletsByHeadingAliases(
+    bulletsByHeading,
+    RELEASE_CATEGORY_ALIASES.security,
+  );
+  const added = pickBulletsByHeadingAliases(
+    bulletsByHeading,
+    RELEASE_CATEGORY_ALIASES.added,
+  );
+  const changed = pickBulletsByHeadingAliases(
+    bulletsByHeading,
+    RELEASE_CATEGORY_ALIASES.changed,
+  );
+  const admin = pickBulletsByHeadingAliases(
+    bulletsByHeading,
+    RELEASE_CATEGORY_ALIASES.admin,
+  );
+  const breaking = pickBulletsByHeadingAliases(
+    bulletsByHeading,
+    RELEASE_CATEGORY_ALIASES.breaking,
+  );
 
   return {
+    releaseDate: releaseSection.section.date ?? null,
     fixed,
+    security,
     added,
     changed,
     admin,
@@ -280,11 +334,14 @@ function main() {
 
   const repoWebUrl = resolveRepoWebUrl();
   const compareUrl = `${repoWebUrl}/compare/${encodeURIComponent(fromRef)}...${encodeURIComponent(toRef)}`;
-  const releaseDate = new Date().toISOString().slice(0, 10);
   const categorized = loadReleaseItemsFromChangelog(version);
+  const releaseDate = categorized.releaseDate ?? new Date().toISOString().slice(0, 10);
+  const fullChangelogUrl = `${repoWebUrl}/blob/HEAD/${CHANGELOG_PATH}`;
+  const fixedItems = [...categorized.fixed, ...normalizeSecurityBullets(categorized.security)];
 
   const counts = {
     fixed: categorized.fixed.length,
+    security: categorized.security.length,
     added: categorized.added.length,
     changed: categorized.changed.length,
     admin: categorized.admin.length,
@@ -307,7 +364,7 @@ function main() {
     "{{COMPARE_URL}}": `[${fromRef}...${toRef}](${compareUrl})`,
     "{{RELEASE_SUMMARY}}": summary,
     "{{FIXED_ITEMS}}": formatBulletBlock(
-      categorized.fixed,
+      fixedItems,
       "No bug fixes documented in this release.",
     ),
     "{{ADDED_ITEMS}}": formatBulletBlock(
@@ -328,7 +385,7 @@ function main() {
     ),
     "{{KNOWN_ISSUES}}": knownIssues,
     "{{COMPATIBILITY_AND_MIGRATION}}": compatibilityNotes,
-    "{{FULL_CHANGELOG_URL}}": compareUrl,
+    "{{FULL_CHANGELOG_URL}}": fullChangelogUrl,
   });
 
   if (outputPath) {
