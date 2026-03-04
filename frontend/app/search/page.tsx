@@ -6,6 +6,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { SearchIcon } from "lucide-react";
 import { useSearchData } from "@/features/search/hooks/useSearchData";
 import { useSoulseekSearch } from "@/features/search/hooks/useSoulseekSearch";
+import { useYouTubeUrl } from "@/features/search/hooks/useYouTubeUrl";
+import { YouTubePreviewCard } from "@/features/search/components/YouTubePreviewCard";
 import { SearchFilters } from "@/features/search/components/SearchFilters";
 import { TopResult } from "@/features/search/components/TopResult";
 import { EmptyState } from "@/features/search/components/EmptyState";
@@ -70,6 +72,13 @@ export default function SearchPage() {
         downloadingFiles,
         handleDownload,
     } = useSoulseekSearch({ query });
+    const {
+        videoInfo,
+        isLoading: isYtLoading,
+        isDownloading,
+        handlePlay: handleYtPlay,
+        handleDownload: handleYtDownload,
+    } = useYouTubeUrl({ query });
 
     // Sync query from URL params on navigation.
     const urlQuery = searchParams.get("q") ?? "";
@@ -141,6 +150,17 @@ export default function SearchPage() {
             <div className="pb-24 space-y-12">
                 {hasSearched && aliasInfo && (
                     <AliasResolutionBanner aliasInfo={aliasInfo} />
+                )}
+
+                {/* YouTube URL Preview Card */}
+                {(videoInfo || isYtLoading) && (
+                    <YouTubePreviewCard
+                        videoInfo={videoInfo!}
+                        isLoading={isYtLoading}
+                        isDownloading={isDownloading}
+                        onPlay={handleYtPlay}
+                        onDownload={handleYtDownload}
+                    />
                 )}
 
                 <EmptyState hasSearched={hasSearched} isLoading={isLoading} />
