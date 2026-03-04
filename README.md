@@ -32,7 +32,7 @@ soundspan is built for people who want streaming convenience without giving up o
 
 <a href="assets/screenshots/web-library.png"><img src="assets/screenshots/web-library.png" width="750" alt="Library view"/></a>
 
-<a href="assets/screenshots/web-mood-mixer.png"><img src="assets/screenshots/web-mood-mixer.png" width="750" alt="Mood mixer"/></a>
+<a href="assets/screenshots/web-explore.png"><img src="assets/screenshots/web-explore.png" width="750" alt="Explore!"/></a>
 
 <a href="assets/screenshots/web-player-lyrics.png"><img src="assets/screenshots/web-player-lyrics.png" width="750" alt="Player overlay with lyrics and quality badges"/></a>
 
