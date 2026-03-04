@@ -2929,6 +2929,55 @@ class ApiClient {
         return this.get(`/ytmusic/stream-info/${videoId}${suffix}`);
     }
 
+    // ── YouTube (regular, non-Music) ─────────────────────────────
+
+    /**
+     * Fetch metadata for a regular YouTube video.
+     */
+    async getYouTubeVideoInfo(url: string): Promise<{
+        videoId: string;
+        title: string;
+        uploader: string;
+        duration: number;
+        thumbnail: string | null;
+        uploadDate: string;
+    }> {
+        return this.get(`/youtube/info?url=${encodeURIComponent(url)}`);
+    }
+
+    /**
+     * Build a URL for streaming audio from a regular YouTube video.
+     * Used by the player to set the audio source.
+     */
+    getYouTubeStreamUrl(videoId: string, quality?: string): string {
+        let url = `${this.getBaseUrl()}/api/youtube/stream/${videoId}`;
+        const params = new URLSearchParams();
+        if (quality) params.set("quality", quality);
+        const token = this.getCurrentToken();
+        if (token) params.set("token", token);
+        const qs = params.toString();
+        if (qs) url += `?${qs}`;
+        return url;
+    }
+
+    /**
+     * Download audio from a regular YouTube video to the library.
+     */
+    async downloadYouTube(
+        videoId: string,
+        format: string = "mp3",
+        quality: string = "HIGH"
+    ): Promise<{
+        success: boolean;
+        filePath: string;
+        title: string;
+        uploader?: string;
+        duration?: number;
+        alreadyExisted?: boolean;
+    }> {
+        return this.post(`/youtube/download`, { videoId, format, quality });
+    }
+
     // ── TIDAL Streaming ────────────────────────────────────────────
 
     async getTidalStreamingStatus(): Promise<{
