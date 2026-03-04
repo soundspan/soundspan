@@ -3,9 +3,6 @@
 [![GHCR Image](https://img.shields.io/badge/Image-ghcr.io%2Fsoundspan%2Fsoundspan-0A84FF)](https://ghcr.io/soundspan/soundspan)
 [![GitHub Release](https://img.shields.io/github/v/release/soundspan/soundspan?label=Release)](https://github.com/soundspan/soundspan/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-<!-- [![Quality Visibility](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml/badge.svg?branch=main)](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml) -->
-[![Backend Coverage](https://img.shields.io/github/actions/workflow/status/soundspan/soundspan/quality-visibility.yml?branch=main&label=Backend%20Coverage)](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml)
-[![Frontend Coverage](https://img.shields.io/github/actions/workflow/status/soundspan/soundspan/quality-visibility.yml?branch=main&label=Frontend%20Coverage)](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml)
 
 A self-hosted, on-demand audio streaming platform that spans all of your listening experiences in one place.
 
