@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { extractYouTubeVideoId } from "@/lib/youtube-url";
-import { useAudioControls } from "@/lib/audio-hooks";
+import { useAudioControls } from "@/lib/audio-controls-context";
 import type { Track } from "@/lib/audio-state-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
