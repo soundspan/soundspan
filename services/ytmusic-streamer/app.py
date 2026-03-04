@@ -578,6 +578,141 @@ def _is_issue_813_invalid_argument_error(err: Exception) -> bool:
     return any(marker in message for marker in markers)
 
 
+def _extract_video_id(url: str) -> str:
+    """
+    Extract an 11-char YouTube video ID from any common URL format.
+    Accepts: youtube.com/watch?v=, youtu.be/, m.youtube.com/watch?v=,
+    or a bare 11-char ID.
+    """
+    patterns = [
+        r"(?:youtube\.com|m\.youtube\.com)/watch\?.*?v=([a-zA-Z0-9_-]{11})",
+        r"youtu\.be/([a-zA-Z0-9_-]{11})",
+        r"youtube\.com/embed/([a-zA-Z0-9_-]{11})",
+        r"youtube\.com/v/([a-zA-Z0-9_-]{11})",
+        r"youtube\.com/shorts/([a-zA-Z0-9_-]{11})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    # Bare 11-char ID
+    stripped = url.strip()
+    if re.fullmatch(r"[a-zA-Z0-9_-]{11}", stripped):
+        return stripped
+    raise ValueError(f"Could not extract video ID from: {url}")
+
+
+def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
+    """
+    Use yt-dlp to extract audio stream URL for a regular YouTube video.
+    Same as _get_stream_url_sync but targets youtube.com (not music.youtube.com)
+    and does not require OAuth authentication.
+    Returns dict with url, format, duration, expires_at.
+    """
+    import yt_dlp
+
+    cache_key = f"yt:{video_id}"
+
+    # Check cache first
+    cached = _stream_cache.get(cache_key)
+    if cached and cached.get("expires_at", 0) > time.time():
+        log.debug(f"Stream URL cache hit for {cache_key}")
+        return cached
+
+    # Enforce inter-extraction delay to avoid rapid-fire requests
+    global _last_extract_time
+    now = time.time()
+    elapsed = now - _last_extract_time
+    min_gap = random.uniform(EXTRACT_DELAY_MIN, EXTRACT_DELAY_MAX)
+    if elapsed < min_gap:
+        sleep_time = min_gap - elapsed
+        log.debug(f"Throttling yt-dlp extraction by {sleep_time:.2f}s")
+        time.sleep(sleep_time)
+    _last_extract_time = time.time()
+
+    # Map quality to yt-dlp format selection
+    format_map = {
+        "LOW": "ba[abr<=64]/worstaudio/ba",
+        "MEDIUM": "ba[abr<=128]/ba[abr<=192]/ba",
+        "HIGH": "ba[abr<=256]/ba",
+        "LOSSLESS": "ba/bestaudio",
+    }
+    fmt = format_map.get(quality, format_map["HIGH"])
+
+    ydl_opts = {
+        "format": fmt,
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,
+        "http_headers": {
+            "User-Agent": _USER_AGENT,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.youtube.com/",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"],
+            },
+        },
+    }
+
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+            if not info:
+                raise ValueError("No info extracted")
+
+            stream_url = info.get("url")
+            if not stream_url:
+                formats = info.get("formats", [])
+                audio_formats = [
+                    f for f in formats
+                    if f.get("acodec") != "none" and f.get("vcodec") in ("none", None)
+                ]
+                if audio_formats:
+                    audio_formats.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
+                    stream_url = audio_formats[0].get("url")
+
+            if not stream_url:
+                raise ValueError("No audio stream URL found")
+
+            result = {
+                "url": stream_url,
+                "content_type": info.get("audio_ext", "m4a"),
+                "duration": info.get("duration", 0),
+                "title": info.get("title", ""),
+                "artist": info.get("artist") or info.get("uploader", ""),
+                "expires_at": time.time() + STREAM_CACHE_TTL,
+                "abr": info.get("abr", 0),
+                "acodec": info.get("acodec", ""),
+            }
+
+            _stream_cache[cache_key] = result
+            log.debug(f"Extracted YT stream URL for {cache_key}: {result['acodec']} @ {result['abr']}kbps")
+            return result
+
+    except Exception as e:
+        error_str = str(e)
+        log.error(f"yt-dlp extraction failed for YT video {video_id}: {error_str}")
+
+        if "Sign in to confirm your age" in error_str or (
+            "age" in error_str.lower() and "confirm" in error_str.lower()
+        ):
+            raise HTTPException(
+                status_code=451,
+                detail={
+                    "error": "age_restricted",
+                    "message": "This content requires age verification and cannot be streamed.",
+                    "video_id": video_id,
+                },
+            )
+
+        raise HTTPException(status_code=502, detail=f"Failed to extract stream: {error_str}")
+
+
 def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> dict:
     """
     Use yt-dlp to extract audio stream URL for a YouTube Music video.
@@ -1762,6 +1897,277 @@ async def library_albums(user_id: str = Query(...), limit: int = 100, order: str
     except Exception as e:
         log.error(f"Get library albums failed for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# /yt/ endpoints — Regular YouTube (no OAuth required)
+# ════════════════════════════════════════════════════════════════════
+
+
+@app.get("/yt/info")
+async def yt_video_info(url: str = Query(...)):
+    """
+    Return metadata for a regular YouTube video.
+    No authentication required — uses yt-dlp anonymous extraction.
+    """
+    import yt_dlp
+
+    try:
+        video_id = _extract_video_id(url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,
+        "skip_download": True,
+        "http_headers": {
+            "User-Agent": _USER_AGENT,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.youtube.com/",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"],
+            },
+        },
+    }
+
+    try:
+        def _extract():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(
+                    f"https://www.youtube.com/watch?v={video_id}",
+                    download=False,
+                )
+
+        info = await asyncio.to_thread(_extract)
+        if not info:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        thumbnails = info.get("thumbnails", [])
+        best_thumb = thumbnails[-1]["url"] if thumbnails else None
+
+        return {
+            "videoId": info.get("id", video_id),
+            "title": info.get("title", ""),
+            "uploader": info.get("uploader", ""),
+            "duration": info.get("duration", 0),
+            "thumbnail": best_thumb,
+            "uploadDate": info.get("upload_date", ""),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"yt-dlp info extraction failed for {url}: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch video info: {e}")
+
+
+@app.get("/yt/proxy/{video_id}")
+async def yt_proxy_stream(
+    video_id: str,
+    quality: str = "HIGH",
+    request: Request = None,
+):
+    """
+    Proxy audio stream from a regular YouTube video.
+    No OAuth required — uses anonymous yt-dlp extraction.
+    Same Range-request handling as the YouTube Music proxy.
+    """
+    stream_info = await asyncio.to_thread(_get_yt_stream_url_sync, video_id, quality)
+    stream_url = stream_info["url"]
+
+    acodec = stream_info.get("acodec", "")
+    if "opus" in acodec:
+        content_type = "audio/webm"
+    elif "mp4a" in acodec or "aac" in acodec:
+        content_type = "audio/mp4"
+    else:
+        content_type = "audio/mp4"
+
+    headers = {
+        "User-Agent": _USER_AGENT,
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.youtube.com/",
+        "Origin": "https://www.youtube.com",
+    }
+    if request and "range" in request.headers:
+        headers["Range"] = request.headers["range"]
+
+    async def stream_audio():
+        async with build_stream_proxy_client(user_agent=_USER_AGENT) as client:
+            try:
+                async with client.stream("GET", stream_url, headers=headers) as response:
+                    async for chunk in response.aiter_bytes(chunk_size=65536):
+                        yield chunk
+            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
+                log.error(f"Upstream stream error for YT {video_id}: {e}")
+                return
+
+    if headers.get("Range"):
+        client = build_stream_proxy_client(user_agent=_USER_AGENT)
+        upstream = await client.send(
+            client.build_request("GET", stream_url, headers=headers),
+            stream=True,
+        )
+        response_headers = {
+            "Content-Type": content_type,
+            "Accept-Ranges": "bytes",
+        }
+        if "content-range" in upstream.headers:
+            response_headers["Content-Range"] = upstream.headers["content-range"]
+
+        async def range_stream():
+            try:
+                async for chunk in upstream.aiter_bytes(chunk_size=65536):
+                    yield chunk
+            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
+                log.warning(f"Upstream read error during YT range stream for {video_id}: {e}")
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            range_stream(),
+            status_code=upstream.status_code,
+            headers=response_headers,
+        )
+
+    return StreamingResponse(
+        stream_audio(),
+        media_type=content_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+class YtDownloadRequest(BaseModel):
+    video_id: str
+    format: str = "mp3"
+    quality: str = "HIGH"
+    output_dir: str = "/music/YouTube Downloads"
+
+
+@app.post("/yt/download")
+async def yt_download(req: YtDownloadRequest):
+    """
+    Download audio from a regular YouTube video to disk.
+    Uses yt-dlp with FFmpeg postprocessors for format conversion,
+    metadata embedding, and thumbnail embedding.
+    No OAuth required.
+    """
+    import yt_dlp
+    import glob as glob_mod
+
+    video_id = req.video_id
+    output_dir = req.output_dir
+    audio_format = req.format.lower()
+
+    if audio_format not in ("mp3", "opus", "flac", "m4a"):
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {audio_format}")
+
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Check for existing download (idempotent)
+    existing = glob_mod.glob(os.path.join(output_dir, f"*[{video_id}].*"))
+    audio_exts = {".mp3", ".opus", ".flac", ".m4a", ".ogg", ".webm"}
+    existing_audio = [
+        f for f in existing
+        if os.path.splitext(f)[1].lower() in audio_exts
+    ]
+    if existing_audio:
+        filepath = existing_audio[0]
+        log.info(f"YT download already exists: {filepath}")
+        return {
+            "success": True,
+            "filePath": filepath,
+            "title": os.path.basename(filepath),
+            "alreadyExisted": True,
+        }
+
+    # yt-dlp options for downloading
+    outtmpl = os.path.join(output_dir, "%(title)s [%(id)s].%(ext)s")
+    postprocessors = [
+        {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": audio_format,
+            "preferredquality": "320" if audio_format == "mp3" else "0",
+        },
+        {"key": "FFmpegMetadata"},
+        {"key": "EmbedThumbnail"},
+    ]
+
+    format_map = {
+        "LOW": "ba[abr<=64]/worstaudio/ba",
+        "MEDIUM": "ba[abr<=128]/ba[abr<=192]/ba",
+        "HIGH": "ba[abr<=256]/ba",
+        "LOSSLESS": "ba/bestaudio",
+    }
+    fmt = format_map.get(req.quality, format_map["HIGH"])
+
+    ydl_opts = {
+        "format": fmt,
+        "outtmpl": outtmpl,
+        "postprocessors": postprocessors,
+        "writethumbnail": True,
+        "quiet": True,
+        "no_warnings": True,
+        "http_headers": {
+            "User-Agent": _USER_AGENT,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.youtube.com/",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"],
+            },
+        },
+    }
+
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    try:
+        def _download():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=True)
+
+        info = await asyncio.to_thread(_download)
+        if not info:
+            raise HTTPException(status_code=502, detail="Download failed — no info returned")
+
+        # Find the actual downloaded file
+        downloaded = glob_mod.glob(os.path.join(output_dir, f"*[{video_id}].*"))
+        downloaded_audio = [
+            f for f in downloaded
+            if os.path.splitext(f)[1].lower() in audio_exts
+        ]
+        filepath = downloaded_audio[0] if downloaded_audio else None
+
+        if not filepath:
+            raise HTTPException(
+                status_code=502,
+                detail="Download completed but output file not found",
+            )
+
+        return {
+            "success": True,
+            "filePath": filepath,
+            "title": info.get("title", ""),
+            "uploader": info.get("uploader", ""),
+            "duration": info.get("duration", 0),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"YT download failed for {video_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Download failed: {e}")
 
 
 # ── Cleanup ─────────────────────────────────────────────────────────
