@@ -288,7 +288,7 @@ export interface PlaybackQualityBadge {
     label: string;
 }
 
-export type PlaybackStreamSource = "local" | "tidal" | "youtube";
+export type PlaybackStreamSource = "local" | "tidal" | "youtube" | "youtube-direct";
 
 export function resolvePlaybackQualityBadge(input: {
     streamSource?: PlaybackStreamSource;
