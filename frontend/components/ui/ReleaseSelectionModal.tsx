@@ -78,6 +78,9 @@ function compareReleases(a: AlbumRelease, b: AlbumRelease, sortBy: ReleaseSortOp
     return (b.size ?? 0) - (a.size ?? 0);
 }
 
+/**
+ * Renders the ReleaseSelectionModal component.
+ */
 export function ReleaseSelectionModal({
     isOpen,
     onClose,

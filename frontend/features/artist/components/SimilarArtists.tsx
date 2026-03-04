@@ -11,6 +11,9 @@ interface SimilarArtistsProps {
     onNavigate: (artistId: string) => void;
 }
 
+/**
+ * Renders the SimilarArtists component.
+ */
 export function SimilarArtists({
     similarArtists,
     onNavigate,

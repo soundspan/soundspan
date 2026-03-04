@@ -38,6 +38,9 @@ interface SubsonicResponseBody {
     } & SubsonicPayload;
 }
 
+/**
+ * Resolves the response format from Subsonic query params, defaulting to XML.
+ */
 export function getResponseFormat(query: SubsonicQuery): ResponseFormat {
     const formatParam = typeof query.format === "string" ? query.format : undefined;
     const fParam = typeof query.f === "string" ? query.f : undefined;
@@ -48,6 +51,9 @@ export function getResponseFormat(query: SubsonicQuery): ResponseFormat {
     return "xml";
 }
 
+/**
+ * Sends a protocol-level successful Subsonic response in the requested format.
+ */
 export function sendSubsonicSuccess(
     res: Response,
     data: SubsonicPayload,
@@ -64,6 +70,9 @@ export function sendSubsonicSuccess(
     sendResponse(res, response, format, callback);
 }
 
+/**
+ * Sends a protocol-level failed Subsonic response while preserving HTTP 200 semantics.
+ */
 export function sendSubsonicError(
     res: Response,
     code: SubsonicErrorCode,

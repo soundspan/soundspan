@@ -120,6 +120,9 @@ interface ConnectionTestButtonProps {
     disabled?: boolean;
 }
 
+/**
+ * Renders the ConnectionTestButton component.
+ */
 export function ConnectionTestButton({
     label,
     onTest,
@@ -173,6 +176,9 @@ interface SaveButtonProps {
     disabled?: boolean;
 }
 
+/**
+ * Renders the SaveButton component.
+ */
 export function SaveButton({
     onSave,
     label = "Save",

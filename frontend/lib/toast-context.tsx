@@ -35,6 +35,9 @@ interface ToastContextType {
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
+/**
+ * Executes useToast.
+ */
 export function useToast() {
     const context = useContext(ToastContext);
     if (!context) {
@@ -43,6 +46,9 @@ export function useToast() {
     return context;
 }
 
+/**
+ * Renders the ToastProvider component.
+ */
 export function ToastProvider({ children }: { children: ReactNode }) {
     const [toasts, setToasts] = useState<Toast[]>([]);
     const timeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());

@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     createEmptySegmentedStartupRecoveryStageAttempts,
+    resolvePlaybackDuration,
+    resolveRemoteStreamFormat,
     resolveSegmentedHandoffRecoveryStartupEligibility,
     resolveSegmentedStartupRecoveryBackoffDelayMs,
     resolveSegmentedStartupRecoveryDecision,
     shouldAttemptSegmentedRecoveryOnUnexpectedPause,
-} from "./audioPlaybackOrchestratorPolicy.ts";
+} from "./audioPlaybackOrchestratorPolicy";
 
 test("unavailable buffered-ahead does not trigger segmented recovery", () => {
     assert.equal(shouldAttemptSegmentedRecoveryOnUnexpectedPause(null, 1), false);
@@ -291,4 +293,82 @@ test("handoff recovery is eligible once startup stability window is met", () => 
     assert.equal(eligibility.reason, "eligible");
     assert.equal(eligibility.stableForMs, 8_000);
     assert.equal(eligibility.minimumStablePlaybackMs, 8_000);
+});
+
+// ── resolveRemoteStreamFormat ──────────────────────────────────────
+
+test("TIDAL streams use mp4 format hint for Howler codec gate", () => {
+    assert.equal(resolveRemoteStreamFormat("tidal"), "mp4");
+});
+
+test("YouTube streams use mp4 format hint for Howler codec gate", () => {
+    assert.equal(resolveRemoteStreamFormat("youtube"), "mp4");
+});
+
+test("local streams return undefined (format resolved from file extension)", () => {
+    assert.equal(resolveRemoteStreamFormat("local"), undefined);
+});
+
+test("unknown/missing streamSource returns undefined", () => {
+    assert.equal(resolveRemoteStreamFormat(undefined), undefined);
+    assert.equal(resolveRemoteStreamFormat(null as unknown as undefined), undefined);
+});
+
+// ── resolvePlaybackDuration ───────────────────────────────────────
+
+test("prefers audio-reported duration when it exceeds metadata", () => {
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: 240, metadataDurationSec: 180, isRemoteStream: false }),
+        240,
+    );
+});
+
+test("prefers metadata duration when audio element reports a suspiciously low value for remote streams", () => {
+    // fMP4 fragment duration is ~4 s but track is 240 s
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: 4, metadataDurationSec: 240, isRemoteStream: true }),
+        240,
+    );
+});
+
+test("uses loaded duration for remote streams when it is close to metadata", () => {
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: 238, metadataDurationSec: 240, isRemoteStream: true }),
+        238,
+    );
+});
+
+test("uses metadata when loaded duration is zero", () => {
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: 0, metadataDurationSec: 180, isRemoteStream: false }),
+        180,
+    );
+});
+
+test("uses metadata when loaded duration is NaN", () => {
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: Number.NaN, metadataDurationSec: 180, isRemoteStream: true }),
+        180,
+    );
+});
+
+test("uses metadata when loaded duration is Infinity", () => {
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: Infinity, metadataDurationSec: 200, isRemoteStream: true }),
+        200,
+    );
+});
+
+test("returns zero when both durations are zero", () => {
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: 0, metadataDurationSec: 0, isRemoteStream: false }),
+        0,
+    );
+});
+
+test("local stream uses low loaded duration when no metadata available", () => {
+    assert.equal(
+        resolvePlaybackDuration({ loadedDurationSec: 4, metadataDurationSec: 0, isRemoteStream: false }),
+        4,
+    );
 });

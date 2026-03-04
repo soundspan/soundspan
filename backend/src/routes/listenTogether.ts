@@ -29,10 +29,34 @@ router.use(requireAuth);
 // Validation schemas
 // ---------------------------------------------------------------------------
 
+const queueTrackInputSchema = z
+    .object({
+        trackId: z.string().min(1).optional(),
+        tidalTrackId: z.number().int().positive().optional(),
+        youtubeVideoId: z.string().min(1).optional(),
+        title: z.string().optional(),
+        artist: z.string().optional(),
+        album: z.string().optional(),
+        duration: z.number().int().nonnegative().optional(),
+        thumbnailUrl: z.string().optional(),
+        isrc: z.string().optional(),
+    })
+    .refine(
+        (value) =>
+            [value.trackId, value.tidalTrackId, value.youtubeVideoId].filter(
+                (entry) => entry !== undefined
+            ).length === 1,
+        {
+            message:
+                "Each queue track requires exactly one of trackId, tidalTrackId, or youtubeVideoId",
+        }
+    );
+
 const createGroupSchema = z.object({
     name: z.string().trim().min(1).max(80).optional(),
     visibility: z.enum(["public", "private"]).optional(),
-    queueTrackIds: z.array(z.string().min(1)).max(500).optional(),
+    queueTrackIds: z.array(z.string().min(1)).max(500, { message: "Queue cannot exceed 500 tracks" }).optional(),
+    queueTracks: z.array(queueTrackInputSchema).max(500, { message: "Queue cannot exceed 500 tracks" }).optional(),
     currentTrackId: z.string().min(1).optional(),
     currentTimeMs: z.number().finite().min(0).max(86_400_000).optional(),
     isPlaying: z.boolean().optional(),
@@ -58,7 +82,12 @@ function handleError(label: string, error: unknown, res: Response) {
             INVALID: 400,
             CONFLICT: 409,
         };
-        return res.status(statusMap[error.code] ?? 500).json({ error: error.message });
+        const status = statusMap[error.code] ?? 500;
+        if (status >= 500) {
+            logger.error(`[ListenTogether] ${label}:`, error.message);
+            return res.status(status).json({ error: "Internal server error" });
+        }
+        return res.status(status).json({ error: error.message });
     }
     logger.error(`[ListenTogether] ${label} failed:`, error);
     return res.status(500).json({ error: "Internal server error" });

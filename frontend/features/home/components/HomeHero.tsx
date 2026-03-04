@@ -7,6 +7,9 @@ const getGreeting = () => {
     return "Good evening";
 };
 
+/**
+ * Renders the HomeHero component.
+ */
 export function HomeHero() {
     return (
         <div className="relative">

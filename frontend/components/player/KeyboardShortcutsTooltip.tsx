@@ -3,6 +3,9 @@
 import { Info } from "lucide-react";
 import { useState } from "react";
 
+/**
+ * Renders the KeyboardShortcutsTooltip component.
+ */
 export function KeyboardShortcutsTooltip() {
     const [isVisible, setIsVisible] = useState(false);
 

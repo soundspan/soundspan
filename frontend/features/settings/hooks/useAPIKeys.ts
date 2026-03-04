@@ -5,6 +5,9 @@ import { ApiKey } from "../types";
 
 const logger = createFrontendLogger("Settings.useAPIKeys");
 
+/**
+ * Executes useAPIKeys.
+ */
 export function useAPIKeys() {
     const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
     const [loadingApiKeys, setLoadingApiKeys] = useState(false);

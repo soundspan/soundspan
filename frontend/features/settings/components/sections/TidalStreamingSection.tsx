@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SettingsRow, SettingsSelect, IntegrationCard } from "../ui";
+import { SettingsRow, SettingsSelect, SettingsToggle, IntegrationCard } from "../ui";
 import { UserSettings } from "../../types";
 import { CheckCircle, XCircle, Loader2, ExternalLink, Copy, AlertTriangle, Music2 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -20,6 +20,9 @@ const QUALITY_OPTIONS = [
     { value: "HI_RES_LOSSLESS", label: "Max / Hi-Res (FLAC up to 24-bit / 192 kHz)" },
 ];
 
+/**
+ * Renders the TidalStreamingCard component.
+ */
 export function TidalStreamingCard({
     settings,
     onUpdate,
@@ -364,6 +367,19 @@ export function TidalStreamingCard({
                     <CheckCircle className="w-4 h-4 flex-shrink-0" />
                     <span>{success}</span>
                 </div>
+            )}
+
+            {/* Explore Page Toggle — only when connected (TIDAL requires auth) */}
+            {isAuthenticated && (
+                <SettingsRow
+                    label="Show on Explore Page"
+                    description="Display TIDAL mixes, moods, and shelves on the Explore page"
+                >
+                    <SettingsToggle
+                        checked={settings.showTidalExplore}
+                        onChange={(v) => onUpdate({ showTidalExplore: v })}
+                    />
+                </SettingsRow>
             )}
 
             {/* Streaming Quality */}

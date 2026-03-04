@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
     installTrackOverflowHarness,
     trackOverflowIcon,
-} from "../trackOverflowHarness.ts";
+} from "../trackOverflowHarness";
 
 /**
  * Component tests for overflow menu adoption in remaining views.
@@ -14,8 +14,8 @@ import {
  *   7.2 — Artist PopularTracks
  *
  * Tests verify:
- * - PopularTracks renders TrackOverflowMenu trigger on each track row
- * - PopularTracks overflow menu is present alongside existing duration/preview controls
+ * - PopularTracks renders TrackOverflowMenu trigger on each playable track row
+ * - PopularTracks hides overflow menu for unplayable (unmatched) tracks
  */
 
 // Shared mutable state
@@ -143,9 +143,9 @@ beforeEach(() => {
 
 // ─── 7.2 Artist PopularTracks ─────────────────────────────────────────
 
-test("PopularTracks renders TrackOverflowMenu trigger on each track row", async () => {
+test("PopularTracks renders TrackOverflowMenu trigger on each playable track row", async () => {
     const { PopularTracks } = await import(
-        "../../features/artist/components/PopularTracks.tsx"
+        "../../features/artist/components/PopularTracks"
     );
 
     const artist = { id: "artist-1", name: "Test Artist" };
@@ -156,6 +156,7 @@ test("PopularTracks renders TrackOverflowMenu trigger on each track row", async 
             duration: 200,
             album: { id: "al1", title: "Album 1", coverArt: null },
             artist: { id: "artist-1", name: "Test Artist" },
+            filePath: "/music/track1.flac",
         },
         {
             id: "pt2",
@@ -163,6 +164,8 @@ test("PopularTracks renders TrackOverflowMenu trigger on each track row", async 
             duration: 180,
             album: { id: "al2", title: "Album 2", coverArt: null },
             artist: { id: "artist-1", name: "Test Artist" },
+            streamSource: "youtube" as const,
+            youtubeVideoId: "abc123",
         },
     ];
 
@@ -173,21 +176,18 @@ test("PopularTracks renders TrackOverflowMenu trigger on each track row", async 
             currentTrackId: undefined,
             colors: null,
             onPlayTrack: () => undefined,
-            previewTrack: null,
-            previewPlaying: false,
-            onPreview: () => undefined,
         })
     );
 
     // Should have overflow menu triggers (aria-haspopup="menu")
     const triggerMatches = html.match(/aria-haspopup="menu"/g);
     assert.ok(triggerMatches, "Should render overflow menu triggers");
-    assert.equal(triggerMatches!.length, 2, "Should have one trigger per track row");
+    assert.equal(triggerMatches!.length, 2, "Should have one trigger per playable track row");
 });
 
-test("PopularTracks overflow menu passes isInListenTogetherGroup", async () => {
+test("PopularTracks overflow menu renders for playable track", async () => {
     const { PopularTracks } = await import(
-        "../../features/artist/components/PopularTracks.tsx"
+        "../../features/artist/components/PopularTracks"
     );
 
     const artist = { id: "artist-1", name: "Test Artist" };
@@ -197,6 +197,37 @@ test("PopularTracks overflow menu passes isInListenTogetherGroup", async () => {
             title: "Popular Track 1",
             duration: 200,
             album: { id: "al1", title: "Album 1", coverArt: null },
+            artist: { id: "artist-1", name: "Test Artist" },
+            filePath: "/music/track1.flac",
+        },
+    ];
+
+    const html = renderToStaticMarkup(
+        React.createElement(PopularTracks, {
+            tracks,
+            artist,
+            currentTrackId: undefined,
+            colors: null,
+            onPlayTrack: () => undefined,
+        })
+    );
+
+    // Should render the overflow menu (presence check)
+    assert.match(html, /Track actions/, "Should render overflow menu");
+});
+
+test("PopularTracks hides overflow menu for unplayable tracks", async () => {
+    const { PopularTracks } = await import(
+        "../../features/artist/components/PopularTracks"
+    );
+
+    const artist = { id: "artist-1", name: "Test Artist" };
+    const tracks = [
+        {
+            id: "pt1",
+            title: "Unmatched Track",
+            duration: 200,
+            album: { id: "", title: "Unknown Album", coverArt: null },
             artist: { id: "artist-1", name: "Test Artist" },
         },
     ];
@@ -208,13 +239,11 @@ test("PopularTracks overflow menu passes isInListenTogetherGroup", async () => {
             currentTrackId: undefined,
             colors: null,
             onPlayTrack: () => undefined,
-            previewTrack: null,
-            previewPlaying: false,
-            onPreview: () => undefined,
-            isInListenTogetherGroup: false,
         })
     );
 
-    // Should render the overflow menu (presence check)
-    assert.match(html, /Track actions/, "Should render overflow menu");
+    // Unmatched track should NOT have overflow menu
+    assert.doesNotMatch(html, /Track actions/, "Should not render overflow menu for unplayable track");
+    // Should be dimmed
+    assert.match(html, /opacity-50/, "Unplayable track row should be dimmed");
 });

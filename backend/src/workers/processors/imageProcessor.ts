@@ -13,6 +13,9 @@ export interface ImageJobResult {
   error?: string;
 }
 
+/**
+ * Executes processImageOptimization.
+ */
 export async function processImageOptimization(job: Job<ImageJobData>): Promise<ImageJobResult> {
   const { imageUrl, coverId, type } = job.data;
 

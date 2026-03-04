@@ -9,6 +9,9 @@ interface BeforeInstallPromptEvent extends Event {
     userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
+/**
+ * Renders the PWAInstallPrompt component.
+ */
 export function PWAInstallPrompt() {
     const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
     const [showPrompt, setShowPrompt] = useState(false);

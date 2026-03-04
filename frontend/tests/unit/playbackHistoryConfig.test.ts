@@ -5,7 +5,7 @@ import {
     HISTORY_RANGE_OPTIONS,
     MY_HISTORY_ROUTE,
     type PlayHistorySummary,
-} from "../../features/settings/components/sections/playbackHistoryConfig.ts";
+} from "../../features/settings/components/sections/playbackHistoryConfig";
 
 const summary: PlayHistorySummary = {
     allTime: 1000,

@@ -17,7 +17,9 @@ mock.module("lucide-react", {
         Volume2: Icon,
         Disc: Icon,
         Music: Icon,
-        ListPlus: Icon,
+        Plus: Icon,
+        ChevronDown: Icon,
+        ChevronUp: Icon,
     },
 });
 
@@ -30,6 +32,15 @@ mock.module("@/utils/formatTime", {
 mock.module("@/utils/formatNumber", {
     namedExports: {
         formatNumber: (value: number) => `#${value}`,
+    },
+});
+
+mock.module("@/lib/audio-state-context", {
+    namedExports: {
+        useAudioState: () => ({
+            currentTrack: null,
+            playbackType: "track",
+        }),
     },
 });
 
@@ -124,7 +135,7 @@ beforeEach(() => {
 
 test("album TrackList renders disc separators and provider loading badges for unmatched tracks", async () => {
     const { TrackList } = await import(
-        "../../features/album/components/TrackList.tsx"
+        "../../features/album/components/TrackList"
     );
 
     const html = renderToStaticMarkup(
@@ -176,7 +187,7 @@ test("album TrackList renders disc separators and provider loading badges for un
 test("album TrackList shows preview controls, queue badges, and provider badges", async () => {
     state.queuedTrackIds = new Set(["a-tidal"]);
     const { TrackList } = await import(
-        "../../features/album/components/TrackList.tsx"
+        "../../features/album/components/TrackList"
     );
 
     const html = renderToStaticMarkup(
@@ -221,7 +232,6 @@ test("album TrackList shows preview controls, queue badges, and provider badges"
             previewTrack: "a-preview",
             previewPlaying: true,
             onPreview: () => undefined,
-            isInListenTogetherGroup: false,
             isProviderMatching: false,
         })
     );
@@ -238,49 +248,10 @@ test("album TrackList shows preview controls, queue badges, and provider badges"
     );
 });
 
-test("album TrackList marks streaming tracks as LOCAL ONLY inside Listen Together groups", async () => {
-    const { TrackList } = await import(
-        "../../features/album/components/TrackList.tsx"
-    );
-
-    const html = renderToStaticMarkup(
-        React.createElement(TrackList, {
-            tracks: [
-                {
-                    id: "a-group-1",
-                    title: "Group Blocked",
-                    duration: 210,
-                    trackNumber: 1,
-                    streamSource: "youtube",
-                    youtubeVideoId: "yt-group",
-                    album: {},
-                },
-            ],
-            album: {
-                id: "album-1",
-                title: "Album One",
-                artist: { id: "artist-1", name: "Artist One" },
-            },
-            source: "discovery",
-            currentTrackId: undefined,
-            colors: null,
-            onPlayTrack: () => undefined,
-            previewTrack: null,
-            previewPlaying: false,
-            onPreview: () => undefined,
-            isInListenTogetherGroup: true,
-            isProviderMatching: false,
-        })
-    );
-
-    assert.match(html, /LOCAL ONLY/);
-    assert.match(html, /Track actions/);
-});
-
-test("artist PopularTracks limits visible items and renders provider/listen-together states", async () => {
+test("artist PopularTracks limits visible items and renders provider states", async () => {
     state.queuedTrackIds = new Set(["p-in-queue"]);
     const { PopularTracks } = await import(
-        "../../features/artist/components/PopularTracks.tsx"
+        "../../features/artist/components/PopularTracks"
     );
 
     const tracks = [
@@ -336,60 +307,29 @@ test("artist PopularTracks limits visible items and renders provider/listen-toge
             currentTrackId: "p-loading",
             colors: null,
             onPlayTrack: () => undefined,
-            previewTrack: "p-preview",
-            previewPlaying: true,
-            onPreview: () => undefined,
-            isInListenTogetherGroup: true,
             isProviderMatching: true,
             popularHref: "/artist/artist-1/popular",
             onAddAllToQueue: () => undefined,
-        })
+        } as any)
     );
 
-    assert.match(html, /Add All to Queue/);
+    // Plus button (add to queue) renders as icon-only
+    assert.doesNotMatch(html, /Add All to Queue/);
+    assert.match(html, /Add visible popular tracks to queue/);
+    // "See more" toggle visible since there are 6 tracks (> 5 collapsed)
+    assert.match(html, /See more/);
     assert.match(html, /href=\"\/artist\/artist-1\/popular\"/);
     assert.match(html, /LOADING/);
-    assert.match(html, /YT MUSIC/);
-    assert.match(html, /LOCAL ONLY/);
+    assert.match(html, /YT/);
     assert.match(html, /IN QUEUE/);
     assert.match(html, /#12/);
     assert.doesNotMatch(html, /Hidden Sixth/);
 });
 
-test("artist PopularTracks renders PREVIEW state when provider matching is complete", async () => {
-    const { PopularTracks } = await import(
-        "../../features/artist/components/PopularTracks.tsx"
-    );
-
-    const html = renderToStaticMarkup(
-        React.createElement(PopularTracks, {
-            tracks: [
-                {
-                    id: "preview-1",
-                    title: "Preview Candidate",
-                    duration: 140,
-                    album: { id: "", title: "Unknown Album", coverArt: null },
-                },
-            ],
-            artist: { id: "artist-1", name: "Artist One" },
-            currentTrackId: undefined,
-            colors: null,
-            onPlayTrack: () => undefined,
-            previewTrack: "preview-1",
-            previewPlaying: true,
-            onPreview: () => undefined,
-            isInListenTogetherGroup: false,
-            isProviderMatching: false,
-        })
-    );
-
-    assert.match(html, /PREVIEW/);
-});
-
 test("discover TrackList renders source badges, tier aliases, queue badges, and album-link fallback behavior", async () => {
     state.queuedTrackIds = new Set(["d-queue"]);
     const { TrackList } = await import(
-        "../../features/discover/components/TrackList.tsx"
+        "../../features/discover/components/TrackList"
     );
 
     const html = renderToStaticMarkup(
@@ -473,11 +413,11 @@ test("discover TrackList renders source badges, tier aliases, queue badges, and 
             isPlaying: true,
             onPlayTrack: () => undefined,
             onTogglePlay: () => undefined,
-        })
+        } as any)
     );
 
     assert.match(html, /TIDAL/);
-    assert.match(html, /YT Music/);
+    assert.match(html, /YT</);
     assert.match(html, /LOADING/);
     assert.match(html, /Local/);
     assert.match(html, /IN QUEUE/);

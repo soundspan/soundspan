@@ -16,6 +16,9 @@ export const HISTORY_RANGE_OPTIONS: Array<{ value: HistoryRange; label: string }
     { value: "all", label: "All time" },
 ];
 
+/**
+ * Executes getImpactedHistoryCount.
+ */
 export function getImpactedHistoryCount(
     summary: PlayHistorySummary | null,
     selectedRange: HistoryRange

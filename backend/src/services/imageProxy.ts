@@ -93,6 +93,9 @@ async function fetchWithSafeRedirects(options: {
     };
 }
 
+/**
+ * Executes fetchExternalImage.
+ */
 export async function fetchExternalImage(options: {
     url: string;
     timeoutMs?: number;

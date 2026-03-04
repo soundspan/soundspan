@@ -80,6 +80,9 @@ function getDiscoverLockKey(userId: string): string {
     return `${DISCOVER_PROCESSOR_LOCK_KEY_PREFIX}:${userId}`;
 }
 
+/**
+ * Executes shutdownDiscoverProcessor.
+ */
 export async function shutdownDiscoverProcessor(): Promise<void> {
     try {
         await withDiscoverLockRedisRetry("shutdown quit", () =>
@@ -94,6 +97,9 @@ export async function shutdownDiscoverProcessor(): Promise<void> {
     }
 }
 
+/**
+ * Executes processDiscoverWeekly.
+ */
 export async function processDiscoverWeekly(
     job: Job<DiscoverJobData>
 ): Promise<DiscoverJobResult> {

@@ -6,6 +6,9 @@ export interface AutoMatchVibeQueueEndInput {
     isListenTogether: boolean;
 }
 
+/**
+ * Executes shouldAutoMatchVibeAtQueueEnd.
+ */
 export function shouldAutoMatchVibeAtQueueEnd(
     input: AutoMatchVibeQueueEndInput
 ): boolean {

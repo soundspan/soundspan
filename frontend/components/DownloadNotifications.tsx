@@ -17,6 +17,9 @@ import { api } from "@/lib/api";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Renders the DownloadNotifications component.
+ */
 export function DownloadNotifications() {
     const { downloadStatus } = useDownloadContext();
     const [isOpen, setIsOpen] = useState(false);

@@ -30,6 +30,9 @@ interface StreamFileInfo {
     mimeType: string;
 }
 
+/**
+ * Represents the AudioStreamingService class.
+ */
 export class AudioStreamingService {
     private transcodeQueue = new PQueue({ concurrency: 3 });
     private musicPath: string;

@@ -7,6 +7,9 @@ export interface ResolveListenTogetherNavigationIndexInput {
     currentPositionMs: number;
 }
 
+/**
+ * Executes resolveListenTogetherNavigationIndex.
+ */
 export function resolveListenTogetherNavigationIndex(
     input: ResolveListenTogetherNavigationIndexInput,
 ): number | null {

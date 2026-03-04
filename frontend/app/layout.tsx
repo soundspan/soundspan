@@ -59,6 +59,9 @@ export const metadata: Metadata = {
     },
 };
 
+/**
+ * Renders the RootLayout component.
+ */
 export default function RootLayout({
     children,
 }: Readonly<{

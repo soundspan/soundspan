@@ -13,6 +13,9 @@ interface DiscoverSettingsProps {
     onPlaylistCleared?: () => void;
 }
 
+/**
+ * Renders the DiscoverSettings component.
+ */
 export function DiscoverSettings({
     config,
     onUpdateConfig,

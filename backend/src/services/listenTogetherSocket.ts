@@ -8,7 +8,7 @@
  */
 
 import type { Server as HttpServer } from "http";
-import { Server, type Socket } from "socket.io";
+import { Server, type Namespace, type Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { prisma } from "../utils/db";
@@ -31,8 +31,11 @@ import {
 import {
     joinGroupById,
     leaveGroup,
-    validateLocalTracks,
+    validateQueueTracks,
+    type QueueTrackInput,
 } from "./listenTogether";
+import { resolveQueueForUser } from "./listenTogetherResolution";
+import { trackMappingService } from "./trackMappingService";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -241,6 +244,78 @@ function queueEndedSnapshotSync(groupId: string): Promise<void> {
     });
 }
 
+async function emitAvailabilityForGroup(
+    ns: Namespace,
+    groupId: string,
+    snapshot?: GroupSnapshot
+): Promise<void> {
+    const activeSnapshot = snapshot ?? groupManager.snapshotById(groupId);
+    if (!activeSnapshot) return;
+
+    const sockets = await ns.in(groupId).fetchSockets();
+    await Promise.all(
+        sockets.map(async (rawSocket) => {
+            const socket = rawSocket as unknown as AuthenticatedSocket;
+            const userId =
+                typeof socket.data?.userId === "string" ? socket.data.userId : null;
+            if (!userId) return;
+
+            try {
+                const availabilityByIndex = await resolveQueueForUser(
+                    activeSnapshot.playback.queue,
+                    userId
+                );
+                const unavailableIndices: number[] = [];
+                const availability = [...availabilityByIndex.entries()].map(
+                    ([queueIndex, resolved]) => {
+                        if (!resolved.available) {
+                            unavailableIndices.push(queueIndex);
+                        }
+                        const localTrackId =
+                            resolved.available && resolved.source === "local"
+                                ? resolved.trackId
+                                : undefined;
+                        const tidalTrackId =
+                            resolved.available && resolved.source === "tidal"
+                                ? resolved.tidalTrackId
+                                : undefined;
+                        const youtubeVideoId =
+                            resolved.available && resolved.source === "youtube"
+                                ? resolved.youtubeVideoId
+                                : undefined;
+                        return {
+                            queueIndex,
+                            available: resolved.available,
+                            source: resolved.available ? resolved.source : undefined,
+                            localTrackId,
+                            tidalTrackId,
+                            youtubeVideoId,
+                            reason: !resolved.available
+                                ? resolved.reason
+                                : undefined,
+                        };
+                    }
+                );
+
+                groupManager.setUnavailableIndices(
+                    groupId,
+                    userId,
+                    unavailableIndices
+                );
+                socket.emit("group:availability", {
+                    availability,
+                    stateVersion: activeSnapshot.playback.stateVersion,
+                });
+            } catch (error) {
+                logger.warn(
+                    `[ListenTogether/WS] Failed to resolve per-user availability for ${userId} in ${groupId}`,
+                    error
+                );
+            }
+        })
+    );
+}
+
 async function withGroupMutationLock<T>(
     groupId: string,
     operationName: string,
@@ -401,6 +476,9 @@ function scheduleDisconnectCleanup(
     pendingDisconnectCleanupTimers.set(key, timer);
 }
 
+/**
+ * Executes setupListenTogetherSocket.
+ */
 export function setupListenTogetherSocket(httpServer: HttpServer): Server {
     io = new Server(httpServer, {
         path: "/socket.io/listen-together",
@@ -554,6 +632,7 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         onGroupState(groupId: string, snapshot: GroupSnapshot) {
             ns.to(groupId).emit("group:state", snapshot);
             void queuePersistAndPublishSnapshot(groupId, snapshot);
+            void emitAvailabilityForGroup(ns, groupId, snapshot);
         },
         onPlaybackDelta(groupId: string, delta: PlaybackDelta) {
             ns.to(groupId).emit("group:playback-delta", delta);
@@ -562,6 +641,7 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         onQueueDelta(groupId: string, delta: QueueDelta) {
             ns.to(groupId).emit("group:queue-delta", delta);
             void queuePersistAndPublishSnapshot(groupId);
+            void emitAvailabilityForGroup(ns, groupId);
         },
         onWaiting(groupId: string, data) {
             ns.to(groupId).emit("group:waiting", data);
@@ -622,6 +702,7 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
 
                 // Send current state to the new member only
                 socket.emit("group:state", snapshot);
+                void emitAvailabilityForGroup(ns, groupId, snapshot);
 
                 sendAck(ack, { ok: true });
                 logger.debug(`[ListenTogether/WS] ${username} joined room ${groupId}`);
@@ -710,7 +791,14 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         );
 
         // ----- queue commands -----
-        socket.on("queue", async (data: { action: string; trackIds?: string[]; index?: number; fromIndex?: number; toIndex?: number }, ack?: (res: unknown) => void) => {
+        socket.on("queue", async (data: {
+            action: string;
+            trackIds?: string[];
+            tracks?: QueueTrackInput[];
+            index?: number;
+            fromIndex?: number;
+            toIndex?: number;
+        }, ack?: (res: unknown) => void) => {
             try {
                 const groupId = socket.data.groupId;
                 if (!groupId) {
@@ -720,14 +808,19 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
 
                 switch (data.action) {
                     case "add": {
-                        if (!Array.isArray(data.trackIds) || data.trackIds.length === 0) {
+                        const queueTrackInputs =
+                            Array.isArray(data.tracks) && data.tracks.length > 0
+                                ? data.tracks
+                                : Array.isArray(data.trackIds) && data.trackIds.length > 0
+                                ? data.trackIds.map((trackId) => ({ trackId }))
+                                : [];
+                        if (queueTrackInputs.length === 0) {
                             sendAck(ack, { error: "trackIds required" });
                             return;
                         }
-                        // Validate tracks are local
-                        const items = await validateLocalTracks(data.trackIds);
+                        const items = await validateQueueTracks(queueTrackInputs);
                         if (items.length === 0) {
-                            sendAck(ack, { error: "No valid local tracks found" });
+                            sendAck(ack, { error: "No valid tracks found" });
                             return;
                         }
                         await withGroupMutationLock(
@@ -743,13 +836,21 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                         break;
                     }
                     case "insert-next": {
-                        if (!Array.isArray(data.trackIds) || data.trackIds.length === 0) {
+                        const queueTrackInputs =
+                            Array.isArray(data.tracks) && data.tracks.length > 0
+                                ? data.tracks
+                                : Array.isArray(data.trackIds) && data.trackIds.length > 0
+                                ? data.trackIds.map((trackId) => ({ trackId }))
+                                : [];
+                        if (queueTrackInputs.length === 0) {
                             sendAck(ack, { error: "trackIds required" });
                             return;
                         }
-                        const insertItems = await validateLocalTracks(data.trackIds);
+                        const insertItems = await validateQueueTracks(
+                            queueTrackInputs
+                        );
                         if (insertItems.length === 0) {
-                            sendAck(ack, { error: "No valid local tracks found" });
+                            sendAck(ack, { error: "No valid tracks found" });
                             return;
                         }
                         await withGroupMutationLock(
@@ -860,6 +961,73 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
             }
         });
 
+        socket.on(
+            "track:playback-failed",
+            async (
+                payloadOrAck?: unknown,
+                maybeAck?: unknown
+            ) => {
+                const ack = resolveAck(payloadOrAck, maybeAck);
+                const payload =
+                    payloadOrAck &&
+                    typeof payloadOrAck === "object" &&
+                    !Array.isArray(payloadOrAck)
+                        ? (payloadOrAck as { queueIndex?: unknown })
+                        : {};
+                try {
+                    const groupId = socket.data.groupId;
+                    if (!groupId) {
+                        sendAck(ack, { error: "Not in a group" });
+                        return;
+                    }
+
+                    const queueIndex =
+                        typeof payload.queueIndex === "number" &&
+                        Number.isInteger(payload.queueIndex)
+                            ? payload.queueIndex
+                            : null;
+                    if (queueIndex === null || queueIndex < 0) {
+                        sendAck(ack, { error: "queueIndex required" });
+                        return;
+                    }
+
+                    await withGroupMutationLock(
+                        groupId,
+                        "track:playback-failed",
+                        async () => {
+                            const snapshot = groupManager.snapshotById(groupId);
+                            if (!snapshot) return;
+                            const failedItem = snapshot.playback.queue[queueIndex];
+                            if (!failedItem?.trackMappingId) return;
+
+                            await trackMappingService.markStale(
+                                failedItem.trackMappingId
+                            );
+                            await emitAvailabilityForGroup(ns, groupId);
+                        }
+                    );
+
+                    sendAck(ack, { ok: true });
+                } catch (err) {
+                    const message =
+                        err instanceof GroupError
+                            ? err.message
+                            : "Failed to process playback failure";
+                    if (err instanceof GroupError && err.code === "CONFLICT") {
+                        recordGroupConflict(
+                            socket.data.groupId,
+                            userId,
+                            "track:playback-failed",
+                            message
+                        );
+                        sendAck(ack, buildTransientConflictAck(message));
+                        return;
+                    }
+                    sendAck(ack, { error: message });
+                }
+            }
+        );
+
         // ----- ping (latency measurement) -----
         socket.on("lt-ping", (payloadOrAck?: unknown, maybeAck?: unknown) => {
             const ack = resolveAck(payloadOrAck, maybeAck);
@@ -922,10 +1090,16 @@ async function handleLeaveRoom(socket: AuthenticatedSocket, isDisconnect: boolea
     }
 }
 
+/**
+ * Executes getListenTogetherIO.
+ */
 export function getListenTogetherIO(): Server | null {
     return io;
 }
 
+/**
+ * Executes shutdownListenTogetherSocket.
+ */
 export function shutdownListenTogetherSocket(): void {
     for (const timer of pendingDisconnectCleanupTimers.values()) {
         clearTimeout(timer);

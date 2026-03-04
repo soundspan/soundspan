@@ -24,6 +24,10 @@ import {
     startMoodBucketWorker,
     stopMoodBucketWorker,
 } from "./moodBucketWorker";
+import {
+    startTrackMappingStalenessWorker,
+    stopTrackMappingStalenessWorker,
+} from "./trackMappingStaleness";
 import { downloadQueueManager } from "../services/downloadQueue";
 import { prisma } from "../utils/db";
 import {
@@ -161,6 +165,8 @@ const SCHEDULER_JOB_TYPES = {
     downloadQueueReconcile: "download-queue-reconcile-startup",
     artistCountsBackfill: "artist-counts-backfill-startup",
     imageBackfill: "image-backfill-startup",
+    trackMappingReconcile: "track-mapping-reconcile",
+    remoteTrackMetadataRefresh: "remote-track-metadata-refresh",
 } as const;
 
 const SCHEDULER_JOB_IDS = {
@@ -177,6 +183,10 @@ const SCHEDULER_JOB_IDS = {
     downloadQueueReconcileStartup: "scheduler:download-queue-reconcile:startup",
     artistCountsBackfillStartup: "scheduler:artist-counts-backfill:startup",
     imageBackfillStartup: "scheduler:image-backfill:startup",
+    trackMappingReconcileStartup: "scheduler:track-mapping-reconcile:startup",
+    trackMappingReconcileRepeat: "scheduler:track-mapping-reconcile:repeat",
+    remoteTrackMetadataRefreshStartup: "scheduler:remote-track-metadata-refresh:startup",
+    remoteTrackMetadataRefreshRepeat: "scheduler:remote-track-metadata-refresh:repeat",
 } as const;
 
 async function runWithSchedulerClaim(
@@ -575,6 +585,67 @@ async function processImageBackfillJob(): Promise<void> {
     );
 }
 
+async function processTrackMappingReconcileJob(): Promise<void> {
+    await runWithSchedulerClaim(
+        "scheduler-claim:track-mapping-reconcile",
+        ONE_HOUR_MS,
+        "track mapping reconciliation",
+        async () => {
+            const { trackReconciliationService } = await import(
+                "../services/trackReconciliation"
+            );
+            const orphanResult = await trackReconciliationService.reconcileOrphans();
+            if (orphanResult.created > 0) {
+                logger.info(
+                    `[TrackMappingReconcile] Created ${orphanResult.created} mappings for orphaned provider rows`
+                );
+            }
+
+            const result = await trackReconciliationService.reconcile();
+            if (result.linked > 0) {
+                logger.info(
+                    `[TrackMappingReconcile] Linked ${result.linked} mappings to local tracks (${result.skipped} skipped)`
+                );
+            } else if (result.processed > 0) {
+                logger.debug(
+                    `[TrackMappingReconcile] No new links found (${result.processed} checked)`
+                );
+            }
+
+            const upgradeResult =
+                await trackReconciliationService.reconcileYoutubeToTidal();
+            if (upgradeResult.upgraded > 0) {
+                logger.info(
+                    `[TrackMappingReconcile] Upgraded ${upgradeResult.upgraded} YT mappings to TIDAL (${upgradeResult.skipped} skipped)`
+                );
+            } else if (upgradeResult.processed > 0) {
+                logger.debug(
+                    `[TrackMappingReconcile] No YT->TIDAL upgrades found (${upgradeResult.processed} checked)`
+                );
+            }
+        }
+    );
+}
+
+async function processRemoteTrackMetadataRefreshJob(): Promise<void> {
+    await runWithSchedulerClaim(
+        "scheduler-claim:remote-track-metadata-refresh",
+        ONE_HOUR_MS,
+        "remote track metadata refresh",
+        async () => {
+            const { remoteTrackMetadataRefreshService } = await import(
+                "../services/remoteTrackMetadataRefresh"
+            );
+            const result = await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
+            if (result.updated > 0 || result.failed > 0) {
+                logger.info(
+                    `[MetadataRefresh] Updated ${result.updated} remote tracks, ${result.failed} failed`
+                );
+            }
+        }
+    );
+}
+
 async function registerSchedulerJobs(): Promise<void> {
     await schedulerQueue.isReady();
 
@@ -713,6 +784,46 @@ async function registerSchedulerJobs(): Promise<void> {
                 removeOnFail: 10,
             },
         },
+        {
+            type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
+            data: { mode: "startup" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.trackMappingReconcileStartup,
+                delay: 45_000,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.trackMappingReconcile,
+            data: { mode: "repeat" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.trackMappingReconcileRepeat,
+                repeat: { every: 6 * ONE_HOUR_MS },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh,
+            data: { mode: "startup" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.remoteTrackMetadataRefreshStartup,
+                delay: 90_000,
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
+        {
+            type: SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh,
+            data: { mode: "repeat" },
+            opts: {
+                jobId: SCHEDULER_JOB_IDS.remoteTrackMetadataRefreshRepeat,
+                repeat: { every: 12 * ONE_HOUR_MS },
+                removeOnComplete: true,
+                removeOnFail: 10,
+            },
+        },
     ];
 
     for (const job of schedulerJobs) {
@@ -766,6 +877,14 @@ async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
         case SCHEDULER_JOB_TYPES.imageBackfill:
         case "image-backfill":
             await processImageBackfillJob();
+            break;
+        case SCHEDULER_JOB_TYPES.trackMappingReconcile:
+        case "track-mapping-reconcile":
+            await processTrackMappingReconcileJob();
+            break;
+        case SCHEDULER_JOB_TYPES.remoteTrackMetadataRefresh:
+        case "remote-track-metadata-refresh":
+            await processRemoteTrackMetadataRefreshJob();
             break;
         default:
             logger.warn(
@@ -847,6 +966,8 @@ startUnifiedEnrichmentWorker().catch((err) => {
 startMoodBucketWorker().catch((err) => {
     logger.error("Failed to start mood bucket worker:", err);
 });
+
+startTrackMappingStalenessWorker();
 
 // Event handlers for scan queue
 scanQueue.on("completed", (job, result) => {
@@ -967,6 +1088,8 @@ export async function shutdownWorkers(): Promise<void> {
 
     // Stop mood bucket worker
     stopMoodBucketWorker();
+
+    stopTrackMappingStalenessWorker();
 
     // Shutdown download queue manager
     downloadQueueManager.shutdown();

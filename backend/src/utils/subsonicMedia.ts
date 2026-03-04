@@ -4,6 +4,9 @@ import type { Quality } from "../services/audioStreaming";
 const MIN_COVER_ART_SIZE = 16;
 const MAX_COVER_ART_SIZE = 2048;
 
+/**
+ * Maps Subsonic bitrate and format query params to the internal stream quality tier.
+ */
 export function resolveSubsonicStreamQuality(
     maxBitRate: unknown,
     targetFormat: unknown,
@@ -33,6 +36,9 @@ export function resolveSubsonicStreamQuality(
     return "high";
 }
 
+/**
+ * Resolves a track path and rejects values that escape the configured media root.
+ */
 export function resolveTrackPathWithinRoot(
     rootPath: string,
     trackFilePath: string,
@@ -53,6 +59,9 @@ export function resolveTrackPathWithinRoot(
     return resolvedPath;
 }
 
+/**
+ * Parses and bounds a requested cover art size to the supported min/max range.
+ */
 export function parseCoverArtSize(value: unknown): number | undefined {
     if (typeof value !== "string") {
         return undefined;
@@ -66,6 +75,9 @@ export function parseCoverArtSize(value: unknown): number | undefined {
     return Math.min(parsed, MAX_COVER_ART_SIZE);
 }
 
+/**
+ * Returns true when a cover-art URL is publicly reachable over HTTP(S).
+ */
 export function isPublicCoverArtUrl(rawUrl: string): boolean {
     try {
         const parsed = new URL(rawUrl);

@@ -7,6 +7,9 @@ import { useDownloadContext } from "@/lib/download-context";
 import type { AlbumSource } from "../types";
 import { useMemo, useEffect, useRef, useCallback } from "react";
 
+/**
+ * Executes useAlbumData.
+ */
 export function useAlbumData(albumId?: string) {
     const params = useParams();
     const router = useRouter();

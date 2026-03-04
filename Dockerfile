@@ -175,6 +175,13 @@ COPY backend/src ./src
 COPY backend/tsconfig.json ./
 RUN npm run build
 
+# Prune backend dev dependencies after build (typescript, jest, tsx, etc.)
+# Install prisma CLI globally first — startup script needs `npx prisma migrate deploy`
+# and prisma is a devDependency that would otherwise be removed by prune.
+RUN npm install -g prisma@$(node -p "require('./node_modules/prisma/package.json').version") && \
+    npm prune --omit=dev && \
+    npm cache clean --force
+
 COPY backend/docker-entrypoint.sh ./
 COPY backend/healthcheck.js ./healthcheck-backend.js
 
@@ -201,6 +208,12 @@ ENV NEXT_PUBLIC_LOG_LEVEL=$NEXT_PUBLIC_LOG_LEVEL
 ENV NEXT_PUBLIC_BUILD_TYPE=$NEXT_PUBLIC_BUILD_TYPE
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 RUN npm run build
+
+# Prune frontend dev dependencies after build (typescript, eslint, playwright, etc.)
+# and remove Next.js build cache (not needed at runtime)
+RUN npm prune --omit=dev && \
+    npm cache clean --force && \
+    rm -rf .next/cache
 
 # ============================================
 # SECURITY HARDENING

@@ -6,6 +6,9 @@ import { useAuth } from "@/lib/auth-context";
 
 const PRESENCE_HEARTBEAT_INTERVAL_MS = 25_000;
 
+/**
+ * Executes usePresenceHeartbeat.
+ */
 export function usePresenceHeartbeat() {
     const { isAuthenticated } = useAuth();
 

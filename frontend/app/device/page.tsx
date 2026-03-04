@@ -35,6 +35,9 @@ interface LinkedDevice {
     createdAt: string;
 }
 
+/**
+ * Renders the DeviceLinkPage component.
+ */
 export default function DeviceLinkPage() {
     const router = useRouter();
     const { isAuthenticated, isLoading: authLoading } = useAuth();

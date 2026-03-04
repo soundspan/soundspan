@@ -1,4 +1,5 @@
 import { prisma } from "../../utils/db";
+import { logger } from "../../utils/logger";
 import { notificationService } from "../notificationService";
 
 jest.mock("../../utils/db", () => ({
@@ -20,6 +21,7 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+const mockLogger = logger as jest.Mocked<typeof logger>;
 
 describe("notificationService", () => {
     beforeEach(() => {
@@ -58,6 +60,7 @@ describe("notificationService", () => {
             count: 1,
         });
 
+        await notificationService.getForUser("u1", true);
         await notificationService.getForUser("u1", false);
         await notificationService.getUnreadCount("u1");
         await notificationService.markAsRead("n1", "u1");
@@ -65,6 +68,11 @@ describe("notificationService", () => {
         await notificationService.clear("n1", "u1");
         await notificationService.clearAll("u1");
 
+        expect(mockPrisma.notification.findMany).toHaveBeenNthCalledWith(1, {
+            where: { userId: "u1", cleared: false },
+            orderBy: { createdAt: "desc" },
+            take: 100,
+        });
         expect(mockPrisma.notification.findMany).toHaveBeenCalledWith({
             where: { userId: "u1", cleared: false, read: false },
             orderBy: { createdAt: "desc" },
@@ -99,6 +107,50 @@ describe("notificationService", () => {
                 createdAt: { lt: expect.any(Date) },
             },
         });
+        expect(mockLogger.debug).toHaveBeenCalledWith(
+            "[NOTIFICATION] Cleaned up 2 old notifications"
+        );
         expect(mockPrisma.notification.create).toHaveBeenCalledTimes(5);
+    });
+
+    it("skips cleanup logging when no cleared notifications were deleted", async () => {
+        (mockPrisma.notification.deleteMany as jest.Mock).mockResolvedValue({
+            count: 0,
+        });
+
+        await expect(notificationService.deleteOldCleared()).resolves.toEqual({
+            count: 0,
+        });
+
+        expect(mockPrisma.notification.deleteMany).toHaveBeenCalledWith({
+            where: {
+                cleared: true,
+                createdAt: { lt: expect.any(Date) },
+            },
+        });
+        expect(mockLogger.debug).not.toHaveBeenCalledWith(
+            expect.stringContaining("Cleaned up")
+        );
+    });
+
+    it("formats failed-download notifications without an error suffix when no error is provided", async () => {
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue({
+            id: "n3",
+        });
+
+        await notificationService.notifyDownloadFailed("u1", "Album");
+
+        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+            data: {
+                userId: "u1",
+                type: "download_failed",
+                title: "Download Failed",
+                message: "Failed to download Album",
+                metadata: {
+                    subject: "Album",
+                    error: undefined,
+                },
+            },
+        });
     });
 });

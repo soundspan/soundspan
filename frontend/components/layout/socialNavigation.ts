@@ -10,23 +10,23 @@ export interface MobileQuickLinkItem {
 }
 
 export const SIDEBAR_NAVIGATION: SidebarNavigationItem[] = [
+    { name: "Home", href: "/" },
+    { name: "Explore", href: "/explore" },
     { name: "Library", href: "/library" },
-    { name: "My Liked", href: "/playlist/my-liked" },
-    { name: "Radio", href: "/radio" },
-    { name: "Discovery", href: "/discover" },
     { name: "Listen Together", href: "/listen-together" },
     { name: "Audiobooks", href: "/audiobooks" },
     { name: "Podcasts", href: "/podcasts" },
-    { name: "Browse", href: "/browse/playlists", badge: "Beta" },
 ];
 
 export const MOBILE_QUICK_LINKS: MobileQuickLinkItem[] = [
-    { name: "Discover", href: "/discover" },
-    { name: "My Liked", href: "/playlist/my-liked" },
-    { name: "Radio", href: "/radio" },
+    { name: "Home", href: "/" },
+    { name: "Explore", href: "/explore" },
     { name: "Listen Together", href: "/listen-together" },
 ];
 
+/**
+ * Executes hasMyHistoryLink.
+ */
 export function hasMyHistoryLink(
     links: ReadonlyArray<{ href: string }>
 ): boolean {

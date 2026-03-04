@@ -30,17 +30,15 @@ import { tidalStreamingService } from "../services/tidalStreaming";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
 import { logger } from "../utils/logger";
+import { trackMappingService } from "../services/trackMappingService";
 
 const router = Router();
 const OAUTH_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
-const USER_QUALITY_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 60_000;
 const tidalOauthSessionCache = new Map<
     string,
     { authenticated: boolean; expiresAt: number }
 >();
 const tidalOauthRestoreInFlight = new Map<string, Promise<boolean>>();
-const userQualityCache = new Map<string, { quality: string; expiresAt: number }>();
-
 const setTidalOAuthCache = (
     userId: string,
     authenticated: boolean,
@@ -69,34 +67,7 @@ const getCachedTidalOAuth = (userId: string): boolean | null => {
 const invalidateTidalUserCaches = (userId: string) => {
     tidalOauthSessionCache.delete(userId);
     tidalOauthRestoreInFlight.delete(userId);
-    userQualityCache.delete(userId);
 };
-
-async function getUserPreferredTidalQuality(userId: string): Promise<string> {
-    if (USER_QUALITY_CACHE_TTL_MS > 0) {
-        const cached = userQualityCache.get(userId);
-        if (cached && cached.expiresAt > Date.now()) {
-            return cached.quality;
-        }
-    }
-
-    try {
-        const userSettings = await prisma.userSettings.findUnique({
-            where: { userId },
-            select: { tidalStreamingQuality: true },
-        });
-        const quality = userSettings?.tidalStreamingQuality || "HIGH";
-        if (USER_QUALITY_CACHE_TTL_MS > 0) {
-            userQualityCache.set(userId, {
-                quality,
-                expiresAt: Date.now() + USER_QUALITY_CACHE_TTL_MS,
-            });
-        }
-        return quality;
-    } catch {
-        return "HIGH";
-    }
-}
 
 // ── Guard middleware ───────────────────────────────────────────────
 
@@ -767,6 +738,28 @@ router.post(
                 userId,
                 parsed.data.tracks
             );
+
+            // Fire-and-forget: persist matched tracks as TrackTidal rows
+            Promise.resolve().then(async () => {
+                try {
+                    for (let i = 0; i < matches.length; i++) {
+                        const match = matches[i];
+                        if (!match) continue;
+                        const inputTrack = parsed.data.tracks[i];
+                        await trackMappingService.upsertTrackTidal({
+                            tidalId: match.id,
+                            title: match.title,
+                            artist: match.artist,
+                            album: inputTrack.albumTitle || "",
+                            duration: match.duration,
+                            isrc: match.isrc,
+                        });
+                    }
+                } catch (err) {
+                    logger.warn("[TIDAL-STREAM] Failed to persist gap-fill TrackTidal rows:", err);
+                }
+            });
+
             res.json({ matches });
         } catch (err: any) {
             logger.error("[TIDAL-STREAM] Batch match failed:", err.message);
@@ -834,7 +827,7 @@ router.get(
             }
 
             if (!quality) {
-                quality = await getUserPreferredTidalQuality(userId);
+                quality = await tidalStreamingService.getUserPreferredQuality(userId);
             }
 
             const info = await tidalStreamingService.getStreamInfo(
@@ -907,7 +900,7 @@ router.get(
         // Get user's preferred quality
         let quality = req.query.quality as string | undefined;
         if (!quality) {
-            quality = await getUserPreferredTidalQuality(userId);
+            quality = await tidalStreamingService.getUserPreferredQuality(userId);
         }
 
         try {

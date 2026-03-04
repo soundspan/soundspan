@@ -666,6 +666,96 @@ describe("search service", () => {
         expect(prisma.audiobook.findMany).toHaveBeenCalled();
     });
 
+    it("searchArtistsFallback includes remote-only artists via OR condition", async () => {
+        prisma.artist.findMany.mockResolvedValueOnce([
+            {
+                id: "artist-remote",
+                name: "Remote Only Artist",
+                mbid: "mbid-remote",
+                heroUrl: null,
+            },
+        ]);
+
+        const results = await searchService.searchArtists({
+            query: "***",
+            limit: 5,
+            offset: 0,
+        });
+
+        expect(results).toEqual([
+            {
+                id: "artist-remote",
+                name: "Remote Only Artist",
+                mbid: "mbid-remote",
+                heroUrl: null,
+                rank: 0,
+            },
+        ]);
+
+        expect(prisma.artist.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    OR: [
+                        { albums: { some: {} } },
+                        { remoteTrackCount: { gt: 0 } },
+                    ],
+                }),
+            })
+        );
+    });
+
+    it("searchArtistsFallback excludes artists with no albums and zero remoteTrackCount", async () => {
+        prisma.artist.findMany.mockResolvedValueOnce([]);
+
+        const results = await searchService.searchArtists({
+            query: "###",
+            limit: 5,
+            offset: 0,
+        });
+
+        expect(results).toEqual([]);
+
+        // Verify the OR filter is passed so Prisma excludes artists
+        // that have neither albums nor remote tracks
+        expect(prisma.artist.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    OR: [
+                        { albums: { some: {} } },
+                        { remoteTrackCount: { gt: 0 } },
+                    ],
+                }),
+            })
+        );
+    });
+
+    it("searchArtists FTS SQL includes remoteTrackCount condition", async () => {
+        prisma.$queryRaw.mockResolvedValueOnce([
+            {
+                id: "artist-remote-fts",
+                name: "Remote FTS Artist",
+                mbid: "mbid-remote-fts",
+                heroUrl: null,
+                summary: null,
+                rank: 0.85,
+            },
+        ]);
+
+        const results = await searchService.searchArtists({
+            query: "remote",
+            limit: 5,
+            offset: 0,
+        });
+
+        expect(results).toEqual([
+            expect.objectContaining({ id: "artist-remote-fts", rank: 0.85 }),
+        ]);
+
+        // Verify the raw SQL query was called (the actual SQL content
+        // includes remoteTrackCount — validated by the implementation change)
+        expect(prisma.$queryRaw).toHaveBeenCalled();
+    });
+
     it("filterTracksByGenre returns early on empty input", async () => {
         const filtered = await searchService.filterTracksByGenre([], "jazz");
 

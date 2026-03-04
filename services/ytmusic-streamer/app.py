@@ -141,6 +141,18 @@ if SEARCH_MODE not in {"tv", "native", "auto"}:
     )
     SEARCH_MODE = "auto"
 
+# BCP-47 language code forwarded to all YTMusic() constructors.
+# Ensures shelf titles and content descriptions come back in the desired
+# language regardless of the server's geo-IP locale.
+YTMUSIC_LANGUAGE = (os.getenv("YTMUSIC_LANGUAGE", "en") or "en").strip()
+
+# Comma-separated shelf titles to exclude from /home responses.
+# Stored as a lowercase set for O(1) case-insensitive lookup.
+_raw_filtered = os.getenv("YTMUSIC_HOME_FILTERED_SHELVES", "Quick picks") or ""
+YTMUSIC_HOME_FILTERED_SHELVES: set[str] = {
+    s.strip().lower() for s in _raw_filtered.split(",") if s.strip()
+}
+
 # Realistic browser User-Agent for yt-dlp and httpx proxy requests
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -254,7 +266,7 @@ def _get_public_ytmusic(strategy: Literal["tv", "native"]) -> YTMusic:
     if existing:
         return existing
 
-    yt = YTMusic()
+    yt = YTMusic(language=YTMUSIC_LANGUAGE)
     if strategy == "tv":
         _apply_tv_client_context(yt)
     _public_ytmusic_instances[strategy] = yt
@@ -405,9 +417,9 @@ def _get_ytmusic(user_id: str) -> YTMusic:
                 )
 
             if oauth_creds:
-                yt = YTMusic(str(oauth_path), oauth_credentials=oauth_creds)
+                yt = YTMusic(str(oauth_path), oauth_credentials=oauth_creds, language=YTMUSIC_LANGUAGE)
             else:
-                yt = YTMusic(str(oauth_path))
+                yt = YTMusic(str(oauth_path), language=YTMUSIC_LANGUAGE)
 
             client_mode = _resolve_user_search_strategy(user_id)
             if client_mode == "tv":
@@ -1455,46 +1467,57 @@ async def search_debug(req: SearchRequest, user_id: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _format_album_response(browse_id: str, album: dict) -> dict:
+    """Build a normalized album response dict from a ytmusicapi get_album() result."""
+    tracks = []
+    for t in album.get("tracks", []):
+        artists = t.get("artists", [])
+        tracks.append({
+            "videoId": t.get("videoId"),
+            "title": t.get("title"),
+            "artist": artists[0].get("name") if artists else "Unknown",
+            "artists": [a.get("name") for a in artists],
+            "trackNumber": t.get("trackNumber"),
+            "duration": t.get("duration"),
+            "duration_seconds": t.get("duration_seconds"),
+            "isExplicit": t.get("isExplicit", False),
+            "likeStatus": t.get("likeStatus"),
+        })
+
+    thumbnails = album.get("thumbnails", [])
+    return {
+        "browseId": browse_id,
+        "title": album.get("title"),
+        "artist": album.get("artists", [{}])[0].get("name") if album.get("artists") else "Unknown",
+        "artists": [a.get("name") for a in album.get("artists", [])],
+        "year": album.get("year"),
+        "trackCount": album.get("trackCount"),
+        "duration": album.get("duration"),
+        "type": album.get("type", "Album"),
+        "thumbnails": thumbnails,
+        "coverUrl": thumbnails[-1].get("url") if thumbnails else None,
+        "tracks": tracks,
+        "description": album.get("description"),
+    }
+
+
 @app.get("/album/{browse_id}")
 async def get_album(browse_id: str, user_id: str = Query(...)):
-    """Get album details and track listing from YouTube Music."""
+    """Get album details and track listing from YouTube Music.
+
+    When user_id is "__public__", uses an unauthenticated YTMusic instance.
+    """
     try:
-        album = _run_ytmusic_with_auth_retry(
-            user_id,
-            operation=f"get_album({browse_id})",
-            func=lambda yt: yt.get_album(browse_id),
-        )
-
-        tracks = []
-        for t in album.get("tracks", []):
-            artists = t.get("artists", [])
-            tracks.append({
-                "videoId": t.get("videoId"),
-                "title": t.get("title"),
-                "artist": artists[0].get("name") if artists else "Unknown",
-                "artists": [a.get("name") for a in artists],
-                "trackNumber": t.get("trackNumber"),
-                "duration": t.get("duration"),
-                "duration_seconds": t.get("duration_seconds"),
-                "isExplicit": t.get("isExplicit", False),
-                "likeStatus": t.get("likeStatus"),
-            })
-
-        thumbnails = album.get("thumbnails", [])
-        return {
-            "browseId": browse_id,
-            "title": album.get("title"),
-            "artist": album.get("artists", [{}])[0].get("name") if album.get("artists") else "Unknown",
-            "artists": [a.get("name") for a in album.get("artists", [])],
-            "year": album.get("year"),
-            "trackCount": album.get("trackCount"),
-            "duration": album.get("duration"),
-            "type": album.get("type", "Album"),
-            "thumbnails": thumbnails,
-            "coverUrl": thumbnails[-1].get("url") if thumbnails else None,
-            "tracks": tracks,
-            "description": album.get("description"),
-        }
+        if user_id == "__public__":
+            yt = _get_public_ytmusic("native")
+            album = yt.get_album(browse_id)
+        else:
+            album = _run_ytmusic_with_auth_retry(
+                user_id,
+                operation=f"get_album({browse_id})",
+                func=lambda yt: yt.get_album(browse_id),
+            )
+        return _format_album_response(browse_id, album)
     except HTTPException:
         raise
     except Exception as e:
@@ -1504,13 +1527,20 @@ async def get_album(browse_id: str, user_id: str = Query(...)):
 
 @app.get("/artist/{channel_id}")
 async def get_artist(channel_id: str, user_id: str = Query(...)):
-    """Get artist details from YouTube Music."""
+    """Get artist details from YouTube Music.
+
+    When user_id is "__public__", uses an unauthenticated YTMusic instance.
+    """
     try:
-        artist = _run_ytmusic_with_auth_retry(
-            user_id,
-            operation=f"get_artist({channel_id})",
-            func=lambda yt: yt.get_artist(channel_id),
-        )
+        if user_id == "__public__":
+            yt = _get_public_ytmusic("native")
+            artist = yt.get_artist(channel_id)
+        else:
+            artist = _run_ytmusic_with_auth_retry(
+                user_id,
+                operation=f"get_artist({channel_id})",
+                func=lambda yt: yt.get_artist(channel_id),
+            )
 
         songs = []
         for s in (artist.get("songs", {}).get("results", []))[:10]:
@@ -1552,13 +1582,20 @@ async def get_artist(channel_id: str, user_id: str = Query(...)):
 
 @app.get("/song/{video_id}")
 async def get_song(video_id: str, user_id: str = Query(...)):
-    """Get song metadata from YouTube Music."""
+    """Get song metadata from YouTube Music.
+
+    When user_id is "__public__", uses an unauthenticated YTMusic instance.
+    """
     try:
-        song = _run_ytmusic_with_auth_retry(
-            user_id,
-            operation=f"get_song({video_id})",
-            func=lambda yt: yt.get_song(video_id),
-        )
+        if user_id == "__public__":
+            yt = _get_public_ytmusic("native")
+            song = yt.get_song(video_id)
+        else:
+            song = _run_ytmusic_with_auth_retry(
+                user_id,
+                operation=f"get_song({video_id})",
+                func=lambda yt: yt.get_song(video_id),
+            )
         video_details = song.get("videoDetails", {})
 
         return {
@@ -1581,9 +1618,13 @@ async def get_song(video_id: str, user_id: str = Query(...)):
 
 @app.get("/stream/{video_id}")
 async def get_stream_info(video_id: str, user_id: str = Query(...), quality: str = "HIGH"):
-    """Get stream URL info for a video (metadata only, no proxy)."""
-    # Verify user is authenticated before extracting
-    _get_ytmusic(user_id)
+    """Get stream URL info for a video (metadata only, no proxy).
+
+    When user_id is "__public__", skips OAuth verification.
+    """
+    # Skip OAuth check for public/unauthenticated streaming
+    if user_id != "__public__":
+        _get_ytmusic(user_id)
 
     result = await asyncio.to_thread(_get_stream_url_sync, user_id, video_id, quality)
     return {
@@ -1608,9 +1649,14 @@ async def proxy_stream(
     Proxy the audio stream from YouTube. The backend pipes this to the
     frontend player. Stream URLs are IP-locked to the server, so we
     must proxy.
+
+    When user_id is "__public__", skips OAuth verification (yt-dlp
+    extraction is unauthenticated). This enables free-tier streaming
+    for users without YT Music OAuth connected.
     """
-    # Verify user is authenticated
-    _get_ytmusic(user_id)
+    # Skip OAuth check for public/unauthenticated streaming
+    if user_id != "__public__":
+        _get_ytmusic(user_id)
 
     stream_info = await asyncio.to_thread(_get_stream_url_sync, user_id, video_id, quality)
     stream_url = stream_info["url"]
@@ -1776,6 +1822,10 @@ async def startup():
         f"search_cache_ttl={SEARCH_CACHE_TTL}s, "
         f"search_mode={SEARCH_MODE}"
     )
+    log.info(
+        f"Browse config: language={YTMUSIC_LANGUAGE}, "
+        f"home_filtered_shelves={YTMUSIC_HOME_FILTERED_SHELVES or '(none)'}"
+    )
 
     # Ensure data directory exists and is writable
     DATA_PATH.mkdir(parents=True, exist_ok=True)
@@ -1796,6 +1846,356 @@ async def startup():
         log.info(f"Found {len(oauth_files)} user OAuth credential file(s)")
     else:
         log.info("No OAuth credentials found — users need to authenticate via settings")
+
+
+# ── Browse (unauthenticated) ────────────────────────────────────────
+
+def _get_browse_ytmusic(user_id: Optional[str] = None) -> YTMusic:
+    """Get a YTMusic instance for browse — authenticated if user has OAuth, else public."""
+    if user_id and _oauth_file(user_id).exists():
+        try:
+            return _get_ytmusic(user_id)
+        except Exception:
+            log.warning("Failed to get authenticated YTMusic for user=%s, falling back to public", user_id)
+    return _get_public_ytmusic("native")
+
+
+@app.get("/charts")
+async def get_charts(country: str = "US", user_id: Optional[str] = Query(None)):
+    """Get YT Music charts (top songs, trending, etc.).
+
+    Always uses a public (unauthenticated) YTMusic instance because
+    YouTube's browse API rejects chart requests from OAuth sessions
+    with HTTP 400.
+    """
+    try:
+        yt = _get_public_ytmusic("native")
+        charts = yt.get_charts(country=country)
+
+        result = {}
+        # Extract top songs/videos if present
+        for section_key in ("songs", "videos", "trending", "artists"):
+            section = charts.get(section_key)
+            if section and isinstance(section, dict) and "items" in section:
+                items = []
+                for item in section["items"][:20]:
+                    artists = item.get("artists", [])
+                    entry = {
+                        "videoId": item.get("videoId"),
+                        "title": item.get("title"),
+                        "artist": artists[0].get("name") if artists else "Unknown",
+                        "thumbnailUrl": _best_thumbnail(item.get("thumbnails", [])),
+                    }
+                    if item.get("album"):
+                        entry["album"] = item["album"].get("name", "")
+                    items.append(entry)
+                result[section_key] = items
+        return result
+    except Exception as e:
+        log.error(f"Charts fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/moods-and-genres")
+async def get_moods_and_genres(user_id: Optional[str] = Query(None)):
+    """Get YT Music mood/genre categories.
+
+    Always uses a public (unauthenticated) YTMusic instance because
+    YouTube's browse API rejects mood/genre requests from OAuth
+    sessions with HTTP 400.
+    """
+    try:
+        yt = _get_public_ytmusic("native")
+        categories = yt.get_mood_categories()
+
+        result = []
+        for cat_title, cat_items in categories.items():
+            entries = []
+            for item in cat_items:
+                entries.append({
+                    "title": item.get("title", ""),
+                    "params": item.get("params", ""),
+                })
+            result.append({"title": cat_title, "items": entries})
+        return result
+    except Exception as e:
+        log.error(f"Moods/genres fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/home")
+async def get_home(limit: int = Query(6, ge=1, le=20), user_id: Optional[str] = Query(None)):
+    """Get YT Music home page shelves (featured/curated content).
+
+    Always uses a public (unauthenticated) YTMusic instance because
+    YouTube's browse API rejects home requests from OAuth sessions
+    with HTTP 400.
+    """
+    try:
+        yt = _get_public_ytmusic("native")
+        home = yt.get_home(limit=limit)
+
+        shelves = []
+        for shelf in home:
+            if not isinstance(shelf, dict):
+                continue
+            title = shelf.get("title", "")
+            if YTMUSIC_HOME_FILTERED_SHELVES and title.strip().lower() in YTMUSIC_HOME_FILTERED_SHELVES:
+                log.debug("Filtered shelf from /home response: %r", title)
+                continue
+            contents = []
+            for item in shelf.get("contents", []):
+                if not isinstance(item, dict):
+                    continue
+                entry = {
+                    "title": item.get("title", ""),
+                    "thumbnailUrl": _best_thumbnail(item.get("thumbnails", [])),
+                    "subtitle": "",
+                }
+                # Resolve subtitle from artists or description
+                artists = item.get("artists", [])
+                if artists:
+                    names = [a.get("name", "") if isinstance(a, dict) else str(a) for a in artists]
+                    entry["subtitle"] = ", ".join(n for n in names if n)
+                elif item.get("description"):
+                    entry["subtitle"] = item["description"]
+
+                # Extract item type (album, playlist, song, artist, video)
+                raw_type = str(item.get("resultType") or item.get("type") or "").strip().lower()
+                if raw_type:
+                    entry["type"] = raw_type
+
+                if item.get("playlistId"):
+                    entry["playlistId"] = item["playlistId"]
+                if item.get("videoId"):
+                    entry["videoId"] = item["videoId"]
+                if item.get("browseId"):
+                    entry["browseId"] = item["browseId"]
+
+                contents.append(entry)
+
+            if contents:
+                shelves.append({"title": title, "contents": contents})
+
+        return shelves
+    except Exception as e:
+        log.error(f"Home fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/browse-album/{browse_id}")
+async def get_browse_album(browse_id: str):
+    """Get album details from YouTube Music (unauthenticated, public browse)."""
+    try:
+        yt = _get_public_ytmusic("native")
+        album = yt.get_album(browse_id)
+        return _format_album_response(browse_id, album)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_str = str(e).lower()
+        if "not found" in error_str or "unable to find" in error_str:
+            raise HTTPException(status_code=404, detail=f"Album not found: {browse_id}")
+        log.error(f"Browse album fetch failed for {browse_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mood-playlists")
+async def get_mood_playlists(params: str = Query(..., min_length=1, max_length=512), user_id: Optional[str] = Query(None)):
+    """Get playlists for a specific mood/genre category.
+
+    Uses a custom browse implementation instead of ytmusicapi's
+    ``get_mood_playlists`` to handle renderer types that the library
+    does not support (``musicResponsiveListItemRenderer`` for songs,
+    ``musicTwoRowItemRenderer`` items without a navigation endpoint for
+    music videos/singles).
+    """
+    try:
+        params = params.strip()
+        if not params:
+            raise HTTPException(status_code=400, detail="params must be a non-empty string")
+
+        yt = _get_public_ytmusic("native")
+        playlists = _fetch_mood_playlists(yt, params)
+
+        result = []
+        for item in playlists:
+            if not isinstance(item, dict):
+                continue
+            # parse_playlist may return author as a list of
+            # {"name": str, "id": str|None} dicts; flatten to a string.
+            raw_author = item.get("author", "")
+            if isinstance(raw_author, list):
+                raw_author = ", ".join(
+                    a.get("name", "") for a in raw_author if isinstance(a, dict)
+                ) if raw_author else ""
+            elif not isinstance(raw_author, str):
+                raw_author = str(raw_author)
+            entry = {
+                "playlistId": item.get("playlistId", "") or "",
+                "title": item.get("title", "") or "",
+                "thumbnailUrl": _best_thumbnail(item.get("thumbnails", [])),
+                "author": raw_author,
+            }
+            result.append(entry)
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Mood playlists fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/playlist/{playlist_id}")
+async def get_playlist(
+    playlist_id: str,
+    limit: int = 100,
+    user_id: Optional[str] = Query(None),
+):
+    """Get a YT Music playlist with track details.
+
+    When ``user_id`` is provided, prefers authenticated browse context and
+    falls back to public browse if authenticated fetch fails.
+    """
+    auth_error: Optional[Exception] = None
+    try:
+        if user_id and user_id != "__public__":
+            try:
+                playlist = _run_ytmusic_with_auth_retry(
+                    user_id,
+                    operation=f"get_playlist({playlist_id})",
+                    func=lambda yt: yt.get_playlist(playlist_id, limit=limit),
+                )
+            except Exception as auth_err:
+                auth_error = auth_err
+                log.warning(
+                    "Authenticated playlist fetch failed for user=%s, retrying public browse: %s",
+                    user_id,
+                    auth_err,
+                )
+                playlist = _get_public_ytmusic("native").get_playlist(
+                    playlist_id, limit=limit
+                )
+        else:
+            playlist = _get_public_ytmusic("native").get_playlist(
+                playlist_id, limit=limit
+            )
+
+        tracks = []
+        for t in playlist.get("tracks", []):
+            raw_artists = t.get("artists") or []
+            artists = raw_artists if isinstance(raw_artists, list) else []
+            album = t.get("album", {}) or {}
+            first_artist = artists[0] if artists else None
+            artist_name = (
+                first_artist.get("name", "Unknown")
+                if isinstance(first_artist, dict)
+                else str(first_artist) if first_artist else "Unknown"
+            )
+            tracks.append({
+                "videoId": t.get("videoId"),
+                "title": t.get("title"),
+                "artist": artist_name,
+                "artists": [
+                    a.get("name") if isinstance(a, dict) else str(a)
+                    for a in artists
+                    if (a.get("name") if isinstance(a, dict) else a)
+                ],
+                "album": album.get("name", "") if isinstance(album, dict) else str(album),
+                "duration": _parse_duration(t.get("duration", "")),
+                "thumbnailUrl": _best_thumbnail(t.get("thumbnails", [])),
+            })
+
+        return {
+            "id": playlist_id,
+            "title": playlist.get("title", ""),
+            "description": playlist.get("description", ""),
+            "trackCount": playlist.get("trackCount", len(tracks)),
+            "thumbnailUrl": _best_thumbnail(playlist.get("thumbnails", [])),
+            "tracks": tracks,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if isinstance(auth_error, HTTPException):
+            raise auth_error
+        log.error(f"Playlist fetch failed for {playlist_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _fetch_mood_playlists(yt: YTMusic, params: str) -> list[dict]:
+    """Robustly fetch mood/genre playlists via the browse API.
+
+    ``ytmusicapi.get_mood_playlists`` crashes on categories whose first
+    carousel contains songs (``musicResponsiveListItemRenderer``) or
+    videos without a browse endpoint.  This helper re-implements the
+    browse call with per-item error handling so those sections are
+    silently skipped instead of taking down the whole request.
+    """
+    from ytmusicapi.navigation import (
+        nav,
+        SINGLE_COLUMN_TAB,
+        SECTION_LIST,
+        CAROUSEL_CONTENTS,
+        GRID_ITEMS,
+    )
+    from ytmusicapi.parsers._utils import MTRIR
+    from ytmusicapi.parsers.browsing import parse_playlist
+
+    response = yt._send_request(
+        "browse",
+        {"browseId": "FEmusic_moods_and_genres_category", "params": params},
+    )
+    playlists: list[dict] = []
+    for section in nav(response, SINGLE_COLUMN_TAB + SECTION_LIST):
+        path: list = []
+        if "gridRenderer" in section:
+            path = list(GRID_ITEMS)
+        elif "musicCarouselShelfRenderer" in section:
+            path = list(CAROUSEL_CONTENTS)
+        elif "musicImmersiveCarouselShelfRenderer" in section:
+            path = ["musicImmersiveCarouselShelfRenderer", "contents"]
+        if not path:
+            continue
+        results = nav(section, path)
+        for result in results:
+            if MTRIR not in result:
+                # Skip non-playlist renderers (e.g. songs)
+                continue
+            try:
+                playlists.append(parse_playlist(result[MTRIR]))
+            except Exception:
+                # Skip items that lack required fields (e.g. music videos
+                # without a browse navigation endpoint)
+                continue
+    return playlists
+
+
+def _best_thumbnail(thumbnails: list) -> Optional[str]:
+    """Pick the best available thumbnail URL."""
+    if not thumbnails:
+        return None
+    # Prefer medium/large resolution
+    for t in reversed(thumbnails):
+        if isinstance(t, dict) and t.get("url"):
+            return t["url"]
+    return thumbnails[0].get("url") if isinstance(thumbnails[0], dict) else None
+
+
+def _parse_duration(duration_str: str) -> int:
+    """Parse duration string like '3:45' into seconds."""
+    if not duration_str:
+        return 0
+    parts = duration_str.split(":")
+    try:
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except (ValueError, IndexError):
+        pass
+    return 0
 
 
 @app.on_event("shutdown")

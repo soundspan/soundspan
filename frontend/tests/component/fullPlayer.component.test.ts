@@ -51,6 +51,7 @@ mock.module("lucide-react", {
         Volume2: Icon,
         VolumeX: Icon,
         ChevronUp: Icon,
+        ChevronDown: Icon,
         Music: Icon,
         Shuffle: Icon,
         Repeat: Icon,
@@ -63,6 +64,21 @@ mock.module("lucide-react", {
         ThumbsUp: Icon,
         ThumbsDown: Icon,
         Users: Icon,
+        Radio: Icon,
+        X: Icon,
+        EllipsisVertical: Icon,
+    },
+});
+
+mock.module("next/navigation", {
+    namedExports: {
+        useRouter: () => ({
+            push: () => undefined,
+            back: () => undefined,
+            replace: () => undefined,
+            prefetch: () => undefined,
+        }),
+        usePathname: () => "/",
     },
 });
 
@@ -214,7 +230,7 @@ beforeEach(() => {
 test("FullPlayer shows retry affordance when audioError is present", async () => {
     state.audioError = "network failure";
 
-    const { FullPlayer } = await import("../../components/player/FullPlayer.tsx");
+    const { FullPlayer } = await import("../../components/player/FullPlayer");
     const html = renderToStaticMarkup(React.createElement(FullPlayer));
 
     assert.match(html, /aria-label="Retry playback"/);
@@ -235,9 +251,8 @@ test("FullPlayer uses podcast saved progress when live currentTime is zero", asy
     state.currentTime = 0;
     state.duration = 0;
 
-    const { FullPlayer } = await import("../../components/player/FullPlayer.tsx");
+    const { FullPlayer } = await import("../../components/player/FullPlayer");
     const html = renderToStaticMarkup(React.createElement(FullPlayer));
 
-    assert.match(html, />2:00</);
-    assert.match(html, />-3:00</);
+    assert.match(html, /2:00\s*\/\s*5:00/);
 });

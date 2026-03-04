@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { resolvePollingJitter } from "@/hooks/pollingCadence";
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -37,12 +38,16 @@ export function useActiveListenSessions(): boolean {
         // Defer initial fetch to avoid synchronous setState in effect body
         const initialTimeout = setTimeout(() => fetchCount(), 0);
 
-        // Poll periodically
-        intervalRef.current = setInterval(fetchCount, POLL_INTERVAL_MS);
+        // Start polling with jitter to prevent alignment with other intervals
+        const jitterDelay = resolvePollingJitter(5000);
+        const jitterTimeout = setTimeout(() => {
+            intervalRef.current = setInterval(fetchCount, POLL_INTERVAL_MS);
+        }, jitterDelay);
 
         return () => {
             mountedRef.current = false;
             clearTimeout(initialTimeout);
+            clearTimeout(jitterTimeout);
             if (intervalRef.current) {
                 clearInterval(intervalRef.current);
                 intervalRef.current = null;

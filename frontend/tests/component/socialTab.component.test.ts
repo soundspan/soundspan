@@ -96,7 +96,7 @@ test("renders unavailable state when initial fetch fails", async () => {
     state.error = new Error("network");
 
     const { SocialTab } = await import(
-        "../../components/activity/SocialTab.tsx"
+        "../../components/activity/SocialTab"
     );
     const html = renderToStaticMarkup(React.createElement(SocialTab));
 
@@ -107,7 +107,7 @@ test("renders loading spinner when query is still loading and no users are prese
     state.isLoading = true;
 
     const { SocialTab } = await import(
-        "../../components/activity/SocialTab.tsx"
+        "../../components/activity/SocialTab"
     );
     const html = renderToStaticMarkup(React.createElement(SocialTab));
 
@@ -117,7 +117,7 @@ test("renders loading spinner when query is still loading and no users are prese
 
 test("renders empty state when there are no users and no request error", async () => {
     const { SocialTab } = await import(
-        "../../components/activity/SocialTab.tsx"
+        "../../components/activity/SocialTab"
     );
     const html = renderToStaticMarkup(React.createElement(SocialTab));
 
@@ -140,7 +140,7 @@ test("keeps rendering social users when a refetch error occurs", async () => {
     state.error = new Error("transient");
 
     const { SocialTab } = await import(
-        "../../components/activity/SocialTab.tsx"
+        "../../components/activity/SocialTab"
     );
     const html = renderToStaticMarkup(React.createElement(SocialTab));
 
@@ -171,7 +171,7 @@ test("renders paused track details with cover art, listen-together badge, and pl
     ];
 
     const { SocialTab } = await import(
-        "../../components/activity/SocialTab.tsx"
+        "../../components/activity/SocialTab"
     );
     const html = renderToStaticMarkup(React.createElement(SocialTab));
 
@@ -210,7 +210,7 @@ test("renders playing state with song and artist links when ids are present", as
     ];
 
     const { SocialTab } = await import(
-        "../../components/activity/SocialTab.tsx"
+        "../../components/activity/SocialTab"
     );
     const html = renderToStaticMarkup(React.createElement(SocialTab));
 
@@ -243,7 +243,7 @@ test("renders idle users as not currently playing", async () => {
     ];
 
     const { SocialTab } = await import(
-        "../../components/activity/SocialTab.tsx"
+        "../../components/activity/SocialTab"
     );
     const html = renderToStaticMarkup(React.createElement(SocialTab));
 
@@ -307,7 +307,7 @@ test("formats last seen timestamps for now, minutes, hours, today, and invalid d
 
     try {
         const { SocialTab } = await import(
-            "../../components/activity/SocialTab.tsx"
+            "../../components/activity/SocialTab"
         );
         const html = renderToStaticMarkup(React.createElement(SocialTab));
 

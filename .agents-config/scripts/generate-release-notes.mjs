@@ -13,11 +13,16 @@ import {
 } from "./changelog-utils.mjs";
 
 const TEMPLATE_PATH = ".agents-config/docs/RELEASE_NOTES_TEMPLATE.md";
-const DEFAULT_REPO_WEB_URL = "https://github.com/soundspan/soundspan";
+const TOOLING_CONFIG_PATH = ".agents-config/config/project-tooling.json";
+const DEFAULT_REPO_WEB_URL_FALLBACK = "https://github.com/example/project";
 
 function fail(message) {
   console.error(message);
   process.exit(1);
+}
+
+function toNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function runCommand(command, args) {
@@ -124,17 +129,38 @@ function normalizeRepoWebUrl(remoteUrl) {
   return null;
 }
 
+function readToolingConfigDefaultRepoWebUrl() {
+  if (!fs.existsSync(TOOLING_CONFIG_PATH)) {
+    return DEFAULT_REPO_WEB_URL_FALLBACK;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(TOOLING_CONFIG_PATH, "utf8"));
+  } catch (error) {
+    fail(`Invalid JSON in ${TOOLING_CONFIG_PATH}: ${error.message}`);
+  }
+
+  const configuredUrl = toNonEmptyString(parsed?.releaseNotes?.defaultRepoWebUrl);
+  if (!configuredUrl) {
+    return DEFAULT_REPO_WEB_URL_FALLBACK;
+  }
+
+  return configuredUrl;
+}
+
 function resolveRepoWebUrl() {
+  const configDefaultRepoWebUrl = readToolingConfigDefaultRepoWebUrl();
   const result = spawnSync("git", ["config", "--get", "remote.origin.url"], {
     encoding: "utf8",
   });
 
   if (result.error || result.status !== 0) {
-    return DEFAULT_REPO_WEB_URL;
+    return configDefaultRepoWebUrl;
   }
 
   const remoteUrl = (result.stdout ?? "").trim();
-  return normalizeRepoWebUrl(remoteUrl) ?? DEFAULT_REPO_WEB_URL;
+  return normalizeRepoWebUrl(remoteUrl) ?? configDefaultRepoWebUrl;
 }
 
 function formatCount(count, singular, plural) {

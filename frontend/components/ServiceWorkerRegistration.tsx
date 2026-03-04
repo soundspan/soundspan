@@ -43,6 +43,9 @@ function maybeActivateWaitingWorker(
     waitingWorker.postMessage({ type: "SKIP_WAITING" });
 }
 
+/**
+ * Renders the ServiceWorkerRegistration component.
+ */
 export function ServiceWorkerRegistration() {
     useEffect(() => {
         if (typeof window === "undefined") return;

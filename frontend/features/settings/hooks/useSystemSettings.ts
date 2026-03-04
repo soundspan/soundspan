@@ -51,6 +51,9 @@ const defaultSystemSettings: SystemSettings = {
     showVersion: false,
 };
 
+/**
+ * Executes useSystemSettings.
+ */
 export function useSystemSettings() {
     const { isAuthenticated, user } = useAuth();
     // Initialize as null — settings are only valid once loaded from the DB.

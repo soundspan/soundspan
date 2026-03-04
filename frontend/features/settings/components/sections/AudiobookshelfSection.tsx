@@ -12,6 +12,9 @@ interface AudiobookshelfSectionProps {
     isTesting: boolean;
 }
 
+/**
+ * Renders the AudiobookshelfSection component.
+ */
 export function AudiobookshelfSection({ settings, onUpdate, onTest, isTesting }: AudiobookshelfSectionProps) {
     const [testStatus, setTestStatus] = useState<StatusType>("idle");
     const [testMessage, setTestMessage] = useState("");

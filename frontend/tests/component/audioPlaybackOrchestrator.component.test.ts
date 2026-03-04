@@ -757,15 +757,16 @@ mock.module("@/lib/api", {
                 const next = handoffSessionQueue.shift();
                 if (next instanceof Error) throw next;
                 const resolved = next ?? makeSegmentedSession("default-handoff");
+                const resolvedAny = resolved as Record<string, unknown>;
                 return {
                     ...resolved,
                     resumeAtSec:
-                        typeof resolved.resumeAtSec === "number"
-                            ? resolved.resumeAtSec
+                        typeof resolvedAny.resumeAtSec === "number"
+                            ? resolvedAny.resumeAtSec
                             : 0,
                     shouldPlay:
-                        typeof resolved.shouldPlay === "boolean"
-                            ? resolved.shouldPlay
+                        typeof resolvedAny.shouldPlay === "boolean"
+                            ? resolvedAny.shouldPlay
                             : false,
                 };
             },
@@ -797,6 +798,11 @@ mock.module("@/lib/api", {
             reportPlaybackClientMetric: async (payload: Record<string, unknown>) => {
                 apiCalls.reportPlaybackClientMetric.push(payload);
             },
+            getYtMusicStatus: async () => ({
+                enabled: false,
+                available: false,
+                authenticated: false,
+            }),
         },
     },
 });
@@ -1080,10 +1086,11 @@ mock.module("@soundspan/media-metadata-contract", {
 let orchestratorComponent: (() => null) | null = null;
 
 before(async () => {
-    const module = await import(
-        "../../components/player/AudioPlaybackOrchestrator.tsx"
+    const orchestratorModule = await import(
+        "../../components/player/AudioPlaybackOrchestrator"
     );
-    orchestratorComponent = module.AudioPlaybackOrchestrator as unknown as () => null;
+    orchestratorComponent =
+        orchestratorModule.AudioPlaybackOrchestrator as unknown as () => null;
 });
 
 beforeEach(() => {
@@ -1118,8 +1125,10 @@ const flushAsync = async (ticks = 6): Promise<void> => {
 };
 
 const enableWindowMetrics = (runtimeConfig: Record<string, unknown> = {}): void => {
-    (globalThis as { window?: Record<string, unknown> }).window = {
+    (globalThis as unknown as { window?: Record<string, unknown> }).window = {
         __SOUNDSPAN_RUNTIME_CONFIG__: runtimeConfig,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
     };
 };
 

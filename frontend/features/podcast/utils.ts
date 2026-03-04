@@ -1,3 +1,6 @@
+/**
+ * Executes formatDate.
+ */
 export function formatDate(dateString: string): string {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
@@ -7,6 +10,9 @@ export function formatDate(dateString: string): string {
     });
 }
 
+/**
+ * Executes getContrastColor.
+ */
 export function getContrastColor(hexColor: string | undefined): string {
     if (!hexColor) return "#ffffff";
     const hex = hexColor.replace("#", "");

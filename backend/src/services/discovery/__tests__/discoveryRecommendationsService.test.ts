@@ -91,6 +91,7 @@ const mockSubDays = subDays as jest.MockedFunction<typeof subDays>;
 
 describe("DiscoveryRecommendationsService", () => {
     let service: DiscoveryRecommendationsService;
+    let mathRandomSpy: jest.SpiedFunction<typeof Math.random> | null = null;
 
     beforeEach(() => {
         jest.useFakeTimers();
@@ -104,7 +105,7 @@ describe("DiscoveryRecommendationsService", () => {
         );
         mockAddMonths.mockReturnValue(EXPIRES_AT);
 
-        jest.spyOn(Math, "random").mockReturnValue(0);
+        mathRandomSpy = jest.spyOn(Math, "random").mockReturnValue(0);
         (mockPrisma.likedTrack.findMany as jest.Mock).mockResolvedValue([]);
         (mockPrisma.dislikedEntity.findMany as jest.Mock).mockResolvedValue([]);
 
@@ -112,6 +113,8 @@ describe("DiscoveryRecommendationsService", () => {
     });
 
     afterEach(() => {
+        mathRandomSpy?.mockRestore();
+        mathRandomSpy = null;
         jest.useRealTimers();
         jest.restoreAllMocks();
     });
@@ -910,6 +913,8 @@ describe("DiscoveryRecommendationsService", () => {
         });
 
         it("throws when discovery recommendations are disabled", async () => {
+            mathRandomSpy?.mockRestore();
+            mathRandomSpy = null;
             jest
                 .spyOn(service as any, "getOrCreateUserConfig")
                 .mockResolvedValue({ enabled: false, playlistSize: 10 });
@@ -921,6 +926,8 @@ describe("DiscoveryRecommendationsService", () => {
         });
 
         it("surfaces transaction failures and skips success logging", async () => {
+            mathRandomSpy?.mockRestore();
+            mathRandomSpy = null;
             jest
                 .spyOn(service as any, "getOrCreateUserConfig")
                 .mockResolvedValue({

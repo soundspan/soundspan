@@ -350,6 +350,9 @@ export interface DashBuildInFlightStatus {
     inFlight: boolean;
 }
 
+/**
+ * Represents the SegmentedSegmentService class.
+ */
 export class SegmentedSegmentService {
     private readonly inFlightBuilds = new Map<string, Promise<LocalDashSegmentAsset>>();
     private readonly inFlightValidations = new Map<string, Promise<boolean>>();

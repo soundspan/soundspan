@@ -6,6 +6,9 @@
 import { useEffect, useCallback, useState } from "react";
 
 // Check if running on Android TV
+/**
+ * Executes isAndroidTV.
+ */
 export function isAndroidTV(): boolean {
     if (typeof window === "undefined") return false;
     
@@ -31,6 +34,9 @@ export function isAndroidTV(): boolean {
 }
 
 // React hook to detect Android TV (with SSR safety)
+/**
+ * Executes useIsTV.
+ */
 export function useIsTV(): boolean {
     const [isTV] = useState(() => isAndroidTV());
     return isTV;
@@ -53,6 +59,9 @@ export const DPAD_KEYS = {
 } as const;
 
 // Hook to handle D-pad navigation with custom actions
+/**
+ * Executes useDpadNavigation.
+ */
 export function useDpadNavigation(options?: {
     onSelect?: () => void;
     onBack?: () => void;
@@ -80,6 +89,9 @@ export function useDpadNavigation(options?: {
 }
 
 // Get focusable elements within a container
+/**
+ * Executes getFocusableElements.
+ */
 export function getFocusableElements(container: HTMLElement): HTMLElement[] {
     const selector = [
         'a[href]',
@@ -95,6 +107,9 @@ export function getFocusableElements(container: HTMLElement): HTMLElement[] {
 }
 
 // Focus management for grid navigation
+/**
+ * Executes navigateGrid.
+ */
 export function navigateGrid(
     currentElement: HTMLElement,
     direction: 'up' | 'down' | 'left' | 'right',

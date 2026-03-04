@@ -9,6 +9,9 @@ interface SearchFiltersProps {
     hasSearched: boolean;
 }
 
+/**
+ * Renders the SearchFilters component.
+ */
 export function SearchFilters({
     filterTab,
     onFilterChange,

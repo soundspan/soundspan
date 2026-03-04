@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
     installTrackOverflowHarness,
     trackOverflowIcon,
-} from "../trackOverflowHarness.ts";
+} from "../trackOverflowHarness";
 
 /**
  * Component tests for TrackOverflowMenu.
@@ -20,7 +20,6 @@ const state = {
     lastPlayNextTrack: null as { id: string; title: string } | null,
     lastAddToQueueTrack: null as { id: string; title: string } | null,
     routerPushPath: null as string | null,
-    isInListenTogetherGroup: false,
 };
 
 // Mock lucide-react icons
@@ -78,12 +77,11 @@ beforeEach(() => {
     state.lastPlayNextTrack = null;
     state.lastAddToQueueTrack = null;
     state.routerPushPath = null;
-    state.isInListenTogetherGroup = false;
 });
 
 test("renders trigger button with EllipsisVertical icon", async () => {
     const { TrackOverflowMenu } = await import(
-        "../../components/ui/TrackOverflowMenu.tsx"
+        "../../components/ui/TrackOverflowMenu"
     );
 
     const html = renderToStaticMarkup(
@@ -108,7 +106,7 @@ test("renders all standard menu items when track has full metadata", async () =>
     // test the open menu via renderToStaticMarkup. Instead, we verify
     // the component mounts without error and has the trigger button.
     const { TrackOverflowMenu } = await import(
-        "../../components/ui/TrackOverflowMenu.tsx"
+        "../../components/ui/TrackOverflowMenu"
     );
 
     const html = renderToStaticMarkup(
@@ -130,7 +128,7 @@ test("renders all standard menu items when track has full metadata", async () =>
 
 test("does not render PlaylistSelector when menu is closed", async () => {
     const { TrackOverflowMenu } = await import(
-        "../../components/ui/TrackOverflowMenu.tsx"
+        "../../components/ui/TrackOverflowMenu"
     );
 
     const html = renderToStaticMarkup(
@@ -138,6 +136,8 @@ test("does not render PlaylistSelector when menu is closed", async () => {
             track: {
                 id: "track-1",
                 title: "Test Track",
+                artist: { name: "Test Artist", id: "artist-1" },
+                album: { title: "Test Album", id: "album-1" },
                 duration: 240,
             },
         })
@@ -149,7 +149,7 @@ test("does not render PlaylistSelector when menu is closed", async () => {
 
 test("respects showPlayNext=false to hide Play Next item", async () => {
     const { TrackOverflowMenu } = await import(
-        "../../components/ui/TrackOverflowMenu.tsx"
+        "../../components/ui/TrackOverflowMenu"
     );
 
     // Rendering with menu closed - we verify props are accepted without error
@@ -158,11 +158,12 @@ test("respects showPlayNext=false to hide Play Next item", async () => {
             track: {
                 id: "track-1",
                 title: "Test Track",
+                artist: { name: "Test Artist", id: "artist-1" },
+                album: { title: "Test Album", id: "album-1" },
                 duration: 240,
             },
             showPlayNext: false,
             showMatchVibe: false,
-            showCopyLink: false,
         })
     );
 
@@ -172,7 +173,7 @@ test("respects showPlayNext=false to hide Play Next item", async () => {
 
 test("renders extraItemsBefore and extraItemsAfter slots", async () => {
     const { TrackOverflowMenu } = await import(
-        "../../components/ui/TrackOverflowMenu.tsx"
+        "../../components/ui/TrackOverflowMenu"
     );
 
     // Note: extraItems are only visible when menu is open (stateful).
@@ -183,6 +184,8 @@ test("renders extraItemsBefore and extraItemsAfter slots", async () => {
             track: {
                 id: "track-1",
                 title: "Test Track",
+                artist: { name: "Test Artist", id: "artist-1" },
+                album: { title: "Test Album", id: "album-1" },
                 duration: 240,
             },
             extraItemsBefore: React.createElement("div", null, "BEFORE"),
@@ -195,7 +198,7 @@ test("renders extraItemsBefore and extraItemsAfter slots", async () => {
 
 test("accepts custom className and triggerClassName", async () => {
     const { TrackOverflowMenu } = await import(
-        "../../components/ui/TrackOverflowMenu.tsx"
+        "../../components/ui/TrackOverflowMenu"
     );
 
     const html = renderToStaticMarkup(
@@ -203,6 +206,8 @@ test("accepts custom className and triggerClassName", async () => {
             track: {
                 id: "track-1",
                 title: "Test Track",
+                artist: { name: "Test Artist", id: "artist-1" },
+                album: { title: "Test Album", id: "album-1" },
                 duration: 240,
             },
             className: "custom-container",
@@ -215,7 +220,7 @@ test("accepts custom className and triggerClassName", async () => {
 });
 
 test("TrackMenuButton is exported for slot usage", async () => {
-    const mod = await import("../../components/ui/TrackOverflowMenu.tsx");
+    const mod = await import("../../components/ui/TrackOverflowMenu");
     assert.ok(mod.TrackMenuButton, "TrackMenuButton should be exported");
     assert.equal(typeof mod.TrackMenuButton, "function");
 });

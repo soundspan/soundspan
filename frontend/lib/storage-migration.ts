@@ -5,6 +5,9 @@ export interface MigratingStorageKey {
     legacy: string;
 }
 
+/**
+ * Executes createMigratingStorageKey.
+ */
 export function createMigratingStorageKey(
     suffix: string,
     legacySuffix?: string
@@ -19,6 +22,9 @@ export function createMigratingStorageKey(
     };
 }
 
+/**
+ * Executes createExplicitMigratingStorageKey.
+ */
 export function createExplicitMigratingStorageKey(
     current: string,
     legacy: string
@@ -36,6 +42,9 @@ export const OVERLAY_ACTIVE_TAB_STORAGE_KEY = createExplicitMigratingStorageKey(
     "soundspan.overlay.activeTab"
 );
 
+/**
+ * Executes readMigratingStorageItem.
+ */
 export function readMigratingStorageItem(key: MigratingStorageKey): string | null {
     if (typeof window === "undefined") {
         return null;
@@ -65,6 +74,9 @@ export function readMigratingStorageItem(key: MigratingStorageKey): string | nul
     return null;
 }
 
+/**
+ * Executes writeMigratingStorageItem.
+ */
 export function writeMigratingStorageItem(
     key: MigratingStorageKey,
     value: string
@@ -80,6 +92,9 @@ export function writeMigratingStorageItem(
     }
 }
 
+/**
+ * Executes removeMigratingStorageItem.
+ */
 export function removeMigratingStorageItem(key: MigratingStorageKey): void {
     if (typeof window === "undefined") {
         return;

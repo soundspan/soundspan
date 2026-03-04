@@ -12,16 +12,17 @@ interface DiscographyProps {
     onPlayAlbum: (albumId: string, albumTitle: string) => Promise<void>;
     sortBy: "year" | "dateAdded";
     onSortChange: (sortBy: "year" | "dateAdded") => void;
-    isInListenTogetherGroup?: boolean;
 }
 
+/**
+ * Renders the Discography component.
+ */
 export function Discography({
     albums,
     colors,
     onPlayAlbum,
     sortBy,
     onSortChange,
-    isInListenTogetherGroup = false,
 }: DiscographyProps) {
     if (!albums || albums.length === 0) {
         return null;
@@ -73,7 +74,7 @@ export function Discography({
                             circular={false}
                             colors={colors}
                             onPlay={() => onPlayAlbum(album.id, album.title)}
-                            showPlayButton={!isInListenTogetherGroup}
+                            showPlayButton
                             tvCardIndex={index}
                         />
                     );

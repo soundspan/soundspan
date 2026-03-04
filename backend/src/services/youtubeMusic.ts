@@ -1002,6 +1002,129 @@ class YouTubeMusicService {
 
         return null;
     }
+
+    // ── Browse (unauthenticated) ─────────────────────────────────
+
+    async getCharts(country: string = "US", userId?: string): Promise<Record<string, any[]>> {
+        const { data } = await this.client.get("/charts", {
+            params: { country, ...(userId ? { user_id: userId } : {}) },
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    async getMoodCategories(userId?: string): Promise<
+        Array<{ title: string; items: Array<{ title: string; params: string }> }>
+    > {
+        const { data } = await this.client.get("/moods-and-genres", {
+            params: userId ? { user_id: userId } : {},
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    async getHome(
+        limit: number = 6,
+        userId?: string,
+    ): Promise<
+        Array<{
+            title: string;
+            contents: Array<{
+                playlistId?: string;
+                videoId?: string;
+                browseId?: string;
+                type?: string;
+                title: string;
+                thumbnailUrl: string | null;
+                subtitle: string;
+            }>;
+        }>
+    > {
+        const { data } = await this.client.get("/home", {
+            params: { limit, ...(userId ? { user_id: userId } : {}) },
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    async getMoodPlaylists(
+        params: string,
+        userId?: string,
+    ): Promise<
+        Array<{
+            playlistId: string;
+            title: string;
+            thumbnailUrl: string | null;
+            author: string;
+        }>
+    > {
+        const { data } = await this.client.get("/mood-playlists", {
+            params: { params, ...(userId ? { user_id: userId } : {}) },
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    async getBrowsePlaylist(
+        playlistId: string,
+        limit: number = 100,
+        userId?: string
+    ): Promise<{
+        id: string;
+        title: string;
+        description: string;
+        trackCount: number;
+        thumbnailUrl: string | null;
+        tracks: Array<{
+            videoId: string;
+            title: string;
+            artist: string;
+            artists: string[];
+            album: string;
+            duration: number;
+            thumbnailUrl: string | null;
+        }>;
+    }> {
+        const { data } = await this.client.get(`/playlist/${playlistId}`, {
+            params: { limit, ...(userId ? { user_id: userId } : {}) },
+            timeout: 15_000,
+        });
+        return data;
+    }
+
+    /**
+     * Fetch album details from the sidecar's public browse-album endpoint.
+     */
+    async getBrowseAlbum(browseId: string): Promise<{
+        browseId: string;
+        title: string;
+        artist: string;
+        artists: string[];
+        year: string | null;
+        trackCount: number;
+        duration: string | null;
+        type: string;
+        thumbnails: Array<{ url: string; width: number; height: number }>;
+        coverUrl: string | null;
+        tracks: Array<{
+            videoId: string;
+            title: string;
+            artist: string;
+            artists: string[];
+            trackNumber: number | null;
+            duration: string | null;
+            duration_seconds: number | null;
+            isExplicit: boolean;
+            likeStatus: string | null;
+        }>;
+        description: string | null;
+    }> {
+        const { data } = await this.client.get(
+            `/browse-album/${browseId}`,
+            { timeout: 15_000 }
+        );
+        return data;
+    }
 }
 
 export const ytMusicService = new YouTubeMusicService();

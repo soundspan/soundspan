@@ -46,7 +46,7 @@ beforeEach(() => {
 
 test("renders like control without circular chrome", async () => {
     const { TrackPreferenceButtons } = await import(
-        "../../components/player/TrackPreferenceButtons.tsx"
+        "../../components/player/TrackPreferenceButtons"
     );
     const html = renderToStaticMarkup(
         React.createElement(TrackPreferenceButtons, { trackId: "track-1" })
@@ -64,7 +64,7 @@ test("active signal renders a filled heart icon", async () => {
     state.signal = "thumbs_up";
 
     const { TrackPreferenceButtons } = await import(
-        "../../components/player/TrackPreferenceButtons.tsx"
+        "../../components/player/TrackPreferenceButtons"
     );
     const html = renderToStaticMarkup(
         React.createElement(TrackPreferenceButtons, { trackId: "track-2" })

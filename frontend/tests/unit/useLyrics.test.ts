@@ -5,7 +5,7 @@ import {
     LYRICS_QUERY_STALE_TIME,
     resolveLyricsQueryStaleTime,
     type LyricsCachePolicyInput,
-} from "../../lib/lyrics-cache-policy.ts";
+} from "../../lib/lyrics-cache-policy";
 
 test("resolveLyricsQueryStaleTime keeps successful lyrics cached long-term", () => {
     const synced: LyricsCachePolicyInput = {

@@ -13,6 +13,9 @@ interface HorizontalCarouselProps {
     gap?: "sm" | "md" | "lg";
 }
 
+/**
+ * Renders the HorizontalCarousel component.
+ */
 export function HorizontalCarousel({
     children,
     className,
@@ -122,13 +125,6 @@ export function HorizontalCarousel({
                 </button>
             )}
 
-            {/* Fade edges */}
-            {canScrollLeft && !isMobileOrTablet && (
-                <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-black/50 to-transparent pointer-events-none" />
-            )}
-            {canScrollRight && !isMobileOrTablet && (
-                <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-black/50 to-transparent pointer-events-none" />
-            )}
         </div>
     );
 }
@@ -139,6 +135,9 @@ interface CarouselItemProps {
     className?: string;
 }
 
+/**
+ * Renders the CarouselItem component.
+ */
 export function CarouselItem({ children, className }: CarouselItemProps) {
     return (
         <div

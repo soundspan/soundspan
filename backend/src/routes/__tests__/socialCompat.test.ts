@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
+    requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
+        next(),
     requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
@@ -24,6 +26,7 @@ jest.mock("../../utils/redis", () => ({
 
 jest.mock("../../utils/db", () => ({
     prisma: {
+        $queryRaw: jest.fn(),
         user: {
             findMany: jest.fn(),
         },
@@ -40,6 +43,7 @@ import { prisma } from "../../utils/db";
 const mockScanIterator = redisClient.scanIterator as jest.Mock;
 const mockMGet = redisClient.mGet as jest.Mock;
 const mockSet = redisClient.set as jest.Mock;
+const mockPrismaQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockUserFindMany = prisma.user.findMany as jest.Mock;
 const mockSyncGroupMemberFindMany = prisma.syncGroupMember.findMany as jest.Mock;
 
@@ -92,6 +96,7 @@ describe("social presence compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPrismaQueryRaw.mockResolvedValue([]);
     });
 
     it("returns online roster with privacy filtering and listen-together indicator", async () => {
@@ -194,6 +199,7 @@ describe("social presence compatibility", () => {
                     id: "user-1",
                     username: "alice",
                     displayName: "Alice D",
+                    hasProfilePicture: false,
                     isInListenTogetherGroup: true,
                     listeningStatus: "playing",
                     listeningTrack: {
@@ -212,6 +218,7 @@ describe("social presence compatibility", () => {
                     id: "user-3",
                     username: "carol",
                     displayName: "carol",
+                    hasProfilePicture: false,
                     isInListenTogetherGroup: false,
                     listeningStatus: "idle",
                     listeningTrack: null,
@@ -564,6 +571,7 @@ describe("social presence compatibility", () => {
                     id: "user-ghost",
                     username: "ghost",
                     displayName: "Ghost",
+                    hasProfilePicture: false,
                     isInListenTogetherGroup: false,
                     listeningStatus: "paused",
                     listeningTrack: {
@@ -724,6 +732,7 @@ describe("social presence compatibility", () => {
                     id: "user-2",
                     username: "admin-user",
                     displayName: "Admin User",
+                    hasProfilePicture: false,
                     role: "admin",
                     shareOnlinePresence: true,
                     shareListeningStatus: true,
@@ -733,6 +742,7 @@ describe("social presence compatibility", () => {
                     id: "user-1",
                     username: "alice",
                     displayName: "alice",
+                    hasProfilePicture: false,
                     role: "user",
                     shareOnlinePresence: false,
                     shareListeningStatus: false,
@@ -787,6 +797,7 @@ describe("social presence compatibility", () => {
                     id: "user-1",
                     username: "alice",
                     displayName: "alice",
+                    hasProfilePicture: false,
                     role: "user",
                     shareOnlinePresence: false,
                     shareListeningStatus: false,
@@ -829,6 +840,7 @@ describe("social presence compatibility", () => {
                     id: "user-ghost",
                     username: "ghost",
                     displayName: "Ghost",
+                    hasProfilePicture: false,
                     role: "user",
                     shareOnlinePresence: true,
                     shareListeningStatus: true,

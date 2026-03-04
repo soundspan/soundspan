@@ -28,6 +28,7 @@ const OPENAPI_METHODS = new Set([
   "options",
   "head",
   "trace",
+  "all",
 ]);
 
 function runCommandSafe(cmd, args) {
@@ -105,6 +106,8 @@ function normalizePath(pathValue) {
 
   normalized = normalized.replace(/\/{2,}/g, "/");
   normalized = normalized.replace(/:([A-Za-z0-9_]+)\?/g, "{$1}");
+  // Strip regex constraints from Express params, handling nested parens
+  normalized = normalized.replace(/:([A-Za-z0-9_]+)\((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*\)/g, "{$1}");
   normalized = normalized.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
   normalized = normalized.replace(/\{([^}/\s]+)\?\}/g, "{$1}");
 
@@ -499,7 +502,7 @@ function extractOpenApiEndpointsFromLines(linesWithNumbers, filePath) {
     }
 
     const methodMatch = trimmed.match(
-      /^(get|post|put|patch|delete|options|head|trace)\s*:\s*$/i,
+      /^(get|post|put|patch|delete|options|head|trace|all)\s*:\s*$/i,
     );
     if (!methodMatch) {
       continue;

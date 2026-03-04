@@ -22,6 +22,9 @@ import type { FilterTab } from "@/features/search/types";
 
 type SearchSectionView = "tracks" | "albums" | "artists" | null;
 
+/**
+ * Renders the SearchPage component.
+ */
 export default function SearchPage() {
     const searchParams = useSearchParams();
     const router = useRouter();

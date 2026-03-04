@@ -17,6 +17,9 @@ interface LoadDataOptions {
   preservePlaylistOnError?: boolean;
 }
 
+/**
+ * Executes useDiscoverData.
+ */
 export function useDiscoverData() {
   const [playlist, setPlaylist] = useState<DiscoverPlaylist | null>(null);
   const [config, setConfig] = useState<DiscoverConfig | null>(null);

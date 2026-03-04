@@ -1,53 +1,156 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Image from "next/image";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Heart, Loader2, Music, Pause, Play, Radio, Shuffle } from "lucide-react";
+import { Heart, ListMusic, Loader2, Music, Pause, Play, Plus, Radio, Shuffle } from "lucide-react";
+import { CoverMosaic } from "@/components/ui/CoverMosaic";
+import { createMosaicCandidates, selectMosaicCovers } from "@/utils/mosaicCoverSelection";
 import {
     useAudioControls,
     useAudioPlayback,
     useAudioState,
-    type Track as AudioTrack,
 } from "@/lib/audio-context";
 import { api, type LikedPlaylistResponse, type LikedPlaylistTrack } from "@/lib/api";
 import { queryKeys, useLikedPlaylistQuery } from "@/hooks/useQueries";
-import { cn } from "@/utils/cn";
 import { formatTime } from "@/utils/formatTime";
 import { shuffleArray } from "@/utils/shuffle";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
+import { TidalBadge } from "@/components/ui/TidalBadge";
+import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { useToast } from "@/lib/toast-context";
+import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { toAudioTrack } from "./likedPlaylistUtils";
+import { TrackList, TrackListHeader } from "@/components/track";
+import type { TrackRowItem, TrackRowSlots } from "@/components/track";
 
 const EMPTY_TRACKS: LikedPlaylistTrack[] = [];
 
-function toAudioTrack(track: LikedPlaylistTrack): AudioTrack {
+/**
+ * Resolves the best cover-art URL for a liked track by provider.
+ */
+export function resolveLikedTrackCoverUrl(
+    track: LikedPlaylistTrack,
+    size: number
+): string | null {
+    if (!track.album.coverArt) {
+        return null;
+    }
+    if (track.streamSource === "tidal") {
+        return api.getTidalBrowseImageUrl(track.album.coverArt);
+    }
+    if (track.streamSource === "youtube") {
+        return api.getBrowseImageUrl(track.album.coverArt);
+    }
+    return api.getCoverArtUrl(track.album.coverArt, size);
+}
+
+function toRowItem(track: LikedPlaylistTrack): TrackRowItem {
     return {
         id: track.id,
         title: track.title,
-        artist: {
-            id: track.artist.id,
-            name: track.artist.name,
-        },
-        album: {
-            id: track.album.id,
-            title: track.album.title,
-            coverArt: track.album.coverArt,
-        },
+        artistName: track.artist.name,
         duration: track.duration,
-        filePath: track.filePath || undefined,
+        coverArtUrl: resolveLikedTrackCoverUrl(track, 100),
     };
 }
 
+interface LikedTrackListProps {
+    tracks: LikedPlaylistTrack[];
+    likedTrackIds: Set<string>;
+    removingTrackId: string | null;
+    onPlay: (track: LikedPlaylistTrack) => void;
+    onUnlike: (trackId: string) => void;
+}
+
+function LikedTrackList({ tracks, likedTrackIds, removingTrackId, onPlay, onUnlike }: LikedTrackListProps) {
+    const handlePlay = useCallback(
+        (track: LikedPlaylistTrack) => onPlay(track),
+        [onPlay],
+    );
+
+    const rowSlots = useCallback(
+        (track: LikedPlaylistTrack): TrackRowSlots => {
+            const isRemote = track.streamSource === "youtube" || track.streamSource === "tidal";
+            return {
+                titleBadges: isRemote ? (
+                    <>{track.streamSource === "tidal" ? <TidalBadge /> : <YouTubeBadge />}</>
+                ) : undefined,
+                middleColumns: (
+                    <p className="hidden truncate text-sm text-gray-400 md:flex items-center">
+                        {track.album.title}
+                    </p>
+                ),
+                trailingActions: (
+                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                        <span className="hidden sm:inline text-xs text-gray-500 w-10 text-right tabular-nums">
+                            {formatTime(track.duration)}
+                        </span>
+                        <TrackPreferenceButtons
+                            trackId={track.id}
+                            mode="up-only"
+                            resolveFromQuery={false}
+                            signal={likedTrackIds.has(track.id) ? "thumbs_up" : "clear"}
+                            isSaving={removingTrackId === track.id}
+                            onToggleThumbsUp={() => onUnlike(track.id)}
+                            buttonSizeClassName="h-8 w-8"
+                            iconSizeClassName="h-4 w-4"
+                        />
+                        <TrackOverflowMenu
+                            track={toAudioTrack(track)}
+                            showGoToAlbum={!isRemote}
+                            showMatchVibe={!isRemote}
+                        />
+                    </div>
+                ),
+            };
+        },
+        [likedTrackIds, removingTrackId, onUnlike],
+    );
+
+    return (
+        <div className="w-full">
+            <TrackList
+                items={tracks}
+                toRowItem={toRowItem}
+                onPlay={handlePlay}
+                rowSlots={rowSlots}
+                rowClassName="grid-cols-[28px_1fr_auto] md:grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto]"
+                accentColor="#93c5fd"
+                preferenceMode={null}
+                header={
+                    <TrackListHeader
+                        className="grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto] gap-4 mb-2"
+                        columns={[
+                            { label: "#", className: "text-center" },
+                            { label: "Title" },
+                            { label: "Album" },
+                            { label: "" },
+                        ]}
+                    />
+                }
+            />
+        </div>
+    );
+}
+
+/**
+ * Renders the MyLikedPlaylistPage component.
+ */
 export default function MyLikedPlaylistPage() {
     const queryClient = useQueryClient();
     const { toast } = useToast();
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, playNow, pause, resume } = useAudioControls();
+    const { playTracks, playNow, pause, resume, addTracksToQueue } = useAudioControls();
     const { data, isLoading, isError } = useLikedPlaylistQuery();
     const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
+    const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
+    const [isAddingToPlaylist, setIsAddingToPlaylist] = useState(false);
+    const { showSpinner: showPlaySpinner, trigger: triggerPlayFeedback } = usePlayButtonFeedback();
 
     const likedTracks = data?.tracks ?? EMPTY_TRACKS;
     const likedTrackIds = useMemo(
@@ -62,6 +165,20 @@ export default function MyLikedPlaylistPage() {
         () => likedTracks.reduce((sum, track) => sum + (track.duration || 0), 0),
         [likedTracks]
     );
+    const providerCounts = useMemo(
+        () =>
+            likedTracks.reduce(
+                (acc, track) => {
+                    const source = track.streamSource || "local";
+                    if (source === "tidal") acc.tidal += 1;
+                    else if (source === "youtube") acc.youtube += 1;
+                    else acc.local += 1;
+                    return acc;
+                },
+                { local: 0, tidal: 0, youtube: 0 }
+            ),
+        [likedTracks]
+    );
 
     const isThisPlaylistPlaying = useMemo(() => {
         if (!currentTrack || !isPlaying || likedTracks.length === 0) {
@@ -71,11 +188,21 @@ export default function MyLikedPlaylistPage() {
     }, [currentTrack, isPlaying, likedTracks.length, likedTrackIds]);
 
     const coverUrls = useMemo(() => {
-        const withCovers = likedTracks.filter((t) => t.album.coverArt);
-        if (withCovers.length === 0) return [];
-        return Array.from(
-            new Set(withCovers.map((t) => t.album.coverArt))
-        ).slice(0, 4);
+        if (likedTracks.length === 0) return [];
+        const candidates = createMosaicCandidates(likedTracks, {
+            getId: (t) => t.id,
+            getCoverUrl: (t) => t.album.coverArt,
+            getArtistKey: (t) => t.artist.name?.toLowerCase(),
+            getAlbumKey: (t) => t.album.title?.toLowerCase(),
+        });
+        return selectMosaicCovers(candidates, { count: 4 })
+            .map((r) => {
+                const track = likedTracks.find((t) => t.id === r.candidateId);
+                if (!track) {
+                    return api.getCoverArtUrl(r.coverUrl, 200);
+                }
+                return resolveLikedTrackCoverUrl(track, 200);
+            });
     }, [likedTracks]);
 
     const unlikeMutation = useMutation({
@@ -120,7 +247,7 @@ export default function MyLikedPlaylistPage() {
         },
         onSettled: () => {
             setRemovingTrackId(null);
-            queryClient.invalidateQueries({ queryKey: queryKeys.likedPlaylist() });
+            queryClient.invalidateQueries({ queryKey: ["library", "liked-playlist"] });
         },
     });
 
@@ -133,6 +260,39 @@ export default function MyLikedPlaylistPage() {
         return `${mins} min`;
     };
 
+    const handleAddAllToQueue = () => {
+        if (audioTracks.length === 0) return;
+        addTracksToQueue(audioTracks);
+        toast.success(`Added ${audioTracks.length} tracks to queue`);
+    };
+
+    const handlePlaylistSelected = async (playlistId: string) => {
+        if (likedTracks.length === 0) return;
+        setIsAddingToPlaylist(true);
+        try {
+            for (const track of likedTracks) {
+                await api.addTrackToPlaylist(playlistId, toAddToPlaylistRef({
+                    id: track.id,
+                    title: track.title,
+                    artist: track.artist?.name,
+                    album: track.album?.title,
+                    duration: track.duration,
+                    streamSource: track.streamSource,
+                    youtubeVideoId: track.youtubeVideoId,
+                    tidalTrackId: track.tidalTrackId,
+                    thumbnailUrl: track.album?.coverArt || undefined,
+                }));
+            }
+            toast.success(`Added ${likedTracks.length} tracks to playlist`);
+            setShowPlaylistSelector(false);
+        } catch (error) {
+            sharedFrontendLogger.error("Failed to add tracks to playlist:", error);
+            toast.error("Failed to add some tracks to playlist");
+        } finally {
+            setIsAddingToPlaylist(false);
+        }
+    };
+
     const handlePlayAll = () => {
         if (audioTracks.length === 0) return;
         if (isThisPlaylistPlaying) {
@@ -143,6 +303,7 @@ export default function MyLikedPlaylistPage() {
             }
             return;
         }
+        triggerPlayFeedback();
         playTracks(audioTracks, 0);
     };
 
@@ -214,29 +375,15 @@ export default function MyLikedPlaylistPage() {
                 <div className="relative flex items-end gap-6">
                     {/* Cover Art / Icon */}
                     <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
-                        {coverUrls.length > 0 ? (
-                            <div className="grid grid-cols-2 gap-0 w-full h-full">
-                                {coverUrls.map((url, index) => (
-                                    <div key={index} className="relative bg-[#181818]">
-                                        <Image
-                                            src={api.getCoverArtUrl(url!, 200)}
-                                            alt=""
-                                            fill
-                                            className="object-cover"
-                                            sizes="96px"
-                                            unoptimized
-                                        />
-                                    </div>
-                                ))}
-                                {Array.from({ length: Math.max(0, 4 - coverUrls.length) }).map((_, index) => (
-                                    <div key={`empty-${index}`} className="relative bg-[#282828]" />
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#3b82f6]/20 to-[#1e3a5f]/30">
-                                <Heart className="h-16 w-16 text-[#60a5fa]" />
-                            </div>
-                        )}
+                        <CoverMosaic
+                            coverUrls={coverUrls}
+                            imageSizes="96px"
+                            emptyState={
+                                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#3b82f6]/20 to-[#1e3a5f]/30">
+                                    <Heart className="h-16 w-16 text-[#60a5fa]" />
+                                </div>
+                            }
+                        />
                     </div>
 
                     {/* Info */}
@@ -246,11 +393,17 @@ export default function MyLikedPlaylistPage() {
                             {data.playlist.name}
                         </h1>
                         <div className="flex items-center gap-1 text-sm text-white/70">
+                            <span>{likedTracks.length} songs</span>
+                            <span className="mx-1">&bull;</span>
                             <span>
-                                {likedTracks.length} song{likedTracks.length === 1 ? "" : "s"}
+                                {providerCounts.local} local /{" "}
+                                {providerCounts.tidal} TIDAL /{" "}
+                                {providerCounts.youtube} YouTube
                             </span>
                             {totalDuration > 0 && (
-                                <span>, {formatTotalDuration(totalDuration)}</span>
+                                <span>
+                                    , {formatTotalDuration(totalDuration)}
+                                </span>
                             )}
                         </div>
                     </div>
@@ -265,7 +418,9 @@ export default function MyLikedPlaylistPage() {
                             onClick={handlePlayAll}
                             className="flex items-center gap-2 rounded-full bg-[#60a5fa] px-5 py-2.5 text-sm font-semibold text-black shadow-lg transition-all hover:bg-[#3b82f6] hover:scale-105"
                         >
-                            {isThisPlaylistPlaying && isPlaying ? (
+                            {showPlaySpinner ? (
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                            ) : isThisPlaylistPlaying && isPlaying ? (
                                 <Pause className="h-5 w-5 fill-current" />
                             ) : (
                                 <Play className="h-5 w-5 fill-current ml-0.5" />
@@ -281,6 +436,26 @@ export default function MyLikedPlaylistPage() {
                             aria-label="Shuffle play"
                         >
                             <Shuffle className="h-5 w-5" />
+                        </button>
+                    )}
+                    {likedTracks.length > 0 && (
+                        <button
+                            onClick={handleAddAllToQueue}
+                            className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                            title="Add all to queue"
+                            aria-label="Add all to queue"
+                        >
+                            <ListMusic className="h-5 w-5" />
+                        </button>
+                    )}
+                    {likedTracks.length > 0 && (
+                        <button
+                            onClick={() => setShowPlaylistSelector(true)}
+                            className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                            title="Add all to playlist"
+                            aria-label="Add all to playlist"
+                        >
+                            <Plus className="h-5 w-5" />
                         </button>
                     )}
                     {likedTracks.length > 0 && (
@@ -311,102 +486,23 @@ export default function MyLikedPlaylistPage() {
                         </p>
                     </div>
                 ) : (
-                    <div className="w-full">
-                        {/* Table Header */}
-                        <div className="hidden md:grid grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto] gap-4 px-4 py-2 text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 mb-2">
-                            <span className="text-center">#</span>
-                            <span>Title</span>
-                            <span>Album</span>
-                            <span />
-                        </div>
-
-                        {/* Track Rows */}
-                        <div>
-                            {likedTracks.map((track, index) => {
-                                const isCurrent = currentTrack?.id === track.id;
-                                const isRemoving = removingTrackId === track.id;
-
-                                return (
-                                    <div
-                                        key={track.id}
-                                        onClick={() => handlePlayTrack(track)}
-                                        className={cn(
-                                            "group grid cursor-pointer grid-cols-[28px_1fr_auto] items-center gap-2 px-2 py-2 rounded-md transition-colors hover:bg-white/5 md:grid-cols-[40px_minmax(200px,2fr)_minmax(100px,1fr)_auto] md:gap-4 md:px-4",
-                                            isCurrent && "bg-[#3b82f6]/10"
-                                        )}
-                                    >
-                                        <div className="flex items-center justify-center text-sm text-gray-400">
-                                            {index + 1}
-                                        </div>
-
-                                        <div className="flex min-w-0 items-center gap-3">
-                                            <div className="relative h-10 w-10 overflow-hidden rounded bg-[#282828] shrink-0">
-                                                {track.album.coverArt ? (
-                                                    <Image
-                                                        src={api.getCoverArtUrl(
-                                                            track.album.coverArt,
-                                                            100
-                                                        )}
-                                                        alt={track.title}
-                                                        fill
-                                                        sizes="40px"
-                                                        className="object-cover"
-                                                        unoptimized
-                                                    />
-                                                ) : (
-                                                    <div className="flex h-full w-full items-center justify-center">
-                                                        <Music className="h-4 w-4 text-gray-600" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="min-w-0">
-                                                <p
-                                                    className={cn(
-                                                        "truncate text-sm font-medium",
-                                                        isCurrent
-                                                            ? "text-[#93c5fd]"
-                                                            : "text-white"
-                                                    )}
-                                                >
-                                                    {track.title}
-                                                </p>
-                                                <p className="truncate text-xs text-gray-400">
-                                                    {track.artist.name}
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <p className="hidden truncate text-sm text-gray-400 md:flex items-center">
-                                            {track.album.title}
-                                        </p>
-
-                                        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                                            <span className="hidden sm:inline text-xs text-gray-500 w-10 text-right tabular-nums">
-                                                {formatTime(track.duration)}
-                                            </span>
-                                            <TrackPreferenceButtons
-                                                trackId={track.id}
-                                                mode="up-only"
-                                                resolveFromQuery={false}
-                                                signal={
-                                                    likedTrackIds.has(track.id) ?
-                                                        "thumbs_up"
-                                                    :   "clear"
-                                                }
-                                                isSaving={isRemoving}
-                                                onToggleThumbsUp={() => unlikeMutation.mutate(track.id)}
-                                                buttonSizeClassName="h-8 w-8"
-                                                iconSizeClassName="h-4 w-4"
-                                            />
-                                            <TrackOverflowMenu track={toAudioTrack(track)} />
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
+                    <LikedTrackList
+                        tracks={likedTracks}
+                        likedTrackIds={likedTrackIds}
+                        removingTrackId={removingTrackId}
+                        onPlay={handlePlayTrack}
+                        onUnlike={(trackId) => unlikeMutation.mutate(trackId)}
+                    />
                 )}
             </div>
+
+            <PlaylistSelector
+                isOpen={showPlaylistSelector}
+                onClose={() => setShowPlaylistSelector(false)}
+                onSelectPlaylist={handlePlaylistSelected}
+                isLoading={isAddingToPlaylist}
+                loadingMessage="Adding tracks..."
+            />
         </div>
     );
 }

@@ -49,6 +49,9 @@ interface ActivityPanelProps {
     onTabChange?: (tab: ActivityTab) => void;
 }
 
+/**
+ * Renders the ActivityPanel component.
+ */
 export function ActivityPanel({
     isOpen,
     onToggle,
@@ -368,6 +371,9 @@ export function ActivityPanel({
 }
 
 // Toggle button for TopBar
+/**
+ * Renders the ActivityPanelToggle component.
+ */
 export function ActivityPanelToggle({
     pollingEnabled = true,
 }: { pollingEnabled?: boolean } = {}) {

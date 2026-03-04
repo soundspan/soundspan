@@ -8,9 +8,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cross-provider track mapping layer: new `TrackTidal`, `TrackYtMusic`, and `TrackMapping` tables link local library tracks to TIDAL and YouTube Music equivalents with confidence scores and staleness tracking. Active-linkage uniqueness is enforced at the database level.
+- Remote track likes: users can now like/unlike TIDAL and YouTube Music tracks. Liked remote tracks appear alongside local likes on the My Liked page with provider badges.
+- Remote track playback logging: plays of TIDAL and YouTube Music tracks are now recorded with full metadata, provider source, and the appropriate listen-source type.
+- Unified playlist import: the `/import` page now accepts Spotify, Deezer, YouTube Music, and TIDAL playlist URLs in a single flow. A preview step shows per-track resolution status (local match, TIDAL, YouTube, or unresolved) with confidence scores before creating the playlist.
+- Remote tracks in playlists: playlist items can now reference TIDAL or YouTube Music tracks directly. Playlist detail pages show provider badges and playability indicators for each track.
+- Explore page: merged Home, Browse, Radio, and Discovery into a single `/explore` landing page with For You content (liked summary, Discover Weekly, Made For You mixes), library radio stations, and a provider content section with YouTube Music and TIDAL tabs.
+- TIDAL browse surface: full TIDAL discovery with home shelves, explore picks, genres, moods, mixes, playlist detail, and mix detail pages — all accessible from the Explore provider tabs.
+- YouTube Music browse surface: home shelves, charts, and mood/genre category browsing with playlist and album detail drill-down pages.
+- Per-user provider visibility toggles: new `showYtMusicExplore` and `showTidalExplore` settings control which provider tabs appear on the Explore page.
+- Public YouTube Music streaming: new unauthenticated stream and stream-info endpoints allow playback of YouTube Music tracks without per-user OAuth, using the sidecar's public search client.
+- Track preview migrated to YouTube Music: artist track previews now return a YouTube Music video ID instead of a Deezer preview URL, with Redis caching.
+- Auto-creation of TrackMapping on like/play: `ensureRemoteTrack` now automatically creates a remote-only TrackMapping for every provider row, enabling union-find deduplication without waiting for the background reconciler.
+- Orphan reconciliation: a new `reconcileOrphans()` pass finds TrackTidal/TrackYtMusic rows with no active TrackMapping and creates gap-fill mappings for them, running before the existing reconcile pass.
+- Background metadata refresh worker: periodically re-fetches metadata from TIDAL/YouTube Music APIs for provider rows that still have placeholder ("Unknown") titles or artists, updating only fields with real values.
+- Background reconciliation service: periodically attempts to match remote-only track mappings back to local library tracks using ISRC and artist/title/duration similarity.
+- Provider-upgrade reconciliation pass: the track-mapping reconciler now retries YT-only mappings against TIDAL and upgrades successful matches so TIDAL can be preferred in later playback resolution.
+- Remote track backfill service: resolves artist and album entities for existing remote tracks that were persisted before the universal artist/album linking was added.
+- Listen Together remote track support: queue inputs now accept TIDAL and YouTube Music tracks with full metadata. Playback source resolution picks the best available provider per user based on their OAuth connectivity.
+- Multi-seed radio engine: radio generation from multiple seed tracks now computes a centroid feature vector and scores candidates against it, improving variety for artist/album radio.
+- Reusable track list components: new shared `TrackList`, `TrackRow`, and `TrackListHeader` components replace per-page inline track tables across playlists, liked tracks, and album pages.
+- Cover mosaic component: new `CoverMosaic` renders 2x2 or 3x2 cover art grids, used for playlist headers, radio station cards, and the My Liked hero.
+- Radio station cards: extracted radio stations into reusable `RadioStationCard` components with daily-seeded mosaic artwork.
+- Browse image caching: TIDAL and YouTube Music browse thumbnails are now cached to disk, reducing repeated external image fetches.
+- iOS foreground recovery: automatic playback retry when returning to the app after iOS reclaims the audio session.
+- Next-track eager preload: loads the next track before the UI state update cycle, eliminating inter-track silence gaps on iOS.
+- Consecutive error circuit breaker: stops auto-advancing after 3 consecutive track failures with a user-facing toast.
+- Collection-level like button: playlists and albums now have a heart button that likes/unlikes all tracks in one action.
+- Inline playlist rename: playlist owners can click the title on the detail page to rename it directly. Keyboard-accessible with Enter to save, Escape to cancel.
+
+### Security
+
+- Timing-safe secret comparisons: Subsonic token, Lidarr webhook secret, and 2FA recovery codes now use constant-time comparison to prevent timing side-channel attacks.
+- Anti-enumeration auth timing: failed login and token auth paths run a dummy bcrypt round to equalize response timing, preventing username enumeration.
+- Cryptographic device link codes: link code generation now uses `crypto.randomInt()` instead of `Math.random()`.
+- Safe error responses: internal exception details stripped from all API error responses across 13 route files.
+- SSRF protection for podcast cover downloads: URL validation blocks private IPs, localhost, and non-HTTP(S) schemes; redirect-based bypass rejected.
+
 ### Changed
 
+- Sidebar navigation simplified from 8 items to 5 (Home, Explore, Library, Listen Together, Audiobooks/Podcasts). Browse, Radio, Discovery, and My Liked moved into the Explore page or promoted as sidebar pins.
+- My Liked pinned as a top-level sidebar link with a heart icon when the user has liked tracks.
+- Home page refocused as a library-centric landing with liked summary, Discover Weekly, and community playlists. External browse content moved to Explore.
+- Spotify import is now resolution-only and no longer triggers the downloader/indexer acquisition path.
+- Playlist import runs inside a database transaction with duplicate-safe item writes.
+- Plays table now supports remote-only entries — `trackId` is nullable with new foreign keys for TIDAL and YouTube Music tracks.
+- Playlist items now support remote-only entries — `trackId` is nullable with new foreign keys for TIDAL and YouTube Music tracks.
+- Playlist detail responses now resolve each item to the viewer's best available source (`local` > `TIDAL` > `YouTube`) using shared per-user mapping logic, and explicitly mark items unplayable when no connected provider can play them.
+- Artist filtering expanded: library artist lists now support `remote` (artists with remote-only tracks) and `all` (library + discovery + remote) filter modes.
+- TIDAL user quality cache is now invalidated immediately when the streaming quality setting is changed.
+- AIO Docker image optimized: added `.dockerignore` (~1.9 GB build context reduction), production dependency pruning, and `.next/cache` cleanup for smaller images and faster rebuilds.
+- Silent exception paths replaced with scoped debug logging across auth middleware, track-mapping reconciliation, and metadata refresh workers.
+- Listen Together enforces a 500-track queue limit with a clear error message when starting or updating a session that exceeds it.
+- Queue and track lists now use virtualized rendering for smoother scrolling with large collections.
+- Polling intervals staggered with random jitter to prevent simultaneous network requests across open pages.
+- YouTube Music album, artist, song, and playlist browse no longer require per-user OAuth — content endpoints fall back to public browse automatically when the user has no linked account.
+- TIDAL playlist import now tries public browse when the user has no TIDAL account, so imports from shared TIDAL playlist URLs work without authentication.
+- YouTube Music playlist import uses authenticated browse when available, falling back to public browse on failure.
+- Listen Together now falls back across providers via TrackMapping: if a listener lacks the track's native provider, resolution checks for an equivalent on their connected provider (e.g. a TIDAL-only track can play via YouTube Music, and vice versa).
+- Playlist track resolution skips mappings with no usable provider for the current user, allowing cross-provider fallback paths to activate correctly.
+- YouTube Music OAuth status checks now cache negative results with a shorter TTL, reducing repeated sidecar calls for users without linked accounts.
+- YouTube Music admin settings collapse the OAuth credentials section by default when no credentials are configured.
+
 ### Fixed
+
+- Fixed remote stream duration display where TIDAL HI_RES_LOSSLESS fragmented MP4 streams reported only the first fragment's duration (~4 seconds) instead of the full track length.
+- Fixed playlist and Subsonic serializers to handle nullable track references safely after the remote-track schema changes.
+- Fixed track-mapping batch validation to reject payloads missing all linkage keys.
+- Fixed nondeterministic mapping selection by enforcing active-linkage uniqueness and source-priority ranking at the database level.
+- Fixed Listen Together to only pause/resume when the remote track actually changes, preventing unnecessary playback interruptions during sync.
+- Fixed Listen Together to sync the active group reference and clamp playback indices to valid bounds.
+- Fixed TIDAL sidecar DASH MPD parsing and stream segmentation, including prepending the initialization segment and detecting codec from the manifest.
+- Fixed remote playback format hints: removed forced format overrides that could interfere with provider stream negotiation, and skip empty TIDAL browse shelves.
+- Fixed zero-duration remote track metadata to be accepted as valid instead of failing validation.
+- Fixed `/api/docs` trailing-slash handling to prevent redirect loops in the Swagger UI proxy.
+- Fixed playlist cursor pagination for liked tracks and hardened playlist URL parsing edge cases.
+- Fixed Spotify playlist import resilience when anonymous token endpoints fail by adding embed-row fallback parsing and enforcing local → TIDAL → YouTube resolution priority during import matching.
+- Fixed remote track metadata loss on like/play where `ensureRemoteTrack` could overwrite real metadata with placeholders. Incoming placeholder values are now preserved against existing real metadata.
+- Fixed reconcile unique-constraint violation where linking an orphan mapping to a local track could conflict with an existing linked mapping for the same provider row. Conflicting orphans are now marked stale instead.
+- Fixed playlist import preview client timeout behavior by extending `/api/import/preview` request timeout to 60 seconds for large/slow provider resolution passes.
+- Fixed YT metadata refresh to use unauthenticated `__public__` lookups instead of requiring a user OAuth session, so placeholder YT rows can still be backfilled.
+- Fixed playlist import TIDAL matching to proactively restore the user’s sidecar session from saved OAuth credentials, so imports no longer depend on visiting another TIDAL surface first.
+- Fixed cover mosaic single-image layout where the image could overflow its container bounds.
 
 ## [1.2.1] - 2026-02-28
 

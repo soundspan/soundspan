@@ -20,6 +20,57 @@ export function parsePlaybackStateSaveTimestamp(raw: string | null): number {
     return parsed;
 }
 
+/** Debounced flush handle returned by {@link createDebouncedStorageFlush}. */
+export interface DebouncedStorageFlush {
+    /** Schedule (or reschedule) a flush callback. Only the most recent callback fires. */
+    schedule(fn: () => void): void;
+    /** Cancel any pending flush without running it. */
+    cancel(): void;
+    /** Immediately run the pending flush (if any) and clear the timer. */
+    flush(): void;
+}
+
+/**
+ * Factory that creates a debounced flush handle for batching localStorage writes.
+ * Successive `schedule()` calls within `delayMs` coalesce — only the last-scheduled
+ * callback fires once the delay elapses.
+ */
+export function createDebouncedStorageFlush(delayMs: number): DebouncedStorageFlush {
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let pendingFn: (() => void) | null = null;
+
+    return {
+        schedule(fn: () => void) {
+            pendingFn = fn;
+            if (timerId !== null) {
+                clearTimeout(timerId);
+            }
+            timerId = setTimeout(() => {
+                timerId = null;
+                const toRun = pendingFn;
+                pendingFn = null;
+                toRun?.();
+            }, delayMs);
+        },
+        cancel() {
+            if (timerId !== null) {
+                clearTimeout(timerId);
+                timerId = null;
+            }
+            pendingFn = null;
+        },
+        flush() {
+            if (timerId !== null) {
+                clearTimeout(timerId);
+                timerId = null;
+            }
+            const toRun = pendingFn;
+            pendingFn = null;
+            toRun?.();
+        },
+    };
+}
+
 /** Returns true when playback-state polling should be skipped due to a recent local save. */
 export function shouldSkipPlaybackStatePoll(
     lastLocalSaveAtMs: number,

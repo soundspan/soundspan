@@ -21,6 +21,9 @@ interface UseSearchDataReturn {
     hasSearched: boolean;
 }
 
+/**
+ * Executes useSearchData.
+ */
 export function useSearchData({
     query,
     libraryType = "all",

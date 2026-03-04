@@ -4,6 +4,9 @@ import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Renders the Error component.
+ */
 export default function Error({
   error,
   reset,

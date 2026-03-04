@@ -3,6 +3,9 @@
 [![GHCR Image](https://img.shields.io/badge/Image-ghcr.io%2Fsoundspan%2Fsoundspan-0A84FF)](https://ghcr.io/soundspan/soundspan)
 [![GitHub Release](https://img.shields.io/github/v/release/soundspan/soundspan?label=Release)](https://github.com/soundspan/soundspan/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+<!-- [![Quality Visibility](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml/badge.svg?branch=main)](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml) -->
+[![Backend Coverage](https://img.shields.io/github/actions/workflow/status/soundspan/soundspan/quality-visibility.yml?branch=main&label=Backend%20Coverage)](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml)
+[![Frontend Coverage](https://img.shields.io/github/actions/workflow/status/soundspan/soundspan/quality-visibility.yml?branch=main&label=Frontend%20Coverage)](https://github.com/soundspan/soundspan/actions/workflows/quality-visibility.yml)
 
 A self-hosted, on-demand audio streaming platform that spans all of your listening experiences in one place.
 
@@ -24,7 +27,7 @@ soundspan is built for people who want streaming convenience without giving up o
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
 - Synced lyrics, source/quality badges, and overhauled desktop/mobile/overlay player flows
 - Multiple users with isolated libraries, admin roles, optional 2FA, and Listen Together group sessions
-- Deezer previews plus Spotify/Deezer playlist import flows
+- Deezer previews plus Spotify/Deezer playlist import flows and provider track mapping APIs
 - OpenSubsonic-compatible `/rest` API surface for third-party client access
 
 <a href="assets/screenshots/desktop-library.png"><img src="assets/screenshots/desktop-library.png" width="750" alt="Library view"/></a>
@@ -96,6 +99,17 @@ soundspan supports optional integrations for discovery, downloads, and client co
 - OpenSubsonic-compatible `/rest` API
 
 Full setup guides are documented in [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+
+### Integration API quick reference
+
+All integration endpoints below require soundspan auth (session or API key where supported) and admin-enabled integrations.
+
+| Area | Endpoints |
+| --- | --- |
+| YouTube Music browse (OAuth-free) | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id` |
+| YouTube Music public stream (OAuth-free) | `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId` |
+| YouTube Music search/match (OAuth-free sidecar clients) | `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch` |
+| Mapping/import APIs | `POST /api/browse/playlists/parse`, `GET /api/track-mappings/album/:albumId`, `POST /api/track-mappings/batch`, `POST /api/import/preview`, `POST /api/import/execute` |
 
 ---
 

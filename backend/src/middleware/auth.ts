@@ -119,7 +119,7 @@ async function authenticateRequest(
                         where: { id: apiKeyRecord.id },
                         data: { lastUsed: new Date() },
                     })
-                    .catch(() => {});
+                    .catch((err) => { logger.debug("Failed to update API key lastUsed", err); });
 
                 return apiKeyRecord.user;
             }
@@ -149,7 +149,7 @@ async function authenticateRequest(
                     return { id: user.id, username: user.username, role: user.role };
                 }
             } catch (error) {
-                // Token invalid, try other methods
+                logger.debug("Query token validation failed", error);
             }
         }
     }
@@ -175,7 +175,7 @@ async function authenticateRequest(
                 return { id: user.id, username: user.username, role: user.role };
             }
         } catch (error) {
-            // Token invalid
+            logger.debug("Bearer token validation failed", error);
         }
     }
 
@@ -250,7 +250,7 @@ export async function requireAuthOrToken(
                         where: { id: apiKeyRecord.id },
                         data: { lastUsed: new Date() },
                     })
-                    .catch(() => {}); // Ignore errors on lastUsed update
+                    .catch((err) => { logger.debug("Failed to update API key lastUsed", err); });
 
                 req.user = apiKeyRecord.user;
                 return next();
@@ -280,7 +280,7 @@ export async function requireAuthOrToken(
                 }
             }
         } catch (error) {
-            // Token invalid, try other methods
+            logger.debug("Query token validation failed in requireAuthOrToken", error);
         }
     }
 
@@ -308,7 +308,7 @@ export async function requireAuthOrToken(
                 }
             }
         } catch (error) {
-            // Token invalid, continue to error
+            logger.debug("Bearer token validation failed in requireAuthOrToken", error);
         }
     }
 

@@ -2,7 +2,7 @@
 
 import { Heart } from "lucide-react";
 import { type TrackPreferenceSignal } from "@/lib/api";
-import { useTrackPreference } from "@/hooks/useTrackPreference";
+import { useTrackPreference, type TrackPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { cn } from "@/utils/cn";
 
 interface TrackPreferenceButtonsProps {
@@ -15,6 +15,7 @@ interface TrackPreferenceButtonsProps {
     isSaving?: boolean;
     onToggleThumbsUp?: () => Promise<unknown> | unknown;
     resolveFromQuery?: boolean;
+    metadata?: TrackPreferenceMetadata;
 }
 
 interface FilledHeartIconProps {
@@ -132,13 +133,14 @@ function TrackPreferenceButtonsWithQuery({
     signal,
     isSaving,
     onToggleThumbsUp,
+    metadata,
 }: TrackPreferenceButtonsProps) {
 
     const {
         signal: queriedSignal,
         isSaving: queriedIsSaving,
         toggleLike: queriedToggleLike,
-    } = useTrackPreference(trackId);
+    } = useTrackPreference(trackId, metadata);
 
     const preferenceSignal = signal ?? queriedSignal;
     const isPreferenceSaving = isSaving ?? queriedIsSaving;
@@ -159,6 +161,9 @@ function TrackPreferenceButtonsWithQuery({
     );
 }
 
+/**
+ * Renders the TrackPreferenceButtons component.
+ */
 export function TrackPreferenceButtons(props: TrackPreferenceButtonsProps) {
     if (props.resolveFromQuery === false) {
         return <TrackPreferenceButtonsControlled {...props} />;

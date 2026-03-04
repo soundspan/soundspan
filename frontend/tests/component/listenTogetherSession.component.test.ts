@@ -12,8 +12,8 @@ import {
     setListenTogetherMembershipPending,
     setListenTogetherSessionSnapshot,
     type ListenTogetherSessionSnapshot,
-} from "../../lib/listen-together-session.ts";
-import { listenTogetherSocket } from "../../lib/listen-together-socket.ts";
+} from "../../lib/listen-together-session";
+import { listenTogetherSocket } from "../../lib/listen-together-socket";
 import { api } from "@/lib/api";
 
 type StorageLike = {
@@ -24,13 +24,13 @@ type StorageLike = {
 
 type GlobalScope = typeof globalThis & {
     window?: unknown;
-    localStorage?: StorageLike;
+    localStorage?: unknown;
 };
 
 const globalScope = globalThis as GlobalScope;
 
 let previousWindow: unknown;
-let previousLocalStorage: StorageLike | undefined;
+let previousLocalStorage: unknown;
 
 function installStorage(
     initial?: Record<string, string>,
@@ -62,10 +62,10 @@ function installStorage(
         },
     };
 
-    globalScope.window = {
+    (globalScope as any).window = {
         localStorage: storage,
     };
-    globalScope.localStorage = storage;
+    (globalScope as any).localStorage = storage;
 
     return { values, storage };
 }
@@ -120,15 +120,15 @@ afterEach(() => {
     setListenTogetherMembershipPending(false);
 
     if (typeof previousWindow === "undefined") {
-        delete globalScope.window;
+        delete (globalScope as any).window;
     } else {
-        globalScope.window = previousWindow;
+        (globalScope as any).window = previousWindow;
     }
 
     if (typeof previousLocalStorage === "undefined") {
-        delete globalScope.localStorage;
+        delete (globalScope as any).localStorage;
     } else {
-        globalScope.localStorage = previousLocalStorage;
+        (globalScope as any).localStorage = previousLocalStorage;
     }
 });
 
@@ -301,7 +301,7 @@ test("host track operation retries retryable conflicts when group is active", as
     ) => {
         delays.push(Number(delay ?? 0));
         callback();
-        return 0 as ReturnType<typeof setTimeout>;
+        return 0 as unknown as ReturnType<typeof setTimeout>;
     }) as typeof setTimeout;
     socketState.currentGroupId = "group-retry";
     (
@@ -348,7 +348,7 @@ test("host track conflict retries are skipped when there is no active group", as
     ) => {
         delays.push(Number(delay ?? 0));
         callback();
-        return 0 as ReturnType<typeof setTimeout>;
+        return 0 as unknown as ReturnType<typeof setTimeout>;
     }) as typeof setTimeout;
     socketState.currentGroupId = null;
     (

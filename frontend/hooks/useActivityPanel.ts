@@ -16,6 +16,9 @@ export interface UseActivityPanelReturn {
     close: () => void;
 }
 
+/**
+ * Executes useActivityPanel.
+ */
 export function useActivityPanel(): UseActivityPanelReturn {
     const [isOpen, setIsOpen] = useState(() => {
         if (typeof window === "undefined") return false;

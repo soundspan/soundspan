@@ -122,6 +122,9 @@ function emit(
     method(prefix, ...passthrough);
 }
 
+/**
+ * Executes createLogger.
+ */
 export function createLogger(scope?: string): Logger {
     const scoped = scope?.trim() || null;
 
@@ -168,6 +171,9 @@ export async function withLogTiming<T>(
     }
 }
 
+/**
+ * Executes logErrorWithContext.
+ */
 export function logErrorWithContext(
     loggerInstance: Logger,
     message: string,

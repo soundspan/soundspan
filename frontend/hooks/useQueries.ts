@@ -18,7 +18,9 @@
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { AddToPlaylistRef } from "@/lib/trackRef";
 import type { Artist, Album, Track } from "@/features/library/types";
+import { isGenreCategory, isHiddenGenreItem } from "@/features/explore/genreClassification";
 
 export const queryKeys = {
     // Artist queries
@@ -81,6 +83,9 @@ export const queryKeys = {
     playlists: () => ["playlists"] as const,
     playlist: (id: string) => ["playlist", id] as const,
 
+    // Discover Weekly
+    discoverWeekly: () => ["discover", "weekly"] as const,
+
     // Mixes
     mixes: () => ["mixes"] as const,
     mix: (id: string) => ["mix", id] as const,
@@ -103,10 +108,21 @@ export const queryKeys = {
     topPodcasts: (limit?: number, genreId?: number) =>
         ["podcasts", "top", limit, genreId] as const,
 
-    // Browse (Deezer playlists/radios)
-    browseAll: () => ["browse", "all"] as const,
-    browseFeatured: (limit?: number) => ["browse", "featured", limit] as const,
-    browseRadios: (limit?: number) => ["browse", "radios", limit] as const,
+    // Home browse feed
+    homeFeaturedPlaylists: (limit?: number) =>
+        ["home", "featured-playlists", limit] as const,
+
+    // Browse (YT Music) — used by Explore page
+    browseHomeShelves: () => ["browse", "ytmusic", "home"] as const,
+    browseCharts: () => ["browse", "ytmusic", "charts"] as const,
+    browseCategories: () => ["browse", "ytmusic", "categories"] as const,
+
+    // Browse (TIDAL) — used by Explore page
+    browseTidalHome: () => ["browse", "tidal", "home"] as const,
+    browseTidalExplore: () => ["browse", "tidal", "explore"] as const,
+    browseTidalGenres: () => ["browse", "tidal", "genres"] as const,
+    browseTidalMoods: () => ["browse", "tidal", "moods"] as const,
+    browseTidalMixes: () => ["browse", "tidal", "mixes"] as const,
 };
 
 /**
@@ -733,6 +749,20 @@ export function useLikedPlaylistQuery(limit: number = 10_000) {
 }
 
 /**
+ * Lightweight hook to fetch the current Discover Weekly summary.
+ *
+ * Returns week range and track count without full track data hydration.
+ * Used by the Explore page to render a playlist card.
+ */
+export function useDiscoverWeeklySummaryQuery() {
+    return useQuery({
+        queryKey: queryKeys.discoverWeekly(),
+        queryFn: () => api.getCurrentDiscoverWeekly(),
+        staleTime: 5 * 60 * 1000, // 5 minutes
+    });
+}
+
+/**
  * Hook to fetch all mixes (Made For You)
  *
  * Cache time: 5 minutes
@@ -798,6 +828,9 @@ interface AudiobooksQueryParams {
     enabled?: boolean;
 }
 
+/**
+ * Executes useAudiobooksQuery.
+ */
 export function useAudiobooksQuery({
     limit,
     offset,
@@ -931,7 +964,7 @@ export function useRefreshMixesMutation() {
  *
  * @example
  * const { mutate: addToPlaylist } = useAddToPlaylistMutation();
- * addToPlaylist({ playlistId: "123", trackId: "456" });
+ * addToPlaylist({ playlistId: "123", trackRef: { trackId: "456" } });
  */
 export function useAddToPlaylistMutation() {
     const queryClient = useQueryClient();
@@ -939,11 +972,11 @@ export function useAddToPlaylistMutation() {
     return useMutation({
         mutationFn: ({
             playlistId,
-            trackId,
+            trackRef,
         }: {
             playlistId: string;
-            trackId: string;
-        }) => api.addTrackToPlaylist(playlistId, trackId),
+            trackRef: AddToPlaylistRef;
+        }) => api.addTrackToPlaylist(playlistId, trackRef),
         onSuccess: (_, variables) => {
             // Invalidate the specific playlist query
             queryClient.invalidateQueries({
@@ -1009,7 +1042,7 @@ export function useDeletePlaylistMutation() {
     });
 }
 
-interface PlaylistPreview {
+export interface PlaylistPreview {
     id: string;
     source: string;
     type: string;
@@ -1017,71 +1050,384 @@ interface PlaylistPreview {
     description: string | null;
     creator: string;
     imageUrl: string | null;
-    trackCount: number;
+    trackCount?: number;
     url: string;
 }
 
-interface Genre {
-    id: number;
+interface YtMusicChartArtist {
+    name?: string;
+}
+
+interface YtMusicChartThumbnail {
+    url?: string;
+}
+
+export interface YtMusicChartEntry {
+    videoId?: string;
+    title?: string;
+    artist?: string;
+    artists?: Array<string | YtMusicChartArtist>;
+    album?: string | { title?: string; name?: string };
+    thumbnailUrl?: string | null;
+    thumbnails?: YtMusicChartThumbnail[];
+}
+
+function resolveChartArtist(item: YtMusicChartEntry): string {
+    if (item.artist?.trim()) return item.artist.trim();
+
+    if (Array.isArray(item.artists)) {
+        for (const artist of item.artists) {
+            if (typeof artist === "string" && artist.trim()) {
+                return artist.trim();
+            }
+            if (
+                artist &&
+                typeof artist === "object" &&
+                typeof artist.name === "string" &&
+                artist.name.trim()
+            ) {
+                return artist.name.trim();
+            }
+        }
+    }
+
+    return "YouTube Music";
+}
+
+function resolveChartAlbum(item: YtMusicChartEntry): string | null {
+    if (typeof item.album === "string" && item.album.trim()) {
+        return item.album.trim();
+    }
+
+    if (
+        item.album &&
+        typeof item.album === "object" &&
+        typeof item.album.title === "string" &&
+        item.album.title.trim()
+    ) {
+        return item.album.title.trim();
+    }
+
+    if (
+        item.album &&
+        typeof item.album === "object" &&
+        typeof item.album.name === "string" &&
+        item.album.name.trim()
+    ) {
+        return item.album.name.trim();
+    }
+
+    return null;
+}
+
+function resolveChartThumbnail(item: YtMusicChartEntry): string | null {
+    if (typeof item.thumbnailUrl === "string" && item.thumbnailUrl.trim()) {
+        return item.thumbnailUrl;
+    }
+
+    if (Array.isArray(item.thumbnails)) {
+        for (const thumbnail of item.thumbnails) {
+            if (typeof thumbnail?.url === "string" && thumbnail.url.trim()) {
+                return thumbnail.url;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Executes mapYtMusicChartsToFeaturedPlaylists.
+ */
+export function mapYtMusicChartsToFeaturedPlaylists(
+    charts: Record<string, YtMusicChartEntry[]> | undefined,
+    limit: number
+): PlaylistPreview[] {
+    if (!charts || typeof charts !== "object" || limit <= 0) {
+        return [];
+    }
+
+    const sectionPriority = ["songs", "trending", "videos"];
+    const orderedSections = [
+        ...sectionPriority.filter((section) => Array.isArray(charts[section])),
+        ...Object.keys(charts).filter((section) => !sectionPriority.includes(section)),
+    ];
+
+    const featured: PlaylistPreview[] = [];
+    const seenVideoIds = new Set<string>();
+
+    for (const section of orderedSections) {
+        const entries = charts[section];
+        if (!Array.isArray(entries)) continue;
+
+        for (const entry of entries) {
+            const videoId =
+                typeof entry.videoId === "string" ? entry.videoId.trim() : "";
+            const title =
+                typeof entry.title === "string" ? entry.title.trim() : "";
+            if (!videoId || !title || seenVideoIds.has(videoId)) continue;
+
+            seenVideoIds.add(videoId);
+
+            const creator = resolveChartArtist(entry);
+            const album = resolveChartAlbum(entry);
+            featured.push({
+                id: videoId,
+                source: "ytmusic",
+                type: "track",
+                title,
+                description: album ? `${creator} - ${album}` : creator,
+                creator,
+                imageUrl: resolveChartThumbnail(entry),
+                trackCount: 1,
+                url: `https://music.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+            });
+
+            if (featured.length >= limit) {
+                return featured;
+            }
+        }
+    }
+
+    return featured;
+}
+
+/**
+ * Hook to fetch home featured browse cards from YouTube Music charts.
+ * This intentionally avoids deprecated Deezer browse endpoints that now return 410.
+ */
+export function useYtMusicFeaturedPlaylistsQuery(limit: number = 20) {
+    return useQuery({
+        queryKey: queryKeys.homeFeaturedPlaylists(limit),
+        queryFn: async (): Promise<PlaylistPreview[]> => {
+            const response = await api.get<{
+                charts: Record<string, YtMusicChartEntry[]>;
+            }>("/browse/ytmusic/charts");
+
+            return mapYtMusicChartsToFeaturedPlaylists(response?.charts, limit);
+        },
+        staleTime: 10 * 60 * 1000, // 10 minutes
+    });
+}
+
+// ── Browse / Explore hooks ──────────────────────────────────────────────
+
+/** Shape of a single item inside a YT Music home shelf. */
+export interface YtMusicShelfItem {
+    title?: string;
+    videoId?: string;
+    playlistId?: string;
+    browseId?: string;
+    /** Item type returned by the sidecar (album, playlist, song, artist, video). */
+    type?: string;
+    /** Flattened thumbnail URL returned by the sidecar (best resolution). */
+    thumbnailUrl?: string | null;
+    subtitle?: string;
+}
+
+/** A shelf row returned from the YT Music home endpoint. */
+export interface YtMusicHomeShelf {
+    title?: string;
+    contents?: YtMusicShelfItem[];
+}
+
+/** A category item (mood or genre) from the YT Music categories endpoint. */
+export interface YtMusicCategoryItem {
+    title?: string;
+    params?: string;
+    color?: string;
+}
+
+/** A top-level category section from the YT Music categories endpoint. */
+export interface YtMusicCategory {
+    title?: string;
+    items?: YtMusicCategoryItem[];
+}
+
+/**
+ * Hook to fetch YT Music home shelves (featured content rows).
+ *
+ * Cache time: 5 minutes (browse content changes occasionally)
+ */
+export function useYtMusicHomeShelvesQuery(options?: { enabled?: boolean }) {
+    return useQuery<YtMusicHomeShelf[]>({
+        queryKey: queryKeys.browseHomeShelves(),
+        queryFn: async () => {
+            const response = await api.get<{
+                shelves?: YtMusicHomeShelf[];
+            }>("/browse/ytmusic/home");
+            return response?.shelves ?? [];
+        },
+        staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled: options?.enabled ?? true,
+    });
+}
+
+/**
+ * Hook to fetch YT Music charts (songs, videos, trending, artists).
+ *
+ * Cache time: 5 minutes
+ */
+export function useYtMusicChartsQuery(options?: { enabled?: boolean }) {
+    return useQuery<Record<string, YtMusicChartEntry[]>>({
+        queryKey: queryKeys.browseCharts(),
+        queryFn: async () => {
+            const response = await api.get<{
+                charts?: Record<string, YtMusicChartEntry[]>;
+            }>("/browse/ytmusic/charts");
+            return response?.charts ?? {};
+        },
+        staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled: options?.enabled ?? true,
+    });
+}
+
+/**
+ * Hook to fetch YT Music categories (moods and genres), split into two lists.
+ *
+ * Cache time: 5 minutes
+ */
+export function useYtMusicCategoriesQuery(options?: { enabled?: boolean }) {
+    return useQuery<{
+        moodCategories: YtMusicCategory[];
+        genreCategories: YtMusicCategory[];
+    }>({
+        queryKey: queryKeys.browseCategories(),
+        queryFn: async () => {
+            const response = await api.get<{
+                categories?: YtMusicCategory[];
+            }>("/browse/ytmusic/categories");
+            const all = response?.categories ?? [];
+
+            const moodCategories: YtMusicCategory[] = [];
+            const genreCategories: YtMusicCategory[] = [];
+
+            for (const cat of all) {
+                if (cat.title && isGenreCategory(cat.title)) {
+                    // Filter out hidden genre items within the category
+                    const filtered = {
+                        ...cat,
+                        items: (cat.items ?? []).filter(
+                            (item) => !item.title || !isHiddenGenreItem(item.title),
+                        ),
+                    };
+                    if ((filtered.items?.length ?? 0) > 0) {
+                        genreCategories.push(filtered);
+                    }
+                } else {
+                    moodCategories.push(cat);
+                }
+            }
+
+            return { moodCategories, genreCategories };
+        },
+        staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled: options?.enabled ?? true,
+    });
+}
+
+// ── TIDAL Browse / Explore hooks ────────────────────────────────────────
+
+export interface TidalBrowseShelfItem {
+    type: string;
+    playlistId?: string;
+    mixId?: string;
+    albumId?: string;
+    title: string;
+    thumbnailUrl: string | null;
+    subtitle?: string;
+}
+
+export interface TidalBrowseShelf {
+    title: string;
+    contents: TidalBrowseShelfItem[];
+}
+
+export interface TidalGenre {
     name: string;
-    picture?: string;
+    path: string;
+    hasPlaylists: boolean;
+    imageUrl: string | null;
 }
 
-interface BrowseAllResponse {
-    playlists: PlaylistPreview[];
-    radios: PlaylistPreview[];
-    genres: Genre[];
+export interface TidalMixPreview {
+    mixId: string;
+    title: string;
+    subTitle: string;
+    thumbnailUrl: string | null;
 }
 
 /**
- * Hook to fetch all browse content (playlists, radios, genres) from Deezer
- *
- * @returns Query result with all browse content
+ * Fetch TIDAL personalized home shelves for the Explore page.
  */
-export function useBrowseAllQuery() {
-    return useQuery({
-        queryKey: queryKeys.browseAll(),
-        queryFn: async (): Promise<BrowseAllResponse> => {
-            return api.get<BrowseAllResponse>("/browse/all");
+export function useTidalHomeShelvesQuery(options?: { enabled?: boolean }) {
+    return useQuery<TidalBrowseShelf[]>({
+        queryKey: queryKeys.browseTidalHome(),
+        queryFn: async () => {
+            const response = await api.getTidalHomeShelves();
+            return response?.shelves ?? [];
         },
-        staleTime: 10 * 60 * 1000, // 10 minutes - playlists don't change often
+        staleTime: 5 * 60 * 1000,
+        enabled: options?.enabled ?? true,
     });
 }
 
 /**
- * Hook to fetch featured playlists from Deezer
- *
- * @param limit - Maximum number of playlists to fetch
- * @returns Query result with featured playlists
+ * Fetch TIDAL editorial explore shelves for the Explore page.
  */
-export function useFeaturedPlaylistsQuery(limit: number = 50) {
-    return useQuery({
-        queryKey: queryKeys.browseFeatured(limit),
-        queryFn: async (): Promise<PlaylistPreview[]> => {
-            const response = await api.get<{ playlists: PlaylistPreview[] }>(
-                `/browse/playlists/featured?limit=${limit}`,
-            );
-            return response.playlists;
+export function useTidalExploreShelvesQuery(options?: { enabled?: boolean }) {
+    return useQuery<TidalBrowseShelf[]>({
+        queryKey: queryKeys.browseTidalExplore(),
+        queryFn: async () => {
+            const response = await api.getTidalExploreShelves();
+            return response?.shelves ?? [];
         },
-        staleTime: 10 * 60 * 1000, // 10 minutes
+        staleTime: 5 * 60 * 1000,
+        enabled: options?.enabled ?? true,
     });
 }
 
 /**
- * Hook to fetch radio stations from Deezer
- *
- * @param limit - Maximum number of radios to fetch
- * @returns Query result with radio stations
+ * Fetch TIDAL genre categories for Explore mood/genre drilldown.
  */
-export function useRadiosQuery(limit: number = 50) {
-    return useQuery({
-        queryKey: queryKeys.browseRadios(limit),
-        queryFn: async (): Promise<PlaylistPreview[]> => {
-            const response = await api.get<{ radios: PlaylistPreview[] }>(
-                `/browse/radios?limit=${limit}`,
-            );
-            return response.radios;
+export function useTidalGenresQuery(options?: { enabled?: boolean }) {
+    return useQuery<TidalGenre[]>({
+        queryKey: queryKeys.browseTidalGenres(),
+        queryFn: async () => {
+            const response = await api.getTidalGenres();
+            return response?.genres ?? [];
         },
-        staleTime: 10 * 60 * 1000, // 10 minutes
+        staleTime: 5 * 60 * 1000,
+        enabled: options?.enabled ?? true,
+    });
+}
+
+/**
+ * Fetch TIDAL mood categories for Explore mood/genre drilldown.
+ */
+export function useTidalMoodsQuery(options?: { enabled?: boolean }) {
+    return useQuery<TidalGenre[]>({
+        queryKey: queryKeys.browseTidalMoods(),
+        queryFn: async () => {
+            const response = await api.getTidalMoods();
+            return response?.moods ?? [];
+        },
+        staleTime: 5 * 60 * 1000,
+        enabled: options?.enabled ?? true,
+    });
+}
+
+/**
+ * Fetch TIDAL personal mix previews (for-you style mixes).
+ */
+export function useTidalMixesQuery(options?: { enabled?: boolean }) {
+    return useQuery<TidalMixPreview[]>({
+        queryKey: queryKeys.browseTidalMixes(),
+        queryFn: async () => {
+            const response = await api.getTidalMixes();
+            return response?.mixes ?? [];
+        },
+        staleTime: 5 * 60 * 1000,
+        enabled: options?.enabled ?? true,
     });
 }

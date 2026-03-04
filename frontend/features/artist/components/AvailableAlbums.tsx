@@ -191,6 +191,9 @@ function AlbumGrid({
     );
 }
 
+/**
+ * Renders the AvailableAlbums component.
+ */
 export function AvailableAlbums({
     albums,
     artistName: _artistName,

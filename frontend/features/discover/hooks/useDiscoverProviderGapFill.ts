@@ -43,6 +43,9 @@ function toLocalTrack(track: DiscoverTrack): DiscoverTrack {
     };
 }
 
+/**
+ * Executes applyDiscoverProviderGapFill.
+ */
 export function applyDiscoverProviderGapFill(
     sourceTracks: DiscoverTrack[],
     gapIndices: number[],
@@ -86,6 +89,9 @@ export function applyDiscoverProviderGapFill(
     });
 }
 
+/**
+ * Executes useDiscoverProviderGapFill.
+ */
 export function useDiscoverProviderGapFill(
     tracks: DiscoverTrack[] | undefined
 ): GapFillResult {
@@ -123,10 +129,10 @@ export function useDiscoverProviderGapFill(
                 !!tidalStatus?.enabled &&
                 !!tidalStatus?.available &&
                 !!tidalStatus?.authenticated;
+            // Match/search uses public sidecar client — no user OAuth required
             const ytAvailable =
                 !!ytStatus?.enabled &&
-                !!ytStatus?.available &&
-                !!ytStatus?.authenticated;
+                !!ytStatus?.available;
 
             // Only gap-fill tracks that aren't locally available
             const gapIndices: number[] = [];

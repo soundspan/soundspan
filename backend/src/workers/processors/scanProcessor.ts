@@ -157,6 +157,9 @@ export interface ScanJobResult {
     duration: number;
 }
 
+/**
+ * Executes processScan.
+ */
 export async function processScan(
     job: Job<ScanJobData>
 ): Promise<ScanJobResult> {
@@ -539,6 +542,26 @@ export async function processScan(
                 }
             } catch (error) {
                 logger.error('[SCAN] Discovery Weekly reconciliation failed:', error);
+            }
+        }
+
+        // Reconcile TrackMapping rows — link remote-only mappings to newly scanned local tracks
+        if (shouldReconcile) {
+            try {
+                const { trackReconciliationService } = await import(
+                    "../../services/trackReconciliation"
+                );
+                const mappingResult = await trackReconciliationService.reconcile();
+                if (mappingResult.linked > 0) {
+                    logger.info(
+                        `[ScanJob ${job.id}] TrackMapping reconciliation: ${mappingResult.linked} remote mappings linked to local tracks`
+                    );
+                }
+            } catch (error) {
+                logger.error(
+                    `[ScanJob ${job.id}] TrackMapping reconciliation failed:`,
+                    error
+                );
             }
         }
 

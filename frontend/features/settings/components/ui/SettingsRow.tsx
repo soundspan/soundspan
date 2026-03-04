@@ -9,6 +9,9 @@ interface SettingsRowProps {
     align?: "center" | "start";
 }
 
+/**
+ * Renders the SettingsRow component.
+ */
 export function SettingsRow({
     label,
     description,

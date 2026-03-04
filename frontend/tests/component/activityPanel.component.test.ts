@@ -135,7 +135,7 @@ test("shows all tabs for admin users on desktop", async () => {
     state.socialUsers = [{ id: "u1" }];
 
     const { ActivityPanel } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     const html = renderToStaticMarkup(
@@ -165,7 +165,7 @@ test("hides admin-only tabs for non-admin users and falls back from hidden activ
     state.socialUsers = [{ id: "u1" }];
 
     const { ActivityPanel } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     const html = renderToStaticMarkup(
@@ -194,7 +194,7 @@ test("renders mobile overlay with social content and capped badges", async () =>
     }));
 
     const { ActivityPanel } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     const html = renderToStaticMarkup(
@@ -212,7 +212,7 @@ test("renders mobile overlay with social content and capped badges", async () =>
 
 test("renders controlled active, history, and social content", async () => {
     const { ActivityPanel } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     const tabCases: Array<[string, "active" | "history" | "social"]> = [
@@ -238,7 +238,7 @@ test("returns null for closed mobile panel", async () => {
     state.isMobile = true;
 
     const { ActivityPanel } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     const html = renderToStaticMarkup(
@@ -253,7 +253,7 @@ test("returns null for closed mobile panel", async () => {
 
 test("renders collapsed desktop strip without the panel badge when idle", async () => {
     const { ActivityPanel } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     const html = renderToStaticMarkup(
@@ -278,7 +278,7 @@ test("renders collapsed desktop strip without the panel badge when idle", async 
 
 test("activity panel toggle hides on mobile and renders on desktop", async () => {
     const { ActivityPanelToggle } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     state.isMobile = true;
@@ -294,7 +294,7 @@ test("activity panel toggle hides on mobile and renders on desktop", async () =>
 
 test("activity panel toggle omits badge when idle", async () => {
     const { ActivityPanelToggle } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     const html = renderToStaticMarkup(React.createElement(ActivityPanelToggle));
@@ -303,7 +303,7 @@ test("activity panel toggle omits badge when idle", async () => {
 
 test("activity panel toggle can disable polling when panel is open", async () => {
     const { ActivityPanelToggle } = await import(
-        "../../components/layout/ActivityPanel.tsx"
+        "../../components/layout/ActivityPanel"
     );
 
     renderToStaticMarkup(

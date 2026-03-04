@@ -14,6 +14,9 @@ interface PodcastActionBarProps {
     onShowDeleteConfirm: (show: boolean) => void;
 }
 
+/**
+ * Renders the PodcastActionBar component.
+ */
 export function PodcastActionBar({
     isSubscribed,
     feedUrl,

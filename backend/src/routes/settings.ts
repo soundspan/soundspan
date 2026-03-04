@@ -6,6 +6,7 @@ import { requireAuth, requireAdmin } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import { staleJobCleanupService } from "../services/staleJobCleanup";
+import { tidalStreamingService } from "../services/tidalStreaming";
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -37,6 +38,8 @@ const settingsSchema = z.object({
     offlineEnabled: z.boolean().optional(),
     maxCacheSizeMb: z.number().int().min(0).optional(),
     // YouTube Music (per-user)
+    showYtMusicExplore: z.boolean().optional(),
+    showTidalExplore: z.boolean().optional(),
     ytMusicQuality: z.enum(["LOW", "MEDIUM", "HIGH", "LOSSLESS"]).optional(),
     tidalStreamingQuality: z.enum(["LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"]).optional(),
     displayName: displayNameSchema.nullable().optional(),
@@ -94,6 +97,8 @@ router.get("/", async (req, res) => {
                     wifiOnly: false,
                     offlineEnabled: false,
                     maxCacheSizeMb: 5120,
+                    showYtMusicExplore: true,
+                    showTidalExplore: true,
                 },
             });
         }
@@ -138,6 +143,12 @@ router.get("/", async (req, res) => {
  *                 type: boolean
  *               maxCacheSizeMb:
  *                 type: integer
+ *               showYtMusicExplore:
+ *                 type: boolean
+ *                 description: Show YouTube Music content on the Explore page
+ *               showTidalExplore:
+ *                 type: boolean
+ *                 description: Show TIDAL content on the Explore page
  *               ytMusicQuality:
  *                 type: string
  *                 enum: [LOW, MEDIUM, HIGH, LOSSLESS]
@@ -177,6 +188,10 @@ router.post("/", async (req, res) => {
             },
             update: settingsData,
         });
+
+        if (settingsData.tidalStreamingQuality !== undefined) {
+            tidalStreamingService.clearUserQualityCache(userId);
+        }
 
         if (normalizedDisplayName !== undefined) {
             await prisma.user.update({

@@ -140,6 +140,9 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
     );
 });
 
+/**
+ * Renders the ContinueListening component.
+ */
 export function ContinueListening({ items }: ContinueListeningProps) {
     return (
         <HorizontalCarousel>

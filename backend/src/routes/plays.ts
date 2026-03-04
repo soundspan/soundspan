@@ -3,14 +3,55 @@ import { logger } from "../utils/logger";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { z } from "zod";
+import { trackMappingService } from "../services/trackMappingService";
+import {
+    type UnifiedTrackResponse,
+    normalizeLocalTrack,
+    normalizeTidalTrack,
+    normalizeYtMusicTrack,
+} from "../services/unifiedTrackResponse";
 
 const router = Router();
 
 router.use(requireAuth);
 
-const playSchema = z.object({
-    trackId: z.string(),
-});
+const playSchema = z
+    .object({
+        trackId: z.string().optional(),
+        tidalTrackId: z.number().int().positive().optional(),
+        youtubeVideoId: z.string().trim().min(1).optional(),
+        title: z.string().trim().min(1).optional(),
+        artist: z.string().trim().min(1).optional(),
+        album: z.string().trim().min(1).optional(),
+        duration: z.number().int().nonnegative().optional(),
+        thumbnailUrl: z.string().trim().min(1).optional(),
+    })
+    .superRefine((data, ctx) => {
+        const providedIdentifiers = [
+            data.trackId ? 1 : 0,
+            data.tidalTrackId ? 1 : 0,
+            data.youtubeVideoId ? 1 : 0,
+        ].reduce((sum, value) => sum + value, 0);
+        if (providedIdentifiers !== 1) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["trackId"],
+                message: "Exactly one track identifier required",
+            });
+        }
+
+        const isRemote = Boolean(data.tidalTrackId || data.youtubeVideoId);
+        if (isRemote) {
+            if (!data.title || !data.artist || !data.album || data.duration === undefined) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ["title"],
+                    message:
+                        "Remote play logging requires title, artist, album, and duration",
+                });
+            }
+        }
+    });
 
 const playHistoryRangeSchema = z.enum(["7d", "30d", "365d", "all"]);
 type PlayHistoryRange = z.infer<typeof playHistoryRangeSchema>;
@@ -53,7 +94,7 @@ const getHistoryRangeStart = (range: Exclude<PlayHistoryRange, "all">): Date => 
 // GET /plays/summary (counts for warning/confirmation UI)
 router.get("/summary", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const now = new Date();
         const sevenDaysAgo = getHistoryRangeStart("7d");
         const thirtyDaysAgo = getHistoryRangeStart("30d");
@@ -133,7 +174,7 @@ router.get("/summary", async (req, res) => {
 // DELETE /plays/history?range=7d|30d|365d|all
 router.delete("/history", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const parsed = playHistoryRangeSchema.safeParse(
             (req.query.range as string) || "30d"
         );
@@ -202,26 +243,67 @@ router.delete("/history", async (req, res) => {
 // POST /plays
 router.post("/", async (req, res) => {
     try {
-        const userId = req.session.userId!;
-        const { trackId } = playSchema.parse(req.body);
+        const userId = req.user!.id;
+        const payload = playSchema.parse(req.body);
 
-        // Verify track exists
-        const track = await prisma.track.findUnique({
-            where: { id: trackId },
-        });
+        if (payload.trackId) {
+            // Verify local track exists
+            const track = await prisma.track.findUnique({
+                where: { id: payload.trackId },
+            });
 
-        if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+            if (!track) {
+                return res.status(404).json({ error: "Track not found" });
+            }
+
+            const play = await prisma.play.create({
+                data: {
+                    userId,
+                    trackId: payload.trackId,
+                    source: "LIBRARY",
+                },
+            });
+
+            return res.json(play);
         }
 
+        if (payload.tidalTrackId) {
+            const ensured = await trackMappingService.ensureRemoteTrack({
+                provider: "tidal",
+                tidalId: payload.tidalTrackId,
+                title: payload.title!,
+                artist: payload.artist!,
+                album: payload.album!,
+                duration: payload.duration!,
+            });
+            const play = await prisma.play.create({
+                data: {
+                    userId,
+                    trackTidalId: ensured.id,
+                    source: "TIDAL",
+                },
+            });
+            return res.json(play);
+        }
+
+        const ensured = await trackMappingService.ensureRemoteTrack({
+            provider: "youtube",
+            videoId: payload.youtubeVideoId!,
+            title: payload.title!,
+            artist: payload.artist!,
+            album: payload.album!,
+            duration: payload.duration!,
+            thumbnailUrl: payload.thumbnailUrl,
+        });
         const play = await prisma.play.create({
             data: {
                 userId,
-                trackId,
+                trackYtMusicId: ensured.id,
+                source: "YOUTUBE_MUSIC",
             },
         });
 
-        res.json(play);
+        return res.json(play);
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res
@@ -257,7 +339,7 @@ router.post("/", async (req, res) => {
 // GET /plays (recent plays for user)
 router.get("/", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const { limit = "50" } = req.query;
 
         const plays = await prisma.play.findMany({
@@ -280,10 +362,45 @@ router.get("/", async (req, res) => {
                         },
                     },
                 },
+                trackTidal: true,
+                trackYtMusic: true,
             },
         });
 
-        res.json(plays);
+        res.json(
+            plays
+                .map((play) => {
+                    if (play.track) {
+                        const normalized = normalizeLocalTrack(play.track as any);
+                        return {
+                            id: play.id,
+                            playedAt: play.playedAt,
+                            source: play.source,
+                            track: toHistoryTrackShape(normalized),
+                        };
+                    }
+                    if (play.trackTidal) {
+                        const normalized = normalizeTidalTrack(play.trackTidal);
+                        return {
+                            id: play.id,
+                            playedAt: play.playedAt,
+                            source: play.source,
+                            track: toHistoryTrackShape(normalized),
+                        };
+                    }
+                    if (play.trackYtMusic) {
+                        const normalized = normalizeYtMusicTrack(play.trackYtMusic);
+                        return {
+                            id: play.id,
+                            playedAt: play.playedAt,
+                            source: play.source,
+                            track: toHistoryTrackShape(normalized),
+                        };
+                    }
+                    return null;
+                })
+                .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        );
     } catch (error) {
         logger.error("Get plays error:", error);
         res.status(500).json({ error: "Failed to get plays" });
@@ -291,3 +408,36 @@ router.get("/", async (req, res) => {
 });
 
 export default router;
+const toHistoryTrackShape = (normalized: UnifiedTrackResponse) => {
+    const base = {
+        id: normalized.id,
+        title: normalized.title,
+        displayTitle: normalized.displayTitle ?? null,
+        duration: normalized.duration,
+        trackNo: normalized.trackNo,
+        source: normalized.source,
+        provider: normalized.provider,
+        filePath: normalized.filePath ?? null,
+        artist: normalized.artist,
+        album: {
+            ...normalized.album,
+            artist: normalized.artist,
+        },
+    };
+
+    if (normalized.source === "tidal") {
+        return {
+            ...base,
+            streamSource: "tidal" as const,
+            tidalTrackId: normalized.provider.tidalTrackId,
+        };
+    }
+    if (normalized.source === "youtube") {
+        return {
+            ...base,
+            streamSource: "youtube" as const,
+            youtubeVideoId: normalized.provider.youtubeVideoId,
+        };
+    }
+    return base;
+};

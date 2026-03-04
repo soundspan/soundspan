@@ -18,6 +18,9 @@ interface EpisodeListProps {
     onMarkComplete?: (episodeId: string, duration: number) => void;
 }
 
+/**
+ * Renders the EpisodeList component.
+ */
 export function EpisodeList({
     podcast: _podcast,
     episodes,

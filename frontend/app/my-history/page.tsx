@@ -1,23 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { History, Music2 } from "lucide-react";
+import { History } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
-import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
+import { TidalBadge } from "@/components/ui/TidalBadge";
+import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { useAudioState } from "@/lib/audio-state-context";
 import { useToast } from "@/lib/toast-context";
-import { formatTime } from "@/utils/formatTime";
-import { cn } from "@/utils/cn";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { TrackList } from "@/components/track";
+import type { TrackRowItem, TrackRowSlots, OverflowConfig } from "@/components/track";
 
 interface PlayHistoryTrack {
     id: string;
@@ -25,16 +23,26 @@ interface PlayHistoryTrack {
     displayTitle?: string | null;
     duration: number;
     filePath?: string;
+    source?: "local" | "tidal" | "youtube";
+    provider?: {
+        tidalTrackId: number | null;
+        youtubeVideoId: string | null;
+    };
     streamSource?: "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    artist?: {
+        id?: string | null;
+        name?: string;
+        mbid?: string;
+    };
     album?: {
-        id?: string;
+        id?: string | null;
         title?: string;
         coverArt?: string;
         coverUrl?: string;
         artist?: {
-            id?: string;
+            id?: string | null;
             name?: string;
             mbid?: string;
         };
@@ -48,22 +56,33 @@ interface PlayHistoryEntry {
 }
 
 function toAudioTrack(track: PlayHistoryTrack) {
+    const artist = track.artist ?? track.album?.artist;
+    const streamSource =
+        track.streamSource ??
+        (track.source === "tidal" || track.source === "youtube"
+            ? track.source
+            : undefined);
+
     return {
         id: track.id,
         title: track.title,
         displayTitle: track.displayTitle,
         duration: track.duration,
         filePath: track.filePath,
-        streamSource: track.streamSource,
-        tidalTrackId: track.tidalTrackId,
-        youtubeVideoId: track.youtubeVideoId,
+        streamSource,
+        tidalTrackId:
+            track.tidalTrackId ??
+            (track.provider?.tidalTrackId ?? undefined),
+        youtubeVideoId:
+            track.youtubeVideoId ??
+            (track.provider?.youtubeVideoId ?? undefined),
         artist: {
-            id: track.album?.artist?.id,
-            name: track.album?.artist?.name || "Unknown Artist",
-            mbid: track.album?.artist?.mbid,
+            id: artist?.id ?? undefined,
+            name: artist?.name || "Unknown Artist",
+            mbid: artist?.mbid,
         },
         album: {
-            id: track.album?.id,
+            id: track.album?.id ?? undefined,
             title: track.album?.title || "Unknown Album",
             coverArt: track.album?.coverArt || track.album?.coverUrl || undefined,
         },
@@ -81,11 +100,28 @@ function formatPlayedAt(isoDate: string): string {
     return new Date(parsed).toLocaleDateString();
 }
 
+function historyToRowItem(entry: PlayHistoryEntry): TrackRowItem {
+    const track = entry.track;
+    const streamSource = track.streamSource ?? (track.source === "tidal" || track.source === "youtube" ? track.source : undefined);
+    const isRemote = streamSource === "tidal" || streamSource === "youtube";
+    const coverArt = track.album?.coverArt || track.album?.coverUrl;
+    return {
+        id: track.id,
+        title: track.title,
+        displayTitle: track.displayTitle,
+        artistName: track.artist?.name || track.album?.artist?.name || "Unknown Artist",
+        duration: track.duration,
+        coverArtUrl: coverArt ? (isRemote ? api.getBrowseImageUrl(coverArt) : api.getCoverArtUrl(coverArt, 100)) : null,
+    };
+}
+
+/**
+ * Renders the MyHistoryPage component.
+ */
 export default function MyHistoryPage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
     const { playTracks } = useAudioControls();
-    const { currentTrack } = useAudioState();
     const { toast } = useToast();
     const [history, setHistory] = useState<PlayHistoryEntry[]>([]);
     const [loading, setLoading] = useState(true);
@@ -118,11 +154,42 @@ export default function MyHistoryPage() {
         [history]
     );
 
-    const handlePlayFromHistory = (index: number) => {
-        if (audioTracks.length === 0) return;
-        playTracks(audioTracks, index);
-        toast.success("Playing from history");
-    };
+    const handlePlayFromHistory = useCallback(
+        (_entry: PlayHistoryEntry, index: number) => {
+            if (audioTracks.length === 0) return;
+            playTracks(audioTracks, index);
+            toast.success("Playing from history");
+        },
+        [audioTracks, playTracks, toast],
+    );
+
+    const historyRowSlots = useCallback((entry: PlayHistoryEntry): TrackRowSlots => {
+        const track = entry.track;
+        const streamSource = track.streamSource ?? (track.source === "tidal" || track.source === "youtube" ? track.source : undefined);
+        const isRemote = streamSource === "tidal" || streamSource === "youtube";
+        return {
+            leadingColumn: null,
+            subtitleExtra: (
+                <>
+                    {isRemote && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                            {streamSource === "tidal" ? <TidalBadge /> : <YouTubeBadge />}
+                        </div>
+                    )}
+                    <p className="text-[11px] text-gray-500 truncate">
+                        {track.album?.title || "Unknown Album"}
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                        Played {formatPlayedAt(entry.playedAt)}
+                    </p>
+                </>
+            ),
+        };
+    }, []);
+
+    const historyRowOverflow = useCallback((entry: PlayHistoryEntry): OverflowConfig => ({
+        track: toAudioTrack(entry.track),
+    }), []);
 
     if (!isAuthenticated) {
         return null;
@@ -185,74 +252,16 @@ export default function MyHistoryPage() {
                         </h2>
 
                         <Card>
-                            <div className="divide-y divide-[#1c1c1c]">
-                                {history.map((entry, index) => {
-                                    const track = entry.track;
-                                    const isCurrentTrack = currentTrack?.id === track.id;
-                                    const coverArt =
-                                        track.album?.coverArt || track.album?.coverUrl;
-                                    return (
-                                        <div
-                                            key={entry.id}
-                                            onClick={() => handlePlayFromHistory(index)}
-                                            className={cn(
-                                                "flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group cursor-pointer",
-                                                isCurrentTrack && "bg-[#3b82f6]/10"
-                                            )}
-                                        >
-                                            <div className="relative flex-shrink-0 w-12 h-12">
-                                                {coverArt ? (
-                                                    <Image
-                                                        src={api.getCoverArtUrl(coverArt, 100)}
-                                                        alt={track.album?.title || "Album"}
-                                                        fill
-                                                        sizes="48px"
-                                                        className="object-cover rounded-sm"
-                                                        unoptimized
-                                                    />
-                                                ) : (
-                                                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                                                        <Music2 className="w-5 h-5 text-gray-600" />
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            <div className="flex-1 min-w-0">
-                                                <p
-                                                    className={cn(
-                                                        "text-sm font-medium truncate",
-                                                        isCurrentTrack ? "text-[#3b82f6]" : "text-white"
-                                                    )}
-                                                >
-                                                    {track.displayTitle ?? track.title}
-                                                </p>
-                                                <p className="text-xs text-gray-400 truncate">
-                                                    {track.album?.artist?.name || "Unknown Artist"}
-                                                </p>
-                                                <p className="text-[11px] text-gray-500 truncate">
-                                                    {track.album?.title || "Unknown Album"}
-                                                </p>
-                                                <p className="text-[11px] text-gray-500 mt-1">
-                                                    Played {formatPlayedAt(entry.playedAt)}
-                                                </p>
-                                            </div>
-
-                                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
-                                                    {formatTime(track.duration)}
-                                                </span>
-                                                <TrackPreferenceButtons
-                                                    trackId={track.id}
-                                                    mode="up-only"
-                                                    buttonSizeClassName="h-8 w-8"
-                                                    iconSizeClassName="h-4 w-4"
-                                                />
-                                                <TrackOverflowMenu track={toAudioTrack(track)} />
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                            <TrackList<PlayHistoryEntry>
+                                items={history}
+                                toRowItem={historyToRowItem}
+                                onPlay={handlePlayFromHistory}
+                                rowSlots={historyRowSlots}
+                                rowOverflow={historyRowOverflow}
+                                rowClassName="grid-cols-[1fr_auto] p-4 hover:bg-[#1a1a1a]"
+                                preferenceMode="up-only"
+                                className="divide-y divide-[#1c1c1c]"
+                            />
                         </Card>
                     </section>
                 )}

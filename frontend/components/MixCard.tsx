@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
-import { Music } from "lucide-react";
 import { api } from "@/lib/api";
-import { memo } from "react";
+import { memo, useMemo } from "react";
+import { CoverMosaic } from "@/components/ui/CoverMosaic";
 
 interface MixCardProps {
     mix: {
@@ -19,6 +18,11 @@ interface MixCardProps {
 
 const MixCard = memo(
     function MixCard({ mix, index }: MixCardProps) {
+        const proxiedUrls = useMemo(
+            () => mix.coverUrls.slice(0, 4).map((url) => api.getCoverArtUrl(url, 300)),
+            [mix.coverUrls],
+        );
+
         return (
             <Link
                 href={`/mix/${mix.id}`}
@@ -29,49 +33,12 @@ const MixCard = memo(
                 <div className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors">
                     {/* Mosaic cover art */}
                     <div className="aspect-square bg-[#282828] rounded-lg mb-3 overflow-hidden relative shadow-lg">
-                        {mix.coverUrls.length > 0 ? (
-                            <div className="grid grid-cols-2 gap-0 w-full h-full">
-                                {mix.coverUrls.slice(0, 4).map((url, idx) => {
-                                    const proxiedUrl = api.getCoverArtUrl(
-                                        url,
-                                        300
-                                    );
-                                    return (
-                                        <div
-                                            key={idx}
-                                            className="relative bg-[#282828]"
-                                        >
-                                            <Image
-                                                src={proxiedUrl}
-                                                alt=""
-                                                fill
-                                                className="object-cover group-hover:scale-105 transition-transform duration-300"
-                                                sizes="180px"
-                                                unoptimized
-                                            />
-                                        </div>
-                                    );
-                                })}
-                                {/* Fill remaining cells if less than 4 covers */}
-                                {Array.from({
-                                    length: Math.max(
-                                        0,
-                                        4 - mix.coverUrls.length
-                                    ),
-                                }).map((_, idx) => (
-                                    <div
-                                        key={`empty-${idx}`}
-                                        className="relative bg-[#282828] flex items-center justify-center"
-                                    >
-                                        <Music className="w-6 h-6 text-gray-600" />
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                                <Music className="w-10 h-10 text-gray-600" />
-                            </div>
-                        )}
+                        <CoverMosaic
+                            coverUrls={proxiedUrls}
+                            hoverScale
+                            imageSizes="180px"
+                            showEmptyCellIcon
+                        />
                     </div>
 
                     <h3 className="text-sm font-semibold text-white truncate">
@@ -85,8 +52,6 @@ const MixCard = memo(
         );
     },
     (prevProps, nextProps) => {
-        // Compare id, name, description, trackCount, and coverUrls to detect content changes
-        // This ensures the card re-renders when mood mix content changes even if ID is the same
         return (
             prevProps.mix.id === nextProps.mix.id &&
             prevProps.mix.name === nextProps.mix.name &&

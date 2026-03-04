@@ -3,6 +3,9 @@
 import { useEffect } from 'react';
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Renders the GlobalError component.
+ */
 export default function GlobalError({
   error,
   reset,

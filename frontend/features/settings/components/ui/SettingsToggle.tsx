@@ -5,6 +5,9 @@ interface SettingsToggleProps {
     disabled?: boolean;
 }
 
+/**
+ * Renders the SettingsToggle component.
+ */
 export function SettingsToggle({ id, checked, onChange, disabled }: SettingsToggleProps) {
     return (
         <label className="relative inline-flex items-center cursor-pointer">

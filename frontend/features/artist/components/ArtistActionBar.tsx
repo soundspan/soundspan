@@ -1,4 +1,4 @@
-import { Play, Pause, Shuffle, Download, Radio, ListMusic, Loader2 } from "lucide-react";
+import { Play, Pause, Shuffle, Download, Radio, ListMusic, Loader2, Plus, Heart } from "lucide-react";
 import { cn } from "@/utils/cn";
 import type { Artist } from "../types";
 import type { Album } from "../types";
@@ -18,6 +18,9 @@ interface ArtistActionBarProps {
     onShuffle: () => void;
     onDownloadAll: () => void;
     onAddAllToQueue?: () => void;
+    onAddToPlaylist?: () => void;
+    onLikeAll?: () => void;
+    isLikingAll?: boolean;
     onStartRadio?: () => void;
     isPendingDownload: boolean;
     isPlaying?: boolean;
@@ -27,6 +30,9 @@ interface ArtistActionBarProps {
     isInListenTogetherGroup?: boolean;
 }
 
+/**
+ * Renders the ArtistActionBar component.
+ */
 export function ArtistActionBar({
     artist: _artist,
     albums,
@@ -36,6 +42,9 @@ export function ArtistActionBar({
     onShuffle,
     onDownloadAll,
     onAddAllToQueue,
+    onAddToPlaylist,
+    onLikeAll,
+    isLikingAll = false,
     onStartRadio,
     isPendingDownload,
     isPlaying = false,
@@ -50,7 +59,7 @@ export function ArtistActionBar({
     const showDownloadAll = downloadsEnabled && (source === "discovery" || availableAlbums.length > 0);
     const showPause = isPlaying && isPlayingThisArtist;
     const showRadio = source === "library" && onStartRadio;
-    const lockMessage = "Listen Together is active. Play and shuffle are disabled here.";
+    const lockMessage = "Listen Together is active — use Add to Queue to add tracks to the shared session.";
     const { showSpinner: showPlaySpinner, trigger: triggerPlayFeedback } =
         usePlayButtonFeedback();
 
@@ -71,10 +80,10 @@ export function ArtistActionBar({
         <div className="space-y-2">
             <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-2.5 py-2 backdrop-blur-sm">
                 {isInListenTogetherGroup ? (
-                    <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl border border-red-500/50 bg-red-500/10 px-2.5 py-1.5">
+                    <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5">
                         <button
                             onClick={handleLockedAction}
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm border border-red-400/60 bg-red-500/20 text-red-100"
+                            className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm border border-white/15 bg-white/10 text-white/40"
                             title={lockMessage}
                         >
                             {showPause ? (
@@ -87,7 +96,7 @@ export function ArtistActionBar({
 
                         <button
                             onClick={handleLockedAction}
-                            className="h-8 w-8 rounded-full border border-red-400/50 bg-red-500/10 flex items-center justify-center text-red-100"
+                            className="h-8 w-8 rounded-full border border-white/15 bg-white/10 flex items-center justify-center text-white/40"
                             title={lockMessage}
                         >
                             <Shuffle className="w-5 h-5" />
@@ -124,6 +133,46 @@ export function ArtistActionBar({
                     </>
                 )}
 
+                {onAddAllToQueue && (
+                    <button
+                        onClick={onAddAllToQueue}
+                        className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                        title="Add all to queue"
+                    >
+                        <ListMusic className="w-5 h-5" />
+                    </button>
+                )}
+
+                {onAddToPlaylist && (
+                    <button
+                        onClick={onAddToPlaylist}
+                        className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                        title="Add all to playlist"
+                    >
+                        <Plus className="w-5 h-5" />
+                    </button>
+                )}
+
+                {onLikeAll && (
+                    <button
+                        onClick={onLikeAll}
+                        disabled={isLikingAll}
+                        className={cn(
+                            "h-8 w-8 rounded-full flex items-center justify-center transition-all",
+                            isLikingAll
+                                ? "cursor-not-allowed text-white/35"
+                                : "text-white/60 hover:bg-white/10 hover:text-white"
+                        )}
+                        title="Like all tracks"
+                    >
+                        {isLikingAll ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                            <Heart className="h-4 w-4" />
+                        )}
+                    </button>
+                )}
+
                 {showDownloadAll && (
                     <button
                         onClick={onDownloadAll}
@@ -144,16 +193,6 @@ export function ArtistActionBar({
                     </button>
                 )}
 
-                {onAddAllToQueue && (
-                    <button
-                        onClick={onAddAllToQueue}
-                        className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
-                        title="Add all to queue"
-                    >
-                        <ListMusic className="w-5 h-5" />
-                    </button>
-                )}
-
                 {/* Radio Button - Only for library artists */}
                 {showRadio && (
                     <button
@@ -167,7 +206,7 @@ export function ArtistActionBar({
             </div>
 
             {isInListenTogetherGroup && (
-                <p className="text-xs text-red-300">
+                <p className="text-xs text-white/40">
                     {lockMessage}
                 </p>
             )}

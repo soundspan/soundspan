@@ -26,6 +26,9 @@ export interface LidarrSettings {
     lidarrApiKey?: string;
 }
 
+/**
+ * Represents the DiscoveryAlbumLifecycle class.
+ */
 export class DiscoveryAlbumLifecycle {
     /**
      * Moves a LIKED discovery album to the permanent LIBRARY.

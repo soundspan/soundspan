@@ -14,6 +14,9 @@ import {
     type PlayHistorySummary,
 } from "./playbackHistoryConfig";
 
+/**
+ * Renders the PlaybackHistorySection component.
+ */
 export function PlaybackHistorySection() {
     const [selectedRange, setSelectedRange] = useState<HistoryRange>("30d");
     const [confirmClear, setConfirmClear] = useState(false);

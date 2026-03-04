@@ -20,6 +20,7 @@
       "artist",
       "audiobook",
       "discover",
+      "explore",
       "home",
       "library",
       "podcast",
@@ -41,16 +42,22 @@
       "frontend": {
         "feature_dirs": [
           "library",
-          "home"
+          "home",
+          "explore"
         ],
         "routes": [
           "frontend/app/library/page.tsx",
           "frontend/app/page.tsx",
+          "frontend/app/explore/page.tsx",
           "frontend/app/radio/page.tsx"
         ],
         "primary_files": [
           "frontend/features/library/components/TracksList.tsx",
           "frontend/features/home/components/LibraryRadioStations.tsx",
+          "frontend/features/explore/hooks/useExploreData.ts",
+          "frontend/features/explore/components/MadeForYouSection.tsx",
+          "frontend/features/explore/components/FeaturedShelvesSection.tsx",
+          "frontend/features/explore/components/MoodsGenresSection.tsx",
           "frontend/components/player/MiniPlayer.tsx"
         ]
       },
@@ -74,7 +81,13 @@
         "primary_specs": [
           "backend/src/routes/__tests__/libraryRuntime.test.ts",
           "backend/src/routes/__tests__/homepageRuntime.test.ts",
-          "frontend/tests/component/trackPreferenceButtons.component.test.ts"
+          "frontend/tests/component/trackPreferenceButtons.component.test.ts",
+          "frontend/tests/component/explorePage.component.test.ts",
+          "frontend/tests/component/exploreMadeForYouSection.component.test.ts",
+          "frontend/tests/component/exploreFeaturedShelvesSection.component.test.ts",
+          "frontend/tests/component/exploreMoodsGenresTab.component.test.ts",
+          "frontend/tests/unit/exploreGenreClassification.test.ts",
+          "frontend/tests/unit/exploreNavigation.test.ts"
         ]
       },
       "docs": [

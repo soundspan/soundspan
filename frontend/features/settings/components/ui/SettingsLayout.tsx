@@ -10,6 +10,9 @@ interface SettingsLayoutProps {
     title?: string;
 }
 
+/**
+ * Renders the SettingsLayout component.
+ */
 export function SettingsLayout({ children, sidebarItems, isAdmin, title = "Settings" }: SettingsLayoutProps) {
     const [activeSection, setActiveSection] = useState(sidebarItems[0]?.id || "");
     const mainContentRef = useRef<HTMLDivElement>(null);

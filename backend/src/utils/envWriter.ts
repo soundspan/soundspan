@@ -12,6 +12,9 @@ const STALE_ENV_SYNC_KEYS = [
     "MULLVAD_SERVER_CITY",
 ] as const;
 
+/**
+ * Represents the EnvFileSyncSkippedError class.
+ */
 export class EnvFileSyncSkippedError extends Error {
     constructor(message: string) {
         super(message);

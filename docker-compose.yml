@@ -318,6 +318,10 @@ services:
             # auto prefers native ytmusicapi search and falls back to TV per-user
             # when #813 invalid-argument responses occur.
             YTMUSIC_SEARCH_MODE: ${YTMUSIC_SEARCH_MODE:-auto}
+            # BCP-47 language code for YTMusic shelf titles and content descriptions
+            YTMUSIC_LANGUAGE: ${YTMUSIC_LANGUAGE:-en}
+            # Comma-separated shelf titles to exclude from /home (case-insensitive)
+            YTMUSIC_HOME_FILTERED_SHELVES: ${YTMUSIC_HOME_FILTERED_SHELVES:-Quick picks}
         volumes:
             - ytmusic_data:/data
         restart: unless-stopped

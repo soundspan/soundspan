@@ -29,7 +29,8 @@ interface AlbumActionBarProps {
     onShuffle: () => void;
     onDownloadAlbum: () => void;
     onAddToPlaylist: () => void;
-    onThumbsUpAlbum?: () => void;
+    onToggleAlbumLike?: () => void;
+    isAlbumLiked?: boolean;
     isPendingDownload: boolean;
     isApplyingAlbumPreference?: boolean;
     isPlaying?: boolean;
@@ -39,6 +40,9 @@ interface AlbumActionBarProps {
     isInListenTogetherGroup?: boolean;
 }
 
+/**
+ * Renders the AlbumActionBar component.
+ */
 export function AlbumActionBar({
     album,
     source,
@@ -48,7 +52,8 @@ export function AlbumActionBar({
     onShuffle,
     onDownloadAlbum,
     onAddToPlaylist,
-    onThumbsUpAlbum,
+    onToggleAlbumLike,
+    isAlbumLiked = false,
     isPendingDownload,
     isApplyingAlbumPreference = false,
     isPlaying = false,
@@ -63,10 +68,10 @@ export function AlbumActionBar({
     const albumMbid = album.rgMbid || album.mbid || album.id;
     const showPause = isPlaying && isPlayingThisAlbum;
     const hasLockedControls = isOwned || showDownload;
-    const lockMessage = "Listen Together is active. Play, shuffle, and download are disabled here.";
+    const lockMessage = "Listen Together is active — use Add to Queue to add tracks to the shared session.";
     const canShowAddAllToQueue = Boolean(onAddAllToQueue);
     const canShowAddToPlaylist = isOwned;
-    const canShowAlbumPreference = isOwned && Boolean(onThumbsUpAlbum);
+    const canShowAlbumPreference = isOwned && Boolean(onToggleAlbumLike);
     const hasActionControls =
         isInListenTogetherGroup
             ? hasLockedControls ||
@@ -100,12 +105,12 @@ export function AlbumActionBar({
                 <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-2.5 py-2 backdrop-blur-sm">
                     {isInListenTogetherGroup ? (
                         hasLockedControls ? (
-                            <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl border border-red-500/50 bg-red-500/10 px-2.5 py-1.5">
+                            <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5">
                                 {isOwned && (
                                     <>
                                         <button
                                             onClick={handleLockedAction}
-                                            className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm border border-red-400/60 bg-red-500/20 text-red-100"
+                                            className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm border border-white/15 bg-white/10 text-white/40"
                                             title={lockMessage}
                                         >
                                             {showPause ? (
@@ -118,7 +123,7 @@ export function AlbumActionBar({
 
                                         <button
                                             onClick={handleLockedAction}
-                                            className="h-8 w-8 rounded-full border border-red-400/50 bg-red-500/10 flex items-center justify-center text-red-100"
+                                            className="h-8 w-8 rounded-full border border-white/15 bg-white/10 flex items-center justify-center text-white/40"
                                             title={lockMessage}
                                         >
                                             <Shuffle className="w-5 h-5" />
@@ -131,7 +136,7 @@ export function AlbumActionBar({
                                         <button
                                             onClick={handleLockedAction}
                                             className={cn(
-                                                "flex items-center gap-2 px-5 py-2.5 rounded-full font-medium border border-red-400/50 bg-red-500/10 text-red-100",
+                                                "flex items-center gap-2 px-5 py-2.5 rounded-full font-medium border border-white/15 bg-white/10 text-white/40",
                                                 isPendingDownload && "opacity-70"
                                             )}
                                             title={lockMessage}
@@ -143,7 +148,7 @@ export function AlbumActionBar({
                                         </button>
                                         <button
                                             onClick={handleLockedAction}
-                                            className="flex items-center gap-2 rounded-full border border-red-400/50 bg-red-500/10 px-4 py-2.5 font-medium text-red-100"
+                                            className="flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2.5 font-medium text-white/40"
                                             title={lockMessage}
                                         >
                                             <Search className="w-4 h-4" />
@@ -222,6 +227,7 @@ export function AlbumActionBar({
                         </>
                     )}
 
+                    {/* Add to Queue Button */}
                     {onAddAllToQueue && (
                         <button
                             onClick={onAddAllToQueue}
@@ -245,22 +251,24 @@ export function AlbumActionBar({
 
                     {canShowAlbumPreference && (
                         <div className="flex items-center gap-1.5">
-                            {onThumbsUpAlbum && (
+                            {onToggleAlbumLike && (
                                 <button
-                                    onClick={onThumbsUpAlbum}
+                                    onClick={onToggleAlbumLike}
                                     disabled={isApplyingAlbumPreference}
                                     className={cn(
                                         "h-8 w-8 rounded-full flex items-center justify-center transition-colors",
                                         isApplyingAlbumPreference ?
                                             "cursor-not-allowed text-white/35"
+                                        : isAlbumLiked ?
+                                            "text-[#3b82f6] hover:bg-white/10"
                                         :   "text-white/60 hover:bg-white/10 hover:text-white"
                                     )}
-                                    title="Like every track on this album"
+                                    title={isAlbumLiked ? "Remove like from all tracks" : "Like every track on this album"}
                                 >
                                     {isApplyingAlbumPreference ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                     ) : (
-                                        <Heart className="h-4 w-4" />
+                                        <Heart className={cn("h-4 w-4", isAlbumLiked && "fill-current")} />
                                     )}
                                 </button>
                             )}
@@ -270,7 +278,7 @@ export function AlbumActionBar({
             )}
 
             {isInListenTogetherGroup && hasLockedControls && (
-                <p className="text-xs text-red-300">
+                <p className="text-xs text-white/40">
                     {lockMessage}
                 </p>
             )}

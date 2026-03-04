@@ -9,6 +9,9 @@ interface ArtistBioProps {
   bio: string;
 }
 
+/**
+ * Renders the ArtistBio component.
+ */
 export function ArtistBio({ bio }: ArtistBioProps) {
   const safeBio = bio || "";
   const isMobile = useIsMobile();

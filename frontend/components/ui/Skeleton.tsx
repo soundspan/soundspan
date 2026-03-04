@@ -6,6 +6,9 @@ interface SkeletonProps {
     className?: string;
 }
 
+/**
+ * Renders the Skeleton component.
+ */
 export function Skeleton({ className }: SkeletonProps) {
     return (
         <div
@@ -14,6 +17,9 @@ export function Skeleton({ className }: SkeletonProps) {
     );
 }
 
+/**
+ * Renders the ArtistCardSkeleton component.
+ */
 export function ArtistCardSkeleton({ count = 6 }: { count?: number }) {
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -31,6 +37,9 @@ export function ArtistCardSkeleton({ count = 6 }: { count?: number }) {
     );
 }
 
+/**
+ * Renders the AlbumCardSkeleton component.
+ */
 export function AlbumCardSkeleton({ count = 6 }: { count?: number }) {
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -49,6 +58,9 @@ export function AlbumCardSkeleton({ count = 6 }: { count?: number }) {
     );
 }
 
+/**
+ * Renders the TrackListSkeleton component.
+ */
 export function TrackListSkeleton({ count = 10 }: { count?: number }) {
     return (
         <div className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-sm divide-y divide-[#1c1c1c]">
@@ -67,6 +79,9 @@ export function TrackListSkeleton({ count = 10 }: { count?: number }) {
     );
 }
 
+/**
+ * Renders the HeroSkeleton component.
+ */
 export function HeroSkeleton() {
     return (
         <div className="relative bg-gradient-to-b from-blue-900/20 to-transparent">

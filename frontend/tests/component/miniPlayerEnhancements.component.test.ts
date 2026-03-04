@@ -43,6 +43,7 @@ mock.module("lucide-react", {
         Loader2: Icon,
         RefreshCw: Icon,
         SkipForward: Icon,
+        X: Icon,
     },
 });
 
@@ -135,6 +136,27 @@ mock.module("framer-motion", {
     },
 });
 
+// Mock audio-state-context
+mock.module("@/lib/audio-state-context", {
+    namedExports: {
+        useAudioState: () => ({
+            currentTrack: state.currentTrack,
+            currentAudiobook: state.currentAudiobook,
+            currentPodcast: state.currentPodcast,
+            playbackType: state.playbackType,
+        }),
+    },
+});
+
+// Mock audio-playback-context
+mock.module("@/lib/audio-playback-context", {
+    namedExports: {
+        useAudioPlayback: () => ({
+            streamProfile: null,
+        }),
+    },
+});
+
 // Mock TidalBadge
 mock.module("@/components/ui/TidalBadge", {
     namedExports: {
@@ -174,7 +196,7 @@ beforeEach(() => {
 });
 
 test("MiniPlayer renders Next Track button", async () => {
-    const { MiniPlayer } = await import("../../components/player/MiniPlayer.tsx");
+    const { MiniPlayer } = await import("../../components/player/MiniPlayer");
 
     const html = renderToStaticMarkup(React.createElement(MiniPlayer));
 
@@ -183,7 +205,7 @@ test("MiniPlayer renders Next Track button", async () => {
 });
 
 test("MiniPlayer renders thumbs-up (TrackPreferenceButtons) for tracks", async () => {
-    const { MiniPlayer } = await import("../../components/player/MiniPlayer.tsx");
+    const { MiniPlayer } = await import("../../components/player/MiniPlayer");
 
     const html = renderToStaticMarkup(React.createElement(MiniPlayer));
 
@@ -196,7 +218,7 @@ test("MiniPlayer does not render Next/thumbs when no media playing", async () =>
     state.currentTrack = null;
     state.playbackType = null;
 
-    const { MiniPlayer } = await import("../../components/player/MiniPlayer.tsx");
+    const { MiniPlayer } = await import("../../components/player/MiniPlayer");
 
     const html = renderToStaticMarkup(React.createElement(MiniPlayer));
 
@@ -210,7 +232,7 @@ test("MiniPlayer does not render thumbs for audiobook playback", async () => {
     state.currentAudiobook = { id: "ab1", title: "Test Audiobook", duration: 3600 };
     state.playbackType = "audiobook";
 
-    const { MiniPlayer } = await import("../../components/player/MiniPlayer.tsx");
+    const { MiniPlayer } = await import("../../components/player/MiniPlayer");
 
     const html = renderToStaticMarkup(React.createElement(MiniPlayer));
 
@@ -221,15 +243,15 @@ test("MiniPlayer does not render thumbs for audiobook playback", async () => {
 });
 
 test("MiniPlayer renders playback quality badge label with shared badge component", async () => {
-    state.qualityBadge = { variant: "tidal", label: "TIDAL · FLAC · 24/96kHz" };
+    state.qualityBadge = { variant: "tidal", label: "FLAC · 24/96kHz" };
 
-    const { MiniPlayer } = await import("../../components/player/MiniPlayer.tsx");
+    const { MiniPlayer } = await import("../../components/player/MiniPlayer");
 
     const html = renderToStaticMarkup(React.createElement(MiniPlayer));
 
     assert.match(
         html,
-        /TIDAL · FLAC · 24\/96kHz/,
+        /FLAC · 24\/96kHz/,
         "Should render shared quality badge label text"
     );
     assert.match(

@@ -17,6 +17,7 @@ import {
     Volume2,
     VolumeX,
     ChevronUp,
+    ChevronDown,
     Music as MusicIcon,
     Shuffle,
     Repeat,
@@ -32,6 +33,7 @@ import { formatTime, clampTime } from "@/utils/formatTime";
 import { SeekSlider } from "./SeekSlider";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
+import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { PlaybackQualityBadgeWithStats } from "./PlaybackQualityBadgeWithStats";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 import { useFeatures } from "@/lib/features-context";
@@ -87,7 +89,6 @@ export function FullPlayer() {
         toggleRepeat,
         startVibeMode,
         stopVibeMode,
-        playTracks,
         setUpcoming,
     } = useAudioControls();
     const preferenceTrackId =
@@ -361,7 +362,7 @@ export function FullPlayer() {
                                 <Link
                                     href={mediaLink}
                                     prefetch={false}
-                                    className="block hover:underline"
+                                    className="block w-fit hover:underline"
                                 >
                                     <h4 className="text-white font-semibold truncate text-sm">
                                         {title}
@@ -376,7 +377,7 @@ export function FullPlayer() {
                                 <Link
                                     href={artistLink}
                                     prefetch={false}
-                                    className="block hover:underline"
+                                    className="block w-fit hover:underline"
                                 >
                                     <p className="text-xs text-gray-400 truncate">
                                         {subtitle}
@@ -386,7 +387,7 @@ export function FullPlayer() {
                                 <Link
                                     href={mediaLink}
                                     prefetch={false}
-                                    className="block hover:underline"
+                                    className="block w-fit hover:underline"
                                 >
                                     <p className="text-xs text-gray-400 truncate">
                                         {subtitle}
@@ -613,6 +614,7 @@ export function FullPlayer() {
                                 trackId={preferenceTrackId}
                                 buttonSizeClassName="h-8 w-8"
                                 iconSizeClassName="h-[18px] w-[18px]"
+                                metadata={buildPreferenceMetadata(currentTrack)}
                             />
 
                             {/* 3-dot context menu for current track */}
@@ -676,7 +678,13 @@ export function FullPlayer() {
                             </div>
 
                             <button
-                                onClick={() => setPlayerMode("overlay")}
+                                onClick={() => {
+                                    if (playerMode === "overlay") {
+                                        returnToPreviousMode();
+                                    } else {
+                                        setPlayerMode("overlay");
+                                    }
+                                }}
                                 className={cn(
                                     "flex items-center justify-center w-8 h-8 transition-all duration-200",
                                     hasMedia
@@ -684,10 +692,14 @@ export function FullPlayer() {
                                         : "text-gray-600 cursor-not-allowed"
                                 )}
                                 disabled={!hasMedia}
-                                aria-label="Open overlay player"
-                                title="Open overlay player"
+                                aria-label={playerMode === "overlay" ? "Close overlay player" : "Open overlay player"}
+                                title={playerMode === "overlay" ? "Close overlay player" : "Open overlay player"}
                             >
-                                <ChevronUp className="w-[18px] h-[18px]" />
+                                {playerMode === "overlay" ? (
+                                    <ChevronDown className="w-[18px] h-[18px]" />
+                                ) : (
+                                    <ChevronUp className="w-[18px] h-[18px]" />
+                                )}
                             </button>
                         </div>
                     </div>

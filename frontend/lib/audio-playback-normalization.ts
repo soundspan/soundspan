@@ -1,7 +1,13 @@
+/**
+ * Executes clampNonNegativePlaybackTime.
+ */
 export function clampNonNegativePlaybackTime(timeSec: number): number {
     return Math.max(0, timeSec);
 }
 
+/**
+ * Executes resolvePlaybackTimeUpperBound.
+ */
 export function resolvePlaybackTimeUpperBound(
     mediaDurationSec: number,
     engineDurationSec = 0
@@ -11,6 +17,9 @@ export function resolvePlaybackTimeUpperBound(
         : mediaDurationSec || engineDurationSec || 0;
 }
 
+/**
+ * Executes clampPlaybackTimeToUpperBound.
+ */
 export function clampPlaybackTimeToUpperBound(
     timeSec: number,
     upperBoundSec: number

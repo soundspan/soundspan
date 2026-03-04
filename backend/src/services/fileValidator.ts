@@ -12,6 +12,9 @@ export interface ValidationResult {
     duration: number;
 }
 
+/**
+ * Represents the FileValidatorService class.
+ */
 export class FileValidatorService {
     private validationQueue = new PQueue({ concurrency: 50 });
 

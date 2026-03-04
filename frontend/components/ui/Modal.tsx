@@ -14,6 +14,9 @@ export interface ModalProps {
     className?: string;
 }
 
+/**
+ * Renders the Modal component.
+ */
 export function Modal({
     isOpen,
     onClose,

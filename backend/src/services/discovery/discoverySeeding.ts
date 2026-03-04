@@ -17,6 +17,9 @@ export interface SeedArtist {
     mbid?: string;
 }
 
+/**
+ * Represents the DiscoverySeeding class.
+ */
 export class DiscoverySeeding {
     private readonly DEFAULT_SEED_COUNT = 10;
     private readonly MIN_PLAYS_THRESHOLD = 5;
@@ -46,9 +49,16 @@ export class DiscoverySeeding {
             return this.getFallbackSeedArtists(limit);
         }
 
+        const recentTrackIds = recentPlays
+            .map((play) => play.trackId)
+            .filter((trackId): trackId is string => typeof trackId === "string");
+        if (recentTrackIds.length === 0) {
+            return this.getFallbackSeedArtists(limit);
+        }
+
         const tracks = await prisma.track.findMany({
             where: {
-                id: { in: recentPlays.map((p) => p.trackId) },
+                id: { in: recentTrackIds },
                 album: { location: 'LIBRARY' },
             },
             include: { album: { include: { artist: true } } },

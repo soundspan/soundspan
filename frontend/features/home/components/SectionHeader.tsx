@@ -7,7 +7,7 @@ interface SectionHeaderProps {
     title: string;
     showAllHref?: string;
     rightAction?: React.ReactNode;
-    badge?: string;
+    badge?: React.ReactNode;
 }
 
 const SectionHeader = memo(function SectionHeader({

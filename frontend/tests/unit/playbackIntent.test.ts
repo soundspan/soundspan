@@ -3,7 +3,7 @@ import test from "node:test";
 import {
     resolveHydratedPlaybackIntent,
     resolveMachinePlaybackIntent,
-} from "../../lib/playback-intent.ts";
+} from "../../lib/playback-intent";
 
 test("resolveHydratedPlaybackIntent restores resumed and paused states from server", () => {
     assert.equal(resolveHydratedPlaybackIntent({ isPlaying: true }, false), true);

@@ -144,10 +144,16 @@ function fetchLocalTrackQuality(
     return request;
 }
 
+/**
+ * Executes friendlyCodecName.
+ */
 export function friendlyCodecName(raw: string): string {
     return CODEC_FRIENDLY_NAMES[raw] || raw;
 }
 
+/**
+ * Executes formatSampleRateKHz.
+ */
 export function formatSampleRateKHz(hz?: number | null): string | null {
     if (!hz || !Number.isFinite(hz) || hz <= 0) return null;
     const khz = hz / 1000;
@@ -172,6 +178,9 @@ function isLosslessCodec(codec?: string | null): boolean {
     );
 }
 
+/**
+ * Executes resolveEffectiveLocalPlaybackQuality.
+ */
 export function resolveEffectiveLocalPlaybackQuality(input: {
     sourceQuality: LocalTrackQuality | null;
     playbackQuality: LocalTrackQuality | null;
@@ -219,6 +228,9 @@ export function resolveEffectiveLocalPlaybackQuality(input: {
     };
 }
 
+/**
+ * Executes isLikelyLosslessTidal.
+ */
 export function isLikelyLosslessTidal(quality: TidalStreamQuality): boolean {
     if (quality.bitDepth && quality.sampleRate) return true;
     if (/LOSSLESS/i.test(quality.quality || "")) return true;
@@ -226,6 +238,9 @@ export function isLikelyLosslessTidal(quality: TidalStreamQuality): boolean {
     return codec === "FLAC" || codec === "ALAC" || codec === "WAV" || codec === "PCM";
 }
 
+/**
+ * Executes estimateTidalLossyBitrateKbps.
+ */
 export function estimateTidalLossyBitrateKbps(qualityTier?: string): number | null {
     const tier = (qualityTier || "").toUpperCase();
     if (tier === "LOW") return 96;
@@ -234,26 +249,37 @@ export function estimateTidalLossyBitrateKbps(qualityTier?: string): number | nu
     return null;
 }
 
+/**
+ * Executes formatTidalQualityBadge.
+ */
 export function formatTidalQualityBadge(quality?: TidalStreamQuality | null): string | null {
     if (!quality) return null;
     const codec = normalizeCodecLabel(quality.codec);
-    const codecPart = codec ? ` · ${codec}` : "";
 
     if (isLikelyLosslessTidal(quality)) {
         const sampleRate = formatSampleRateKHz(quality.sampleRate);
-        if (sampleRate) {
-            return `TIDAL${codecPart} · ${quality.bitDepth || "?"}/${sampleRate}`;
+        if (codec && sampleRate) {
+            return `${codec} · ${quality.bitDepth || "?"}/${sampleRate}`;
         }
-        return `TIDAL${codecPart}`;
+        if (sampleRate) {
+            return `${quality.bitDepth || "?"}/${sampleRate}`;
+        }
+        return codec || "Lossless";
     }
 
     const bitrate = estimateTidalLossyBitrateKbps(quality.quality);
-    if (bitrate) {
-        return `TIDAL${codecPart} · ${bitrate} kbps`;
+    if (codec && bitrate) {
+        return `${codec} · ${bitrate} kbps`;
     }
-    return `TIDAL${codecPart}`;
+    if (bitrate) {
+        return `${bitrate} kbps`;
+    }
+    return codec || null;
 }
 
+/**
+ * Executes formatLocalQualityBadge.
+ */
 export function formatLocalQualityBadge(quality?: LocalTrackQuality | null): string | null {
     if (!quality) return null;
     const codec = normalizeCodecLabel(quality.codec);
@@ -268,19 +294,22 @@ export function formatLocalQualityBadge(quality?: LocalTrackQuality | null): str
     }
 
     if (quality.bitrate && quality.bitrate > 0) {
-        return `${codecLabel} · ${quality.bitrate} kbps`;
+        return `${codecLabel} · ${Math.round(quality.bitrate)} kbps`;
     }
     return codecLabel;
 }
 
-export function formatYtQualityBadge(codec?: string | null, bitrate?: number | null): string {
+/**
+ * Executes formatYtQualityBadge.
+ */
+export function formatYtQualityBadge(codec?: string | null, bitrate?: number | null): string | null {
     const codecLabel = normalizeCodecLabel(codec);
-    const bitrateLabel = bitrate && bitrate > 0 ? `${bitrate} kbps` : null;
+    const bitrateLabel = bitrate && bitrate > 0 ? `${Math.round(bitrate)} kbps` : null;
 
-    if (codecLabel && bitrateLabel) return `YOUTUBE · ${codecLabel} · ${bitrateLabel}`;
-    if (codecLabel) return `YOUTUBE · ${codecLabel}`;
-    if (bitrateLabel) return `YOUTUBE · ${bitrateLabel}`;
-    return "YOUTUBE";
+    if (codecLabel && bitrateLabel) return `${codecLabel} · ${bitrateLabel}`;
+    if (codecLabel) return codecLabel;
+    if (bitrateLabel) return bitrateLabel;
+    return null;
 }
 
 export interface PlaybackQualityBadge {
@@ -290,6 +319,9 @@ export interface PlaybackQualityBadge {
 
 export type PlaybackStreamSource = "local" | "tidal" | "youtube";
 
+/**
+ * Executes resolvePlaybackQualityBadge.
+ */
 export function resolvePlaybackQualityBadge(input: {
     streamSource?: PlaybackStreamSource;
     tidalQuality: TidalStreamQuality | null;
@@ -300,14 +332,14 @@ export function resolvePlaybackQualityBadge(input: {
     if (input.streamSource === "tidal") {
         return {
             variant: "tidal",
-            label: formatTidalQualityBadge(input.tidalQuality) || "TIDAL",
+            label: formatTidalQualityBadge(input.tidalQuality) || "Unknown",
         };
     }
 
     if (input.streamSource === "youtube") {
         return {
             variant: "youtube",
-            label: formatYtQualityBadge(input.codec, input.bitrate),
+            label: formatYtQualityBadge(input.codec, input.bitrate) || "Unknown",
         };
     }
 
@@ -322,6 +354,9 @@ export function resolvePlaybackQualityBadge(input: {
     };
 }
 
+/**
+ * Executes resolvePlaybackQualityBadgeFromStreamSource.
+ */
 export function resolvePlaybackQualityBadgeFromStreamSource(
     streamSource: PlaybackStreamSource | undefined,
 ): PlaybackQualityBadge | null {

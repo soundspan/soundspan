@@ -4,7 +4,7 @@ import {
     normalizeApiBaseUrlInput,
     resolveApiBaseUrl,
     resolveApiPathMode,
-} from "../../lib/api-base-url.ts";
+} from "../../lib/api-base-url";
 
 test("resolveApiBaseUrl auto mode uses proxy path on canonical frontend ports", () => {
     const result = resolveApiBaseUrl({
@@ -105,6 +105,21 @@ test("resolveApiBaseUrl server mode uses BACKEND_URL and strips trailing slash",
     assert.equal(result, "http://127.0.0.1:3007");
 });
 
+test("resolveApiBaseUrl server mode falls back to default backend URL", () => {
+    const result = resolveApiBaseUrl({
+        isServer: true,
+    });
+    assert.equal(result, "http://127.0.0.1:3006");
+});
+
+test("resolveApiBaseUrl direct mode returns empty when browser location is unavailable", () => {
+    const result = resolveApiBaseUrl({
+        isServer: false,
+        apiPathMode: "direct",
+    });
+    assert.equal(result, "");
+});
+
 test("resolveApiPathMode trims and lowercases mode values", () => {
     assert.equal(resolveApiPathMode(" PROXY "), "proxy");
     assert.equal(resolveApiPathMode(" DiReCt "), "direct");
@@ -113,6 +128,7 @@ test("resolveApiPathMode trims and lowercases mode values", () => {
 test("resolveApiPathMode falls back to auto for empty or invalid values", () => {
     assert.equal(resolveApiPathMode(""), "auto");
     assert.equal(resolveApiPathMode("bogus"), "auto");
+    assert.equal(resolveApiPathMode(undefined), "auto");
 });
 
 test("normalizeApiBaseUrlInput trims and removes all trailing slashes", () => {
@@ -125,4 +141,18 @@ test("normalizeApiBaseUrlInput trims and removes all trailing slashes", () => {
 test("normalizeApiBaseUrlInput returns null for missing or whitespace input", () => {
     assert.equal(normalizeApiBaseUrlInput(undefined), null);
     assert.equal(normalizeApiBaseUrlInput("   "), null);
+});
+
+test("resolveApiBaseUrl direct mode falls back to browser host when configured URL is whitespace", () => {
+    const result = resolveApiBaseUrl({
+        isServer: false,
+        apiPathMode: "direct",
+        configuredApiUrl: "   ",
+        browserLocation: {
+            protocol: "http:",
+            hostname: "localhost",
+            port: "3030",
+        },
+    });
+    assert.equal(result, "http://localhost:3006");
 });

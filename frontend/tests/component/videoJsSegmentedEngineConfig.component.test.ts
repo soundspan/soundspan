@@ -393,13 +393,13 @@ beforeEach(() => {
         },
     };
 
-    globalScope.window = {
+    (globalScope as any).window = {
         location: {
             origin: "https://example.test",
         },
     };
 
-    globalScope.document = {
+    (globalScope as any).document = {
         createElement: () => mediaElement,
         body,
     };
@@ -413,21 +413,21 @@ afterEach(() => {
     }
 
     if (typeof previousWindow === "undefined") {
-        delete globalScope.window;
+        delete (globalScope as any).window;
     } else {
-        globalScope.window = previousWindow;
+        (globalScope as any).window = previousWindow;
     }
 
     if (typeof previousDocument === "undefined") {
-        delete globalScope.document;
+        delete (globalScope as any).document;
     } else {
-        globalScope.document = previousDocument;
+        (globalScope as any).document = previousDocument;
     }
 });
 
 test("applies steady-state buffer controls immediately for DASH VOD", async () => {
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -464,7 +464,7 @@ test("reapplies steady-state controls when preset matches but VHS globals drift"
     state.durationSec = Number.POSITIVE_INFINITY;
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -498,7 +498,7 @@ test("reapplies steady-state controls when preset matches but VHS globals drift"
 
 test("detaches request hooks before src transition and reattaches after load", async () => {
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -525,7 +525,7 @@ test("detaches request hooks before src transition and reattaches after load", a
 
 test("does not clear stale quality levels before new source quality list binds", async () => {
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -565,7 +565,7 @@ test("emits manifeststall when DASH manifest succeeds without a segment response
     mock.timers.enable();
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
     const manifestStallEvents: Array<Record<string, unknown>> = [];
@@ -601,7 +601,7 @@ test("emits manifeststall when DASH manifest succeeds without a segment response
         { statusCode: 200 },
     );
 
-    mock.timers.tick(1_499);
+    mock.timers.tick(3_999);
     assert.equal(manifestStallEvents.length, 0);
 
     mock.timers.tick(1);
@@ -633,7 +633,7 @@ test("cancels manifeststall timer when the first segment response arrives", asyn
     mock.timers.enable();
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
     const manifestStallEvents: Array<Record<string, unknown>> = [];
@@ -687,7 +687,7 @@ test("cancels manifeststall timer when source is reset before timeout", async ()
     mock.timers.enable();
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
     const manifestStallEvents: Array<Record<string, unknown>> = [];
@@ -738,7 +738,7 @@ test("keeps steady-state controls for live DASH and applies dash.js liveDelay wh
     state.durationSec = Number.POSITIVE_INFINITY;
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -774,7 +774,7 @@ test("keeps steady-state controls for live DASH when dash.js runtime is unavaila
     state.durationSec = Number.POSITIVE_INFINITY;
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -799,7 +799,7 @@ test("retains steady-state controls while DASH live/vod state becomes knowable",
     state.durationSec = 0;
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -826,7 +826,7 @@ test("keeps steady-state controls when DASH live/vod state remains unknown after
     state.durationSec = 0;
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -857,7 +857,7 @@ test("keeps steady-state controls when DASH live/vod state remains unknown after
 
 test("uses steady-state controls for DASH and keeps steady-state on non-DASH source load", async () => {
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -890,7 +890,7 @@ test("ignores runtime fragment duration for startup buffer controls", async () =
     };
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 
@@ -921,7 +921,7 @@ test("keeps explicit runtime VHS buffer overrides for DASH VOD tuning", async ()
     };
 
     const { VideoJsSegmentedEngine } = await import(
-        "../../lib/audio-engine/videoJsSegmentedEngine.ts"
+        "../../lib/audio-engine/videoJsSegmentedEngine"
     );
     const engine = new VideoJsSegmentedEngine();
 

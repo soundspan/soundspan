@@ -14,6 +14,9 @@ interface SettingsSelectProps {
     disabled?: boolean;
 }
 
+/**
+ * Renders the SettingsSelect component.
+ */
 export function SettingsSelect({ id, value, onChange, options, disabled }: SettingsSelectProps) {
     return (
         <div className="relative">

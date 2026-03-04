@@ -48,6 +48,16 @@ import { tidalStreamingService } from "../tidalStreaming";
 describe("tidal streaming service", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockClient.get.mockReset();
+        mockClient.post.mockReset();
+        mockPrisma.systemSettings.findUnique.mockReset();
+        mockPrisma.userSettings.findUnique.mockReset();
+        mockPrisma.userSettings.update.mockReset();
+        mockEncrypt.mockClear();
+        (tidalStreamingService as any).availabilityCache = null;
+        (tidalStreamingService as any).enabledCache = null;
+        (tidalStreamingService as any).availabilityInFlight = null;
+        (tidalStreamingService as any).enabledInFlight = null;
     });
 
     describe("availability and auth status", () => {
@@ -72,12 +82,16 @@ describe("tidal streaming service", () => {
                 tidalEnabled: true,
             });
             await expect(tidalStreamingService.isEnabled()).resolves.toBe(true);
+            (tidalStreamingService as any).enabledCache = null;
+            (tidalStreamingService as any).enabledInFlight = null;
 
             mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
                 id: "default",
                 tidalEnabled: false,
             });
             await expect(tidalStreamingService.isEnabled()).resolves.toBe(false);
+            (tidalStreamingService as any).enabledCache = null;
+            (tidalStreamingService as any).enabledInFlight = null;
 
             mockPrisma.systemSettings.findUnique.mockRejectedValueOnce(
                 new Error("db unavailable")

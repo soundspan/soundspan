@@ -88,6 +88,9 @@ function sortAlbumsNewestFirst(albums: ArtistPlaybackAlbum[]): ArtistPlaybackAlb
     return [...albums].sort((a, b) => toNumber(b.year, 0) - toNumber(a.year, 0));
 }
 
+/**
+ * Executes loadOwnedArtistTracksNewestFirst.
+ */
 export async function loadOwnedArtistTracksNewestFirst({
     artistId,
     artistName,

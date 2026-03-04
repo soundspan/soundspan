@@ -9,7 +9,7 @@ import {
     normalizeSegmentedStartupFallbackTimeoutMs,
     normalizeSegmentedVhsProfile,
     normalizeStreamingEngineMode,
-} from "../../lib/runtime-config/normalization.ts";
+} from "../../lib/runtime-config/normalization";
 
 test("normalizeStreamingEngineMode trims, lowercases, and validates values", () => {
     assert.equal(normalizeStreamingEngineMode(" VIDEOJS "), "videojs");

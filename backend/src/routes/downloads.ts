@@ -1127,7 +1127,6 @@ router.get("/releases/:albumMbid", async (req, res) => {
         logger.error("Get interactive releases error:", error);
         res.status(500).json({
             error: "Failed to fetch releases",
-            message: error?.message,
         });
     }
 });
@@ -1275,7 +1274,6 @@ router.post("/grab", async (req, res) => {
         logger.error("Grab interactive release error:", error);
         res.status(500).json({
             error: "Failed to grab release",
-            message: error?.message,
         });
     }
 });
@@ -1435,7 +1433,6 @@ router.delete("/:id", async (req, res) => {
         logger.error("Error details:", error.message, error.stack);
         res.status(500).json({
             error: "Failed to delete download job",
-            details: error.message,
         });
     }
 });

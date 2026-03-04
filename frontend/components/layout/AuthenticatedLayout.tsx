@@ -23,6 +23,9 @@ import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 
 const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
 
+/**
+ * Renders the AuthenticatedLayout component.
+ */
 export function AuthenticatedLayout({ children }: { children: ReactNode }) {
     const { isAuthenticated, isLoading } = useAuth();
     const pathname = usePathname();

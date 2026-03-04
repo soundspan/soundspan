@@ -15,6 +15,7 @@ describe("listen together socket runtime behavior", () => {
             on: jest.fn(),
             emit: jest.fn(),
             to: jest.fn(() => ({ emit: jest.fn() })),
+            in: jest.fn(() => ({ fetchSockets: jest.fn(async () => []) })),
         };
         const logger: any = {
             debug: jest.fn(),
@@ -93,6 +94,7 @@ describe("listen together socket runtime behavior", () => {
             setCallbacks: jest.fn(),
             applyExternalSnapshot: jest.fn(),
             snapshotById: jest.fn(() => null),
+            setUnavailableIndices: jest.fn(),
             removeSocket: jest.fn(),
             socketCount: jest.fn(() => 0),
             addSocket: jest.fn(),
@@ -113,7 +115,11 @@ describe("listen together socket runtime behavior", () => {
             playback: { status: "paused", index: 0, positionMs: 0 },
         }));
         const leaveGroup = jest.fn(async () => undefined);
-        const validateLocalTracks = jest.fn(async () => [{ id: "track-1" }]);
+        const validateQueueTracks = jest.fn(async () => [{ id: "track-1" }]);
+        const resolveQueueForUser = jest.fn(async () => new Map());
+        const trackMappingService = {
+            markStale: jest.fn(async () => undefined),
+        };
         class MockGroupError extends Error {
             constructor(
                 public code: string,
@@ -157,7 +163,13 @@ describe("listen together socket runtime behavior", () => {
         jest.doMock("../listenTogether", () => ({
             joinGroupById,
             leaveGroup,
-            validateLocalTracks,
+            validateQueueTracks,
+        }));
+        jest.doMock("../listenTogetherResolution", () => ({
+            resolveQueueForUser,
+        }));
+        jest.doMock("../trackMappingService", () => ({
+            trackMappingService,
         }));
         jest.doMock(
             "@socket.io/redis-adapter",
@@ -184,7 +196,9 @@ describe("listen together socket runtime behavior", () => {
             groupManager,
             joinGroupById,
             leaveGroup,
-            validateLocalTracks,
+            validateQueueTracks,
+            resolveQueueForUser,
+            trackMappingService,
             logger,
             jwtVerify,
             prismaUserFindUnique,
@@ -332,17 +346,17 @@ describe("listen together socket runtime behavior", () => {
             error: "trackIds required",
         });
 
-        mocks.validateLocalTracks.mockResolvedValueOnce([]);
+        mocks.validateQueueTracks.mockResolvedValueOnce([]);
         const queueNoTracksAck = jest.fn();
         await eventHandlers["queue"](
             { action: "add", trackIds: ["bad-track"] },
             queueNoTracksAck
         );
         expect(queueNoTracksAck).toHaveBeenCalledWith({
-            error: "No valid local tracks found",
+            error: "No valid tracks found",
         });
 
-        mocks.validateLocalTracks.mockResolvedValueOnce([{ id: "track-1" }]);
+        mocks.validateQueueTracks.mockResolvedValueOnce([{ id: "track-1" }]);
         const queueAddAck = jest.fn();
         await eventHandlers["queue"](
             { action: "add", trackIds: ["track-1"] },

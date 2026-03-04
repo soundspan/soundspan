@@ -4,7 +4,7 @@ import {
     resolveSegmentAssetNameFromUri,
     resolveSegmentRepresentationIdFromName,
     resolveSegmentRepresentationIdFromUri,
-} from "../../lib/audio-engine/segmentedRepresentationPolicy.ts";
+} from "../../lib/audio-engine/segmentedRepresentationPolicy";
 
 test("resolveSegmentAssetNameFromUri extracts the final segment", () => {
     assert.equal(

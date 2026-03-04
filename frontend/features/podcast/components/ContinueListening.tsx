@@ -16,6 +16,9 @@ interface ContinueListeningProps {
     onPlayPause: (episode: Episode) => void;
 }
 
+/**
+ * Renders the ContinueListening component.
+ */
 export function ContinueListening({
     podcast: _podcast,
     inProgressEpisodes,

@@ -1,0 +1,70 @@
+# =============================================================================
+# Root .dockerignore — applies to AIO Dockerfile and service Dockerfiles
+# that use the repo root as build context.
+# =============================================================================
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Node modules (reinstalled inside containers via npm ci)
+**/node_modules
+
+# Build artifacts (rebuilt inside containers)
+**/.next
+**/dist
+**/*.tsbuildinfo
+
+# Agent artifacts (local operator context, never shipped)
+.agents
+.agents-config
+
+# CI/CD workflows
+.github
+
+# IDE and editor files
+.vscode
+.idea
+**/*.swp
+**/*.swo
+**/*~
+.claude
+
+# Testing artifacts
+**/coverage
+**/tests
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+
+# Root-level documentation (not needed inside images)
+*.md
+LICENSE
+
+# Environment files
+**/.env
+**/.env.local
+**/.env.*.local
+
+# OS metadata
+**/.DS_Store
+**/Thumbs.db
+
+# Docker compose files (not needed inside images)
+docker-compose*.yml
+
+# Frontend mobile builds (Capacitor)
+frontend/android
+frontend/ios
+frontend/capacitor.config.ts
+
+# Logs
+**/*.log
+**/logs
+
+# Playwright state
+frontend/playwright-report
+frontend/test-results

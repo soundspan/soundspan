@@ -6,5 +6,7 @@ module.exports = {
     testMatch: ['**/__tests__/**/*.test.ts'],
     moduleFileExtensions: ['ts', 'js', 'json'],
     clearMocks: true,
+    maxWorkers: 8,
+    workerIdleMemoryLimit: '512MB',
     collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
 };

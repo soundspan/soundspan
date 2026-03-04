@@ -3,6 +3,9 @@ import { logger } from "../utils/logger";
 import fs from "fs/promises";
 import path from "path";
 
+/**
+ * Executes cleanupDiscoveryTracks.
+ */
 export async function cleanupDiscoveryTracks() {
     logger.debug("\nCleaning up old discovery tracks...");
 

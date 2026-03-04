@@ -50,7 +50,7 @@ mock.module("@/utils/cn", {
 
 test("renders history settings row with my-history route", async () => {
     const { PlaybackHistorySection } = await import(
-        "../../features/settings/components/sections/PlaybackHistorySection.tsx"
+        "../../features/settings/components/sections/PlaybackHistorySection"
     );
 
     const html = renderToStaticMarkup(
@@ -65,7 +65,7 @@ test("renders history settings row with my-history route", async () => {
 
 test("renders configured history range options", async () => {
     const { PlaybackHistorySection } = await import(
-        "../../features/settings/components/sections/PlaybackHistorySection.tsx"
+        "../../features/settings/components/sections/PlaybackHistorySection"
     );
 
     const html = renderToStaticMarkup(

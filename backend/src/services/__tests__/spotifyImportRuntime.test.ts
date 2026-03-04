@@ -1562,7 +1562,7 @@ describe("spotify import runtime behavior", () => {
         expect(prisma.$connect).toHaveBeenCalledTimes(1);
     });
 
-    it("builds pending-track payloads in startImport and schedules background processing", async () => {
+    it("builds pending-track payloads in startImport and schedules resolution-only processing", async () => {
         setupSpotifyImportMocks();
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { spotifyImportService } = require("../spotifyImport");
@@ -1652,6 +1652,8 @@ describe("spotify import runtime behavior", () => {
         );
 
         expect(job.id).toContain("import_");
+        expect(job.albumsTotal).toBe(0);
+        expect(job.tracksDownloadable).toBe(0);
         expect(job.pendingTracks).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
@@ -1662,7 +1664,7 @@ describe("spotify import runtime behavior", () => {
         );
         expect(processSpy).toHaveBeenCalledWith(
             expect.objectContaining({ id: job.id }),
-            ["rg-direct", "rg-resolved"],
+            [],
             preview
         );
     });
@@ -3547,15 +3549,13 @@ describe("spotify import runtime behavior", () => {
         expect(proxied.track.modelName).toBe("Track");
     });
 
-    it("logs default acquisition failure message when album acquisition fails without explicit error", async () => {
-        const { acquisitionService } = setupSpotifyImportMocks();
-        (acquisitionService.acquireAlbum as jest.Mock).mockResolvedValueOnce({
-            success: false,
-            source: "none",
-        });
-
+    it("ignores selected download albums and keeps startImport resolution-only", async () => {
+        setupSpotifyImportMocks();
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { spotifyImportService } = require("../spotifyImport");
+        const buildPlaylistSpy = jest
+            .spyOn(spotifyImportService as any, "buildPlaylist")
+            .mockResolvedValue(undefined);
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { createPlaylistLogger } = require("../../utils/playlistLogger");
 
@@ -3604,11 +3604,11 @@ describe("spotify import runtime behavior", () => {
 
         const createdLogger = (createPlaylistLogger as jest.Mock).mock.results[0]
             .value;
-        expect(createdLogger.logAlbumFailed).toHaveBeenCalledWith(
-            "Missing Source Album",
-            "Missing Source Artist",
-            "No download sources available"
+        expect(buildPlaylistSpy).toHaveBeenCalledTimes(1);
+        expect(createdLogger.info).toHaveBeenCalledWith(
+            expect.stringContaining("ignored in resolution-only mode")
         );
+        expect(createdLogger.logAlbumFailed).not.toHaveBeenCalled();
     });
 
     it("retries prisma operation when retryable string errors occur and reconnect fails once", async () => {
@@ -5013,37 +5013,16 @@ describe("spotify import runtime behavior", () => {
         ]);
     });
 
-    it("startImport unknown-album success path logs successful acquisition and checks completion", async () => {
-        const { acquisitionService, redisClient } = setupSpotifyImportMocks();
-        (acquisitionService.acquireTracks as jest.Mock).mockResolvedValueOnce([
-            { success: true },
-            { success: true },
-        ]);
-        (redisClient.get as jest.Mock).mockResolvedValueOnce(
-            JSON.stringify({
-                id: "job-unknown-success",
-                userId: "u1",
-                spotifyPlaylistId: "sp-unknown-success",
-                playlistName: "Unknown Success",
-                status: "completed",
-                progress: 100,
-                albumsTotal: 1,
-                albumsCompleted: 1,
-                tracksMatched: 0,
-                tracksTotal: 2,
-                tracksDownloadable: 2,
-                createdPlaylistId: null,
-                error: null,
-                createdAt: new Date("2026-01-17T00:00:00.000Z").toISOString(),
-                updatedAt: new Date("2026-01-17T00:01:00.000Z").toISOString(),
-                pendingTracks: [],
-            })
-        );
+    it("startImport unknown-album path skips acquisition and completion-check phases", async () => {
+        const { acquisitionService } = setupSpotifyImportMocks();
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { spotifyImportService } = require("../spotifyImport");
         const completionSpy = jest
             .spyOn(spotifyImportService, "checkImportCompletion")
+            .mockResolvedValue(undefined);
+        const buildPlaylistSpy = jest
+            .spyOn(spotifyImportService as any, "buildPlaylist")
             .mockResolvedValue(undefined);
 
         await spotifyImportService.startImport(
@@ -5096,8 +5075,9 @@ describe("spotify import runtime behavior", () => {
         );
         await new Promise((resolve) => setImmediate(resolve));
 
-        expect(completionSpy).toHaveBeenCalled();
-        expect(acquisitionService.acquireTracks).toHaveBeenCalledTimes(1);
+        expect(buildPlaylistSpy).toHaveBeenCalledTimes(1);
+        expect(completionSpy).not.toHaveBeenCalled();
+        expect(acquisitionService.acquireTracks).not.toHaveBeenCalled();
     });
 
     it("checkImportCompletion evaluates scan logging branches when a job logger exists and scan ids are present/missing", async () => {

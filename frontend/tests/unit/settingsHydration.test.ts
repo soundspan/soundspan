@@ -4,7 +4,7 @@ import {
     SETTINGS_BACKGROUND_RETRY_COOLDOWN_MS,
     shouldRetryFailedSettingsLoad,
     shouldShowSettingsPageLoading,
-} from "../../features/settings/hooks/settingsHydration.ts";
+} from "../../features/settings/hooks/settingsHydration";
 
 test("shouldRetryFailedSettingsLoad only retries failed loads after cooldown", () => {
     const now = 1_000_000;
@@ -85,3 +85,4 @@ test("shouldShowSettingsPageLoading gates rendering until required payloads hydr
         false
     );
 });
+

@@ -8,6 +8,9 @@ const CURRENT_TIME_TRACK_ID_KEY = createMigratingStorageKey(
     "current_time_track_id",
 );
 
+/**
+ * Executes resetPersistedTrackStartPosition.
+ */
 export function resetPersistedTrackStartPosition(trackId: string): void {
     if (!trackId || typeof window === "undefined") return;
     try {

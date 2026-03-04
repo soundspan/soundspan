@@ -21,6 +21,9 @@ const formatTrackForAudio = (track: Track) => ({
     },
 });
 
+/**
+ * Executes useLibraryActions.
+ */
 export function useLibraryActions() {
     const { playTracks, addToQueue } = useAudioControls();
 
@@ -76,7 +79,7 @@ export function useLibraryActions() {
 
     const addTrackToPlaylist = useCallback(async (playlistId: string, trackId: string) => {
         try {
-            await api.addTrackToPlaylist(playlistId, trackId);
+            await api.addTrackToPlaylist(playlistId, { trackId });
         } catch (error) {
             sharedFrontendLogger.error("Error adding track to playlist:", error);
         }

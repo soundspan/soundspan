@@ -92,7 +92,6 @@ router.get("/status", requireAuth, async (req, res) => {
         logger.error("Soulseek status error:", error.message);
         res.status(500).json({
             error: "Failed to get Soulseek status",
-            details: error.message,
         });
     }
 });
@@ -133,7 +132,6 @@ router.post(
             logger.error("Soulseek connect error:", error.message);
             res.status(500).json({
                 error: "Failed to connect to Soulseek",
-                details: error.message,
             });
         }
     },
@@ -256,7 +254,6 @@ router.post(
             logger.error("Soulseek search error:", error.message);
             res.status(500).json({
                 error: "Search failed",
-                details: error.message,
             });
         }
     },
@@ -347,7 +344,6 @@ router.get("/search/:searchId", requireAuth, async (req, res) => {
         logger.error("Get search results error:", error.message);
         res.status(500).json({
             error: "Failed to get results",
-            details: error.message,
         });
     }
 });
@@ -450,7 +446,6 @@ router.post(
             logger.error("Soulseek download error:", error.message);
             res.status(500).json({
                 error: "Download failed",
-                details: error.message,
             });
         }
     },
@@ -479,7 +474,8 @@ router.post("/disconnect", requireAuth, async (req, res) => {
         soulseekService.disconnect();
         res.json({ success: true, message: "Disconnected" });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        logger.error("[Soulseek] Disconnect error:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 

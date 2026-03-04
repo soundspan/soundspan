@@ -32,6 +32,8 @@ import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { EqBars } from "@/components/ui/EqBars";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/utils/cn";
+import { TidalBadge } from "@/components/ui/TidalBadge";
+import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import type { SyncQueueItem } from "@/lib/listen-together-socket";
 
 // ---------------------------------------------------------------------------
@@ -841,11 +843,8 @@ function QueueItem({
                     >
                         {item.title}
                     </p>
-                    {isCurrentTrack && (
-                        <Badge variant="warning" className="flex-shrink-0 text-[10px] px-1.5 py-0">
-                            Now Playing
-                        </Badge>
-                    )}
+                    {item.streamSource === "tidal" && <TidalBadge />}
+                    {item.streamSource === "youtube" && <YouTubeBadge />}
                 </div>
                 <p className="text-xs text-[#525252] truncate">
                     {item.artist.name} &middot; {item.album.title}
@@ -868,7 +867,6 @@ function QueueItem({
                 }}
                 showPlayNext={false}
                 showAddToQueue={false}
-                isInListenTogetherGroup
                 extraItemsAfter={canRemove ? (
                     <TrackMenuButton
                         onClick={(e) => {
@@ -895,6 +893,9 @@ function formatDuration(seconds: number): string {
 // Page
 // ---------------------------------------------------------------------------
 
+/**
+ * Renders the ListenTogetherPage component.
+ */
 export default function ListenTogetherPage() {
     const router = useRouter();
     const { isAuthenticated, isLoading: authLoading } = useAuth();

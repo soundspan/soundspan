@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { shouldAutoMatchVibeAtQueueEnd } from "../../components/player/autoMatchVibePlayback.ts";
+import { shouldAutoMatchVibeAtQueueEnd } from "../../components/player/autoMatchVibePlayback";
 
 test("triggers auto Match Vibe when queue is at the final track", () => {
     assert.equal(
@@ -19,6 +19,19 @@ test("does not trigger when playback is not a track queue", () => {
     assert.equal(
         shouldAutoMatchVibeAtQueueEnd({
             playbackType: "podcast",
+            queueLength: 12,
+            currentIndex: 11,
+            repeatMode: "off",
+            isListenTogether: false,
+        }),
+        false
+    );
+});
+
+test("does not trigger when playback type is null", () => {
+    assert.equal(
+        shouldAutoMatchVibeAtQueueEnd({
+            playbackType: null,
             queueLength: 12,
             currentIndex: 11,
             repeatMode: "off",
@@ -71,6 +84,29 @@ test("does not trigger when repeat mode is enabled", () => {
             queueLength: 12,
             currentIndex: 11,
             repeatMode: "one",
+            isListenTogether: false,
+        }),
+        false
+    );
+});
+
+test("does not trigger when the queue length is zero or negative", () => {
+    assert.equal(
+        shouldAutoMatchVibeAtQueueEnd({
+            playbackType: "track",
+            queueLength: 0,
+            currentIndex: 0,
+            repeatMode: "off",
+            isListenTogether: false,
+        }),
+        false
+    );
+    assert.equal(
+        shouldAutoMatchVibeAtQueueEnd({
+            playbackType: "track",
+            queueLength: -2,
+            currentIndex: 0,
+            repeatMode: "off",
             isListenTogether: false,
         }),
         false

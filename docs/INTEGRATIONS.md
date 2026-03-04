@@ -99,6 +99,27 @@ Stream unowned tracks via per-user YouTube Music OAuth.
 | High | ~256 kbps |
 | Lossless | Best available |
 
+### API access modes
+
+All routes below still require soundspan authentication and `ytMusicEnabled=true`.
+
+| Mode | Endpoints |
+| --- | --- |
+| OAuth-free browse/search/stream | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id`, `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch`, `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId` |
+| Per-user OAuth required | `GET /api/ytmusic/album/:browseId`, `GET /api/ytmusic/artist/:channelId`, `GET /api/ytmusic/song/:videoId`, `GET /api/ytmusic/stream-info/:videoId`, `GET /api/ytmusic/stream/:videoId`, `GET /api/ytmusic/library/songs`, `GET /api/ytmusic/library/albums` |
+
+## Track Mapping and Playlist Import APIs
+
+soundspan also exposes provider mapping and playlist import routes for cross-provider workflows:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/browse/playlists/parse` | Parse Spotify/Deezer playlist URLs before import |
+| `GET /api/track-mappings/album/:albumId` | Read provider mappings for an album's local tracks |
+| `POST /api/track-mappings/batch` | Persist multiple mapping links in one request |
+| `POST /api/import/preview` | Resolve playlist tracks (local/YT/TIDAL) without creating a playlist |
+| `POST /api/import/execute` | Create a playlist from a resolved import |
+
 ## TIDAL Streaming
 
 Stream unowned tracks via per-user TIDAL OAuth.

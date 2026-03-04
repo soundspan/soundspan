@@ -13,6 +13,9 @@ interface PlayControlsProps {
   formatTime: (seconds: number) => string;
 }
 
+/**
+ * Renders the PlayControls component.
+ */
 export function PlayControls({
   audiobook,
   isThisBookPlaying,

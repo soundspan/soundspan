@@ -19,6 +19,7 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 import {
     createContext,
+    startTransition,
     useCallback,
     useContext,
     useEffect,
@@ -38,6 +39,9 @@ import {
     type GroupSnapshot,
     type PlaybackDelta,
     type QueueDelta,
+    type QueueTrackInput,
+    type AvailabilityItem,
+    type GroupAvailabilityEvent,
     type WaitingEvent,
     type PlayAtEvent,
     type SyncQueueItem,
@@ -57,6 +61,7 @@ import {
     normalizeCanonicalMediaProviderIdentity,
     toLegacyStreamFields,
 } from "@soundspan/media-metadata-contract";
+import { toAddToPlaylistRef } from "@/lib/trackRef";
 
 const playbackEngine = createRuntimeAudioEngine();
 const LT_READY_REPORT_POLL_INTERVAL_MS = 100;
@@ -118,9 +123,10 @@ interface ListenTogetherContextType {
     syncNext: () => void;
     syncPrevious: () => void;
     syncSetTrack: (index: number) => void;
-    syncAddToQueue: (trackIds: string[]) => void;
+    syncAddToQueue: (tracks: QueueTrackInput[]) => void;
     syncRemoveFromQueue: (index: number) => void;
     syncClearQueue: () => void;
+    trackAvailability: Map<number, AvailabilityItem>;
 }
 
 const ListenTogetherContext = createContext<ListenTogetherContextType | undefined>(undefined);
@@ -130,18 +136,45 @@ const ListenTogetherContext = createContext<ListenTogetherContextType | undefine
 // ---------------------------------------------------------------------------
 
 /** Convert a SyncQueueItem to a local Track for the audio player. */
-function toLocalTrack(item: SyncQueueItem): Track {
+function toLocalTrack(
+    item: SyncQueueItem,
+    availability?: AvailabilityItem,
+): Track {
+    const resolvedSource = availability?.source;
+    const effectiveSource = resolvedSource ?? item.originSource;
+    const effectiveLocalTrackId =
+        availability?.localTrackId ?? item.localTrackId;
+    const effectiveTidalTrackId =
+        availability?.tidalTrackId ??
+        item.provider?.tidalTrackId ??
+        item.tidalTrackId;
+    const effectiveYoutubeVideoId =
+        availability?.youtubeVideoId ??
+        item.provider?.youtubeVideoId ??
+        item.youtubeVideoId;
+    const effectiveTrackId =
+        effectiveSource === "local" ? effectiveLocalTrackId ?? item.id : item.id;
     const provider = normalizeCanonicalMediaProviderIdentity({
-        mediaSource: item.mediaSource,
+        mediaSource:
+            effectiveSource === "local" ? "local" : item.mediaSource,
         providerTrackId: item.provider?.providerTrackId,
-        tidalTrackId: item.provider?.tidalTrackId ?? item.tidalTrackId,
-        youtubeVideoId: item.provider?.youtubeVideoId ?? item.youtubeVideoId,
-        streamSource: item.streamSource,
+        tidalTrackId:
+            effectiveSource === "youtube"
+                ? undefined
+                : effectiveTidalTrackId,
+        youtubeVideoId:
+            effectiveSource === "tidal"
+                ? undefined
+                : effectiveYoutubeVideoId,
+        streamSource:
+            effectiveSource === "local"
+                ? undefined
+                : effectiveSource ?? item.streamSource,
     });
     const legacyStreamFields = toLegacyStreamFields(provider);
 
     return {
-        id: item.id,
+        id: effectiveTrackId,
         title: item.title,
         duration: item.duration,
         artist: { id: item.artist.id, name: item.artist.name },
@@ -152,13 +185,23 @@ function toLocalTrack(item: SyncQueueItem): Track {
     };
 }
 
-function extractLocalTrackIds(queue: Track[], currentTrack: Track | null): {
-    localTrackIds: string[];
-    removedCount: number;
+function extractQueueTrackInputs(queue: Track[], currentTrack: Track | null): {
+    queueTracks: QueueTrackInput[];
+    currentTrackId?: string;
 } {
     const source = queue.length > 0 ? queue : currentTrack ? [currentTrack] : [];
-    const local = source.filter((t) => !t.streamSource);
-    return { localTrackIds: local.map((t) => t.id), removedCount: source.length - local.length };
+    const queueTracks: QueueTrackInput[] = [];
+    for (const track of source) {
+        try {
+            queueTracks.push(toAddToPlaylistRef(track));
+        } catch {
+            continue;
+        }
+    }
+
+    const currentTrackId =
+        currentTrack && queueTracks.length > 0 ? currentTrack.id : undefined;
+    return { queueTracks, currentTrackId };
 }
 
 function formatSocketRouteError(result: SocketRouteProbeResult): string {
@@ -183,6 +226,9 @@ export type ListenTogetherMembershipPendingOperation =
     | "join"
     | null;
 
+/**
+ * Executes resolveListenTogetherMembershipPendingState.
+ */
 export function resolveListenTogetherMembershipPendingState(
     operation: ListenTogetherMembershipPendingOperation,
 ): boolean {
@@ -196,6 +242,9 @@ export interface ResolveListenTogetherHostControlInput {
     snapshot: ListenTogetherSessionSnapshot | null;
 }
 
+/**
+ * Executes canIssueListenTogetherHostPlaybackCommand.
+ */
 export function canIssueListenTogetherHostPlaybackCommand(
     input: ResolveListenTogetherHostControlInput,
 ): boolean {
@@ -222,6 +271,9 @@ export type ListenTogetherReadyReportRecoveryAction =
     | "terminal-retry"
     | "recover";
 
+/**
+ * Executes resolveListenTogetherReadyReportRecoveryAction.
+ */
 export function resolveListenTogetherReadyReportRecoveryAction(input: {
     elapsedMs: number;
     maxWaitMs: number;
@@ -237,6 +289,9 @@ export function resolveListenTogetherReadyReportRecoveryAction(input: {
 // Provider
 // ---------------------------------------------------------------------------
 
+/**
+ * Renders the ListenTogetherProvider component.
+ */
 export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const { isAuthenticated, user } = useAuth();
     const audioState = useAudioState();
@@ -251,6 +306,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const [socketRouteStatus, setSocketRouteStatus] = useState<SocketRouteStatus>("checking");
     const [socketRouteError, setSocketRouteError] = useState<string | null>(null);
+    const [trackAvailability, setTrackAvailability] = useState<
+        Map<number, AvailabilityItem>
+    >(new Map());
 
     // Derived
     const isHost = canIssueListenTogetherHostPlaybackCommand({
@@ -274,12 +332,17 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const reconnectAudioRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const controlsRef = useRef(controls);
     const audioStateRef = useRef(audioState);
+    const trackAvailabilityRef = useRef<Map<number, AvailabilityItem>>(new Map());
+    const trackAvailabilityStateVersionRef = useRef<number | null>(null);
     const lastLoadedTrackIdRef = useRef<string | null>(null);
 
     // Keep refs in sync
     useEffect(() => { activeGroupRef.current = activeGroup; }, [activeGroup]);
     useEffect(() => { controlsRef.current = controls; }, [controls]);
     useEffect(() => { audioStateRef.current = audioState; }, [audioState]);
+    useEffect(() => {
+        trackAvailabilityRef.current = trackAvailability;
+    }, [trackAvailability]);
     useEffect(() => {
         const onLoad = () => {
             lastLoadedTrackIdRef.current =
@@ -344,7 +407,13 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const applyPlaybackToPlayer = useCallback((snapshot: GroupSnapshot) => {
         const pb = snapshot.playback;
         if (!pb || !Array.isArray(pb.queue)) return;
-        const mappedQueue = pb.queue.map(toLocalTrack);
+        const availabilityForState =
+            trackAvailabilityStateVersionRef.current === pb.stateVersion
+                ? trackAvailabilityRef.current
+                : null;
+        const mappedQueue = pb.queue.map((item, index) =>
+            toLocalTrack(item, availabilityForState?.get(index))
+        );
         const safeIndex = mappedQueue.length > 0
             ? Math.min(Math.max(pb.currentIndex, 0), mappedQueue.length - 1)
             : 0;
@@ -354,6 +423,12 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         const ctrl = controlsRef.current;
 
         isApplyingRemoteRef.current = true;
+
+        // Pause before switching tracks to prevent buffered audio from
+        // the old track replaying during the async transition.
+        if (state.currentTrack?.id !== targetTrack?.id && playbackEngine.isPlaying()) {
+            ctrl.pause({ suppressListenTogetherBroadcast: true });
+        }
 
         // Set queue + track
         state.setPlaybackType("track");
@@ -410,10 +485,22 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
         // Handle track change if currentIndex changed
         const currentQueue = state.queue;
-        if (delta.currentIndex !== state.currentIndex && currentQueue.length > 0) {
+        let trackChanged = false;
+        if (currentQueue.length > 0) {
             const safeIdx = Math.min(Math.max(delta.currentIndex, 0), currentQueue.length - 1);
-            state.setCurrentIndex(safeIdx);
-            state.setCurrentTrack(currentQueue[safeIdx] ?? null);
+            const effectiveTrack = currentQueue[safeIdx] ?? null;
+            trackChanged = effectiveTrack?.id !== state.currentTrack?.id;
+            if (trackChanged) {
+                // Pause before switching to prevent buffered audio from the old
+                // track replaying during the async transition.
+                if (playbackEngine.isPlaying()) {
+                    ctrl.pause({ suppressListenTogetherBroadcast: true });
+                }
+                state.setCurrentIndex(safeIdx);
+                state.setCurrentTrack(effectiveTrack);
+            } else if (safeIdx !== state.currentIndex) {
+                state.setCurrentIndex(safeIdx);
+            }
         }
 
         // Compute target position
@@ -422,7 +509,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             const age = Date.now() - delta.serverTime;
             targetMs += Math.min(Math.max(age, 0), 5000);
         }
-        const track = currentQueue[delta.currentIndex];
+        const safeTrackIdx = currentQueue.length > 0
+            ? Math.min(Math.max(delta.currentIndex, 0), currentQueue.length - 1)
+            : -1;
+        const track = safeTrackIdx >= 0 ? currentQueue[safeTrackIdx] : undefined;
         if (track?.duration) {
             targetMs = Math.min(targetMs, track.duration * 1000);
         }
@@ -438,8 +528,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             });
         }
 
-        // Play/pause
-        if (delta.isPlaying && !playbackEngine.isPlaying()) {
+        // Play/pause — after a track change, always call resume if delta says
+        // playing, because the pre-switch pause may have cleared isPlaying state.
+        if (delta.isPlaying && (trackChanged || !playbackEngine.isPlaying())) {
             ctrl.resume({
                 suppressListenTogetherBroadcast: true,
                 listenTogetherForceIsPlaying: true,
@@ -530,17 +621,23 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             : incomingVersion > lastAppliedVersionRef.current;
 
         setActiveGroup((prev) => {
+            let next: GroupSnapshot;
             if (!prev || shouldApplyPlayback) {
-                return snapshot;
+                next = snapshot;
+            } else {
+                // Preserve the latest known playback fields to prevent
+                // stale/equal-version snapshots from visually rewinding track state.
+                next = {
+                    ...snapshot,
+                    syncState: prev.syncState,
+                    playback: prev.playback,
+                };
             }
-
-            // Preserve the latest known playback fields to prevent
-            // stale/equal-version snapshots from visually rewinding track state.
-            return {
-                ...snapshot,
-                syncState: prev.syncState,
-                playback: prev.playback,
-            };
+            // Sync ref immediately so socket handlers that read activeGroupRef
+            // (e.g. onAvailability) see the latest state without waiting for
+            // the useEffect render cycle.
+            activeGroupRef.current = next;
+            return next;
         });
 
         if (!shouldApplyPlayback) return;
@@ -563,7 +660,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         // Update local group state
         setActiveGroup((prev) => {
             if (!prev) return prev;
-            return {
+            const next = {
                 ...prev,
                 playback: {
                     ...prev.playback,
@@ -574,8 +671,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     currentIndex: delta.currentIndex,
                     trackId: delta.trackId,
                 },
-                syncState: delta.isPlaying ? "playing" : "paused",
+                syncState: (delta.isPlaying ? "playing" : "paused") as "playing" | "paused",
             };
+            activeGroupRef.current = next;
+            return next;
         });
 
         applyDeltaToPlayer(delta);
@@ -591,7 +690,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
         setActiveGroup((prev) => {
             if (!prev) return prev;
-            return {
+            const next = {
                 ...prev,
                 playback: {
                     ...prev.playback,
@@ -601,11 +700,19 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     stateVersion: delta.stateVersion,
                 },
             };
+            activeGroupRef.current = next;
+            return next;
         });
 
         // Rebuild local queue from sync queue
         if (!Array.isArray(delta.queue)) return;
-        const mappedQueue = delta.queue.map(toLocalTrack);
+        const availabilityForState =
+            trackAvailabilityStateVersionRef.current === delta.stateVersion
+                ? trackAvailabilityRef.current
+                : null;
+        const mappedQueue = delta.queue.map((item, index) =>
+            toLocalTrack(item, availabilityForState?.get(index))
+        );
         const safeIndex = mappedQueue.length > 0
             ? Math.min(Math.max(delta.currentIndex, 0), mappedQueue.length - 1)
             : 0;
@@ -613,16 +720,18 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         isApplyingRemoteRef.current = true;
         const aState = audioStateRef.current;
 
-        aState.setPlaybackType("track");
-        aState.setQueue(mappedQueue);
-        aState.setCurrentIndex(safeIndex);
-        aState.setCurrentTrack(mappedQueue[safeIndex] ?? null);
-        aState.setCurrentAudiobook(null);
-        aState.setCurrentPodcast(null);
-        aState.setVibeMode(false);
+        startTransition(() => {
+            aState.setPlaybackType("track");
+            aState.setQueue(mappedQueue);
+            aState.setCurrentIndex(safeIndex);
+            aState.setCurrentTrack(mappedQueue[safeIndex] ?? null);
+            aState.setCurrentAudiobook(null);
+            aState.setCurrentPodcast(null);
+            aState.setVibeMode(false);
+        });
 
-        // Use requestAnimationFrame to clear the flag after React processes updates
-        requestAnimationFrame(() => { isApplyingRemoteRef.current = false; });
+        // Allow time for the deferred startTransition to commit before clearing
+        setTimeout(() => { isApplyingRemoteRef.current = false; }, 100);
     }, []);
 
     // -----------------------------------------------------------------------
@@ -646,10 +755,57 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             },
             onPlaybackDelta: (delta) => applyPlaybackDelta(delta),
             onQueueDelta: (delta) => applyQueueDelta(delta),
+            onAvailability: (data: GroupAvailabilityEvent) => {
+                const availabilityMap = new Map<number, AvailabilityItem>();
+                for (const item of data.availability ?? []) {
+                    availabilityMap.set(item.queueIndex, item);
+                }
+                setTrackAvailability(availabilityMap);
+                trackAvailabilityStateVersionRef.current = data.stateVersion;
+
+                const group = activeGroupRef.current;
+                if (!group?.playback?.queue) return;
+
+                const mappedQueue = group.playback.queue.map((item, index) =>
+                    toLocalTrack(item, availabilityMap.get(index))
+                );
+                const safeIndex =
+                    mappedQueue.length > 0
+                        ? Math.min(
+                              Math.max(group.playback.currentIndex, 0),
+                              mappedQueue.length - 1
+                          )
+                        : 0;
+                const state = audioStateRef.current;
+                startTransition(() => {
+                    state.setQueue(mappedQueue);
+                    state.setCurrentIndex(safeIndex);
+                    state.setCurrentTrack(mappedQueue[safeIndex] ?? null);
+                });
+            },
             onWaiting: (data: WaitingEvent) => {
                 if (readyReportTimerRef.current) {
                     clearTimeout(readyReportTimerRef.current);
                     readyReportTimerRef.current = null;
+                }
+
+                const trackAvailabilityForIndex =
+                    trackAvailabilityRef.current.get(data.currentIndex);
+                if (trackAvailabilityForIndex?.available === false) {
+                    void listenTogetherSocket.reportReady().catch((error) => {
+                        sharedFrontendLogger.warn(
+                            "[ListenTogether] reportReady failed for unavailable track",
+                            {
+                                queueIndex: data.currentIndex,
+                                reason: trackAvailabilityForIndex.reason,
+                                error:
+                                    error instanceof Error
+                                        ? error.message
+                                        : String(error),
+                            }
+                        );
+                    });
+                    return;
                 }
 
                 // The server says "buffer this track and report ready".
@@ -683,16 +839,59 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
                 const tryReportReady = () => {
                     const state = audioStateRef.current;
-                    const queuedTrackId = state.queue[state.currentIndex]?.id ?? null;
+                    const queuedTrackId =
+                        state.queue[data.currentIndex]?.id ??
+                        state.queue[state.currentIndex]?.id ??
+                        null;
                     const activeTrackId = state.currentTrack?.id ?? null;
                     const expectedTrackId = data.trackId ?? null;
+                    const serverQueuedTrackId =
+                        activeGroupRef.current?.playback?.queue?.[data.currentIndex]?.id ??
+                        null;
+                    const currentPlayback = activeGroupRef.current?.playback;
+                    const availabilityMatchesState =
+                        trackAvailabilityStateVersionRef.current !== null &&
+                        currentPlayback?.stateVersion ===
+                            trackAvailabilityStateVersionRef.current &&
+                        currentPlayback?.currentIndex === data.currentIndex;
+                    const availabilityExpected =
+                        availabilityMatchesState
+                            ? trackAvailabilityRef.current.get(data.currentIndex)
+                            : undefined;
+                    const expectedLocalTrackId = availabilityExpected?.localTrackId ?? null;
+                    const expectedCandidates = Array.from(
+                        new Set(
+                            [
+                                expectedTrackId,
+                                serverQueuedTrackId,
+                                expectedLocalTrackId,
+                            ].filter((candidate): candidate is string =>
+                                typeof candidate === "string" &&
+                                candidate.length > 0
+                            )
+                        )
+                    );
+                    const localCandidates = Array.from(
+                        new Set(
+                            [activeTrackId, queuedTrackId].filter(
+                                (candidate): candidate is string =>
+                                    typeof candidate === "string" &&
+                                    candidate.length > 0
+                            )
+                        )
+                    );
                     const hasTrackMatch =
-                        !expectedTrackId ||
-                        queuedTrackId === expectedTrackId ||
-                        activeTrackId === expectedTrackId;
+                        expectedCandidates.length === 0 ||
+                        localCandidates.some((candidate) =>
+                            expectedCandidates.includes(candidate)
+                        );
                     const loadedTrackId = lastLoadedTrackIdRef.current;
                     const readinessTrackId =
-                        expectedTrackId ?? activeTrackId ?? queuedTrackId;
+                        localCandidates.find(
+                            (candidate) =>
+                                expectedCandidates.length === 0 ||
+                                expectedCandidates.includes(candidate)
+                        ) ?? null;
                     const hasLoadedExpectedTrack =
                         Boolean(readinessTrackId) &&
                         loadedTrackId === readinessTrackId;
@@ -788,9 +987,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
                 setActiveGroup((prev) => {
                     if (!prev) return prev;
-                    return {
+                    const next = {
                         ...prev,
-                        syncState: "playing",
+                        syncState: "playing" as const,
                         playback: {
                             ...prev.playback,
                             isPlaying: true,
@@ -799,6 +998,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                             stateVersion: data.stateVersion,
                         },
                     };
+                    activeGroupRef.current = next;
+                    return next;
                 });
 
                 const elapsed = Date.now() - data.serverTime;
@@ -830,7 +1031,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                     if (!prev) return prev;
                     const exists = prev.members.some((m) => m.userId === data.userId);
                     if (exists) return prev;
-                    return {
+                    const next = {
                         ...prev,
                         members: [
                             ...prev.members,
@@ -843,6 +1044,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                             },
                         ],
                     };
+                    activeGroupRef.current = next;
+                    return next;
                 });
             },
             onMemberLeft: (data) => {
@@ -866,11 +1069,15 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                             toast.success("You are now the host!");
                         }
                     }
+                    activeGroupRef.current = updated;
                     return updated;
                 });
             },
             onGroupEnded: (_data) => {
+                activeGroupRef.current = null;
                 setActiveGroup(null);
+                setTrackAvailability(new Map());
+                trackAvailabilityStateVersionRef.current = null;
                 setHasConnectedOnce(false);
                 lastAppliedVersionRef.current = 0;
                 setListenTogetherMembershipPending(false);
@@ -944,6 +1151,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         if (!isAuthenticated) {
             setListenTogetherMembershipPending(false);
             queueMicrotask(() => {
+                activeGroupRef.current = null;
                 setActiveGroup(null);
                 setIsLoading(false);
                 lastAppliedVersionRef.current = 0;
@@ -975,6 +1183,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 if (!mounted) return;
 
                 if (!groupSnapshot || !groupSnapshot.id) {
+                    activeGroupRef.current = null;
                     setActiveGroup(null);
                     lastAppliedVersionRef.current = 0;
                     setIsLoading(false);
@@ -984,6 +1193,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 // Ensure snapshot has required structure before using it
                 if (!groupSnapshot.playback || !Array.isArray(groupSnapshot.members)) {
                     sharedFrontendLogger.warn("[ListenTogether] Received malformed group snapshot, ignoring");
+                    activeGroupRef.current = null;
                     setActiveGroup(null);
                     lastAppliedVersionRef.current = 0;
                     setIsLoading(false);
@@ -992,6 +1202,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
                 // We have an active group — connect socket
                 lastAppliedVersionRef.current = groupSnapshot.playback?.stateVersion ?? 0;
+                activeGroupRef.current = groupSnapshot;
                 setActiveGroup(groupSnapshot);
                 setIsLoading(false);
                 if (routeOk) {
@@ -1016,6 +1227,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (!activeGroup) {
+            setTrackAvailability(new Map());
+            trackAvailabilityStateVersionRef.current = null;
             setListenTogetherSessionSnapshot(null);
             return;
         }
@@ -1130,49 +1343,53 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 return null;
             }
             const shouldUseCurrentQueue = options?.useCurrentQueue !== false;
-            let localTrackIds: string[] = [];
+            let queueTracks: QueueTrackInput[] = [];
             let currentTrackId: string | undefined;
             let currentTimeMs: number | undefined;
             let isPlaying: boolean | undefined;
 
             if (shouldUseCurrentQueue) {
-                const { localTrackIds: ids, removedCount } = extractLocalTrackIds(
+                const { queueTracks: queueInputs, currentTrackId: snapshotTrackId } = extractQueueTrackInputs(
                     audioState.queue,
                     audioState.currentTrack,
                 );
-                localTrackIds = ids;
+                queueTracks = queueInputs;
 
                 const nowPlayingTrack = audioState.currentTrack;
-                const isLocalNowPlayingTrack = Boolean(
+                const isTrackNowPlaying = Boolean(
                     audioState.playbackType === "track" &&
-                        nowPlayingTrack?.id &&
-                        !nowPlayingTrack.streamSource
+                        nowPlayingTrack?.id
                 );
 
                 if (
-                    isLocalNowPlayingTrack &&
-                    localTrackIds.includes(nowPlayingTrack.id)
+                    isTrackNowPlaying &&
+                    snapshotTrackId &&
+                    queueTracks.length > 0
                 ) {
-                    currentTrackId = nowPlayingTrack.id;
+                    currentTrackId = snapshotTrackId;
                     currentTimeMs = Math.max(0, playbackEngine.getCurrentTime() * 1000);
                     isPlaying = playbackEngine.isPlaying();
                 }
+            }
 
-                if (removedCount > 0) {
-                    toast.info(`Filtered ${removedCount} streaming track${removedCount === 1 ? "" : "s"} — only local tracks are shared`);
-                }
+            if (queueTracks.length > 500) {
+                const msg = `Queue has ${queueTracks.length} tracks — Listen Together supports up to 500. Remove some tracks and try again.`;
+                setError(msg);
+                toast.error(msg);
+                return null;
             }
 
             const group = await api.createListenGroup({
                 name: options?.name,
                 visibility: options?.visibility,
-                queueTrackIds: localTrackIds,
+                queueTracks,
                 currentTrackId,
                 currentTimeMs,
                 isPlaying,
             });
 
             lastAppliedVersionRef.current = group.playback?.stateVersion ?? 0;
+            activeGroupRef.current = group;
             setActiveGroup(group);
 
             // Connect socket
@@ -1213,6 +1430,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             const group = await api.joinListenGroup(joinCode);
 
             lastAppliedVersionRef.current = group.playback?.stateVersion ?? 0;
+            activeGroupRef.current = group;
             setActiveGroup(group);
 
             // Connect socket — applyGroupState will run on first group:state event
@@ -1240,7 +1458,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         setListenTogetherMembershipPending(false);
         // Optimistic cleanup first so UI remains responsive even if backend is slow.
         listenTogetherSocket.disconnect();
+        activeGroupRef.current = null;
         setActiveGroup(null);
+        setTrackAvailability(new Map());
+        trackAvailabilityStateVersionRef.current = null;
         setHasConnectedOnce(false);
         lastAppliedVersionRef.current = 0;
 
@@ -1354,8 +1575,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         });
         applyOptimisticHostTrackSelection(safeIndex);
     }, [applyOptimisticHostTrackSelection, canCurrentUserControlHostPlayback]);
-    const syncAddToQueue = useCallback((trackIds: string[]) => {
-        listenTogetherSocket.addToQueue(trackIds).catch((err) => {
+    const syncAddToQueue = useCallback((tracks: QueueTrackInput[]) => {
+        listenTogetherSocket.addToQueue(tracks).catch((err) => {
             toast.error(err?.message || "Failed to add to queue");
         });
     }, []);
@@ -1376,6 +1597,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
     const value = useMemo<ListenTogetherContextType>(() => ({
         activeGroup,
+        trackAvailability,
         isInGroup: Boolean(activeGroup),
         isHost: Boolean(isHost),
         canControl,
@@ -1404,6 +1626,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         syncClearQueue,
     }), [
         activeGroup,
+        trackAvailability,
         isHost,
         canControl,
         canEditQueue,
@@ -1438,6 +1661,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useListenTogether.
+ */
 export function useListenTogether(): ListenTogetherContextType {
     const context = useContext(ListenTogetherContext);
     if (!context) {

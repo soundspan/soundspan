@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computePlayNowInsertion } from "../../lib/queue-utils.ts";
+import { computePlayNowInsertion } from "../../lib/queue-utils";
 
 test("inserts track after current index in a non-shuffle queue", () => {
     const result = computePlayNowInsertion({
@@ -86,4 +86,30 @@ test("handles empty shuffle indices in shuffle mode gracefully", () => {
     assert.equal(result.newCurrentIndex, 1);
     // With empty shuffle indices, should return empty (caller regenerates)
     assert.deepEqual(result.newShuffleIndices, []);
+});
+
+test("inserts at shuffle start when current index is absent from shuffle order", () => {
+    const result = computePlayNowInsertion({
+        queue: ["A", "B", "C", "D"],
+        currentIndex: 2,
+        isShuffle: true,
+        shuffleIndices: [0, 1, 3],
+    });
+
+    assert.equal(result.insertAt, 3);
+    assert.equal(result.newCurrentIndex, 3);
+    assert.deepEqual(result.newShuffleIndices, [3, 0, 1, 4]);
+});
+
+test("supports sentinel currentIndex=-1 by inserting at queue start and shifting all shuffle indices", () => {
+    const result = computePlayNowInsertion({
+        queue: ["A", "B", "C"],
+        currentIndex: -1,
+        isShuffle: true,
+        shuffleIndices: [0, 2, 1],
+    });
+
+    assert.equal(result.insertAt, 0);
+    assert.equal(result.newCurrentIndex, 0);
+    assert.deepEqual(result.newShuffleIndices, [0, 1, 3, 2]);
 });

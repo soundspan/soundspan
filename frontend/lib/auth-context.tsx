@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "./api";
+import { getQueryClient } from "@/lib/query-client";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface User {
@@ -38,6 +39,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
 
+/**
+ * Renders the AuthProvider component.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [user, setUser] = useState<User | null>(null);
@@ -149,6 +153,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await api.logout();
         setIsAuthenticated(false);
         setUser(null);
+        // Clear all cached query data so the next user session starts fresh
+        if (typeof window !== "undefined") {
+            getQueryClient().clear();
+        }
         router.push("/login");
     }, [router]);
 
@@ -157,6 +165,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const handleSessionExpired = () => {
             setIsAuthenticated(false);
             setUser(null);
+            // Clear all cached query data so stale user data is not retained
+            getQueryClient().clear();
             router.push("/login");
         };
         window.addEventListener("auth:session-expired", handleSessionExpired);
@@ -179,6 +189,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useAuth.
+ */
 export function useAuth() {
     const context = useContext(AuthContext);
     if (context === undefined) {

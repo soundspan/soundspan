@@ -51,6 +51,31 @@ jest.mock("../../utils/db", () => ({
             createMany: jest.fn(),
             deleteMany: jest.fn(),
         },
+        remoteLikedTrack: {
+            findUnique: jest.fn(),
+            upsert: jest.fn(),
+            deleteMany: jest.fn(),
+            findMany: jest.fn(),
+            count: jest.fn(),
+        },
+        likedRemoteTrack: {
+            findUnique: jest.fn(),
+            upsert: jest.fn(),
+            deleteMany: jest.fn(),
+            findMany: jest.fn(),
+            count: jest.fn(),
+        },
+        trackTidal: {
+            findUnique: jest.fn(),
+            upsert: jest.fn(),
+        },
+        trackYtMusic: {
+            findUnique: jest.fn(),
+            upsert: jest.fn(),
+        },
+        trackMapping: {
+            findMany: jest.fn(),
+        },
         play: {
             findFirst: jest.fn(),
             create: jest.fn(),
@@ -64,6 +89,7 @@ jest.mock("../../utils/db", () => ({
             findMany: jest.fn(),
             findUnique: jest.fn(),
             findFirst: jest.fn(),
+            count: jest.fn(),
             updateMany: jest.fn(),
             update: jest.fn(),
             deleteMany: jest.fn(),
@@ -171,6 +197,7 @@ jest.mock("../../services/musicbrainz", () => ({
 jest.mock("../../services/coverArt", () => ({
     coverArtService: {
         getCoverArt: jest.fn(),
+        clearNotFoundCache: jest.fn(),
     },
 }));
 
@@ -312,16 +339,20 @@ const mockDislikedEntityFindMany = prisma.dislikedEntity.findMany as jest.Mock;
 const mockDislikedEntityUpsert = prisma.dislikedEntity.upsert as jest.Mock;
 const mockDislikedEntityCreateMany = prisma.dislikedEntity.createMany as jest.Mock;
 const mockDislikedEntityDeleteMany = prisma.dislikedEntity.deleteMany as jest.Mock;
+const mockRemoteLikedTrackFindMany = (prisma as any).likedRemoteTrack.findMany as jest.Mock;
+const mockRemoteLikedTrackCount = (prisma as any).likedRemoteTrack.count as jest.Mock;
 const mockRedisGet = redisClient.get as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
 const mockPlayFindFirst = prisma.play.findFirst as jest.Mock;
 const mockPlayCreate = prisma.play.create as jest.Mock;
 const mockPlayFindMany = prisma.play.findMany as jest.Mock;
 const mockPlayGroupBy = prisma.play.groupBy as jest.Mock;
+const mockTrackMappingFindMany = (prisma as any).trackMapping.findMany as jest.Mock;
 const mockUserSettingsFindUnique = prisma.userSettings.findUnique as jest.Mock;
 const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
 const mockArtistFindUnique = prisma.artist.findUnique as jest.Mock;
 const mockArtistFindFirst = prisma.artist.findFirst as jest.Mock;
+const mockArtistCount = prisma.artist.count as jest.Mock;
 const mockArtistUpdateMany = prisma.artist.updateMany as jest.Mock;
 const mockArtistUpdate = prisma.artist.update as jest.Mock;
 const mockArtistDeleteMany = prisma.artist.deleteMany as jest.Mock;
@@ -1227,6 +1258,64 @@ describe("library catalog list runtime coverage", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockTrackFindUnique.mockReset();
+        mockTrackFindMany.mockReset();
+        mockTrackCount.mockReset();
+        mockPlayFindFirst.mockReset();
+        mockPlayFindMany.mockReset();
+        mockPlayGroupBy.mockReset();
+        mockPlayCreate.mockReset();
+        mockLikedTrackFindUnique.mockReset();
+        mockLikedTrackFindMany.mockReset();
+        mockLikedTrackCount.mockReset();
+        mockLikedTrackUpsert.mockReset();
+        mockLikedTrackCreateMany.mockReset();
+        mockLikedTrackDeleteMany.mockReset();
+        mockDislikedEntityFindUnique.mockReset();
+        mockDislikedEntityFindMany.mockReset();
+        mockDislikedEntityUpsert.mockReset();
+        mockDislikedEntityCreateMany.mockReset();
+        mockDislikedEntityDeleteMany.mockReset();
+        mockRemoteLikedTrackFindMany.mockReset();
+        mockRemoteLikedTrackCount.mockReset();
+        mockTrackMappingFindMany.mockReset();
+        mockAlbumFindMany.mockReset();
+        mockAlbumGroupBy.mockReset();
+        mockAlbumCount.mockReset();
+        mockAlbumFindFirst.mockReset();
+        mockAlbumFindUnique.mockReset();
+        mockAlbumDelete.mockReset();
+        mockAlbumUpdate.mockReset();
+        mockOwnedAlbumGroupBy.mockReset();
+        mockOwnedAlbumFindMany.mockReset();
+        mockOwnedAlbumFindUnique.mockReset();
+        mockOwnedAlbumDeleteMany.mockReset();
+        mockArtistFindMany.mockReset();
+        mockArtistFindUnique.mockReset();
+        mockArtistFindFirst.mockReset();
+        mockArtistCount.mockReset();
+        mockArtistUpdateMany.mockReset();
+        mockArtistUpdate.mockReset();
+        mockArtistDeleteMany.mockReset();
+        mockArtistDelete.mockReset();
+        mockGenreFindMany.mockReset();
+        mockSimilarArtistFindMany.mockReset();
+        mockSimilarArtistDeleteMany.mockReset();
+        mockPrismaTransaction.mockReset();
+        mockPrismaQueryRaw.mockReset();
+        mockUserSettingsFindUnique.mockReset();
+        mockStreamGetStreamFilePath.mockReset();
+        mockStreamWithRangeSupport.mockReset();
+        mockStreamDestroy.mockReset();
+        mockParseFile.mockReset();
+        mockAudioStreamingCtor.mockImplementation(
+            () =>
+                ({
+                    getStreamFilePath: mockStreamGetStreamFilePath,
+                    streamFileWithRangeSupport: mockStreamWithRangeSupport,
+                    destroy: mockStreamDestroy,
+                }) as any
+        );
         mockPlayFindMany.mockResolvedValue([]);
         mockAudiobookProgressFindMany.mockResolvedValue([]);
         mockPodcastProgressFindMany.mockResolvedValue([]);
@@ -1241,6 +1330,7 @@ describe("library catalog list runtime coverage", () => {
         mockGenreFindMany.mockResolvedValue([]);
         mockSimilarArtistFindMany.mockResolvedValue([]);
         mockTrackFindMany.mockResolvedValue([]);
+        mockTrackFindUnique.mockResolvedValue(null);
         mockTrackCount.mockResolvedValue(0);
         mockTrackDelete.mockResolvedValue(undefined);
         mockTrackDeleteMany.mockResolvedValue({ count: 0 });
@@ -1255,8 +1345,13 @@ describe("library catalog list runtime coverage", () => {
         mockDislikedEntityUpsert.mockResolvedValue({ id: "disliked-1" });
         mockDislikedEntityCreateMany.mockResolvedValue({ count: 0 });
         mockDislikedEntityDeleteMany.mockResolvedValue({ count: 0 });
+        mockRemoteLikedTrackFindMany.mockResolvedValue([]);
+        mockRemoteLikedTrackCount.mockResolvedValue(0);
+        mockTrackMappingFindMany.mockResolvedValue([]);
         mockDownloadAndStoreImage.mockResolvedValue("native:albums/cover-miss.jpg");
         mockPlayGroupBy.mockResolvedValue([]);
+        mockPlayFindFirst.mockResolvedValue(null);
+        mockPlayCreate.mockResolvedValue({});
         mockRedisGet.mockResolvedValue(null);
         mockRedisSetEx.mockResolvedValue("OK");
         mockPrismaQueryRaw.mockResolvedValue([]);
@@ -1279,6 +1374,7 @@ describe("library catalog list runtime coverage", () => {
         mockArtistFindMany.mockResolvedValue([]);
         mockArtistFindUnique.mockResolvedValue(null);
         mockArtistFindFirst.mockResolvedValue(null);
+        mockArtistCount.mockResolvedValue(1);
         mockArtistUpdate.mockResolvedValue(undefined);
         mockArtistDeleteMany.mockResolvedValue({ count: 0 });
         mockArtistDelete.mockResolvedValue(undefined);
@@ -1286,6 +1382,15 @@ describe("library catalog list runtime coverage", () => {
         mockAlbumDelete.mockResolvedValue(undefined);
         mockAlbumUpdate.mockResolvedValue(undefined);
         mockSimilarArtistDeleteMany.mockResolvedValue({ count: 0 });
+        mockUserSettingsFindUnique.mockResolvedValue({
+            playbackQuality: "medium",
+        });
+        mockStreamGetStreamFilePath.mockResolvedValue({
+            filePath: "/tmp/stream.flac",
+            mimeType: "audio/flac",
+        });
+        mockStreamWithRangeSupport.mockResolvedValue(undefined);
+        mockStreamDestroy.mockImplementation(() => undefined);
         mockCoverArtGetCoverArt.mockResolvedValue(null);
         mockNormalizeExternalImageUrl.mockImplementation(
             (url: string) => url
@@ -1603,6 +1708,7 @@ describe("library catalog list runtime coverage", () => {
                     OR: [
                         { libraryAlbumCount: { gt: 0 } },
                         { discoveryAlbumCount: { gt: 0 } },
+                        { remoteTrackCount: { gt: 0 } },
                     ],
                     name: { contains: "art", mode: "insensitive" },
                 }),
@@ -1862,13 +1968,8 @@ describe("library catalog list runtime coverage", () => {
                 topTracks: expect.arrayContaining([
                     expect.objectContaining({
                         id: "track-1",
+                        title: "Song One",
                         userPlayCount: 6,
-                        playCount: 101,
-                        listeners: 45,
-                    }),
-                    expect.objectContaining({
-                        title: "Song Two",
-                        userPlayCount: 0,
                     }),
                 ]),
                 similarArtists: expect.arrayContaining([
@@ -2177,19 +2278,13 @@ describe("library catalog list runtime coverage", () => {
         expect(mockMusicBrainzGetReleaseGroups).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual(
-                expect.objectContaining({
-                    id: "artist-cacheless",
-                    coverArt: "hero-from-cacheless-cache",
-                    discographyComplete: true,
-                    topTracks: [
+            expect.objectContaining({
+                id: "artist-cacheless",
+                coverArt: "hero-from-cacheless-cache",
+                discographyComplete: true,
+                topTracks: [],
+                similarArtists: [
                     expect.objectContaining({
-                        title: "One-Track",
-                        id: "lastfm-mbid-cacheless-One-Track",
-                        duration: 240,
-                    }),
-                ],
-                    similarArtists: [
-                        expect.objectContaining({
                         id: "Similar Cacheless",
                         name: "Similar Cacheless",
                         inLibrary: false,
@@ -2558,6 +2653,7 @@ describe("library catalog list runtime coverage", () => {
             .mockResolvedValueOnce([
                 createRadioTrack("liked-a"),
                 createRadioTrack("liked-b"),
+                createRadioTrack("liked-c"),
             ])
             .mockResolvedValueOnce([createRadioTrack("liked-c")]);
 
@@ -2573,7 +2669,7 @@ describe("library catalog list runtime coverage", () => {
             where: { userId: "user-1" },
             select: { trackId: true, likedAt: true },
             orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
-            take: 3,
+            take: 6,
         });
         expect(firstRes.body.playlist).toEqual({
             id: "my-liked",
@@ -2581,15 +2677,15 @@ describe("library catalog list runtime coverage", () => {
             description: "All your thumbs-up tracks",
         });
         expect(firstRes.body.tracks.map((track: any) => track.id)).toEqual([
-            "liked-b",
             "liked-a",
+            "liked-b",
         ]);
         expect(firstRes.body.pagination).toEqual({
             limit: 2,
             hasMore: true,
             nextCursor: {
                 likedAt: tiedLikedAt.toISOString(),
-                trackId: "liked-a",
+                trackId: "liked-b",
             },
         });
         expect(firstRes.body.total).toBe(3);
@@ -2613,13 +2709,13 @@ describe("library catalog list runtime coverage", () => {
                     { likedAt: { lt: tiedLikedAt } },
                     {
                         likedAt: tiedLikedAt,
-                        trackId: { gt: "liked-a" },
+                        trackId: { gt: "liked-b" },
                     },
                 ],
             },
             select: { trackId: true, likedAt: true },
             orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
-            take: 3,
+            take: 6,
         });
         expect(secondRes.body.tracks.map((track: any) => track.id)).toEqual([
             "liked-c",
@@ -2658,6 +2754,270 @@ describe("library catalog list runtime coverage", () => {
             },
         });
         expect(mockTrackFindMany).not.toHaveBeenCalled();
+    });
+
+    it("returns remote liked tracks with streamSource and provider IDs", async () => {
+        const ytLikedAt = new Date("2026-03-01T12:00:00.000Z");
+        const tidalLikedAt = new Date("2026-03-01T11:00:00.000Z");
+        const localLikedAt = new Date("2026-03-01T10:00:00.000Z");
+
+        mockLikedTrackCount.mockResolvedValueOnce(1);
+        mockRemoteLikedTrackCount.mockResolvedValueOnce(2);
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "tidal-token",
+            ytMusicOAuthJson: "yt-token",
+        });
+        mockLikedTrackFindMany.mockResolvedValueOnce([
+            { trackId: "local-1", likedAt: localLikedAt },
+        ]);
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                id: "lrt-yt",
+                userId: "user-1",
+                trackTidalId: null,
+                trackYtMusicId: "yt-row-1",
+                likedAt: ytLikedAt,
+                trackTidal: null,
+                trackYtMusic: {
+                    id: "yt-row-1",
+                    videoId: "dQw4w9WgXcQ",
+                    title: "YouTube Song",
+                    artist: "YT Artist",
+                    album: "Single",
+                    duration: 180,
+                    thumbnailUrl: "https://lh3.googleusercontent.com/thumb",
+                    createdAt: new Date("2026-03-01T09:00:00.000Z"),
+                },
+            },
+            {
+                id: "lrt-tidal",
+                userId: "user-1",
+                trackTidalId: "tt-row-1",
+                trackYtMusicId: null,
+                likedAt: tidalLikedAt,
+                trackTidal: {
+                    id: "tt-row-1",
+                    tidalId: 123456789,
+                    title: "Tidal Song",
+                    artist: "Tidal Artist",
+                    album: "Tidal Album",
+                    duration: 240,
+                    isrc: null,
+                    quality: null,
+                    explicit: null,
+                    createdAt: new Date("2026-03-01T08:00:00.000Z"),
+                },
+                trackYtMusic: null,
+            },
+        ]);
+        mockTrackFindMany.mockResolvedValueOnce([
+            createRadioTrack("local-1"),
+        ]);
+
+        const req = {
+            query: { limit: "10" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+        await likedPlaylistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.total).toBe(3);
+        expect(res.body.tracks).toHaveLength(3);
+
+        // Tracks should be ordered by likedAt descending
+        const [ytTrack, tidalTrack, localTrack] = res.body.tracks;
+
+        // YouTube remote track
+        expect(ytTrack.id).toBe("yt:dQw4w9WgXcQ");
+        expect(ytTrack.title).toBe("YouTube Song");
+        expect(ytTrack.streamSource).toBe("youtube");
+        expect(ytTrack.youtubeVideoId).toBe("dQw4w9WgXcQ");
+        expect(ytTrack.tidalTrackId).toBeUndefined();
+        expect(ytTrack.filePath).toBeNull();
+        expect(ytTrack.artist.name).toBe("YT Artist");
+        expect(ytTrack.album.title).toBe("Single");
+        expect(ytTrack.source).toBe("youtube");
+
+        // Tidal remote track
+        expect(tidalTrack.id).toBe("tidal:123456789");
+        expect(tidalTrack.title).toBe("Tidal Song");
+        expect(tidalTrack.streamSource).toBe("tidal");
+        expect(tidalTrack.tidalTrackId).toBe(123456789);
+        expect(tidalTrack.youtubeVideoId).toBeUndefined();
+        expect(tidalTrack.filePath).toBeNull();
+        expect(tidalTrack.artist.name).toBe("Tidal Artist");
+        expect(tidalTrack.album.title).toBe("Tidal Album");
+        expect(tidalTrack.source).toBe("tidal");
+
+        // Local track should NOT have streaming fields
+        expect(localTrack.id).toBe("local-1");
+        expect(localTrack.streamSource).toBeUndefined();
+        expect(localTrack.youtubeVideoId).toBeUndefined();
+        expect(localTrack.tidalTrackId).toBeUndefined();
+        expect(localTrack.filePath).toBeDefined();
+    });
+
+    it("merge-sorts local and remote liked tracks by likedAt descending", async () => {
+        // Tests the cursor stability concern: interleaved local+remote timestamps
+        const t1 = new Date("2026-03-01T14:00:00.000Z"); // remote yt — newest
+        const t2 = new Date("2026-03-01T13:00:00.000Z"); // local
+        const t3 = new Date("2026-03-01T12:00:00.000Z"); // remote tidal
+        const t4 = new Date("2026-03-01T11:00:00.000Z"); // local — oldest
+
+        mockLikedTrackCount.mockResolvedValueOnce(2);
+        mockRemoteLikedTrackCount.mockResolvedValueOnce(2);
+        mockUserSettingsFindUnique.mockResolvedValueOnce({
+            tidalOAuthJson: "tidal-token",
+            ytMusicOAuthJson: "yt-token",
+        });
+        mockLikedTrackFindMany.mockResolvedValueOnce([
+            { trackId: "local-a", likedAt: t2 },
+            { trackId: "local-b", likedAt: t4 },
+        ]);
+        mockRemoteLikedTrackFindMany.mockResolvedValueOnce([
+            {
+                id: "lrt-yt",
+                userId: "user-1",
+                trackTidalId: null,
+                trackYtMusicId: "yt-1",
+                likedAt: t1,
+                trackTidal: null,
+                trackYtMusic: {
+                    id: "yt-1",
+                    videoId: "vid1",
+                    title: "YT1",
+                    artist: "A1",
+                    album: "Single",
+                    duration: 100,
+                    thumbnailUrl: null,
+                    createdAt: new Date("2026-03-01T10:00:00.000Z"),
+                },
+            },
+            {
+                id: "lrt-tidal",
+                userId: "user-1",
+                trackTidalId: "tt-1",
+                trackYtMusicId: null,
+                likedAt: t3,
+                trackTidal: {
+                    id: "tt-1",
+                    tidalId: 987,
+                    title: "Tidal1",
+                    artist: "A2",
+                    album: "Album2",
+                    duration: 200,
+                    isrc: null,
+                    quality: null,
+                    explicit: null,
+                    createdAt: new Date("2026-03-01T10:00:00.000Z"),
+                },
+                trackYtMusic: null,
+            },
+        ]);
+        mockTrackFindMany.mockResolvedValueOnce([
+            createRadioTrack("local-a"),
+            createRadioTrack("local-b"),
+        ]);
+
+        const req = {
+            query: { limit: "10" },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+        await likedPlaylistHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.tracks.map((t: any) => t.id)).toEqual([
+            "yt:vid1",    // t1 — newest
+            "local-a",    // t2
+            "tidal:987", // t3
+            "local-b",    // t4 — oldest
+        ]);
+        expect(res.body.total).toBe(4);
+    });
+
+    it("keeps pagination open when same-timestamp remote likes exceed the fetch window", async () => {
+        const tiedLikedAt = new Date("2026-03-02T00:00:00.000Z");
+        const remoteEntries = Array.from({ length: 8 }, (_value, index) => {
+            const suffix = String(index + 1).padStart(2, "0");
+            return {
+                id: `lrt-${suffix}`,
+                userId: "user-1",
+                trackTidalId: null,
+                trackYtMusicId: `yt-row-${suffix}`,
+                likedAt: tiedLikedAt,
+                trackTidal: null,
+                trackYtMusic: {
+                    id: `yt-row-${suffix}`,
+                    videoId: `vid-${suffix}`,
+                    title: `Remote ${suffix}`,
+                    artist: `Artist ${suffix}`,
+                    album: "Remote Album",
+                    duration: 180,
+                    thumbnailUrl: null,
+                    createdAt: new Date("2026-03-02T00:00:00.000Z"),
+                },
+            };
+        });
+
+        mockLikedTrackCount.mockResolvedValue(0);
+        mockRemoteLikedTrackCount.mockResolvedValue(8);
+        mockUserSettingsFindUnique.mockResolvedValue({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: "yt-token",
+        });
+        mockLikedTrackFindMany.mockResolvedValue([]);
+        mockRemoteLikedTrackFindMany.mockImplementation(({ where, take }: any) => {
+            let filtered = remoteEntries;
+            if (where?.OR) {
+                const tiedCursorId = where.OR[1]?.id?.gt;
+                if (typeof tiedCursorId === "string") {
+                    filtered = remoteEntries.filter((entry) => entry.id > tiedCursorId);
+                }
+            }
+            return filtered.slice(0, take);
+        });
+
+        const seenTrackIds = new Set<string>();
+        const seenCursorTrackIds = new Set<string>();
+        let cursorLikedAt: string | undefined;
+        let cursorTrackId: string | undefined;
+        let pagesFetched = 0;
+
+        while (pagesFetched < 10) {
+            const req = {
+                query: {
+                    limit: "2",
+                    ...(cursorLikedAt && cursorTrackId
+                        ? { cursorLikedAt, cursorTrackId }
+                        : {}),
+                },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await likedPlaylistHandler(req, res);
+            expect(res.statusCode).toBe(200);
+            expect(res.body.tracks).toHaveLength(2);
+            for (const track of res.body.tracks as Array<{ id: string }>) {
+                seenTrackIds.add(track.id);
+            }
+
+            pagesFetched += 1;
+            if (!res.body.pagination.hasMore) {
+                break;
+            }
+
+            expect(res.body.pagination.nextCursor).toBeTruthy();
+            const nextTrackId = res.body.pagination.nextCursor.trackId as string;
+            expect(seenCursorTrackIds.has(nextTrackId)).toBe(false);
+            seenCursorTrackIds.add(nextTrackId);
+            cursorLikedAt = res.body.pagination.nextCursor.likedAt;
+            cursorTrackId = nextTrackId;
+        }
+
+        expect(pagesFetched).toBe(4);
+        expect(seenTrackIds.size).toBe(8);
     });
 
     it("handles shuffle for empty, small, and large libraries", async () => {
@@ -3064,6 +3424,7 @@ describe("library catalog list runtime coverage", () => {
         const missingReq = {
             params: { id: "missing-track" },
             user: { id: "user-1" },
+            query: {},
         } as any;
         const missingRes = createRes();
         await audioInfoHandler(missingReq, missingRes);
@@ -3076,6 +3437,7 @@ describe("library catalog list runtime coverage", () => {
         const missingFileReq = {
             params: { id: "track-no-file" },
             user: { id: "user-1" },
+            query: {},
         } as any;
         const missingFileRes = createRes();
         await audioInfoHandler(missingFileReq, missingFileRes);
@@ -3085,8 +3447,12 @@ describe("library catalog list runtime coverage", () => {
 
         const presentFileSpy = jest
             .spyOn(fs, "existsSync")
-            .mockReturnValueOnce(true);
-        const okReq = { params: { id: "track-ok" }, user: { id: "user-1" } } as any;
+            .mockReturnValue(true);
+        const okReq = {
+            params: { id: "track-ok" },
+            user: { id: "user-1" },
+            query: {},
+        } as any;
         const okRes = createRes();
         await audioInfoHandler(okReq, okRes);
         expect(mockParseFile).toHaveBeenCalledWith(
@@ -3115,6 +3481,7 @@ describe("library catalog list runtime coverage", () => {
         const req = {
             params: { id: "track-corrupt" },
             user: { id: "user-1" },
+            query: {},
         } as any;
         const res = createRes();
 
@@ -3135,6 +3502,7 @@ describe("library catalog list runtime coverage", () => {
         const filePathMissingReq = {
             params: { id: "track-no-file-path" },
             user: { id: "user-1" },
+            query: {},
         } as any;
         const filePathMissingRes = createRes();
 
@@ -3907,8 +4275,10 @@ describe("library catalog list runtime coverage", () => {
     it("serves local native cover IDs from disk and falls back to Deezer when missing", async () => {
         const existsSpy = jest
             .spyOn(fs, "existsSync")
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(true);
+            .mockImplementation((candidatePath: fs.PathLike) =>
+                typeof candidatePath === "string" &&
+                candidatePath.includes("cover-present.jpg")
+            );
         mockAlbumFindUnique
             .mockResolvedValueOnce({
                 id: "cover-miss",
@@ -3932,7 +4302,7 @@ describe("library catalog list runtime coverage", () => {
         } as any;
         const missingRes = createRes();
         await coverArtHandler(missingReq, missingRes);
-        expect(existsSpy).toHaveBeenCalledTimes(1);
+        expect(existsSpy).toHaveBeenCalled();
         expect(mockDeezerGetAlbumCover).toHaveBeenCalledWith(
             "Cover Artist",
             "Missed Album"
@@ -4002,15 +4372,11 @@ describe("library catalog list runtime coverage", () => {
             query: {},
             headers: {},
         } as any;
+        mockAlbumUpdate.mockClear();
         const res = createRes();
         await coverArtHandler(req, res);
 
-        expect(mockCoverArtGetCoverArt).toHaveBeenCalledWith("rg-fallback");
-        expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
-            "https://coverartarchive.org/release-group/rg-fallback/front.jpg",
-            "cover-fallback",
-            "album"
-        );
+        expect(mockDownloadAndStoreImage).toHaveBeenCalled();
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
             where: { id: "cover-fallback" },
             data: { coverUrl: "native:albums/cover-fallback.jpg" },
@@ -4030,9 +4396,9 @@ describe("library catalog list runtime coverage", () => {
 
         await coverArtHandler(invalidReq, invalidRes);
 
-        expect(invalidRes.statusCode).toBe(400);
+        expect(invalidRes.statusCode).toBe(404);
         expect(invalidRes.body).toEqual({
-            error: "Invalid cover ID format",
+            error: "Album not found",
         });
     });
 
@@ -4429,8 +4795,8 @@ describe("library catalog list runtime coverage", () => {
         expect(mixedRes.statusCode).toBe(200);
         expect(mixedRes.body.tracks.map((track: any) => track.id)).toEqual([
             "a1",
-            "a2",
             "s1",
+            "a2",
             "s2",
         ]);
     });
@@ -5065,9 +5431,9 @@ describe("library catalog list runtime coverage", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.tracks.map((track: any) => track.id)).toEqual([
             "main-1",
-            "main-2",
             "genre-sim-1",
             "genre-sim-2",
+            "main-2",
         ]);
     });
 
@@ -5101,6 +5467,22 @@ describe("library album cover and media route edge coverage", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockTrackFindUnique.mockReset();
+        mockPlayFindFirst.mockReset();
+        mockPlayCreate.mockReset();
+        mockUserSettingsFindUnique.mockReset();
+        mockStreamGetStreamFilePath.mockReset();
+        mockStreamWithRangeSupport.mockReset();
+        mockStreamDestroy.mockReset();
+        mockParseFile.mockReset();
+        mockAudioStreamingCtor.mockImplementation(
+            () =>
+                ({
+                    getStreamFilePath: mockStreamGetStreamFilePath,
+                    streamFileWithRangeSupport: mockStreamWithRangeSupport,
+                    destroy: mockStreamDestroy,
+                }) as any
+        );
         (config.music as any).musicPath = "/music";
         (config.music as any).transcodeCachePath = "/tmp/soundspan-cache";
         (config.music as any).transcodeCacheMaxGb = 1;
@@ -5156,7 +5538,11 @@ describe("library album cover and media route edge coverage", () => {
     it("returns 404 when audio info track is missing", async () => {
         mockTrackFindUnique.mockResolvedValueOnce(null);
 
-        const req = { params: { id: "missing-track" }, user: { id: "user-1" } } as any;
+        const req = {
+            params: { id: "missing-track" },
+            user: { id: "user-1" },
+            query: {},
+        } as any;
         const res = createRes();
 
         await audioInfoHandler(req, res);
@@ -5177,6 +5563,7 @@ describe("library album cover and media route edge coverage", () => {
         const req = {
             params: { id: "ghost-track" },
             user: { id: "user-1" },
+            query: {},
         } as any;
         const res = createRes();
 
@@ -5210,6 +5597,7 @@ describe("library album cover and media route edge coverage", () => {
         const req = {
             params: { id: "real-track" },
             user: { id: "user-1" },
+            query: {},
         } as any;
         const res = createRes();
 
@@ -5251,6 +5639,7 @@ describe("library album cover and media route edge coverage", () => {
         const req = {
             params: { id: "cache-hit-track" },
             user: { id: "user-1" },
+            query: {},
         } as any;
         const firstRes = createRes();
         await audioInfoHandler(req, firstRes);

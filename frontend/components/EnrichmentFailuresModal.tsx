@@ -16,6 +16,9 @@ interface EnrichmentFailuresModalProps {
     onClose: () => void;
 }
 
+/**
+ * Renders the EnrichmentFailuresModal component.
+ */
 export function EnrichmentFailuresModal({
     isOpen,
     onClose,

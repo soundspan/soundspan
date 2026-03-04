@@ -10,6 +10,9 @@ interface RestartModalProps {
     changedServices: string[];
 }
 
+/**
+ * Renders the RestartModal component.
+ */
 export function RestartModal({
     isOpen,
     onClose,

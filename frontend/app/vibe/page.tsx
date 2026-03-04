@@ -543,6 +543,9 @@ function TrackRow({
     );
 }
 
+/**
+ * Renders the VibePage component.
+ */
 export default function VibePage() {
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
 

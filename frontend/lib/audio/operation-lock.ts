@@ -13,6 +13,9 @@ interface PendingOperation {
   type: OperationType;
 }
 
+/**
+ * Represents the OperationLock class.
+ */
 export class OperationLock {
   private currentOp: OperationType | null = null;
   private opId = 0;

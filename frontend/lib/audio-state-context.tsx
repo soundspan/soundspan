@@ -5,6 +5,7 @@ import {
     useContext,
     useState,
     useEffect,
+    useRef,
     ReactNode,
     useMemo,
 } from "react";
@@ -26,7 +27,9 @@ import {
     QUEUE_CLEARED_AT_KEY_SUFFIX,
     parsePlaybackStateSaveTimestamp,
     shouldSkipPlaybackStatePoll,
+    createDebouncedStorageFlush,
 } from "@/lib/playback-state-cadence";
+import { resolvePollingJitter } from "@/hooks/pollingCadence";
 import { clampNonNegativePlaybackTime } from "@/lib/audio-playback-normalization";
 import { resolveInitialAudioVolume } from "@/lib/audio-volume";
 import {
@@ -240,6 +243,9 @@ function parseStorageJson<T>(key: MigratingStorageKey, fallback: T): T {
     try { return JSON.parse(raw) as T; } catch { return fallback; }
 }
 
+/**
+ * Renders the AudioStateProvider component.
+ */
 export function AudioStateProvider({ children }: { children: ReactNode }) {
     const [currentTrack, setCurrentTrack] = useState<Track | null>(
         () => parseStorageJson(STORAGE_KEYS.CURRENT_TRACK, null)
@@ -543,61 +549,76 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             });
     }, []);
 
-    // Save state to localStorage whenever it changes
+    // Effect A (debounced): Persist heavy JSON blobs to localStorage.
+    // Debounced at 300ms to coalesce rapid state changes (e.g. queue updates).
+    const storageFlushRef = useRef(createDebouncedStorageFlush(300));
+
     useEffect(() => {
         if (!isHydrated || typeof window === "undefined") return;
 
-        try {
-            if (currentTrack) {
+        // Snapshot current values for the debounced callback
+        const snapshot = {
+            currentTrack,
+            currentAudiobook,
+            currentPodcast,
+            playbackType,
+            queue,
+            currentIndex,
+            isShuffle,
+            podcastEpisodeQueue,
+        };
+
+        storageFlushRef.current.schedule(() => {
+            try {
+                if (snapshot.currentTrack) {
+                    writeMigratingStorageItem(
+                        STORAGE_KEYS.CURRENT_TRACK,
+                        JSON.stringify(snapshot.currentTrack)
+                    );
+                } else {
+                    removeMigratingStorageItem(STORAGE_KEYS.CURRENT_TRACK);
+                }
+                if (snapshot.currentAudiobook) {
+                    writeMigratingStorageItem(
+                        STORAGE_KEYS.CURRENT_AUDIOBOOK,
+                        JSON.stringify(snapshot.currentAudiobook)
+                    );
+                } else {
+                    removeMigratingStorageItem(STORAGE_KEYS.CURRENT_AUDIOBOOK);
+                }
+                if (snapshot.currentPodcast) {
+                    writeMigratingStorageItem(
+                        STORAGE_KEYS.CURRENT_PODCAST,
+                        JSON.stringify(snapshot.currentPodcast)
+                    );
+                } else {
+                    removeMigratingStorageItem(STORAGE_KEYS.CURRENT_PODCAST);
+                }
+                if (snapshot.playbackType) {
+                    writeMigratingStorageItem(STORAGE_KEYS.PLAYBACK_TYPE, snapshot.playbackType);
+                } else {
+                    removeMigratingStorageItem(STORAGE_KEYS.PLAYBACK_TYPE);
+                }
+                writeMigratingStorageItem(STORAGE_KEYS.QUEUE, JSON.stringify(snapshot.queue));
                 writeMigratingStorageItem(
-                    STORAGE_KEYS.CURRENT_TRACK,
-                    JSON.stringify(currentTrack)
+                    STORAGE_KEYS.CURRENT_INDEX,
+                    snapshot.currentIndex.toString()
                 );
-            } else {
-                removeMigratingStorageItem(STORAGE_KEYS.CURRENT_TRACK);
+                writeMigratingStorageItem(STORAGE_KEYS.IS_SHUFFLE, snapshot.isShuffle.toString());
+                if (snapshot.podcastEpisodeQueue) {
+                    writeMigratingStorageItem(
+                        STORAGE_KEYS.PODCAST_EPISODE_QUEUE,
+                        JSON.stringify(snapshot.podcastEpisodeQueue)
+                    );
+                } else {
+                    removeMigratingStorageItem(STORAGE_KEYS.PODCAST_EPISODE_QUEUE);
+                }
+            } catch (error) {
+                sharedFrontendLogger.error("[AudioState] Failed to save state (debounced):", error);
             }
-            if (currentAudiobook) {
-                writeMigratingStorageItem(
-                    STORAGE_KEYS.CURRENT_AUDIOBOOK,
-                    JSON.stringify(currentAudiobook)
-                );
-            } else {
-                removeMigratingStorageItem(STORAGE_KEYS.CURRENT_AUDIOBOOK);
-            }
-            if (currentPodcast) {
-                writeMigratingStorageItem(
-                    STORAGE_KEYS.CURRENT_PODCAST,
-                    JSON.stringify(currentPodcast)
-                );
-            } else {
-                removeMigratingStorageItem(STORAGE_KEYS.CURRENT_PODCAST);
-            }
-            if (playbackType) {
-                writeMigratingStorageItem(STORAGE_KEYS.PLAYBACK_TYPE, playbackType);
-            } else {
-                removeMigratingStorageItem(STORAGE_KEYS.PLAYBACK_TYPE);
-            }
-            writeMigratingStorageItem(STORAGE_KEYS.QUEUE, JSON.stringify(queue));
-            writeMigratingStorageItem(
-                STORAGE_KEYS.CURRENT_INDEX,
-                currentIndex.toString()
-            );
-            writeMigratingStorageItem(STORAGE_KEYS.IS_SHUFFLE, isShuffle.toString());
-            writeMigratingStorageItem(STORAGE_KEYS.REPEAT_MODE, repeatMode);
-            if (podcastEpisodeQueue) {
-                writeMigratingStorageItem(
-                    STORAGE_KEYS.PODCAST_EPISODE_QUEUE,
-                    JSON.stringify(podcastEpisodeQueue)
-                );
-            } else {
-                removeMigratingStorageItem(STORAGE_KEYS.PODCAST_EPISODE_QUEUE);
-            }
-            writeMigratingStorageItem(STORAGE_KEYS.PLAYER_MODE, playerMode);
-            writeMigratingStorageItem(STORAGE_KEYS.VOLUME, volume.toString());
-            writeMigratingStorageItem(STORAGE_KEYS.IS_MUTED, isMuted.toString());
-        } catch (error) {
-            sharedFrontendLogger.error("[AudioState] Failed to save state:", error);
-        }
+        });
+
+        return () => { storageFlushRef.current.flush(); };
     }, [
         currentTrack,
         currentAudiobook,
@@ -606,13 +627,44 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         queue,
         currentIndex,
         isShuffle,
-        repeatMode,
         podcastEpisodeQueue,
-        playerMode,
-        volume,
-        isMuted,
         isHydrated,
     ]);
+
+    // Effect B (immediate): Persist cheap scalar values to localStorage.
+    useEffect(() => {
+        if (!isHydrated || typeof window === "undefined") return;
+
+        try {
+            writeMigratingStorageItem(STORAGE_KEYS.REPEAT_MODE, repeatMode);
+            writeMigratingStorageItem(STORAGE_KEYS.PLAYER_MODE, playerMode);
+            writeMigratingStorageItem(STORAGE_KEYS.VOLUME, volume.toString());
+            writeMigratingStorageItem(STORAGE_KEYS.IS_MUTED, isMuted.toString());
+        } catch (error) {
+            sharedFrontendLogger.error("[AudioState] Failed to save scalar state:", error);
+        }
+    }, [repeatMode, playerMode, volume, isMuted, isHydrated]);
+
+    // Refs for poll effect — read inside setInterval so deps stay stable at [isHydrated]
+    const queueRef = useRef(queue);
+    const currentIndexRef = useRef(currentIndex);
+    const isShuffleRef = useRef(isShuffle);
+    const lastServerSyncRef = useRef(lastServerSync);
+    const playbackTypeRef = useRef(playbackType);
+    const currentTrackIdRef = useRef(currentTrack?.id);
+    const currentAudiobookIdRef = useRef(currentAudiobook?.id);
+    const currentPodcastIdRef = useRef(currentPodcast?.id);
+    const pollInFlightRef = useRef(false);
+
+    // Sync refs via lightweight effects
+    useEffect(() => { queueRef.current = queue; }, [queue]);
+    useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+    useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
+    useEffect(() => { lastServerSyncRef.current = lastServerSync; }, [lastServerSync]);
+    useEffect(() => { playbackTypeRef.current = playbackType; }, [playbackType]);
+    useEffect(() => { currentTrackIdRef.current = currentTrack?.id; }, [currentTrack?.id]);
+    useEffect(() => { currentAudiobookIdRef.current = currentAudiobook?.id; }, [currentAudiobook?.id]);
+    useEffect(() => { currentPodcastIdRef.current = currentPodcast?.id; }, [currentPodcast?.id]);
 
     // Poll server for persisted changes for this device (pauses when tab is hidden)
     useEffect(() => {
@@ -629,31 +681,43 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         };
         document.addEventListener("visibilitychange", handleVisibilityChange);
 
-        const pollInterval = setInterval(async () => {
+        let pollInterval: ReturnType<typeof setInterval> | null = null;
+        const pollCallback = async () => {
             // Skip polling when tab is hidden, unmounted, or not authenticated
             if (!isAuthenticated || !mounted || !isVisible) return;
-
-            const lastLocalSave = parsePlaybackStateSaveTimestamp(
-                readStorage(STORAGE_KEYS.LAST_PLAYBACK_STATE_SAVE_AT)
-            );
-            if (shouldSkipPlaybackStatePoll(lastLocalSave)) {
-                return;
-            }
-
-            // If the queue was recently cleared, skip adopting server state
-            // to prevent a stale in-flight save from resurrecting the queue.
-            const queueClearedAt = parsePlaybackStateSaveTimestamp(
-                readStorage(STORAGE_KEYS.QUEUE_CLEARED_AT)
-            );
-            if (queueClearedAt > 0 && queue.length === 0) {
-                if (Date.now() - queueClearedAt < 60_000) {
-                    return;
-                }
-                // Protection window expired — clean up the flag
-                removeMigratingStorageItem(STORAGE_KEYS.QUEUE_CLEARED_AT);
-            }
+            // Prevent overlapping async poll calls
+            if (pollInFlightRef.current) return;
+            pollInFlightRef.current = true;
 
             try {
+                const lastLocalSave = parsePlaybackStateSaveTimestamp(
+                    readStorage(STORAGE_KEYS.LAST_PLAYBACK_STATE_SAVE_AT)
+                );
+                if (shouldSkipPlaybackStatePoll(lastLocalSave)) {
+                    return;
+                }
+
+                // Read current state from refs
+                const localQueue = queueRef.current;
+                const localCurrentIndex = currentIndexRef.current;
+                const localIsShuffle = isShuffleRef.current;
+                const localLastServerSync = lastServerSyncRef.current;
+                const localPlaybackType = playbackTypeRef.current;
+                const localCurrentTrackId = currentTrackIdRef.current;
+                const localCurrentAudiobookId = currentAudiobookIdRef.current;
+                const localCurrentPodcastId = currentPodcastIdRef.current;
+
+                // If the queue was recently cleared, skip adopting server state
+                const queueClearedAt = parsePlaybackStateSaveTimestamp(
+                    readStorage(STORAGE_KEYS.QUEUE_CLEARED_AT)
+                );
+                if (queueClearedAt > 0 && localQueue.length === 0) {
+                    if (Date.now() - queueClearedAt < 60_000) {
+                        return;
+                    }
+                    removeMigratingStorageItem(STORAGE_KEYS.QUEUE_CLEARED_AT);
+                }
+
                 const serverState = await api.getPlaybackState();
                 if (!serverState || !mounted) return;
 
@@ -666,8 +730,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 const serverUpdatedAt = new Date(serverUpdatedAtMs);
 
                 if (
-                    lastServerSync &&
-                    serverUpdatedAt.getTime() <= lastServerSync.getTime()
+                    localLastServerSync &&
+                    serverUpdatedAt.getTime() <= localLastServerSync.getTime()
                 ) {
                     return;
                 }
@@ -684,17 +748,17 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverState.audiobookId ||
                     serverState.podcastId;
                 const currentMediaId =
-                    currentTrack?.id ||
-                    currentAudiobook?.id ||
-                    currentPodcast?.id;
+                    localCurrentTrackId ||
+                    localCurrentAudiobookId ||
+                    localCurrentPodcastId;
 
                 const serverQueue = Array.isArray(serverState.queue)
                     ? (serverState.queue as Track[])
                     : null;
                 const pollDecision = resolveServerPlaybackPollDecision({
-                    localPlaybackType: playbackType,
+                    localPlaybackType: localPlaybackType,
                     localMediaId: currentMediaId || null,
-                    localQueue: queue,
+                    localQueue: localQueue,
                     localLastSaveAtMs: lastLocalSave,
                     serverPlaybackType,
                     serverMediaId: serverMediaId || null,
@@ -704,11 +768,11 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 if (!pollDecision.shouldApplyServerSnapshot) {
                     queueDebugLog("Polling ignored server playback snapshot", {
                         reason: pollDecision.reason,
-                        localPlaybackType: playbackType,
+                        localPlaybackType: localPlaybackType,
                         serverPlaybackType,
                         localMediaId: currentMediaId,
                         serverMediaId,
-                        localQueueLen: queue.length,
+                        localQueueLen: localQueue.length,
                         serverQueueLen: serverQueue?.length || 0,
                         serverUpdatedAt: serverState.updatedAt,
                     });
@@ -718,7 +782,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
                 if (
                     serverMediaId !== currentMediaId ||
-                    serverPlaybackType !== playbackType
+                    serverPlaybackType !== localPlaybackType
                 ) {
                     if (
                         serverPlaybackType === "track" &&
@@ -734,7 +798,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                             setCurrentAudiobook(null);
                             setCurrentPodcast(null);
                             if (serverQueue && serverQueue.length > 0) {
-                                if (!queuesMatchByTrackId(queue, serverQueue)) {
+                                if (!queuesMatchByTrackId(localQueue, serverQueue)) {
                                     setQueue(serverQueue);
                                 }
                                 setCurrentIndex(
@@ -798,19 +862,19 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     if (
                         serverQueue &&
                         serverQueue.length > 0 &&
-                        !queuesMatchByTrackId(queue, serverQueue)
+                        !queuesMatchByTrackId(localQueue, serverQueue)
                     ) {
                         queueDebugLog("Polling applied server queue", {
                             reason: pollDecision.reason,
                             serverQueueLen: serverQueue.length,
-                            localQueueLen: queue?.length || 0,
+                            localQueueLen: localQueue?.length || 0,
                             serverCurrentIndex: normalizeQueueIndex(
                                 serverState.currentIndex,
                                 serverQueue.length
                             ),
-                            localCurrentIndex: currentIndex,
+                            localCurrentIndex: localCurrentIndex,
                             serverIsShuffle: serverState.isShuffle,
-                            localIsShuffle: isShuffle,
+                            localIsShuffle: localIsShuffle,
                             serverUpdatedAt: serverState.updatedAt,
                         });
                         setQueue(serverQueue);
@@ -828,10 +892,18 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             } catch (err: unknown) {
                 if (err instanceof Error && err.message === "Not authenticated") {
                     isAuthenticated = false;
-                    clearInterval(pollInterval);
+                    if (pollInterval) clearInterval(pollInterval);
                 }
+            } finally {
+                pollInFlightRef.current = false;
             }
-        }, 30000);
+        };
+
+        // Start polling with jitter to prevent alignment with other intervals
+        const jitterDelay = resolvePollingJitter(8000);
+        const jitterTimeout = setTimeout(() => {
+            pollInterval = setInterval(pollCallback, 30000);
+        }, jitterDelay);
 
         return () => {
             mounted = false;
@@ -839,19 +911,10 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                 "visibilitychange",
                 handleVisibilityChange
             );
-            clearInterval(pollInterval);
+            clearTimeout(jitterTimeout);
+            if (pollInterval) clearInterval(pollInterval);
         };
-    }, [
-        isHydrated,
-        playbackType,
-        currentTrack?.id,
-        currentAudiobook?.id,
-        currentPodcast?.id,
-        queue,
-        currentIndex,
-        isShuffle,
-        lastServerSync,
-    ]);
+    }, [isHydrated]);
 
     // Memoize the context value to prevent unnecessary re-renders
     const value = useMemo(
@@ -928,6 +991,9 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useAudioState.
+ */
 export function useAudioState() {
     const context = useContext(AudioStateContext);
     if (!context) {

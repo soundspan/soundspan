@@ -14,6 +14,9 @@ interface PlaylistSelectorProps {
     loadingMessage?: string;
 }
 
+/**
+ * Renders the PlaylistSelector component.
+ */
 export function PlaylistSelector({
     isOpen,
     onClose,

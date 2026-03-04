@@ -291,6 +291,40 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
     });
 
+    it("auto-readies unavailable members during waiting gates", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-unavailable-ready", {
+            name: "Unavailable Ready",
+            joinCode: "UNRDY",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-unavailable-ready", "guest", "Guest");
+        groupManager.addSocket("g-unavailable-ready", "host", "host-socket");
+        groupManager.addSocket("g-unavailable-ready", "guest", "guest-socket");
+
+        const waiting = groupManager.setTrack(
+            "g-unavailable-ready",
+            "host",
+            1,
+            true
+        );
+        expect(waiting.waiting).toBe(true);
+
+        expect(groupManager.reportReady("g-unavailable-ready", "host")).toBe(false);
+        groupManager.setUnavailableIndices("g-unavailable-ready", "guest", [1]);
+
+        expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
+        expect(groupManager.snapshotById("g-unavailable-ready")?.syncState).toBe(
+            "playing"
+        );
+    });
+
     it("treats play/pause/seek as no-ops while waiting and keeps track-change conflicts", () => {
         const callbacks = createCallbacks();
         groupManager.setCallbacks(callbacks);

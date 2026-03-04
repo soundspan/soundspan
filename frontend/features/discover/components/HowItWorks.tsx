@@ -3,6 +3,9 @@
 import { Sparkles, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 
+/**
+ * Renders the HowItWorks component.
+ */
 export function HowItWorks() {
     return (
         <Card className="p-6 bg-[#111]/50  border-white/5">

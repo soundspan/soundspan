@@ -12,6 +12,9 @@ import { useAudiobookActions } from "@/features/audiobook/hooks/useAudiobookActi
 import { AudiobookHero } from "@/features/audiobook/components/AudiobookHero";
 import { AudiobookActionBar } from "@/features/audiobook/components/AudiobookActionBar";
 
+/**
+ * Renders the AudiobookDetailPage component.
+ */
 export default function AudiobookDetailPage() {
     // Data hook
     const { audiobookId, audiobook, isLoading, refetch, heroImage, colorExtractionImage, metadata } =

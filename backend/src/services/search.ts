@@ -2,6 +2,9 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 
+/**
+ * Executes normalizeCacheQuery.
+ */
 export function normalizeCacheQuery(query: string): string {
     return query.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -93,6 +96,9 @@ export interface SearchResults {
     episodes: EpisodeSearchResult[];
 }
 
+/**
+ * Represents the SearchService class.
+ */
 export class SearchService {
     /**
      * Convert user query to PostgreSQL tsquery format
@@ -123,9 +129,10 @@ export class SearchService {
                     contains: query,
                     mode: "insensitive",
                 },
-                albums: {
-                    some: {},
-                },
+                OR: [
+                    { albums: { some: {} } },
+                    { remoteTrackCount: { gt: 0 } },
+                ],
             },
             select: {
                 id: true,
@@ -168,7 +175,10 @@ export class SearchService {
           ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
         FROM "Artist" a
         WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+          AND (
+            EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+            OR a."remoteTrackCount" > 0
+          )
         ORDER BY rank DESC, a.name ASC
         LIMIT ${limit}
         OFFSET ${offset}

@@ -18,6 +18,9 @@ interface AudiobookCardProps {
     getCoverUrl: (url: string) => string | null;
 }
 
+/**
+ * Renders the AudiobookCard component.
+ */
 export function AudiobookCard({
     id,
     title,

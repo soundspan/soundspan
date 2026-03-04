@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
-import { ListenTogetherSocket } from "../../lib/listen-together-socket.ts";
+import { ListenTogetherSocket } from "../../lib/listen-together-socket";
 
 type AckResponse = {
     ok?: boolean;
@@ -29,7 +29,7 @@ function installImmediateTimerMock(): void {
     ) => {
         scheduledDelaysMs.push(Number(delay ?? 0));
         callback();
-        return 0 as ReturnType<typeof setTimeout>;
+        return 0 as unknown as ReturnType<typeof setTimeout>;
     }) as typeof setTimeout;
 }
 

@@ -13,6 +13,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { BRAND_SLUG } from "../config/brand";
+import { timingSafeCompare } from "../utils/timingSafe";
 
 const router = Router();
 const LEGACY_SERVICE_ALIASES = [BRAND_SLUG];
@@ -95,7 +96,7 @@ router.post("/lidarr", async (req, res) => {
         if (settings.lidarrWebhookSecret) {
             const providedSecret = req.headers["x-webhook-secret"] as string;
 
-            if (!providedSecret || providedSecret !== settings.lidarrWebhookSecret) {
+            if (!providedSecret || !timingSafeCompare(providedSecret, settings.lidarrWebhookSecret)) {
                 logger.debug(
                     `[WEBHOOK] Lidarr webhook received with invalid or missing secret`
                 );

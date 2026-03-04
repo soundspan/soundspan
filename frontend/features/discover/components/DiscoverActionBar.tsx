@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, Pause, RefreshCw, Settings, Loader2, Plus, Shuffle } from "lucide-react";
+import { Play, Pause, RefreshCw, Settings, Loader2, Plus, Shuffle, ListMusic } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
@@ -25,10 +25,14 @@ interface DiscoverActionBarProps {
     onToggleSettings: () => void;
     onAddToPlaylist?: () => void;
     onShuffle?: () => void;
+    onAddAllToQueue?: () => void;
     isGenerating: boolean;
     batchStatus?: BatchStatus | null;
 }
 
+/**
+ * Renders the DiscoverActionBar component.
+ */
 export function DiscoverActionBar({
     playlist,
     config,
@@ -39,6 +43,7 @@ export function DiscoverActionBar({
     onToggleSettings,
     onAddToPlaylist,
     onShuffle,
+    onAddAllToQueue,
     isGenerating,
     batchStatus,
 }: DiscoverActionBarProps) {
@@ -93,6 +98,51 @@ export function DiscoverActionBar({
                     </button>
                 )}
 
+                {/* Shuffle Button */}
+                {playlist && playlist.tracks.length > 0 && onShuffle && (
+                    <button
+                        onClick={onShuffle}
+                        disabled={isGenerating}
+                        className={cn(
+                            "h-8 w-8 rounded-full flex items-center justify-center transition-all",
+                            isGenerating
+                                ? "text-white/30 cursor-not-allowed"
+                                : "text-white/60 hover:text-white hover:bg-white/10"
+                        )}
+                        title="Shuffle all"
+                    >
+                        <Shuffle className="w-5 h-5" />
+                    </button>
+                )}
+
+                {/* Add to Queue Button */}
+                {playlist && playlist.tracks.length > 0 && onAddAllToQueue && (
+                    <button
+                        onClick={onAddAllToQueue}
+                        disabled={isGenerating}
+                        className={cn(
+                            "h-8 w-8 rounded-full flex items-center justify-center transition-all",
+                            isGenerating
+                                ? "text-white/30 cursor-not-allowed"
+                                : "text-white/60 hover:text-white hover:bg-white/10"
+                        )}
+                        title="Add all to queue"
+                    >
+                        <ListMusic className="w-5 h-5" />
+                    </button>
+                )}
+
+                {/* Add to Playlist Button */}
+                {playlist && playlist.tracks.length > 0 && onAddToPlaylist && (
+                    <button
+                        onClick={onAddToPlaylist}
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                        title="Add all to playlist"
+                    >
+                        <Plus className="w-5 h-5" />
+                    </button>
+                )}
+
                 {/* Regenerate Button (icon only) */}
                 <button
                     onClick={onGenerate}
@@ -111,34 +161,6 @@ export function DiscoverActionBar({
                         <RefreshCw className="w-5 h-5" />
                     )}
                 </button>
-
-                {/* Shuffle Button */}
-                {playlist && playlist.tracks.length > 0 && onShuffle && (
-                    <button
-                        onClick={onShuffle}
-                        disabled={isGenerating}
-                        className={cn(
-                            "h-8 w-8 rounded-full flex items-center justify-center transition-all",
-                            isGenerating
-                                ? "text-white/30 cursor-not-allowed"
-                                : "text-white/60 hover:text-white hover:bg-white/10"
-                        )}
-                        title="Shuffle all"
-                    >
-                        <Shuffle className="w-5 h-5" />
-                    </button>
-                )}
-
-                {/* Add to Playlist Button */}
-                {playlist && playlist.tracks.length > 0 && onAddToPlaylist && (
-                    <button
-                        onClick={onAddToPlaylist}
-                        className="h-8 w-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
-                        title="Add all to playlist"
-                    >
-                        <Plus className="w-5 h-5" />
-                    </button>
-                )}
 
                 {/* Spacer to push Settings to far right */}
                 <div className="flex-1" />

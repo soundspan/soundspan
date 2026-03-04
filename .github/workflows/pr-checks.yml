@@ -29,10 +29,17 @@ jobs:
       - name: Check managed workflow drift
         run: npm run agent:managed -- --mode check
 
-      - name: Verify repository index readiness
-        run: |
-          npm run index:build
-          npm run index:verify
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Run test coverage baseline suites
+        run: npm run test-coverage:run
+
+      - name: Verify test coverage baseline
+        run: npm run test-coverage:verify
 
       - name: Verify release runtime contract
         run: npm run release:contract:check

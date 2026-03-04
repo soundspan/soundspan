@@ -16,6 +16,7 @@ const tidalStreamingService = {
     isEnabled: jest.fn(),
     isAvailable: jest.fn(),
     getAuthStatus: jest.fn(),
+    getUserPreferredQuality: jest.fn(),
     initiateDeviceAuth: jest.fn(),
     pollDeviceAuth: jest.fn(),
     restoreOAuth: jest.fn(),
@@ -123,6 +124,7 @@ describe("tidal streaming route runtime", () => {
 
         tidalStreamingService.isEnabled.mockResolvedValue(true);
         tidalStreamingService.isAvailable.mockResolvedValue(true);
+        tidalStreamingService.getUserPreferredQuality.mockResolvedValue("LOSSLESS");
         tidalStreamingService.getAuthStatus.mockResolvedValue({
             authenticated: true,
             credentialsConfigured: true,
@@ -419,7 +421,7 @@ describe("tidal streaming route runtime", () => {
             "LOSSLESS"
         );
 
-        prisma.userSettings.findUnique.mockRejectedValueOnce(new Error("db down"));
+        tidalStreamingService.getUserPreferredQuality.mockResolvedValueOnce("HIGH");
         const dbFallbackReq = {
             user: { id: "u1" },
             params: { trackId: "44" },

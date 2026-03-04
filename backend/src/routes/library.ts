@@ -38,6 +38,10 @@ import {
     isBackfillInProgress,
 } from "../services/artistCountsService";
 import {
+    backfillRemoteArtistAlbumLinks,
+    isRemoteBackfillInProgress,
+} from "../services/remoteTrackBackfillService";
+import {
     isImageBackfillNeeded,
     getImageBackfillProgress,
     backfillAllImages,
@@ -65,6 +69,17 @@ import {
     sendInternalRouteError,
     sendRouteError,
 } from "./routeErrorResponse";
+import {
+    computeAggregateFeatureVector,
+    scoreTracksAgainstSeed,
+} from "../services/radioVibeEngine";
+import { trackMappingService } from "../services/trackMappingService";
+import {
+    type UnifiedTrackResponse,
+    normalizeLocalTrack,
+    normalizeTidalTrack,
+    normalizeYtMusicTrack,
+} from "../services/unifiedTrackResponse";
 
 const router = Router();
 
@@ -262,6 +277,46 @@ const formatAlbumPreferenceResponse = (
     dislikedAt: preference.dislikedAt ? preference.dislikedAt.toISOString() : null,
     updatedAt: preference.updatedAt ? preference.updatedAt.toISOString() : null,
 });
+
+const hasConnectedProviderToken = (value: string | null | undefined): boolean =>
+    typeof value === "string" && value.trim().length > 0;
+
+const toLikedResponseTrack = (
+    normalized: UnifiedTrackResponse,
+    likedAt: Date
+) => {
+    const likedAtIso = likedAt.toISOString();
+    const base = {
+        id: normalized.id,
+        title: normalized.title,
+        duration: normalized.duration,
+        trackNo: normalized.trackNo,
+        filePath: normalized.filePath ?? null,
+        likedAt: likedAtIso,
+        source: normalized.source,
+        provider: normalized.provider,
+        artist: normalized.artist,
+        album: normalized.album,
+    };
+
+    if (normalized.source === "tidal") {
+        return {
+            ...base,
+            streamSource: "tidal" as const,
+            tidalTrackId: normalized.provider.tidalTrackId,
+        };
+    }
+
+    if (normalized.source === "youtube") {
+        return {
+            ...base,
+            streamSource: "youtube" as const,
+            youtubeVideoId: normalized.provider.youtubeVideoId,
+        };
+    }
+
+    return base;
+};
 
 const applyTrackPreferenceSignalToTrackIds = async (
     tx: {
@@ -481,6 +536,251 @@ const selectTracksWithArtistDiversity = <
     }
 
     return selected.slice(0, targetCount);
+};
+
+/**
+ * Builds a multi-track seeded radio queue using vibe-matching against a centroid
+ * computed from the seed tracks' audio features.
+ *
+ * Falls back through: vibe matches → seed artist tracks → genre expansion → random fill.
+ *
+ * @param seedTrackIds - IDs of the seed tracks to derive the radio vibe from.
+ * @param excludeTrackIds - IDs to exclude from results (typically the seeds themselves).
+ * @param limitNum - Maximum number of tracks to return.
+ * @param userId - Authenticated user ID for preference weighting.
+ * @returns Object with trackIds array and preserveInputOrder flag.
+ */
+const buildMultiTrackRadio = async (
+    seedTrackIds: string[],
+    excludeTrackIds: string[],
+    limitNum: number,
+    userId: string | undefined
+): Promise<{ trackIds: string[]; preserveInputOrder: boolean }> => {
+    if (seedTrackIds.length === 0) {
+        return { trackIds: [], preserveInputOrder: true };
+    }
+
+    // 1. Load seed tracks with analysis fields
+    const seedTracks = await prisma.track.findMany({
+        where: { id: { in: seedTrackIds } },
+        select: {
+            id: true,
+            bpm: true,
+            energy: true,
+            valence: true,
+            arousal: true,
+            danceability: true,
+            keyScale: true,
+            moodTags: true,
+            lastfmTags: true,
+            essentiaGenres: true,
+            instrumentalness: true,
+            moodHappy: true,
+            moodSad: true,
+            moodRelaxed: true,
+            moodAggressive: true,
+            moodParty: true,
+            moodAcoustic: true,
+            moodElectronic: true,
+            danceabilityMl: true,
+            analysisMode: true,
+            analysisVersion: true,
+            album: {
+                select: {
+                    artistId: true,
+                    artist: { select: { id: true, genres: true, userGenres: true } },
+                },
+            },
+        },
+    });
+
+    if (seedTracks.length === 0) {
+        return { trackIds: [], preserveInputOrder: true };
+    }
+
+    // 2. Compute aggregate feature vector (centroid)
+    const seedVector = computeAggregateFeatureVector(seedTracks);
+
+    // 3. Merge tags and genres from all seeds
+    const allTags = new Set<string>();
+    const allGenres = new Set<string>();
+    for (const t of seedTracks) {
+        for (const tag of (t.lastfmTags || [])) allTags.add(tag);
+        for (const genre of (t.essentiaGenres || [])) allGenres.add(genre);
+    }
+
+    // Collect seed artist IDs for fallback
+    const seedArtistIds = new Set<string>();
+    for (const t of seedTracks) {
+        if (t.album?.artistId) seedArtistIds.add(t.album.artistId);
+    }
+
+    const excludeSet = new Set(excludeTrackIds);
+    let resultIds: string[] = [];
+
+    // 4. Score candidates via vibe matching (if we have a valid centroid)
+    if (seedVector) {
+        const candidates = await prisma.track.findMany({
+            where: {
+                id: { notIn: [...excludeSet] },
+                analysisStatus: "completed",
+            },
+            select: {
+                id: true,
+                bpm: true,
+                energy: true,
+                valence: true,
+                arousal: true,
+                danceability: true,
+                keyScale: true,
+                moodTags: true,
+                lastfmTags: true,
+                essentiaGenres: true,
+                instrumentalness: true,
+                moodHappy: true,
+                moodSad: true,
+                moodRelaxed: true,
+                moodAggressive: true,
+                moodParty: true,
+                moodAcoustic: true,
+                moodElectronic: true,
+                danceabilityMl: true,
+                analysisMode: true,
+                analysisVersion: true,
+                album: { select: { artistId: true } },
+            },
+        });
+
+        logger.debug(
+            `[Radio:multi-seed] Found ${candidates.length} analyzed candidates to score against ${seedTracks.length} seed tracks`
+        );
+
+        const preferenceScores = await buildTrackPreferenceScoreMapForUser(
+            userId,
+            candidates.map((c) => c.id)
+        );
+
+        const scored = scoreTracksAgainstSeed(
+            seedVector,
+            [...allTags],
+            [...allGenres],
+            candidates,
+            preferenceScores,
+            applyTrackPreferenceSimilarityBias
+        );
+
+        logger.debug(
+            `[Radio:multi-seed] Vibe scoring matched ${scored.length} tracks above threshold`
+        );
+
+        // Apply artist diversity to scored results
+        const candidateArtistMap = new Map(
+            candidates.map((c) => [c.id, c.album?.artistId ?? ""])
+        );
+        const scoredWithArtist = scored.map((s) => ({
+            id: s.id,
+            score: s.score,
+            artistId: candidateArtistMap.get(s.id) ?? "",
+        }));
+
+        const strictCap = getRadioArtistCapForLimit(limitNum);
+        const relaxedCap = getRelaxedRadioArtistCapForLimit(limitNum);
+        const diverseMatches = selectTracksWithArtistDiversity(
+            scoredWithArtist,
+            limitNum,
+            strictCap,
+            relaxedCap
+        );
+        resultIds = diverseMatches.map((m) => m.id);
+    }
+
+    // 5. Fallback chain (if not enough vibe matches)
+    if (resultIds.length < limitNum) {
+        // Fallback A: Other tracks from seed artists (not already in results)
+        const currentExclude = new Set([...excludeSet, ...resultIds]);
+        const artistTracks = await prisma.track.findMany({
+            where: {
+                album: { artistId: { in: [...seedArtistIds] } },
+                id: { notIn: [...currentExclude] },
+            },
+            select: { id: true },
+            take: limitNum - resultIds.length,
+        });
+        const newArtistIds = artistTracks.map((t) => t.id);
+        resultIds.push(...newArtistIds);
+        if (newArtistIds.length > 0) {
+            logger.debug(
+                `[Radio:multi-seed] Fallback A: added ${newArtistIds.length} tracks from seed artists`
+            );
+        }
+    }
+
+    if (resultIds.length < limitNum) {
+        // Fallback B: Genre-based expansion from seed artist genres
+        const seedArtistGenres = new Set<string>();
+        for (const t of seedTracks) {
+            if (t.album?.artist) {
+                for (const g of getMergedGenres(t.album.artist)) {
+                    seedArtistGenres.add(g.toLowerCase());
+                }
+            }
+        }
+
+        if (seedArtistGenres.size > 0) {
+            const currentExclude = [...excludeSet, ...resultIds];
+            const genreKeywords = [...seedArtistGenres].slice(0, 5);
+            const genreConditions = genreKeywords.map(
+                (g) =>
+                    Prisma.sql`EXISTS (
+                        SELECT 1 FROM jsonb_array_elements_text("Artist"."genres") AS g
+                        WHERE LOWER(g) LIKE ${`%${g}%`}
+                    )`
+            );
+            const genreTracks = await prisma.$queryRaw<{ id: string }[]>`
+                SELECT "Track"."id"
+                FROM "Track"
+                JOIN "Album" ON "Track"."albumId" = "Album"."id"
+                JOIN "Artist" ON "Album"."artistId" = "Artist"."id"
+                WHERE "Track"."id" NOT IN (${Prisma.join(currentExclude.length > 0 ? currentExclude : ["__none__"])})
+                AND (${Prisma.join(genreConditions, " OR ")})
+                ORDER BY RANDOM()
+                LIMIT ${limitNum - resultIds.length}
+            `;
+            const newGenreIds = genreTracks.map((t) => t.id);
+            resultIds.push(...newGenreIds);
+            if (newGenreIds.length > 0) {
+                logger.debug(
+                    `[Radio:multi-seed] Fallback B: added ${newGenreIds.length} tracks from genre expansion (${genreKeywords.join(", ")})`
+                );
+            }
+        }
+    }
+
+    if (resultIds.length < limitNum) {
+        // Fallback C: Random library fill
+        const currentExclude = [...excludeSet, ...resultIds];
+        const randomTracks = await prisma.track.findMany({
+            where: {
+                id: { notIn: currentExclude },
+            },
+            select: { id: true },
+            take: (limitNum - resultIds.length) * 3,
+        });
+        const shuffled = shuffleArray(randomTracks.map((t) => t.id));
+        const newRandomIds = shuffled.slice(0, limitNum - resultIds.length);
+        resultIds.push(...newRandomIds);
+        if (newRandomIds.length > 0) {
+            logger.debug(
+                `[Radio:multi-seed] Fallback C: added ${newRandomIds.length} random library tracks`
+            );
+        }
+    }
+
+    logger.debug(
+        `[Radio:multi-seed] Final queue: ${resultIds.length} tracks`
+    );
+
+    return { trackIds: resultIds, preserveInputOrder: true };
 };
 
 const applyCoverArtCorsHeaders = (res: ExpressResponse, origin?: string) => {
@@ -1077,6 +1377,9 @@ router.get("/recently-listened", async (req, res) => {
 
         // Add music artists
         for (const play of recentPlays) {
+            if (!play.track) {
+                continue;
+            }
             const artist = play.track.album.artist;
             if (!artistsMap.has(artist.id)) {
                 artistsMap.set(artist.id, {
@@ -1303,9 +1606,9 @@ router.get("/recently-added", async (req, res) => {
  *         name: filter
  *         schema:
  *           type: string
- *           enum: [owned, discovery, all]
+ *           enum: [owned, discovery, remote, all]
  *           default: owned
- *         description: Filter by ownership type
+ *         description: Filter by ownership type (remote = streaming-only artists)
  *       - in: query
  *         name: cursor
  *         schema:
@@ -1342,7 +1645,7 @@ router.get("/recently-added", async (req, res) => {
  *       401:
  *         description: Not authenticated
  */
-// GET /library/artists?query=&limit=&offset=&filter=owned|discovery|all&cursor=
+// GET /library/artists?query=&limit=&offset=&filter=owned|discovery|remote|all&cursor=
 // Optimized with denormalized counts for O(1) filtering
 router.get("/artists", async (req, res) => {
     try {
@@ -1350,7 +1653,7 @@ router.get("/artists", async (req, res) => {
             query = "",
             limit: limitParam = "50",
             offset: offsetParam = "0",
-            filter = "owned", // owned (default), discovery, all
+            filter = "owned", // owned (default), discovery, remote, all
             cursor, // Optional cursor for cursor-based pagination
             sortBy = "name",
         } = req.query;
@@ -1384,10 +1687,16 @@ router.get("/artists", async (req, res) => {
             } else if (filter === "discovery") {
                 where.discoveryAlbumCount = { gt: 0 };
                 where.libraryAlbumCount = 0;
+            } else if (filter === "remote") {
+                where.remoteTrackCount = { gt: 0 };
+                where.libraryAlbumCount = 0;
+                where.discoveryAlbumCount = 0;
             } else {
+                // "all" — include library, discovery, and remote-only artists
                 where.OR = [
                     { libraryAlbumCount: { gt: 0 } },
                     { discoveryAlbumCount: { gt: 0 } },
+                    { remoteTrackCount: { gt: 0 } },
                 ];
             }
         } else {
@@ -1400,8 +1709,19 @@ router.get("/artists", async (req, res) => {
             } else if (filter === "discovery") {
                 where.albums = { some: { location: "DISCOVER", tracks: { some: {} } } };
                 where.NOT = { albums: { some: { location: "LIBRARY", tracks: { some: {} } } } };
+            } else if (filter === "remote") {
+                where.OR = [
+                    { tracksTidal: { some: {} } },
+                    { tracksYtMusic: { some: {} } },
+                ];
+                where.NOT = { albums: { some: { tracks: { some: {} } } } };
             } else {
-                where.albums = { some: { tracks: { some: {} } } };
+                // "all" — include library, discovery, and remote-only
+                where.OR = [
+                    { albums: { some: { tracks: { some: {} } } } },
+                    { tracksTidal: { some: {} } },
+                    { tracksYtMusic: { some: {} } },
+                ];
             }
         }
 
@@ -1427,6 +1747,7 @@ router.get("/artists", async (req, res) => {
                         libraryAlbumCount: true,
                         discoveryAlbumCount: true,
                         totalTrackCount: true,
+                        remoteTrackCount: true,
                     },
                 };
 
@@ -1756,6 +2077,53 @@ router.post("/backfill-genres", async (req, res) => {
 
 /**
  * @openapi
+ * /api/library/backfill-remote-artists:
+ *   post:
+ *     summary: Backfill artist/album entity links for existing remote tracks
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Backfill started or already in progress
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 status:
+ *                   type: string
+ *       401:
+ *         description: Not authenticated
+ */
+// POST /library/backfill-remote-artists - Backfill artist/album links for remote tracks
+router.post("/backfill-remote-artists", async (req, res) => {
+    try {
+        if (isRemoteBackfillInProgress()) {
+            return res.json({
+                message: "Remote artist backfill already in progress",
+                status: "processing",
+            });
+        }
+
+        // Return immediately, run backfill in background
+        res.json({ message: "Remote artist backfill started", status: "processing" });
+
+        // Run backfill (non-blocking)
+        backfillRemoteArtistAlbumLinks().catch((error) => {
+            logger.error("[RemoteBackfill] Backfill failed:", error);
+        });
+    } catch (error: any) {
+        logger.error("[RemoteBackfill] Error:", error?.message);
+        sendInternalRouteError(res, "Failed to start remote artist backfill");
+    }
+});
+
+/**
+ * @openapi
  * /api/library/artists/{id}:
  *   get:
  *     summary: Get detailed artist information including discography and similar artists
@@ -1926,16 +2294,19 @@ router.get("/artists/:id", async (req, res) => {
         // Track whether we successfully loaded the full discography
         let discographyComplete = !includeDiscography;
 
-        // Albums from database have actual tracks on disk - they MUST show as owned
-        const dbAlbums = artist.albums.map((album) => ({
-            ...album,
-            owned: true, // If it's in the database with tracks, user owns it!
-            coverArt: album.coverUrl,
-            source: "database" as const,
-        }));
+        // Only LIBRARY/DISCOVER albums represent files on disk — REMOTE albums
+        // are created by provider entity resolution and should not appear as owned.
+        const dbAlbums = artist.albums
+            .filter((album) => album.location !== "REMOTE")
+            .map((album) => ({
+                ...album,
+                owned: album.location === "LIBRARY" || ownedRgMbids.has(album.rgMbid),
+                coverArt: album.coverUrl,
+                source: "database" as const,
+            }));
 
         logger.debug(
-            `[Artist] Found ${dbAlbums.length} albums from database (actual owned files)`
+            `[Artist] Found ${dbAlbums.length} albums from database (excluding REMOTE-only)`
         );
 
         if (!includeDiscography) {
@@ -3028,6 +3399,10 @@ router.get("/liked", async (req, res) => {
             typeof req.query.cursorTrackId === "string" ?
                 req.query.cursorTrackId
             :   null;
+        const remoteCursorIdParam =
+            cursorTrackIdParam?.startsWith("remote:")
+                ? cursorTrackIdParam.slice("remote:".length)
+                : null;
 
         if (!!cursorLikedAtParam !== !!cursorTrackIdParam) {
             return sendRouteError(
@@ -3046,43 +3421,140 @@ router.get("/liked", async (req, res) => {
             cursorLikedAt = parsedCursor;
         }
 
+        const fetchTake = Math.max(limit * 3, limit + 1);
         const likedWhere: Prisma.LikedTrackWhereInput =
-            cursorLikedAt && cursorTrackIdParam ?
-                {
-                    userId,
-                    OR: [
-                        { likedAt: { lt: cursorLikedAt } },
-                        {
-                            likedAt: cursorLikedAt,
-                            trackId: { gt: cursorTrackIdParam },
-                        },
-                    ],
-                }
-            :   { userId };
+            cursorLikedAt && cursorTrackIdParam
+                ? {
+                      userId,
+                      OR: [
+                          { likedAt: { lt: cursorLikedAt } },
+                          {
+                              likedAt: cursorLikedAt,
+                              trackId: { gt: cursorTrackIdParam },
+                          },
+                      ],
+                  }
+                : { userId };
+        const remoteWhere: Prisma.LikedRemoteTrackWhereInput =
+            cursorLikedAt && remoteCursorIdParam
+                ? {
+                      userId,
+                      OR: [
+                          { likedAt: { lt: cursorLikedAt } },
+                          {
+                              likedAt: cursorLikedAt,
+                              id: { gt: remoteCursorIdParam },
+                          },
+                      ],
+                  }
+                : cursorLikedAt
+                  ? {
+                        userId,
+                        likedAt: { lte: cursorLikedAt },
+                    }
+                  : { userId };
 
-        const [total, likedEntriesWithExtra] = await Promise.all([
-            prisma.likedTrack.count({
-                where: { userId },
-            }),
-            prisma.likedTrack.findMany({
-                where: likedWhere,
-                select: {
-                    trackId: true,
-                    likedAt: true,
-                },
-                orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
-                take: limit + 1,
-            }),
-        ]);
+        const [total, remoteTotal, userSettings, localEntries, remoteEntries] =
+            await Promise.all([
+                prisma.likedTrack.count({ where: { userId } }),
+                prisma.likedRemoteTrack.count({ where: { userId } }),
+                prisma.userSettings.findUnique({
+                    where: { userId },
+                    select: {
+                        tidalOAuthJson: true,
+                        ytMusicOAuthJson: true,
+                    },
+                }),
+                prisma.likedTrack.findMany({
+                    where: likedWhere,
+                    select: {
+                        trackId: true,
+                        likedAt: true,
+                    },
+                    orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
+                    take: fetchTake,
+                }),
+                prisma.likedRemoteTrack.findMany({
+                    where: remoteWhere,
+                    include: {
+                        trackTidal: true,
+                        trackYtMusic: true,
+                    },
+                    orderBy: [{ likedAt: "desc" }, { id: "asc" }],
+                    take: fetchTake,
+                }),
+            ]);
 
-        const hasMore = likedEntriesWithExtra.length > limit;
-        const likedEntries =
-            hasMore ?
-                likedEntriesWithExtra.slice(0, limit)
-            :   likedEntriesWithExtra;
-        const trackIds = likedEntries.map((entry) => entry.trackId);
+        const hasTidal = hasConnectedProviderToken(userSettings?.tidalOAuthJson);
+        const hasYtMusic = hasConnectedProviderToken(
+            userSettings?.ytMusicOAuthJson
+        );
 
-        if (trackIds.length === 0) {
+        type LocalMergedEntry = {
+            kind: "local";
+            token: string;
+            cursorId: string;
+            trackId: string;
+            likedAt: Date;
+        };
+        type RemoteMergedEntry = {
+            kind: "remote";
+            token: string;
+            cursorId: string;
+            likedAt: Date;
+            source: "tidal" | "youtube";
+            trackTidalId: string | null;
+            trackYtMusicId: string | null;
+            remote: (typeof remoteEntries)[number];
+        };
+        type MergedEntry = LocalMergedEntry | RemoteMergedEntry;
+
+        const mergedEntries: MergedEntry[] = [
+            ...localEntries.map((entry) => ({
+                kind: "local" as const,
+                token: `l:${entry.trackId}`,
+                cursorId: entry.trackId,
+                trackId: entry.trackId,
+                likedAt: entry.likedAt,
+            })),
+            ...remoteEntries
+                .map((entry): RemoteMergedEntry | null => {
+                    if (entry.trackTidalId && entry.trackTidal) {
+                        return {
+                            kind: "remote",
+                            token: `t:${entry.trackTidalId}`,
+                            cursorId: `remote:${entry.id}`,
+                            likedAt: entry.likedAt,
+                            source: "tidal",
+                            trackTidalId: entry.trackTidalId,
+                            trackYtMusicId: null,
+                            remote: entry,
+                        };
+                    }
+                    if (entry.trackYtMusicId && entry.trackYtMusic) {
+                        return {
+                            kind: "remote",
+                            token: `y:${entry.trackYtMusicId}`,
+                            cursorId: `remote:${entry.id}`,
+                            likedAt: entry.likedAt,
+                            source: "youtube",
+                            trackTidalId: null,
+                            trackYtMusicId: entry.trackYtMusicId,
+                            remote: entry,
+                        };
+                    }
+                    return null;
+                })
+                .filter(
+                    (entry): entry is RemoteMergedEntry => entry !== null
+                ),
+        ].sort((left, right) => {
+            const likedAtDiff = right.likedAt.getTime() - left.likedAt.getTime();
+            if (likedAtDiff !== 0) return likedAtDiff;
+            return left.cursorId.localeCompare(right.cursorId);
+        });
+
+        if (mergedEntries.length === 0) {
             return res.json({
                 playlist: {
                     id: MY_LIKED_PLAYLIST_ID,
@@ -3090,7 +3562,7 @@ router.get("/liked", async (req, res) => {
                     description: MY_LIKED_PLAYLIST_DESCRIPTION,
                 },
                 tracks: [],
-                total,
+                total: total + remoteTotal,
                 pagination: {
                     limit,
                     hasMore: false,
@@ -3099,60 +3571,200 @@ router.get("/liked", async (req, res) => {
             });
         }
 
-        const tracks = await prisma.track.findMany({
-            where: {
-                id: { in: trackIds },
-            },
-            include: {
-                album: {
-                    include: {
-                        artist: {
-                            select: {
-                                id: true,
-                                name: true,
-                            },
-                        },
-                    },
-                },
-            },
-        });
+        const localTrackIds = Array.from(
+            new Set(
+                mergedEntries
+                    .filter(
+                        (entry): entry is LocalMergedEntry =>
+                            entry.kind === "local"
+                    )
+                    .map((entry) => entry.trackId)
+            )
+        );
+        const localTrackRows =
+            localTrackIds.length > 0
+                ? await prisma.track.findMany({
+                      where: { id: { in: localTrackIds } },
+                      include: {
+                          album: {
+                              include: {
+                                  artist: { select: { id: true, name: true } },
+                              },
+                          },
+                      },
+                  })
+                : [];
+        const localTrackById = new Map(
+            localTrackRows.map((track) => [track.id, track])
+        );
 
-        const trackById = new Map(tracks.map((track) => [track.id, track]));
-        const orderedTracks = likedEntries
-            .map((entry) => {
-                const track = trackById.get(entry.trackId);
-                if (!track) {
-                    return null;
+        const mappingWhereOr: Prisma.TrackMappingWhereInput[] = [];
+        if (localTrackIds.length > 0) {
+            mappingWhereOr.push({ trackId: { in: localTrackIds } });
+        }
+        const trackTidalIds = Array.from(
+            new Set(
+                mergedEntries
+                    .filter(
+                        (entry): entry is RemoteMergedEntry =>
+                            entry.kind === "remote" &&
+                            entry.trackTidalId !== null
+                    )
+                    .map((entry) => entry.trackTidalId as string)
+            )
+        );
+        if (trackTidalIds.length > 0) {
+            mappingWhereOr.push({ trackTidalId: { in: trackTidalIds } });
+        }
+        const trackYtMusicIds = Array.from(
+            new Set(
+                mergedEntries
+                    .filter(
+                        (entry): entry is RemoteMergedEntry =>
+                            entry.kind === "remote" &&
+                            entry.trackYtMusicId !== null
+                    )
+                    .map((entry) => entry.trackYtMusicId as string)
+            )
+        );
+        if (trackYtMusicIds.length > 0) {
+            mappingWhereOr.push({ trackYtMusicId: { in: trackYtMusicIds } });
+        }
+
+        const mappings =
+            mappingWhereOr.length > 0
+                ? await prisma.trackMapping.findMany({
+                      where: {
+                          stale: false,
+                          OR: mappingWhereOr,
+                      },
+                      select: {
+                          trackId: true,
+                          trackTidalId: true,
+                          trackYtMusicId: true,
+                      },
+                  })
+                : [];
+
+        const parent = new Map<string, string>();
+        const findRoot = (token: string): string => {
+            const existing = parent.get(token);
+            if (!existing) {
+                parent.set(token, token);
+                return token;
+            }
+            if (existing === token) return token;
+            const root = findRoot(existing);
+            parent.set(token, root);
+            return root;
+        };
+        const unionTokens = (left: string, right: string) => {
+            const leftRoot = findRoot(left);
+            const rightRoot = findRoot(right);
+            if (leftRoot !== rightRoot) {
+                parent.set(rightRoot, leftRoot);
+            }
+        };
+
+        for (const entry of mergedEntries) {
+            findRoot(entry.token);
+        }
+
+        for (const mapping of mappings) {
+            const tokens: string[] = [];
+            if (mapping.trackId) tokens.push(`l:${mapping.trackId}`);
+            if (mapping.trackTidalId) tokens.push(`t:${mapping.trackTidalId}`);
+            if (mapping.trackYtMusicId) tokens.push(`y:${mapping.trackYtMusicId}`);
+            for (let i = 1; i < tokens.length; i += 1) {
+                unionTokens(tokens[0], tokens[i]);
+            }
+        }
+
+        const grouped = new Map<string, MergedEntry[]>();
+        for (const entry of mergedEntries) {
+            const root = findRoot(entry.token);
+            const bucket = grouped.get(root) ?? [];
+            bucket.push(entry);
+            grouped.set(root, bucket);
+        }
+
+        const choosePriority = (entry: MergedEntry): number => {
+            if (entry.kind === "local") return 300;
+            if (entry.source === "tidal") return hasTidal ? 220 : 120;
+            return hasYtMusic ? 210 : 110;
+        };
+
+        const deduped = Array.from(grouped.values())
+            .map((entries) => {
+                const sortedCandidates = [...entries].sort((left, right) => {
+                    const priorityDiff =
+                        choosePriority(right) - choosePriority(left);
+                    if (priorityDiff !== 0) return priorityDiff;
+                    const likedAtDiff =
+                        left.likedAt.getTime() - right.likedAt.getTime();
+                    if (likedAtDiff !== 0) return likedAtDiff;
+                    return left.cursorId.localeCompare(right.cursorId);
+                });
+                const preferred = sortedCandidates[0];
+                const earliestLikedAt = entries.reduce((earliest, candidate) =>
+                    candidate.likedAt < earliest ? candidate.likedAt : earliest
+                , entries[0].likedAt);
+
+                let normalized: UnifiedTrackResponse | null = null;
+                if (preferred.kind === "local") {
+                    const localTrack = localTrackById.get(preferred.trackId);
+                    if (localTrack) {
+                        normalized = normalizeLocalTrack(localTrack as any);
+                    }
+                } else if (preferred.source === "tidal") {
+                    if (preferred.remote.trackTidal) {
+                        normalized = normalizeTidalTrack(preferred.remote.trackTidal);
+                    }
+                } else if (preferred.remote.trackYtMusic) {
+                    normalized = normalizeYtMusicTrack(preferred.remote.trackYtMusic);
                 }
 
+                if (!normalized) return null;
                 return {
-                    id: track.id,
-                    title: track.title,
-                    duration: track.duration,
-                    trackNo: track.trackNo,
-                    filePath: track.filePath,
-                    likedAt: entry.likedAt.toISOString(),
-                    artist: {
-                        id: track.album.artist.id,
-                        name: track.album.artist.name,
-                    },
-                    album: {
-                        id: track.album.id,
-                        title: track.album.title,
-                        coverArt: track.album.coverUrl,
-                    },
+                    cursorId: preferred.cursorId,
+                    likedAt: earliestLikedAt,
+                    track: toLikedResponseTrack(normalized, earliestLikedAt),
                 };
             })
-            .filter((track): track is NonNullable<typeof track> => track !== null);
+            .filter(
+                (
+                    entry
+                ): entry is {
+                    cursorId: string;
+                    likedAt: Date;
+                    track: ReturnType<typeof toLikedResponseTrack>;
+                } => entry !== null
+            )
+            .sort((left, right) => {
+                const likedAtDiff = right.likedAt.getTime() - left.likedAt.getTime();
+                if (likedAtDiff !== 0) return likedAtDiff;
+                return left.cursorId.localeCompare(right.cursorId);
+            });
 
+        const cursorFiltered =
+            cursorLikedAt && cursorTrackIdParam
+                ? deduped.filter(
+                      (entry) =>
+                          entry.likedAt < cursorLikedAt ||
+                          (entry.likedAt.getTime() === cursorLikedAt.getTime() &&
+                              entry.cursorId > cursorTrackIdParam)
+                  )
+                : deduped;
+
+        const hasMore = cursorFiltered.length > limit;
+        const page = hasMore ? cursorFiltered.slice(0, limit) : cursorFiltered;
         const nextCursor =
-            hasMore && likedEntries.length > 0 ?
-                {
-                    likedAt:
-                        likedEntries[likedEntries.length - 1].likedAt.toISOString(),
-                    trackId: likedEntries[likedEntries.length - 1].trackId,
-                }
-            :   null;
+            hasMore && page.length > 0
+                ? {
+                      likedAt: page[page.length - 1].likedAt.toISOString(),
+                      trackId: page[page.length - 1].cursorId,
+                  }
+                : null;
 
         return res.json({
             playlist: {
@@ -3160,8 +3772,8 @@ router.get("/liked", async (req, res) => {
                 name: MY_LIKED_PLAYLIST_NAME,
                 description: MY_LIKED_PLAYLIST_DESCRIPTION,
             },
-            tracks: orderedTracks,
-            total,
+            tracks: page.map((entry) => entry.track),
+            total: total + remoteTotal,
             pagination: {
                 limit,
                 hasMore,
@@ -4626,6 +5238,330 @@ router.post("/tracks/:id/preference", async (req, res) => {
     }
 });
 
+// ── Remote Track Preference (YT Music / TIDAL) ─────────────────
+
+function parseRemoteTrackId(
+    compositeId: string
+): { provider: "youtube" | "tidal"; externalId: string } | null {
+    if (compositeId.startsWith("yt:")) {
+        const externalId = compositeId.slice(3).trim();
+        return externalId.length > 0
+            ? { provider: "youtube", externalId }
+            : null;
+    }
+    if (compositeId.startsWith("tidal:")) {
+        const externalId = compositeId.slice(6).trim();
+        return externalId.length > 0
+            ? { provider: "tidal", externalId }
+            : null;
+    }
+    return null;
+}
+
+/**
+ * @openapi
+ * /api/library/remote-tracks/{id}/preference:
+ *   get:
+ *     summary: Get preference for a remote (YT/TIDAL) track
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: "Composite track ID (yt:videoId or tidal:trackId)"
+ *     responses:
+ *       200:
+ *         description: Remote track preference state
+ *       400:
+ *         description: Invalid remote track ID format
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/remote-tracks/:id/preference", async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return sendRouteError(res, 401, "Authentication required");
+        }
+
+        const parsed = parseRemoteTrackId(req.params.id);
+        if (!parsed) {
+            return res.status(400).json({ error: "Invalid remote track ID. Use yt:videoId or tidal:trackId format." });
+        }
+
+        let likedAt: Date | null = null;
+        if (parsed.provider === "tidal") {
+            const tidalTrackId = Number.parseInt(parsed.externalId, 10);
+            if (!Number.isFinite(tidalTrackId) || tidalTrackId <= 0) {
+                return res.status(400).json({
+                    error: "Invalid remote track ID. Use yt:videoId or tidal:trackId format.",
+                });
+            }
+
+            const trackTidal = await prisma.trackTidal.findUnique({
+                where: { tidalId: tidalTrackId },
+                select: { id: true },
+            });
+            if (trackTidal) {
+                const liked = await prisma.likedRemoteTrack.findUnique({
+                    where: {
+                        userId_trackTidalId: {
+                            userId,
+                            trackTidalId: trackTidal.id,
+                        },
+                    },
+                    select: { likedAt: true },
+                });
+                likedAt = liked?.likedAt ?? null;
+            }
+        } else {
+            const trackYtMusic = await prisma.trackYtMusic.findUnique({
+                where: { videoId: parsed.externalId },
+                select: { id: true },
+            });
+            if (trackYtMusic) {
+                const liked = await prisma.likedRemoteTrack.findUnique({
+                    where: {
+                        userId_trackYtMusicId: {
+                            userId,
+                            trackYtMusicId: trackYtMusic.id,
+                        },
+                    },
+                    select: { likedAt: true },
+                });
+                likedAt = liked?.likedAt ?? null;
+            }
+        }
+
+        const preference = resolveTrackPreference({
+            likedAt,
+            dislikedAt: null,
+        });
+
+        res.json(formatTrackPreferenceResponse(req.params.id, preference));
+    } catch (error) {
+        logger.error("Get remote track preference error:", error);
+        sendInternalRouteError(res, "Failed to get remote track preference");
+    }
+});
+
+/**
+ * @openapi
+ * /api/library/remote-tracks/{id}/preference:
+ *   post:
+ *     summary: Set preference for a remote (YT/TIDAL) track
+ *     tags: [Library]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: "Composite track ID (yt:videoId or tidal:trackId)"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - signal
+ *             properties:
+ *               signal:
+ *                 type: string
+ *                 enum: [thumbs_up, thumbs_down, clear]
+ *               metadata:
+ *                 type: object
+ *                 properties:
+ *                   title:
+ *                     type: string
+ *                   artist:
+ *                     type: string
+ *                   album:
+ *                     type: string
+ *                   thumbnailUrl:
+ *                     type: string
+ *                   duration:
+ *                     type: integer
+ *     responses:
+ *       200:
+ *         description: Updated remote track preference
+ *       400:
+ *         description: Invalid remote track ID or signal
+ *       401:
+ *         description: Not authenticated
+ */
+router.post("/remote-tracks/:id/preference", async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return sendRouteError(res, 401, "Authentication required");
+        }
+
+        const parsed = parseRemoteTrackId(req.params.id);
+        if (!parsed) {
+            return res.status(400).json({ error: "Invalid remote track ID. Use yt:videoId or tidal:trackId format." });
+        }
+
+        const signal = normalizeTrackPreferenceSignal(
+            req.body?.signal ?? req.body?.score ?? req.body?.action
+        );
+        if (!signal) {
+            return res.status(400).json({
+                error: "Invalid preference signal. Use thumbs_up, thumbs_down, or clear.",
+            });
+        }
+
+        const metadataSource =
+            req.body?.metadata && typeof req.body.metadata === "object"
+                ? req.body.metadata
+                : req.body ?? {};
+        const metadata = metadataSource as {
+            title?: string;
+            artist?: string;
+            album?: string;
+            thumbnailUrl?: string;
+            duration?: number;
+            isrc?: string;
+        };
+        const title =
+            typeof metadata.title === "string" && metadata.title.trim().length > 0
+                ? metadata.title.trim()
+                : "Unknown";
+        const artist =
+            typeof metadata.artist === "string" &&
+            metadata.artist.trim().length > 0
+                ? metadata.artist.trim()
+                : "Unknown";
+        const album =
+            typeof metadata.album === "string" && metadata.album.trim().length > 0
+                ? metadata.album.trim()
+                : "Unknown";
+        const duration =
+            typeof metadata.duration === "number" &&
+            Number.isFinite(metadata.duration) &&
+            metadata.duration > 0
+                ? Math.trunc(metadata.duration)
+                : 180;
+        const now = new Date();
+
+        if (signal === "thumbs_up") {
+            if (parsed.provider === "tidal") {
+                const tidalId = Number.parseInt(parsed.externalId, 10);
+                if (!Number.isFinite(tidalId) || tidalId <= 0) {
+                    return res.status(400).json({
+                        error: "Invalid remote track ID. Use yt:videoId or tidal:trackId format.",
+                    });
+                }
+            }
+
+            const ensured =
+                parsed.provider === "tidal"
+                    ? await trackMappingService.ensureRemoteTrack({
+                          provider: "tidal",
+                          tidalId: Number.parseInt(parsed.externalId, 10),
+                          title,
+                          artist,
+                          album,
+                          duration,
+                          isrc: metadata.isrc,
+                      })
+                    : await trackMappingService.ensureRemoteTrack({
+                          provider: "youtube",
+                          videoId: parsed.externalId,
+                          title,
+                          artist,
+                          album,
+                          duration,
+                          thumbnailUrl: metadata.thumbnailUrl,
+                      });
+
+            if (ensured.provider === "tidal") {
+                await prisma.likedRemoteTrack.upsert({
+                    where: {
+                        userId_trackTidalId: {
+                            userId,
+                            trackTidalId: ensured.id,
+                        },
+                    },
+                    create: {
+                        userId,
+                        trackTidalId: ensured.id,
+                        likedAt: now,
+                    },
+                    update: { likedAt: now },
+                });
+            } else {
+                await prisma.likedRemoteTrack.upsert({
+                    where: {
+                        userId_trackYtMusicId: {
+                            userId,
+                            trackYtMusicId: ensured.id,
+                        },
+                    },
+                    create: {
+                        userId,
+                        trackYtMusicId: ensured.id,
+                        likedAt: now,
+                    },
+                    update: { likedAt: now },
+                });
+            }
+
+        } else {
+            if (parsed.provider === "tidal") {
+                const tidalTrackId = Number.parseInt(parsed.externalId, 10);
+                if (Number.isFinite(tidalTrackId) && tidalTrackId > 0) {
+                    const trackTidal = await prisma.trackTidal.findUnique({
+                        where: { tidalId: tidalTrackId },
+                        select: { id: true },
+                    });
+                    if (trackTidal) {
+                        await prisma.likedRemoteTrack.deleteMany({
+                            where: {
+                                userId,
+                                trackTidalId: trackTidal.id,
+                            },
+                        });
+                    }
+                }
+            } else {
+                const trackYtMusic = await prisma.trackYtMusic.findUnique({
+                    where: { videoId: parsed.externalId },
+                    select: { id: true },
+                });
+                if (trackYtMusic) {
+                    await prisma.likedRemoteTrack.deleteMany({
+                        where: {
+                            userId,
+                            trackYtMusicId: trackYtMusic.id,
+                        },
+                    });
+                }
+            }
+
+        }
+
+        const preference = resolveTrackPreference({
+            likedAt: signal === "thumbs_up" ? now : null,
+            dislikedAt: null,
+        });
+
+        res.json(formatTrackPreferenceResponse(req.params.id, preference));
+    } catch (error) {
+        logger.error("Set remote track preference error:", error);
+        sendInternalRouteError(res, "Failed to set remote track preference");
+    }
+});
+
 /**
  * @openapi
  * /api/library/tracks/{id}:
@@ -4910,9 +5846,10 @@ router.delete("/tracks/:id", requireAdmin, async (req, res) => {
         // Delete file from filesystem if path is available
         if (track.filePath) {
             try {
+                const normalizedRelativePath = track.filePath.replace(/\\/g, "/");
                 const absolutePath = path.join(
                     config.music.musicPath,
-                    track.filePath
+                    normalizedRelativePath
                 );
 
                 if (fs.existsSync(absolutePath)) {
@@ -5005,9 +5942,10 @@ router.delete("/albums/:id", requireAdmin, async (req, res) => {
         for (const track of album.tracks) {
             if (track.filePath) {
                 try {
+                    const normalizedRelativePath = track.filePath.replace(/\\/g, "/");
                     const absolutePath = path.join(
                         config.music.musicPath,
-                        track.filePath
+                        normalizedRelativePath
                     );
 
                     if (fs.existsSync(absolutePath)) {
@@ -5134,9 +6072,10 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
             for (const track of album.tracks) {
                 if (track.filePath) {
                     try {
+                        const normalizedRelativePath = track.filePath.replace(/\\/g, "/");
                         const absolutePath = path.join(
                             config.music.musicPath,
-                            track.filePath
+                            normalizedRelativePath
                         );
 
                         if (fs.existsSync(absolutePath)) {
@@ -5145,7 +6084,9 @@ router.delete("/artists/:id", requireAdmin, async (req, res) => {
 
                             // Extract actual artist folder from file path
                             // Path format: Soulseek/Artist/Album/Track.mp3 OR Artist/Album/Track.mp3
-                            const pathParts = track.filePath.split(path.sep);
+                            const pathParts = normalizedRelativePath
+                                .split("/")
+                                .filter((segment) => segment.length > 0);
                             if (pathParts.length >= 2) {
                                 // If first part is "Soulseek", artist folder is Soulseek/Artist
                                 // Otherwise, artist folder is just Artist
@@ -5496,7 +6437,7 @@ router.get("/decades", async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *           enum: [all, liked, discovery, favorites, decade, genre, mood, workout, artist, vibe]
+ *           enum: [all, liked, discovery, favorites, decade, genre, mood, workout, artist, artist-name, vibe]
  *         description: Radio station type
  *       - in: query
  *         name: value
@@ -5532,8 +6473,8 @@ router.get("/decades", async (req, res) => {
 router.get("/radio", async (req, res) => {
     try {
         const { type, value, limit = "50" } = req.query;
-        const radioType = typeof type === "string" ? type : "";
-        const radioValue = typeof value === "string" ? value : undefined;
+        let radioType = typeof type === "string" ? type : "";
+        let radioValue = typeof value === "string" ? value : undefined;
         const parsedLimit = Number.parseInt(String(limit), 10);
         const normalizedRequestedLimit =
             Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50;
@@ -5545,6 +6486,29 @@ router.get("/radio", async (req, res) => {
 
         if (!radioType) {
             return sendRouteError(res, 400, "Radio type is required");
+        }
+
+        if (radioType === "artist-name") {
+            const artistName = (radioValue ?? "").trim();
+            if (!artistName) {
+                return sendRouteError(
+                    res,
+                    400,
+                    "Artist name is required for artist-name radio"
+                );
+            }
+
+            const matchedArtist = await prisma.artist.findFirst({
+                where: { name: { equals: artistName, mode: "insensitive" } },
+                select: { id: true },
+            });
+
+            if (!matchedArtist) {
+                return res.json({ tracks: [] });
+            }
+
+            radioType = "artist";
+            radioValue = matchedArtist.id;
         }
 
         let trackIds: string[] = [];
@@ -6782,6 +7746,117 @@ router.get("/radio", async (req, res) => {
                 );
                 break;
 
+            case "playlist": {
+                // Playlist radio — seeds from the playlist's local tracks
+                if (!radioValue) {
+                    return sendRouteError(
+                        res,
+                        400,
+                        "Playlist ID required for playlist radio"
+                    );
+                }
+
+                let seedTrackIds: string[];
+
+                if (radioValue === MY_LIKED_PLAYLIST_ID) {
+                    // My Liked pseudo-playlist — requires auth
+                    if (!userId) {
+                        return sendRouteError(
+                            res,
+                            401,
+                            "Authentication required for liked playlist radio"
+                        );
+                    }
+                    const likedEntries = await prisma.likedTrack.findMany({
+                        where: { userId },
+                        select: { trackId: true },
+                    });
+                    seedTrackIds = likedEntries.map((e) => e.trackId);
+                    logger.debug(
+                        `[Radio:playlist] Seeding from My Liked: ${seedTrackIds.length} tracks`
+                    );
+                } else {
+                    // Regular playlist — verify ownership or public visibility
+                    const playlist = await prisma.playlist.findUnique({
+                        where: { id: radioValue },
+                        select: { userId: true, isPublic: true },
+                    });
+                    if (!playlist) {
+                        return sendRouteError(res, 404, "Playlist not found");
+                    }
+                    if (!playlist.isPublic && playlist.userId !== userId) {
+                        return sendRouteError(
+                            res,
+                            403,
+                            "Access denied to private playlist"
+                        );
+                    }
+
+                    // Only local tracks have analysis data
+                    const items = await prisma.playlistItem.findMany({
+                        where: {
+                            playlistId: radioValue,
+                            trackId: { not: null },
+                        },
+                        select: { trackId: true },
+                    });
+                    seedTrackIds = items
+                        .map((i) => i.trackId)
+                        .filter((id): id is string => id !== null);
+                    logger.debug(
+                        `[Radio:playlist] Seeding from playlist ${radioValue}: ${seedTrackIds.length} local tracks`
+                    );
+                }
+
+                if (seedTrackIds.length === 0) {
+                    trackIds = [];
+                    break;
+                }
+
+                const playlistResult = await buildMultiTrackRadio(
+                    seedTrackIds,
+                    seedTrackIds,
+                    limitNum,
+                    userId
+                );
+                trackIds = playlistResult.trackIds;
+                break;
+            }
+
+            case "tracks": {
+                // Arbitrary multi-track seed radio — comma-separated track IDs
+                if (!radioValue) {
+                    return sendRouteError(
+                        res,
+                        400,
+                        "Track IDs required for tracks radio"
+                    );
+                }
+
+                const inputTrackIds = radioValue
+                    .split(",")
+                    .map((id) => id.trim())
+                    .filter((id) => id.length > 0);
+
+                if (inputTrackIds.length === 0) {
+                    trackIds = [];
+                    break;
+                }
+
+                logger.debug(
+                    `[Radio:tracks] Seeding from ${inputTrackIds.length} track IDs`
+                );
+
+                const tracksResult = await buildMultiTrackRadio(
+                    inputTrackIds,
+                    inputTrackIds,
+                    limitNum,
+                    userId
+                );
+                trackIds = tracksResult.trackIds;
+                break;
+            }
+
             case "all":
             default:
                 // Random selection from all tracks in library
@@ -6794,7 +7869,10 @@ router.get("/radio", async (req, res) => {
         // Keep deterministic ordering for vibe (similarity-ranked) and liked (likedAt-ranked) queues.
         // Shuffle the source pool for all other radio modes.
         const preserveInputOrder =
-            radioType === "vibe" || radioType === "liked";
+            radioType === "vibe" ||
+            radioType === "liked" ||
+            radioType === "playlist" ||
+            radioType === "tracks";
         const basePoolIds =
             preserveInputOrder ?
                 trackIds

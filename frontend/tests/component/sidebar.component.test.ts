@@ -79,6 +79,16 @@ mock.module("@/hooks/useActiveListenSessions", {
     },
 });
 
+mock.module("@/hooks/useQueries", {
+    namedExports: {
+        useLikedPlaylistQuery: () => ({
+            data: null,
+            isLoading: false,
+            isError: false,
+        }),
+    },
+});
+
 mock.module("@/hooks/useMediaQuery", {
     namedExports: {
         useIsMobile: () => state.isMobile,
@@ -120,21 +130,21 @@ beforeEach(() => {
 test("returns null for auth routes", async () => {
     state.pathname = "/login";
 
-    const { Sidebar } = await import("../../components/layout/Sidebar.tsx");
+    const { Sidebar } = await import("../../components/layout/Sidebar");
     const html = renderToStaticMarkup(React.createElement(Sidebar));
 
     assert.equal(html, "");
 });
 
 test("renders social navigation without my history link", async () => {
-    const { Sidebar } = await import("../../components/layout/Sidebar.tsx");
+    const { Sidebar } = await import("../../components/layout/Sidebar");
     const html = renderToStaticMarkup(React.createElement(Sidebar));
 
+    assert.match(html, />Explore</);
     assert.match(html, />Library</);
-    assert.match(html, />My Liked</);
-    assert.match(html, />Radio</);
-    assert.match(html, />Discovery</);
     assert.match(html, />Listen Together</);
+    assert.match(html, />Audiobooks</);
+    assert.match(html, />Podcasts</);
     assert.doesNotMatch(html, /My History/);
 });
 
@@ -142,25 +152,22 @@ test("shows listen-together equalizer marker when active sessions exist", async 
     state.hasActiveSessions = true;
     state.pathname = "/listen-together";
 
-    const { Sidebar } = await import("../../components/layout/Sidebar.tsx");
+    const { Sidebar } = await import("../../components/layout/Sidebar");
     const html = renderToStaticMarkup(React.createElement(Sidebar));
 
     assert.match(html, /eq-bars/);
 });
 
 test("keeps prefetch enabled for primary sidebar navigation links", async () => {
-    const { Sidebar } = await import("../../components/layout/Sidebar.tsx");
+    const { Sidebar } = await import("../../components/layout/Sidebar");
     const html = renderToStaticMarkup(React.createElement(Sidebar));
 
     const navHrefs = [
+        "/explore",
         "/library",
-        "/playlist/my-liked",
-        "/radio",
-        "/discover",
         "/listen-together",
         "/audiobooks",
         "/podcasts",
-        "/browse/playlists",
     ];
 
     for (const href of navHrefs) {

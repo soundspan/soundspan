@@ -5,7 +5,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const BASELINE_PATH = ".agents-config/policies/logging-compliance-baseline.json";
+const TOOLING_CONFIG_PATH = ".agents-config/config/project-tooling.json";
 const ALLOW_MARKER = "logging-allow: raw";
+const DEFAULT_BASELINE_METADATA_ID = "agents-template-logging-compliance-baseline";
 
 const JS_RUNTIME_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 const JS_TEST_FILE_PATTERN = /\.(test|spec)\.[jt]sx?$/;
@@ -84,6 +86,10 @@ const RULES = [
   },
 ];
 
+function toNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 function runCommandSafe(cmd, args) {
   const result = spawnSync(cmd, args, { encoding: "utf8" });
   return {
@@ -92,6 +98,24 @@ function runCommandSafe(cmd, args) {
     stdout: (result.stdout ?? "").trim(),
     stderr: (result.stderr ?? "").trim(),
   };
+}
+
+function resolveBaselineMetadataId() {
+  if (!fs.existsSync(TOOLING_CONFIG_PATH)) {
+    return DEFAULT_BASELINE_METADATA_ID;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(TOOLING_CONFIG_PATH, "utf8"));
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${TOOLING_CONFIG_PATH}: ${error.message}`);
+  }
+
+  return (
+    toNonEmptyString(parsed?.loggingCompliance?.baselineMetadataId) ??
+    DEFAULT_BASELINE_METADATA_ID
+  );
 }
 
 function getTrackedFiles() {
@@ -129,6 +153,12 @@ function collectFindings() {
   for (const filePath of trackedFiles) {
     let relevantRules = RULES.filter((rule) => rule.applies(filePath));
     if (relevantRules.length === 0) {
+      continue;
+    }
+
+    // Tracked files can be deleted in the working tree during in-flight refactors.
+    // Skip missing paths so compliance checks report findings instead of crashing.
+    if (!fs.existsSync(filePath)) {
       continue;
     }
 
@@ -199,9 +229,10 @@ function readBaseline() {
 }
 
 function writeBaseline(findings) {
+  const baselineMetadataId = resolveBaselineMetadataId();
   const payload = {
     metadata: {
-      id: "soundspan-logging-compliance-baseline",
+      id: baselineMetadataId,
       version: "2026-02-21.01",
       generated_at: new Date().toISOString(),
       description:

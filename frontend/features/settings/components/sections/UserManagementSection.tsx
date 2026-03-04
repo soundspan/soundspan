@@ -31,6 +31,9 @@ interface InviteCode {
     createdBy: string;
 }
 
+/**
+ * Renders the UserManagementSection component.
+ */
 export function UserManagementSection() {
     const { user: currentUser } = useAuth();
     const isAdmin = currentUser?.role === "admin";

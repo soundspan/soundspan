@@ -17,6 +17,9 @@ const getProxiedImageUrl = (imageUrl: string | undefined): string | null => {
     return api.getCoverArtUrl(imageUrl, 200);
 };
 
+/**
+ * Renders the SimilarArtistsGrid component.
+ */
 export function SimilarArtistsGrid({
     similarArtists,
     title = "Related Artists",

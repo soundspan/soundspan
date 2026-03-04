@@ -108,6 +108,9 @@ const UserManagementSection = dynamic(
 
 const logger = createFrontendLogger("Admin.Page");
 
+/**
+ * Renders the AdminPage component.
+ */
 export default function AdminPage() {
     const { isAuthenticated, isLoading: authLoading, user } = useAuth();
     const router = useRouter();

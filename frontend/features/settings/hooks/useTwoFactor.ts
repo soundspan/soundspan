@@ -4,6 +4,9 @@ import { createFrontendLogger } from "@/lib/logger";
 
 const logger = createFrontendLogger("Settings.useTwoFactor");
 
+/**
+ * Executes useTwoFactor.
+ */
 export function useTwoFactor() {
     const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
     const [loadingTwoFactor, setLoadingTwoFactor] = useState(false);

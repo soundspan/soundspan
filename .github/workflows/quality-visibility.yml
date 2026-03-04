@@ -19,6 +19,8 @@ jobs:
     name: Backend Tests + Coverage
     runs-on: ubuntu-latest
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    env:
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,7 +38,9 @@ jobs:
 
       - name: Run backend tests with coverage
         working-directory: backend
-        run: npm run test:coverage
+        env:
+          BACKEND_COVERAGE_MAX_WORKERS: ${{ vars.BACKEND_COVERAGE_MAX_WORKERS || '2' }}
+        run: npm run test:coverage -- --maxWorkers=${BACKEND_COVERAGE_MAX_WORKERS}
 
       - name: Build backend coverage summary
         run: node .agents-config/scripts/backend-coverage-summary.mjs
@@ -71,6 +75,8 @@ jobs:
     name: Frontend Quality Visibility
     runs-on: ubuntu-latest
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    env:
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

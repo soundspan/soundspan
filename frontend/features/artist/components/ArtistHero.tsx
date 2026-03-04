@@ -21,6 +21,9 @@ interface ArtistHeroProps {
     children?: ReactNode;
 }
 
+/**
+ * Renders the ArtistHero component.
+ */
 export function ArtistHero({
     artist,
     source,

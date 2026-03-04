@@ -1,5 +1,8 @@
 export const DEFAULT_AUDIO_VOLUME = 0.5;
 
+/**
+ * Executes clampAudioVolume.
+ */
 export function clampAudioVolume(value: number): number {
     if (!Number.isFinite(value)) return DEFAULT_AUDIO_VOLUME;
     return Math.max(0, Math.min(1, value));

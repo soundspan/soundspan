@@ -22,6 +22,9 @@ interface TopBarProps {
     isActivityPanelOpen?: boolean;
 }
 
+/**
+ * Renders the TopBar component.
+ */
 export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
     const pathname = usePathname();
     const router = useRouter();

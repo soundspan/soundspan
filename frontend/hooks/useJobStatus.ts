@@ -25,6 +25,9 @@ export interface UseJobStatusReturn {
     checkStatus: () => Promise<void>;
 }
 
+/**
+ * Executes useJobStatus.
+ */
 export function useJobStatus(
     jobId: string | null,
     jobType: JobType,

@@ -20,6 +20,9 @@ export type ProactiveSegmentedHandoffSkipReason =
     | "already_segmented_active"
     | "already_attempted_this_track";
 
+/**
+ * Executes resolveSegmentedPrewarmMaxRetries.
+ */
 export function resolveSegmentedPrewarmMaxRetries(
     reason: SegmentedPrewarmReason,
 ): number {
@@ -28,6 +31,9 @@ export function resolveSegmentedPrewarmMaxRetries(
         : SEGMENTED_NEXT_TRACK_PREWARM_MAX_RETRIES;
 }
 
+/**
+ * Executes resolveProactiveSegmentedHandoffEligibility.
+ */
 export function resolveProactiveSegmentedHandoffEligibility(
     input: ProactiveSegmentedHandoffEligibilityInput,
 ): { eligible: boolean; reason: ProactiveSegmentedHandoffSkipReason } {

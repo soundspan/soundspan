@@ -10,6 +10,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { trackMappingService } from "./trackMappingService";
 import {
     groupManager,
     type SyncQueueItem,
@@ -39,6 +40,7 @@ export interface CreateGroupOptions {
     name?: string;
     visibility?: "public" | "private";
     queueTrackIds?: string[];
+    queueTracks?: QueueTrackInput[];
     currentTrackId?: string;
     currentTimeMs?: number;
     isPlaying?: boolean;
@@ -61,6 +63,18 @@ export interface LeaveResult {
     ended: boolean;
     newHostUserId?: string;
     newHostUsername?: string;
+}
+
+export interface QueueTrackInput {
+    trackId?: string;
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    title?: string;
+    artist?: string;
+    album?: string;
+    duration?: number;
+    thumbnailUrl?: string;
+    isrc?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,47 +115,205 @@ async function resolvePresentationName(
     return user?.username ?? fallbackUsername;
 }
 
-/** Validate that track IDs exist and are local (have a filePath). */
-async function validateLocalTracks(trackIds: string[]): Promise<SyncQueueItem[]> {
-    if (!trackIds.length) return [];
+/**
+ * Validates and materializes mixed-source queue input into canonical queue items.
+ */
+export async function validateQueueTracks(
+    inputs: QueueTrackInput[]
+): Promise<SyncQueueItem[]> {
+    if (!inputs.length) return [];
 
-    const unique = Array.from(new Set(trackIds));
-    const tracks = await prisma.track.findMany({
-        where: { id: { in: unique }, filePath: { not: "" } },
-        select: {
-            id: true,
-            title: true,
-            duration: true,
-            filePath: true,
-            album: {
-                select: {
-                    id: true,
-                    title: true,
-                    coverUrl: true,
-                    artist: { select: { id: true, name: true } },
-                },
-            },
-        },
-    });
+    const localInputs: Array<{ input: QueueTrackInput; trackId: string }> = [];
+    const tidalInputs: Array<{ input: QueueTrackInput; tidalTrackId: number }> = [];
+    const youtubeInputs: Array<{ input: QueueTrackInput; youtubeVideoId: string }> = [];
 
-    const trackMap = new Map(tracks.map((t) => [t.id, t]));
+    for (const input of inputs) {
+        const localTrackId =
+            typeof input.trackId === "string" && input.trackId.trim().length > 0
+                ? input.trackId.trim()
+                : null;
+        const tidalTrackId =
+            typeof input.tidalTrackId === "number" &&
+            Number.isFinite(input.tidalTrackId) &&
+            input.tidalTrackId > 0
+                ? Math.trunc(input.tidalTrackId)
+                : null;
+        const youtubeVideoId =
+            typeof input.youtubeVideoId === "string" &&
+            input.youtubeVideoId.trim().length > 0
+                ? input.youtubeVideoId.trim()
+                : null;
+        const presentCount = [localTrackId, tidalTrackId, youtubeVideoId].filter(
+            Boolean
+        ).length;
+        if (presentCount !== 1) continue;
+
+        if (localTrackId) {
+            localInputs.push({ input, trackId: localTrackId });
+            continue;
+        }
+        if (tidalTrackId) {
+            tidalInputs.push({ input, tidalTrackId });
+            continue;
+        }
+        if (youtubeVideoId) {
+            youtubeInputs.push({ input, youtubeVideoId });
+        }
+    }
+
     const queue: SyncQueueItem[] = [];
 
-    for (const id of trackIds) {
-        const t = trackMap.get(id);
-        if (!t || !t.filePath) continue; // Skip non-local / invalid
+    if (localInputs.length > 0) {
+        const uniqueLocalIds = Array.from(new Set(localInputs.map((entry) => entry.trackId)));
+        const localTracks = await prisma.track.findMany({
+            where: { id: { in: uniqueLocalIds }, filePath: { not: "" } },
+            select: {
+                id: true,
+                title: true,
+                duration: true,
+                filePath: true,
+                album: {
+                    select: {
+                        id: true,
+                        title: true,
+                        coverUrl: true,
+                        artist: { select: { id: true, name: true } },
+                    },
+                },
+            },
+        });
+        const localTrackMap = new Map(localTracks.map((track) => [track.id, track]));
+
+        for (const entry of localInputs) {
+            const track = localTrackMap.get(entry.trackId);
+            if (!track || !track.filePath) continue;
+            queue.push({
+                id: track.id,
+                title: track.title,
+                duration: track.duration,
+                artist: { id: track.album.artist.id, name: track.album.artist.name },
+                album: {
+                    id: track.album.id,
+                    title: track.album.title,
+                    coverArt: track.album.coverUrl,
+                },
+                mediaSource: "local",
+                provider: { source: "local" },
+                localTrackId: track.id,
+                originSource: "local",
+            });
+        }
+    }
+
+    for (const entry of tidalInputs) {
+        const title = (entry.input.title ?? "").trim();
+        const artist = (entry.input.artist ?? "").trim();
+        const album = (entry.input.album ?? "").trim();
+        const duration =
+            typeof entry.input.duration === "number" && Number.isFinite(entry.input.duration)
+                ? Math.max(1, Math.trunc(entry.input.duration))
+                : 180;
+        const ensured = await trackMappingService.ensureRemoteTrack({
+            provider: "tidal",
+            tidalId: entry.tidalTrackId,
+            title: title || "Unknown Track",
+            artist: artist || "Unknown Artist",
+            album: album || "Unknown Album",
+            duration,
+            isrc: entry.input.isrc,
+        });
+        const mapping = await prisma.trackMapping.findFirst({
+            where: { trackTidalId: ensured.id, stale: false },
+            select: { id: true },
+            orderBy: [{ confidence: "desc" }, { createdAt: "desc" }],
+        });
+
         queue.push({
-            id: t.id,
-            title: t.title,
-            duration: t.duration,
-            artist: { id: t.album.artist.id, name: t.album.artist.name },
-            album: { id: t.album.id, title: t.album.title, coverArt: t.album.coverUrl },
-            mediaSource: "local",
-            provider: { source: "local" },
+            id: `tidal:${entry.tidalTrackId}`,
+            title: title || "Unknown Track",
+            duration,
+            artist: {
+                id: `tidal-artist:${entry.tidalTrackId}`,
+                name: artist || "Unknown Artist",
+            },
+            album: {
+                id: `tidal-album:${entry.tidalTrackId}`,
+                title: album || "Unknown Album",
+                coverArt: null,
+            },
+            mediaSource: "tidal",
+            provider: {
+                source: "tidal",
+                providerTrackId: String(entry.tidalTrackId),
+                tidalTrackId: entry.tidalTrackId,
+            },
+            streamSource: "tidal",
+            tidalTrackId: entry.tidalTrackId,
+            trackTidalId: ensured.id,
+            trackMappingId: mapping?.id,
+            originSource: "tidal",
+        });
+    }
+
+    for (const entry of youtubeInputs) {
+        const title = (entry.input.title ?? "").trim();
+        const artist = (entry.input.artist ?? "").trim();
+        const album = (entry.input.album ?? "").trim();
+        const duration =
+            typeof entry.input.duration === "number" && Number.isFinite(entry.input.duration)
+                ? Math.max(1, Math.trunc(entry.input.duration))
+                : 180;
+        const ensured = await trackMappingService.ensureRemoteTrack({
+            provider: "youtube",
+            videoId: entry.youtubeVideoId,
+            title: title || "Unknown Track",
+            artist: artist || "Unknown Artist",
+            album: album || "Unknown Album",
+            duration,
+            thumbnailUrl: entry.input.thumbnailUrl,
+        });
+        const mapping = await prisma.trackMapping.findFirst({
+            where: { trackYtMusicId: ensured.id, stale: false },
+            select: { id: true },
+            orderBy: [{ confidence: "desc" }, { createdAt: "desc" }],
+        });
+
+        queue.push({
+            id: `yt:${entry.youtubeVideoId}`,
+            title: title || "Unknown Track",
+            duration,
+            artist: {
+                id: `yt-artist:${entry.youtubeVideoId}`,
+                name: artist || "Unknown Artist",
+            },
+            album: {
+                id: `yt-album:${entry.youtubeVideoId}`,
+                title: album || "Unknown Album",
+                coverArt: entry.input.thumbnailUrl ?? null,
+            },
+            mediaSource: "youtube",
+            provider: {
+                source: "youtube",
+                providerTrackId: entry.youtubeVideoId,
+                youtubeVideoId: entry.youtubeVideoId,
+            },
+            streamSource: "youtube",
+            youtubeVideoId: entry.youtubeVideoId,
+            trackYtMusicId: ensured.id,
+            trackMappingId: mapping?.id,
+            originSource: "youtube",
         });
     }
 
     return queue;
+}
+
+/** Backward-compatible local-only wrapper used by older paths/tests. */
+export async function validateLocalTracks(
+    trackIds: string[]
+): Promise<SyncQueueItem[]> {
+    const queue = await validateQueueTracks(trackIds.map((trackId) => ({ trackId })));
+    return queue.filter((item) => (item.originSource ?? "local") === "local");
 }
 
 function queueToJson(queue: SyncQueueItem[]): Prisma.InputJsonValue | typeof Prisma.DbNull {
@@ -166,10 +338,18 @@ export async function createGroup(
 
     const hostPresentationName = await resolvePresentationName(userId, username);
     const joinCode = await generateJoinCode();
-    const initialQueue = await validateLocalTracks(options.queueTrackIds ?? []);
+    const queueInputs =
+        Array.isArray(options.queueTracks) && options.queueTracks.length > 0
+            ? options.queueTracks
+            : (options.queueTrackIds ?? []).map((trackId) => ({ trackId }));
+    const initialQueue = await validateQueueTracks(queueInputs);
     const requestedTrackId = options.currentTrackId;
     const requestedTrackIndex = requestedTrackId
-        ? initialQueue.findIndex((track) => track.id === requestedTrackId)
+        ? initialQueue.findIndex(
+              (track) =>
+                  track.id === requestedTrackId ||
+                  track.localTrackId === requestedTrackId
+          )
         : -1;
     const hasRequestedTrack = requestedTrackIndex >= 0;
     const initialCurrentIndex = hasRequestedTrack ? requestedTrackIndex : 0;
@@ -183,7 +363,7 @@ export async function createGroup(
     const initialIsPlaying = Boolean(
         options.isPlaying && initialQueue.length > 0 && hasRequestedTrack
     );
-    const initialTrackId = initialTrack?.id ?? null;
+    const initialTrackId = initialTrack?.localTrackId ?? null;
 
     const now = new Date();
 
@@ -458,24 +638,24 @@ export async function getMyGroup(userId: string): Promise<GroupSnapshot | null> 
     return groupManager.snapshotById(membership.syncGroupId) ?? null;
 }
 
-/**
- * Validate track IDs and return queue items.
- * Exported for use by the socket layer when adding tracks to queue.
- */
-export { validateLocalTracks };
-
 // ---------------------------------------------------------------------------
 // Periodic persistence
 // ---------------------------------------------------------------------------
 
 let persistInterval: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * Executes startPersistLoop.
+ */
 export function startPersistLoop(): void {
     if (persistInterval) return;
     persistInterval = setInterval(persistDirtyGroups, PERSIST_INTERVAL_MS);
     logger.debug("[ListenTogether] Persistence loop started");
 }
 
+/**
+ * Executes stopPersistLoop.
+ */
 export function stopPersistLoop(): void {
     if (persistInterval) {
         clearInterval(persistInterval);
@@ -497,7 +677,7 @@ async function persistDirtyGroups(): Promise<void> {
             await prisma.syncGroup.update({
                 where: { id: group.id },
                 data: {
-                    trackId: pb.queue[pb.currentIndex]?.id ?? null,
+                    trackId: pb.queue[pb.currentIndex]?.localTrackId ?? null,
                     queue: queueToJson(pb.queue),
                     currentIndex: pb.currentIndex,
                     isPlaying: pb.isPlaying,
@@ -530,7 +710,7 @@ export async function persistAllGroups(): Promise<void> {
             await prisma.syncGroup.update({
                 where: { id: group.id },
                 data: {
-                    trackId: pb.queue[pb.currentIndex]?.id ?? null,
+                    trackId: pb.queue[pb.currentIndex]?.localTrackId ?? null,
                     queue: queueToJson(pb.queue),
                     currentIndex: pb.currentIndex,
                     isPlaying: false, // Stop on shutdown
@@ -624,8 +804,8 @@ function parseQueueFromDb(raw: Prisma.JsonValue | null): SyncQueueItem[] {
             typeof q.id === "string" &&
             typeof q.title === "string" &&
             typeof q.duration === "number" &&
-            artist && typeof artist.id === "string" && typeof artist.name === "string" &&
-            album && typeof album.id === "string" && typeof album.title === "string"
+            artist && typeof artist.name === "string" &&
+            album && typeof album.title === "string"
         ) {
             const provider = normalizeCanonicalMediaProviderIdentity({
                 mediaSource: q.mediaSource,
@@ -645,15 +825,42 @@ function parseQueueFromDb(raw: Prisma.JsonValue | null): SyncQueueItem[] {
                 id: q.id,
                 title: q.title,
                 duration: q.duration,
-                artist: { id: artist.id, name: artist.name },
+                artist: {
+                    id:
+                        typeof artist.id === "string"
+                            ? artist.id
+                            : `artist:${q.id}`,
+                    name: artist.name,
+                },
                 album: {
-                    id: album.id,
+                    id:
+                        typeof album.id === "string"
+                            ? album.id
+                            : `album:${q.id}`,
                     title: album.title,
                     coverArt: typeof album.coverArt === "string" ? album.coverArt : null,
                 },
                 mediaSource: provider.source,
                 provider,
                 ...toLegacyStreamFields(provider),
+                localTrackId:
+                    typeof q.localTrackId === "string" ? q.localTrackId : undefined,
+                trackTidalId:
+                    typeof q.trackTidalId === "string" ? q.trackTidalId : undefined,
+                trackYtMusicId:
+                    typeof q.trackYtMusicId === "string"
+                        ? q.trackYtMusicId
+                        : undefined,
+                trackMappingId:
+                    typeof q.trackMappingId === "string"
+                        ? q.trackMappingId
+                        : undefined,
+                originSource:
+                    q.originSource === "tidal" ||
+                    q.originSource === "youtube" ||
+                    q.originSource === "local"
+                        ? q.originSource
+                        : "local",
             });
         }
     }

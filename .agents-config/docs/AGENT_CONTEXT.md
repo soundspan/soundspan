@@ -271,7 +271,7 @@ For this repository, documentation updates are part of the definition of done fo
 - Keep `README.md` aligned with current repository behavior for user-visible features.
 - For major implemented features, keep an explicit known-gap ledger and revisit criteria in the canonical feature docs (for example OpenSubsonic gap/non-goal sections in `docs/OPENSUBSONIC_COMPATIBILITY.md`).
 - At task start and before phase boundaries, review known-gap ledgers for impacted features and explicitly decide whether any deferred gaps must be promoted to in-scope for the work being planned.
-- Maintain canonical continuity in `.agents/CONTINUITY.md` for cross-feature context survivability. This is the first file to read at the start of every assistant turn.
+- Maintain canonical continuity in `.agents/MEMORY.md` and `.agents/SESSION_LOG.md` for cross-feature context survivability.
 - Canonical shared local agent context root is `../agents-workfiles/soundspan` (git-ignored).
 - Treat `.agents/**` as shared multi-writer context; preserve concurrent updates with semantic merges (no blind overwrite).
 - `.agents/**` may be concurrently modified by other Codex sessions; every `.agents/**` edit must be semantically merged against latest on-disk state before write.
@@ -281,10 +281,10 @@ For this repository, documentation updates are part of the definition of done fo
   - `.agents/EXECUTION_QUEUE.json` (canonical execution queue + atomic state)
   - `.agents/SESSION_BRIEF.json` (generated from preflight)
 - Keep `.agents-config/docs/CONTEXT_INDEX.json` synchronized with policy/documentation contracts; treat it as machine-readable authority, not optional prose.
-- Repository index operations contract lives in `.agents-config/docs/REPO_INDEXING.md`; `npm run agent:preflight` now performs index readiness gating (always re-index, then strict verify) before implementation starts.
-- Keep queue/continuity/plan boundaries clear:
+- `npm run agent:preflight` is the canonical startup gate before implementation begins.
+- Keep queue/memory/plan boundaries clear:
   - queue: execution plan + state authority
-  - continuity: historical decisions/findings/outcomes
+  - memory/session-log: historical decisions/findings/outcomes
   - plan files: human-readable implementation detail tied to queue item IDs
 - Multi-agent queue usage:
   - Exactly one orchestrator agent should own cross-task coordination/context in a session.
@@ -334,7 +334,7 @@ For this repository, documentation updates are part of the definition of done fo
 - If a verbosity target is exceeded for correctness, include a one-line rationale in `PLAN.json` (and mirror in `PLAN.md` only for historical context).
 - Move completed feature directories from `.agents/plans/current/` to `.agents/plans/archived/` immediately at closeout, and update any inbound references in the same change.
 - All `.agents/plans/**` and `.agents/**` artifacts are local operator/agent context and must not be committed or pushed.
-- For small one-off tasks expected to finish in one session, do not create a new feature directory unless continuity risk justifies it; log key outcome/decision deltas in `.agents/CONTINUITY.md` instead.
+- For small one-off tasks expected to finish in one session, do not create a new feature directory unless continuity risk justifies it; log key outcome/decision deltas in `.agents/MEMORY.md` and `.agents/SESSION_LOG.md` instead.
 - Plan-link hygiene is mandatory:
   - At session start, before/after archive moves, and before final handoff, run a stale-link check for `.agents/plans/current/...`, `.agents/plans/deferred/...`, and `.agents/plans/archived/...` references.
   - Fix broken references in the same change where they are discovered.
@@ -352,7 +352,7 @@ For this repository, documentation updates are part of the definition of done fo
 - Legacy root context files (`*_PLAN.md`, `LLM_SESSION_HANDOFF.md`, `PROMPT_HISTORY.md`) should be migrated into feature directories under `.agents/plans/current/` or `.agents/plans/archived/` when encountered.
 - When adding/changing agent process expectations, update `AGENTS.md`, `.agents-config/docs/AGENT_RULES.md`, `.agents-config/policies/agent-governance.json`, and `.agents-config/scripts/enforce-agent-policies.mjs` in the same change set.
 
-## Full-Stack Delivery Gates
+## Delivery Gates
 
 For any feature or fix that touches API contracts, auth flows, routing/proxying, external clients, or service-to-service communication, treat implementation as full-stack by default.
 
@@ -419,8 +419,8 @@ For any feature or fix that touches API contracts, auth flows, routing/proxying,
 - **Mandatory verification default:** Regression prevention tests and contract tests are required for all behavior-changing work unless the user explicitly bypasses this requirement.
 - **Coverage bar:** Maintain 100% actual code coverage (lines, branches, functions, statements) unless the user explicitly approves a temporary exception.
 - **Coverage target:** Strive for 100% automated test coverage across backend, frontend, workers, and integration surfaces. If full coverage is not feasible for a change, explicitly document the remaining gap and rationale in the completion summary.
-- **Development approach:** Default to Test Driven Development (write or update a failing test first, then implement), unless technical constraints make strict TDD impractical. When deviating, document why.
-- **True TDD workflow (required by default):** Define the expected outcome with tests first, confirm those tests fail for the current implementation, then adapt production code until the new tests pass.
+- **Development approach:** Clarify and confirm acceptance criteria before writing tests or implementation; if criteria are unclear, ask the user clarifying questions first.
+- **True TDD workflow (required by default):** Strict tests-first TDD for new code and behavior changes: write failing tests first, then implement only until tests pass.
 - **Opportunistic coverage rule:** While implementing any feature/fix, if you encounter adjacent code paths lacking meaningful tests, add focused coverage in the same change set where practical (without broad unrelated refactors).
 
 ## Local Testing Bootstrap

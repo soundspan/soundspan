@@ -4,6 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
 import { buildCachePath } from "./cacheHelpers";
+import { normalizeExternalImageUrl } from "./imageProxy";
 
 /**
  * Service to cache podcast cover images locally
@@ -18,6 +19,9 @@ interface CoverSyncResult {
     errors: string[];
 }
 
+/**
+ * Represents the PodcastCacheService class.
+ */
 export class PodcastCacheService {
     private coverCacheDir: string;
 
@@ -190,7 +194,16 @@ export class PodcastCacheService {
         type: "podcast" | "episode"
     ): Promise<string | null> {
         try {
-            const response = await fetch(imageUrl);
+            const safeUrl = normalizeExternalImageUrl(imageUrl);
+            if (!safeUrl) {
+                logger.error(
+                    `SSRF-blocked cover download for ${type} ${id}:`,
+                    imageUrl
+                );
+                return null;
+            }
+
+            const response = await fetch(safeUrl, { redirect: "error" });
 
             if (!response.ok) {
                 throw new Error(

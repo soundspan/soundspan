@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import {
     shouldAcceptEngineTimeUpdate,
     type ActivePlaybackSelection,
-} from "../../lib/audio-playback-persistence-guards.ts";
+} from "../../lib/audio-playback-persistence-guards";
 
 /**
  * Integration-style tests for the timeupdate guard chain:

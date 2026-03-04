@@ -8,6 +8,9 @@ import { dispatchQueryEvent } from "@/lib/query-events";
 import { BRAND_NAME } from "@/lib/brand";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Renders the SyncPage component.
+ */
 export default function SyncPage() {
     useRouter();
     const [syncing, setSyncing] = useState(true);

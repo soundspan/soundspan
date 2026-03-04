@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
-import { HeartbeatMonitor } from "../../lib/audio/heartbeat-monitor.ts";
+import { HeartbeatMonitor } from "../../lib/audio/heartbeat-monitor";
 
 function createHarness(options?: {
     interval?: number;

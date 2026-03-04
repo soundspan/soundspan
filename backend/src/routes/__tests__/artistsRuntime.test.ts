@@ -15,7 +15,21 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 jest.mock("../../utils/db", () => ({
-    prisma: {},
+    prisma: {
+        userSettings: { findUnique: jest.fn() },
+    },
+}));
+
+const mockGetSystemSettings = jest.fn();
+jest.mock("../../utils/systemSettings", () => ({
+    getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
+}));
+
+jest.mock("../../services/youtubeMusic", () => ({
+    ytMusicService: {
+        search: jest.fn(),
+        getStreamProxy: jest.fn(),
+    },
 }));
 
 const deezerService = {
@@ -61,6 +75,7 @@ jest.mock("../../services/fanart", () => ({
 
 const redisClient = {
     get: jest.fn(),
+    set: jest.fn(),
     setEx: jest.fn(),
 };
 
@@ -70,9 +85,11 @@ jest.mock("../../utils/redis", () => ({
 
 import router from "../artists";
 import { logger } from "../../utils/logger";
+import { ytMusicService } from "../../services/youtubeMusic";
 
 const mockLoggerError = logger.error as jest.Mock;
 
+const mockYtSearch = ytMusicService.search as jest.Mock;
 const mockGetTrackPreview = deezerService.getTrackPreview as jest.Mock;
 const mockGetArtistImage = deezerService.getArtistImage as jest.Mock;
 const mockGetAlbumCover = deezerService.getAlbumCover as jest.Mock;
@@ -141,6 +158,8 @@ describe("artists routes runtime", () => {
     beforeEach(() => {
         jest.clearAllMocks();
 
+        mockGetSystemSettings.mockResolvedValue({ ytMusicEnabled: true });
+        mockYtSearch.mockResolvedValue({ results: [], total: 0 });
         mockGetTrackPreview.mockResolvedValue(null);
         mockGetArtistImage.mockResolvedValue(null);
         mockGetAlbumCover.mockResolvedValue(null);
@@ -170,10 +189,11 @@ describe("artists routes runtime", () => {
         fetchMock.mockResolvedValue({ ok: true });
     });
 
-    it("returns preview URL for /preview when Deezer has one", async () => {
-        mockGetTrackPreview.mockResolvedValueOnce(
-            "https://cdn.example/previews/back-in-black.mp3"
-        );
+    it("returns videoId for /preview when YT Music search finds a match", async () => {
+        mockYtSearch.mockResolvedValueOnce({
+            results: [{ videoId: "dQw4w9WgXcQ", title: "Back In Black" }],
+            total: 1,
+        });
 
         const req = {
             params: {
@@ -185,18 +205,17 @@ describe("artists routes runtime", () => {
 
         await getPreview(req, res);
 
-        expect(mockGetTrackPreview).toHaveBeenCalledWith(
-            "AC/DC",
-            "Back In Black"
+        expect(mockYtSearch).toHaveBeenCalledWith(
+            "__public__",
+            "AC/DC Back In Black",
+            "songs"
         );
         expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual({
-            previewUrl: "https://cdn.example/previews/back-in-black.mp3",
-        });
+        expect(res.body).toEqual({ videoId: "dQw4w9WgXcQ" });
     });
 
-    it("returns 404 for /preview when Deezer has no preview", async () => {
-        mockGetTrackPreview.mockResolvedValueOnce(null);
+    it("returns 404 for /preview when YT Music has no match", async () => {
+        mockYtSearch.mockResolvedValueOnce({ results: [], total: 0 });
 
         const req = {
             params: {
@@ -213,7 +232,7 @@ describe("artists routes runtime", () => {
     });
 
     it("returns 500 for /preview errors", async () => {
-        mockGetTrackPreview.mockRejectedValueOnce(new Error("deezer unavailable"));
+        mockYtSearch.mockRejectedValueOnce(new Error("sidecar unavailable"));
 
         const req = {
             params: {
@@ -228,7 +247,6 @@ describe("artists routes runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch preview",
-            message: "deezer unavailable",
         });
         expect(mockLoggerError).toHaveBeenCalled();
     });

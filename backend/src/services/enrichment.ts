@@ -60,6 +60,9 @@ export interface AlbumEnrichmentData {
     confidence: number;
 }
 
+/**
+ * Represents the EnrichmentService class.
+ */
 export class EnrichmentService {
     private defaultSettings: EnrichmentSettings = {
         enabled: false, // Opt-in by default

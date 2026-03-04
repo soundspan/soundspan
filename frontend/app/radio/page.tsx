@@ -2,34 +2,17 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AudioLines, Play, Loader2, Shuffle } from "lucide-react";
+import { AudioLines, Shuffle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { Track } from "@/lib/audio-state-context";
 import { toast } from "sonner";
 import { shuffleArray } from "@/utils/shuffle";
-import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
-import { cn } from "@/utils/cn";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { RadioStationCard, RadioStationCardStation } from "@/components/ui/RadioStationCard";
 
-interface RadioStation {
-    id: string;
-    name: string;
-    description: string;
-    color: string;
-    filter: {
-        type:
-            | "genre"
-            | "decade"
-            | "discovery"
-            | "favorites"
-            | "all"
-            | "workout";
-        value?: string;
-    };
-    minTracks?: number;
-}
+type RadioStation = RadioStationCardStation;
 
 interface GenreCount {
     genre: string;
@@ -156,76 +139,6 @@ const getGenreColor = (genre: string): string => {
     return GENRE_COLORS[lower] || GENRE_COLORS.default;
 };
 
-// Radio Station Card Component
-function RadioStationCard({ 
-    station, 
-    onPlay, 
-    isLoading 
-}: { 
-    station: RadioStation; 
-    onPlay: () => void; 
-    isLoading: boolean;
-}) {
-    const { showSpinner, triggerPlayFeedback } = usePlayButtonFeedback();
-
-    const handlePlayClick = () => {
-        triggerPlayFeedback();
-        onPlay();
-    };
-
-    return (
-        <button
-            onClick={handlePlayClick}
-            disabled={isLoading}
-            className={`
-                relative group w-full
-                aspect-[4/3] rounded-lg overflow-hidden
-                bg-gradient-to-br ${station.color}
-                border border-white/10 hover:border-white/20
-                transition-all duration-200
-                hover:scale-[1.02] active:scale-[0.98]
-                disabled:opacity-50 disabled:cursor-not-allowed
-            `}
-        >
-            {/* Content */}
-            <div className="absolute inset-0 p-3 flex flex-col justify-between">
-                <div className="flex items-center gap-1.5">
-                    <AudioLines className="w-4 h-4 text-white/60" />
-                    <span className="text-[10px] text-white/60 font-medium uppercase tracking-wider">
-                        Radio
-                    </span>
-                </div>
-                <div>
-                    <h3 className="text-sm font-bold text-white truncate leading-tight">
-                        {station.name}
-                    </h3>
-                    <p className="text-xs text-white/50 truncate">
-                        {station.description}
-                    </p>
-                </div>
-            </div>
-
-            <div
-                className={cn(
-                    "absolute inset-0 bg-black/40 transition-opacity flex items-center justify-center",
-                    isLoading || showSpinner
-                        ? "opacity-100"
-                        : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
-                )}
-            >
-                <div className="w-10 h-10 rounded-full bg-[#60a5fa] border border-[#93c5fd]/60 flex items-center justify-center shadow-lg transform scale-90 group-hover:scale-100 group-focus-visible:scale-100 transition-transform">
-                    {isLoading || showSpinner ? (
-                        <Loader2 className="w-4 h-4 text-black animate-spin" />
-                    ) : (
-                        <Play className="w-4 h-4 fill-current text-black ml-0.5" />
-                    )}
-                </div>
-            </div>
-
-        </button>
-    );
-}
-
 // Section Header Component
 function SectionHeader({ title, description }: { title: string; description?: string }) {
     return (
@@ -236,6 +149,9 @@ function SectionHeader({ title, description }: { title: string; description?: st
     );
 }
 
+/**
+ * Renders the RadioPage component.
+ */
 export default function RadioPage() {
     const { playTracks } = useAudioControls();
     const [loadingStation, setLoadingStation] = useState<string | null>(null);
@@ -378,7 +294,7 @@ export default function RadioPage() {
                         {isLoading ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                                 {Array.from({ length: 6 }).map((_, i) => (
-                                    <div key={i} className="aspect-[4/3] rounded-lg bg-white/5 animate-pulse" />
+                                    <div key={i} className="aspect-square rounded-lg bg-white/5 animate-pulse" />
                                 ))}
                             </div>
                         ) : (
@@ -406,7 +322,7 @@ export default function RadioPage() {
                         {isLoading ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                                 {Array.from({ length: 6 }).map((_, i) => (
-                                    <div key={i} className="aspect-[4/3] rounded-lg bg-white/5 animate-pulse" />
+                                    <div key={i} className="aspect-square rounded-lg bg-white/5 animate-pulse" />
                                 ))}
                             </div>
                         ) : (

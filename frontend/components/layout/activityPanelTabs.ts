@@ -21,6 +21,9 @@ interface ActivityPanelBadgeInput {
     isAdmin: boolean;
 }
 
+/**
+ * Executes getActivityPanelBadgeState.
+ */
 export function getActivityPanelBadgeState({
     unreadCount,
     activeDownloadCount,
@@ -43,6 +46,9 @@ export function getActivityPanelBadgeState({
     };
 }
 
+/**
+ * Executes getActivityTabBadge.
+ */
 export function getActivityTabBadge(
     tab: ActivityTab,
     badgeState: ActivityPanelBadgeState
@@ -62,6 +68,9 @@ export function getActivityTabBadge(
     return null;
 }
 
+/**
+ * Executes isActivityTabVisible.
+ */
 export function isActivityTabVisible(
     tab: ActivityTab,
     isAdmin: boolean
@@ -73,10 +82,16 @@ export function isActivityTabVisible(
     return tab !== "active" && tab !== "history";
 }
 
+/**
+ * Executes getVisibleActivityTabIds.
+ */
 export function getVisibleActivityTabIds(isAdmin: boolean): ActivityTab[] {
     return ALL_ACTIVITY_TAB_IDS.filter((tab) => isActivityTabVisible(tab, isAdmin));
 }
 
+/**
+ * Executes resolveActivityTab.
+ */
 export function resolveActivityTab(
     requestedTab: ActivityTab,
     visibleTabs: readonly ActivityTab[],

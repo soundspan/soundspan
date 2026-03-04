@@ -5,7 +5,7 @@ import {
     PROVIDER_STATUS_POSITIVE_TTL_MS,
     createProviderStatusCacheEntry,
     isProviderStatusCacheFresh,
-} from "../../features/album/hooks/providerStatusCache.ts";
+} from "../../features/album/hooks/providerStatusCache";
 
 test("provider status cache keeps successful availability longer than failures", () => {
     const now = 1_000_000;

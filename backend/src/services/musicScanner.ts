@@ -44,6 +44,9 @@ interface ScanResult {
     duration: number;
 }
 
+/**
+ * Represents the MusicScannerService class.
+ */
 export class MusicScannerService {
     private scanQueue = new PQueue({ concurrency: 10 });
     private progressCallback?: (progress: ScanProgress) => void;

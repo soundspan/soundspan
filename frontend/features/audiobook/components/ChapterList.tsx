@@ -9,6 +9,9 @@ interface ChapterListProps {
   formatTime: (seconds: number) => string;
 }
 
+/**
+ * Renders the ChapterList component.
+ */
 export function ChapterList({
   chapters,
   onSeekToChapter,

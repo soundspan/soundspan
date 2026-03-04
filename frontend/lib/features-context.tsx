@@ -29,6 +29,9 @@ const FEATURES_REFRESH_INTERVAL_MS = 60_000;
 
 const FeaturesContext = createContext<FeaturesState | undefined>(undefined);
 
+/**
+ * Renders the FeaturesProvider component.
+ */
 export function FeaturesProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<FeaturesState>(defaultState);
     const refreshFeatures = useCallback(async () => {
@@ -99,6 +102,9 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useFeatures.
+ */
 export function useFeatures(): FeaturesState {
     const context = useContext(FeaturesContext);
     if (!context) {

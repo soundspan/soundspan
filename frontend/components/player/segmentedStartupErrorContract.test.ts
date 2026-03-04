@@ -3,7 +3,7 @@ import test from "node:test";
 import {
     parseSegmentedStartupErrorHint,
     resolveConservativeSegmentedStartupRetryDelayMs,
-} from "./segmentedStartupErrorContract.ts";
+} from "./segmentedStartupErrorContract";
 
 test("parseSegmentedStartupErrorHint reads structured hint from API error data", () => {
     const error = Object.assign(new Error("Manifest not ready"), {

@@ -14,10 +14,14 @@
     "agent:queue:close-feature": "node .agents-config/scripts/agent-queue-lifecycle.mjs close-feature",
     "agent:queue:verify-evidence:check": "node .agents-config/scripts/repair-queue-verification-evidence.mjs --check",
     "agent:queue:verify-evidence:write": "node .agents-config/scripts/repair-queue-verification-evidence.mjs --write --run-cmd \"node .agents-config/scripts/enforce-agent-policies.mjs\"",
-    "index:build": "node .agents-config/tools/index/indexer.mjs build",
-    "index:rebuild": "node .agents-config/tools/index/indexer.mjs build --full",
-    "index:query": "node .agents-config/tools/index/indexer.mjs query",
-    "index:verify": "node .agents-config/tools/index/indexer.mjs verify --strict",
+    "release:notes": "node .agents-config/scripts/generate-release-notes.mjs",
+    "release:prepare": "node .agents-config/scripts/release-version-sync.mjs --write",
+    "release:verify": "node .agents-config/scripts/release-version-sync.mjs --check",
+    "release:contract:check": "node .agents-config/scripts/release-contract-check.mjs",
+    "bootstrap": "node .agents-config/tools/bootstrap/bootstrap.mjs",
+    "ownership:generate": "node .agents-config/tools/bootstrap/generate-ownership-matrix.mjs --write",
+    "ownership:verify": "node .agents-config/tools/bootstrap/generate-ownership-matrix.mjs --check",
+    "agent:sync": "node .agents-config/tools/bootstrap/agent-sync.mjs",
     "feature-index:verify": "node .agents-config/tools/docs/feature-index-check.mjs --strict",
     "jsdoc-coverage:generate": "node .agents-config/tools/docs/generate-jsdoc-coverage.mjs --write",
     "jsdoc-coverage:verify": "node .agents-config/tools/docs/generate-jsdoc-coverage.mjs --check",
@@ -29,11 +33,9 @@
     "route-map:verify": "node .agents-config/tools/docs/generate-route-map.mjs --check",
     "domain-readmes:generate": "node .agents-config/tools/docs/generate-domain-readmes.mjs --write",
     "domain-readmes:verify": "node .agents-config/tools/docs/generate-domain-readmes.mjs --check",
-    "release:notes": "node .agents-config/scripts/generate-release-notes.mjs",
-    "release:prepare": "node .agents-config/scripts/release-version-sync.mjs --write",
-    "release:verify": "node .agents-config/scripts/release-version-sync.mjs --check",
-    "release:contract:check": "node .agents-config/scripts/release-contract-check.mjs",
-    "bootstrap": "node .agents-config/tools/bootstrap/bootstrap.mjs"
+    "test-coverage:run": "node .agents-config/scripts/verify-test-coverage.mjs --run",
+    "test-coverage:verify": "node .agents-config/scripts/verify-test-coverage.mjs --check",
+    "test-coverage:write": "node .agents-config/scripts/verify-test-coverage.mjs --write"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

@@ -4,6 +4,12 @@ import { z } from "zod";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { sessionLog } from "../utils/playlistLogger";
+import { trackMappingService } from "../services/trackMappingService";
+import {
+    formatUnifiedTrackItem,
+    type UnifiedPlaylistItemRecord,
+} from "../services/unifiedTrackResponse";
+import { resolvePlaylistItemsForUser } from "../services/playlistTrackResolution";
 
 const router = Router();
 
@@ -14,9 +20,143 @@ const createPlaylistSchema = z.object({
     isPublic: z.boolean().optional().default(false),
 });
 
-const addTrackSchema = z.object({
-    trackId: z.string(),
+const updatePlaylistSchema = z.object({
+    name: z.string().min(1).max(200).optional(),
+    isPublic: z.boolean().optional(),
 });
+
+const playlistItemInclude = {
+    track: {
+        include: {
+            album: {
+                include: {
+                    artist: {
+                        select: {
+                            id: true,
+                            name: true,
+                            mbid: true,
+                        },
+                    },
+                },
+            },
+        },
+    },
+    trackTidal: true,
+    trackYtMusic: true,
+} as const;
+
+const addTrackSchema = z
+    .object({
+        trackId: z.string().trim().min(1).optional(),
+        tidalTrackId: z.coerce.number().int().positive().optional(),
+        youtubeVideoId: z.string().trim().min(1).optional(),
+        title: z.string().trim().min(1).optional(),
+        artist: z.string().trim().min(1).optional(),
+        album: z.string().trim().min(1).optional(),
+        duration: z.coerce.number().int().nonnegative().optional(),
+        isrc: z.string().trim().min(1).max(64).optional(),
+        quality: z.string().trim().min(1).max(64).optional(),
+        explicit: z.boolean().optional(),
+        thumbnailUrl: z.string().trim().min(1).optional(),
+    })
+    .superRefine((value, ctx) => {
+        const identifierCount = [
+            value.trackId,
+            value.tidalTrackId,
+            value.youtubeVideoId,
+        ].filter((entry) => entry !== undefined).length;
+        if (identifierCount !== 1) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message:
+                    "Exactly one of trackId, tidalTrackId, or youtubeVideoId is required.",
+                path: ["trackId"],
+            });
+            return;
+        }
+
+        const needsRemoteMetadata =
+            value.tidalTrackId !== undefined || value.youtubeVideoId !== undefined;
+        if (!needsRemoteMetadata) return;
+
+        if (!value.title) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "title is required for remote playlist items.",
+                path: ["title"],
+            });
+        }
+        if (!value.artist) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "artist is required for remote playlist items.",
+                path: ["artist"],
+            });
+        }
+        if (!value.album) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "album is required for remote playlist items.",
+                path: ["album"],
+            });
+        }
+        if (value.duration === undefined) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "duration is required for remote playlist items.",
+                path: ["duration"],
+            });
+        }
+    });
+
+function unavailablePlaybackForReason(reason: string): {
+    isPlayable: boolean;
+    reason: string;
+    message: string;
+} {
+    if (reason === "no-provider") {
+        return {
+            isPlayable: false,
+            reason: "provider_unavailable",
+            message:
+                "Playback is unavailable because this account is not connected to a compatible provider for this track.",
+        };
+    }
+
+    if (reason === "duration-mismatch") {
+        return {
+            isPlayable: false,
+            reason: "duration_mismatch",
+            message:
+                "Playback is unavailable because available provider matches failed duration validation.",
+        };
+    }
+
+    if (reason === "low-confidence") {
+        return {
+            isPlayable: false,
+            reason: "low_confidence_mapping",
+            message:
+                "Playback is unavailable because available provider mappings are too low confidence.",
+        };
+    }
+
+    if (reason === "stale") {
+        return {
+            isPlayable: false,
+            reason: "stale_mapping",
+            message:
+                "Playback is unavailable because this mapping has been marked stale and needs refresh.",
+        };
+    }
+
+    return {
+        isPlayable: false,
+        reason: "missing_provider_track",
+        message:
+            "Playback is unavailable because this playlist item no longer has an attached track source.",
+    };
+}
 
 /**
  * @openapi
@@ -94,6 +234,18 @@ router.get("/", async (req, res) => {
             trackCount: playlist.items.length,
             isOwner: playlist.userId === userId,
             isHidden: hiddenPlaylistIds.has(playlist.id),
+            items: playlist.items.map((item) => ({
+                ...item,
+                track: item.track
+                    ? {
+                          ...item.track,
+                          album: {
+                              ...item.track.album,
+                              coverArt: item.track.album.coverUrl,
+                          },
+                      }
+                    : null,
+            })),
         }));
 
         // Debug: log shared playlists with user info
@@ -227,23 +379,7 @@ router.get("/:id", async (req, res) => {
                     select: { id: true },
                 },
                 items: {
-                    include: {
-                        track: {
-                            include: {
-                                album: {
-                                    include: {
-                                        artist: {
-                                            select: {
-                                                id: true,
-                                                name: true,
-                                                mbid: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
+                    include: playlistItemInclude,
                     orderBy: { sort: "asc" },
                 },
                 pendingTracks: {
@@ -261,24 +397,35 @@ router.get("/:id", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        // Format playlist items
-        const formattedItems = playlist.items.map((item) => ({
-            ...item,
-            type: "track" as const,
-            track: {
-                ...item.track,
-                album: {
-                    ...item.track.album,
-                    coverArt: item.track.album.coverUrl,
-                },
-            },
-        }));
+        const resolvedItems = await resolvePlaylistItemsForUser(
+            playlist.items as UnifiedPlaylistItemRecord[],
+            userId
+        );
+        const formattedItems = resolvedItems.map((resolvedItem) => {
+            const formatted = formatUnifiedTrackItem(resolvedItem.effective);
+            if (!resolvedItem.resolution.available) {
+                formatted.playback = unavailablePlaybackForReason(
+                    resolvedItem.resolution.reason
+                );
+            }
+            return formatted;
+        });
 
         // Format pending tracks
         const formattedPending = playlist.pendingTracks.map((pending) => ({
             id: pending.id,
             type: "pending" as const,
             sort: pending.sort,
+            provider: {
+                source: "pending" as const,
+                label: "PENDING",
+            },
+            playback: {
+                isPlayable: false,
+                reason: "pending_import",
+                message:
+                    "Playback is unavailable until this track is matched and imported.",
+            },
             pending: {
                 id: pending.id,
                 artist: pending.spotifyArtist,
@@ -360,7 +507,7 @@ router.put("/:id", async (req, res) => {
             return res.status(401).json({ error: "Unauthorized" });
         }
         const userId = req.user.id;
-        const data = createPlaylistSchema.parse(req.body);
+        const data = updatePlaylistSchema.parse(req.body);
 
         // Check ownership
         const existing = await prisma.playlist.findUnique({
@@ -378,8 +525,8 @@ router.put("/:id", async (req, res) => {
         const playlist = await prisma.playlist.update({
             where: { id: req.params.id },
             data: {
-                name: data.name,
-                isPublic: data.isPublic,
+                ...(data.name !== undefined && { name: data.name }),
+                ...(data.isPublic !== undefined && { isPublic: data.isPublic }),
             },
         });
 
@@ -630,7 +777,7 @@ router.post("/:id/items", async (req, res) => {
                 details: parsedBody.error.errors,
             });
         }
-        const { trackId } = parsedBody.data;
+        const addTrackData = parsedBody.data;
 
         // Check ownership
         const playlist = await prisma.playlist.findUnique({
@@ -651,30 +798,71 @@ router.post("/:id/items", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        // Check if track exists
-        const track = await prisma.track.findUnique({
-            where: { id: trackId },
-        });
+        let createTrackId: string | null = null;
+        let createTrackTidalId: string | null = null;
+        let createTrackYtMusicId: string | null = null;
+        let existingItem: UnifiedPlaylistItemRecord | null = null;
 
-        if (!track) {
-            return res.status(404).json({ error: "Track not found" });
+        if (addTrackData.trackId) {
+            const track = await prisma.track.findUnique({
+                where: { id: addTrackData.trackId },
+            });
+
+            if (!track) {
+                return res.status(404).json({ error: "Track not found" });
+            }
+
+            existingItem = (await prisma.playlistItem.findFirst({
+                where: {
+                    playlistId: req.params.id,
+                    trackId: addTrackData.trackId,
+                },
+                include: playlistItemInclude,
+            })) as UnifiedPlaylistItemRecord | null;
+            createTrackId = addTrackData.trackId;
+        } else {
+            const remoteProvider =
+                addTrackData.tidalTrackId !== undefined ? "tidal" : "youtube";
+            const ensuredRemoteTrack = await trackMappingService.ensureRemoteTrack({
+                provider: remoteProvider,
+                tidalId: addTrackData.tidalTrackId,
+                videoId: addTrackData.youtubeVideoId,
+                title: addTrackData.title as string,
+                artist: addTrackData.artist as string,
+                album: addTrackData.album as string,
+                duration: addTrackData.duration as number,
+                isrc: addTrackData.isrc,
+                quality: addTrackData.quality,
+                explicit: addTrackData.explicit,
+                thumbnailUrl: addTrackData.thumbnailUrl,
+            });
+
+            if (ensuredRemoteTrack.provider === "tidal") {
+                createTrackTidalId = ensuredRemoteTrack.id;
+                existingItem = (await prisma.playlistItem.findFirst({
+                    where: {
+                        playlistId: req.params.id,
+                        trackTidalId: createTrackTidalId,
+                    },
+                    include: playlistItemInclude,
+                })) as UnifiedPlaylistItemRecord | null;
+            } else {
+                createTrackYtMusicId = ensuredRemoteTrack.id;
+                existingItem = (await prisma.playlistItem.findFirst({
+                    where: {
+                        playlistId: req.params.id,
+                        trackYtMusicId: createTrackYtMusicId,
+                    },
+                    include: playlistItemInclude,
+                })) as UnifiedPlaylistItemRecord | null;
+            }
         }
 
-        // Check if track already in playlist
-        const existing = await prisma.playlistItem.findUnique({
-            where: {
-                playlistId_trackId: {
-                    playlistId: req.params.id,
-                    trackId,
-                },
-            },
-        });
-
-        if (existing) {
+        if (existingItem) {
             return res.status(200).json({
                 message: "Track already in playlist",
                 duplicated: true,
-                item: existing,
+                item: formatUnifiedTrackItem(existingItem),
             });
         }
 
@@ -685,20 +873,12 @@ router.post("/:id/items", async (req, res) => {
             prisma.playlistItem.create({
                 data: {
                     playlistId: req.params.id,
-                    trackId,
+                    trackId: createTrackId,
+                    trackTidalId: createTrackTidalId,
+                    trackYtMusicId: createTrackYtMusicId,
                     sort: maxSort + 1,
                 },
-                include: {
-                    track: {
-                        include: {
-                            album: {
-                                include: {
-                                    artist: true,
-                                },
-                            },
-                        },
-                    },
-                },
+                include: playlistItemInclude,
             }),
             prisma.playlist.update({
                 where: { id: req.params.id },
@@ -706,12 +886,21 @@ router.post("/:id/items", async (req, res) => {
             }),
         ]);
 
-        res.json(item);
+        res.json(formatUnifiedTrackItem(item as UnifiedPlaylistItemRecord));
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
                 .json({ error: "Invalid request", details: error.errors });
+        }
+        if (
+            error instanceof Error &&
+            error.message.startsWith("ensureRemoteTrack requires")
+        ) {
+            return res.status(400).json({
+                error: "Invalid request",
+                details: [{ message: error.message }],
+            });
         }
         logger.error("Add track to playlist error:", error);
         res.status(500).json({ error: "Failed to add track to playlist" });
@@ -722,7 +911,7 @@ router.post("/:id/items", async (req, res) => {
  * @openapi
  * /api/playlists/{id}/items/{trackId}:
  *   delete:
- *     summary: Remove a track from a playlist
+ *     summary: Remove a playlist item
  *     tags: [Playlists]
  *     security:
  *       - sessionAuth: []
@@ -739,7 +928,7 @@ router.post("/:id/items", async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *         description: Track ID to remove
+ *         description: Playlist item ID (preferred) or local track ID (legacy fallback)
  *     responses:
  *       200:
  *         description: Track removed from playlist
@@ -768,13 +957,35 @@ router.delete("/:id/items/:trackId", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
+        const playlistItemIdOrTrackId = req.params.trackId;
+        const matchedByItemId = await prisma.playlistItem.findFirst({
+            where: {
+                playlistId: req.params.id,
+                id: playlistItemIdOrTrackId,
+            },
+            select: { id: true },
+        });
+
+        let targetItemId = matchedByItemId?.id ?? null;
+        if (!targetItemId) {
+            const matchedByTrackId = await prisma.playlistItem.findFirst({
+                where: {
+                    playlistId: req.params.id,
+                    trackId: playlistItemIdOrTrackId,
+                },
+                select: { id: true },
+            });
+            targetItemId = matchedByTrackId?.id ?? null;
+        }
+
+        if (!targetItemId) {
+            return res.status(404).json({ error: "Playlist item not found" });
+        }
+
         await prisma.$transaction([
             prisma.playlistItem.delete({
                 where: {
-                    playlistId_trackId: {
-                        playlistId: req.params.id,
-                        trackId: req.params.trackId,
-                    },
+                    id: targetItemId,
                 },
             }),
             prisma.playlist.update({
@@ -836,11 +1047,25 @@ router.delete("/:id/items/:trackId", async (req, res) => {
 router.put("/:id/items/reorder", async (req, res) => {
     try {
         const userId = req.user!.id;
-        const { trackIds } = req.body; // Array of track IDs in new order
+        const { itemIds, trackIds } = req.body; // Arrays in desired order (itemIds preferred)
 
-        if (!Array.isArray(trackIds)) {
+        if (itemIds !== undefined && !Array.isArray(itemIds)) {
+            return res.status(400).json({ error: "itemIds must be an array" });
+        }
+        if (trackIds !== undefined && !Array.isArray(trackIds)) {
             return res.status(400).json({ error: "trackIds must be an array" });
         }
+        const reorderIds = Array.isArray(itemIds)
+            ? itemIds
+            : Array.isArray(trackIds)
+            ? trackIds
+            : null;
+        if (!reorderIds) {
+            return res
+                .status(400)
+                .json({ error: "itemIds or trackIds must be an array" });
+        }
+        const reorderByItemId = Array.isArray(itemIds);
 
         // Check ownership
         const playlist = await prisma.playlist.findUnique({
@@ -855,17 +1080,59 @@ router.put("/:id/items/reorder", async (req, res) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        // Update sort order for each track
-        const updates = trackIds.map((trackId, index) =>
-            prisma.playlistItem.update({
+        if (reorderByItemId) {
+            const matchedItems = await prisma.playlistItem.findMany({
                 where: {
-                    playlistId_trackId: {
-                        playlistId: req.params.id,
-                        trackId,
-                    },
+                    playlistId: req.params.id,
+                    id: { in: reorderIds },
                 },
-                data: { sort: index },
-            })
+                select: { id: true },
+            });
+            if (matchedItems.length !== reorderIds.length) {
+                return res.status(404).json({
+                    error: "One or more playlist items were not found in this playlist",
+                });
+            }
+        } else {
+            const requestedTrackIds = Array.from(new Set(reorderIds));
+            const matchedItems = await prisma.playlistItem.findMany({
+                where: {
+                    playlistId: req.params.id,
+                    trackId: { in: requestedTrackIds },
+                },
+                select: { trackId: true },
+            });
+            const matchedTrackIds = new Set(
+                matchedItems
+                    .map((item) => item.trackId)
+                    .filter((trackId): trackId is string => typeof trackId === "string")
+            );
+            const hasMissingTrackIds = requestedTrackIds.some(
+                (trackId) => !matchedTrackIds.has(trackId)
+            );
+            if (hasMissingTrackIds) {
+                return res.status(404).json({
+                    error: "One or more tracks were not found in this playlist",
+                });
+            }
+        }
+
+        // Update sort order for each item, preferring explicit playlist item ids.
+        const updates = reorderIds.map((id, index) =>
+            reorderByItemId
+                ? prisma.playlistItem.update({
+                      where: { id },
+                      data: { sort: index },
+                  })
+                : prisma.playlistItem.update({
+                      where: {
+                          playlistId_trackId: {
+                              playlistId: req.params.id,
+                              trackId: id,
+                          },
+                      },
+                      data: { sort: index },
+                  })
         );
 
         await prisma.$transaction([
@@ -1446,7 +1713,6 @@ router.post("/:id/pending/:trackId/retry", async (req, res) => {
         );
         res.status(500).json({
             error: "Failed to retry download",
-            details: error.message,
         });
     }
 });

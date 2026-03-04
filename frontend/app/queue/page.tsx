@@ -3,15 +3,18 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { Virtuoso } from "react-virtuoso";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useAudioState, useAudioControls } from "@/lib/audio-context";
+import type { Track } from "@/lib/audio-state-context";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { api } from "@/lib/api";
 import { useListenTogether } from "@/lib/listen-together-context";
 import { PageHeader } from "@/components/layout/PageHeader";
+import type { AvailabilityItem } from "@/lib/listen-together-socket";
 
 import {
     Music,
@@ -26,21 +29,44 @@ import {
 } from "lucide-react";
 import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { formatTime } from "@/utils/formatTime";
+import { toAddToPlaylistRef } from "@/lib/trackRef";
+import { TidalBadge } from "@/components/ui/TidalBadge";
+import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 
+/**
+ * Renders the QueuePage component.
+ */
 export default function QueuePage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
     const { queue, currentTrack, currentIndex, setQueue } = useAudioState();
     const { playTracks, removeFromQueue, clearQueue } = useAudioControls();
     const { toast } = useToast();
-    const { isInGroup, isHost, syncSetTrack } = useListenTogether();
+    const listenTogether = useListenTogether();
+    const { isInGroup, isHost, syncSetTrack } = listenTogether;
+    const trackAvailability = listenTogether.trackAvailability ?? new Map();
 
     useEffect(() => {
         if (!isAuthenticated) {
             router.push("/login");
         }
     }, [isAuthenticated, router]);
+
+    const resolveQueueSource = (
+        index: number,
+        fallback?: "tidal" | "youtube",
+    ): "local" | "tidal" | "youtube" => {
+        const resolved = trackAvailability.get(index)?.source;
+        if (resolved === "local" || resolved === "tidal" || resolved === "youtube") {
+            return resolved;
+        }
+        if (fallback === "tidal" || fallback === "youtube") {
+            return fallback;
+        }
+        return "local";
+    };
 
     const handleClearQueue = () => {
         clearQueue();
@@ -53,6 +79,11 @@ export default function QueuePage() {
     };
 
     const handlePlayFromQueue = (index: number) => {
+        const availability = isInGroup ? trackAvailability.get(index) : undefined;
+        if (availability?.available === false) {
+            toast.info("Track unavailable for your account in this Listen Together session");
+            return;
+        }
         if (isInGroup) {
             if (!isHost) {
                 toast.info("Only the host can change the current track");
@@ -101,7 +132,7 @@ export default function QueuePage() {
         try {
             const playlist = await api.createPlaylist(name);
             for (const track of queue) {
-                await api.addTrackToPlaylist(playlist.id, track.id);
+                await api.addTrackToPlaylist(playlist.id, toAddToPlaylistRef(track));
             }
             toast.success(`Saved ${queue.length} tracks to "${name}"`);
             setShowSaveDialog(false);
@@ -121,6 +152,10 @@ export default function QueuePage() {
     // Split queue into current, next up, and previous
     const previousTracks = queue.slice(0, currentIndex);
     const nextTracks = queue.slice(currentIndex + 1);
+    const currentAvailability = currentTrack
+        ? trackAvailability.get(currentIndex)
+        : undefined;
+    const isCurrentUnavailable = currentAvailability?.available === false;
 
     return (
         <div className="min-h-screen bg-[#0a0a0a]">
@@ -174,7 +209,7 @@ export default function QueuePage() {
                             Now Playing
                         </h2>
                         <Card>
-                            <div className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-[#2323FF] group">
+                            <div className={`flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-[#2323FF] group ${isCurrentUnavailable ? "opacity-50" : ""}`}>
                                 <div className="relative flex-shrink-0 w-16 h-16">
                                     {currentTrack.album?.coverArt ? (
                                         <Image
@@ -205,6 +240,19 @@ export default function QueuePage() {
                                     <p className="text-sm text-gray-400 truncate">
                                         {currentTrack.artist?.name}
                                     </p>
+                                    <div className="mt-1 flex items-center gap-2">
+                                        {isCurrentUnavailable ? (
+                                            <span className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-500/50 rounded px-1.5 py-0.5">
+                                                Unavailable
+                                            </span>
+                                        ) : null}
+                                        {isInGroup && resolveQueueSource(currentIndex, currentTrack.streamSource) === "tidal" ? (
+                                            <TidalBadge />
+                                        ) : null}
+                                        {isInGroup && resolveQueueSource(currentIndex, currentTrack.streamSource) === "youtube" ? (
+                                            <YouTubeBadge />
+                                        ) : null}
+                                    </div>
                                     <p className="text-xs text-gray-500 truncate">
                                         {currentTrack.album?.title}
                                     </p>
@@ -218,12 +266,12 @@ export default function QueuePage() {
                                         mode="up-only"
                                         buttonSizeClassName="h-8 w-8"
                                         iconSizeClassName="h-4 w-4"
+                                        metadata={buildPreferenceMetadata(currentTrack)}
                                     />
                                     <TrackOverflowMenu
                                         track={currentTrack}
                                         showPlayNext={false}
                                         showAddToQueue={false}
-                                        isInListenTogetherGroup={isInGroup}
                                     />
                                 </div>
                             </div>
@@ -238,140 +286,31 @@ export default function QueuePage() {
                             Next Up ({nextTracks.length})
                         </h2>
                         <Card>
-                            <div className="divide-y divide-[#1c1c1c]">
-                                {nextTracks.map((track, idx) => {
+                            <Virtuoso
+                                totalCount={nextTracks.length}
+                                initialItemCount={nextTracks.length}
+                                computeItemKey={(idx) => `next-${nextTracks[idx]?.id ?? idx}-${idx}`}
+                                style={{ height: Math.min(nextTracks.length * 80, 600) }}
+                                itemContent={(idx) => {
+                                    const track = nextTracks[idx];
                                     const queueIndex = currentIndex + 1 + idx;
                                     return (
-                                        <div
-                                            key={`${track.id}-${queueIndex}`}
-                                            className="flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group"
-                                        >
-                                            {/* Drag Handle */}
-                                            {!isInGroup && (
-                                                <button
-                                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
-                                                    title="Drag to reorder"
-                                                >
-                                                    <GripVertical className="w-5 h-5" />
-                                                </button>
-                                            )}
-
-                                            {/* Album Art */}
-                                            <div className="relative flex-shrink-0 w-12 h-12">
-                                                {track.album?.coverArt ? (
-                                                    <Image
-                                                        src={api.getCoverArtUrl(
-                                                            track.album
-                                                                .coverArt,
-                                                            100
-                                                        )}
-                                                        alt={track.album.title}
-                                                        fill
-                                                        sizes="48px"
-                                                        className="object-cover rounded-sm"
-                                                        unoptimized
-                                                    />
-                                                ) : (
-                                                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                                                        <Music className="w-5 h-5 text-gray-600" />
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Track Info */}
-                                            <div className="flex-1 min-w-0">
-                                                <h3 className="text-sm font-medium text-white truncate">
-                                                    {track.displayTitle ??
-                                                        track.title}
-                                                </h3>
-                                                <p className="text-sm text-gray-400 truncate">
-                                                    {track.artist?.name}
-                                                </p>
-                                                {track.album?.title && (
-                                                    <p className="text-[11px] text-gray-500 truncate">
-                                                        {track.album.title}
-                                                    </p>
-                                                )}
-                                            </div>
-
-                                            {/* Actions */}
-                                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                {!isInGroup && (
-                                                    <>
-                                                        <button
-                                                            onClick={() =>
-                                                                handleMoveUp(queueIndex)
-                                                            }
-                                                            disabled={
-                                                                queueIndex <=
-                                                                currentIndex + 1
-                                                            }
-                                                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                            title="Move up"
-                                                        >
-                                                            <ChevronUp className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() =>
-                                                                handleMoveDown(
-                                                                    queueIndex
-                                                                )
-                                                            }
-                                                            disabled={
-                                                                queueIndex >=
-                                                                queue.length - 1
-                                                            }
-                                                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                            title="Move down"
-                                                        >
-                                                            <ChevronDown className="w-4 h-4" />
-                                                        </button>
-                                                    </>
-                                                )}
-                                                <button
-                                                    onClick={() =>
-                                                        handlePlayFromQueue(
-                                                            queueIndex
-                                                        )
-                                                    }
-                                                    className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors"
-                                                    title="Play now"
-                                                >
-                                                    <Play className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
-                                                    {formatTime(track.duration)}
-                                                </span>
-                                                <TrackPreferenceButtons
-                                                    trackId={track.id}
-                                                    mode="up-only"
-                                                    buttonSizeClassName="h-8 w-8"
-                                                    iconSizeClassName="h-4 w-4"
-                                                />
-                                                <TrackOverflowMenu
-                                                    track={track}
-                                                    showPlayNext={false}
-                                                    showAddToQueue={false}
-                                                    isInListenTogetherGroup={isInGroup}
-                                                    extraItemsAfter={
-                                                        <TrackMenuButton
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleRemoveTrack(queueIndex);
-                                                            }}
-                                                            icon={<X className="h-4 w-4" />}
-                                                            label="Remove from queue"
-                                                            className="text-red-400 hover:text-red-300"
-                                                        />
-                                                    }
-                                                />
-                                            </div>
-                                        </div>
+                                        <NextTrackRow
+                                            track={track}
+                                            queueIndex={queueIndex}
+                                            queueLength={queue.length}
+                                            currentIndex={currentIndex}
+                                            isInGroup={isInGroup}
+                                            resolveQueueSource={resolveQueueSource}
+                                            onMoveUp={handleMoveUp}
+                                            onMoveDown={handleMoveDown}
+                                            onPlay={handlePlayFromQueue}
+                                            onRemove={handleRemoveTrack}
+                                            trackAvailability={trackAvailability}
+                                        />
                                     );
-                                })}
-                            </div>
+                                }}
+                            />
                         </Card>
                     </section>
                 )}
@@ -383,68 +322,24 @@ export default function QueuePage() {
                             Previously Played ({previousTracks.length})
                         </h2>
                         <Card>
-                            <div className="divide-y divide-[#1c1c1c]">
-                                {previousTracks.map((track, idx) => (
-                                    <div
-                                        key={`${track.id}-${idx}`}
-                                        className="flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group opacity-50"
-                                    >
-                                        {/* Album Art */}
-                                        <div className="relative flex-shrink-0 w-12 h-12">
-                                            {track.album?.coverArt ? (
-                                                <Image
-                                                    src={api.getCoverArtUrl(
-                                                        track.album.coverArt,
-                                                        100
-                                                    )}
-                                                    alt={track.album.title}
-                                                    fill
-                                                    sizes="48px"
-                                                    className="object-cover rounded-sm"
-                                                    unoptimized
-                                                />
-                                            ) : (
-                                                <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                                                    <Music className="w-5 h-5 text-gray-600" />
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Track Info */}
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="text-sm font-medium text-white truncate">
-                                                {track.title}
-                                            </h3>
-                                            <p className="text-sm text-gray-400 truncate">
-                                                {track.artist?.name}
-                                            </p>
-                                            {track.album?.title && (
-                                                <p className="text-[11px] text-gray-500 truncate">
-                                                    {track.album.title}
-                                                </p>
-                                            )}
-                                        </div>
-
-                                        <div className="flex items-center gap-1">
-                                            <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
-                                                {formatTime(track.duration)}
-                                            </span>
-                                            <TrackPreferenceButtons
-                                                trackId={track.id}
-                                                mode="up-only"
-                                                buttonSizeClassName="h-8 w-8"
-                                                iconSizeClassName="h-4 w-4"
-                                            />
-                                            <TrackOverflowMenu
-                                                track={track}
-                                                showPlayNext={false}
-                                                showAddToQueue={false}
-                                                isInListenTogetherGroup={isInGroup}
-                                            />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                            <Virtuoso
+                                totalCount={previousTracks.length}
+                                initialItemCount={previousTracks.length}
+                                computeItemKey={(idx) => `prev-${previousTracks[idx]?.id ?? idx}-${idx}`}
+                                style={{ height: Math.min(previousTracks.length * 80, 600) }}
+                                itemContent={(idx) => {
+                                    const track = previousTracks[idx];
+                                    return (
+                                        <PreviousTrackRow
+                                            track={track}
+                                            idx={idx}
+                                            isInGroup={isInGroup}
+                                            resolveQueueSource={resolveQueueSource}
+                                            trackAvailability={trackAvailability}
+                                        />
+                                    );
+                                }}
+                            />
                         </Card>
                     </section>
                 )}
@@ -495,6 +390,219 @@ export default function QueuePage() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+/** Virtualized row for the "Next Up" section. */
+function NextTrackRow({
+    track,
+    queueIndex,
+    queueLength,
+    currentIndex,
+    isInGroup,
+    resolveQueueSource,
+    onMoveUp,
+    onMoveDown,
+    onPlay,
+    onRemove,
+    trackAvailability,
+}: {
+    track: Track;
+    queueIndex: number;
+    queueLength: number;
+    currentIndex: number;
+    isInGroup: boolean;
+    resolveQueueSource: (index: number, fallback?: "tidal" | "youtube") => "local" | "tidal" | "youtube";
+    onMoveUp: (index: number) => void;
+    onMoveDown: (index: number) => void;
+    onPlay: (index: number) => void;
+    onRemove: (index: number) => void;
+    trackAvailability: Map<number, AvailabilityItem>;
+}) {
+    const availability = isInGroup ? trackAvailability.get(queueIndex) : undefined;
+    const isUnavailable = availability?.available === false;
+    const resolvedSource = resolveQueueSource(queueIndex, track.streamSource);
+
+    return (
+        <div
+            className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group border-b border-[#1c1c1c] ${isUnavailable ? "opacity-50" : ""}`}
+        >
+            {!isInGroup && (
+                <button
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
+                    title="Drag to reorder"
+                >
+                    <GripVertical className="w-5 h-5" />
+                </button>
+            )}
+            <div className="relative flex-shrink-0 w-12 h-12">
+                {track.album?.coverArt ? (
+                    <Image
+                        src={api.getCoverArtUrl(track.album.coverArt, 100)}
+                        alt={track.album.title}
+                        fill
+                        sizes="48px"
+                        className="object-cover rounded-sm"
+                        unoptimized
+                    />
+                ) : (
+                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
+                        <Music className="w-5 h-5 text-gray-600" />
+                    </div>
+                )}
+            </div>
+            <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-medium text-white truncate">
+                    {track.displayTitle ?? track.title}
+                </h3>
+                <p className="text-sm text-gray-400 truncate">{track.artist?.name}</p>
+                <div className="mt-1 flex items-center gap-2">
+                    {isUnavailable ? (
+                        <span className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-500/50 rounded px-1.5 py-0.5">
+                            Unavailable
+                        </span>
+                    ) : null}
+                    {isInGroup && resolvedSource === "tidal" ? <TidalBadge /> : null}
+                    {isInGroup && resolvedSource === "youtube" ? <YouTubeBadge /> : null}
+                </div>
+                {track.album?.title && (
+                    <p className="text-[11px] text-gray-500 truncate">{track.album.title}</p>
+                )}
+            </div>
+            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                {!isInGroup && (
+                    <>
+                        <button
+                            onClick={() => onMoveUp(queueIndex)}
+                            disabled={queueIndex <= currentIndex + 1}
+                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Move up"
+                        >
+                            <ChevronUp className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => onMoveDown(queueIndex)}
+                            disabled={queueIndex >= queueLength - 1}
+                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Move down"
+                        >
+                            <ChevronDown className="w-4 h-4" />
+                        </button>
+                    </>
+                )}
+                <button
+                    onClick={() => onPlay(queueIndex)}
+                    disabled={isUnavailable}
+                    className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Play now"
+                >
+                    <Play className="w-4 h-4" />
+                </button>
+            </div>
+            <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                    {formatTime(track.duration)}
+                </span>
+                <TrackPreferenceButtons
+                    trackId={track.id}
+                    mode="up-only"
+                    buttonSizeClassName="h-8 w-8"
+                    iconSizeClassName="h-4 w-4"
+                    metadata={buildPreferenceMetadata(track)}
+                />
+                <TrackOverflowMenu
+                    track={track}
+                    showPlayNext={false}
+                    showAddToQueue={false}
+                    extraItemsAfter={
+                        <TrackMenuButton
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onRemove(queueIndex);
+                            }}
+                            icon={<X className="h-4 w-4" />}
+                            label="Remove from queue"
+                            className="text-red-400 hover:text-red-300"
+                        />
+                    }
+                />
+            </div>
+        </div>
+    );
+}
+
+/** Virtualized row for the "Previously Played" section. */
+function PreviousTrackRow({
+    track,
+    idx,
+    isInGroup,
+    resolveQueueSource,
+    trackAvailability,
+}: {
+    track: Track;
+    idx: number;
+    isInGroup: boolean;
+    resolveQueueSource: (index: number, fallback?: "tidal" | "youtube") => "local" | "tidal" | "youtube";
+    trackAvailability: Map<number, AvailabilityItem>;
+}) {
+    const availability = isInGroup ? trackAvailability.get(idx) : undefined;
+    const isUnavailable = availability?.available === false;
+    const resolvedSource = resolveQueueSource(idx, track.streamSource);
+
+    return (
+        <div
+            className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group opacity-50 border-b border-[#1c1c1c] ${isUnavailable ? "opacity-30" : ""}`}
+        >
+            <div className="relative flex-shrink-0 w-12 h-12">
+                {track.album?.coverArt ? (
+                    <Image
+                        src={api.getCoverArtUrl(track.album.coverArt, 100)}
+                        alt={track.album.title}
+                        fill
+                        sizes="48px"
+                        className="object-cover rounded-sm"
+                        unoptimized
+                    />
+                ) : (
+                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
+                        <Music className="w-5 h-5 text-gray-600" />
+                    </div>
+                )}
+            </div>
+            <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-medium text-white truncate">{track.title}</h3>
+                <p className="text-sm text-gray-400 truncate">{track.artist?.name}</p>
+                <div className="mt-1 flex items-center gap-2">
+                    {isUnavailable ? (
+                        <span className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-500/50 rounded px-1.5 py-0.5">
+                            Unavailable
+                        </span>
+                    ) : null}
+                    {isInGroup && resolvedSource === "tidal" ? <TidalBadge /> : null}
+                    {isInGroup && resolvedSource === "youtube" ? <YouTubeBadge /> : null}
+                </div>
+                {track.album?.title && (
+                    <p className="text-[11px] text-gray-500 truncate">{track.album.title}</p>
+                )}
+            </div>
+            <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                    {formatTime(track.duration)}
+                </span>
+                <TrackPreferenceButtons
+                    trackId={track.id}
+                    mode="up-only"
+                    buttonSizeClassName="h-8 w-8"
+                    iconSizeClassName="h-4 w-4"
+                    metadata={buildPreferenceMetadata(track)}
+                />
+                <TrackOverflowMenu
+                    track={track}
+                    showPlayNext={false}
+                    showAddToQueue={false}
+                />
+            </div>
         </div>
     );
 }

@@ -9,6 +9,9 @@ import { useAuth } from "@/lib/auth-context";
 import { AudioRuntimeElement } from "@/components/player/AudioRuntimeElement";
 import { AudioErrorBoundary } from "@/components/providers/AudioErrorBoundary";
 
+/**
+ * Renders the ConditionalAudioProvider component.
+ */
 export function ConditionalAudioProvider({
     children,
 }: {

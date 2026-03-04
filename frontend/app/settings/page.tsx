@@ -55,6 +55,9 @@ const APIKeysSection = dynamic(
 
 const logger = createFrontendLogger("Settings.Page");
 
+/**
+ * Renders the SettingsPage component.
+ */
 export default function SettingsPage() {
     const { isAuthenticated, isLoading: authLoading } = useAuth();
     useSearchParams();

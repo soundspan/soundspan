@@ -24,6 +24,9 @@ function normalizeIndexLetter(name: string): string {
     return /^[A-Z]$/.test(firstChar) ? firstChar : "#";
 }
 
+/**
+ * Executes buildArtistIndexes.
+ */
 export function buildArtistIndexes(
     artists: ArtistIndexEntryInput[],
     options?: { lastModified?: number },

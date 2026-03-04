@@ -559,7 +559,7 @@ router.post("/test-lidarr", async (req, res) => {
             error.response?.data || error.code
         );
 
-        let details = error.message;
+        let details = "Connection test failed";
         if (error.code === "ECONNREFUSED") {
             details =
                 "Connection refused - check if Lidarr is running and accessible";
@@ -567,8 +567,6 @@ router.post("/test-lidarr", async (req, res) => {
             details = "Host not found - check the URL";
         } else if (error.response?.status === 401) {
             details = "Invalid API key";
-        } else if (error.response?.data?.message) {
-            details = error.response.data.message;
         }
 
         res.status(500).json({
@@ -643,7 +641,6 @@ router.post("/test-openai", async (req, res) => {
         logger.error("OpenAI test error:", error.message);
         res.status(500).json({
             error: "Failed to connect to OpenAI",
-            details: error.response?.data?.error?.message || error.message,
         });
     }
 });
@@ -715,7 +712,6 @@ router.post("/test-fanart", async (req, res) => {
         } else {
             res.status(500).json({
                 error: "Failed to connect to Fanart.tv",
-                details: error.response?.data || error.message,
             });
         }
     }
@@ -799,7 +795,6 @@ router.post("/test-lastfm", async (req, res) => {
         } else {
             res.status(500).json({
                 error: "Failed to connect to Last.fm",
-                details: error.response?.data || error.message,
             });
         }
     }
@@ -872,7 +867,6 @@ router.post("/test-audiobookshelf", async (req, res) => {
         } else {
             res.status(500).json({
                 error: "Failed to connect to Audiobookshelf",
-                details: error.response?.data || error.message,
             });
         }
     }
@@ -960,14 +954,12 @@ router.post("/test-soulseek", async (req, res) => {
             logger.error(`[SOULSEEK-TEST] Error: ${connectError.message}`);
             res.status(401).json({
                 error: "Invalid Soulseek credentials or connection failed",
-                details: connectError.message,
             });
         }
     } catch (error: any) {
         logger.error("[SOULSEEK-TEST] Error:", error.message);
         res.status(500).json({
             error: "Failed to test Soulseek connection",
-            details: error.message,
         });
     }
 });
@@ -1046,16 +1038,12 @@ router.post("/test-spotify", async (req, res) => {
         } catch (tokenError: any) {
             res.status(401).json({
                 error: "Invalid Spotify credentials",
-                details:
-                    tokenError.response?.data?.error_description ||
-                    tokenError.message,
             });
         }
     } catch (error: any) {
         logger.error("Spotify test error:", error.message);
         res.status(500).json({
             error: "Failed to test Spotify credentials",
-            details: error.message,
         });
     }
 });
@@ -1111,7 +1099,6 @@ router.post("/test-tidal", async (req, res) => {
         logger.error("[TIDAL-TEST] Error:", error.message);
         res.status(500).json({
             error: "Failed to test TIDAL connection",
-            details: error.message,
         });
     }
 });
@@ -1151,7 +1138,7 @@ router.post("/tidal-auth/device", async (req, res) => {
         res.json(deviceAuth);
     } catch (error: any) {
         logger.error("[TIDAL-AUTH] Device auth error:", error.message);
-        res.status(500).json({ error: "Failed to initiate TIDAL auth", details: error.message });
+        res.status(500).json({ error: "Failed to initiate TIDAL auth" });
     }
 });
 
@@ -1220,7 +1207,7 @@ router.post("/tidal-auth/token", async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[TIDAL-AUTH] Token exchange error:", error.message);
-        res.status(500).json({ error: "Failed to complete TIDAL auth", details: error.message });
+        res.status(500).json({ error: "Failed to complete TIDAL auth" });
     }
 });
 
@@ -1277,7 +1264,6 @@ router.post("/queue-cleaner/start", async (req, res) => {
     } catch (error: any) {
         res.status(500).json({
             error: "Failed to start queue cleaner",
-            details: error.message,
         });
     }
 });
@@ -1386,7 +1372,6 @@ router.post("/clear-caches", async (req, res) => {
         logger.error("Clear caches error:", error);
         res.status(500).json({
             error: "Failed to clear caches",
-            details: error.message,
         });
     }
 });

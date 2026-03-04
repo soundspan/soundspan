@@ -7,7 +7,7 @@ import {
     isActivityTabVisible,
     resolveActivityTab,
     type ActivityTab,
-} from "../../components/layout/activityPanelTabs.ts";
+} from "../../components/layout/activityPanelTabs";
 
 test("admin sees every activity tab", () => {
     const visibleTabs = getVisibleActivityTabIds(true);

@@ -18,6 +18,14 @@ jest.mock("../../utils/db", () => ({
         track: {
             findUnique: jest.fn(),
         },
+        trackTidal: {
+            findUnique: jest.fn(),
+            upsert: jest.fn(),
+        },
+        trackYtMusic: {
+            findUnique: jest.fn(),
+            upsert: jest.fn(),
+        },
         play: {
             create: jest.fn(),
             findMany: jest.fn(),
@@ -31,6 +39,10 @@ import router from "../plays";
 import { prisma } from "../../utils/db";
 
 const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
+const mockTrackTidalFindUnique = prisma.trackTidal.findUnique as jest.Mock;
+const mockTrackTidalUpsert = prisma.trackTidal.upsert as jest.Mock;
+const mockTrackYtMusicFindUnique = prisma.trackYtMusic.findUnique as jest.Mock;
+const mockTrackYtMusicUpsert = prisma.trackYtMusic.upsert as jest.Mock;
 const mockPlayCreate = prisma.play.create as jest.Mock;
 const mockPlayFindMany = prisma.play.findMany as jest.Mock;
 const mockPlayCount = prisma.play.count as jest.Mock;
@@ -86,6 +98,10 @@ describe("plays history compatibility", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockTrackFindUnique.mockResolvedValue({ id: "track-1" });
+        mockTrackTidalFindUnique.mockResolvedValue(null);
+        mockTrackTidalUpsert.mockResolvedValue({ id: "tt-1", tidalId: 123 });
+        mockTrackYtMusicFindUnique.mockResolvedValue(null);
+        mockTrackYtMusicUpsert.mockResolvedValue({ id: "yt-1", videoId: "abc123" });
         mockPlayCreate.mockResolvedValue({
             id: "play-1",
             userId: "user-1",
@@ -102,7 +118,7 @@ describe("plays history compatibility", () => {
             .mockResolvedValueOnce(87); // 365d
 
         const req = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: {},
         } as any;
         const res = createRes();
@@ -121,7 +137,7 @@ describe("plays history compatibility", () => {
 
     it("returns 500 when summary query fails", async () => {
         mockPlayCount.mockRejectedValueOnce(new Error("summary failed"));
-        const req = { session: { userId: "user-1" }, query: {} } as any;
+        const req = { session: { userId: "user-1" }, user: { id: "user-1" }, query: {} } as any;
         const res = createRes();
 
         await summaryHandler(req, res);
@@ -134,7 +150,7 @@ describe("plays history compatibility", () => {
         mockPlayDeleteMany.mockResolvedValue({ count: 55 });
 
         const req = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: { range: "all" },
         } as any;
         const res = createRes();
@@ -156,7 +172,7 @@ describe("plays history compatibility", () => {
         mockPlayDeleteMany.mockResolvedValue({ count: 22 });
 
         const req = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: { range: "30d" },
         } as any;
         const res = createRes();
@@ -183,7 +199,7 @@ describe("plays history compatibility", () => {
 
     it("returns 400 for invalid range", async () => {
         const req = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: { range: "bad-range" },
         } as any;
         const res = createRes();
@@ -200,7 +216,7 @@ describe("plays history compatibility", () => {
     it("returns 500 when history clear fails", async () => {
         mockPlayDeleteMany.mockRejectedValueOnce(new Error("delete failed"));
         const req = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: { range: "all" },
         } as any;
         const res = createRes();
@@ -213,7 +229,7 @@ describe("plays history compatibility", () => {
 
     it("validates, creates, and fails play-logging requests", async () => {
         const invalidReq = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             body: {},
         } as any;
         const invalidRes = createRes();
@@ -223,7 +239,7 @@ describe("plays history compatibility", () => {
 
         mockTrackFindUnique.mockResolvedValueOnce(null);
         const missingReq = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             body: { trackId: "missing-track" },
         } as any;
         const missingRes = createRes();
@@ -232,19 +248,19 @@ describe("plays history compatibility", () => {
         expect(missingRes.body).toEqual({ error: "Track not found" });
 
         const okReq = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             body: { trackId: "track-1" },
         } as any;
         const okRes = createRes();
         await createPlayHandler(okReq, okRes);
         expect(okRes.statusCode).toBe(200);
         expect(mockPlayCreate).toHaveBeenCalledWith({
-            data: { userId: "user-1", trackId: "track-1" },
+            data: { userId: "user-1", trackId: "track-1", source: "LIBRARY" },
         });
 
         mockTrackFindUnique.mockRejectedValueOnce(new Error("create failed"));
         const errReq = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             body: { trackId: "track-1" },
         } as any;
         const errRes = createRes();
@@ -253,9 +269,68 @@ describe("plays history compatibility", () => {
         expect(errRes.body).toEqual({ error: "Failed to log play" });
     });
 
+    it("materializes remote tracks when logging tidal or youtube plays", async () => {
+        mockPlayCreate
+            .mockResolvedValueOnce({
+                id: "play-tidal",
+                userId: "user-1",
+                trackTidalId: "tt-1",
+                source: "TIDAL",
+            })
+            .mockResolvedValueOnce({
+                id: "play-yt",
+                userId: "user-1",
+                trackYtMusicId: "yt-1",
+                source: "YOUTUBE_MUSIC",
+            });
+
+        const tidalReq = {
+            session: { userId: "user-1" }, user: { id: "user-1" },
+            body: {
+                tidalTrackId: 123,
+                title: "Remote Tidal",
+                artist: "T Artist",
+                album: "T Album",
+                duration: 222,
+            },
+        } as any;
+        const tidalRes = createRes();
+        await createPlayHandler(tidalReq, tidalRes);
+        expect(tidalRes.statusCode).toBe(200);
+        expect(mockPlayCreate).toHaveBeenCalledWith({
+            data: {
+                userId: "user-1",
+                trackTidalId: "tt-1",
+                source: "TIDAL",
+            },
+        });
+
+        const ytReq = {
+            session: { userId: "user-1" }, user: { id: "user-1" },
+            body: {
+                youtubeVideoId: "abc123",
+                title: "Remote YT",
+                artist: "Y Artist",
+                album: "Y Album",
+                duration: 201,
+                thumbnailUrl: "https://img/abc.jpg",
+            },
+        } as any;
+        const ytRes = createRes();
+        await createPlayHandler(ytReq, ytRes);
+        expect(ytRes.statusCode).toBe(200);
+        expect(mockPlayCreate).toHaveBeenCalledWith({
+            data: {
+                userId: "user-1",
+                trackYtMusicId: "yt-1",
+                source: "YOUTUBE_MUSIC",
+            },
+        });
+    });
+
     it("lists recent plays with default/custom limits and handles failures", async () => {
         const defaultReq = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: {},
         } as any;
         const defaultRes = createRes();
@@ -269,7 +344,7 @@ describe("plays history compatibility", () => {
         );
 
         const customReq = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: { limit: "12" },
         } as any;
         const customRes = createRes();
@@ -284,7 +359,7 @@ describe("plays history compatibility", () => {
 
         mockPlayFindMany.mockRejectedValueOnce(new Error("find failed"));
         const errReq = {
-            session: { userId: "user-1" },
+            session: { userId: "user-1" }, user: { id: "user-1" },
             query: {},
         } as any;
         const errRes = createRes();

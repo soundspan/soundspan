@@ -127,6 +127,9 @@ export interface SegmentedSessionHandoffResponse extends SegmentedSessionRespons
     shouldPlay: boolean;
 }
 
+/**
+ * Represents the SegmentedSessionError class.
+ */
 export class SegmentedSessionError extends Error {
     statusCode: number;
     code: string;

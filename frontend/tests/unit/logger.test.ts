@@ -169,8 +169,8 @@ test("withFrontendLogTiming logs start and completion", async () => {
                 assert.equal(calls.debug.length, 2);
                 assert.equal(calls.debug[0][0], "[DEBUG] [Timing] refresh started");
                 assert.equal(calls.debug[1][0], "[DEBUG] [Timing] refresh completed");
-                assert.equal(calls.debug[1][1].requestId, "req-2");
-                assert.equal(typeof calls.debug[1][1].durationMs, "number");
+                assert.equal((calls.debug[1][1] as Record<string, unknown>).requestId, "req-2");
+                assert.equal(typeof (calls.debug[1][1] as Record<string, unknown>).durationMs, "number");
             });
         }
     );

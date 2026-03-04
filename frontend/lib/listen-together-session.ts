@@ -59,6 +59,9 @@ let inMemoryMembershipPending = false;
 
 const isWindowUnavailable = (): boolean => typeof window === "undefined";
 
+/**
+ * Executes getListenTogetherOptimisticTrackSelectionPolicy.
+ */
 export function getListenTogetherOptimisticTrackSelectionPolicy(): ListenTogetherOptimisticTrackSelectionPolicy {
     return LISTEN_TOGETHER_OPTIMISTIC_TRACK_SELECTION_POLICY;
 }
@@ -104,6 +107,9 @@ function parseSessionSnapshot(
     }
 }
 
+/**
+ * Executes getListenTogetherSessionSnapshot.
+ */
 export function getListenTogetherSessionSnapshot(): ListenTogetherSessionSnapshot | null {
     if (isWindowUnavailable()) return inMemorySessionSnapshot;
     try {
@@ -121,6 +127,9 @@ export function getListenTogetherSessionSnapshot(): ListenTogetherSessionSnapsho
     }
 }
 
+/**
+ * Executes setListenTogetherSessionSnapshot.
+ */
 export function setListenTogetherSessionSnapshot(snapshot: ListenTogetherSessionSnapshot | null): void {
     inMemorySessionSnapshot = snapshot;
     if (isWindowUnavailable()) return;
@@ -138,6 +147,9 @@ export function setListenTogetherSessionSnapshot(snapshot: ListenTogetherSession
     }
 }
 
+/**
+ * Executes isListenTogetherMembershipPending.
+ */
 export function isListenTogetherMembershipPending(): boolean {
     if (isWindowUnavailable()) return inMemoryMembershipPending;
     try {
@@ -152,6 +164,9 @@ export function isListenTogetherMembershipPending(): boolean {
     }
 }
 
+/**
+ * Executes setListenTogetherMembershipPending.
+ */
 export function setListenTogetherMembershipPending(pending: boolean): void {
     inMemoryMembershipPending = pending;
     if (isWindowUnavailable()) return;
@@ -171,6 +186,9 @@ export function setListenTogetherMembershipPending(pending: boolean): void {
     }
 }
 
+/**
+ * Executes isListenTogetherActiveOrPending.
+ */
 export function isListenTogetherActiveOrPending(): boolean {
     const snapshot = getListenTogetherSessionSnapshot();
     if (snapshot?.groupId) {
@@ -179,6 +197,9 @@ export function isListenTogetherActiveOrPending(): boolean {
     return isListenTogetherMembershipPending();
 }
 
+/**
+ * Executes requestListenTogetherGroupResync.
+ */
 export async function requestListenTogetherGroupResync(
     groupId?: string | null,
 ): Promise<void> {
@@ -255,6 +276,9 @@ function enqueueHostTrackOperation(operation: QueuedHostTrackOperation): void {
     );
 }
 
+/**
+ * Executes enqueueLatestListenTogetherHostTrackOperation.
+ */
 export function enqueueLatestListenTogetherHostTrackOperation(
     operation: ListenTogetherHostTrackOperation,
 ): void {

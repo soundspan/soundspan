@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "schema_version": "1.0",
+    "id": "soundspan-test-coverage-baseline",
+    "version": "2026-03-02.01",
+    "generated_at": "2026-03-02T05:14:22.558Z",
+    "description": "Per-domain test coverage baseline with ratchet-floor enforcement. Migrated from .agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json v73."
+  },
+  "global_thresholds": {
+    "statements": 95,
+    "branches": 90,
+    "functions": 95,
+    "lines": 95
+  },
+  "scopes": [
+    {
+      "id": "backend-core",
+      "label": "Backend core services (auth, notification, error, apiKeys)",
+      "runner": "jest",
+      "source_globs": [
+        "backend/src/middleware/subsonicAuth.ts",
+        "backend/src/services/notificationService.ts",
+        "backend/src/middleware/errorHandler.ts",
+        "backend/src/routes/apiKeys.ts"
+      ],
+      "test_globs": [
+        "backend/src/middleware/__tests__/subsonicAuth.test.ts",
+        "backend/src/services/__tests__/notificationService.test.ts",
+        "backend/src/middleware/__tests__/errorHandler.test.ts",
+        "backend/src/routes/__tests__/apiKeysRuntime.test.ts"
+      ],
+      "run_command": "npm --prefix backend test -- --runInBand src/middleware/__tests__/subsonicAuth.test.ts src/services/__tests__/notificationService.test.ts src/middleware/__tests__/errorHandler.test.ts src/routes/__tests__/apiKeysRuntime.test.ts --coverage --coverageDirectory=coverage/scope-backend-firstslice --coverageReporters=text-summary --coverageReporters=json-summary --coverageReporters=lcov --collectCoverageFrom='src/middleware/subsonicAuth.ts' --collectCoverageFrom='src/services/notificationService.ts' --collectCoverageFrom='src/middleware/errorHandler.ts' --collectCoverageFrom='src/routes/apiKeys.ts'",
+      "coverage_summary_path": "backend/coverage/scope-backend-firstslice/coverage-summary.json",
+      "thresholds": {
+        "statements": 95,
+        "branches": 90,
+        "functions": 95,
+        "lines": 95
+      },
+      "baseline_metrics": {
+        "statements": 100,
+        "branches": 99.06,
+        "functions": 100,
+        "lines": 100
+      },
+      "baseline_recorded_at": "2026-03-02T05:14:22.558Z"
+    },
+    {
+      "id": "frontend-core",
+      "label": "Frontend core (reconciliation, API, queue, vibe, recovery)",
+      "runner": "c8",
+      "source_globs": [
+        "frontend/lib/playback-state-reconciliation.ts",
+        "frontend/lib/api-base-url.ts",
+        "frontend/lib/queue-utils.ts",
+        "frontend/components/player/autoMatchVibePlayback.ts",
+        "frontend/lib/audio-engine/recoveryPolicy.ts"
+      ],
+      "test_globs": [
+        "frontend/tests/unit/playbackStateReconciliation.test.ts",
+        "frontend/tests/unit/apiBaseUrl.test.ts",
+        "frontend/tests/unit/playNowQueueLogic.test.ts",
+        "frontend/tests/unit/autoMatchVibePlayback.test.ts",
+        "frontend/tests/unit/recoveryPolicy.test.ts"
+      ],
+      "run_command": "cd frontend && npx --yes c8 --reporter=text --reporter=json-summary --reports-dir=coverage/scope-frontend-firstslice --check-coverage --statements 95 --branches 93 --functions 95 --lines 95 --include=lib/playback-state-reconciliation.ts --include=lib/api-base-url.ts --include=lib/queue-utils.ts --include=components/player/autoMatchVibePlayback.ts --include=lib/audio-engine/recoveryPolicy.ts node --test --import ../backend/node_modules/tsx/dist/loader.mjs tests/unit/playbackStateReconciliation.test.ts tests/unit/apiBaseUrl.test.ts tests/unit/playNowQueueLogic.test.ts tests/unit/autoMatchVibePlayback.test.ts tests/unit/recoveryPolicy.test.ts",
+      "coverage_summary_path": "frontend/coverage/scope-frontend-firstslice/coverage-summary.json",
+      "thresholds": {
+        "statements": 95,
+        "branches": 93,
+        "functions": 95,
+        "lines": 95
+      },
+      "baseline_metrics": {
+        "statements": 100,
+        "branches": 93.24,
+        "functions": 100,
+        "lines": 100
+      },
+      "baseline_recorded_at": "2026-03-02T05:14:22.558Z"
+    }
+  ]
+}

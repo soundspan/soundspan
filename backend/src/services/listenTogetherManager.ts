@@ -12,6 +12,9 @@ import type {
     CanonicalMediaProviderIdentity,
     CanonicalMediaSource,
 } from "@soundspan/media-metadata-contract";
+import { logger } from "../utils/logger";
+
+const log = logger.child("ListenTogetherManager");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +31,11 @@ export interface SyncQueueItem {
     streamSource?: "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    localTrackId?: string;
+    trackTidalId?: string;
+    trackYtMusicId?: string;
+    trackMappingId?: string;
+    originSource?: "local" | "tidal" | "youtube";
 }
 
 export interface GroupMember {
@@ -37,6 +45,7 @@ export interface GroupMember {
     joinedAt: Date;
     socketIds: Set<string>;
     isReady: boolean;
+    unavailableIndices?: Set<number>;
     lastSeen: number; // Date.now()
 }
 
@@ -132,6 +141,9 @@ export type QueueAction =
 // Errors
 // ---------------------------------------------------------------------------
 
+/**
+ * Represents the GroupError class.
+ */
 export class GroupError extends Error {
     constructor(
         public readonly code:
@@ -260,6 +272,7 @@ class GroupManager {
                 joinedAt: m.joinedAt,
                 socketIds: new Set(),
                 isReady: false,
+                unavailableIndices: new Set(),
                 lastSeen: now,
             });
         }
@@ -290,6 +303,7 @@ class GroupManager {
         };
 
         this.groups.set(id, group);
+        log.debug(`Hydrated group ${id} with ${opts.members.length} members, queue=${opts.queue.length}`);
         return group;
     }
 
@@ -325,6 +339,7 @@ class GroupManager {
             joinedAt: opts.createdAt,
             socketIds: new Set(),
             isReady: false,
+            unavailableIndices: new Set(),
             lastSeen: now,
         });
 
@@ -359,6 +374,7 @@ class GroupManager {
         };
 
         this.groups.set(id, group);
+        log.info(`Created group ${id} "${opts.name}" hosted by ${opts.hostUsername}`);
         return group;
     }
 
@@ -375,6 +391,7 @@ class GroupManager {
         const group = this.groups.get(groupId);
         if (group) this.clearReadyGateTimer(group);
         this.groups.delete(groupId);
+        log.debug(`Removed group ${groupId} from memory`);
     }
 
     /** Get all in-memory group IDs (for persist loop). */
@@ -472,12 +489,14 @@ class GroupManager {
             joinedAt: new Date(),
             socketIds: new Set(),
             isReady: false,
+            unavailableIndices: new Set(),
             lastSeen: Date.now(),
         });
 
         group.lastActivity = Date.now();
         group.dirty = true;
 
+        log.info(`Member ${username} (${userId}) joined group ${groupId}`);
         this.callbacks?.onMemberJoined(groupId, { userId, username });
         this.broadcastState(group);
         return this.snapshot(group);
@@ -498,7 +517,7 @@ class GroupManager {
         group.readyUserIds.delete(userId);
 
         if (group.members.size === 0) {
-            // Auto-disband
+            log.info(`Group ${groupId} auto-disbanded: all members left`);
             this.endGroupInternal(group, "All members left");
             return { ended: true };
         }
@@ -524,6 +543,7 @@ class GroupManager {
                 group.hostUserId = nextHost.userId;
                 newHostUserId = nextHost.userId;
                 newHostUsername = nextHost.username;
+                log.info(`Host transferred in group ${groupId}: ${username} -> ${nextHost.username}`);
             }
         }
 
@@ -694,6 +714,24 @@ class GroupManager {
 
         group.readyUserIds.add(userId);
         return this.checkReadyGate(group);
+    }
+
+    setUnavailableIndices(
+        groupId: string,
+        userId: string,
+        unavailableIndices: Iterable<number>
+    ): void {
+        const group = this.groups.get(groupId);
+        if (!group) return;
+        const member = group.members.get(userId);
+        if (!member) return;
+
+        member.unavailableIndices = new Set(unavailableIndices);
+        member.lastSeen = Date.now();
+
+        if (group.syncState === "waiting") {
+            this.checkReadyGate(group);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -891,6 +929,7 @@ class GroupManager {
                 // Preserve local socket presence for users connected to this pod.
                 socketIds: existingMember?.socketIds ?? new Set<string>(),
                 isReady: false,
+                unavailableIndices: new Set(),
                 lastSeen: now,
             });
         }
@@ -1006,10 +1045,17 @@ class GroupManager {
 
         // Check if all connected members are ready
         for (const uid of connectedUserIds) {
+            const member = group.members.get(uid);
+            const currentIndex = group.playback.currentIndex;
+            if (member?.unavailableIndices?.has(currentIndex)) {
+                group.readyUserIds.add(uid);
+                continue;
+            }
             if (!group.readyUserIds.has(uid)) return false;
         }
 
         // All ready — start playback!
+        log.debug(`Ready gate passed for group ${group.id}: all ${connectedUserIds.size} members ready`);
         this.forcePlay(group);
         return true;
     }
@@ -1110,6 +1156,7 @@ class GroupManager {
         group.playback.isPlaying = false;
         group.syncState = "idle";
 
+        log.info(`Group ${group.id} ended: ${reason}`);
         this.callbacks?.onGroupEnded(group.id, reason);
         // Don't remove from memory yet — the service layer handles DB cleanup
         // and then calls manager.remove()
@@ -1133,6 +1180,9 @@ class GroupManager {
             }
         }
 
+        if (stale.length > 0) {
+            log.debug(`Cleaning up ${stale.length} stale members from group ${groupId}`);
+        }
         for (const userId of stale) {
             this.removeMember(groupId, userId);
         }

@@ -12,6 +12,9 @@ interface AIServicesSectionProps {
     isTesting: boolean;
 }
 
+/**
+ * Renders the AIServicesSection component.
+ */
 export function AIServicesSection({ settings, onUpdate, onTest, isTesting }: AIServicesSectionProps) {
     const [fanartTestStatus, setFanartTestStatus] = useState<StatusType>("idle");
     const [fanartTestMessage, setFanartTestMessage] = useState("");

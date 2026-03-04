@@ -17,6 +17,9 @@ interface UseSoulseekSearchReturn {
     handleDownload: (result: SoulseekResult) => Promise<void>;
 }
 
+/**
+ * Executes useSoulseekSearch.
+ */
 export function useSoulseekSearch({
     query,
 }: UseSoulseekSearchProps): UseSoulseekSearchReturn {

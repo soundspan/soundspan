@@ -15,6 +15,9 @@ const qualityOptions = [
     { value: "low", label: "Low (128 kbps)" },
 ];
 
+/**
+ * Renders the PlaybackSection component.
+ */
 export function PlaybackSection({ value, onChange }: PlaybackSectionProps) {
     return (
         <SettingsSection

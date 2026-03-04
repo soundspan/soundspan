@@ -52,6 +52,9 @@ interface SocialTabProps {
     queryEnabled?: boolean;
 }
 
+/**
+ * Renders the SocialTab component.
+ */
 export function SocialTab({
     users: usersProp,
     isLoading: isLoadingProp,
@@ -145,10 +148,13 @@ export function SocialTab({
                             <div className="flex items-start gap-3">
                                 <div className="w-8 h-8 rounded-full bg-white/10 text-white/80 text-xs font-semibold flex items-center justify-center shrink-0 overflow-hidden">
                                     {user.hasProfilePicture ? (
-                                        <img
+                                        <Image
                                             src={api.getProfilePictureUrl(user.id)}
                                             alt={user.displayName}
+                                            width={32}
+                                            height={32}
                                             className="w-full h-full object-cover"
+                                            unoptimized
                                         />
                                     ) : (
                                         user.displayName.charAt(0).toUpperCase()

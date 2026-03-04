@@ -13,13 +13,41 @@ const getBackendUrl = (): string => {
     );
 };
 
-const getProxyTimeoutMs = (): number => {
-    const env = getEnv();
-    const parsed = Number(env?.PROXY_REQUEST_TIMEOUT_MS);
+const DEFAULT_PROXY_TIMEOUT_MS = 20_000;
+const DEFAULT_IMPORT_PREVIEW_PROXY_TIMEOUT_MS = 90_000;
+const IMPORT_PREVIEW_PROXY_PATH = "api/import/preview";
+
+const parsePositiveTimeoutMs = (value: string | undefined): number | null => {
+    const parsed = Number(value);
     if (Number.isFinite(parsed) && parsed > 0) {
         return parsed;
     }
-    return 20_000;
+    return null;
+};
+
+const normalizeTargetPath = (targetPath: string): string =>
+    targetPath.replace(/^\/+|\/+$/g, "").toLowerCase();
+
+export const resolveProxyTimeoutMs = (
+    targetPath: string,
+    env: Record<string, string | undefined> = getEnv()
+): number => {
+    const globalTimeout =
+        parsePositiveTimeoutMs(env.PROXY_REQUEST_TIMEOUT_MS) ??
+        DEFAULT_PROXY_TIMEOUT_MS;
+
+    if (normalizeTargetPath(targetPath) !== IMPORT_PREVIEW_PROXY_PATH) {
+        return globalTimeout;
+    }
+
+    const importPreviewTimeout = parsePositiveTimeoutMs(
+        env.PROXY_IMPORT_PREVIEW_TIMEOUT_MS
+    );
+    if (importPreviewTimeout !== null) {
+        return importPreviewTimeout;
+    }
+
+    return Math.max(globalTimeout, DEFAULT_IMPORT_PREVIEW_PROXY_TIMEOUT_MS);
 };
 
 const isProxyDebugEnabled = (): boolean => {
@@ -175,7 +203,7 @@ export const proxyRequest = async (
 
     const controller = new AbortController();
     const upstreamSignal = request.signal;
-    const timeoutMs = getProxyTimeoutMs();
+    const timeoutMs = resolveProxyTimeoutMs(targetPath);
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let timedOut = false;
 

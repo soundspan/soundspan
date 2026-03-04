@@ -79,6 +79,9 @@ interface IntegrityReport {
     oldDownloadJobs: number;
 }
 
+/**
+ * Executes runDataIntegrityCheck.
+ */
 export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
     logger.debug("\nRunning data integrity check...");
 

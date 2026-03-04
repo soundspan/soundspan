@@ -21,6 +21,9 @@ interface PlaybackQueueTrack {
     youtubeVideoId?: string;
 }
 
+/**
+ * Executes mapDiscoverTrackToPlaybackTrack.
+ */
 export function mapDiscoverTrackToPlaybackTrack(
     track: DiscoverPlaylist["tracks"][number]
 ): PlaybackQueueTrack {
@@ -47,13 +50,16 @@ export function mapDiscoverTrackToPlaybackTrack(
     };
 }
 
+/**
+ * Executes useDiscoverActions.
+ */
 export function useDiscoverActions(
     playlist: DiscoverPlaylist | null,
     isGenerating?: boolean,
     refreshBatchStatus?: () => Promise<unknown>,
     setPendingGeneration?: (pending: boolean) => void
 ) {
-    const { playTracks, playNow, isPlaying, pause, resume } = useAudio();
+    const { playTracks, playNow, addTracksToQueue, isPlaying, pause, resume } = useAudio();
 
     const handleGenerate = useCallback(async () => {
         if (isGenerating) {
@@ -126,6 +132,13 @@ export function useDiscoverActions(
         [playlist, playNow]
     );
 
+    const handleAddAllToQueue = useCallback(() => {
+        if (!playlist || playlist.tracks.length === 0) return;
+        const formattedTracks = playlist.tracks.map(mapDiscoverTrackToPlaybackTrack);
+        addTracksToQueue(formattedTracks);
+        toast.success(`Added ${formattedTracks.length} tracks to queue`);
+    }, [playlist, addTracksToQueue]);
+
     const handleTogglePlay = useCallback(() => {
         if (isPlaying) {
             pause();
@@ -140,5 +153,6 @@ export function useDiscoverActions(
         handleShufflePlaylist,
         handlePlayTrack,
         handleTogglePlay,
+        handleAddAllToQueue,
     };
 }

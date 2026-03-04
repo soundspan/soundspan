@@ -7,6 +7,9 @@ interface DiscoverHeroProps {
     config: DiscoverConfig | null;
 }
 
+/**
+ * Renders the DiscoverHero component.
+ */
 export function DiscoverHero({ playlist, config }: DiscoverHeroProps) {
     // Calculate total duration
     const totalDuration =

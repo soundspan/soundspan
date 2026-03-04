@@ -14,6 +14,9 @@ const PREFIX_ENTITY = new Map(
     ]),
 );
 
+/**
+ * Represents the SubsonicIdError class.
+ */
 export class SubsonicIdError extends Error {
     constructor(message: string) {
         super(message);
@@ -21,6 +24,9 @@ export class SubsonicIdError extends Error {
     }
 }
 
+/**
+ * Executes toSubsonicId.
+ */
 export function toSubsonicId(type: SubsonicEntityType, id: string): string {
     return `${ENTITY_PREFIX[type]}-${id}`;
 }

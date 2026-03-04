@@ -20,6 +20,9 @@ interface AudiobookHeroProps {
   children?: ReactNode;
 }
 
+/**
+ * Renders the AudiobookHero component.
+ */
 export function AudiobookHero({
   audiobook,
   heroImage,

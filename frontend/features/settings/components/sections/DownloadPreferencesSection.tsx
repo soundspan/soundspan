@@ -9,6 +9,9 @@ interface DownloadPreferencesSectionProps {
     onUpdate: (updates: Partial<SystemSettings>) => void;
 }
 
+/**
+ * Renders the DownloadPreferencesSection component.
+ */
 export function DownloadPreferencesSection({
     settings,
     onUpdate,

@@ -4,7 +4,7 @@ import {
     PLAYBACK_POLL_AFTER_LOCAL_SAVE_COOLDOWN_MS,
     parsePlaybackStateSaveTimestamp,
     shouldSkipPlaybackStatePoll,
-} from "../../lib/playback-state-cadence.ts";
+} from "../../lib/playback-state-cadence";
 
 test("parsePlaybackStateSaveTimestamp normalizes invalid values to zero", () => {
     assert.equal(parsePlaybackStateSaveTimestamp(null), 0);

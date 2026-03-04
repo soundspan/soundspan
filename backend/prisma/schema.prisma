@@ -35,6 +35,7 @@ model User {
   downloadJobs           DownloadJob[]
   hiddenPlaylists        HiddenPlaylist[]
   likedTracks            LikedTrack[]
+  likedRemoteTracks      LikedRemoteTrack[]
   listeningState         ListeningState[]
   notifications          Notification[]
   plays                  Play[]
@@ -62,6 +63,8 @@ model UserSettings {
   wifiOnly              Boolean @default(false)
   offlineEnabled        Boolean @default(false)
   maxCacheSizeMb        Int     @default(10240)
+  showYtMusicExplore    Boolean @default(true)
+  showTidalExplore      Boolean @default(true)
   // YouTube Music — per-user OAuth credentials and quality preference
   ytMusicOAuthJson      String? // Encrypted OAuth token JSON from ytmusicapi
   ytMusicQuality        String  @default("HIGH")
@@ -241,10 +244,13 @@ model Artist {
   discoveryAlbumCount Int                      @default(0)
   libraryAlbumCount   Int                      @default(0)
   totalTrackCount     Int                      @default(0)
+  remoteTrackCount    Int                      @default(0)
   albums              Album[]
   ownedAlbums         OwnedAlbum[]
   similarFrom         SimilarArtist[]          @relation("FromArtist")
   similarTo           SimilarArtist[]          @relation("ToArtist")
+  tracksTidal         TrackTidal[]
+  tracksYtMusic       TrackYtMusic[]
 
   @@index([name])
   @@index([normalizedName])
@@ -253,6 +259,7 @@ model Artist {
   @@index([libraryAlbumCount])
   @@index([discoveryAlbumCount])
   @@index([totalTrackCount])
+  @@index([remoteTrackCount])
 }
 
 model Album {
@@ -276,6 +283,8 @@ model Album {
   originalYear     Int?
   artist           Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   tracks           Track[]
+  tracksTidal      TrackTidal[]
+  tracksYtMusic    TrackYtMusic[]
 
   @@index([artistId])
   @@index([location])
@@ -346,6 +355,7 @@ model Track {
 
   cachedBy        CachedTrack[]
   likedBy         LikedTrack[]
+  mappings        TrackMapping[]
   moodBuckets     MoodBucket[]
   plays           Play[]
   playlistItems   PlaylistItem[]
@@ -397,16 +407,22 @@ model TranscodedFile {
 }
 
 model Play {
-  id       String       @id @default(cuid())
-  userId   String
-  trackId  String
-  playedAt DateTime     @default(now())
-  source   ListenSource @default(LIBRARY)
-  track    Track        @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  userId         String
+  trackId        String?
+  trackTidalId   String?
+  trackYtMusicId String?
+  playedAt       DateTime      @default(now())
+  source         ListenSource  @default(LIBRARY)
+  track          Track?        @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  trackTidal     TrackTidal?   @relation(fields: [trackTidalId], references: [id], onDelete: SetNull)
+  trackYtMusic   TrackYtMusic? @relation(fields: [trackYtMusicId], references: [id], onDelete: SetNull)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, playedAt])
   @@index([trackId])
+  @@index([trackTidalId])
+  @@index([trackYtMusicId])
   @@index([source])
 }
 
@@ -443,17 +459,28 @@ model HiddenPlaylist {
 }
 
 model PlaylistItem {
-  id         String   @id @default(cuid())
-  playlistId String
-  trackId    String
-  sort       Int
-  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
-  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  playlistId     String
+  trackId        String?
+  trackTidalId   String?
+  trackYtMusicId String?
+  sort           Int
+  playlist       Playlist      @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track          Track?        @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  trackTidal     TrackTidal?   @relation(fields: [trackTidalId], references: [id], onDelete: SetNull)
+  trackYtMusic   TrackYtMusic? @relation(fields: [trackYtMusicId], references: [id], onDelete: SetNull)
 
   @@unique([playlistId, trackId])
+  @@unique([playlistId, trackTidalId])
+  @@unique([playlistId, trackYtMusicId])
   @@index([playlistId, sort])
+  @@index([trackTidalId])
+  @@index([trackYtMusicId])
 }
 
+/// @deprecated Use PlaylistItem with trackTidalId/trackYtMusicId instead.
+/// Retained for backward compatibility with legacy Spotify imports.
+/// No new rows should be written. Table will be dropped in a future migration.
 model PlaylistPendingTrack {
   id               String   @id @default(cuid())
   playlistId       String
@@ -632,6 +659,22 @@ model LikedTrack {
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, trackId])
+  @@index([userId])
+  @@index([likedAt])
+}
+
+model LikedRemoteTrack {
+  id             String        @id @default(cuid())
+  userId         String
+  trackTidalId   String?
+  trackYtMusicId String?
+  likedAt        DateTime      @default(now())
+  trackTidal     TrackTidal?   @relation(fields: [trackTidalId], references: [id], onDelete: Cascade)
+  trackYtMusic   TrackYtMusic? @relation(fields: [trackYtMusicId], references: [id], onDelete: Cascade)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trackTidalId])
+  @@unique([userId, trackYtMusicId])
   @@index([userId])
   @@index([likedAt])
 }
@@ -1015,11 +1058,14 @@ enum ListenSource {
   LIBRARY
   DISCOVERY
   DISCOVERY_KEPT
+  TIDAL
+  YOUTUBE_MUSIC
 }
 
 enum AlbumLocation {
   LIBRARY
   DISCOVER
+  REMOTE
 }
 
 model TrackLyrics {
@@ -1044,4 +1090,73 @@ model TrackEmbedding {
 
   @@index([modelVersion])
   @@map("track_embeddings")
+}
+
+model TrackTidal {
+  id            String         @id @default(cuid())
+  tidalId       Int            @unique
+  title         String
+  artist        String
+  album         String
+  duration      Int
+  isrc          String?
+  quality       String?
+  explicit      Boolean?
+  artistId      String?
+  albumId       String?
+  createdAt     DateTime       @default(now())
+  artistEntity  Artist?        @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  albumEntity   Album?         @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  likedBy       LikedRemoteTrack[]
+  mappings      TrackMapping[]
+  plays         Play[]
+  playlistItems PlaylistItem[]
+
+  @@index([isrc])
+  @@index([artistId])
+  @@index([albumId])
+}
+
+model TrackYtMusic {
+  id            String         @id @default(cuid())
+  videoId       String         @unique
+  title         String
+  artist        String
+  album         String
+  duration      Int
+  thumbnailUrl  String?
+  artistId      String?
+  albumId       String?
+  createdAt     DateTime       @default(now())
+  artistEntity  Artist?        @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  albumEntity   Album?         @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  likedBy       LikedRemoteTrack[]
+  mappings      TrackMapping[]
+  plays         Play[]
+  playlistItems PlaylistItem[]
+
+  @@index([artistId])
+  @@index([albumId])
+}
+
+model TrackMapping {
+  id             String        @id @default(cuid())
+  /// Active-row linkage uniqueness is enforced in SQL migrations:
+  /// - stale=false rows are unique by (trackId, trackTidalId, trackYtMusicId)
+  /// - at least one linkage key must be present
+  trackId        String?
+  trackTidalId   String?
+  trackYtMusicId String?
+  confidence     Float
+  source         String        // "gap-fill" | "isrc" | "import-match" | "manual"
+  stale          Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  track          Track?        @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  trackTidal     TrackTidal?   @relation(fields: [trackTidalId], references: [id], onDelete: SetNull)
+  trackYtMusic   TrackYtMusic? @relation(fields: [trackYtMusicId], references: [id], onDelete: SetNull)
+
+  @@index([trackId])
+  @@index([trackTidalId])
+  @@index([trackYtMusicId])
+  @@index([stale])
 }

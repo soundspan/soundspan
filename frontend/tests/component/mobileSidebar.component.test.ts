@@ -75,12 +75,6 @@ mock.module("@/lib/auth-context", {
     },
 });
 
-mock.module("@/hooks/useActiveListenSessions", {
-    namedExports: {
-        useActiveListenSessions: () => state.hasActiveSessions,
-    },
-});
-
 mock.module("@/lib/toast-context", {
     namedExports: {
         useToast: () => ({
@@ -105,13 +99,14 @@ beforeEach(() => {
 
 test("returns null when closed", async () => {
     const { MobileSidebar } = await import(
-        "../../components/layout/MobileSidebar.tsx"
+        "../../components/layout/MobileSidebar"
     );
 
     const html = renderToStaticMarkup(
         React.createElement(MobileSidebar, {
             isOpen: false,
             onClose: () => undefined,
+            hasActiveSessions: false,
         })
     );
 
@@ -120,20 +115,20 @@ test("returns null when closed", async () => {
 
 test("renders quick links and omits my history", async () => {
     const { MobileSidebar } = await import(
-        "../../components/layout/MobileSidebar.tsx"
+        "../../components/layout/MobileSidebar"
     );
 
     const html = renderToStaticMarkup(
         React.createElement(MobileSidebar, {
             isOpen: true,
             onClose: () => undefined,
+            hasActiveSessions: state.hasActiveSessions,
         })
     );
 
     assert.match(html, /Quick Links/);
-    assert.match(html, />Discover</);
-    assert.match(html, />My Liked</);
-    assert.match(html, />Radio</);
+    assert.match(html, />Home</);
+    assert.match(html, />Explore</);
     assert.match(html, />Listen Together</);
     assert.doesNotMatch(html, /My History/);
 });
@@ -143,13 +138,14 @@ test("shows listen-together marker when sessions are active", async () => {
     state.pathname = "/listen-together";
 
     const { MobileSidebar } = await import(
-        "../../components/layout/MobileSidebar.tsx"
+        "../../components/layout/MobileSidebar"
     );
 
     const html = renderToStaticMarkup(
         React.createElement(MobileSidebar, {
             isOpen: true,
             onClose: () => undefined,
+            hasActiveSessions: state.hasActiveSessions,
         })
     );
 
@@ -160,13 +156,14 @@ test("marks settings as the current route when viewing settings", async () => {
     state.pathname = "/settings";
 
     const { MobileSidebar } = await import(
-        "../../components/layout/MobileSidebar.tsx"
+        "../../components/layout/MobileSidebar"
     );
 
     const html = renderToStaticMarkup(
         React.createElement(MobileSidebar, {
             isOpen: true,
             onClose: () => undefined,
+            hasActiveSessions: state.hasActiveSessions,
         })
     );
 

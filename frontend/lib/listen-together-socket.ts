@@ -27,6 +27,11 @@ export interface SyncQueueItem {
     streamSource?: "tidal" | "youtube";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    localTrackId?: string;
+    trackTidalId?: string;
+    trackYtMusicId?: string;
+    trackMappingId?: string;
+    originSource?: "local" | "tidal" | "youtube";
 }
 
 export interface GroupSnapshot {
@@ -72,6 +77,38 @@ export interface QueueDelta {
     stateVersion: number;
 }
 
+export interface QueueTrackInput {
+    trackId?: string;
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    title?: string;
+    artist?: string;
+    album?: string;
+    duration?: number;
+    thumbnailUrl?: string;
+    isrc?: string;
+}
+
+export interface AvailabilityItem {
+    queueIndex: number;
+    available: boolean;
+    source?: "local" | "tidal" | "youtube";
+    localTrackId?: string;
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    reason?:
+        | "no-provider"
+        | "no-mapping"
+        | "duration-mismatch"
+        | "low-confidence"
+        | "stale";
+}
+
+export interface GroupAvailabilityEvent {
+    availability: AvailabilityItem[];
+    stateVersion: number;
+}
+
 export interface WaitingEvent {
     trackId: string | null;
     currentIndex: number;
@@ -112,6 +149,7 @@ export interface ListenTogetherSocketCallbacks {
     onGroupState: (snapshot: GroupSnapshot) => void;
     onPlaybackDelta: (delta: PlaybackDelta) => void;
     onQueueDelta: (delta: QueueDelta) => void;
+    onAvailability?: (data: GroupAvailabilityEvent) => void;
     onWaiting: (data: WaitingEvent) => void;
     onPlayAt: (data: PlayAtEvent) => void;
     onMemberJoined: (data: MemberEvent) => void;
@@ -173,6 +211,9 @@ const TRANSIENT_CONFLICT_RETRY_POLICY: EmitRetryPolicy = {
     jitterFactor: TRANSIENT_CONFLICT_JITTER_FACTOR,
 };
 
+/**
+ * Represents the ListenTogetherSocket class.
+ */
 export class ListenTogetherSocket {
     private socket: Socket | null = null;
     private callbacks: ListenTogetherSocketCallbacks | null = null;
@@ -281,6 +322,10 @@ export class ListenTogetherSocket {
 
         this.socket.on("group:queue-delta", (delta: QueueDelta) => {
             this.callbacks?.onQueueDelta(delta);
+        });
+
+        this.socket.on("group:availability", (data: GroupAvailabilityEvent) => {
+            this.callbacks?.onAvailability?.(data);
         });
 
         this.socket.on("group:waiting", (data: WaitingEvent) => {
@@ -513,12 +558,12 @@ export class ListenTogetherSocket {
         return this.emit("playback", { action: "set-track", index }, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
-    addToQueue(trackIds: string[]): Promise<void> {
-        return this.emit("queue", { action: "add", trackIds });
+    addToQueue(tracks: string[] | QueueTrackInput[]): Promise<void> {
+        return this.emit("queue", this.buildQueuePayload("add", tracks));
     }
 
-    insertNext(trackIds: string[]): Promise<void> {
-        return this.emit("queue", { action: "insert-next", trackIds });
+    insertNext(tracks: string[] | QueueTrackInput[]): Promise<void> {
+        return this.emit("queue", this.buildQueuePayload("insert-next", tracks));
     }
 
     removeFromQueue(index: number): Promise<void> {
@@ -535,6 +580,14 @@ export class ListenTogetherSocket {
 
     reportReady(): Promise<void> {
         return this.emit("ready", undefined, TRANSIENT_CONFLICT_RETRY_POLICY);
+    }
+
+    reportPlaybackFailed(queueIndex: number): Promise<void> {
+        return this.emit(
+            "track:playback-failed",
+            { queueIndex },
+            TRANSIENT_CONFLICT_RETRY_POLICY
+        );
     }
 
     /** Measure round-trip time. Returns server's Date.now(). */
@@ -599,6 +652,21 @@ export class ListenTogetherSocket {
                 this.socket.emit(event, data, onAck);
             }
         });
+    }
+
+    private buildQueuePayload(
+        action: "add" | "insert-next",
+        tracks: string[] | QueueTrackInput[]
+    ): { action: "add" | "insert-next"; trackIds?: string[]; tracks?: QueueTrackInput[] } {
+        if (tracks.length === 0) {
+            return { action, trackIds: [] };
+        }
+
+        const first = tracks[0];
+        if (typeof first === "string") {
+            return { action, trackIds: tracks as string[] };
+        }
+        return { action, tracks: tracks as QueueTrackInput[] };
     }
 
     private isTransientConflictAck(response: ListenTogetherAckResponse): boolean {

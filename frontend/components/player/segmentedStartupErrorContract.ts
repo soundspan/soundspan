@@ -136,6 +136,9 @@ const collectHintRecords = (root: LooseObject): LooseObject[] => {
     return records;
 };
 
+/**
+ * Executes parseSegmentedStartupErrorHint.
+ */
 export function parseSegmentedStartupErrorHint(
     error: unknown,
 ): SegmentedStartupErrorHint | null {
@@ -200,6 +203,9 @@ export function parseSegmentedStartupErrorHint(
     };
 }
 
+/**
+ * Executes resolveConservativeSegmentedStartupRetryDelayMs.
+ */
 export function resolveConservativeSegmentedStartupRetryDelayMs({
     computedDelayMs,
     retryAfterMsHint,

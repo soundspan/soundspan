@@ -4,7 +4,7 @@ Start-here guide for `frontend/features/home`.
 
 ## Start Here
 
-1. Route entrypoints: `frontend/app/library/page.tsx`, `frontend/app/page.tsx`, `frontend/app/radio/page.tsx`
+1. Route entrypoints: `frontend/app/explore/page.tsx`, `frontend/app/library/page.tsx`, `frontend/app/page.tsx`, `frontend/app/radio/page.tsx`
 2. Domain ownership and contracts: `.agents-config/docs/FEATURE_INDEX.json`.
 3. Targeted verification commands:
 - `npm --prefix backend test -- --runInBand src/routes/__tests__/libraryRuntime.test.ts src/routes/__tests__/homepageRuntime.test.ts`
@@ -25,10 +25,12 @@ Start-here guide for `frontend/features/home`.
 | `components/FeaturedPlaylistsGrid.tsx` | components |
 | `components/HomeHero.tsx` | components |
 | `components/LibraryRadioStations.tsx` | components |
+| `components/libraryRadioStationsGenreSelection.ts` | components |
 | `components/MixesGrid.tsx` | components |
 | `components/PodcastsGrid.tsx` | components |
 | `components/PopularArtistsGrid.tsx` | components |
 | `components/SectionHeader.tsx` | components |
+| `components/StaticPlaylistCard.tsx` | components |
 | `hooks/useHomeData.ts` | hooks |
 | `types.ts` | root |
 

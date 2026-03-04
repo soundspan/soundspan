@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { createFrontendLogger } from "@/lib/logger";
@@ -7,7 +8,7 @@ import { shouldRetryFailedSettingsLoad } from "./settingsHydration";
 
 const logger = createFrontendLogger("Settings.useSettingsData");
 
-const defaultSettings: UserSettings = {
+export const defaultSettings: UserSettings = {
     displayName: "",
     playbackQuality: "original",
     shareOnlinePresence: false,
@@ -15,12 +16,18 @@ const defaultSettings: UserSettings = {
     wifiOnly: false,
     offlineEnabled: false,
     maxCacheSizeMb: 5120,
+    showYtMusicExplore: true,
+    showTidalExplore: true,
     ytMusicQuality: "HIGH",
     tidalStreamingQuality: "HIGH",
 };
 
+/**
+ * Executes useSettingsData.
+ */
 export function useSettingsData() {
     const { isAuthenticated } = useAuth();
+    const queryClient = useQueryClient();
     const [settings, setSettings] = useState<UserSettings>(defaultSettings);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -40,6 +47,8 @@ export function useSettingsData() {
                 displayName: data.displayName ?? "",
                 shareOnlinePresence: data.shareOnlinePresence ?? false,
                 shareListeningStatus: data.shareListeningStatus ?? false,
+                showYtMusicExplore: data.showYtMusicExplore ?? true,
+                showTidalExplore: data.showTidalExplore ?? true,
             });
             setLoadError(false);
         } catch (error) {
@@ -95,6 +104,8 @@ export function useSettingsData() {
             setIsSaving(true);
             await api.updateSettings(newSettings);
             setSettings(newSettings);
+            // Invalidate shared settings query so other consumers (e.g. Explore page) pick up changes immediately
+            queryClient.invalidateQueries({ queryKey: ["user-settings"] });
             // No toast - caller shows inline status
         } catch (error) {
             logger.error("Failed to save user settings", { error });

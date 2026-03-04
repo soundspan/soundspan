@@ -194,7 +194,7 @@ describe("auth routes runtime", () => {
         await login(invalidReq, invalidRes);
         expect(invalidRes.statusCode).toBe(400);
 
-        prisma.user.findUnique.mockResolvedValueOnce(null);
+        prisma.user.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
         const missingReq = { body: { username: "bob", password: "pw" } } as any;
         const missingRes = createRes();
         await login(missingReq, missingRes);

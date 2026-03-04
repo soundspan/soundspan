@@ -15,6 +15,8 @@ import {
 } from "../middleware/auth";
 import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME } from "../config/brand";
+import { timingSafeCompare } from "../utils/timingSafe";
+import { runDummyBcrypt } from "../utils/dummyCredential";
 
 const router = Router();
 
@@ -131,6 +133,9 @@ router.post("/login", async (req, res) => {
             (await prisma.user.findUnique({ where: { username } })) ??
             (await prisma.user.findUnique({ where: { email: username } }));
         if (!user) {
+            // Run dummy bcrypt to equalize response timing with the valid-user
+            // path, preventing username enumeration via timing side-channel.
+            await runDummyBcrypt();
             logger.debug(`[AUTH] User not found: ${username}`);
             return res.status(401).json({ error: "Invalid credentials" });
         }
@@ -165,7 +170,14 @@ router.post("/login", async (req, res) => {
                     .update(token.toUpperCase())
                     .digest("hex");
 
-                const codeIndex = hashedCodes.indexOf(providedHash);
+                // Iterate all codes with constant-time comparison to avoid
+                // timing leaks that reveal which code position matched.
+                let codeIndex = -1;
+                for (let i = 0; i < hashedCodes.length; i++) {
+                    if (timingSafeCompare(hashedCodes[i], providedHash)) {
+                        codeIndex = i;
+                    }
+                }
                 if (codeIndex === -1) {
                     return res
                         .status(401)

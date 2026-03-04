@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
-import { resetPersistedTrackStartPosition } from "../../lib/persisted-playback-position.ts";
+import { resetPersistedTrackStartPosition } from "../../lib/persisted-playback-position";
 
 type StorageLike = {
     getItem: (key: string) => string | null;
@@ -10,13 +10,13 @@ type StorageLike = {
 
 type GlobalScope = typeof globalThis & {
     window?: unknown;
-    localStorage?: StorageLike;
+    localStorage?: unknown;
 };
 
 const globalScope = globalThis as GlobalScope;
 
 let previousWindow: unknown;
-let previousLocalStorage: StorageLike | undefined;
+let previousLocalStorage: unknown;
 
 function installStorage(options?: { throwOnSet?: boolean }) {
     const values = new Map<string, string>();
@@ -33,10 +33,10 @@ function installStorage(options?: { throwOnSet?: boolean }) {
         },
     };
 
-    globalScope.window = {
+    (globalScope as any).window = {
         localStorage: storage,
     };
-    globalScope.localStorage = storage;
+    (globalScope as any).localStorage = storage;
 
     return values;
 }
@@ -48,15 +48,15 @@ beforeEach(() => {
 
 afterEach(() => {
     if (typeof previousWindow === "undefined") {
-        delete globalScope.window;
+        delete (globalScope as any).window;
     } else {
-        globalScope.window = previousWindow;
+        (globalScope as any).window = previousWindow;
     }
 
     if (typeof previousLocalStorage === "undefined") {
-        delete globalScope.localStorage;
+        delete (globalScope as any).localStorage;
     } else {
-        globalScope.localStorage = previousLocalStorage;
+        (globalScope as any).localStorage = previousLocalStorage;
     }
 });
 

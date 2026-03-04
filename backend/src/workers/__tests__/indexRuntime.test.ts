@@ -94,6 +94,15 @@ describe("workers runtime behavior", () => {
         const dataCacheService = {
             warmupCache: jest.fn(async () => undefined),
         };
+        const trackReconciliationService = {
+            reconcileOrphans: jest.fn(async () => ({ created: 0 })),
+            reconcile: jest.fn(async () => ({ processed: 0, linked: 0, skipped: 0 })),
+            reconcileYoutubeToTidal: jest.fn(async () => ({
+                processed: 0,
+                upgraded: 0,
+                skipped: 0,
+            })),
+        };
 
         const prisma = {
             discoveryAlbum: { findFirst: jest.fn(async () => null) },
@@ -160,6 +169,9 @@ describe("workers runtime behavior", () => {
         jest.doMock("../../services/dataCache", () => ({
             dataCacheService,
         }));
+        jest.doMock("../../services/trackReconciliation", () => ({
+            trackReconciliationService,
+        }));
 
         return {
             scanQueue,
@@ -190,6 +202,7 @@ describe("workers runtime behavior", () => {
             backfillAllImages,
             lidarrService,
             dataCacheService,
+            trackReconciliationService,
         };
     }
 
@@ -450,6 +463,52 @@ describe("workers runtime behavior", () => {
         expect(mocks.downloadQueueManager.reconcileOnStartup).toHaveBeenCalled();
         expect(mocks.backfillAllArtistCounts).toHaveBeenCalled();
         expect(mocks.backfillAllImages).toHaveBeenCalled();
+    });
+
+    it("runs track-mapping reconcile job including YT->TIDAL upgrade pass", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+        mocks.trackReconciliationService.reconcileOrphans.mockResolvedValueOnce({
+            created: 1,
+        });
+        mocks.trackReconciliationService.reconcile.mockResolvedValueOnce({
+            processed: 2,
+            linked: 1,
+            skipped: 1,
+        });
+        mocks.trackReconciliationService.reconcileYoutubeToTidal.mockResolvedValueOnce(
+            {
+                processed: 3,
+                upgraded: 2,
+                skipped: 1,
+            }
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const schedulerHandler = mocks.schedulerQueue.process.mock.calls.find(
+            (call) => call[0] === "*"
+        )?.[1];
+        expect(schedulerHandler).toBeTruthy();
+
+        await schedulerHandler({
+            id: "track-reconcile-1",
+            name: "track-mapping-reconcile",
+            data: { mode: "repeat" },
+        });
+
+        expect(mocks.trackReconciliationService.reconcileOrphans).toHaveBeenCalledTimes(
+            1
+        );
+        expect(mocks.trackReconciliationService.reconcile).toHaveBeenCalledTimes(1);
+        expect(
+            mocks.trackReconciliationService.reconcileYoutubeToTidal
+        ).toHaveBeenCalledTimes(1);
+        expect(mocks.logger.info).toHaveBeenCalledWith(
+            expect.stringContaining("Upgraded 2 YT mappings to TIDAL")
+        );
     });
 
     it("skips audiobook startup sync when audiobookshelf is disabled or unconfigured", async () => {

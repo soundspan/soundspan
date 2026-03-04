@@ -5,6 +5,9 @@ interface EmptyStateProps {
     isLoading: boolean;
 }
 
+/**
+ * Renders the EmptyState component.
+ */
 export function EmptyState({ hasSearched, isLoading }: EmptyStateProps) {
     // Don't show empty state while loading or if search has been performed
     if (isLoading || hasSearched) {

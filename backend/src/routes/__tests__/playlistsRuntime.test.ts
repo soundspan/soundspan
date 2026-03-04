@@ -2,12 +2,20 @@ jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: any, _res: any, next: () => void) => next(),
 }));
 
+const childLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+};
+
 jest.mock("../../utils/logger", () => ({
     logger: {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
+        child: jest.fn(() => childLogger),
     },
 }));
 
@@ -26,11 +34,31 @@ const prisma = {
     },
     playlistItem: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        findMany: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
         update: jest.fn(),
     },
+    userSettings: {
+        findUnique: jest.fn(),
+    },
+    systemSettings: {
+        findUnique: jest.fn(),
+    },
+    trackMapping: {
+        findMany: jest.fn(),
+    },
     track: {
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+    },
+    trackTidal: {
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+    },
+    trackYtMusic: {
+        findMany: jest.fn(),
         findUnique: jest.fn(),
     },
     playlistPendingTrack: {
@@ -48,6 +76,13 @@ const prisma = {
 
 jest.mock("../../utils/db", () => ({
     prisma,
+}));
+
+const trackMappingService = {
+    ensureRemoteTrack: jest.fn(),
+};
+jest.mock("../../services/trackMappingService", () => ({
+    trackMappingService,
 }));
 
 const deezerService = {
@@ -178,19 +213,49 @@ describe("playlists route runtime", () => {
         });
 
         prisma.playlistItem.findUnique.mockResolvedValue(null);
+        prisma.playlistItem.findFirst.mockResolvedValue(null);
+        prisma.playlistItem.findMany.mockResolvedValue([]);
         prisma.playlistItem.create.mockResolvedValue({
             id: "pli-1",
+            playlistId: "pl-1",
+            trackId: "t-1",
+            trackTidalId: null,
+            trackYtMusicId: null,
             sort: 6,
             track: {
                 id: "t-1",
                 title: "Track 1",
-                album: { title: "Album 1", artist: { name: "Artist 1" } },
+                duration: 210,
+                album: {
+                    title: "Album 1",
+                    coverUrl: "native:albums/a1.jpg",
+                    artist: {
+                        id: "artist-1",
+                        name: "Artist 1",
+                        mbid: null,
+                    },
+                },
             },
+            trackTidal: null,
+            trackYtMusic: null,
         });
         prisma.playlistItem.delete.mockResolvedValue({});
         prisma.playlistItem.update.mockResolvedValue({});
 
+        prisma.userSettings.findUnique.mockResolvedValue({
+            tidalOAuthJson: "tidal-token",
+            ytMusicOAuthJson: "yt-token",
+        });
+        prisma.systemSettings.findUnique.mockResolvedValue({
+            ytMusicEnabled: true,
+        });
+        prisma.trackMapping.findMany.mockResolvedValue([]);
         prisma.track.findUnique.mockResolvedValue({ id: "t-1" });
+        prisma.track.findMany.mockResolvedValue([]);
+        prisma.trackTidal.findMany.mockResolvedValue([]);
+        prisma.trackTidal.findUnique.mockResolvedValue(null);
+        prisma.trackYtMusic.findMany.mockResolvedValue([]);
+        prisma.trackYtMusic.findUnique.mockResolvedValue(null);
 
         prisma.playlistPendingTrack.findMany.mockResolvedValue([]);
         prisma.playlistPendingTrack.findUnique.mockResolvedValue(null);
@@ -216,6 +281,11 @@ describe("playlists route runtime", () => {
         soulseekService.downloadBestMatch.mockResolvedValue({
             success: true,
             filePath: "/tmp/song.mp3",
+        });
+        trackMappingService.ensureRemoteTrack.mockResolvedValue({
+            provider: "tidal",
+            id: "tt-1",
+            created: false,
         });
         getSystemSettings.mockResolvedValue({
             musicPath: null,
@@ -364,7 +434,21 @@ describe("playlists route runtime", () => {
         expect(errRes.body).toEqual({ error: "Failed to get playlist" });
     });
 
-    it("formats playlist detail with merged track and pending items", async () => {
+    it("formats playlist detail with provider/playability metadata and merged items", async () => {
+        prisma.trackTidal.findMany.mockResolvedValueOnce([
+            {
+                id: "tt-1",
+                tidalId: 991,
+                duration: 245,
+            },
+        ]);
+        prisma.trackYtMusic.findMany.mockResolvedValueOnce([
+            {
+                id: "yt-1",
+                videoId: "yt-video-7",
+                duration: 199,
+            },
+        ]);
         prisma.playlist.findUnique.mockResolvedValueOnce({
             id: "pl-1",
             userId: "u1",
@@ -374,16 +458,71 @@ describe("playlists route runtime", () => {
             items: [
                 {
                     id: "pli-1",
+                    playlistId: "pl-1",
+                    trackId: "t-1",
+                    trackTidalId: null,
+                    trackYtMusicId: null,
                     sort: 2,
                     track: {
                         id: "t-1",
                         title: "Song",
+                        duration: 180,
                         album: {
                             title: "Album",
                             coverUrl: "native:albums/a1.jpg",
                             artist: { id: "a-1", name: "Artist", mbid: "mbid-a1" },
                         },
                     },
+                    trackTidal: null,
+                    trackYtMusic: null,
+                },
+                {
+                    id: "pli-2",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: "tt-1",
+                    trackYtMusicId: null,
+                    sort: 3,
+                    track: null,
+                    trackTidal: {
+                        id: "tt-1",
+                        tidalId: 991,
+                        title: "Tidal Song",
+                        artist: "Tidal Artist",
+                        album: "Tidal Album",
+                        duration: 245,
+                    },
+                    trackYtMusic: null,
+                },
+                {
+                    id: "pli-3",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-1",
+                    sort: 4,
+                    track: null,
+                    trackTidal: null,
+                    trackYtMusic: {
+                        id: "yt-1",
+                        videoId: "yt-video-7",
+                        title: "YT Song",
+                        artist: "YT Artist",
+                        album: "YT Album",
+                        duration: 199,
+                        thumbnailUrl: "https://yt/thumb.jpg",
+                    },
+                },
+                {
+                    id: "pli-4",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: null,
+                    sort: 5,
+                    track: null,
+                    trackTidal: null,
+                    trackYtMusic: null,
                 },
             ],
             pendingTracks: [
@@ -403,13 +542,386 @@ describe("playlists route runtime", () => {
         await getPlaylist(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(res.body.trackCount).toBe(1);
+        expect(res.body.trackCount).toBe(4);
         expect(res.body.pendingCount).toBe(1);
         expect(res.body.isOwner).toBe(true);
         expect(res.body.isHidden).toBe(true);
         expect(res.body.items[0].track.album.coverArt).toBe("native:albums/a1.jpg");
+        expect(res.body.items[0].provider.source).toBe("local");
+        expect(res.body.items[0].playback.isPlayable).toBe(true);
+
+        const tidalItem = res.body.items.find(
+            (entry: any) => entry.provider?.source === "tidal"
+        );
+        expect(tidalItem).toBeDefined();
+        expect(tidalItem.playback.isPlayable).toBe(true);
+        expect(tidalItem.track.streamSource).toBe("tidal");
+        expect(tidalItem.track.tidalTrackId).toBe(991);
+
+        const ytItem = res.body.items.find(
+            (entry: any) => entry.provider?.source === "youtube"
+        );
+        expect(ytItem).toBeDefined();
+        expect(ytItem.playback.isPlayable).toBe(true);
+        expect(ytItem.track.streamSource).toBe("youtube");
+        expect(ytItem.track.youtubeVideoId).toBe("yt-video-7");
+
+        const unknownItem = res.body.items.find(
+            (entry: any) => entry.provider?.source === "unknown"
+        );
+        expect(unknownItem).toBeDefined();
+        expect(unknownItem.playback.isPlayable).toBe(false);
+        expect(unknownItem.playback.message).toContain(
+            "no longer has an attached track source"
+        );
+
+        expect(res.body.pendingTracks[0].playback.isPlayable).toBe(false);
+        expect(res.body.pendingTracks[0].provider.source).toBe("pending");
         expect(res.body.mergedItems[0].type).toBe("pending");
         expect(res.body.mergedItems[1].type).toBe("track");
+    });
+
+    it("resolves remote playlist items to local when a mapping links to a local track", async () => {
+        prisma.userSettings.findUnique.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+            user: { username: "owner" },
+            hiddenByUsers: [],
+            items: [
+                {
+                    id: "pli-yt-1",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-1",
+                    sort: 1,
+                    track: null,
+                    trackTidal: null,
+                    trackYtMusic: {
+                        id: "yt-1",
+                        videoId: "yt-video-1",
+                        title: "Mapped Song",
+                        artist: "Mapped Artist",
+                        album: "Mapped Album",
+                        duration: 201,
+                        thumbnailUrl: "https://yt/thumb.jpg",
+                    },
+                },
+            ],
+            pendingTracks: [],
+        });
+        prisma.trackMapping.findMany
+            .mockResolvedValueOnce([
+                {
+                    id: "map-yt-local",
+                    trackId: "t-local-1",
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-1",
+                    source: "import-match",
+                    confidence: 0.96,
+                    createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    id: "map-yt-local",
+                    stale: false,
+                    confidence: 0.96,
+                    trackId: "t-local-1",
+                    trackTidal: null,
+                    trackYtMusic: {
+                        id: "yt-1",
+                        videoId: "yt-video-1",
+                        duration: 201,
+                    },
+                },
+            ]);
+        prisma.trackYtMusic.findMany.mockResolvedValueOnce([
+            {
+                id: "yt-1",
+                videoId: "yt-video-1",
+                duration: 201,
+            },
+        ]);
+        prisma.track.findMany.mockResolvedValueOnce([
+            {
+                id: "t-local-1",
+                title: "Mapped Song",
+                duration: 201,
+                filePath: "/music/mapped-song.flac",
+                displayTitle: null,
+                album: {
+                    id: "alb-1",
+                    title: "Mapped Album",
+                    coverUrl: "native:albums/alb-1.jpg",
+                    artist: {
+                        id: "art-1",
+                        name: "Mapped Artist",
+                        mbid: null,
+                    },
+                },
+            },
+        ]);
+
+        const req = { user: { id: "u1" }, params: { id: "pl-1" } } as any;
+        const res = createRes();
+        await getPlaylist(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.items[0].provider.source).toBe("local");
+        expect(res.body.items[0].playback.isPlayable).toBe(true);
+        expect(res.body.items[0].track.source).toBe("local");
+        expect(res.body.items[0].track.filePath).toBe(
+            "/music/mapped-song.flac"
+        );
+    });
+
+    it("prefers a local-linked mapping when multiple mappings share the same remote token", async () => {
+        prisma.userSettings.findUnique.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u-conflict",
+            isPublic: false,
+            user: { username: "owner" },
+            hiddenByUsers: [],
+            items: [
+                {
+                    id: "pli-yt-conflict",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-1",
+                    sort: 1,
+                    track: null,
+                    trackTidal: null,
+                    trackYtMusic: {
+                        id: "yt-1",
+                        videoId: "yt-video-1",
+                        title: "Conflict Song",
+                        artist: "Conflict Artist",
+                        album: "Conflict Album",
+                        duration: 200,
+                        thumbnailUrl: "https://yt/conflict.jpg",
+                    },
+                },
+            ],
+            pendingTracks: [],
+        });
+        prisma.trackMapping.findMany
+            .mockResolvedValueOnce([
+                {
+                    id: "map-remote-manual",
+                    trackId: null,
+                    trackTidalId: "tt-remote-only",
+                    trackYtMusicId: "yt-1",
+                    source: "manual",
+                    confidence: 1,
+                    createdAt: new Date("2026-03-04T00:00:00.000Z"),
+                },
+                {
+                    id: "map-local-import",
+                    trackId: "t-local-conflict",
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-1",
+                    source: "import-match",
+                    confidence: 0.8,
+                    createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                },
+            ])
+            .mockImplementationOnce(async (args: any) => {
+                const ids: string[] = args?.where?.id?.in ?? [];
+                if (ids.includes("map-remote-manual")) {
+                    return [
+                        {
+                            id: "map-remote-manual",
+                            stale: false,
+                            confidence: 1,
+                            trackId: null,
+                            trackTidal: {
+                                id: "tt-remote-only",
+                                tidalId: 88888,
+                                duration: 200,
+                            },
+                            trackYtMusic: {
+                                id: "yt-1",
+                                videoId: "yt-video-1",
+                                duration: 200,
+                            },
+                        },
+                    ];
+                }
+                return [
+                    {
+                        id: "map-local-import",
+                        stale: false,
+                        confidence: 0.8,
+                        trackId: "t-local-conflict",
+                        trackTidal: null,
+                        trackYtMusic: {
+                            id: "yt-1",
+                            videoId: "yt-video-1",
+                            duration: 200,
+                        },
+                    },
+                ];
+            });
+        prisma.trackYtMusic.findMany.mockResolvedValueOnce([
+            {
+                id: "yt-1",
+                videoId: "yt-video-1",
+                duration: 200,
+            },
+        ]);
+        prisma.track.findMany.mockResolvedValueOnce([
+            {
+                id: "t-local-conflict",
+                title: "Conflict Song",
+                duration: 200,
+                filePath: "/music/conflict-song.flac",
+                displayTitle: null,
+                album: {
+                    id: "alb-conflict",
+                    title: "Conflict Album",
+                    coverUrl: "native:albums/conflict.jpg",
+                    artist: {
+                        id: "art-conflict",
+                        name: "Conflict Artist",
+                        mbid: null,
+                    },
+                },
+            },
+        ]);
+
+        const req = {
+            user: { id: "u-conflict" },
+            params: { id: "pl-1" },
+        } as any;
+        const res = createRes();
+        await getPlaylist(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.items[0].provider.source).toBe("local");
+        expect(res.body.items[0].playback.isPlayable).toBe(true);
+        expect(res.body.items[0].track.source).toBe("local");
+    });
+
+    it("marks provider-only playlist items unplayable when user lacks provider connectivity", async () => {
+        prisma.userSettings.findUnique.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u-no-provider",
+            isPublic: false,
+            user: { username: "owner" },
+            hiddenByUsers: [],
+            items: [
+                {
+                    id: "pli-tidal-1",
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: "tt-1",
+                    trackYtMusicId: null,
+                    sort: 1,
+                    track: null,
+                    trackTidal: {
+                        id: "tt-1",
+                        tidalId: 991,
+                        title: "Tidal Song",
+                        artist: "Tidal Artist",
+                        album: "Tidal Album",
+                        duration: 245,
+                    },
+                    trackYtMusic: null,
+                },
+            ],
+            pendingTracks: [],
+        });
+        prisma.trackTidal.findMany.mockResolvedValueOnce([
+            {
+                id: "tt-1",
+                tidalId: 991,
+                duration: 245,
+            },
+        ]);
+
+        const req = {
+            user: { id: "u-no-provider" },
+            params: { id: "pl-1" },
+        } as any;
+        const res = createRes();
+        await getPlaylist(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.items[0].provider.source).toBe("tidal");
+        expect(res.body.items[0].playback.isPlayable).toBe(false);
+        expect(res.body.items[0].playback.reason).toBe("provider_unavailable");
+        expect(res.body.items[0].playback.message).toContain("not connected");
+    });
+
+    it("keeps youtube playlist items playable without user youtube oauth token", async () => {
+        prisma.userSettings.findUnique.mockResolvedValueOnce({
+            tidalOAuthJson: null,
+            ytMusicOAuthJson: null,
+        });
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-yt-public",
+            userId: "u-yt-public",
+            isPublic: false,
+            user: { username: "owner" },
+            hiddenByUsers: [],
+            items: [
+                {
+                    id: "pli-yt-1",
+                    playlistId: "pl-yt-public",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-1",
+                    sort: 1,
+                    track: null,
+                    trackTidal: null,
+                    trackYtMusic: {
+                        id: "yt-1",
+                        videoId: "yt-video-1",
+                        title: "YouTube Song",
+                        artist: "YouTube Artist",
+                        album: "YouTube Album",
+                        duration: 219,
+                        thumbnailUrl: "https://yt/thumb.jpg",
+                    },
+                },
+            ],
+            pendingTracks: [],
+        });
+        prisma.trackYtMusic.findMany.mockResolvedValueOnce([
+            {
+                id: "yt-1",
+                videoId: "yt-video-1",
+                duration: 219,
+            },
+        ]);
+
+        const req = {
+            user: { id: "u-yt-public" },
+            params: { id: "pl-yt-public" },
+        } as any;
+        const res = createRes();
+        await getPlaylist(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.items[0].provider.source).toBe("youtube");
+        expect(res.body.items[0].playback.isPlayable).toBe(true);
+        expect(res.body.items[0].track.streamSource).toBe("youtube");
+        expect(res.body.items[0].track.youtubeVideoId).toBe("yt-video-1");
     });
 
     it("validates and updates playlists with ownership checks", async () => {
@@ -645,11 +1157,29 @@ describe("playlists route runtime", () => {
             items: [{ sort: 5 }],
         });
         prisma.track.findUnique.mockResolvedValueOnce({ id: "t-1" });
-        prisma.playlistItem.findUnique.mockResolvedValueOnce({
+        prisma.playlistItem.findFirst.mockResolvedValueOnce({
             id: "pli-existing",
             playlistId: "pl-1",
             trackId: "t-1",
+            trackTidalId: null,
+            trackYtMusicId: null,
             sort: 2,
+            track: {
+                id: "t-1",
+                title: "Track 1",
+                duration: 210,
+                album: {
+                    title: "Album 1",
+                    coverUrl: "native:albums/a1.jpg",
+                    artist: {
+                        id: "artist-1",
+                        name: "Artist 1",
+                        mbid: null,
+                    },
+                },
+            },
+            trackTidal: null,
+            trackYtMusic: null,
         });
         const duplicateReq = {
             user: { id: "u1" },
@@ -667,7 +1197,33 @@ describe("playlists route runtime", () => {
             items: [{ sort: 5 }],
         });
         prisma.track.findUnique.mockResolvedValueOnce({ id: "t-1" });
-        prisma.playlistItem.findUnique.mockResolvedValueOnce(null);
+        prisma.playlistItem.findFirst.mockResolvedValueOnce(null);
+        prisma.$transaction.mockResolvedValueOnce([
+            {
+                id: "pli-1",
+                playlistId: "pl-1",
+                trackId: "t-1",
+                trackTidalId: null,
+                trackYtMusicId: null,
+                sort: 6,
+                track: {
+                    id: "t-1",
+                    title: "Track 1",
+                    duration: 210,
+                    album: {
+                        title: "Album 1",
+                        coverUrl: "native:albums/a1.jpg",
+                        artist: {
+                            id: "artist-1",
+                            name: "Artist 1",
+                            mbid: null,
+                        },
+                    },
+                },
+                trackTidal: null,
+                trackYtMusic: null,
+            },
+        ]);
         const createReq = {
             user: { id: "u1" },
             params: { id: "pl-1" },
@@ -684,6 +1240,11 @@ describe("playlists route runtime", () => {
                     sort: 6,
                 }),
             })
+        );
+        expect(createResValue.body.provider.source).toBe("local");
+        expect(createResValue.body.playback.isPlayable).toBe(true);
+        expect(createResValue.body.track.album.coverArt).toBe(
+            "native:albums/a1.jpg"
         );
     });
 
@@ -709,6 +1270,229 @@ describe("playlists route runtime", () => {
         await addItem(errReq, errRes);
         expect(errRes.statusCode).toBe(500);
         expect(errRes.body).toEqual({ error: "Failed to add track to playlist" });
+    });
+
+    it("requires exactly one item reference key in add-item payloads", async () => {
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                trackId: "t-1",
+                tidalTrackId: 991,
+                title: "Tidal Song",
+                artist: "Tidal Artist",
+                album: "Tidal Album",
+                duration: 245,
+            },
+        } as any;
+        const res = createRes();
+
+        await addItem(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toBe("Invalid request");
+    });
+
+    it("materializes remote tidal items, handles duplicate detection, and normalizes responses", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            items: [{ sort: 5 }],
+        });
+        trackMappingService.ensureRemoteTrack.mockResolvedValueOnce({
+            provider: "tidal",
+            id: "tt-remote-dup",
+            created: false,
+        });
+        prisma.playlistItem.findFirst.mockResolvedValueOnce({
+            id: "pli-remote-dup",
+            playlistId: "pl-1",
+            trackId: null,
+            trackTidalId: "tt-remote-dup",
+            trackYtMusicId: null,
+            sort: 3,
+            track: null,
+            trackTidal: {
+                id: "tt-remote-dup",
+                tidalId: 991,
+                title: "Tidal Song",
+                artist: "Tidal Artist",
+                album: "Tidal Album",
+                duration: 245,
+            },
+            trackYtMusic: null,
+        });
+
+        const duplicateReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                tidalTrackId: 991,
+                title: "Tidal Song",
+                artist: "Tidal Artist",
+                album: "Tidal Album",
+                duration: 245,
+            },
+        } as any;
+        const duplicateRes = createRes();
+        await addItem(duplicateReq, duplicateRes);
+
+        expect(trackMappingService.ensureRemoteTrack).toHaveBeenCalledWith({
+            provider: "tidal",
+            tidalId: 991,
+            videoId: undefined,
+            title: "Tidal Song",
+            artist: "Tidal Artist",
+            album: "Tidal Album",
+            duration: 245,
+            isrc: undefined,
+            quality: undefined,
+            explicit: undefined,
+            thumbnailUrl: undefined,
+        });
+        expect(duplicateRes.statusCode).toBe(200);
+        expect(duplicateRes.body.duplicated).toBe(true);
+        expect(duplicateRes.body.item.provider.source).toBe("tidal");
+        expect(prisma.playlistItem.create).not.toHaveBeenCalled();
+
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            items: [{ sort: 5 }],
+        });
+        trackMappingService.ensureRemoteTrack.mockResolvedValueOnce({
+            provider: "tidal",
+            id: "tt-remote-new",
+            created: true,
+        });
+        prisma.playlistItem.findFirst.mockResolvedValueOnce(null);
+        prisma.$transaction.mockResolvedValueOnce([
+            {
+                id: "pli-remote-new",
+                playlistId: "pl-1",
+                trackId: null,
+                trackTidalId: "tt-remote-new",
+                trackYtMusicId: null,
+                sort: 6,
+                track: null,
+                trackTidal: {
+                    id: "tt-remote-new",
+                    tidalId: 992,
+                    title: "Tidal Song 2",
+                    artist: "Tidal Artist",
+                    album: "Tidal Album",
+                    duration: 244,
+                },
+                trackYtMusic: null,
+            },
+        ]);
+
+        const createReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                tidalTrackId: 992,
+                title: "Tidal Song 2",
+                artist: "Tidal Artist",
+                album: "Tidal Album",
+                duration: 244,
+            },
+        } as any;
+        const createResValue = createRes();
+        await addItem(createReq, createResValue);
+
+        expect(createResValue.statusCode).toBe(200);
+        expect(createResValue.body.provider.source).toBe("tidal");
+        expect(createResValue.body.track.streamSource).toBe("tidal");
+        expect(prisma.playlistItem.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: "tt-remote-new",
+                    trackYtMusicId: null,
+                    sort: 6,
+                }),
+            })
+        );
+    });
+
+    it("materializes remote youtube items and normalizes add responses", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            items: [{ sort: 2 }],
+        });
+        trackMappingService.ensureRemoteTrack.mockResolvedValueOnce({
+            provider: "youtube",
+            id: "yt-row-1",
+            created: true,
+        });
+        prisma.playlistItem.findFirst.mockResolvedValueOnce(null);
+        prisma.$transaction.mockResolvedValueOnce([
+            {
+                id: "pli-yt-1",
+                playlistId: "pl-1",
+                trackId: null,
+                trackTidalId: null,
+                trackYtMusicId: "yt-row-1",
+                sort: 3,
+                track: null,
+                trackTidal: null,
+                trackYtMusic: {
+                    id: "yt-row-1",
+                    videoId: "yt-video-7",
+                    title: "YT Song",
+                    artist: "YT Artist",
+                    album: "YT Album",
+                    duration: 199,
+                    thumbnailUrl: "https://yt/thumb.jpg",
+                },
+            },
+        ]);
+
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                youtubeVideoId: "yt-video-7",
+                title: "YT Song",
+                artist: "YT Artist",
+                album: "YT Album",
+                duration: 199,
+                thumbnailUrl: "https://yt/thumb.jpg",
+            },
+        } as any;
+        const res = createRes();
+        await addItem(req, res);
+
+        expect(trackMappingService.ensureRemoteTrack).toHaveBeenCalledWith({
+            provider: "youtube",
+            tidalId: undefined,
+            videoId: "yt-video-7",
+            title: "YT Song",
+            artist: "YT Artist",
+            album: "YT Album",
+            duration: 199,
+            isrc: undefined,
+            quality: undefined,
+            explicit: undefined,
+            thumbnailUrl: "https://yt/thumb.jpg",
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.body.provider.source).toBe("youtube");
+        expect(res.body.track.youtubeVideoId).toBe("yt-video-7");
+        expect(prisma.playlistItem.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    playlistId: "pl-1",
+                    trackId: null,
+                    trackTidalId: null,
+                    trackYtMusicId: "yt-row-1",
+                    sort: 3,
+                }),
+            })
+        );
     });
 
     it("removes and reorders playlist items", async () => {
@@ -739,6 +1523,13 @@ describe("playlists route runtime", () => {
             userId: "u1",
             isPublic: false,
         });
+        prisma.playlistItem.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "pli-local-remove",
+                playlistId: "pl-1",
+                trackId: "t-1",
+            });
         const removeOkReq = {
             user: { id: "u1" },
             params: { id: "pl-1", trackId: "t-1" },
@@ -762,6 +1553,10 @@ describe("playlists route runtime", () => {
             userId: "u1",
             isPublic: false,
         });
+        prisma.playlistItem.findMany.mockResolvedValueOnce([
+            { trackId: "t-2" },
+            { trackId: "t-1" },
+        ]);
         const reorderReq = {
             user: { id: "u1" },
             params: { id: "pl-1" },
@@ -772,6 +1567,166 @@ describe("playlists route runtime", () => {
         expect(reorderRes.statusCode).toBe(200);
         expect(prisma.playlistItem.update).toHaveBeenCalledTimes(2);
         expect(prisma.$transaction).toHaveBeenCalled();
+    });
+
+    it("removes by playlist-item id first, then falls back to local track id, and returns 404 when missing", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findFirst.mockResolvedValueOnce({
+            id: "pli-remote-1",
+            playlistId: "pl-1",
+            trackId: null,
+        });
+
+        const byItemIdReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "pli-remote-1" },
+        } as any;
+        const byItemIdRes = createRes();
+        await removeItem(byItemIdReq, byItemIdRes);
+
+        expect(byItemIdRes.statusCode).toBe(200);
+        expect(prisma.playlistItem.delete).toHaveBeenNthCalledWith(1, {
+            where: { id: "pli-remote-1" },
+        });
+
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "pli-local-2",
+                playlistId: "pl-1",
+                trackId: "t-1",
+            });
+
+        const byTrackIdReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "t-1" },
+        } as any;
+        const byTrackIdRes = createRes();
+        await removeItem(byTrackIdReq, byTrackIdRes);
+
+        expect(byTrackIdRes.statusCode).toBe(200);
+        expect(prisma.playlistItem.delete).toHaveBeenNthCalledWith(2, {
+            where: { id: "pli-local-2" },
+        });
+
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
+
+        const missingReq = {
+            user: { id: "u1" },
+            params: { id: "pl-1", trackId: "missing" },
+        } as any;
+        const missingRes = createRes();
+        await removeItem(missingReq, missingRes);
+
+        expect(missingRes.statusCode).toBe(404);
+        expect(missingRes.body).toEqual({ error: "Playlist item not found" });
+    });
+
+    it("prefers itemIds over trackIds for reorder payloads", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findMany.mockResolvedValueOnce([
+            { id: "pli-2" },
+            { id: "pli-1" },
+        ]);
+
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                itemIds: ["pli-2", "pli-1"],
+                trackIds: ["t-99", "t-98"],
+            },
+        } as any;
+        const res = createRes();
+        await reorderItems(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(prisma.playlistItem.update).toHaveBeenNthCalledWith(1, {
+            where: { id: "pli-2" },
+            data: { sort: 0 },
+        });
+        expect(prisma.playlistItem.update).toHaveBeenNthCalledWith(2, {
+            where: { id: "pli-1" },
+            data: { sort: 1 },
+        });
+    });
+
+    it("returns 404 when reorder itemIds are outside the playlist scope", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findMany.mockResolvedValueOnce([{ id: "pli-1" }]);
+
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                itemIds: ["pli-2", "pli-1"],
+            },
+        } as any;
+        const res = createRes();
+        await reorderItems(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({
+            error: "One or more playlist items were not found in this playlist",
+        });
+        expect(prisma.playlistItem.update).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when reorder trackIds include entries not found in the playlist", async () => {
+        prisma.playlist.findUnique.mockResolvedValueOnce({
+            id: "pl-1",
+            userId: "u1",
+            isPublic: false,
+        });
+        prisma.playlistItem.findMany.mockResolvedValueOnce([{ trackId: "t-1" }]);
+
+        const req = {
+            user: { id: "u1" },
+            params: { id: "pl-1" },
+            body: {
+                trackIds: ["t-1", "tidal:991"],
+            },
+        } as any;
+        const res = createRes();
+        await reorderItems(req, res);
+
+        expect(prisma.playlistItem.findMany).toHaveBeenCalledWith({
+            where: {
+                playlistId: "pl-1",
+                trackId: { in: ["t-1", "tidal:991"] },
+            },
+            select: { trackId: true },
+        });
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({
+            error: "One or more tracks were not found in this playlist",
+        });
+        expect(prisma.playlistItem.update).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it("handles remove and reorder server-error/missing/denied branches", async () => {
@@ -818,6 +1773,10 @@ describe("playlists route runtime", () => {
             userId: "u1",
             isPublic: false,
         });
+        prisma.playlistItem.findMany.mockResolvedValueOnce([
+            { trackId: "t-2" },
+            { trackId: "t-1" },
+        ]);
         prisma.$transaction.mockRejectedValueOnce(new Error("reorder failed"));
         const reorderErrReq = {
             user: { id: "u1" },
@@ -1440,7 +2399,6 @@ describe("playlists route runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to retry download",
-            details: "db exploded",
         });
     });
 

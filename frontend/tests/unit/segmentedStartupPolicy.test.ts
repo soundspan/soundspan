@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
     resolveProactiveSegmentedHandoffEligibility,
     resolveSegmentedPrewarmMaxRetries,
-} from "../../lib/audio-engine/segmentedStartupPolicy.ts";
+} from "../../lib/audio-engine/segmentedStartupPolicy";
 
 test("resolveSegmentedPrewarmMaxRetries returns larger budget for startup background", () => {
     assert.equal(resolveSegmentedPrewarmMaxRetries("startup_background"), 12);

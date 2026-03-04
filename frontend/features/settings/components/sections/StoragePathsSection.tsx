@@ -10,6 +10,9 @@ interface StoragePathsSectionProps {
     isTesting: boolean;
 }
 
+/**
+ * Renders the StoragePathsSection component.
+ */
 export function StoragePathsSection({ settings, onUpdate }: StoragePathsSectionProps) {
     return (
         <SettingsSection 

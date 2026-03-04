@@ -111,6 +111,9 @@ async function probeRedis(timeoutMs: number): Promise<DependencyStatus> {
     }
 }
 
+/**
+ * Represents the DependencyReadinessTracker class.
+ */
 export class DependencyReadinessTracker {
     private snapshot: DependencyReadinessSnapshot = initialSnapshot();
     private inFlightProbe: Promise<DependencyReadinessSnapshot> | null = null;
@@ -189,6 +192,9 @@ export class DependencyReadinessTracker {
     }
 }
 
+/**
+ * Executes createDependencyReadinessTracker.
+ */
 export function createDependencyReadinessTracker(
     label: string
 ): DependencyReadinessTracker {

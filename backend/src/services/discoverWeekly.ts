@@ -186,6 +186,9 @@ function getTierFromSimilarity(
     return "wildcard";
 }
 
+/**
+ * Represents the DiscoverWeeklyService class.
+ */
 export class DiscoverWeeklyService {
     /**
      * Main entry: Generate Discovery Weekly

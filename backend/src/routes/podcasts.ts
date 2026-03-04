@@ -123,7 +123,6 @@ router.post("/sync-covers", requireAuth, async (req, res) => {
         logger.error("Podcast cover sync failed:", error);
         res.status(500).json({
             error: "Sync failed",
-            message: error.message,
         });
     }
 });
@@ -214,7 +213,6 @@ router.get("/", async (req, res) => {
         logger.error("Error fetching podcasts:", error);
         res.status(500).json({
             error: "Failed to fetch podcasts",
-            message: error.message,
         });
     }
 });
@@ -645,7 +643,6 @@ router.get("/preview/:itunesId", async (req, res) => {
         logger.error("Error previewing podcast:", error);
         res.status(500).json({
             error: "Failed to preview podcast",
-            message: error.message,
         });
     }
 });
@@ -761,7 +758,6 @@ router.get("/:id", async (req, res) => {
         logger.error("Error fetching podcast:", error);
         res.status(500).json({
             error: "Failed to fetch podcast",
-            message: error.message,
         });
     }
 });
@@ -964,7 +960,6 @@ router.post("/subscribe", async (req, res) => {
         logger.error("Error subscribing to podcast:", error);
         res.status(500).json({
             error: "Failed to subscribe to podcast",
-            message: error.message,
         });
     }
 });
@@ -1049,7 +1044,6 @@ router.delete("/:id/unsubscribe", async (req, res) => {
         logger.error("Error unsubscribing from podcast:", error);
         res.status(500).json({
             error: "Failed to unsubscribe",
-            message: error.message,
         });
     }
 });
@@ -1108,7 +1102,6 @@ router.get("/:id/refresh", async (req, res) => {
         logger.error("Error refreshing podcast:", error);
         res.status(500).json({
             error: "Failed to refresh podcast",
-            message: error.message,
         });
     }
 });
@@ -1597,7 +1590,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
         if (!res.headersSent) {
             res.status(500).json({
                 error: "Failed to stream episode",
-                message: error.message,
             });
         }
     }
@@ -1702,7 +1694,6 @@ router.post("/:podcastId/episodes/:episodeId/progress", async (req, res) => {
         logger.error("Error updating progress:", error);
         res.status(500).json({
             error: "Failed to update progress",
-            message: error.message,
         });
     }
 });
@@ -1764,7 +1755,6 @@ router.delete("/:podcastId/episodes/:episodeId/progress", async (req, res) => {
         logger.error("Error removing progress:", error);
         res.status(500).json({
             error: "Failed to remove progress",
-            message: error.message,
         });
     }
 });
@@ -1910,7 +1900,6 @@ router.get("/:id/similar", async (req, res) => {
         logger.error("Error fetching similar podcasts:", error);
         res.status(500).json({
             error: "Failed to fetch similar podcasts",
-            message: error.message,
         });
     }
 });
@@ -2012,7 +2001,6 @@ router.get("/:id/cover", async (req, res) => {
         logger.error("Error serving podcast cover:", error);
         res.status(500).json({
             error: "Failed to serve cover",
-            message: error.message,
         });
     }
 });
@@ -2114,7 +2102,6 @@ router.get("/episodes/:episodeId/cover", async (req, res) => {
         logger.error("Error serving episode cover:", error);
         res.status(500).json({
             error: "Failed to serve cover",
-            message: error.message,
         });
     }
 });
