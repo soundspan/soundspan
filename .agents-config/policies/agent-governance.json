@@ -1018,11 +1018,28 @@
           "label": "root",
           "dir": ".",
           "expectedName": "soundspan"
+        },
+        {
+          "label": "backend",
+          "dir": "backend",
+          "expectedName": "soundspan-backend"
+        },
+        {
+          "label": "frontend",
+          "dir": "frontend",
+          "expectedName": "soundspan-frontend"
         }
       ],
       "chartDir": "charts/soundspan",
       "releaseImageSections": [
-        "app"
+        "aio",
+        "backend",
+        "backendWorker",
+        "frontend",
+        "tidalSidecar",
+        "ytmusicStreamer",
+        "audioAnalyzer",
+        "audioAnalyzerClap"
       ]
     },
     "profiles": {
