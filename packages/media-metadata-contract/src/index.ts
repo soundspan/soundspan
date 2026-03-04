@@ -20,7 +20,7 @@ export interface CanonicalMediaProviderIdentity {
 }
 
 export interface LegacyStreamFields {
-    streamSource?: "tidal" | "youtube";
+    streamSource?: "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
 }

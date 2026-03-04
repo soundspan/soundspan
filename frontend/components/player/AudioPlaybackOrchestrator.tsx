@@ -89,7 +89,7 @@ import {
 interface RuntimeProviderTrack {
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "local" | "tidal" | "youtube";
+    streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
 }
@@ -100,7 +100,7 @@ function getNextTrackInfo(
         filePath?: string;
         mediaSource?: CanonicalMediaSource;
         provider?: CanonicalMediaProviderIdentity;
-        streamSource?: "local" | "tidal" | "youtube";
+        streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
         tidalTrackId?: number;
         youtubeVideoId?: string;
     }[],
@@ -113,7 +113,7 @@ function getNextTrackInfo(
     filePath?: string;
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "local" | "tidal" | "youtube";
+    streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
 } | null {
@@ -4201,9 +4201,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             });
 
             // Show a descriptive toast for YouTube-sourced tracks that fail
-            if (playbackType === "track" && currentTrack?.streamSource === "youtube") {
+            if (playbackType === "track" && (currentTrack?.streamSource === "youtube" || currentTrack?.streamSource === "youtube-direct")) {
+                const source = currentTrack.streamSource === "youtube-direct" ? "YouTube" : "YouTube Music";
                 toast.error(
-                    `Couldn't stream "${currentTrack.title}" from YouTube Music — it may be age-restricted or unavailable.`,
+                    `Couldn't stream "${currentTrack.title}" from ${source} — it may be age-restricted or unavailable.`,
                     { duration: 5000 }
                 );
             }
@@ -4883,6 +4884,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 streamUrl = api.getTidalStreamUrl(currentTrack.tidalTrackId);
             } else if (currentTrack.streamSource === "youtube" && currentTrack.youtubeVideoId) {
                 streamUrl = api.getYtMusicStreamUrl(currentTrack.youtubeVideoId);
+            } else if (currentTrack.streamSource === "youtube-direct" && currentTrack.youtubeVideoId) {
+                streamUrl = api.getYouTubeStreamUrl(currentTrack.youtubeVideoId);
             } else {
                 streamUrl = api.getStreamUrl(currentTrack.id);
             }
@@ -4953,8 +4956,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             setDuration(fallbackDuration);
 
             let format = "mp3";
-            if (currentTrack?.streamSource === "tidal" || currentTrack?.streamSource === "youtube") {
-                // TIDAL and YouTube Music streams are AAC in MP4 container
+            if (currentTrack?.streamSource === "tidal" || currentTrack?.streamSource === "youtube" || currentTrack?.streamSource === "youtube-direct") {
+                // TIDAL and YouTube streams are AAC in MP4 container
                 format = "mp4";
             } else {
                 const filePath = currentTrack?.filePath || "";
@@ -5730,10 +5733,11 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     // Show a descriptive toast for YouTube-sourced tracks that fail to load
                     if (
                         playbackType === "track" &&
-                        currentTrack?.streamSource === "youtube"
+                        (currentTrack?.streamSource === "youtube" || currentTrack?.streamSource === "youtube-direct")
                     ) {
+                        const source = currentTrack.streamSource === "youtube-direct" ? "YouTube" : "YouTube Music";
                         toast.error(
-                            `Couldn't stream "${currentTrack.title}" from YouTube Music — it may be age-restricted or unavailable.`,
+                            `Couldn't stream "${currentTrack.title}" from ${source} — it may be age-restricted or unavailable.`,
                             { duration: 5000 }
                         );
                     }
@@ -5980,6 +5984,12 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             nextTrack.youtubeVideoId
         ) {
             streamUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId);
+            format = "mp4";
+        } else if (
+            nextTrack.streamSource === "youtube-direct" &&
+            nextTrack.youtubeVideoId
+        ) {
+            streamUrl = api.getYouTubeStreamUrl(nextTrack.youtubeVideoId);
             format = "mp4";
         } else {
             streamUrl = api.getStreamUrl(nextTrack.id);
