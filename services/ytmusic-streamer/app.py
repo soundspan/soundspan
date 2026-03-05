@@ -1815,6 +1815,14 @@ async def library_albums(user_id: str = Query(...), limit: int = 100, order: str
 # TODO: This prefix list is best-effort based on known YT Music patterns. If YouTube
 # introduces new auto-generated playlist prefixes, mixes with those IDs will be
 # silently excluded. Monitor for missing mixes and update as needed.
+#
+# TODO(#813): get_library_playlists() currently fails for all users due to
+# ytmusicapi issue #813 (OAuth + WEB_REMIX returns HTTP 400). The TV client
+# fallback also fails because ytmusicapi's parser expects WEB_REMIX response
+# structure. Additionally, personalized mixes (My Supermix, Discover Mix, etc.)
+# live on the home feed, not in the library — so even when #813 is resolved,
+# this endpoint may only surface saved playlists, not personalized mixes.
+# Revisit when ytmusicapi resolves #813 or exposes a dedicated mixes endpoint.
 _AUTO_PLAYLIST_PREFIXES = ("RDTMAK", "RDEM", "RDAMPL", "RDAuto", "RDCLAK", "RDAO")
 _SPECIAL_PLAYLIST_IDS = {"LM", "SE", "RDPN"}
 

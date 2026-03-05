@@ -3,6 +3,11 @@
  *
  * Shows a carousel of personal YT Music mixes using HorizontalCarousel.
  * Only renders when the user has YT Music OAuth and mixes are available.
+ *
+ * TODO(#813): Currently dormant. The sidecar's get_library_playlists() fails
+ * due to ytmusicapi #813 (OAuth + WEB_REMIX → HTTP 400). The backend route
+ * gracefully returns an empty array on 401, so this section simply doesn't
+ * render. Revisit when ytmusicapi resolves #813.
  */
 
 import Link from "next/link";
