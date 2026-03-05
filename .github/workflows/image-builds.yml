@@ -1,0 +1,357 @@
+name: Image Builds
+
+on:
+    push:
+        branches: [main, "feature/**"]
+    release:
+        types: [published]
+    workflow_dispatch:
+
+jobs:
+    validate-release-tag:
+        name: Validate release tag
+        runs-on: ubuntu-latest
+        outputs:
+            release_tag: ${{ steps.release-meta.outputs.release_tag }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Validate release metadata
+              id: release-meta
+              run: |
+                  if [ "${GITHUB_EVENT_NAME}" != "release" ]; then
+                    echo "release_tag=" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+
+                  RELEASE_TAG="${{ github.event.release.tag_name }}"
+                  if [ -z "${RELEASE_TAG}" ]; then
+                    echo "Release tag is missing." >&2
+                    exit 1
+                  fi
+                  if [[ "${RELEASE_TAG}" == v* ]]; then
+                    echo "Release tags must be plain semantic versions without a 'v' prefix (example: 1.2.3)." >&2
+                    exit 1
+                  fi
+                  if ! [[ "${RELEASE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                    echo "Release tag must be container-tag-compatible semantic versioning (example: 1.2.3 or 1.2.3-rc.1)." >&2
+                    exit 1
+                  fi
+
+                  FRONTEND_VERSION="$(node -p "require('./frontend/package.json').version")"
+                  if [ "${FRONTEND_VERSION}" != "${RELEASE_TAG}" ]; then
+                    echo "frontend/package.json version (${FRONTEND_VERSION}) must match release tag (${RELEASE_TAG})." >&2
+                    exit 1
+                  fi
+
+                  echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+
+    build-images:
+        name: ${{ matrix.job_name }}
+        runs-on: ${{ matrix.runs_on }}
+        needs: [validate-release-tag]
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - id: aio
+                      job_name: Build & Push AIO Image
+                      runs_on: self-hosted
+                      image_name: ""
+                      image_repo_mode: root
+                      context: .
+                      file: ./Dockerfile
+                      target: ""
+                      build_contexts: ""
+                      include_hf_token: true
+                      needs_node: true
+                      include_frontend_build_args: true
+                      cache_scope: aio
+                    - id: backend
+                      job_name: Build & Push Backend Image
+                      runs_on: ubuntu-latest
+                      image_name: backend
+                      image_repo_mode: suffixed
+                      context: ./backend
+                      file: ./backend/Dockerfile
+                      target: api-runtime
+                      build_contexts: media-metadata-contract=./packages/media-metadata-contract
+                      include_hf_token: false
+                      needs_node: false
+                      include_frontend_build_args: false
+                      cache_scope: backend
+                    - id: backend-worker
+                      job_name: Build & Push Backend Worker Image
+                      runs_on: ubuntu-latest
+                      image_name: backend-worker
+                      image_repo_mode: suffixed
+                      context: ./backend
+                      file: ./backend/Dockerfile
+                      target: worker-runtime
+                      build_contexts: media-metadata-contract=./packages/media-metadata-contract
+                      include_hf_token: false
+                      needs_node: false
+                      include_frontend_build_args: false
+                      cache_scope: backend-worker
+                    - id: frontend
+                      job_name: Build & Push Frontend Image
+                      runs_on: ubuntu-latest
+                      image_name: frontend
+                      image_repo_mode: suffixed
+                      context: ./frontend
+                      file: ./frontend/Dockerfile
+                      target: ""
+                      build_contexts: media-metadata-contract=./packages/media-metadata-contract
+                      include_hf_token: false
+                      needs_node: true
+                      include_frontend_build_args: true
+                      cache_scope: frontend
+                    - id: audio-analyzer
+                      job_name: Build & Push Audio Analyzer Image
+                      runs_on: ubuntu-latest
+                      image_name: audio-analyzer
+                      image_repo_mode: suffixed
+                      context: .
+                      file: ./services/audio-analyzer/Dockerfile
+                      target: ""
+                      build_contexts: ""
+                      include_hf_token: true
+                      needs_node: false
+                      include_frontend_build_args: false
+                      cache_scope: audio-analyzer
+                    - id: audio-analyzer-clap
+                      job_name: Build & Push CLAP Image
+                      runs_on: self-hosted
+                      image_name: audio-analyzer-clap
+                      image_repo_mode: suffixed
+                      context: .
+                      file: ./services/audio-analyzer-clap/Dockerfile
+                      target: ""
+                      build_contexts: ""
+                      include_hf_token: true
+                      needs_node: false
+                      include_frontend_build_args: false
+                      cache_scope: audio-analyzer-clap
+                    - id: tidal-downloader
+                      job_name: Build & Push TIDAL Downloader Image
+                      runs_on: ubuntu-latest
+                      image_name: tidal-downloader
+                      image_repo_mode: suffixed
+                      context: .
+                      file: ./services/tidal-downloader/Dockerfile
+                      target: ""
+                      build_contexts: ""
+                      include_hf_token: false
+                      needs_node: false
+                      include_frontend_build_args: false
+                      cache_scope: tidal-downloader
+                    - id: ytmusic-streamer
+                      job_name: Build & Push YTMusic Streamer Image
+                      runs_on: ubuntu-latest
+                      image_name: ytmusic-streamer
+                      image_repo_mode: suffixed
+                      context: .
+                      file: ./services/ytmusic-streamer/Dockerfile
+                      target: ""
+                      build_contexts: ""
+                      include_hf_token: false
+                      needs_node: false
+                      include_frontend_build_args: false
+                      cache_scope: ytmusic-streamer
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - id: lower-repo
+              name: Repository to lowercase
+              run: |
+                  echo "GHCR_REPO=ghcr.io/${GITHUB_REPOSITORY@L}" >> "$GITHUB_ENV"
+
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              if: ${{ matrix.needs_node }}
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Self-hosted pre-build cache trim (safe)
+              if: ${{ contains(runner.labels, 'self-hosted') }}
+              run: |
+                  set -euo pipefail
+                  # Prune old BuildKit cache; keeps recent cache for faster rebuilds.
+                  docker buildx prune --all --force --filter "until=168h" || true
+
+                  # Prune old classic builder cache (safe; no volumes).
+                  docker builder prune --all --force --filter "until=168h" || true
+
+                  # Remove stale dangling images older than a week (untagged only).
+                  docker image prune --force --filter "until=168h" || true
+
+                  # Remove exited buildx/buildkit containers left from interrupted runs.
+                  docker ps -a --filter "name=buildx_buildkit" --filter "status=exited" -q | xargs -r docker rm -v || true
+
+            - name: Set up Buildx
+              id: buildx
+              uses: docker/setup-buildx-action@v3
+              with:
+                  cleanup: true
+
+            - name: Login to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Get short SHA
+              id: sha
+              run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+            - name: Determine image tags
+              id: tag-config
+              run: |
+                  IMAGE_REPO="${GHCR_REPO}"
+                  if [ "${{ matrix.image_repo_mode }}" = "suffixed" ]; then
+                    IMAGE_REPO="${GHCR_REPO}-${{ matrix.image_name }}"
+                  fi
+                  echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
+
+                  if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+                    RELEASE_TAG="${{ needs.validate-release-tag.outputs.release_tag }}"
+                    if [ -z "${RELEASE_TAG}" ]; then
+                      echo "Release tag is missing." >&2
+                      exit 1
+                    fi
+
+                    if [ "${{ matrix.include_frontend_build_args }}" = "true" ]; then
+                      echo "frontend_build_type=release" >> "$GITHUB_OUTPUT"
+                      echo "frontend_app_version=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+                    fi
+
+                    echo "version_label=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+                    if [[ "${RELEASE_TAG}" == *-* ]]; then
+                      {
+                        echo "tags<<EOF"
+                        echo "${IMAGE_REPO}:${RELEASE_TAG}"
+                        echo "EOF"
+                      } >> "$GITHUB_OUTPUT"
+                    else
+                      {
+                        echo "tags<<EOF"
+                        echo "${IMAGE_REPO}:latest"
+                        echo "${IMAGE_REPO}:${RELEASE_TAG}"
+                        echo "EOF"
+                      } >> "$GITHUB_OUTPUT"
+                    fi
+                  else
+                    if [ "${GITHUB_REF_NAME}" = "main" ]; then
+                      CHANNEL="main"
+                    else
+                      CHANNEL="develop"
+                    fi
+
+                    echo "version_label=${CHANNEL}-${{ steps.sha.outputs.short }}" >> "$GITHUB_OUTPUT"
+                    if [ "${{ matrix.include_frontend_build_args }}" = "true" ]; then
+                      echo "frontend_build_type=nightly" >> "$GITHUB_OUTPUT"
+                      echo "frontend_app_version=" >> "$GITHUB_OUTPUT"
+                    fi
+                    {
+                      echo "tags<<EOF"
+                      echo "${IMAGE_REPO}:${CHANNEL}"
+                      echo "${IMAGE_REPO}:${CHANNEL}-${{ steps.sha.outputs.short }}"
+                      echo "EOF"
+                    } >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Prepare optional build inputs
+              id: build-inputs
+              run: |
+                  {
+                    echo "build_args<<EOF"
+                    if [ "${{ matrix.include_frontend_build_args }}" = "true" ]; then
+                      echo "NEXT_PUBLIC_BUILD_TYPE=${{ steps.tag-config.outputs.frontend_build_type }}"
+                      echo "NEXT_PUBLIC_APP_VERSION=${{ steps.tag-config.outputs.frontend_app_version }}"
+                    fi
+                    echo "EOF"
+
+                    echo "build_secrets<<EOF"
+                    if [ "${{ matrix.include_hf_token }}" = "true" ]; then
+                      echo "hf_token=${{ secrets.HF_TOKEN }}"
+                    fi
+                    echo "EOF"
+                  } >> "$GITHUB_OUTPUT"
+
+            - name: Build and push image (with target)
+              if: ${{ matrix.target != '' }}
+              uses: docker/build-push-action@v5
+              with:
+                  context: ${{ matrix.context }}
+                  file: ${{ matrix.file }}
+                  build-contexts: ${{ matrix.build_contexts }}
+                  target: ${{ matrix.target }}
+                  push: true
+                  build-args: ${{ steps.build-inputs.outputs.build_args }}
+                  secrets: ${{ steps.build-inputs.outputs.build_secrets }}
+                  tags: ${{ steps.tag-config.outputs.tags }}
+                  labels: |
+                      org.opencontainers.image.revision=${{ github.sha }}
+                      org.opencontainers.image.version=${{ steps.tag-config.outputs.version_label }}
+                  cache-from: type=gha,scope=${{ matrix.cache_scope }}
+                  cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+                  # ARM64 disabled due to QEMU emulation issues with npm packages
+                  platforms: linux/amd64
+
+            - name: Build and push image
+              if: ${{ matrix.target == '' }}
+              uses: docker/build-push-action@v5
+              with:
+                  context: ${{ matrix.context }}
+                  file: ${{ matrix.file }}
+                  build-contexts: ${{ matrix.build_contexts }}
+                  push: true
+                  build-args: ${{ steps.build-inputs.outputs.build_args }}
+                  secrets: ${{ steps.build-inputs.outputs.build_secrets }}
+                  tags: ${{ steps.tag-config.outputs.tags }}
+                  labels: |
+                      org.opencontainers.image.revision=${{ github.sha }}
+                      org.opencontainers.image.version=${{ steps.tag-config.outputs.version_label }}
+                  cache-from: type=gha,scope=${{ matrix.cache_scope }}
+                  cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+                  # ARM64 disabled due to QEMU emulation issues with npm packages
+                  platforms: linux/amd64
+
+            - name: Self-hosted post-build cleanup (safe)
+              if: ${{ always() && contains(runner.labels, 'self-hosted') }}
+              run: |
+                  set -euo pipefail
+                  BUILDER_NAME="${{ steps.buildx.outputs.name }}"
+                  echo "Container disk usage before cleanup:"
+                  docker system df || true
+
+                  # Remove this workflow's ephemeral Buildx builder if it still exists.
+                  if [ -n "${BUILDER_NAME}" ]; then
+                      docker buildx rm "${BUILDER_NAME}" >/dev/null 2>&1 || true
+                  fi
+
+                  # Prune old BuildKit cache; keeps recent cache for faster rebuilds.
+                  docker buildx prune --all --force --filter "until=168h" || true
+
+                  # Prune old classic builder cache (safe; no volumes).
+                  docker builder prune --all --force --filter "until=168h" || true
+
+                  # Remove stale dangling images older than a week (untagged only).
+                  docker image prune --force --filter "until=168h" || true
+
+                  # Remove exited buildx/buildkit containers left from interrupted runs.
+                  docker ps -a --filter "name=buildx_buildkit" --filter "status=exited" -q | xargs -r docker rm -v || true
+
+                  echo "Container disk usage after cleanup:"
+                  docker system df || true
