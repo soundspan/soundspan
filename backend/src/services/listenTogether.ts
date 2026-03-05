@@ -13,6 +13,7 @@ import { logger } from "../utils/logger";
 import { trackMappingService } from "./trackMappingService";
 import {
     groupManager,
+    MAX_QUEUE_SIZE,
     type SyncQueueItem,
     type GroupSnapshot,
     GroupError,
@@ -342,7 +343,8 @@ export async function createGroup(
         Array.isArray(options.queueTracks) && options.queueTracks.length > 0
             ? options.queueTracks
             : (options.queueTrackIds ?? []).map((trackId) => ({ trackId }));
-    const initialQueue = await validateQueueTracks(queueInputs);
+    const validatedQueue = await validateQueueTracks(queueInputs);
+    const initialQueue = validatedQueue.slice(0, MAX_QUEUE_SIZE);
     const requestedTrackId = options.currentTrackId;
     const requestedTrackIndex = requestedTrackId
         ? initialQueue.findIndex(
