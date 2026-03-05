@@ -12,8 +12,8 @@ Scope:
 
 | Area | Implemented Endpoints | Documented Endpoints | Covered Implemented Endpoints | Missing OpenAPI Endpoints | Undocumentable Endpoints | Coverage |
 | --- | --- | --- | --- | --- | --- | --- |
-| Backend API | 375 | 400 | 375 | 0 | 65 | 100.0% |
-| **Total** | **375** | **400** | **375** | **0** | **65** | **100.0%** |
+| Backend API | 376 | 401 | 376 | 0 | 65 | 100.0% |
+| **Total** | **376** | **401** | **376** | **0** | **65** | **100.0%** |
 
 ## Missing OpenAPI Endpoint Docs
 
@@ -176,32 +176,33 @@ _None._
 | `GET` | `/api/auth/me` | `backend/src/routes/auth.ts:359` |
 | `GET` | `/api/auth/subsonic-password` | `backend/src/routes/auth.ts:1501` |
 | `GET` | `/api/auth/users` | `backend/src/routes/auth.ts:540` |
-| `GET` | `/api/browse/all` | `backend/src/routes/browse.ts:414` |
-| `GET` | `/api/browse/genres` | `backend/src/routes/browse.ts:348` |
-| `GET` | `/api/browse/genres/{id}` | `backend/src/routes/browse.ts:396` |
-| `GET` | `/api/browse/genres/{id}/playlists` | `backend/src/routes/browse.ts:372` |
-| `GET` | `/api/browse/playlists/{id}` | `backend/src/routes/browse.ts:270` |
-| `GET` | `/api/browse/playlists/featured` | `backend/src/routes/browse.ts:228` |
-| `GET` | `/api/browse/playlists/search` | `backend/src/routes/browse.ts:246` |
-| `GET` | `/api/browse/radios` | `backend/src/routes/browse.ts:288` |
-| `GET` | `/api/browse/radios/{id}` | `backend/src/routes/browse.ts:330` |
-| `GET` | `/api/browse/radios/by-genre` | `backend/src/routes/browse.ts:306` |
-| `GET` | `/api/browse/tidal/explore` | `backend/src/routes/browse.ts:1103` |
-| `GET` | `/api/browse/tidal/genre-playlists` | `backend/src/routes/browse.ts:1280` |
-| `GET` | `/api/browse/tidal/genres` | `backend/src/routes/browse.ts:1145` |
-| `GET` | `/api/browse/tidal/home` | `backend/src/routes/browse.ts:1061` |
-| `GET` | `/api/browse/tidal/image` | `backend/src/routes/browse.ts:1006` |
-| `GET` | `/api/browse/tidal/mix/{id}` | `backend/src/routes/browse.ts:1399` |
-| `GET` | `/api/browse/tidal/mixes` | `backend/src/routes/browse.ts:1229` |
-| `GET` | `/api/browse/tidal/moods` | `backend/src/routes/browse.ts:1187` |
-| `GET` | `/api/browse/tidal/playlist/{id}` | `backend/src/routes/browse.ts:1342` |
-| `GET` | `/api/browse/ytmusic/album/{id}` | `backend/src/routes/browse.ts:785` |
-| `GET` | `/api/browse/ytmusic/categories` | `backend/src/routes/browse.ts:612` |
-| `GET` | `/api/browse/ytmusic/charts` | `backend/src/routes/browse.ts:572` |
-| `GET` | `/api/browse/ytmusic/home` | `backend/src/routes/browse.ts:657` |
-| `GET` | `/api/browse/ytmusic/image` | `backend/src/routes/browse.ts:171` |
-| `GET` | `/api/browse/ytmusic/mood-playlists` | `backend/src/routes/browse.ts:720` |
-| `GET` | `/api/browse/ytmusic/playlist/{id}` | `backend/src/routes/browse.ts:868` |
+| `GET` | `/api/browse/all` | `backend/src/routes/browse.ts:421` |
+| `GET` | `/api/browse/genres` | `backend/src/routes/browse.ts:355` |
+| `GET` | `/api/browse/genres/{id}` | `backend/src/routes/browse.ts:403` |
+| `GET` | `/api/browse/genres/{id}/playlists` | `backend/src/routes/browse.ts:379` |
+| `GET` | `/api/browse/playlists/{id}` | `backend/src/routes/browse.ts:277` |
+| `GET` | `/api/browse/playlists/featured` | `backend/src/routes/browse.ts:235` |
+| `GET` | `/api/browse/playlists/search` | `backend/src/routes/browse.ts:253` |
+| `GET` | `/api/browse/radios` | `backend/src/routes/browse.ts:295` |
+| `GET` | `/api/browse/radios/{id}` | `backend/src/routes/browse.ts:337` |
+| `GET` | `/api/browse/radios/by-genre` | `backend/src/routes/browse.ts:313` |
+| `GET` | `/api/browse/tidal/explore` | `backend/src/routes/browse.ts:1163` |
+| `GET` | `/api/browse/tidal/genre-playlists` | `backend/src/routes/browse.ts:1340` |
+| `GET` | `/api/browse/tidal/genres` | `backend/src/routes/browse.ts:1205` |
+| `GET` | `/api/browse/tidal/home` | `backend/src/routes/browse.ts:1121` |
+| `GET` | `/api/browse/tidal/image` | `backend/src/routes/browse.ts:1066` |
+| `GET` | `/api/browse/tidal/mix/{id}` | `backend/src/routes/browse.ts:1459` |
+| `GET` | `/api/browse/tidal/mixes` | `backend/src/routes/browse.ts:1289` |
+| `GET` | `/api/browse/tidal/moods` | `backend/src/routes/browse.ts:1247` |
+| `GET` | `/api/browse/tidal/playlist/{id}` | `backend/src/routes/browse.ts:1402` |
+| `GET` | `/api/browse/ytmusic/album/{id}` | `backend/src/routes/browse.ts:792` |
+| `GET` | `/api/browse/ytmusic/categories` | `backend/src/routes/browse.ts:619` |
+| `GET` | `/api/browse/ytmusic/charts` | `backend/src/routes/browse.ts:579` |
+| `GET` | `/api/browse/ytmusic/home` | `backend/src/routes/browse.ts:664` |
+| `GET` | `/api/browse/ytmusic/image` | `backend/src/routes/browse.ts:178` |
+| `GET` | `/api/browse/ytmusic/mixes` | `backend/src/routes/browse.ts:925` |
+| `GET` | `/api/browse/ytmusic/mood-playlists` | `backend/src/routes/browse.ts:727` |
+| `GET` | `/api/browse/ytmusic/playlist/{id}` | `backend/src/routes/browse.ts:875` |
 | `GET` | `/api/device-link/devices` | `backend/src/routes/deviceLink.ts:249` |
 | `GET` | `/api/device-link/status/{code}` | `backend/src/routes/deviceLink.ts:196` |
 | `GET` | `/api/discover/batch-status` | `backend/src/routes/discover.ts:42` |
@@ -365,7 +366,7 @@ _None._
 | `POST` | `/api/auth/refresh` | `backend/src/routes/auth.ts:288` |
 | `POST` | `/api/auth/register` | `backend/src/routes/auth.ts:1089` |
 | `POST` | `/api/auth/subsonic-password` | `backend/src/routes/auth.ts:1553` |
-| `POST` | `/api/browse/playlists/parse` | `backend/src/routes/browse.ts:449` |
+| `POST` | `/api/browse/playlists/parse` | `backend/src/routes/browse.ts:456` |
 | `POST` | `/api/device-link/generate` | `backend/src/routes/deviceLink.ts:40` |
 | `POST` | `/api/device-link/verify` | `backend/src/routes/deviceLink.ts:118` |
 | `POST` | `/api/discover/cleanup-lidarr` | `backend/src/routes/discover.ts:2157` |
@@ -559,32 +560,33 @@ _None._
 | `GET` | `/api/auth/me` | `backend/src/routes/openapiSupplement.ts:34` |
 | `GET` | `/api/auth/subsonic-password` | `backend/src/routes/auth.ts:1486` |
 | `GET` | `/api/auth/users` | `backend/src/routes/auth.ts:525` |
-| `GET` | `/api/browse/all` | `backend/src/routes/browse.ts:402` |
-| `GET` | `/api/browse/genres` | `backend/src/routes/browse.ts:336` |
-| `GET` | `/api/browse/genres/{id}` | `backend/src/routes/browse.ts:378` |
-| `GET` | `/api/browse/genres/{id}/playlists` | `backend/src/routes/browse.ts:354` |
-| `GET` | `/api/browse/playlists/{id}` | `backend/src/routes/browse.ts:252` |
-| `GET` | `/api/browse/playlists/featured` | `backend/src/routes/browse.ts:216` |
-| `GET` | `/api/browse/playlists/search` | `backend/src/routes/browse.ts:234` |
-| `GET` | `/api/browse/radios` | `backend/src/routes/browse.ts:276` |
-| `GET` | `/api/browse/radios/{id}` | `backend/src/routes/browse.ts:312` |
-| `GET` | `/api/browse/radios/by-genre` | `backend/src/routes/browse.ts:294` |
-| `GET` | `/api/browse/tidal/explore` | `backend/src/routes/browse.ts:1089` |
-| `GET` | `/api/browse/tidal/genre-playlists` | `backend/src/routes/browse.ts:1257` |
-| `GET` | `/api/browse/tidal/genres` | `backend/src/routes/browse.ts:1131` |
-| `GET` | `/api/browse/tidal/home` | `backend/src/routes/browse.ts:1047` |
-| `GET` | `/api/browse/tidal/image` | `backend/src/routes/browse.ts:978` |
-| `GET` | `/api/browse/tidal/mix/{id}` | `backend/src/routes/browse.ts:1378` |
-| `GET` | `/api/browse/tidal/mixes` | `backend/src/routes/browse.ts:1215` |
-| `GET` | `/api/browse/tidal/moods` | `backend/src/routes/browse.ts:1173` |
-| `GET` | `/api/browse/tidal/playlist/{id}` | `backend/src/routes/browse.ts:1316` |
-| `GET` | `/api/browse/ytmusic/album/{id}` | `backend/src/routes/browse.ts:764` |
-| `GET` | `/api/browse/ytmusic/categories` | `backend/src/routes/browse.ts:600` |
-| `GET` | `/api/browse/ytmusic/charts` | `backend/src/routes/browse.ts:553` |
-| `GET` | `/api/browse/ytmusic/home` | `backend/src/routes/browse.ts:638` |
-| `GET` | `/api/browse/ytmusic/image` | `backend/src/routes/browse.ts:143` |
-| `GET` | `/api/browse/ytmusic/mood-playlists` | `backend/src/routes/browse.ts:699` |
-| `GET` | `/api/browse/ytmusic/playlist/{id}` | `backend/src/routes/browse.ts:840` |
+| `GET` | `/api/browse/all` | `backend/src/routes/browse.ts:409` |
+| `GET` | `/api/browse/genres` | `backend/src/routes/browse.ts:343` |
+| `GET` | `/api/browse/genres/{id}` | `backend/src/routes/browse.ts:385` |
+| `GET` | `/api/browse/genres/{id}/playlists` | `backend/src/routes/browse.ts:361` |
+| `GET` | `/api/browse/playlists/{id}` | `backend/src/routes/browse.ts:259` |
+| `GET` | `/api/browse/playlists/featured` | `backend/src/routes/browse.ts:223` |
+| `GET` | `/api/browse/playlists/search` | `backend/src/routes/browse.ts:241` |
+| `GET` | `/api/browse/radios` | `backend/src/routes/browse.ts:283` |
+| `GET` | `/api/browse/radios/{id}` | `backend/src/routes/browse.ts:319` |
+| `GET` | `/api/browse/radios/by-genre` | `backend/src/routes/browse.ts:301` |
+| `GET` | `/api/browse/tidal/explore` | `backend/src/routes/browse.ts:1149` |
+| `GET` | `/api/browse/tidal/genre-playlists` | `backend/src/routes/browse.ts:1317` |
+| `GET` | `/api/browse/tidal/genres` | `backend/src/routes/browse.ts:1191` |
+| `GET` | `/api/browse/tidal/home` | `backend/src/routes/browse.ts:1107` |
+| `GET` | `/api/browse/tidal/image` | `backend/src/routes/browse.ts:1038` |
+| `GET` | `/api/browse/tidal/mix/{id}` | `backend/src/routes/browse.ts:1438` |
+| `GET` | `/api/browse/tidal/mixes` | `backend/src/routes/browse.ts:1275` |
+| `GET` | `/api/browse/tidal/moods` | `backend/src/routes/browse.ts:1233` |
+| `GET` | `/api/browse/tidal/playlist/{id}` | `backend/src/routes/browse.ts:1376` |
+| `GET` | `/api/browse/ytmusic/album/{id}` | `backend/src/routes/browse.ts:771` |
+| `GET` | `/api/browse/ytmusic/categories` | `backend/src/routes/browse.ts:607` |
+| `GET` | `/api/browse/ytmusic/charts` | `backend/src/routes/browse.ts:560` |
+| `GET` | `/api/browse/ytmusic/home` | `backend/src/routes/browse.ts:645` |
+| `GET` | `/api/browse/ytmusic/image` | `backend/src/routes/browse.ts:150` |
+| `GET` | `/api/browse/ytmusic/mixes` | `backend/src/routes/browse.ts:911` |
+| `GET` | `/api/browse/ytmusic/mood-playlists` | `backend/src/routes/browse.ts:706` |
+| `GET` | `/api/browse/ytmusic/playlist/{id}` | `backend/src/routes/browse.ts:847` |
 | `GET` | `/api/device-link/devices` | `backend/src/routes/deviceLink.ts:236` |
 | `GET` | `/api/device-link/status/{code}` | `backend/src/routes/deviceLink.ts:179` |
 | `GET` | `/api/discover/batch-status` | `backend/src/routes/discover.ts:30` |
@@ -759,7 +761,7 @@ _None._
 | `POST` | `/api/auth/refresh` | `backend/src/routes/auth.ts:265` |
 | `POST` | `/api/auth/register` | `backend/src/routes/auth.ts:1050` |
 | `POST` | `/api/auth/subsonic-password` | `backend/src/routes/auth.ts:1524` |
-| `POST` | `/api/browse/playlists/parse` | `backend/src/routes/browse.ts:423` |
+| `POST` | `/api/browse/playlists/parse` | `backend/src/routes/browse.ts:430` |
 | `POST` | `/api/device-link/generate` | `backend/src/routes/deviceLink.ts:27` |
 | `POST` | `/api/device-link/verify` | `backend/src/routes/deviceLink.ts:91` |
 | `POST` | `/api/discover/cleanup-lidarr` | `backend/src/routes/discover.ts:2141` |

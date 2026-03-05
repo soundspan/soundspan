@@ -12,16 +12,16 @@ Scope:
 | --- | --- | --- | --- | --- | --- |
 | Backend middleware | 4 | 7 | 7 | 0 | 100.0% |
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
-| Backend routes | 42 | 55 | 55 | 0 | 100.0% |
+| Backend routes | 42 | 56 | 56 | 0 | 100.0% |
 | Backend services | 82 | 102 | 102 | 0 | 100.0% |
 | Backend utils | 34 | 89 | 89 | 0 | 100.0% |
 | Backend workers | 15 | 29 | 29 | 0 | 100.0% |
 | Frontend components | 82 | 86 | 86 | 0 | 100.0% |
-| Frontend features | 150 | 130 | 130 | 0 | 100.0% |
-| Frontend hooks | 26 | 101 | 101 | 0 | 100.0% |
+| Frontend features | 151 | 131 | 131 | 0 | 100.0% |
+| Frontend hooks | 26 | 102 | 102 | 0 | 100.0% |
 | Frontend lib | 60 | 95 | 95 | 0 | 100.0% |
 | Frontend other | 71 | 72 | 72 | 0 | 100.0% |
-| **Total** | **576** | **767** | **767** | **0** | **100.0%** |
+| **Total** | **577** | **770** | **770** | **0** | **100.0%** |
 
 ## Missing Exported Symbols (Top 250)
 
