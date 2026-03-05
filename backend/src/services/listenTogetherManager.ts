@@ -749,6 +749,12 @@ class GroupManager {
 
         switch (action.action) {
             case "add": {
+                if (pb.queue.length + action.items.length > MAX_QUEUE_SIZE) {
+                    throw new GroupError(
+                        "INVALID",
+                        `Queue cannot exceed ${MAX_QUEUE_SIZE} tracks`,
+                    );
+                }
                 pb.queue.push(...action.items);
                 // If queue was empty and we just added tracks, set up the first track
                 if (pb.queue.length === action.items.length) {
@@ -758,6 +764,12 @@ class GroupManager {
                 break;
             }
             case "insert-next": {
+                if (pb.queue.length + action.items.length > MAX_QUEUE_SIZE) {
+                    throw new GroupError(
+                        "INVALID",
+                        `Queue cannot exceed ${MAX_QUEUE_SIZE} tracks`,
+                    );
+                }
                 const insertAt = pb.currentIndex + 1;
                 pb.queue.splice(insertAt, 0, ...action.items);
                 // If queue was empty before, set up the first track
