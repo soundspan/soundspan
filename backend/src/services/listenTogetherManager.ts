@@ -205,6 +205,9 @@ function shouldApplyIncomingPlayback(
     return incomingServerTime >= existing.playback.lastPositionUpdate;
 }
 
+/** Hard cap on queue size to keep Socket.IO snapshots within 1 MB. */
+export const MAX_QUEUE_SIZE = 500;
+
 /** Max time to wait for all members to report ready (ms). */
 const READY_GATE_TIMEOUT_MS = 8_000;
 
