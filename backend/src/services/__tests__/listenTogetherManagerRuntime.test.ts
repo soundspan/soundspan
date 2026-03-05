@@ -1,6 +1,7 @@
 import {
     GroupError,
     groupManager,
+    MAX_QUEUE_SIZE,
     type GroupSnapshot,
     type ManagerCallbacks,
     type SyncQueueItem,
@@ -1105,5 +1106,84 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(groupManager.removeMember("g-report-ready", "unknown-user")).toEqual({
             ended: false,
         });
+    });
+
+    it("enforces MAX_QUEUE_SIZE on add and insert-next", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        const initialTracks = Array.from({ length: MAX_QUEUE_SIZE - 1 }, (_, i) =>
+            track(`init-${i}`)
+        );
+        groupManager.create("g-cap", {
+            name: "Cap Test",
+            joinCode: "CAP1",
+            groupType: "collaborative",
+            visibility: "public",
+            hostUserId: "u1",
+            hostUsername: "User 1",
+            queue: initialTracks,
+            currentIndex: 0,
+            currentTimeMs: 0,
+            isPlaying: false,
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-cap", "u1", "User 1");
+
+        // Adding 1 track to a queue of MAX-1 should succeed (hits exactly MAX)
+        const delta = groupManager.modifyQueue("g-cap", "u1", {
+            action: "add",
+            items: [track("fill")],
+        });
+        expect(delta.queue).toHaveLength(MAX_QUEUE_SIZE);
+
+        // Adding another track should fail — already at cap
+        expect(() =>
+            groupManager.modifyQueue("g-cap", "u1", {
+                action: "add",
+                items: [track("overflow")],
+            })
+        ).toThrow(GroupError);
+        expect(() =>
+            groupManager.modifyQueue("g-cap", "u1", {
+                action: "add",
+                items: [track("overflow")],
+            })
+        ).toThrow(/queue.*500/i);
+
+        // insert-next should also fail at cap
+        expect(() =>
+            groupManager.modifyQueue("g-cap", "u1", {
+                action: "insert-next",
+                items: [track("overflow-insert")],
+            })
+        ).toThrow(GroupError);
+    });
+
+    it("allows add when items fit within remaining capacity", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        groupManager.create("g-cap2", {
+            name: "Cap Test 2",
+            joinCode: "CAP2",
+            groupType: "collaborative",
+            visibility: "public",
+            hostUserId: "u1",
+            hostUsername: "User 1",
+            queue: [track("1")],
+            currentIndex: 0,
+            currentTimeMs: 0,
+            isPlaying: false,
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-cap2", "u1", "User 1");
+
+        const batch = Array.from({ length: 10 }, (_, i) => track(`batch-${i}`));
+        const delta = groupManager.modifyQueue("g-cap2", "u1", {
+            action: "add",
+            items: batch,
+        });
+        expect(delta.queue).toHaveLength(11);
     });
 });
