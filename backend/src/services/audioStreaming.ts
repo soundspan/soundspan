@@ -35,6 +35,7 @@ interface StreamFileInfo {
  */
 export class AudioStreamingService {
     private transcodeQueue = new PQueue({ concurrency: 3 });
+    private inflightTranscodes = new Map<string, Promise<string>>();
     private musicPath: string;
     private transcodeCachePath: string;
     private transcodeCacheMaxGb: number;
@@ -207,9 +208,40 @@ export class AudioStreamingService {
     }
 
     /**
-     * Transcode audio file to cache
+     * Transcode audio file to cache, deduplicating concurrent requests for the same track+quality.
      */
-    private async transcodeToCache(
+    private transcodeToCache(
+        trackId: string,
+        quality: Quality,
+        sourcePath: string,
+        sourceModified: Date
+    ): Promise<string> {
+        const dedupeKey = `${trackId}-${quality}`;
+        const inflight = this.inflightTranscodes.get(dedupeKey);
+        if (inflight) {
+            logger.debug(
+                `[STREAM] Joining in-flight transcode for ${dedupeKey}`
+            );
+            return inflight;
+        }
+
+        const promise = this.doTranscode(
+            trackId,
+            quality,
+            sourcePath,
+            sourceModified
+        ).finally(() => {
+            this.inflightTranscodes.delete(dedupeKey);
+        });
+
+        this.inflightTranscodes.set(dedupeKey, promise);
+        return promise;
+    }
+
+    /**
+     * Run the actual ffmpeg transcode and persist the cache record.
+     */
+    private async doTranscode(
         trackId: string,
         quality: Quality,
         sourcePath: string,
@@ -269,12 +301,20 @@ export class AudioStreamingService {
                             // Get file size
                             const stats = await fs.promises.stat(cachePath);
 
-                            // Save to database
-                            await prisma.transcodedFile.create({
-                                data: {
+                            // Save to database (upsert to handle concurrent transcodes for same track+quality)
+                            await prisma.transcodedFile.upsert({
+                                where: {
+                                    trackId_quality: { trackId, quality },
+                                },
+                                create: {
                                     trackId,
                                     quality,
                                     cachePath: cacheFileName,
+                                    cacheSize: stats.size,
+                                    sourceModified,
+                                    lastAccessed: new Date(),
+                                },
+                                update: {
                                     cacheSize: stats.size,
                                     sourceModified,
                                     lastAccessed: new Date(),
