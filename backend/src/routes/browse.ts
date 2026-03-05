@@ -46,6 +46,13 @@ function trimCacheIfNeeded(): void {
     }
 }
 
+/**
+ * Clear the YT Music browse cache (exported for test isolation).
+ */
+export function _resetYtBrowseCache(): void {
+    ytBrowseCache.clear();
+}
+
 function pruneExpiredCacheEntries(now = Date.now()): void {
     for (const [key, entry] of ytBrowseCache.entries()) {
         if (entry.expiresAt <= now) {
@@ -895,6 +902,59 @@ router.get("/ytmusic/playlist/:id", async (req: Request, res: Response) => {
         }
         logger.error("[Browse] YT Music playlist error:", error);
         res.status(500).json({ error: "Failed to fetch playlist" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/browse/ytmusic/mixes:
+ *   get:
+ *     summary: Get personalized YT Music mixes for the current user
+ *     tags: [Browse]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: List of personalized mix previews
+ *       403:
+ *         description: YouTube Music integration not enabled
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/ytmusic/mixes", async (req: Request, res: Response) => {
+    try {
+        if (!(await ensureYtMusicEnabled(res))) {
+            return;
+        }
+
+        const userId = req.user!.id;
+        const cacheKey = `ytmusic:mixes:${userId}`;
+
+        const cached = getCachedOrNull(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+
+        const mixes = await ytMusicService.getLibraryPlaylists(userId, 25, true);
+        const result = { mixes, source: "ytmusic" as const };
+        setCache(cacheKey, result);
+        res.json(result);
+    } catch (error: any) {
+        const status = resolveHttpStatusFromError(error);
+        if (status === 401) {
+            return res.json({ mixes: [], source: "ytmusic" as const });
+        }
+        if (status && status >= 400 && status < 500) {
+            return res.status(status).json({
+                error:
+                    typeof error?.response?.data?.detail === "string"
+                        ? error.response.data.detail
+                        : "Invalid request for mixes",
+            });
+        }
+        logger.error("[Browse] YT Music mixes error:", error?.message || "unknown");
+        res.status(500).json({ error: "Failed to fetch YT Music mixes" });
     }
 });
 

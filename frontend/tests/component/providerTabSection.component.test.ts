@@ -27,6 +27,10 @@ mock.module("@/features/explore/components/FeaturedShelvesSection", {
     namedExports: { FeaturedShelvesSection: marker("featured-shelves-section") },
 });
 
+mock.module("@/features/explore/components/YtMusicMixesSection", {
+    namedExports: { YtMusicMixesSection: marker("ytmusic-mixes-section") },
+});
+
 mock.module("@/features/explore/components/TidalMixesSection", {
     namedExports: { TidalMixesSection: marker("tidal-mixes-section") },
 });
@@ -86,6 +90,7 @@ mock.module("@/components/ui/TidalBadge", {
 const baseProps = {
     showYtMusicExplore: true,
     showTidalExplore: true,
+    ytMusicMixes: [],
     moodCategories: [],
     genreCategories: [],
     isMoodsLoading: false,

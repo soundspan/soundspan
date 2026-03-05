@@ -116,6 +116,7 @@ export const queryKeys = {
     browseHomeShelves: () => ["browse", "ytmusic", "home"] as const,
     browseCharts: () => ["browse", "ytmusic", "charts"] as const,
     browseCategories: () => ["browse", "ytmusic", "categories"] as const,
+    browseYtMusicMixes: () => ["browse", "ytmusic", "mixes"] as const,
 
     // Browse (TIDAL) — used by Explore page
     browseTidalHome: () => ["browse", "tidal", "home"] as const,
@@ -1322,6 +1323,30 @@ export function useYtMusicCategoriesQuery(options?: { enabled?: boolean }) {
             return { moodCategories, genreCategories };
         },
         staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled: options?.enabled ?? true,
+    });
+}
+
+export interface YtMusicMixPreview {
+    playlistId: string;
+    title: string;
+    description: string;
+    thumbnails: Array<{ url: string; width: number }>;
+    count: string | null;
+}
+
+/**
+ * Hook to fetch personalized YT Music mixes (requires user OAuth).
+ * Returns empty array gracefully when user has no YT Music OAuth.
+ */
+export function useYtMusicMixesQuery(options?: { enabled?: boolean }) {
+    return useQuery<YtMusicMixPreview[]>({
+        queryKey: queryKeys.browseYtMusicMixes(),
+        queryFn: async () => {
+            const response = await api.getYtMusicMixes();
+            return response?.mixes ?? [];
+        },
+        staleTime: 5 * 60 * 1000,
         enabled: options?.enabled ?? true,
     });
 }

@@ -103,6 +103,14 @@ export interface YtMusicStreamInfo {
 
 export type YtMusicStreamQuality = "low" | "medium" | "high" | "lossless";
 
+export interface YtMusicMixPreview {
+    playlistId: string;
+    title: string;
+    description: string;
+    thumbnails: Array<{ url: string; width: number }>;
+    count: string | null;
+}
+
 /**
  * Normalize user-provided or stored quality values to sidecar query values.
  * Accepts both persisted uppercase settings and lowercase request values.
@@ -573,6 +581,21 @@ class YouTubeMusicService {
             params: { user_id: userId, limit },
         });
         return res.data.albums;
+    }
+
+    /**
+     * Get user's library playlists from YouTube Music.
+     * When mixesOnly is true, filters to auto-generated/personalized mixes only.
+     */
+    async getLibraryPlaylists(
+        userId: string,
+        limit = 25,
+        mixesOnly = false
+    ): Promise<YtMusicMixPreview[]> {
+        const res = await this.client.get("/library/playlists", {
+            params: { user_id: userId, limit, mixes_only: mixesOnly },
+        });
+        return res.data.playlists ?? [];
     }
 
     // ── Gap-Fill Matching ──────────────────────────────────────────

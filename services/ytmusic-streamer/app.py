@@ -1810,6 +1810,56 @@ async def library_albums(user_id: str = Query(...), limit: int = 100, order: str
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Auto-generated / personalized playlist ID prefixes.
+# Excludes special single-purpose IDs like "LM" (Liked Music), "SE" (Saved Episodes).
+# TODO: This prefix list is best-effort based on known YT Music patterns. If YouTube
+# introduces new auto-generated playlist prefixes, mixes with those IDs will be
+# silently excluded. Monitor for missing mixes and update as needed.
+_AUTO_PLAYLIST_PREFIXES = ("RDTMAK", "RDEM", "RDAMPL", "RDAuto", "RDCLAK", "RDAO")
+_SPECIAL_PLAYLIST_IDS = {"LM", "SE", "RDPN"}
+
+
+@app.get("/library/playlists")
+async def library_playlists(
+    user_id: str = Query(...),
+    limit: int = Query(25, ge=1, le=100),
+    mixes_only: bool = False,
+):
+    """Get user's library playlists from YouTube Music.
+
+    When mixes_only=true, filters to auto-generated/personalized mixes
+    (e.g. "My Supermix", "Discover Mix", "Fresh finds, old favorites"),
+    excluding user-created playlists and special IDs like Liked Music.
+    """
+    try:
+        playlists = _run_ytmusic_with_auth_retry(
+            user_id,
+            operation=f"get_library_playlists(limit={limit})",
+            func=lambda yt: yt.get_library_playlists(limit),
+        )
+        items = []
+        for p in playlists:
+            pid = p.get("playlistId", "")
+            if mixes_only:
+                if pid in _SPECIAL_PLAYLIST_IDS:
+                    continue
+                if not any(pid.startswith(prefix) for prefix in _AUTO_PLAYLIST_PREFIXES):
+                    continue
+            items.append({
+                "playlistId": pid,
+                "title": p.get("title", ""),
+                "description": p.get("description", ""),
+                "thumbnails": p.get("thumbnails", []),
+                "count": p.get("count"),
+            })
+        return {"playlists": items, "total": len(items)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Get library playlists failed for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Cleanup ─────────────────────────────────────────────────────────
 
 @app.on_event("startup")

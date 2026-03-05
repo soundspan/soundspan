@@ -20,6 +20,7 @@ import {
     useYtMusicHomeShelvesQuery,
     useYtMusicChartsQuery,
     useYtMusicCategoriesQuery,
+    useYtMusicMixesQuery,
     useTidalHomeShelvesQuery,
     useTidalExploreShelvesQuery,
     useTidalGenresQuery,
@@ -29,6 +30,7 @@ import {
     type YtMusicHomeShelf,
     type YtMusicCategory,
     type YtMusicChartEntry,
+    type YtMusicMixPreview,
     type TidalBrowseShelf,
     type TidalGenre,
     type TidalMixPreview,
@@ -68,6 +70,8 @@ export interface UseExploreDataReturn {
     moodCategories: YtMusicCategory[];
     /** YT Music genre categories. */
     genreCategories: YtMusicCategory[];
+    /** YT Music personalized mixes (requires OAuth). */
+    ytMusicMixes: YtMusicMixPreview[];
     /** TIDAL home shelves (personalized). */
     tidalHomeShelves: TidalBrowseShelf[];
     /** TIDAL explore shelves (editorial). */
@@ -135,6 +139,7 @@ export function useExploreData(options?: { showYtMusicExplore?: boolean; showTid
     // ── Moods & Genres queries ───────────────────────────────────────────
     const { data: categoriesData, isLoading: isLoadingCategories } =
         useYtMusicCategoriesQuery({ enabled: showYtMusicExplore });
+    const { data: ytMusicMixesData } = useYtMusicMixesQuery({ enabled: showYtMusicExplore });
 
     // ── TIDAL Browse queries ─────────────────────────────────────────────
     const { data: tidalHomeData } = useTidalHomeShelvesQuery({ enabled: showTidalExplore });
@@ -197,6 +202,7 @@ export function useExploreData(options?: { showYtMusicExplore?: boolean; showTid
         popularArtists: popularData?.artists ?? [],
         moodCategories: categoriesData?.moodCategories ?? [],
         genreCategories: categoriesData?.genreCategories ?? [],
+        ytMusicMixes: ytMusicMixesData ?? [],
         tidalHomeShelves: tidalHomeData ?? [],
         tidalExploreShelves: tidalExploreData ?? [],
         tidalGenres: tidalGenresData ?? [],

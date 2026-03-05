@@ -27,6 +27,7 @@ Start-here guide for `frontend/features/explore`.
 | `components/TidalFeaturedShelvesSection.tsx` | components |
 | `components/TidalMixesSection.tsx` | components |
 | `components/TidalMoodsGenresSection.tsx` | components |
+| `components/YtMusicMixesSection.tsx` | components |
 | `genreClassification.ts` | root |
 | `hooks/useExploreData.ts` | hooks |
 | `hooks/useTidalExploreEnabled.ts` | hooks |

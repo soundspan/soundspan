@@ -38,6 +38,7 @@ export default function ExplorePage() {
         tidalExploreShelves,
         tidalGenres,
         tidalMoods,
+        ytMusicMixes,
         tidalMixes,
         isLoading,
         isRefreshingMixes,
@@ -104,6 +105,7 @@ export default function ExplorePage() {
                     <ProviderTabSection
                         showYtMusicExplore={showYtMusicExplore}
                         showTidalExplore={showTidalExplore}
+                        ytMusicMixes={ytMusicMixes}
                         moodCategories={moodCategories}
                         genreCategories={genreCategories}
                         isMoodsLoading={isMoodsLoading}

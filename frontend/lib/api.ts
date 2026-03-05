@@ -1377,6 +1377,12 @@ class ApiClient {
         return `${baseUrl}/api/browse/ytmusic/image?${params.toString()}`;
     }
 
+    async getYtMusicMixes(): Promise<{
+        mixes: Array<{ playlistId: string; title: string; description: string; thumbnails: Array<{ url: string; width: number }>; count: string | null }>;
+    }> {
+        return this.get("/browse/ytmusic/mixes");
+    }
+
     // Recommendations
     async getRecommendationsForYou(limit = 10) {
         return this.request<{ artists: ApiData[] }>(

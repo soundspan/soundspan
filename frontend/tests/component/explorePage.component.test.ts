@@ -39,6 +39,7 @@ mock.module("@/features/explore/hooks/useExploreData", {
             popularArtists: state.popularArtists,
             moodCategories: state.moodCategories,
             genreCategories: state.genreCategories,
+            ytMusicMixes: [],
             tidalHomeShelves: [],
             tidalExploreShelves: [],
             tidalGenres: [],

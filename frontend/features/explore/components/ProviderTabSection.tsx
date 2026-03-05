@@ -11,13 +11,14 @@
 import { useState } from "react";
 import { MoodsGenresSection } from "./MoodsGenresSection";
 import { FeaturedShelvesSection } from "./FeaturedShelvesSection";
+import { YtMusicMixesSection } from "./YtMusicMixesSection";
 import { TidalMixesSection } from "./TidalMixesSection";
 import { TidalMoodsGenresSection } from "./TidalMoodsGenresSection";
 import { TidalFeaturedShelvesSection } from "./TidalFeaturedShelvesSection";
 import { SectionHeader } from "@/features/home/components/SectionHeader";
 import { FeaturedPlaylistsGrid } from "@/features/home/components/FeaturedPlaylistsGrid";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
-import type { YtMusicCategory, YtMusicHomeShelf, PlaylistPreview, TidalMixPreview, TidalBrowseShelf, TidalGenre } from "@/hooks/useQueries";
+import type { YtMusicCategory, YtMusicHomeShelf, YtMusicMixPreview, PlaylistPreview, TidalMixPreview, TidalBrowseShelf, TidalGenre } from "@/hooks/useQueries";
 
 type TabId = "youtube" | "tidal";
 
@@ -25,6 +26,7 @@ interface ProviderTabSectionProps {
     showYtMusicExplore: boolean;
     showTidalExplore: boolean;
     // YouTube Music data
+    ytMusicMixes: YtMusicMixPreview[];
     moodCategories: YtMusicCategory[];
     genreCategories: YtMusicCategory[];
     isMoodsLoading: boolean;
@@ -42,14 +44,16 @@ interface ProviderTabSectionProps {
  * Renders the YouTube Music tab content.
  */
 function YouTubeContent({
+    ytMusicMixes,
     moodCategories,
     genreCategories,
     isMoodsLoading,
     homeShelves,
     chartPlaylists,
-}: Pick<ProviderTabSectionProps, "moodCategories" | "genreCategories" | "isMoodsLoading" | "homeShelves" | "chartPlaylists">) {
+}: Pick<ProviderTabSectionProps, "ytMusicMixes" | "moodCategories" | "genreCategories" | "isMoodsLoading" | "homeShelves" | "chartPlaylists">) {
     return (
         <div className="space-y-8">
+            <YtMusicMixesSection mixes={ytMusicMixes} />
             <MoodsGenresSection
                 moodCategories={moodCategories}
                 genreCategories={genreCategories}
@@ -106,6 +110,7 @@ export function ProviderTabSection(props: ProviderTabSectionProps) {
     if (!showTidalExplore) {
         return (
             <YouTubeContent
+                ytMusicMixes={props.ytMusicMixes}
                 moodCategories={props.moodCategories}
                 genreCategories={props.genreCategories}
                 isMoodsLoading={props.isMoodsLoading}
@@ -155,6 +160,7 @@ export function ProviderTabSection(props: ProviderTabSectionProps) {
             {/* Tab content */}
             {activeTab === "youtube" && (
                 <YouTubeContent
+                    ytMusicMixes={props.ytMusicMixes}
                     moodCategories={props.moodCategories}
                     genreCategories={props.genreCategories}
                     isMoodsLoading={props.isMoodsLoading}

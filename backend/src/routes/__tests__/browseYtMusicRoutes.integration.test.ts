@@ -47,6 +47,7 @@ jest.mock("../../services/youtubeMusic", () => ({
         getMoodPlaylists: jest.fn(),
         getBrowsePlaylist: jest.fn(),
         getBrowseAlbum: jest.fn(),
+        getLibraryPlaylists: jest.fn(),
     },
 }));
 
@@ -63,7 +64,7 @@ jest.mock("../../utils/systemSettings", () => ({
 }));
 
 import { ytMusicService } from "../../services/youtubeMusic";
-import router from "../browse";
+import router, { _resetYtBrowseCache } from "../browse";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
 
 const app = createRouteTestApp("/api/browse", router);
@@ -75,9 +76,11 @@ describe("browse ytmusic routes integration", () => {
     const mockGetMoodPlaylists = ytMusicService.getMoodPlaylists as jest.Mock;
     const mockGetBrowsePlaylist = ytMusicService.getBrowsePlaylist as jest.Mock;
     const mockGetBrowseAlbum = ytMusicService.getBrowseAlbum as jest.Mock;
+    const mockGetLibraryPlaylists = ytMusicService.getLibraryPlaylists as jest.Mock;
 
     beforeEach(() => {
         jest.clearAllMocks();
+        _resetYtBrowseCache();
         mockGetSystemSettings.mockResolvedValue({ ytMusicEnabled: true });
     });
 
@@ -322,5 +325,45 @@ describe("browse ytmusic routes integration", () => {
             source: "ytmusic",
         });
         expect(mockGetHome).toHaveBeenCalledWith(6);
+    });
+
+    it("returns personalized mixes from ytmusic with source metadata", async () => {
+        const mixes = [
+            {
+                playlistId: "RDTMAK5uy_abc",
+                title: "My Supermix",
+                description: "A mix of everything",
+                thumbnails: [{ url: "http://img/1", width: 226 }],
+                count: "50+ songs",
+            },
+        ];
+        mockGetLibraryPlaylists.mockResolvedValueOnce(mixes);
+
+        const res = await request(app)
+            .get("/api/browse/ytmusic/mixes")
+            .set(AUTH_HEADER, AUTH_VALUE);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({
+            mixes,
+            source: "ytmusic",
+        });
+        expect(mockGetLibraryPlaylists).toHaveBeenCalledWith("user-1", 25, true);
+    });
+
+    it("returns empty mixes array when user has no YT Music OAuth", async () => {
+        const axiosError: any = new Error("401");
+        axiosError.response = { status: 401 };
+        mockGetLibraryPlaylists.mockRejectedValueOnce(axiosError);
+
+        const res = await request(app)
+            .get("/api/browse/ytmusic/mixes")
+            .set(AUTH_HEADER, AUTH_VALUE);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({
+            mixes: [],
+            source: "ytmusic",
+        });
     });
 });
