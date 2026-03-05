@@ -4,9 +4,9 @@ Status: **Proposed** | Created: 2026-03-05
 
 ## Context
 
-Listen Together broadcasts the full queue array on every mutation via `group:state` and `group:queue-delta` events. With the queue limit raised to 2000 tracks (Phase 1), each broadcast can be 400KB-1MB. This works but is wasteful — most mutations only add, remove, or reorder a single track.
+Listen Together broadcasts the full queue array on every mutation via `group:state` and `group:queue-delta` events. At the current hard cap of 500 tracks (`MAX_QUEUE_SIZE` in `listenTogetherManager.ts`), each full-state broadcast is ~150KB. This fits within the 1MB `maxHttpBufferSize` but is wasteful — most mutations only add, remove, or reorder a single track.
 
-Phase 1 (completed) raised the `maxHttpBufferSize` to 5MB and the queue limit to 2000, fixing the hard-refresh disconnect bug. This document describes Phase 2: sending incremental queue operations instead of full replacements.
+The queue is hard-capped at 500 tracks: creation truncates to the first 500, and runtime add/insert-next operations reject with `INVALID` when the cap would be exceeded. If we want to raise this limit in the future, we need to send incremental queue operations instead of full replacements. This document describes that delta protocol design.
 
 ## Current Architecture
 
