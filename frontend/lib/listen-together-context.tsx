@@ -462,8 +462,15 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             });
         }
 
-        // Play/pause
-        if (pb.isPlaying) {
+        // Play/pause — skip resume when a reconnect audio recovery is pending,
+        // because recoverAudioAfterReconnect will reload the stream and resume
+        // after the reload completes. Resuming here would race with the reload
+        // and cause overlapping audio. Pause must still be applied so that a
+        // paused host state is respected (recoverAudioAfterReconnect exits
+        // early when !pb.isPlaying).
+        if (pendingReconnectAudioRecoveryRef.current && pb.isPlaying) {
+            // Let recoverAudioAfterReconnect handle resume after reload
+        } else if (pb.isPlaying) {
             ctrl.resume({
                 suppressListenTogetherBroadcast: true,
                 listenTogetherForceIsPlaying: true,
@@ -478,6 +485,11 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const applyDeltaToPlayer = useCallback((delta: PlaybackDelta) => {
+        // Ignore deltas while a reconnect audio recovery is in progress.
+        // recoverAudioAfterReconnect owns the reload+resume lifecycle;
+        // applying a delta here would race with that reload.
+        if (pendingReconnectAudioRecoveryRef.current) return;
+
         const state = audioStateRef.current;
         const ctrl = controlsRef.current;
 
@@ -547,6 +559,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const recoverAudioAfterReconnect = useCallback((snapshot: GroupSnapshot) => {
         const pb = snapshot.playback;
         if (!pb?.isPlaying || !Array.isArray(pb.queue) || pb.queue.length === 0) {
+            pendingReconnectAudioRecoveryRef.current = false;
             return;
         }
 
@@ -556,6 +569,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         );
         const targetTrack = pb.queue[safeIndex];
         if (!targetTrack) {
+            pendingReconnectAudioRecoveryRef.current = false;
             return;
         }
 
@@ -579,6 +593,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         const onReloaded = () => {
             playbackEngine.off("load", onReloaded);
             clearRecoveryTimeout();
+            pendingReconnectAudioRecoveryRef.current = false;
 
             const active = activeGroupRef.current;
             if (!active?.playback?.isPlaying) return;
@@ -602,6 +617,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         reconnectAudioRecoveryTimeoutRef.current = setTimeout(() => {
             playbackEngine.off("load", onReloaded);
             reconnectAudioRecoveryTimeoutRef.current = null;
+            pendingReconnectAudioRecoveryRef.current = false;
         }, 10_000);
         playbackEngine.reload();
     }, []);
@@ -749,7 +765,9 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 awaitingInitialStateRef.current = false;
                 applyGroupState(snapshot, forceApply);
                 if (shouldRecoverAudio) {
-                    pendingReconnectAudioRecoveryRef.current = false;
+                    // Note: the ref stays true until recoverAudioAfterReconnect
+                    // completes (or exits early), so deltas are suppressed during
+                    // the async reload window.
                     recoverAudioAfterReconnect(snapshot);
                 }
             },

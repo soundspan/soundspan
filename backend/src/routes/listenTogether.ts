@@ -55,8 +55,8 @@ const queueTrackInputSchema = z
 const createGroupSchema = z.object({
     name: z.string().trim().min(1).max(80).optional(),
     visibility: z.enum(["public", "private"]).optional(),
-    queueTrackIds: z.array(z.string().min(1)).max(500, { message: "Queue cannot exceed 500 tracks" }).optional(),
-    queueTracks: z.array(queueTrackInputSchema).max(500, { message: "Queue cannot exceed 500 tracks" }).optional(),
+    queueTrackIds: z.array(z.string().min(1)).optional(),
+    queueTracks: z.array(queueTrackInputSchema).optional(),
     currentTrackId: z.string().min(1).optional(),
     currentTimeMs: z.number().finite().min(0).max(86_400_000).optional(),
     isPlaying: z.boolean().optional(),

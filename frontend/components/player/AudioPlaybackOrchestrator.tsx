@@ -4202,7 +4202,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             } else if (playbackType === "audiobook") {
                 pause();
             } else if (playbackType === "track") {
-                if (repeatMode === "one") {
+                if (repeatMode === "one" && !isListenTogether) {
                     audioEngine.seek(0);
                     audioEngine.play();
                 } else {
@@ -4637,11 +4637,18 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 lastPlayingStateRef.current;
             const isNonUserPause = !isUserInitiatedRef.current;
 
+            // In a listen-together session as a follower, the host heartbeat
+            // mechanism handles playback recovery. Independent pause recovery
+            // would race with it and cause overlapping audio.
+            const ltSession = getListenTogetherSessionSnapshot();
+            const isListenTogetherFollower = Boolean(ltSession?.groupId && !ltSession.isHost);
+
             const shouldAttemptUnexpectedPauseRecovery =
                 playbackType === "track" &&
                 isNonUserPause &&
                 hasPlayIntent &&
-                !nearTrackEnd;
+                !nearTrackEnd &&
+                !isListenTogetherFollower;
 
             if (shouldAttemptUnexpectedPauseRecovery) {
                 const pauseObservedAtMs = Date.now();
