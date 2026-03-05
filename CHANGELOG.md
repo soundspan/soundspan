@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.3.1] - 2026-03-05
+
+### Added
+
+### Changed
+
+- Listen Together queue hard-capped at 500 tracks: group creation silently truncates oversized queues to the first 500, and add/insert-next operations are rejected when the cap would be exceeded. The cap is also enforced when restoring groups from the database and when syncing state across backend pods, preventing pre-existing oversized groups from causing issues.
+- Listen Together queue inputs are now validated only after truncation, avoiding unnecessary database work for tracks that would be discarded.
+- Concurrent audio transcodes for the same track and quality now share a single ffmpeg job instead of spawning duplicates, and the transcoded file cache uses upsert to prevent duplicate-record races.
+
+### Fixed
+
+- Listen Together: fixed a race condition where hard-refreshing the page with a large queue could disconnect the user from the session due to the Socket.IO payload exceeding the buffer limit.
+- Listen Together: fixed duplicate resume and recovery races in the playback orchestrator, including follower pause recovery and reconnect delta suppression that could cause playback state to flicker.
+
 ## [1.3.0] - 2026-03-04
 
 ### Added
