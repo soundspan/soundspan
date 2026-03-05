@@ -1160,6 +1160,66 @@ describe("listenTogetherManager runtime behavior", () => {
         ).toThrow(GroupError);
     });
 
+    it("truncates oversized queue on hydrate", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        const oversizedQueue = Array.from({ length: MAX_QUEUE_SIZE + 50 }, (_, i) =>
+            track(`hydrate-${i}`)
+        );
+        const group = groupManager.hydrate("g-hydrate-cap", {
+            name: "Hydrate Cap",
+            joinCode: "HYD1",
+            groupType: "host-follower",
+            visibility: "public",
+            hostUserId: "h1",
+            queue: oversizedQueue,
+            currentIndex: 0,
+            isPlaying: false,
+            currentTimeMs: 0,
+            stateVersion: 1,
+            createdAt: new Date(),
+            members: [{ userId: "h1", username: "Host", isHost: true, joinedAt: new Date() }],
+        });
+
+        expect(group.playback.queue).toHaveLength(MAX_QUEUE_SIZE);
+    });
+
+    it("truncates oversized queue on applyExternalSnapshot", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        const oversizedQueue = Array.from({ length: MAX_QUEUE_SIZE + 100 }, (_, i) =>
+            track(`ext-${i}`)
+        );
+        groupManager.applyExternalSnapshot({
+            id: "g-ext-cap",
+            name: "External Cap",
+            joinCode: "EXT1",
+            groupType: "host-follower",
+            visibility: "public",
+            isActive: true,
+            hostUserId: "h1",
+            syncState: "paused",
+            playback: {
+                queue: oversizedQueue,
+                currentIndex: 0,
+                isPlaying: false,
+                positionMs: 0,
+                serverTime: Date.now(),
+                stateVersion: 1,
+                trackId: oversizedQueue[0].id,
+            },
+            members: [
+                { userId: "h1", username: "Host", isHost: true, joinedAt: new Date().toISOString(), isConnected: false },
+            ],
+        });
+
+        const snapshot = groupManager.snapshotById("g-ext-cap");
+        expect(snapshot).toBeDefined();
+        expect(snapshot!.playback.queue).toHaveLength(MAX_QUEUE_SIZE);
+    });
+
     it("allows add when items fit within remaining capacity", () => {
         const callbacks = createCallbacks();
         groupManager.setCallbacks(callbacks);

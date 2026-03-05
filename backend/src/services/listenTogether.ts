@@ -339,12 +339,12 @@ export async function createGroup(
 
     const hostPresentationName = await resolvePresentationName(userId, username);
     const joinCode = await generateJoinCode();
-    const queueInputs =
+    const allQueueInputs =
         Array.isArray(options.queueTracks) && options.queueTracks.length > 0
             ? options.queueTracks
             : (options.queueTrackIds ?? []).map((trackId) => ({ trackId }));
-    const validatedQueue = await validateQueueTracks(queueInputs);
-    const initialQueue = validatedQueue.slice(0, MAX_QUEUE_SIZE);
+    const queueInputs = allQueueInputs.slice(0, MAX_QUEUE_SIZE);
+    const initialQueue = await validateQueueTracks(queueInputs);
     const requestedTrackId = options.currentTrackId;
     const requestedTrackIndex = requestedTrackId
         ? initialQueue.findIndex(

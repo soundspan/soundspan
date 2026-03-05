@@ -263,7 +263,10 @@ class GroupManager {
             members: Array<{ userId: string; username: string; isHost: boolean; joinedAt: Date }>;
         },
     ): GroupState {
-        const safeIndex = clampIndex(opts.currentIndex, opts.queue.length);
+        const queue = opts.queue.length > MAX_QUEUE_SIZE
+            ? opts.queue.slice(0, MAX_QUEUE_SIZE)
+            : opts.queue;
+        const safeIndex = clampIndex(opts.currentIndex, queue.length);
         const now = Date.now();
 
         const members = new Map<string, GroupMember>();
@@ -287,9 +290,9 @@ class GroupManager {
             groupType: opts.groupType,
             visibility: opts.visibility,
             hostUserId: opts.hostUserId,
-            syncState: opts.isPlaying ? "playing" : opts.queue.length > 0 ? "paused" : "idle",
+            syncState: opts.isPlaying ? "playing" : queue.length > 0 ? "paused" : "idle",
             playback: {
-                queue: opts.queue,
+                queue,
                 currentIndex: safeIndex,
                 isPlaying: false, // Always start paused after hydration (no one is connected yet)
                 positionMs: opts.currentTimeMs,
@@ -306,7 +309,7 @@ class GroupManager {
         };
 
         this.groups.set(id, group);
-        log.debug(`Hydrated group ${id} with ${opts.members.length} members, queue=${opts.queue.length}`);
+        log.debug(`Hydrated group ${id} with ${opts.members.length} members, queue=${queue.length}`);
         return group;
     }
 
@@ -911,9 +914,12 @@ class GroupManager {
             this.clearReadyGateTimer(existing);
         }
 
-        const incomingQueue = Array.isArray(snapshot.playback?.queue)
+        const rawQueue = Array.isArray(snapshot.playback?.queue)
             ? snapshot.playback.queue
             : [];
+        const incomingQueue = rawQueue.length > MAX_QUEUE_SIZE
+            ? rawQueue.slice(0, MAX_QUEUE_SIZE)
+            : rawQueue;
         const incomingIndex = clampIndex(
             snapshot.playback?.currentIndex ?? 0,
             incomingQueue.length
