@@ -10,12 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- ACM verify now owns the repo-native backend coverage, frontend lint/build/coverage, and Helm chart render checks, and historical work lookup now goes through ACM `work list/search --scope all`.
+### Fixed
+
+## [1.3.2] - 2026-03-06
+
+### Added
+
+- Overlay icons on My Liked and Discover Weekly cards on the Home and Explore pages for clearer visual identity.
+
+### Changed
+
+- Discover Weekly icon changed from compass to lightning bolt across Home, Explore, and Discover hero.
+- Discover Weekly and My Liked hero sections now show actual cover art from their first track instead of a placeholder icon.
+- My Liked page header simplified to a single cover image instead of a mosaic grid.
+- CI image builds consolidated from 8 separate workflows into a single unified pipeline with shared release-tag validation.
+- Project tooling migrated from custom agent-config scripts to the ACM control plane, removing ~30k lines of legacy governance scaffolding.
+- PR checks updated to use ACM-driven verification for backend coverage, frontend lint/build/coverage, and Helm chart rendering.
+- Developer documentation reorganized under `docs/maintainers/` and streamlined across README, CONTRIBUTING, and TESTING guides.
+- Backend runtime tests aligned with current API response shapes and behavior.
 
 ### Fixed
 
 - Listen Together: fixed a guest recovery race where follower-side stall/handoff recovery could run in parallel with session resync after mid-track buffering, causing doubled playback or unintended stops.
-- Library scan now promotes preexisting remote album rows into owned library albums when local files arrive, preventing downloaded albums from staying hidden behind `REMOTE` state. Track-mapping reconciliation also sweeps forward through the backlog instead of retrying the same oldest skipped rows forever, so imported provider tracks can switch over to local copies after scan.
+- Library scan now promotes preexisting remote album rows into owned library albums when local files arrive, preventing downloaded albums from staying hidden behind `REMOTE` state.
+- Track-mapping reconciliation now sweeps forward through the backlog instead of retrying the same oldest skipped rows forever, so imported provider tracks can switch over to local copies after scan.
 
 ## [1.3.1] - 2026-03-05
 
