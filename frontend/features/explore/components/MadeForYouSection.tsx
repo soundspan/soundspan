@@ -4,7 +4,7 @@
  * Shows a unified carousel with My Liked, Discover Weekly, and generated mixes.
  */
 
-import { RefreshCw, Heart, Compass } from "lucide-react";
+import { RefreshCw, Heart, Zap } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
 import { MixCard } from "@/components/MixCard";
@@ -72,6 +72,9 @@ export function MadeForYouSection({
                                 placeholderIcon={
                                     <Heart className="w-12 h-12 text-pink-500 fill-pink-500" />
                                 }
+                                overlayIcon={
+                                    <Heart className="w-6 h-6 text-pink-500" strokeWidth={2.5} />
+                                }
                                 index={0}
                             />
                         </CarouselItem>
@@ -84,7 +87,10 @@ export function MadeForYouSection({
                                 title="Discover Weekly"
                                 subtitle={`${discoverWeekly.totalCount} tracks`}
                                 placeholderIcon={
-                                    <Compass className="w-12 h-12 text-blue-400" />
+                                    <Zap className="w-12 h-12 text-blue-400" />
+                                }
+                                overlayIcon={
+                                    <Zap className="w-6 h-6 text-pink-500" strokeWidth={2.5} />
                                 }
                                 index={1}
                             />

@@ -1,6 +1,6 @@
 "use client";
 
-import { Heart, Compass, RefreshCw } from "lucide-react";
+import { Heart, Zap, RefreshCw } from "lucide-react";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
@@ -123,6 +123,9 @@ export default function HomePage() {
                                             placeholderIcon={
                                                 <Heart className="w-12 h-12 text-pink-500 fill-pink-500" />
                                             }
+                                            overlayIcon={
+                                                <Heart className="w-6 h-6 text-pink-500" strokeWidth={2.5} />
+                                            }
                                             index={0}
                                         />
                                     </CarouselItem>
@@ -135,7 +138,10 @@ export default function HomePage() {
                                             title="Discover Weekly"
                                             subtitle={`${discoverWeekly.totalCount} tracks`}
                                             placeholderIcon={
-                                                <Compass className="w-12 h-12 text-blue-400" />
+                                                <Zap className="w-12 h-12 text-blue-400" />
+                                            }
+                                            overlayIcon={
+                                                <Zap className="w-6 h-6 text-pink-500" strokeWidth={2.5} />
                                             }
                                             index={1}
                                         />

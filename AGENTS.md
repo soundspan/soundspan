@@ -202,7 +202,7 @@ This file is additive to `AGENTS.md` and should contain soundspan-specific delta
   - JSDoc coverage MUST be 100% for exported symbols (`npm run jsdoc-coverage:verify`).
   - Python docstring coverage MUST be 100% for runtime Python modules.
   - OpenAPI coverage MUST document 100% of implemented OpenAPI routes (`npm run openapi-coverage:verify`).
-- After an implementation, use a codex xhigh agent to review your work.  Use the following command: `codex exec -c model="gpt-5.3-codex" -c model_reasoning_effort="xhigh" --sandbox read-only --ephemeral <your-context-here>`  
+- After an implementation, use a codex xhigh agent to review your work.  Use the following command: `codex exec -c model="gpt-5.4" -c model_reasoning_effort="xhigh" --sandbox read-only --ephemeral <your-context-here>`  
 - Prefer full template sync/fix/verify with:
   - `npm run agent:sync`
 - Optional remote-template mode (only when the selected template ref is published remotely):

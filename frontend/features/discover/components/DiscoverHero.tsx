@@ -1,5 +1,7 @@
-import { Music2 } from "lucide-react";
+import { Music2, Zap } from "lucide-react";
 import { format } from "date-fns";
+import { CachedImage } from "@/components/ui/CachedImage";
+import { api } from "@/lib/api";
 import { DiscoverPlaylist, DiscoverConfig } from "../types";
 
 interface DiscoverHeroProps {
@@ -24,12 +26,31 @@ export function DiscoverHero({ playlist, config }: DiscoverHeroProps) {
         return `${mins} min`;
     };
 
+    const coverUrl = playlist?.tracks?.[0]?.coverUrl
+        ? api.getCoverArtUrl(playlist.tracks[0].coverUrl, 200)
+        : null;
+
     return (
         <div className="relative bg-gradient-to-b from-blue-900/40 via-[#1a1a1a] to-transparent pt-16 pb-10 px-4 md:px-8">
             <div className="flex items-end gap-6">
-                {/* Icon */}
-                <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-gradient-to-br from-[#1a1acc]/30 to-yellow-600/20 rounded shadow-2xl shrink-0 flex items-center justify-center border border-white/10">
-                    <Music2 className="w-16 h-16 md:w-20 md:h-20 text-[#5b5bff]" />
+                {/* Cover Art */}
+                <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden relative">
+                    {coverUrl ? (
+                        <CachedImage
+                            src={coverUrl}
+                            alt="Discover Weekly"
+                            fill
+                            className="object-cover"
+                            sizes="192px"
+                        />
+                    ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#1a1acc]/30 to-yellow-600/20 border border-white/10">
+                            <Music2 className="w-16 h-16 md:w-20 md:h-20 text-[#5b5bff]" />
+                        </div>
+                    )}
+                    <div className="absolute bottom-2 right-2 drop-shadow-lg">
+                        <Zap className="w-7 h-7 text-pink-500" strokeWidth={2.5} />
+                    </div>
                 </div>
 
                 {/* Info - Bottom Aligned */}

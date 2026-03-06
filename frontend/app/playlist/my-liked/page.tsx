@@ -3,8 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Heart, ListMusic, Loader2, Music, Pause, Play, Plus, Radio, Shuffle } from "lucide-react";
-import { CoverMosaic } from "@/components/ui/CoverMosaic";
-import { createMosaicCandidates, selectMosaicCovers } from "@/utils/mosaicCoverSelection";
+import { CachedImage } from "@/components/ui/CachedImage";
 import {
     useAudioControls,
     useAudioPlayback,
@@ -187,22 +186,9 @@ export default function MyLikedPlaylistPage() {
         return likedTrackIds.has(currentTrack.id);
     }, [currentTrack, isPlaying, likedTracks.length, likedTrackIds]);
 
-    const coverUrls = useMemo(() => {
-        if (likedTracks.length === 0) return [];
-        const candidates = createMosaicCandidates(likedTracks, {
-            getId: (t) => t.id,
-            getCoverUrl: (t) => t.album.coverArt,
-            getArtistKey: (t) => t.artist.name?.toLowerCase(),
-            getAlbumKey: (t) => t.album.title?.toLowerCase(),
-        });
-        return selectMosaicCovers(candidates, { count: 4 })
-            .map((r) => {
-                const track = likedTracks.find((t) => t.id === r.candidateId);
-                if (!track) {
-                    return api.getCoverArtUrl(r.coverUrl, 200);
-                }
-                return resolveLikedTrackCoverUrl(track, 200);
-            });
+    const coverUrl = useMemo(() => {
+        if (likedTracks.length === 0) return null;
+        return resolveLikedTrackCoverUrl(likedTracks[0], 200);
     }, [likedTracks]);
 
     const unlikeMutation = useMutation({
@@ -374,16 +360,23 @@ export default function MyLikedPlaylistPage() {
                 </div>
                 <div className="relative flex items-end gap-6">
                     {/* Cover Art / Icon */}
-                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
-                        <CoverMosaic
-                            coverUrls={coverUrls}
-                            imageSizes="96px"
-                            emptyState={
-                                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#3b82f6]/20 to-[#1e3a5f]/30">
-                                    <Heart className="h-16 w-16 text-[#60a5fa]" />
-                                </div>
-                            }
-                        />
+                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden relative">
+                        {coverUrl ? (
+                            <CachedImage
+                                src={coverUrl}
+                                alt="My Liked"
+                                fill
+                                className="object-cover"
+                                sizes="192px"
+                            />
+                        ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#3b82f6]/20 to-[#1e3a5f]/30">
+                                <Heart className="h-16 w-16 text-[#60a5fa]" />
+                            </div>
+                        )}
+                        <div className="absolute bottom-2 right-2 drop-shadow-lg">
+                            <Heart className="w-7 h-7 text-pink-500" strokeWidth={2.5} />
+                        </div>
                     </div>
 
                     {/* Info */}

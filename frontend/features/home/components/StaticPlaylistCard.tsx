@@ -15,6 +15,8 @@ export interface StaticPlaylistCardProps {
     title: string;
     subtitle: string;
     placeholderIcon: ReactNode;
+    /** Optional icon rendered in the bottom-right corner of the cover art. */
+    overlayIcon?: ReactNode;
     index?: number;
 }
 
@@ -27,6 +29,7 @@ export const StaticPlaylistCard = memo(function StaticPlaylistCard({
     title,
     subtitle,
     placeholderIcon,
+    overlayIcon,
     index,
 }: StaticPlaylistCardProps) {
     return (
@@ -44,6 +47,11 @@ export const StaticPlaylistCard = memo(function StaticPlaylistCard({
                     ) : (
                         <div className="absolute inset-0 flex items-center justify-center">
                             {placeholderIcon}
+                        </div>
+                    )}
+                    {overlayIcon && (
+                        <div className="absolute bottom-1.5 right-1.5 drop-shadow-lg">
+                            {overlayIcon}
                         </div>
                     )}
                 </div>
