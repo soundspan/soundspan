@@ -730,6 +730,42 @@ export class MusicScannerService {
             }
         }
 
+        const albumMbid = metadata.common.musicbrainz_releasegroupid;
+
+        const isDiscoveryByPath = this.isDiscoveryPath(relativePath);
+        const isDiscoveryByJob = await this.isDiscoveryDownload(
+            artistName,
+            albumTitle
+        );
+
+        let isDiscoveryArtist = false;
+        if (!isDiscoveryByPath && !isDiscoveryByJob) {
+            const artistAlbums = await prisma.album.findMany({
+                where: { artistId: artist.id },
+                select: { location: true },
+            });
+
+            // Artist is discovery-only only when they already have discovery
+            // albums and still have no owned library albums.
+            if (artistAlbums.length > 0) {
+                const hasLibraryAlbums = artistAlbums.some(
+                    (candidateAlbum) => candidateAlbum.location === "LIBRARY"
+                );
+                const hasDiscoveryAlbums = artistAlbums.some(
+                    (candidateAlbum) => candidateAlbum.location === "DISCOVER"
+                );
+                isDiscoveryArtist = hasDiscoveryAlbums && !hasLibraryAlbums;
+                if (isDiscoveryArtist) {
+                    logger.debug(
+                        `[Scanner] Discovery-only artist detected: ${artistName}`
+                    );
+                }
+            }
+        }
+
+        const isDiscoveryAlbum =
+            isDiscoveryByPath || isDiscoveryByJob || isDiscoveryArtist;
+
         // Get or create album
         let album = await prisma.album.findFirst({
             where: {
@@ -740,7 +776,6 @@ export class MusicScannerService {
 
         if (!album) {
             // Try to find by release group MBID if available
-            const albumMbid = metadata.common.musicbrainz_releasegroupid;
             if (albumMbid) {
                 album = await prisma.album.findUnique({
                     where: { rgMbid: albumMbid },
@@ -752,42 +787,6 @@ export class MusicScannerService {
                 const rgMbid =
                     albumMbid || `temp-${Date.now()}-${Math.random()}`;
 
-                // Determine if this is a discovery album:
-                // 1. Check file path (legacy: /music/discovery/ folder)
-                // 2. Check if artist+album matches a discovery download job
-                // 3. Check if artist is a discovery-only artist (has DISCOVER albums but no LIBRARY albums)
-                const isDiscoveryByPath = this.isDiscoveryPath(relativePath);
-                const isDiscoveryByJob = await this.isDiscoveryDownload(
-                    artistName,
-                    albumTitle
-                );
-
-                // Check if this artist is discovery-only (has no LIBRARY albums)
-                // If so, any new albums from them should also be DISCOVER
-                let isDiscoveryArtist = false;
-                if (!isDiscoveryByPath && !isDiscoveryByJob) {
-                    const artistAlbums = await prisma.album.findMany({
-                        where: { artistId: artist.id },
-                        select: { location: true },
-                    });
-
-                    // Artist is discovery-only if they have albums but NONE are LIBRARY
-                    if (artistAlbums.length > 0) {
-                        const hasLibraryAlbums = artistAlbums.some(
-                            (a) => a.location === "LIBRARY"
-                        );
-                        isDiscoveryArtist = !hasLibraryAlbums;
-                        if (isDiscoveryArtist) {
-                            logger.debug(
-                                `[Scanner] Discovery-only artist detected: ${artistName}`
-                            );
-                        }
-                    }
-                }
-
-                const isDiscoveryAlbum =
-                    isDiscoveryByPath || isDiscoveryByJob || isDiscoveryArtist;
-
                 album = await prisma.album.create({
                     data: {
                         title: albumTitle,
@@ -798,18 +797,6 @@ export class MusicScannerService {
                         location: isDiscoveryAlbum ? "DISCOVER" : "LIBRARY",
                     },
                 });
-
-                // Only create OwnedAlbum record for library albums (not discovery)
-                // Discovery albums are temporary and should not appear in the user's library
-                if (!isDiscoveryAlbum) {
-                    await prisma.ownedAlbum.create({
-                        data: {
-                            rgMbid,
-                            artistId: artist.id,
-                            source: "native_scan",
-                        },
-                    });
-                }
             }
 
             // Extract cover art if we have an extractor
@@ -869,6 +856,35 @@ export class MusicScannerService {
                     }
                 }
             }
+        }
+
+        if (!isDiscoveryAlbum) {
+            if (album.location !== "LIBRARY") {
+                logger.info(
+                    `[Scanner] Promoting album "${album.title}" (${album.id}) from ${album.location} to LIBRARY after local scan`
+                );
+                album = await prisma.album.update({
+                    where: { id: album.id },
+                    data: { location: "LIBRARY" },
+                });
+            }
+
+            await prisma.ownedAlbum.upsert({
+                where: {
+                    artistId_rgMbid: {
+                        artistId: artist.id,
+                        rgMbid: album.rgMbid,
+                    },
+                },
+                update: {
+                    source: "native_scan",
+                },
+                create: {
+                    rgMbid: album.rgMbid,
+                    artistId: artist.id,
+                    source: "native_scan",
+                },
+            });
         }
 
         // Upsert track

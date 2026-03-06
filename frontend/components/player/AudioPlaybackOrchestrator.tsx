@@ -47,6 +47,7 @@ import {
     enqueueLatestListenTogetherHostTrackOperation,
     getListenTogetherSessionSnapshot,
     isListenTogetherActiveOrPending,
+    resolveListenTogetherFollowerGroupId,
     requestListenTogetherGroupResync,
 } from "@/lib/listen-together-session";
 import { shouldAutoMatchVibeAtQueueEnd } from "./autoMatchVibePlayback";
@@ -340,6 +341,7 @@ const TRACK_ERROR_SKIP_DELAY_MS = 1200;
 const TRANSIENT_TRACK_ERROR_RECOVERY_DELAY_MS = 450;
 const TRANSIENT_TRACK_ERROR_RECOVERY_WINDOW_MS = 15_000;
 const TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS = 4;
+const LISTEN_TOGETHER_FOLLOWER_RECOVERY_COOLDOWN_MS = 1_500;
 const STARTUP_PLAYBACK_RECOVERY_DELAY_MS = 1400;
 const STARTUP_PLAYBACK_RECOVERY_RECHECK_DELAY_MS = 900;
 const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
@@ -810,6 +812,15 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const segmentedHeartbeatConsecutiveFailureCountRef = useRef<number>(0);
     const segmentedHeartbeatLastGuardedRefreshAtMsRef = useRef<number>(0);
     const segmentedHeartbeatSessionIdRef = useRef<string | null>(null);
+    const listenTogetherFollowerRecoveryRef = useRef<{
+        groupId: string | null;
+        inFlight: boolean;
+        lastRequestedAtMs: number;
+    }>({
+        groupId: null,
+        inFlight: false,
+        lastRequestedAtMs: 0,
+    });
     const segmentedHandoffListenerCleanupRef = useRef<(() => void) | null>(null);
     const segmentedHandoffListenerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const segmentedHandoffListenerContextRef =
@@ -2010,6 +2021,70 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         [hasStartupChunkResponseForTrack, scheduleStartupPlaybackRecovery],
     );
 
+    const requestListenTogetherFollowerRecovery = useCallback(
+        (reason: string): boolean => {
+            const listenTogetherGroupId = resolveListenTogetherFollowerGroupId(
+                getListenTogetherSessionSnapshot(),
+            );
+            if (!listenTogetherGroupId) {
+                return false;
+            }
+
+            playbackStateMachine.forceTransition("LOADING");
+            setIsBuffering(true);
+
+            const recoveryState = listenTogetherFollowerRecoveryRef.current;
+            const now = Date.now();
+            if (
+                recoveryState.groupId === listenTogetherGroupId &&
+                (recoveryState.inFlight ||
+                    now - recoveryState.lastRequestedAtMs <
+                        LISTEN_TOGETHER_FOLLOWER_RECOVERY_COOLDOWN_MS)
+            ) {
+                return true;
+            }
+
+            recoveryState.groupId = listenTogetherGroupId;
+            recoveryState.inFlight = true;
+            recoveryState.lastRequestedAtMs = now;
+
+            sharedFrontendLogger.warn(
+                "[AudioPlaybackOrchestrator] Delegating follower recovery to Listen Together resync",
+                {
+                    groupId: listenTogetherGroupId,
+                    reason,
+                    trackId: currentTrackRef.current?.id ?? null,
+                    sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
+                },
+            );
+
+            void requestListenTogetherGroupResync(listenTogetherGroupId)
+                .catch((error) => {
+                    sharedFrontendLogger.warn(
+                        "[AudioPlaybackOrchestrator] Listen Together follower resync failed",
+                        {
+                            groupId: listenTogetherGroupId,
+                            reason,
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                        },
+                    );
+                })
+                .finally(() => {
+                    const currentRecoveryState =
+                        listenTogetherFollowerRecoveryRef.current;
+                    if (currentRecoveryState.groupId === listenTogetherGroupId) {
+                        currentRecoveryState.inFlight = false;
+                    }
+                });
+
+            return true;
+        },
+        [setIsBuffering],
+    );
+
     const scheduleTrackErrorSkip = useCallback(
         (failedTrackId: string | null) => {
             if (
@@ -2075,6 +2150,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         (failedTrackId: string | null, error: unknown): boolean => {
             if (playbackTypeRef.current !== "track") return false;
             if (!failedTrackId) return false;
+            if (
+                requestListenTogetherFollowerRecovery(
+                    "transient_track_error",
+                )
+            ) {
+                return true;
+            }
             if (!lastPlayingStateRef.current) return false;
             if (!isLikelyTransientStreamError(error)) return false;
 
@@ -2161,6 +2243,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             return true;
         },
         [
+            requestListenTogetherFollowerRecovery,
             clearPendingTrackErrorSkip,
             clearTransientTrackRecovery,
             resolveStartupSafeTrackPositionSec,
@@ -2481,6 +2564,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             },
         ): Promise<boolean> => {
             if (playbackTypeRef.current !== "track") return false;
+            if (
+                requestListenTogetherFollowerRecovery(
+                    "segmented_handoff_recovery",
+                )
+            ) {
+                return true;
+            }
 
             const currentTrackSnapshot = currentTrackRef.current;
             const segmentedTrackContext =
@@ -2991,6 +3081,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         },
         [
             isPlaying,
+            requestListenTogetherFollowerRecovery,
             resolveStartupSafeTrackPositionSec,
             resolveHandoffLocalPositionSec,
             setCurrentTime,

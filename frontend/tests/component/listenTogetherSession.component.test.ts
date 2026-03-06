@@ -5,6 +5,7 @@ import {
     LISTEN_TOGETHER_MEMBERSHIP_PENDING_STORAGE_KEY,
     LISTEN_TOGETHER_SESSION_STORAGE_KEY,
     getListenTogetherOptimisticTrackSelectionPolicy,
+    resolveListenTogetherFollowerGroupId,
     getListenTogetherSessionSnapshot,
     isListenTogetherActiveOrPending,
     isListenTogetherMembershipPending,
@@ -246,6 +247,25 @@ test("optimistic host track selection policy preserves solo resume and guards re
         resetPersistedTrackStartPosition: false,
         guardRemoteApply: true,
     });
+});
+
+test("resolveListenTogetherFollowerGroupId returns only follower session groups", () => {
+    assert.equal(resolveListenTogetherFollowerGroupId(null), null);
+    assert.equal(
+        resolveListenTogetherFollowerGroupId({
+            ...snapshot,
+            isHost: true,
+        }),
+        null,
+    );
+    assert.equal(
+        resolveListenTogetherFollowerGroupId({
+            ...snapshot,
+            isHost: false,
+            groupId: "group-follower",
+        }),
+        "group-follower",
+    );
 });
 
 test("requestListenTogetherGroupResync joins explicit target group", async () => {

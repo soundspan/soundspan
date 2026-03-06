@@ -38,6 +38,7 @@ const mockPrisma = {
     },
     ownedAlbum: {
         create: jest.fn(),
+        upsert: jest.fn(),
     },
 };
 
@@ -178,6 +179,8 @@ describe("MusicScannerService.scanLibrary", () => {
             id: "album-1",
             title: "Test Album",
             coverUrl: null,
+            location: "LIBRARY",
+            rgMbid: "rg-album-1",
         });
         mockPrisma.album.findMany.mockResolvedValue([]);
         mockPrisma.album.findUnique.mockResolvedValue(null);
@@ -185,6 +188,8 @@ describe("MusicScannerService.scanLibrary", () => {
             id: "album-1",
             title: "Test Album",
             coverUrl: null,
+            location: "LIBRARY",
+            rgMbid: "rg-album-1",
         });
         mockPrisma.album.update.mockResolvedValue({});
         mockPrisma.album.deleteMany.mockResolvedValue({ count: 0 });
@@ -192,6 +197,7 @@ describe("MusicScannerService.scanLibrary", () => {
         mockPrisma.downloadJob.findMany.mockResolvedValue([]);
         mockPrisma.discoveryAlbum.findFirst.mockResolvedValue(null);
         mockPrisma.ownedAlbum.create.mockResolvedValue({});
+        mockPrisma.ownedAlbum.upsert.mockResolvedValue({});
 
         mockBackfillAllArtistCounts.mockResolvedValue(undefined);
         mockGetAlbumCover.mockResolvedValue(null);
@@ -798,6 +804,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         mockPrisma.downloadJob.findMany.mockResolvedValue([]);
         mockPrisma.discoveryAlbum.findFirst.mockResolvedValue(null);
         mockPrisma.ownedAlbum.create.mockResolvedValue({});
+        mockPrisma.ownedAlbum.upsert.mockResolvedValue({});
     });
 
     it("uses grandparent folder as artist when metadata artist is missing", async () => {
@@ -914,7 +921,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
                 }),
             })
         );
-        expect(mockPrisma.ownedAlbum.create).not.toHaveBeenCalled();
+        expect(mockPrisma.ownedAlbum.upsert).not.toHaveBeenCalled();
     });
 
     it("falls back to Deezer cover when extractor returns no local art", async () => {
@@ -1467,6 +1474,77 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
         expect(mockPrisma.album.create).not.toHaveBeenCalled();
     });
 
+    it("promotes existing remote albums for remote-only artists into the owned library when local files are scanned", async () => {
+        const scanner = new MusicScannerService() as any;
+
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Track Title",
+                track: { no: 1 },
+                disk: { no: 1 },
+                albumartist: "John Williams",
+                artist: "John Williams",
+                album: "Hook (Original Motion Picture Soundtrack)",
+                year: 1991,
+            },
+            format: {
+                duration: 222.3,
+                codec: "audio/flac",
+            },
+        } as any);
+        mockPrisma.artist.findFirst.mockResolvedValueOnce({
+            id: "artist-hook",
+            name: "John Williams",
+            normalizedName: "john williams",
+            mbid: "artist-mbid-hook",
+        });
+        mockPrisma.album.findMany.mockResolvedValueOnce([
+            { location: "REMOTE" },
+        ] as any[]);
+        mockPrisma.album.findFirst.mockResolvedValueOnce({
+            id: "album-hook",
+            title: "Hook (Original Motion Picture Soundtrack)",
+            coverUrl: null,
+            location: "REMOTE",
+            rgMbid: "remote:hook",
+        });
+        mockPrisma.album.update.mockResolvedValueOnce({
+            id: "album-hook",
+            title: "Hook (Original Motion Picture Soundtrack)",
+            coverUrl: null,
+            location: "LIBRARY",
+            rgMbid: "remote:hook",
+        });
+
+        await scanner.processAudioFile(
+            "/music/John Williams/Hook (Original Motion Picture Soundtrack)/01 Track Title.flac",
+            "John Williams/Hook (Original Motion Picture Soundtrack)/01 Track Title.flac",
+            "/music"
+        );
+
+        expect(mockPrisma.album.update).toHaveBeenCalledWith({
+            where: { id: "album-hook" },
+            data: { location: "LIBRARY" },
+        });
+        expect(mockPrisma.ownedAlbum.upsert).toHaveBeenCalledWith({
+            where: {
+                artistId_rgMbid: {
+                    artistId: "artist-hook",
+                    rgMbid: "remote:hook",
+                },
+            },
+            update: {
+                source: "native_scan",
+            },
+            create: {
+                rgMbid: "remote:hook",
+                artistId: "artist-hook",
+                source: "native_scan",
+            },
+        });
+        expect(mockPrisma.album.create).not.toHaveBeenCalled();
+    });
+
     it("marks artist as discovery when they have only discovery albums", async () => {
         const scanner = new MusicScannerService() as any;
 
@@ -1509,7 +1587,7 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
                 }),
             })
         );
-        expect(mockPrisma.ownedAlbum.create).not.toHaveBeenCalled();
+        expect(mockPrisma.ownedAlbum.upsert).not.toHaveBeenCalled();
         expect(mockLogger.debug).toHaveBeenCalledWith(
             expect.stringContaining("Discovery-only artist detected: Discovery Artist")
         );

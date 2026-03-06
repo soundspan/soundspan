@@ -46,6 +46,16 @@ import { tidalStreamingService } from "../tidalStreaming";
 describe("TrackReconciliationService", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPrisma.trackMapping.findMany.mockReset();
+        mockPrisma.trackMapping.findFirst.mockReset();
+        mockPrisma.trackMapping.create.mockReset();
+        mockPrisma.trackMapping.update.mockReset();
+        mockPrisma.trackMapping.updateMany.mockReset();
+        mockPrisma.trackTidal.findMany.mockReset();
+        mockPrisma.trackYtMusic.findMany.mockReset();
+        mockPrisma.track.findMany.mockReset();
+        mockPrisma.userSettings.findMany.mockReset();
+        mockPrisma.$transaction.mockReset();
         // Default: empty local library
         mockPrisma.track.findMany.mockResolvedValue([]);
         // Default: no orphans
@@ -80,19 +90,43 @@ describe("TrackReconciliationService", () => {
         });
 
         it("returns early when no local library tracks exist", async () => {
-            mockPrisma.trackMapping.findMany.mockResolvedValue([
-                {
-                    id: "m1",
-                    trackId: null,
-                    trackTidal: { title: "Song", artist: "Artist", album: "Album", duration: 200, isrc: null },
-                    trackYtMusic: null,
-                },
-            ]);
+            mockPrisma.trackMapping.findMany
+                .mockResolvedValueOnce([
+                    {
+                        id: "m1",
+                        createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                        trackId: null,
+                        trackTidal: {
+                            title: "Song",
+                            artist: "Artist",
+                            album: "Album",
+                            duration: 200,
+                            isrc: null,
+                        },
+                        trackYtMusic: null,
+                    },
+                ])
+                .mockResolvedValueOnce([
+                    {
+                        id: "m2",
+                        createdAt: new Date("2026-03-01T00:00:01.000Z"),
+                        trackId: null,
+                        trackTidal: {
+                            title: "Song 2",
+                            artist: "Artist",
+                            album: "Album",
+                            duration: 210,
+                            isrc: null,
+                        },
+                        trackYtMusic: null,
+                    },
+                ])
+                .mockResolvedValueOnce([]);
             mockPrisma.track.findMany.mockResolvedValue([]);
 
-            const result = await trackReconciliationService.reconcile();
+            const result = await trackReconciliationService.reconcile(1);
 
-            expect(result).toEqual({ processed: 1, linked: 0, skipped: 1 });
+            expect(result).toEqual({ processed: 2, linked: 0, skipped: 2 });
             expect(mockPrisma.trackMapping.update).not.toHaveBeenCalled();
         });
 
@@ -226,7 +260,7 @@ describe("TrackReconciliationService", () => {
         it("respects batch size parameter", async () => {
             mockPrisma.trackMapping.findMany.mockResolvedValue([]);
 
-            await trackReconciliationService.reconcile(10);
+            await trackReconciliationService.reconcile(10, 10);
 
             expect(mockPrisma.trackMapping.findMany).toHaveBeenCalledWith(
                 expect.objectContaining({ take: 10 })
@@ -279,6 +313,7 @@ describe("TrackReconciliationService", () => {
             mockPrisma.trackMapping.findMany.mockResolvedValue([
                 {
                     id: "m6a",
+                    createdAt: new Date("2026-03-01T00:00:00.000Z"),
                     trackId: null,
                     trackTidal: {
                         title: "Song A",
@@ -291,6 +326,7 @@ describe("TrackReconciliationService", () => {
                 },
                 {
                     id: "m6b",
+                    createdAt: new Date("2026-03-01T00:00:01.000Z"),
                     trackId: null,
                     trackTidal: null,
                     trackYtMusic: {
@@ -325,23 +361,85 @@ describe("TrackReconciliationService", () => {
             expect(mockPrisma.trackMapping.update).toHaveBeenCalledTimes(2);
         });
 
-        it("marks orphan mapping stale when linked mapping already exists for same tuple", async () => {
-            mockPrisma.trackMapping.findMany.mockResolvedValueOnce([
-                {
-                    id: "m-orphan",
-                    trackId: null,
-                    trackTidalId: "ct_1",
-                    trackYtMusicId: null,
-                    trackTidal: {
-                        title: "Song",
-                        artist: "Artist",
-                        album: "Album",
-                        duration: 200,
-                        isrc: null,
+        it("keeps sweeping forward until the backlog is exhausted so newer rows are not starved", async () => {
+            mockPrisma.trackMapping.findMany
+                .mockResolvedValueOnce([
+                    {
+                        id: "m-old",
+                        createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                        trackId: null,
+                        trackTidalId: null,
+                        trackYtMusicId: "yt-old",
+                        trackTidal: null,
+                        trackYtMusic: {
+                            title: "Unmatchable Song",
+                            artist: "Unknown Artist",
+                            album: "Unknown Album",
+                            duration: 123,
+                        },
                     },
-                    trackYtMusic: null,
+                ])
+                .mockResolvedValueOnce([
+                    {
+                        id: "m-new",
+                        createdAt: new Date("2026-03-02T00:00:00.000Z"),
+                        trackId: null,
+                        trackTidalId: null,
+                        trackYtMusicId: "yt-new",
+                        trackTidal: null,
+                        trackYtMusic: {
+                            title: "Hook-Napped",
+                            artist: "John Williams",
+                            album: "Hook (Original Motion Picture Soundtrack)",
+                            duration: 236,
+                        },
+                    },
+                ])
+                .mockResolvedValueOnce([]);
+            mockPrisma.track.findMany.mockResolvedValue([
+                {
+                    id: "t-hook",
+                    title: "Hook-Napped",
+                    duration: 235,
+                    filePath: "/music/hook-napped.flac",
+                    album: {
+                        title: "Hook (Original Motion Picture Soundtrack)",
+                        artist: { name: "John Williams" },
+                    },
                 },
             ]);
+
+            const result = await trackReconciliationService.reconcile(1);
+
+            expect(result).toEqual({ processed: 2, linked: 1, skipped: 1 });
+            expect(mockPrisma.trackMapping.update).toHaveBeenCalledWith({
+                where: { id: "m-new" },
+                data: expect.objectContaining({
+                    trackId: "t-hook",
+                }),
+            });
+        });
+
+        it("marks orphan mapping stale when linked mapping already exists for same tuple", async () => {
+            mockPrisma.trackMapping.findMany
+                .mockResolvedValueOnce([
+                    {
+                        id: "m-orphan",
+                        createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                        trackId: null,
+                        trackTidalId: "ct_1",
+                        trackYtMusicId: null,
+                        trackTidal: {
+                            title: "Song",
+                            artist: "Artist",
+                            album: "Album",
+                            duration: 200,
+                            isrc: null,
+                        },
+                        trackYtMusic: null,
+                    },
+                ])
+                .mockResolvedValueOnce([]);
             mockPrisma.track.findMany.mockResolvedValueOnce([
                 {
                     id: "t1",
@@ -373,19 +471,23 @@ describe("TrackReconciliationService", () => {
 
         it("is idempotent \u2014 re-running produces same results", async () => {
             // First run: finds unlinked mapping
-            mockPrisma.trackMapping.findMany.mockResolvedValueOnce([
-                {
-                    id: "m7",
-                    trackId: null,
-                    trackTidal: null,
-                    trackYtMusic: {
-                        title: "Stable",
-                        artist: "Stable Artist",
-                        album: "Stable Album",
-                        duration: 200,
+            mockPrisma.trackMapping.findMany
+                .mockResolvedValueOnce([
+                    {
+                        id: "m7",
+                        createdAt: new Date("2026-03-01T00:00:00.000Z"),
+                        trackId: null,
+                        trackTidal: null,
+                        trackYtMusic: {
+                            title: "Stable",
+                            artist: "Stable Artist",
+                            album: "Stable Album",
+                            duration: 200,
+                        },
                     },
-                },
-            ]);
+                ])
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([]);
             mockPrisma.track.findMany.mockResolvedValueOnce([
                 {
                     id: "t7",
@@ -397,9 +499,6 @@ describe("TrackReconciliationService", () => {
             ]);
 
             await trackReconciliationService.reconcile();
-
-            // Second run: no unlinked mappings (the one from before is now linked)
-            mockPrisma.trackMapping.findMany.mockResolvedValueOnce([]);
 
             const result2 = await trackReconciliationService.reconcile();
 

@@ -53,7 +53,120 @@ export interface ProviderUpgradeResult {
     skipped: number;
 }
 
+interface ReconciliationCursor {
+    createdAt: Date;
+    id: string;
+}
+
 class TrackReconciliationService {
+    private buildCursorWhere(cursor?: ReconciliationCursor) {
+        if (!cursor) {
+            return {};
+        }
+
+        return {
+            OR: [
+                { createdAt: { gt: cursor.createdAt } },
+                {
+                    createdAt: cursor.createdAt,
+                    id: { gt: cursor.id },
+                },
+            ],
+        };
+    }
+
+    private async getUnlinkedMappingsBatch(
+        batchSize: number,
+        cursor?: ReconciliationCursor
+    ) {
+        return prisma.trackMapping.findMany({
+            where: {
+                trackId: null,
+                stale: false,
+                ...this.buildCursorWhere(cursor),
+            },
+            include: {
+                trackTidal: true,
+                trackYtMusic: true,
+            },
+            take: batchSize,
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        });
+    }
+
+    private async linkMappingsBatch(
+        mappings: Array<{
+            id: string;
+            trackTidalId: string | null;
+            trackYtMusicId: string | null;
+            trackTidal: {
+                title: string;
+                artist: string;
+                album: string;
+                duration: number;
+                isrc: string | null;
+            } | null;
+            trackYtMusic: {
+                title: string;
+                artist: string;
+                album: string;
+                duration: number;
+            } | null;
+        }>,
+        localCandidates: LocalTrackCandidate[]
+    ): Promise<{ linked: number; skipped: number }> {
+        let linked = 0;
+        let skipped = 0;
+
+        for (const mapping of mappings) {
+            const metadata = this.extractMetadata(mapping);
+            if (!metadata) {
+                log.debug(`Mapping ${mapping.id}: no extractable metadata, skipping`);
+                skipped++;
+                continue;
+            }
+
+            const match = matchTrackAgainstLibrary(metadata, localCandidates);
+            if (match && match.matchConfidence >= MIN_CONFIDENCE_THRESHOLD) {
+                const conflicting = await prisma.trackMapping.findFirst({
+                    where: {
+                        trackId: match.trackId,
+                        trackTidalId: mapping.trackTidalId ?? null,
+                        trackYtMusicId: mapping.trackYtMusicId ?? null,
+                        stale: false,
+                        id: { not: mapping.id },
+                    },
+                });
+                if (conflicting) {
+                    log.info(
+                        `Mapping ${mapping.id}: conflict with existing mapping ${conflicting.id} for trackId=${match.trackId}, marking stale`
+                    );
+                    await prisma.trackMapping.update({
+                        where: { id: mapping.id },
+                        data: { stale: true },
+                    });
+                    skipped++;
+                } else {
+                    await prisma.trackMapping.update({
+                        where: { id: mapping.id },
+                        data: {
+                            trackId: match.trackId,
+                            confidence: match.matchConfidence / 100,
+                        },
+                    });
+                    linked++;
+                }
+            } else {
+                log.debug(
+                    `Mapping ${mapping.id}: no match above threshold (best=${match?.matchConfidence ?? 0}%)`
+                );
+                skipped++;
+            }
+        }
+
+        return { linked, skipped };
+    }
+
     private async getRestoredTidalUserId(): Promise<string | null> {
         let cursorUserId: string | null = null;
         while (true) {
@@ -109,106 +222,127 @@ class TrackReconciliationService {
      * to link them to local library tracks.
      */
     async reconcile(
-        batchSize: number = DEFAULT_BATCH_SIZE
+        batchSize: number = DEFAULT_BATCH_SIZE,
+        maxRows?: number
     ): Promise<ReconciliationResult> {
-        // 1. Find unlinked mappings (trackId IS NULL, not stale)
-        const unlinkedMappings = await prisma.trackMapping.findMany({
-            where: {
-                trackId: null,
-                stale: false,
-            },
-            include: {
-                trackTidal: true,
-                trackYtMusic: true,
-            },
-            take: batchSize,
-            orderBy: { createdAt: "asc" },
-        });
+        const effectiveBatchSize = Math.max(1, Math.trunc(batchSize));
+        const requestedMaxRows =
+            typeof maxRows === "number" && Number.isFinite(maxRows)
+                ? Math.trunc(maxRows)
+                : null;
+        const effectiveMaxRows =
+            requestedMaxRows && requestedMaxRows > 0
+                ? Math.max(effectiveBatchSize, requestedMaxRows)
+                : Number.MAX_SAFE_INTEGER;
+        let processed = 0;
+        let linked = 0;
+        let skipped = 0;
+        let cursor: ReconciliationCursor | undefined;
 
-        if (unlinkedMappings.length === 0) {
+        const firstBatch = await this.getUnlinkedMappingsBatch(
+            Math.min(effectiveBatchSize, effectiveMaxRows),
+            cursor
+        );
+
+        if (firstBatch.length === 0) {
             log.debug("No unlinked mappings to reconcile — early exit");
             return { processed: 0, linked: 0, skipped: 0 };
         }
 
-        log.info(
-            `Reconciling ${unlinkedMappings.length} unlinked TrackMapping rows...`
-        );
+        if (requestedMaxRows && requestedMaxRows > 0) {
+            log.info(
+                `Reconciling up to ${effectiveMaxRows} unlinked TrackMapping rows in batches of ${effectiveBatchSize}...`
+            );
+        } else {
+            log.info(
+                `Reconciling unlinked TrackMapping rows in batches of ${effectiveBatchSize} until exhausted...`
+            );
+        }
 
-        // 2. Load local library candidates (one query for the whole batch)
+        // Load local library candidates once for the whole sweep.
         const localCandidates = await this.getLocalLibraryCandidates();
 
         if (localCandidates.length === 0) {
             log.debug("No local library tracks — nothing to match against");
-            return {
-                processed: unlinkedMappings.length,
-                linked: 0,
-                skipped: unlinkedMappings.length,
-            };
+            return this.exhaustUnlinkedMappingsWithoutMatches(
+                firstBatch,
+                effectiveBatchSize,
+                effectiveMaxRows
+            );
         }
 
-        let linked = 0;
-        let skipped = 0;
+        let currentBatch = firstBatch;
+        let currentBatchSize = Math.min(effectiveBatchSize, effectiveMaxRows);
+        while (currentBatch.length > 0 && processed < effectiveMaxRows) {
+            const batchResult = await this.linkMappingsBatch(
+                currentBatch,
+                localCandidates
+            );
+            processed += currentBatch.length;
+            linked += batchResult.linked;
+            skipped += batchResult.skipped;
 
-        // 3. For each unlinked mapping, try to match
-        for (const mapping of unlinkedMappings) {
-            const metadata = this.extractMetadata(mapping);
-            if (!metadata) {
-                log.debug(`Mapping ${mapping.id}: no extractable metadata, skipping`);
-                skipped++;
-                continue;
+            if (
+                processed >= effectiveMaxRows ||
+                currentBatch.length < currentBatchSize
+            ) {
+                break;
             }
 
-            // Metadata matching (artist + title + album + duration)
-            const match = matchTrackAgainstLibrary(metadata, localCandidates);
-            if (match && match.matchConfidence >= MIN_CONFIDENCE_THRESHOLD) {
-                // Check if an active mapping already links this local track to the
-                // same provider row. If so, mark this orphan stale to avoid a
-                // unique-constraint violation on the active linkage tuple index.
-                const conflicting = await prisma.trackMapping.findFirst({
-                    where: {
-                        trackId: match.trackId,
-                        trackTidalId: mapping.trackTidalId ?? null,
-                        trackYtMusicId: mapping.trackYtMusicId ?? null,
-                        stale: false,
-                        id: { not: mapping.id },
-                    },
-                });
-                if (conflicting) {
-                    log.info(
-                        `Mapping ${mapping.id}: conflict with existing mapping ${conflicting.id} for trackId=${match.trackId}, marking stale`
-                    );
-                    await prisma.trackMapping.update({
-                        where: { id: mapping.id },
-                        data: { stale: true },
-                    });
-                    skipped++;
-                } else {
-                    await prisma.trackMapping.update({
-                        where: { id: mapping.id },
-                        data: {
-                            trackId: match.trackId,
-                            confidence: match.matchConfidence / 100,
-                        },
-                    });
-                    linked++;
-                }
-            } else {
-                log.debug(
-                    `Mapping ${mapping.id}: no match above threshold (best=${match?.matchConfidence ?? 0}%)`
-                );
-                skipped++;
-            }
+            const lastMapping = currentBatch[currentBatch.length - 1];
+            cursor = {
+                createdAt: lastMapping.createdAt,
+                id: lastMapping.id,
+            };
+            const remaining = effectiveMaxRows - processed;
+            currentBatchSize = Math.min(effectiveBatchSize, remaining);
+            currentBatch = await this.getUnlinkedMappingsBatch(
+                currentBatchSize,
+                cursor
+            );
         }
 
         log.info(
-            `Reconciliation complete: ${linked} linked, ${skipped} skipped out of ${unlinkedMappings.length}`
+            `Reconciliation complete: ${linked} linked, ${skipped} skipped out of ${processed}`
         );
 
         return {
-            processed: unlinkedMappings.length,
+            processed,
             linked,
             skipped,
         };
+    }
+
+    private async exhaustUnlinkedMappingsWithoutMatches(
+        firstBatch: Array<{
+            id: string;
+            createdAt: Date;
+        }>,
+        batchSize: number,
+        maxRows: number
+    ): Promise<ReconciliationResult> {
+        let processed = firstBatch.length;
+        let skipped = firstBatch.length;
+        let currentBatch = firstBatch;
+        let currentBatchSize = Math.min(batchSize, maxRows);
+
+        while (currentBatch.length > 0 && processed < maxRows) {
+            if (currentBatch.length < currentBatchSize) {
+                break;
+            }
+
+            const lastMapping = currentBatch[currentBatch.length - 1];
+            const remaining = maxRows - processed;
+            currentBatchSize = Math.min(batchSize, remaining);
+            currentBatch = await this.getUnlinkedMappingsBatch(currentBatchSize, {
+                createdAt: lastMapping.createdAt,
+                id: lastMapping.id,
+            });
+            processed += currentBatch.length;
+            skipped += currentBatch.length;
+        }
+
+        return { processed, linked: 0, skipped };
     }
 
     /**

@@ -198,6 +198,18 @@ export function isListenTogetherActiveOrPending(): boolean {
 }
 
 /**
+ * Executes resolveListenTogetherFollowerGroupId.
+ */
+export function resolveListenTogetherFollowerGroupId(
+    snapshot: ListenTogetherSessionSnapshot | null | undefined,
+): string | null {
+    if (!snapshot?.groupId || snapshot.isHost) {
+        return null;
+    }
+    return snapshot.groupId;
+}
+
+/**
  * Executes requestListenTogetherGroupResync.
  */
 export async function requestListenTogetherGroupResync(
