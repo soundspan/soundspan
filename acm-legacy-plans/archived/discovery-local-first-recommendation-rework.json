@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "feature_id": "discovery-local-first-recommendation-rework",
+  "feature_title": "DISCOVERY_LOCAL_FIRST_RECOMMENDATION_REWORK_PLAN.md",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/discovery-local-first-recommendation-rework.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/discovery-local-first-recommendation-rework/PLAN.json",
+    "plan_dir": ".agents/plans/archived/discovery-local-first-recommendation-rework",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/discovery-local-first-recommendation-rework/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# LLM_SESSION_HANDOFF.md\n\n## Feature\n- Discovery local-first recommendation rework (no automated downloads)\n\n## Current State\n- Core implementation complete.\n- Recommendation mode is now the default discovery runtime path.\n- Legacy discovery downloader path remains present behind `DISCOVERY_MODE=legacy`.\n\n## Implemented in This Session\n1. Added `discoveryRecommendationsService` for local-first recommendation generation and weekly snapshot persistence.\n2. Routed discovery generation/current/batch-status to recommendation behavior when not in legacy mode.\n3. Disabled legacy-only like/unlike and cleanup/tagging mutation endpoints in recommendation mode.\n4. Updated worker processor to dispatch by discovery mode.\n5. Reworked discovery frontend for recommendation semantics and removed like/unlike controls.\n6. Added provider gap-fill blending (TIDAL-first, then YTMusic) with source badges in discovery list and playback payloads.\n7. Updated discovery settings/help copy to remove download semantics.\n\n## Verification Run\n1. `cd backend && npm test -- --runInBand discoverRecommendationCompat.test.ts` passed.\n2. `cd backend && npm test -- --runInBand discover` passed.\n3. `cd backend && npm run build` passed.\n4. `cd frontend && npx tsx features/discover/hooks/useDiscoverProviderGapFill.test.ts` passed.\n5. `cd frontend && npx tsx features/discover/hooks/useDiscoverActions.test.ts` passed.\n6. `cd frontend && npx eslint ...` on touched discover files passed.\n7. `cd frontend && npm run lint` remains red on existing repository-wide baseline issues outside this feature scope.\n\n## Product Direction Locked\n1. Discovery should not auto-download content.\n2. Discovery must prioritize local tracks.\n3. TIDAL/YTMusic can supplement recommendations when connected.\n4. Like/unlike should be removed from discovery UX (future global thumbs system planned separately).\n5. Legacy downloader discovery code should remain frozen for potential future restoration.\n\n## Next Actions\n1. Merge this feature branch after review/acceptance.\n2. If desired, follow up with provider-blend tuning (for example dynamic provider-share based on local library density).\n"
+      },
+      {
+        "path": ".agents/plans/archived/discovery-local-first-recommendation-rework/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# DISCOVERY_LOCAL_FIRST_RECOMMENDATION_REWORK_PLAN.md\n\n## Feature\n- Discovery local-first recommendation rework (no automated downloads)\n\n## Date\n- 2026-02-15\n\n## Problem Statement\nCurrent `/discover` is built around automated acquisition (queue -> download/import -> cleanup). Product direction changed:\n1. Discovery must never auto-download into the library.\n2. Discovery should prioritize local tracks first.\n3. If user has TIDAL and/or YouTube Music connected, include those as optional additional picks.\n4. Existing like/unlike behavior should be removed (future global thumbs-up/thumbs-down will replace it).\n5. Existing download-oriented implementation must remain preserved/frozen for possible future return.\n\n## Scope\n- Rework discovery generation/presentation into recommendation-only behavior.\n- Keep legacy download pipeline code reachable for future revival but disabled from current discovery runtime path.\n- Replace like/unlike interactions with neutral read-only recommendation actions.\n\n## Out of Scope (for this track)\n- Full thumbs-up/thumbs-down system across all Lidify surfaces.\n- Major redesign of cross-app recommendation science/ranking model.\n- Deleting legacy discovery database models/tables.\n\n## Full-Stack Request Path (Current)\n- Frontend: `frontend/app/discover/page.tsx`\n- API client: `frontend/lib/api.ts` discovery methods\n- Backend route: `backend/src/routes/discover.ts`\n- Backend service: `backend/src/services/discoverWeekly.ts`\n- Workers: `backend/src/workers/discoverCron.ts`, `backend/src/workers/processors/discoverProcessor.ts`, discovery hooks inside scan processor\n- Downstream: Last.fm + Lidarr + acquisition + scan + DB persistence in discovery/download models\n\n## Full-Stack Request Path (Target)\n- Frontend: discovery page requests recommendation snapshot and optional regenerate\n- Backend route returns recommendation playlist without triggering acquisition/download/import\n- Recommendation sources:\n  1. local library track selection (primary)\n  2. optional provider-enriched picks (TIDAL/YTMusic) when user auth is present\n- Persistence: lightweight recommendation snapshot + exclusions/config; no download jobs, no Lidarr deletion/move flows\n\n## Reuse/Consolidation Check\n- Existing patterns reused:\n  - `backend/src/routes/discover.ts` as route boundary\n  - `frontend/lib/api.ts` as API boundary\n  - Existing provider match/search endpoints (`/tidal-streaming/*`, `/ytmusic/*`) for optional provider augmentation\n  - Existing exclusion/config models (`DiscoverExclusion`, `UserDiscoverConfig`) where possible\n- Duplication intentionally kept:\n  - Legacy `discoverWeeklyService` download pipeline retained unchanged (frozen) to preserve rollback path.\n- Consolidation deferred:\n  - Shared recommendation-ranking service extraction from discover/search/recommendations is deferred to follow-up once V1 behavior is stable.\n\n## Spec Outline (V0)\n1. Discovery generate/current endpoints become recommendation-only and never enqueue download jobs.\n2. Local-first selection fills playlist target from owned/local tracks.\n3. Provider augmentation fills remaining slots only when per-user provider auth is valid.\n4. Like/unlike endpoints are disabled and frontend controls removed.\n5. Download-centric UI copy/settings (download buffer, unavailable imports, cleanup semantics) are replaced with recommendation semantics.\n6. Legacy pipeline remains in code behind a legacy mode path not used by default runtime.\n\n## Refined Spec (V1)\n### Data Contract\n- `GET /discover/current` returns tracks with explicit `sourceType`: `local | tidal | youtube`.\n- Discovery payload remains playlist-like for playback compatibility.\n- `unavailable` section is removed or returned as empty array with deprecation note in code comments.\n\n### Generation Behavior\n1. Seed from recent listening + top artists (existing logic reused where practical).\n2. Build candidate artists/albums/tracks from local catalog first.\n3. If target not met and provider connected:\n   - resolve additional tracks via batch match/search through TIDAL/YT routes.\n   - cap provider fan-out and dedupe by normalized artist/title.\n4. Store recommendation snapshot for week/user without creating `DownloadJob` rows.\n\n### Controls / Settings\n- Keep `playlistSize` and `exclusionMonths`.\n- Remove/ignore `downloadRatio` and download retry settings from discovery UI.\n- Keep `enabled` for cron/manual generation control.\n\n### UX\n- Remove heart like/unlike controls.\n- Update Discover page messaging from \"download/import\" to \"recommendation/play\".\n- Keep regenerate button.\n\n### Legacy Freeze Strategy\n- Keep old discovery downloader code in place as `legacy` path.\n- New runtime mode defaults to `recommendation-only`.\n- Explicit internal switch allows future return without re-implementing deleted code.\n\n## Detailed Implementation Plan\n\n### Phase 1: Contract + Routing Foundation\n#### Task 1.1: Define and document new discovery response contract\n- Status: Complete\n- Files:\n  - `plans/current/discovery-local-first-recommendation-rework/DISCOVERY_LOCAL_FIRST_RECOMMENDATION_REWORK_PLAN.md`\n  - `backend/src/routes/discover.ts`\n  - `frontend/features/discover/types.ts`\n- Completion summary: Added recommendation-mode contract (`sourceType` and provider stream fields on track payloads) and documented mode behavior in this plan plus route/type updates.\n\n#### Task 1.2: Introduce discovery mode boundary (recommendation-only default; legacy frozen)\n- Status: Complete\n- Files:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n  - `backend/src/config.ts`\n- Completion summary: Added `config.discover.mode` (`DISCOVERY_MODE=legacy` override) with recommendation mode as default; legacy flow remains present but gated.\n\n#### Task 1.3: Rewire generate/current/batch-status endpoints to non-download execution path\n- Status: Complete\n- Files:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discovery/*` (new recommendation service module)\n- Completion summary: Reworked `/discover/generate`, `/discover/current`, and `/discover/batch-status` to recommendation mode semantics while preserving legacy behavior behind mode guard.\n\n### Phase 2: Recommendation Engine (Local-first + Provider augmentation)\n#### Task 2.1: Implement local-first candidate selection and ranking\n- Status: Complete\n- Files:\n  - `backend/src/services/discovery/` (new `discoveryRecommendations.ts`)\n  - possible reuse from `backend/src/routes/recommendations.ts` and `backend/src/services/discovery/discoverySeeding.ts`\n- Completion summary: Implemented `discoveryRecommendationsService` with local-first seed/similar-artist based candidate ranking, recent-play avoidance, exclusion handling, and one-track-per-album selection.\n\n#### Task 2.2: Implement optional provider fill with bounded fan-out and dedupe\n- Status: Complete\n- Files:\n  - `frontend/features/discover/hooks/useDiscoverProviderGapFill.ts`\n  - reuse contracts from `frontend/lib/api.ts` provider batch matching methods\n- Completion summary: Implemented provider gap-fill blend on discovery tracks with bounded slot allocation (local-first) and TIDAL-first precedence, plus source tagging for badges/playback routing.\n\n#### Task 2.3: Persist weekly recommendation snapshot without download jobs\n- Status: Complete\n- Files:\n  - `backend/src/routes/discover.ts`\n  - `backend/prisma/schema.prisma` (only if additive schema is required)\n  - migration file(s) if schema changes are required\n- Completion summary: Reused existing `DiscoveryAlbum`/`DiscoveryTrack` models for weekly snapshot persistence; no schema or migration changes were needed.\n\n### Phase 3: Frontend Discover UX Rework\n#### Task 3.1: Remove like/unlike interaction path and heart controls\n- Status: Complete\n- Files:\n  - `frontend/features/discover/hooks/useDiscoverActions.ts`\n  - `frontend/features/discover/components/TrackList.tsx`\n  - `frontend/lib/api.ts`\n- Completion summary: Removed like/unlike controls from discovery UI/action flow and switched track list emphasis to source badges.\n\n#### Task 3.2: Replace download-centric settings/copy with recommendation-centric language\n- Status: Complete\n- Files:\n  - `frontend/features/discover/components/DiscoverSettings.tsx`\n  - `frontend/features/discover/components/HowItWorks.tsx`\n  - `frontend/features/discover/components/DiscoverActionBar.tsx`\n- Completion summary: Updated discover settings/help/action messaging to recommendation-first language and removed download buffer controls from the UI.\n\n#### Task 3.3: Ensure playback supports mixed local/provider track payloads in discovery page queue\n- Status: Complete\n- Files:\n  - `frontend/app/discover/page.tsx`\n  - `frontend/features/discover/hooks/useDiscoverActions.ts`\n  - player payload shaping touchpoints as needed\n- Completion summary: Discovery playback queue now forwards `streamSource`, `tidalTrackId`, and `youtubeVideoId`; badges are visible on discovery list and player surfaces.\n\n### Phase 4: Worker/Cron and Safety\n#### Task 4.1: Update discover cron/worker behavior to use recommendation mode path only\n- Status: Complete\n- Files:\n  - `backend/src/workers/discoverCron.ts`\n  - `backend/src/workers/processors/discoverProcessor.ts`\n  - `backend/src/workers/index.ts`\n- Completion summary: Worker processor now dispatches by configured discovery mode (legacy vs recommendation); cron logs active mode for operator clarity.\n\n#### Task 4.2: Ensure no automated download side effects from discovery mode\n- Status: Complete\n- Files:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n  - cleanup/data-integrity workers touching discovery paths\n- Completion summary: Recommendation mode routes avoid Lidarr/acquisition side effects and disable legacy-only mutation endpoints (`like`, `unlike`, cleanup/tagging repair).\n\n### Phase 5: Regression Tests + Verification + Docs\n#### Task 5.1: Backend regression tests for new discovery contracts\n- Status: Complete\n- Files:\n  - `backend/src/routes/__tests__/` (new discovery compat tests)\n- Completion summary: Added `discoverRecommendationCompat.test.ts` covering recommendation-mode `/discover` contracts (`batch-status`, `generate`, `current`, `clear`) and legacy-only endpoint `410` guards (`like`, `unlike`, `cleanup-lidarr`, `fix-tagging`); targeted backend suite passes.\n\n#### Task 5.2: Frontend regression tests for no-like/no-download UX and mixed-source playback payload\n- Status: Complete\n- Files:\n  - `frontend/tests/e2e/` and/or targeted frontend unit coverage\n- Completion summary: Added focused frontend regression scripts for provider gap-fill blending (`useDiscoverProviderGapFill.test.ts`) and discovery queue payload mapping (`useDiscoverActions.test.ts`), with helper extraction to make mixed-source playback mapping deterministic/testable.\n\n#### Task 5.3: Docs + fork delta synchronization\n- Status: Complete\n- Files:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`\n- Completion summary: Updated user/operator docs to reflect recommendation-only discovery semantics (no automated downloads, local-first provider-aware gap-fill), and refreshed fork-delta metadata/commit appendix for current branch head.\n\n## Verification Checkpoints (Mandatory)\n1. Backend-direct probe:\n   - `POST /api/discover/generate` does not enqueue/trigger download jobs.\n   - `GET /api/discover/current` returns recommendation playlist with source metadata.\n2. Frontend-proxy probe:\n   - Discover page regenerate and playback works through frontend base URL.\n3. Safety probe:\n   - No `DownloadJob` entries created with discovery metadata in recommendation mode.\n4. Provider probe:\n   - With provider auth disabled -> local-only results.\n   - With provider auth enabled -> provider picks appear only as supplemental entries.\n\n## Open Decisions Requiring User Direction\n1. Legacy mode control:\n   - Decision: Option A implemented (`DISCOVERY_MODE=legacy` override; recommendation default).\n2. Persistence model:\n   - Decision: Option B implemented (reuse `DiscoveryAlbum`/`DiscoveryTrack`).\n3. Provider blend rule:\n   - Decision: Option B implemented (bounded fixed-share provider blend with local-first priority).\n\n## Execution Status\n- Overall: Complete\n- Current phase: Closed\n"
+      },
+      {
+        "path": ".agents/plans/archived/discovery-local-first-recommendation-rework/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-15\n1. User requested replacing discovery behavior with local-first recommendations plus optional TIDAL/YTMusic inclusion.\n2. User explicitly requested no automated downloads and disabling like/unlike behavior.\n3. User requested keeping legacy download-based discovery logic frozen for possible future return.\n4. Planning track created before implementation per repository workflow rules.\n5. User confirmed implementation direction and requested preserving source badges for gap-fill visibility.\n6. Implementation executed with recommendation-mode default and legacy mode freeze.\n7. Frontend lint baseline remains red due pre-existing repository-wide issues unrelated to this change set; touched discovery files lint clean.\n8. Added explicit backend route compatibility tests for recommendation-mode discovery contracts.\n9. Added focused frontend regression scripts for provider gap-fill blending and mixed-source playback payload mapping.\n10. Synced user-facing docs to recommendation-mode discovery behavior (`CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`).\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.discovery-local-first-recommendation-rework.c6e9d38676",
+    "plan_key": "plan:legacy.archived.discovery-local-first-recommendation-rework.c6e9d38676",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "DISCOVERY_LOCAL_FIRST_RECOMMENDATION_REWORK_PLAN.md",
+      "objective": "DISCOVERY_LOCAL_FIRST_RECOMMENDATION_REWORK_PLAN.md",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/discovery-local-first-recommendation-rework.json",
+        ".agents/plans/archived/discovery-local-first-recommendation-rework/PLAN.json",
+        ".agents/plans/archived/discovery-local-first-recommendation-rework/HANDOFF.md",
+        ".agents/plans/archived/discovery-local-first-recommendation-rework/PLAN.md",
+        ".agents/plans/archived/discovery-local-first-recommendation-rework/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/discovery-local-first-recommendation-rework/HANDOFF.md",
+        ".agents/plans/archived/discovery-local-first-recommendation-rework/PLAN.md",
+        ".agents/plans/archived/discovery-local-first-recommendation-rework/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "DISCOVERY_LOCAL_FIRST_RECOMMENDATION_REWORK_PLAN.md",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/discovery-local-first-recommendation-rework.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "discovery-local-first-recommendation-rework",
+    "feature_title": "DISCOVERY_LOCAL_FIRST_RECOMMENDATION_REWORK_PLAN.md",
+    "plan_ref": ".agents/plans/archived/discovery-local-first-recommendation-rework/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "",
+        "non_goals": ""
+      }
+    }
+  }
+}

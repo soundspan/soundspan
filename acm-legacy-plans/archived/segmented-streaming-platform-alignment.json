@@ -1,0 +1,1470 @@
+{
+  "version": 1,
+  "feature_id": "segmented-streaming-platform-alignment",
+  "feature_title": "Plan - Segmented Streaming Platform Alignment",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json",
+    "plan_dir": ".agents/plans/archived/segmented-streaming-platform-alignment",
+    "status": "archived",
+    "updated_at": "2026-03-02T12:51:53.265Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.segmented-streaming-platform-alignment.b1faea6928",
+    "plan_key": "plan:legacy.archived.segmented-streaming-platform-alignment.b1faea6928",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Segmented Streaming Platform Alignment",
+      "objective": "Create an execution-ready, governance-compliant plan that aligns segmented DASH startup/recovery with mature platform patterns while respecting our no-CDN and no-direct-fallback architecture constraints.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Define deterministic segmented startup contract across session create, manifest readiness, and first segment fetch failure paths.",
+        "Machine-readable startup hint response contract plus retry header behavior implemented and validated in backend route tests."
+      ],
+      "out_of_scope": [
+        "Do not redesign product scope beyond segmented playback reliability; do not add direct stream fallback paths; do not include YouTube-specific, infra-only, or unrelated recommendation feature work in this track."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+        ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json",
+        "backend/src/routes/streaming.ts",
+        "backend/src/routes/__tests__/streamingRuntime.test.ts",
+        "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+        "frontend/components/player/segmentedStartupErrorContract.ts",
+        "frontend/components/player/segmentedStartupErrorContract.test.ts",
+        ".agents/plans/current/segmented-streaming-platform-alignment/PLAN.json",
+        "backend/src/services/segmented-streaming/sessionService.ts",
+        "docs/architecture/adr-segmented-streaming.md",
+        "backend/src/services/segmented-streaming/manifestService.ts",
+        "backend/src/services/segmented-streaming/cacheService.ts",
+        "charts",
+        "docker-compose.yml",
+        "frontend/components/player/audioPlaybackOrchestratorPolicy.ts",
+        "frontend/lib/audio/playback-state-machine.ts",
+        "frontend/lib/playback-intent.ts",
+        "frontend/lib/logger.ts",
+        "backend/src/utils/logger.ts",
+        "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts",
+        "frontend/components/player/audioPlaybackOrchestratorPolicy.test.ts",
+        "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
+        "frontend/tests/unit/playbackIntent.test.ts",
+        "docs/architecture/segmented-streaming-baseline.md",
+        "docs/architecture/segmented-streaming-baseline-direct-stream.ndjson",
+        "docs/DEPLOYMENT.md",
+        "docs/ENVIRONMENT_VARIABLES.md",
+        "CHANGELOG.md",
+        "README.md",
+        "backend/src/services/segmented-streaming/segmentService.ts",
+        "backend/src/services/segmented-streaming/__tests__/segmentService.test.ts",
+        "frontend/lib/audio/heartbeat-monitor.ts",
+        "backend/src/utils/redis.ts",
+        "frontend/lib/api.ts",
+        "backend/scripts/measure-segmented-startup-baseline.ts",
+        "Dockerfile"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.week-1-day-1-2:-draft-and-agree-segmented-startup-contract-document-and-route-level-response-taxonomy.",
+        "summary": "Week 1 Day 1-2: Draft and agree segmented startup contract document and route-level response taxonomy.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Contract doc captures ready, transient, and terminal startup states.",
+          "Route handlers and service layer mapping are identified line-by-line.",
+          "Operator-facing retry semantics are explicit and testable."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          ".agents/plans/current/segmented-streaming-platform-alignment/PLAN.json",
+          "backend/src/routes/streaming.ts",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "docs/architecture/adr-segmented-streaming.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added ADR documenting segmented startup contract semantics and route-level response taxonomy for session create, manifest, and segment readiness paths. | Documented startup correlation header expectations and observability implications for rollout diagnostics.",
+        "evidence": [
+          "verify: manual review of docs/architecture/adr-segmented-streaming.md against backend startupHint implementation in backend/src/routes/streaming.ts"
+        ]
+      },
+      {
+        "key": "task.02.week-1-day-2-3:-implement-startup-response-taxonomy-and-retry-hints-in-backend-segmented-routes-services.",
+        "summary": "Week 1 Day 2-3: Implement startup response taxonomy and retry hints in backend segmented routes/services.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Transient startup responses are machine-readable and stable.",
+          "Session create/manifest readiness states are bounded and deterministic.",
+          "Existing segmented token/session security guarantees remain intact."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/routes/streaming.ts",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "backend/src/services/segmented-streaming/manifestService.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added structured startupHint contract and Retry-After header behavior for segmented startup failures on session-create/manifest/segment routes. | Added runtime route tests covering transient/terminal startup hint responses and header behavior.",
+        "evidence": [
+          "verify: cd backend && npm test -- src/routes/__tests__/streamingRuntime.test.ts"
+        ]
+      },
+      {
+        "key": "task.03.week-1-day-3-4:-add-origin-shield-microcache-and-request-coalescing-for-manifest-first-segments.",
+        "summary": "Week 1 Day 3-4: Add origin-shield microcache and request-coalescing for manifest/first segments.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Duplicate startup requests collapse to single backend fill operations.",
+          "Cache behavior for startup assets is observable via logs/metrics.",
+          "No cache policy breaks segmented authorization checks."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/cacheService.ts",
+          "charts",
+          "docker-compose.yml"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented in-flight request coalescing for manifest readiness and segment readiness waits keyed by session and session+segment. | Added focused service tests proving coalescing behavior and cleanup after failure. | Added short-TTL readiness microcache for manifest and segment startup checks to avoid duplicate timeline/file reads during bursty startup retries. | Added segmented trace events for readiness microcache hits and coalesced waits to make cache behavior observable during rollout debugging.",
+        "evidence": [
+          "verify: cd backend && npm test -- src/services/segmented-streaming/__tests__/sessionService.test.ts",
+          "verify: cd backend && npm test -- src/services/segmented-streaming/__tests__/sessionService.test.ts src/routes/__tests__/streamingRuntime.test.ts",
+          "verify: npm run agent:preflight"
+        ]
+      },
+      {
+        "key": "task.04.week-1-day-4-5:-reduce-player-startup-to-staged-deterministic-recovery-and-remove-incidental-complexity.",
+        "summary": "Week 1 Day 4-5: Reduce player startup to staged deterministic recovery and remove incidental complexity.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Recovery stages are bounded and policy-driven.",
+          "RECOVERING/LOADING transitions remain coherent and test-covered.",
+          "No direct fallback behavior exists in startup failure paths."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+          "frontend/components/player/audioPlaybackOrchestratorPolicy.ts",
+          "frontend/lib/audio/playback-state-machine.ts",
+          "frontend/lib/playback-intent.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aligned segmented startup retry scheduling with backend startupHint semantics (transient + retryAfterMs) while keeping recovery stage decisions policy-driven and bounded. | Verified startup timeout path schedules segmented staged retries and transitions through RECOVERING/LOADING until retry budget exhaustion, then surfaces ERROR without direct fallback. | Added explicit terminal stage-exhaustion policy coverage to guarantee startup retry flows stop in ERROR when retry/session-reset budget is spent instead of falling back to direct playback. | Added startup-stability eligibility guard for segmented handoff recovery so early playback errors no longer trigger handoff churn during the first stabilized playback window.",
+        "evidence": [
+          "verify: cd frontend && node --test --experimental-strip-types components/player/audioPlaybackOrchestratorPolicy.test.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts tests/unit/playbackIntent.test.ts components/player/segmentedStartupErrorContract.test.ts",
+          "verify: npm run agent:preflight"
+        ]
+      },
+      {
+        "key": "task.05.week-2-day-1-2:-implement-cmcd-cmsd-aligned-startup-telemetry-dimensions-and-server-correlation-fields.",
+        "summary": "Week 2 Day 1-2: Implement CMCD/CMSD-aligned startup telemetry dimensions and server correlation fields.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Client metrics include stage, retry budget, and startup latency dimensions.",
+          "Server logs/metrics correlate session/create/manifest/segment startup timings.",
+          "Telemetry allows baseline-vs-wave comparisons without ad hoc parsing."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+          "backend/src/routes/streaming.ts",
+          "frontend/lib/logger.ts",
+          "backend/src/utils/logger.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added CMCD/CMSD-aligned startup dimensions to player startup timeline telemetry, including retry budgets and session reset budget usage. | Added startup correlation headers/fields across segmented session-create, manifest, and segment route metrics and trace payloads. | Extended startup metric ingestion on backend client-metrics route for correlation and retry-budget dimensions.",
+        "evidence": [
+          "verify: cd backend && npm test -- src/routes/__tests__/streamingRuntime.test.ts",
+          "verify: cd frontend && node --test --experimental-strip-types components/player/segmentedStartupErrorContract.test.ts"
+        ]
+      },
+      {
+        "key": "task.06.week-2-day-2-3:-add-targeted-regression-suites-for-startup-contract-staged-recovery-and-retry-exhaustion-behavior.",
+        "summary": "Week 2 Day 2-3: Add targeted regression suites for startup contract, staged recovery, and retry exhaustion behavior.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Backend tests cover startup readiness and transient/terminal response codes.",
+          "Frontend tests cover staged recovery decisions and state transitions.",
+          "Tests prove segmented-only policy under retry exhaustion."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts",
+          "frontend/components/player/audioPlaybackOrchestratorPolicy.test.ts",
+          "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
+          "frontend/tests/unit/playbackIntent.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Expanded route-level runtime tests to validate startup contract fields, correlation headers, and transient/terminal startup behavior. | Validated staged startup recovery and retry exhaustion behavior via targeted frontend policy/unit test suites. | Validated startup hint parser + conservative delay behavior in dedicated helper tests.",
+        "evidence": [
+          "verify: cd backend && npm test -- src/routes/__tests__/streamingRuntime.test.ts",
+          "verify: cd frontend && node --test --experimental-strip-types components/player/audioPlaybackOrchestratorPolicy.test.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts tests/unit/playbackIntent.test.ts",
+          "verify: cd frontend && node --test --experimental-strip-types components/player/segmentedStartupErrorContract.test.ts"
+        ]
+      },
+      {
+        "key": "task.07.week-2-day-3-4:-run-rollout-wave-validation-and-compare-startup-slo-like-metrics-against-baseline.",
+        "summary": "Week 2 Day 3-4: Run rollout-wave validation and compare startup SLO-like metrics against baseline.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Wave report includes first-audible, startup timeout, and retry-exhaustion rates.",
+          "Baseline comparison is documented with explicit deltas and confidence caveats.",
+          "Residual risks and follow-up optimizations are ranked by impact."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "docs/architecture/segmented-streaming-baseline.md",
+          "docs/architecture/segmented-streaming-baseline-direct-stream.ndjson",
+          "backend/src/routes/streaming.ts",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added baseline report generator for segmented startup metrics (p50/p95 first-audible latency, startup-timeout rate, retry-exhaustion rate) from NDJSON captures. | Added architecture docs and sample capture for baseline vs wave analysis workflow. | Added baseline-vs-wave comparison mode to startup baseline measurement script with absolute and percent deltas for p50/p95 latency, startup-timeout rate, and retry-exhaustion rate. | Added explicit confidence caveat output based on startup sample count and documented residual-risk prioritization for rollout triage. | Execution halted on 2026-03-02T12:51:53.265Z due to plan archival closure.",
+        "evidence": [
+          "verify: cd backend && npx tsx scripts/measure-segmented-startup-baseline.ts --input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --label sample",
+          "verify: cd backend && npx tsx scripts/measure-segmented-startup-baseline.ts --input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --label baseline-sample",
+          "verify: cd backend && npx tsx scripts/measure-segmented-startup-baseline.ts --input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --label baseline-sample --compare-input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --compare-label wave-sample"
+        ]
+      },
+      {
+        "key": "task.08.week-2-day-5:-document-operator-playbook-rollout-guardrails-and-closeout-evidence-in-canonical-docs.",
+        "summary": "Week 2 Day 5: Document operator playbook, rollout guardrails, and closeout evidence in canonical docs.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Deployment docs include startup contract and retry behavior expectations.",
+          "Observability docs include query examples for startup regression detection.",
+          "Changelog entry summarizes user-visible reliability outcomes."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "docs/DEPLOYMENT.md",
+          "docs/ENVIRONMENT_VARIABLES.md",
+          "CHANGELOG.md",
+          "README.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "Documented segmented startup contract fields, correlation headers, and log query dimensions for rollout diagnostics in deployment docs. | Expanded deployment playbook with startup contract semantics, startup correlation headers, observability field groups, and baseline-vs-wave measurement commands. | Updated architecture guidance to use automated baseline-vs-wave comparison reporting instead of manual markdown diffing. | Recorded reliability-facing rollout updates in changelog for operator/user visibility.",
+        "evidence": [
+          "verify: manual review of docs/DEPLOYMENT.md startup contract and observability sections",
+          "verify: manual review of docs/DEPLOYMENT.md startup contract + observability + compare command sections",
+          "verify: manual review of docs/architecture/segmented-streaming-baseline.md runbook and residual risk ranking",
+          "verify: npm run agent:preflight"
+        ]
+      },
+      {
+        "key": "task.09.remediation-p0-1:-implement-atomic-force-regenerate-staging-promote-flow-for-dash-assets-build-in-staging-dir-validate-",
+        "summary": "Remediation P0-1: Implement atomic force-regenerate staging/promote flow for DASH assets (build in staging dir, validate, atomic swap).",
+        "status": "complete",
+        "acceptance_criteria": [
+          "forceRegenerateDashSegments writes to an isolated staging directory and only promotes artifacts via atomic rename after manifest and startup assets validate.",
+          "No partially regenerated asset directory is externally visible during regeneration; existing stable assets remain serveable until swap.",
+          "Regression coverage proves interrupted regeneration leaves prior assets intact and subsequent regenerate succeeds cleanly."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/segmentService.ts",
+          "backend/src/services/segmented-streaming/cacheService.ts",
+          "backend/src/services/segmented-streaming/__tests__/segmentService.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Refactored force-regenerate flow to build DASH outputs in an isolated staging directory, validate manifest/startup assets, and promote via atomic directory swap. | Added failure-safe cleanup so failed or interrupted regeneration leaves previously promoted assets intact and still serveable.",
+        "evidence": [
+          "verify: npm --prefix backend test -- --runTestsByPath src/services/segmented-streaming/__tests__/segmentService.test.ts src/services/segmented-streaming/__tests__/sessionService.test.ts src/services/__tests__/listenTogetherSocketRuntime.test.ts",
+          "verify: npm --prefix backend run build"
+        ]
+      },
+      {
+        "key": "task.10.remediation-p0-2:-fix-ensurelocaldashsegments-failure-inflight-race-ordering-so-concurrent-callers-receive-deterministi",
+        "summary": "Remediation P0-2: Fix ensureLocalDashSegments failure/inFlight race ordering so concurrent callers receive deterministic outcomes.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Concurrent ensureLocalDashSegments calls share one in-flight build contract and do not expose stale/optimistic paths before readiness semantics are met.",
+          "Failure propagation and inFlightBuilds cleanup ordering are deterministic so retries do not inherit stale failure state or orphaned promises.",
+          "Concurrency-focused tests cover success, failure, and post-failure retry behavior under parallel callers."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/segmentService.ts",
+          "backend/src/services/segmented-streaming/manifestService.ts",
+          "backend/src/services/segmented-streaming/__tests__/segmentService.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Reordered ensureLocalDashSegments in-flight/failure handling so concurrent callers share a single deterministic build promise and never observe optimistic readiness before validation. | Normalized inFlightBuilds cleanup and retry ordering after failures so retries do not inherit stale failure state or orphaned promises.",
+        "evidence": [
+          "verify: npm --prefix backend test -- --runTestsByPath src/services/segmented-streaming/__tests__/segmentService.test.ts src/services/segmented-streaming/__tests__/sessionService.test.ts src/services/__tests__/listenTogetherSocketRuntime.test.ts",
+          "verify: npm --prefix backend run build"
+        ]
+      },
+      {
+        "key": "task.11.remediation-p1-1:-eliminate-handoff-listener-orphans-with-explicit-track-change-unmount-cleanup-plus-timeout-backstop.",
+        "summary": "Remediation P1-1: Eliminate handoff listener orphans with explicit track-change/unmount cleanup plus timeout backstop.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Handoff load/loaderror listeners are tracked and cleared on track-change transitions and component unmount.",
+          "A bounded timeout backstop clears orphan listeners and buffering state when expected callback events never arrive.",
+          "Regression tests demonstrate listener count remains bounded across repeated handoff attempts and rapid track changes."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+          "frontend/components/player/audioPlaybackOrchestratorPolicy.test.ts",
+          "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added explicit handoff listener lifecycle tracking and teardown across track-change transitions and component unmount. | Added a timeout backstop that clears stalled handoff listeners and buffering state when load callbacks never arrive.",
+        "evidence": [
+          "verify: npm --prefix frontend run lint -- components/player/AudioPlaybackOrchestrator.tsx lib/audio-engine/segmentedPlaybackRegressionPolicy.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts lib/listen-together-socket.ts tests/component/listenTogetherSocketRetry.component.test.ts",
+          "verify: npm --prefix frontend run test:unit -- tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
+          "verify: node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/listenTogetherSocketRetry.component.test.ts"
+        ]
+      },
+      {
+        "key": "task.12.remediation-p1-2:-add-heartbeat-consecutive-failure-guarded-refresh-path-to-avoid-repeated-churn-on-transient-heartbeat",
+        "summary": "Remediation P1-2: Add heartbeat consecutive-failure guarded refresh path to avoid repeated churn on transient heartbeat outages.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Client heartbeat logic tracks consecutive failures and resets streak state on success.",
+          "After configured streak threshold, a guarded single-flight refresh/recovery path runs with cooldown protection.",
+          "Heartbeat metrics/log fields record failure streak and guarded refresh outcome for observability and alert tuning."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+          "frontend/lib/audio/heartbeat-monitor.ts",
+          "backend/src/routes/streaming.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented heartbeat consecutive-failure streak tracking with reset-on-success semantics. | Added threshold-guarded single-flight refresh with cooldown protection to prevent repeated churn during transient heartbeat outages, including observable outcome fields.",
+        "evidence": [
+          "verify: npm --prefix frontend run lint -- components/player/AudioPlaybackOrchestrator.tsx lib/audio-engine/segmentedPlaybackRegressionPolicy.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts lib/listen-together-socket.ts tests/component/listenTogetherSocketRetry.component.test.ts",
+          "verify: node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/listenTogetherSocketRetry.component.test.ts"
+        ]
+      },
+      {
+        "key": "task.13.remediation-p1-3:-reclassify-startup-fallback-semantics-finding-as-audit-observability-check-false-positive-rather-than",
+        "summary": "Remediation P1-3: Reclassify startup fallback semantics finding as audit/observability check (false-positive) rather than behavior flip.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Startup fallback behavior remains unchanged unless audit evidence demonstrates a reproducible product-impacting fault.",
+          "Instrumentation captures fallback trigger reason, parsed startup hint details, and retry-hint provenance for post-incident analysis.",
+          "Audit disposition is documented as false-positive with explicit follow-up observability checks and close criteria."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+          "frontend/components/player/segmentedStartupErrorContract.ts",
+          "docs/architecture/segmented-streaming-baseline.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.14.remediation-p2-1:-introduce-bounded-readiness-polling-backoff-strategy-for-asset-startup-readiness-checks-not-a-pure-fs",
+        "summary": "Remediation P2-1: Introduce bounded readiness polling backoff strategy for asset/startup readiness checks (not a pure fs.watch swap).",
+        "status": "complete",
+        "acceptance_criteria": [
+          "waitForAssetFile and waitForStartupWindowReady move from fixed-interval polling to bounded backoff with jitter and explicit maximum interval cap.",
+          "Backoff resets promptly when build progress/readiness signals are observed, preserving fast path startup latency.",
+          "Tests cover backoff progression, reset behavior, and timeout boundary semantics."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.15.remediation-p2-2:-add-periodic-sweeping-for-segmented-in-memory-maps-to-cap-stale-entry-growth.",
+        "summary": "Remediation P2-2: Add periodic sweeping for segmented in-memory maps to cap stale entry growth.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Expired entries in inMemorySessions/readiness microcache maps are swept on a bounded cadence without affecting active sessions.",
+          "Sweep logic is deterministic, low-overhead, and avoids removing entries still referenced by active in-flight work.",
+          "Tests validate stale eviction behavior under churn-heavy session create/heartbeat/readiness paths."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "backend/src/services/segmented-streaming/segmentService.ts",
+          "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.16.remediation-p2-3:-implement-per-user-segmented-session-create-limiting-that-is-redis-aware-and-distributed-safe-across-",
+        "summary": "Remediation P2-3: Implement per-user segmented session create limiting that is Redis-aware and distributed-safe across pods.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Session create rate/concurrency limits are enforced through Redis-backed atomic operations so all pods observe the same limit envelope.",
+          "Limit rejections return explicit contract-compliant status/code/hint and preserve existing authorization/validation ordering.",
+          "Limiter state decays automatically (TTL/windowing) and emits metrics for tuning and incident diagnostics."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/routes/streaming.ts",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "backend/src/utils/redis.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.17.remediation-p2-4:-harden-express-sendfile-callback-error-handling-for-manifest-and-segment-responses.",
+        "summary": "Remediation P2-4: Harden Express sendFile callback/error handling for manifest and segment responses.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Segment and manifest handlers use sendFile callback handling to surface stream errors/aborts without double response writes.",
+          "ENOENT and transport errors from sendFile callback map into existing segmented startup error taxonomy and telemetry fields.",
+          "Route runtime tests cover callback error/abort branches and preserve success-path response headers/types."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/routes/streaming.ts",
+          "backend/src/routes/__tests__/streamingRuntime.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.18.remediation-p2-5:-harden-manifest-timeline-parsing-to-tolerate-malformed-or-edge-segmenttimeline-patterns-safely.",
+        "summary": "Remediation P2-5: Harden manifest timeline parsing to tolerate malformed or edge SegmentTimeline patterns safely.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Timeline parsing handles attribute order/whitespace variance and malformed repeat values without unsafe counts or crashes.",
+          "When timeline parsing cannot derive safe counts, readiness behavior degrades predictably with explicit trace/metric annotations.",
+          "Unit tests add malformed, multi-representation, and large-repeat manifest fixtures."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.19.remediation-p2-6:-deduplicate-lossless-extension-regex-into-shared-segmented-streaming-constant-helper.",
+        "summary": "Remediation P2-6: Deduplicate LOSSLESS extension regex into shared segmented-streaming constant/helper.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "A single shared LOSSLESS extension matcher is consumed by segmentService and sessionService to remove divergence risk.",
+          "Duplicate local regex literals are removed with no behavior change in codec/quality decisions.",
+          "Tests confirm representative lossless/non-lossless extensions retain prior classification results."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/segmentService.ts",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "backend/src/services/segmented-streaming/manifestService.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.20.remediation-p2-7:-add-abortcontroller-management-for-segmented-prewarm-fetches-and-superseded-validation-requests.",
+        "summary": "Remediation P2-7: Add AbortController management for segmented prewarm fetches and superseded validation requests.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Prewarm manifest/segment validation fetches are issued with AbortControllers tied to track/session lifecycle.",
+          "Controllers are canceled on track-change, retry supersession, and unmount to prevent orphan network activity.",
+          "Telemetry distinguishes intentional aborts from true prewarm validation failures."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+          "frontend/lib/api.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added AbortController lifecycle ownership for segmented prewarm validation fetches tied to active track/session context. | Canceled superseded prewarm validations on track change, retry supersession, and unmount, and separated intentional abort reporting from true validation failures.",
+        "evidence": [
+          "verify: npm --prefix frontend run lint -- components/player/AudioPlaybackOrchestrator.tsx lib/audio-engine/segmentedPlaybackRegressionPolicy.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts lib/listen-together-socket.ts tests/component/listenTogetherSocketRetry.component.test.ts",
+          "verify: npm --prefix frontend run test:unit -- tests/unit/segmentedPlaybackRegressionPolicy.test.ts"
+        ]
+      },
+      {
+        "key": "task.21.define-mp4box-exploration-charter-hard-success-metrics-and-explicit-no-pivot-guardrails.",
+        "summary": "Define MP4Box exploration charter, hard success metrics, and explicit no-pivot guardrails.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Success metrics include bad-chunk detection lift, startup-latency impact ceiling, and operational complexity budget.",
+          "Guardrails explicitly prohibit replacing FFmpeg transcoding in this exploration phase.",
+          "Decision gate and owners are documented with concrete evidence requirements."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          ".agents/plans/current/segmented-streaming-platform-alignment/PLAN.json",
+          "docs/architecture/adr-segmented-streaming.md",
+          "backend/src/services/segmented-streaming/segmentService.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      },
+      {
+        "key": "task.22.capture-baseline-ffmpeg-only-reliability-latency-evidence-for-segmented-sessions-before-mp4box-trials.",
+        "summary": "Capture baseline FFmpeg-only reliability/latency evidence for segmented sessions before MP4Box trials.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Baseline includes first-audible latency (p50/p95), playback-error rate, segment-quarantine rate, and forced-regeneration frequency.",
+          "Baseline windows and sample-size caveats are recorded for comparability.",
+          "Evidence is saved in reproducible artifacts, not ad-hoc terminal output."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/scripts/measure-segmented-startup-baseline.ts",
+          "docs/architecture/segmented-streaming-baseline.md",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      },
+      {
+        "key": "task.23.build-an-offline-validation-harness-that-runs-mp4box-checks-against-ffmpeg-generated-dash-outputs-and-compares-results-",
+        "summary": "Build an offline validation harness that runs MP4Box checks against FFmpeg-generated DASH outputs and compares results against current validators.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Harness executes deterministically on a track corpus and records pass/fail + reason for MP4Box, ffprobe, and current structural checks.",
+          "False-positive and false-negative cases are explicitly identified.",
+          "Harness output format supports baseline-vs-wave style comparison."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/segmentService.ts",
+          "backend/src/services/segmented-streaming/cacheService.ts",
+          "docs/architecture/segmented-streaming-baseline.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      },
+      {
+        "key": "task.24.create-a-known-problem-segment-corpus-including-previously-failing-chunk-windows-and-run-reproducibility-trials.",
+        "summary": "Create a known-problem segment corpus (including previously failing chunk windows) and run reproducibility trials.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Corpus includes at least one previously observed fast-fail track/chunk pattern and representative healthy tracks.",
+          "Trials record whether MP4Box flags corruption earlier or more accurately than current checks.",
+          "All corpus items are traceable to concrete cache/session evidence."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/routes/streaming.ts",
+          "backend/src/services/segmented-streaming/sessionService.ts",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      },
+      {
+        "key": "task.25.benchmark-mp4box-validation-overhead-and-operational-impact-under-realistic-concurrency.",
+        "summary": "Benchmark MP4Box validation overhead and operational impact under realistic concurrency.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Measured overhead includes build wall-time delta, CPU, and memory under at least low/medium/high parallelism tiers.",
+          "p95 startup latency budget impact is quantified and compared against declared exploration thresholds.",
+          "Operational concerns (binary packaging, image size, failure modes) are captured with mitigation notes."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/segmentService.ts",
+          "Dockerfile",
+          "charts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      },
+      {
+        "key": "task.26.produce-a-feature-flagged-integration-spike-design-for-optional-mp4box-post-build-validation-temp-build-validate-atomic",
+        "summary": "Produce a feature-flagged integration spike design for optional MP4Box post-build validation (temp-build -> validate -> atomic promote).",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Design keeps live playback request path non-blocking and avoids per-segment inline validation.",
+          "Failure behavior is explicit: reject/purge bad temp assets and trigger deterministic regeneration path.",
+          "Integration plan reuses existing observability and repair signals where possible."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "backend/src/services/segmented-streaming/segmentService.ts",
+          "backend/src/services/segmented-streaming/cacheService.ts",
+          "backend/src/routes/streaming.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      },
+      {
+        "key": "task.27.define-canary-evaluation-and-rollback-criteria-for-optional-mp4box-validation.",
+        "summary": "Define canary evaluation and rollback criteria for optional MP4Box validation.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Canary scope, duration, and guardrails are explicit and reversible.",
+          "Go/no-go thresholds include reliability lift, latency impact, and operational incident rate.",
+          "Rollback and disable procedures are documented as first-class runbook steps."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          "docs/DEPLOYMENT.md",
+          "backend/src/routes/streaming.ts",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      },
+      {
+        "key": "task.28.publish-final-exploration-decision-memo:-keep-ffmpeg-only-adopt-mp4box-as-validator-or-escalate-to-broader-packaging-re",
+        "summary": "Publish final exploration decision memo: keep FFmpeg-only, adopt MP4Box as validator, or escalate to broader packaging redesign.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Decision cites quantitative evidence from baseline, harness, corpus, and benchmark phases.",
+          "Memo includes explicit rationale for rejected alternatives and residual risks.",
+          "Follow-up work is split into atomic queue-ready tasks when further action is approved."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/segmented-streaming-platform-alignment.json",
+          ".agents/plans/current/segmented-streaming-platform-alignment/PLAN.json",
+          "CHANGELOG.md",
+          "docs/architecture/adr-segmented-streaming.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed.",
+        "evidence": [
+          "verify: closure directive recorded; no implementation executed (aborted)"
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "segmented-streaming-platform-alignment",
+    "feature_title": "Plan - Segmented Streaming Platform Alignment",
+    "plan_ref": ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-03-02T12:51:53.265Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "Align segmented DASH startup and recovery behavior with mature platform patterns by shifting reliability burden to deterministic server contracts, origin-shield style caching, and minimal player-side recovery logic under constrained non-CDN infrastructure.",
+        "full_spec_outline": [
+          {
+            "id": "spec-startup-contract",
+            "objective": "Define deterministic segmented startup contract across session create, manifest readiness, and first segment fetch failure paths.",
+            "deliverable": "Machine-readable startup hint response contract plus retry header behavior implemented and validated in backend route tests.",
+            "acceptance_criteria": [
+              "Startup-path errors include stable machine-readable hint fields for stage/state/transient/retry guidance.",
+              "Transient startup states expose bounded retry hints via response payload and header semantics."
+            ],
+            "references": [
+              "backend/src/routes/streaming.ts",
+              "backend/src/routes/__tests__/streamingRuntime.test.ts"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Use a two-week, low-risk execution sequence that first hardens startup contracts and cache behavior, then simplifies player interactions and validates with measurable startup SLO deltas. Preserve segmented-only playback architecture and avoid introducing direct URL fallback paths.",
+        "full_refined_spec": [
+          {
+            "id": "refined-backend-client-retry-contract",
+            "decision": "Use backend-authored startup transientness and retry-after hints as the primary startup retry signal, with frontend heuristic fallback only when hints are absent.",
+            "rationale": "Server-side classification has canonical knowledge of startup state and reduces brittle message-string retry logic in the player.",
+            "acceptance_criteria": [
+              "Frontend startup retry policy consults parsed backend startup hints before heuristic fallback.",
+              "Retry delay logic remains conservative and bounded to existing recovery windows."
+            ],
+            "references": [
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+              "frontend/components/player/segmentedStartupErrorContract.ts",
+              "frontend/components/player/segmentedStartupErrorContract.test.ts"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Three-track execution plan: (A) complete segmented reliability rollout-wave validation, (B) execute the reviewed stabilization remediation backlog in strict priority order (P0 atomic regeneration/race fixes, then P1 handoff-heartbeat-observability controls, then P2 hardening tasks), and (C) continue the bounded MP4Box exploration once stabilization blockers are implemented or explicitly waived.\n\nArchived on 2026-03-02T12:51:53.265Z by user request. Segmented streaming platform alignment plan closed; MP4Box exploration workstream aborted.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Week 1 Day 1-2: Draft and agree segmented startup contract document and route-level response taxonomy.",
+            "acceptance_criteria": [
+              "Contract doc captures ready, transient, and terminal startup states.",
+              "Route handlers and service layer mapping are identified line-by-line.",
+              "Operator-facing retry semantics are explicit and testable."
+            ],
+            "references": [
+              ".agents/plans/current/segmented-streaming-platform-alignment/PLAN.json",
+              "backend/src/routes/streaming.ts",
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "docs/architecture/adr-segmented-streaming.md"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added ADR documenting segmented startup contract semantics and route-level response taxonomy for session create, manifest, and segment readiness paths.",
+                "Documented startup correlation header expectations and observability implications for rollout diagnostics."
+              ],
+              "files_functions_hooks_touched": [
+                "docs/architecture/adr-segmented-streaming.md"
+              ],
+              "verification_testing": [
+                "verify: manual review of docs/architecture/adr-segmented-streaming.md against backend startupHint implementation in backend/src/routes/streaming.ts"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Week 1 Day 2-3: Implement startup response taxonomy and retry hints in backend segmented routes/services.",
+            "acceptance_criteria": [
+              "Transient startup responses are machine-readable and stable.",
+              "Session create/manifest readiness states are bounded and deterministic.",
+              "Existing segmented token/session security guarantees remain intact."
+            ],
+            "references": [
+              "backend/src/routes/streaming.ts",
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "backend/src/services/segmented-streaming/manifestService.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added structured startupHint contract and Retry-After header behavior for segmented startup failures on session-create/manifest/segment routes.",
+                "Added runtime route tests covering transient/terminal startup hint responses and header behavior."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/streaming.ts (respondWithSegmentedStartupError, resolveSegmentedStartupHint)",
+                "backend/src/routes/__tests__/streamingRuntime.test.ts"
+              ],
+              "verification_testing": [
+                "verify: cd backend && npm test -- src/routes/__tests__/streamingRuntime.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Week 1 Day 3-4: Add origin-shield microcache and request-coalescing for manifest/first segments.",
+            "acceptance_criteria": [
+              "Duplicate startup requests collapse to single backend fill operations.",
+              "Cache behavior for startup assets is observable via logs/metrics.",
+              "No cache policy breaks segmented authorization checks."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/cacheService.ts",
+              "charts",
+              "docker-compose.yml"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented in-flight request coalescing for manifest readiness and segment readiness waits keyed by session and session+segment.",
+                "Added focused service tests proving coalescing behavior and cleanup after failure.",
+                "Added short-TTL readiness microcache for manifest and segment startup checks to avoid duplicate timeline/file reads during bursty startup retries.",
+                "Added segmented trace events for readiness microcache hits and coalesced waits to make cache behavior observable during rollout debugging."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/services/segmented-streaming/sessionService.ts",
+                "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts",
+                "backend/src/services/segmented-streaming/sessionService.ts (waitForManifestReady, waitForSegmentReady, coalesceInFlightByKey)"
+              ],
+              "verification_testing": [
+                "verify: cd backend && npm test -- src/services/segmented-streaming/__tests__/sessionService.test.ts",
+                "verify: cd backend && npm test -- src/services/segmented-streaming/__tests__/sessionService.test.ts src/routes/__tests__/streamingRuntime.test.ts",
+                "verify: npm run agent:preflight"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Week 1 Day 4-5: Reduce player startup to staged deterministic recovery and remove incidental complexity.",
+            "acceptance_criteria": [
+              "Recovery stages are bounded and policy-driven.",
+              "RECOVERING/LOADING transitions remain coherent and test-covered.",
+              "No direct fallback behavior exists in startup failure paths."
+            ],
+            "references": [
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+              "frontend/components/player/audioPlaybackOrchestratorPolicy.ts",
+              "frontend/lib/audio/playback-state-machine.ts",
+              "frontend/lib/playback-intent.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aligned segmented startup retry scheduling with backend startupHint semantics (transient + retryAfterMs) while keeping recovery stage decisions policy-driven and bounded.",
+                "Verified startup timeout path schedules segmented staged retries and transitions through RECOVERING/LOADING until retry budget exhaustion, then surfaces ERROR without direct fallback.",
+                "Added explicit terminal stage-exhaustion policy coverage to guarantee startup retry flows stop in ERROR when retry/session-reset budget is spent instead of falling back to direct playback.",
+                "Added startup-stability eligibility guard for segmented handoff recovery so early playback errors no longer trigger handoff churn during the first stabilized playback window."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+                "frontend/components/player/segmentedStartupErrorContract.ts",
+                "frontend/components/player/audioPlaybackOrchestratorPolicy.test.ts",
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx (attemptSegmentedHandoffRecovery)",
+                "frontend/components/player/audioPlaybackOrchestratorPolicy.ts (resolveSegmentedHandoffRecoveryStartupEligibility)"
+              ],
+              "verification_testing": [
+                "verify: cd frontend && node --test --experimental-strip-types components/player/audioPlaybackOrchestratorPolicy.test.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts tests/unit/playbackIntent.test.ts components/player/segmentedStartupErrorContract.test.ts",
+                "verify: npm run agent:preflight"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Week 2 Day 1-2: Implement CMCD/CMSD-aligned startup telemetry dimensions and server correlation fields.",
+            "acceptance_criteria": [
+              "Client metrics include stage, retry budget, and startup latency dimensions.",
+              "Server logs/metrics correlate session/create/manifest/segment startup timings.",
+              "Telemetry allows baseline-vs-wave comparisons without ad hoc parsing."
+            ],
+            "references": [
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+              "backend/src/routes/streaming.ts",
+              "frontend/lib/logger.ts",
+              "backend/src/utils/logger.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added CMCD/CMSD-aligned startup dimensions to player startup timeline telemetry, including retry budgets and session reset budget usage.",
+                "Added startup correlation headers/fields across segmented session-create, manifest, and segment route metrics and trace payloads.",
+                "Extended startup metric ingestion on backend client-metrics route for correlation and retry-budget dimensions."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/streaming.ts",
+                "backend/src/routes/__tests__/streamingRuntime.test.ts",
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+                "frontend/lib/api.ts"
+              ],
+              "verification_testing": [
+                "verify: cd backend && npm test -- src/routes/__tests__/streamingRuntime.test.ts",
+                "verify: cd frontend && node --test --experimental-strip-types components/player/segmentedStartupErrorContract.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Week 2 Day 2-3: Add targeted regression suites for startup contract, staged recovery, and retry exhaustion behavior.",
+            "acceptance_criteria": [
+              "Backend tests cover startup readiness and transient/terminal response codes.",
+              "Frontend tests cover staged recovery decisions and state transitions.",
+              "Tests prove segmented-only policy under retry exhaustion."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts",
+              "frontend/components/player/audioPlaybackOrchestratorPolicy.test.ts",
+              "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
+              "frontend/tests/unit/playbackIntent.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Expanded route-level runtime tests to validate startup contract fields, correlation headers, and transient/terminal startup behavior.",
+                "Validated staged startup recovery and retry exhaustion behavior via targeted frontend policy/unit test suites.",
+                "Validated startup hint parser + conservative delay behavior in dedicated helper tests."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/__tests__/streamingRuntime.test.ts",
+                "frontend/components/player/audioPlaybackOrchestratorPolicy.test.ts",
+                "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
+                "frontend/tests/unit/playbackIntent.test.ts",
+                "frontend/components/player/segmentedStartupErrorContract.test.ts"
+              ],
+              "verification_testing": [
+                "verify: cd backend && npm test -- src/routes/__tests__/streamingRuntime.test.ts",
+                "verify: cd frontend && node --test --experimental-strip-types components/player/audioPlaybackOrchestratorPolicy.test.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts tests/unit/playbackIntent.test.ts",
+                "verify: cd frontend && node --test --experimental-strip-types components/player/segmentedStartupErrorContract.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Week 2 Day 3-4: Run rollout-wave validation and compare startup SLO-like metrics against baseline.",
+            "acceptance_criteria": [
+              "Wave report includes first-audible, startup timeout, and retry-exhaustion rates.",
+              "Baseline comparison is documented with explicit deltas and confidence caveats.",
+              "Residual risks and follow-up optimizations are ranked by impact."
+            ],
+            "references": [
+              "docs/architecture/segmented-streaming-baseline.md",
+              "docs/architecture/segmented-streaming-baseline-direct-stream.ndjson",
+              "backend/src/routes/streaming.ts",
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added baseline report generator for segmented startup metrics (p50/p95 first-audible latency, startup-timeout rate, retry-exhaustion rate) from NDJSON captures.",
+                "Added architecture docs and sample capture for baseline vs wave analysis workflow.",
+                "Added baseline-vs-wave comparison mode to startup baseline measurement script with absolute and percent deltas for p50/p95 latency, startup-timeout rate, and retry-exhaustion rate.",
+                "Added explicit confidence caveat output based on startup sample count and documented residual-risk prioritization for rollout triage.",
+                "Execution halted on 2026-03-02T12:51:53.265Z due to plan archival closure."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/scripts/measure-segmented-startup-baseline.ts",
+                "docs/architecture/segmented-streaming-baseline.md",
+                "docs/architecture/segmented-streaming-baseline-sample.ndjson"
+              ],
+              "verification_testing": [
+                "verify: cd backend && npx tsx scripts/measure-segmented-startup-baseline.ts --input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --label sample",
+                "verify: cd backend && npx tsx scripts/measure-segmented-startup-baseline.ts --input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --label baseline-sample",
+                "verify: cd backend && npx tsx scripts/measure-segmented-startup-baseline.ts --input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --label baseline-sample --compare-input ../docs/architecture/segmented-streaming-baseline-sample.ndjson --compare-label wave-sample"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Week 2 Day 5: Document operator playbook, rollout guardrails, and closeout evidence in canonical docs.",
+            "acceptance_criteria": [
+              "Deployment docs include startup contract and retry behavior expectations.",
+              "Observability docs include query examples for startup regression detection.",
+              "Changelog entry summarizes user-visible reliability outcomes."
+            ],
+            "references": [
+              "docs/DEPLOYMENT.md",
+              "docs/ENVIRONMENT_VARIABLES.md",
+              "CHANGELOG.md",
+              "README.md"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Documented segmented startup contract fields, correlation headers, and log query dimensions for rollout diagnostics in deployment docs.",
+                "Expanded deployment playbook with startup contract semantics, startup correlation headers, observability field groups, and baseline-vs-wave measurement commands.",
+                "Updated architecture guidance to use automated baseline-vs-wave comparison reporting instead of manual markdown diffing.",
+                "Recorded reliability-facing rollout updates in changelog for operator/user visibility."
+              ],
+              "files_functions_hooks_touched": [
+                "docs/DEPLOYMENT.md",
+                "docs/architecture/segmented-streaming-baseline.md",
+                "CHANGELOG.md"
+              ],
+              "verification_testing": [
+                "verify: manual review of docs/DEPLOYMENT.md startup contract and observability sections",
+                "verify: manual review of docs/DEPLOYMENT.md startup contract + observability + compare command sections",
+                "verify: manual review of docs/architecture/segmented-streaming-baseline.md runbook and residual risk ranking",
+                "verify: npm run agent:preflight"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Remediation P0-1: Implement atomic force-regenerate staging/promote flow for DASH assets (build in staging dir, validate, atomic swap).",
+            "acceptance_criteria": [
+              "forceRegenerateDashSegments writes to an isolated staging directory and only promotes artifacts via atomic rename after manifest and startup assets validate.",
+              "No partially regenerated asset directory is externally visible during regeneration; existing stable assets remain serveable until swap.",
+              "Regression coverage proves interrupted regeneration leaves prior assets intact and subsequent regenerate succeeds cleanly."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/segmentService.ts",
+              "backend/src/services/segmented-streaming/cacheService.ts",
+              "backend/src/services/segmented-streaming/__tests__/segmentService.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Refactored force-regenerate flow to build DASH outputs in an isolated staging directory, validate manifest/startup assets, and promote via atomic directory swap.",
+                "Added failure-safe cleanup so failed or interrupted regeneration leaves previously promoted assets intact and still serveable."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/services/segmented-streaming/segmentService.ts (forceRegenerateDashSegments, promoteGeneratedDashAssetsAtomically, cleanupDashRegenerationStaging)",
+                "backend/src/services/segmented-streaming/cacheService.ts (regeneration/promotion cache invalidation ordering)",
+                "backend/src/services/segmented-streaming/__tests__/segmentService.test.ts"
+              ],
+              "verification_testing": [
+                "verify: npm --prefix backend test -- --runTestsByPath src/services/segmented-streaming/__tests__/segmentService.test.ts src/services/segmented-streaming/__tests__/sessionService.test.ts src/services/__tests__/listenTogetherSocketRuntime.test.ts",
+                "verify: npm --prefix backend run build"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Remediation P0-2: Fix ensureLocalDashSegments failure/inFlight race ordering so concurrent callers receive deterministic outcomes.",
+            "acceptance_criteria": [
+              "Concurrent ensureLocalDashSegments calls share one in-flight build contract and do not expose stale/optimistic paths before readiness semantics are met.",
+              "Failure propagation and inFlightBuilds cleanup ordering are deterministic so retries do not inherit stale failure state or orphaned promises.",
+              "Concurrency-focused tests cover success, failure, and post-failure retry behavior under parallel callers."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/segmentService.ts",
+              "backend/src/services/segmented-streaming/manifestService.ts",
+              "backend/src/services/segmented-streaming/__tests__/segmentService.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Reordered ensureLocalDashSegments in-flight/failure handling so concurrent callers share a single deterministic build promise and never observe optimistic readiness before validation.",
+                "Normalized inFlightBuilds cleanup and retry ordering after failures so retries do not inherit stale failure state or orphaned promises."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/services/segmented-streaming/segmentService.ts (ensureLocalDashSegments, buildDashSegmentsWithInFlightDedup)",
+                "backend/src/services/segmented-streaming/manifestService.ts (segment readiness integration points)",
+                "backend/src/services/segmented-streaming/__tests__/segmentService.test.ts"
+              ],
+              "verification_testing": [
+                "verify: npm --prefix backend test -- --runTestsByPath src/services/segmented-streaming/__tests__/segmentService.test.ts src/services/segmented-streaming/__tests__/sessionService.test.ts src/services/__tests__/listenTogetherSocketRuntime.test.ts",
+                "verify: npm --prefix backend run build"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Remediation P1-1: Eliminate handoff listener orphans with explicit track-change/unmount cleanup plus timeout backstop.",
+            "acceptance_criteria": [
+              "Handoff load/loaderror listeners are tracked and cleared on track-change transitions and component unmount.",
+              "A bounded timeout backstop clears orphan listeners and buffering state when expected callback events never arrive.",
+              "Regression tests demonstrate listener count remains bounded across repeated handoff attempts and rapid track changes."
+            ],
+            "references": [
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+              "frontend/components/player/audioPlaybackOrchestratorPolicy.test.ts",
+              "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added explicit handoff listener lifecycle tracking and teardown across track-change transitions and component unmount.",
+                "Added a timeout backstop that clears stalled handoff listeners and buffering state when load callbacks never arrive."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx (handoff listener registration/cleanup, timeout backstop)",
+                "frontend/lib/audio-engine/segmentedPlaybackRegressionPolicy.ts",
+                "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
+                "frontend/lib/listen-together-socket.ts",
+                "frontend/tests/component/listenTogetherSocketRetry.component.test.ts"
+              ],
+              "verification_testing": [
+                "verify: npm --prefix frontend run lint -- components/player/AudioPlaybackOrchestrator.tsx lib/audio-engine/segmentedPlaybackRegressionPolicy.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts lib/listen-together-socket.ts tests/component/listenTogetherSocketRetry.component.test.ts",
+                "verify: npm --prefix frontend run test:unit -- tests/unit/segmentedPlaybackRegressionPolicy.test.ts",
+                "verify: node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/listenTogetherSocketRetry.component.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Remediation P1-2: Add heartbeat consecutive-failure guarded refresh path to avoid repeated churn on transient heartbeat outages.",
+            "acceptance_criteria": [
+              "Client heartbeat logic tracks consecutive failures and resets streak state on success.",
+              "After configured streak threshold, a guarded single-flight refresh/recovery path runs with cooldown protection.",
+              "Heartbeat metrics/log fields record failure streak and guarded refresh outcome for observability and alert tuning."
+            ],
+            "references": [
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+              "frontend/lib/audio/heartbeat-monitor.ts",
+              "backend/src/routes/streaming.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented heartbeat consecutive-failure streak tracking with reset-on-success semantics.",
+                "Added threshold-guarded single-flight refresh with cooldown protection to prevent repeated churn during transient heartbeat outages, including observable outcome fields."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx (heartbeat consecutive-failure guard, cooldown refresh path)",
+                "frontend/lib/listen-together-socket.ts (retry/heartbeat coordination)",
+                "frontend/tests/component/listenTogetherSocketRetry.component.test.ts"
+              ],
+              "verification_testing": [
+                "verify: npm --prefix frontend run lint -- components/player/AudioPlaybackOrchestrator.tsx lib/audio-engine/segmentedPlaybackRegressionPolicy.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts lib/listen-together-socket.ts tests/component/listenTogetherSocketRetry.component.test.ts",
+                "verify: node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/listenTogetherSocketRetry.component.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Remediation P1-3: Reclassify startup fallback semantics finding as audit/observability check (false-positive) rather than behavior flip.",
+            "acceptance_criteria": [
+              "Startup fallback behavior remains unchanged unless audit evidence demonstrates a reproducible product-impacting fault.",
+              "Instrumentation captures fallback trigger reason, parsed startup hint details, and retry-hint provenance for post-incident analysis.",
+              "Audit disposition is documented as false-positive with explicit follow-up observability checks and close criteria."
+            ],
+            "references": [
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+              "frontend/components/player/segmentedStartupErrorContract.ts",
+              "docs/architecture/segmented-streaming-baseline.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Remediation P2-1: Introduce bounded readiness polling backoff strategy for asset/startup readiness checks (not a pure fs.watch swap).",
+            "acceptance_criteria": [
+              "waitForAssetFile and waitForStartupWindowReady move from fixed-interval polling to bounded backoff with jitter and explicit maximum interval cap.",
+              "Backoff resets promptly when build progress/readiness signals are observed, preserving fast path startup latency.",
+              "Tests cover backoff progression, reset behavior, and timeout boundary semantics."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Remediation P2-2: Add periodic sweeping for segmented in-memory maps to cap stale entry growth.",
+            "acceptance_criteria": [
+              "Expired entries in inMemorySessions/readiness microcache maps are swept on a bounded cadence without affecting active sessions.",
+              "Sweep logic is deterministic, low-overhead, and avoids removing entries still referenced by active in-flight work.",
+              "Tests validate stale eviction behavior under churn-heavy session create/heartbeat/readiness paths."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "backend/src/services/segmented-streaming/segmentService.ts",
+              "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Remediation P2-3: Implement per-user segmented session create limiting that is Redis-aware and distributed-safe across pods.",
+            "acceptance_criteria": [
+              "Session create rate/concurrency limits are enforced through Redis-backed atomic operations so all pods observe the same limit envelope.",
+              "Limit rejections return explicit contract-compliant status/code/hint and preserve existing authorization/validation ordering.",
+              "Limiter state decays automatically (TTL/windowing) and emits metrics for tuning and incident diagnostics."
+            ],
+            "references": [
+              "backend/src/routes/streaming.ts",
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "backend/src/utils/redis.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Remediation P2-4: Harden Express sendFile callback/error handling for manifest and segment responses.",
+            "acceptance_criteria": [
+              "Segment and manifest handlers use sendFile callback handling to surface stream errors/aborts without double response writes.",
+              "ENOENT and transport errors from sendFile callback map into existing segmented startup error taxonomy and telemetry fields.",
+              "Route runtime tests cover callback error/abort branches and preserve success-path response headers/types."
+            ],
+            "references": [
+              "backend/src/routes/streaming.ts",
+              "backend/src/routes/__tests__/streamingRuntime.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Remediation P2-5: Harden manifest timeline parsing to tolerate malformed or edge SegmentTimeline patterns safely.",
+            "acceptance_criteria": [
+              "Timeline parsing handles attribute order/whitespace variance and malformed repeat values without unsafe counts or crashes.",
+              "When timeline parsing cannot derive safe counts, readiness behavior degrades predictably with explicit trace/metric annotations.",
+              "Unit tests add malformed, multi-representation, and large-repeat manifest fixtures."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "backend/src/services/segmented-streaming/__tests__/sessionService.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Remediation P2-6: Deduplicate LOSSLESS extension regex into shared segmented-streaming constant/helper.",
+            "acceptance_criteria": [
+              "A single shared LOSSLESS extension matcher is consumed by segmentService and sessionService to remove divergence risk.",
+              "Duplicate local regex literals are removed with no behavior change in codec/quality decisions.",
+              "Tests confirm representative lossless/non-lossless extensions retain prior classification results."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/segmentService.ts",
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "backend/src/services/segmented-streaming/manifestService.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Remediation P2-7: Add AbortController management for segmented prewarm fetches and superseded validation requests.",
+            "acceptance_criteria": [
+              "Prewarm manifest/segment validation fetches are issued with AbortControllers tied to track/session lifecycle.",
+              "Controllers are canceled on track-change, retry supersession, and unmount to prevent orphan network activity.",
+              "Telemetry distinguishes intentional aborts from true prewarm validation failures."
+            ],
+            "references": [
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+              "frontend/lib/api.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added AbortController lifecycle ownership for segmented prewarm validation fetches tied to active track/session context.",
+                "Canceled superseded prewarm validations on track change, retry supersession, and unmount, and separated intentional abort reporting from true validation failures."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx (prewarm validation AbortController lifecycle)",
+                "frontend/lib/api.ts (abort-aware prewarm request plumbing)",
+                "frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts"
+              ],
+              "verification_testing": [
+                "verify: npm --prefix frontend run lint -- components/player/AudioPlaybackOrchestrator.tsx lib/audio-engine/segmentedPlaybackRegressionPolicy.ts tests/unit/segmentedPlaybackRegressionPolicy.test.ts lib/listen-together-socket.ts tests/component/listenTogetherSocketRetry.component.test.ts",
+                "verify: npm --prefix frontend run test:unit -- tests/unit/segmentedPlaybackRegressionPolicy.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Define MP4Box exploration charter, hard success metrics, and explicit no-pivot guardrails.",
+            "acceptance_criteria": [
+              "Success metrics include bad-chunk detection lift, startup-latency impact ceiling, and operational complexity budget.",
+              "Guardrails explicitly prohibit replacing FFmpeg transcoding in this exploration phase.",
+              "Decision gate and owners are documented with concrete evidence requirements."
+            ],
+            "references": [
+              ".agents/plans/current/segmented-streaming-platform-alignment/PLAN.json",
+              "docs/architecture/adr-segmented-streaming.md",
+              "backend/src/services/segmented-streaming/segmentService.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Capture baseline FFmpeg-only reliability/latency evidence for segmented sessions before MP4Box trials.",
+            "acceptance_criteria": [
+              "Baseline includes first-audible latency (p50/p95), playback-error rate, segment-quarantine rate, and forced-regeneration frequency.",
+              "Baseline windows and sample-size caveats are recorded for comparability.",
+              "Evidence is saved in reproducible artifacts, not ad-hoc terminal output."
+            ],
+            "references": [
+              "backend/scripts/measure-segmented-startup-baseline.ts",
+              "docs/architecture/segmented-streaming-baseline.md",
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Build an offline validation harness that runs MP4Box checks against FFmpeg-generated DASH outputs and compares results against current validators.",
+            "acceptance_criteria": [
+              "Harness executes deterministically on a track corpus and records pass/fail + reason for MP4Box, ffprobe, and current structural checks.",
+              "False-positive and false-negative cases are explicitly identified.",
+              "Harness output format supports baseline-vs-wave style comparison."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/segmentService.ts",
+              "backend/src/services/segmented-streaming/cacheService.ts",
+              "docs/architecture/segmented-streaming-baseline.md"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Create a known-problem segment corpus (including previously failing chunk windows) and run reproducibility trials.",
+            "acceptance_criteria": [
+              "Corpus includes at least one previously observed fast-fail track/chunk pattern and representative healthy tracks.",
+              "Trials record whether MP4Box flags corruption earlier or more accurately than current checks.",
+              "All corpus items are traceable to concrete cache/session evidence."
+            ],
+            "references": [
+              "backend/src/routes/streaming.ts",
+              "backend/src/services/segmented-streaming/sessionService.ts",
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Benchmark MP4Box validation overhead and operational impact under realistic concurrency.",
+            "acceptance_criteria": [
+              "Measured overhead includes build wall-time delta, CPU, and memory under at least low/medium/high parallelism tiers.",
+              "p95 startup latency budget impact is quantified and compared against declared exploration thresholds.",
+              "Operational concerns (binary packaging, image size, failure modes) are captured with mitigation notes."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/segmentService.ts",
+              "Dockerfile",
+              "charts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Produce a feature-flagged integration spike design for optional MP4Box post-build validation (temp-build -> validate -> atomic promote).",
+            "acceptance_criteria": [
+              "Design keeps live playback request path non-blocking and avoids per-segment inline validation.",
+              "Failure behavior is explicit: reject/purge bad temp assets and trigger deterministic regeneration path.",
+              "Integration plan reuses existing observability and repair signals where possible."
+            ],
+            "references": [
+              "backend/src/services/segmented-streaming/segmentService.ts",
+              "backend/src/services/segmented-streaming/cacheService.ts",
+              "backend/src/routes/streaming.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Define canary evaluation and rollback criteria for optional MP4Box validation.",
+            "acceptance_criteria": [
+              "Canary scope, duration, and guardrails are explicit and reversible.",
+              "Go/no-go thresholds include reliability lift, latency impact, and operational incident rate.",
+              "Rollback and disable procedures are documented as first-class runbook steps."
+            ],
+            "references": [
+              "docs/DEPLOYMENT.md",
+              "backend/src/routes/streaming.ts",
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          },
+          {
+            "status": "blocked",
+            "deliverable": "Publish final exploration decision memo: keep FFmpeg-only, adopt MP4Box as validator, or escalate to broader packaging redesign.",
+            "acceptance_criteria": [
+              "Decision cites quantitative evidence from baseline, harness, corpus, and benchmark phases.",
+              "Memo includes explicit rationale for rejected alternatives and residual risks.",
+              "Follow-up work is split into atomic queue-ready tasks when further action is approved."
+            ],
+            "references": [
+              ".agents/plans/current/segmented-streaming-platform-alignment/PLAN.json",
+              "CHANGELOG.md",
+              "docs/architecture/adr-segmented-streaming.md"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Aborted on 2026-03-02T12:51:53.265Z by user request: MP4Box exploration tasks closed."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/segmented-streaming-platform-alignment/PLAN.json"
+              ],
+              "verification_testing": [
+                "verify: closure directive recorded; no implementation executed (aborted)"
+              ]
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Create an execution-ready, governance-compliant plan that aligns segmented DASH startup/recovery with mature platform patterns while respecting our no-CDN and no-direct-fallback architecture constraints.",
+        "non_goals": "Do not redesign product scope beyond segmented playback reliability; do not add direct stream fallback paths; do not include YouTube-specific, infra-only, or unrelated recommendation feature work in this track."
+      }
+    },
+    "subagent": {
+      "requirement": "required",
+      "primary_agent": "codex-orchestrator",
+      "execution_agents": [],
+      "last_executor": "codex-orchestrator"
+    }
+  }
+}

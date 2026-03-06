@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "feature_id": "agent-efficiency-hardening",
+  "feature_title": "Plan - Agent Efficiency Hardening",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/agent-efficiency-hardening.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/agent-efficiency-hardening/PLAN.json",
+    "plan_dir": ".agents/plans/archived/agent-efficiency-hardening",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/agent-efficiency-hardening/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Agent Efficiency Hardening\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: Agent discoverability and navigation hardening\n- Scope: Improve codebase findability and intent clarity using documentation, typing, and lightweight structure improvements\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Approved by user (2026-02-20)\n\n## Risk and Effort\n\n- Risk: Medium\n- Effort: Large (multi-domain pass touching backend, frontend, sidecars, and governance docs)\n- Risk notes:\n  - Mechanical doc/comment additions are low risk but high volume.\n  - Barrel/type consolidation can create import-cycle risk and broad churn, so it is staged behind higher-signal work.\n\n## User Goals Captured\n\n1. Start from Claude's improvement list and implement useful additions.\n2. Keep process/policy enforcement opportunities where practical.\n3. Improve ability for agents to quickly find the right files and behavior ownership.\n\n## Spec Outline\n\n1. Improve discoverability docs:\n   - route-to-handler discoverability in canonical context docs\n   - domain glossary with concrete file pointers\n2. Improve code intent readability:\n   - JSDoc/docstring coverage on exported APIs and key Python classes/methods\n3. Improve typing discoverability:\n   - explicit return types on frontend hooks\n   - targeted missing Python type hints\n4. Stage structural refactors separately:\n   - barrels and centralized type files remain optional/deferred unless clear value and low risk are demonstrated.\n\n## Refined Spec\n\n1. Route discoverability should use generated artifacts (`docs/ROUTE_MAP.md`) as authority, with `docs/AGENT_CONTEXT.md` as the start-here index.\n2. Domain glossary entries must map project-specific terms directly to implementation files.\n3. JSDoc/docstring work should be incremental and reviewable, not one giant diff.\n4. Structural reorganizations (barrels and backend type centralization) should only proceed after initial discoverability/docstring gains are in place.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Phase 1: Start-Here Discoverability\n\n#### Task 1.1: Add route discoverability section to AGENT context\n- Status: Complete\n- Completion summary:\n  - Added `## Route and Domain Lookup` with explicit route-to-handler lookup flow in `docs/AGENT_CONTEXT.md`.\n  - Anchored guidance to generated canonical map `docs/ROUTE_MAP.md`.\n- Acceptance criteria:\n  - `docs/AGENT_CONTEXT.md` contains a dedicated section pointing to generated route map and lookup flow.\n  - Section includes backend and frontend lookup guidance.\n- References:\n  - `docs/AGENT_CONTEXT.md`\n  - `docs/ROUTE_MAP.md`\n\n#### Task 1.2: Add domain glossary with code pointers\n- Status: Complete\n- Completion summary:\n  - Added domain glossary table in `docs/AGENT_CONTEXT.md` with concrete backend/frontend/sidecar file pointers for major product domains.\n- Acceptance criteria:\n  - `docs/AGENT_CONTEXT.md` has a domain glossary section with concrete file pointers for major terms.\n- References:\n  - `docs/AGENT_CONTEXT.md`\n  - `backend/src/services/*`\n  - `backend/src/routes/*`\n  - `services/*`\n\n### Phase 2: Python Sidecar Intent/Typing Pass\n\n#### Task 2.1: Add missing Pydantic model docstrings\n- Status: Complete\n- Completion summary:\n  - Added one-line docstrings to missing Pydantic request models in `services/tidal-downloader/app.py` and `services/ytmusic-streamer/app.py`.\n  - Verified model blocks now consistently carry class docstrings.\n- Acceptance criteria:\n  - Sidecar Pydantic models missing docstrings receive concise one-line class docstrings.\n- References:\n  - `services/tidal-downloader/app.py`\n  - `services/ytmusic-streamer/app.py`\n\n#### Task 2.2: Add missing sidecar `__init__` docstrings and targeted type hints\n- Status: Complete\n- Completion summary:\n  - Added concise `__init__` docstrings for analyzer-sidecar classes in `services/audio-analyzer-clap/analyzer.py` and `services/audio-analyzer/analyzer.py`.\n  - Added targeted type hints for `get_cursor`, `_extract_ml_features`, and Redis message handlers without behavior changes.\n- Acceptance criteria:\n  - Identified constructors and methods gain concise docstrings/type hints without behavior changes.\n- References:\n  - `services/audio-analyzer-clap/analyzer.py`\n  - `services/audio-analyzer/analyzer.py`\n\n### Phase 3: Frontend Hook Return-Type Clarity\n\n#### Task 3.1: Add explicit return types to high-traffic hooks\n- Status: Complete\n- Completion summary:\n  - Added explicit return types/interfaces for first-wave high-use hooks: `useDownloadStatus`, `useJobStatus`, `useNotifications`, `useDownloadHistory`, `useActiveDownloads`, `useActivityPanel`, and `usePlayerMode`.\n  - Verified touched hook files with targeted frontend ESLint pass.\n- Acceptance criteria:\n  - A first wave of high-use hooks has explicit return interfaces/types.\n  - No runtime behavior changes; typecheck/lint pass for touched files.\n- References:\n  - `frontend/hooks/*`\n  - `frontend/features/*/hooks/*`\n\n### Phase 4: JSDoc Coverage Rollout\n\n#### Task 4.1: Baseline exported-symbol JSDoc coverage\n- Status: Complete\n- Completion summary:\n  - Added generated coverage artifact `docs/JSDOC_COVERAGE.md` and generator `tools/docs/generate-jsdoc-coverage.mjs`.\n  - Added package scripts `jsdoc-coverage:generate` and `jsdoc-coverage:verify`, then generated and verified the baseline.\n- Acceptance criteria:\n  - Coverage baseline documented (by area) so progress can be tracked.\n- References:\n  - `backend/src/**`\n  - `frontend/**`\n\n#### Task 4.2: Incremental exported-function JSDoc additions (backend routes/services first)\n- Status: Complete\n- Completion summary:\n  - Added concise exported-symbol JSDoc in initial backend pass across `backend/src/middleware/auth.ts`, `backend/src/middleware/errorHandler.ts`, `backend/src/middleware/subsonicAuth.ts`, and `backend/src/config.ts`.\n  - Regenerated `docs/JSDOC_COVERAGE.md` to capture coverage lift and current missing-symbol backlog.\n- Acceptance criteria:\n  - Initial backend pass adds concise docs to public/exported symbols in touched domains.\n\n### Phase 5: Optional Structural Refactors (Gated)\n\n#### Task 5.1: Evaluate barrel file rollout feasibility and import-cycle risk\n- Status: Complete\n- Completion summary:\n  - Decision: defer broad barrel rollout for now.\n  - Rationale: repo-wide barrel introduction would create high-churn import rewrites and non-trivial import-cycle risk relative to current discoverability gains from route map, domain READMEs, and glossary artifacts.\n- Acceptance criteria:\n  - Decision recorded: proceed with constrained barrels or defer.\n\n#### Task 5.2: Evaluate backend type centralization with compatibility aliases\n- Status: Complete\n- Completion summary:\n  - Decision: defer broad backend type centralization for now.\n  - Rationale: cross-cutting type extraction from service-local interfaces is feasible but high-diff and best done domain-by-domain with explicit compatibility tests, not as a mechanical sweep.\n- Acceptance criteria:\n  - Decision recorded: proceed with targeted extraction or defer.\n\n## Open Questions\n\n1. Should JSDoc enforcement be hard-fail policy for all exported symbols, or soft-progress tracking first?\n2. Are barrels desired purely for discoverability, or should import ergonomics also change in consuming files?\n3. Do we want frontend hook return-type rollout to be repo-wide in one pass or domain-by-domain?\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.agent-efficiency-hardening.b53225dc09",
+    "plan_key": "plan:legacy.archived.agent-efficiency-hardening.b53225dc09",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Agent Efficiency Hardening",
+      "objective": "1. Improve discoverability docs:\n   - route-to-handler discoverability in canonical context docs\n   - domain glossary with concrete file pointers\n2. Improve code intent readability:\n   - JSDoc/docstring coverage on exported APIs and key Python classes/methods\n3. Improve typing discoverability:\n   - explicit return types on frontend hooks\n   - targeted missing Python type hints\n4. Stage structural refactors separately:\n   - barrels and centralized type files remain optional/deferred unless clear value and low risk are demonstrated.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Improve discoverability docs:",
+        "- route-to-handler discoverability in canonical context docs",
+        "- domain glossary with concrete file pointers",
+        "2. Improve code intent readability:",
+        "- JSDoc/docstring coverage on exported APIs and key Python classes/methods",
+        "3. Improve typing discoverability:",
+        "- explicit return types on frontend hooks",
+        "- targeted missing Python type hints",
+        "4. Stage structural refactors separately:",
+        "- barrels and centralized type files remain optional/deferred unless clear value and low risk are demonstrated."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/agent-efficiency-hardening.json",
+        ".agents/plans/archived/agent-efficiency-hardening/PLAN.json",
+        ".agents/plans/archived/agent-efficiency-hardening/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/agent-efficiency-hardening/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Improve discoverability docs:\n   - route-to-handler discoverability in canonical context docs\n   - domain glossary with concrete file pointers\n2. Improve code intent readability:\n   - JSDoc/docstring coverage on exported APIs and key Python classes/methods\n3. Improve typing discoverability:\n   - explicit return types on frontend hooks\n   - targeted missing Python type hints\n4. Stage structural refactors separately:\n   - barrels and centralized type files remain optional/deferred unless clear value and low risk are demonstrated.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/agent-efficiency-hardening.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "agent-efficiency-hardening",
+    "feature_title": "Plan - Agent Efficiency Hardening",
+    "plan_ref": ".agents/plans/archived/agent-efficiency-hardening/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Improve discoverability docs:\n   - route-to-handler discoverability in canonical context docs\n   - domain glossary with concrete file pointers\n2. Improve code intent readability:\n   - JSDoc/docstring coverage on exported APIs and key Python classes/methods\n3. Improve typing discoverability:\n   - explicit return types on frontend hooks\n   - targeted missing Python type hints\n4. Stage structural refactors separately:\n   - barrels and centralized type files remain optional/deferred unless clear value and low risk are demonstrated.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "1. Route discoverability should use generated artifacts (`docs/ROUTE_MAP.md`) as authority, with `docs/AGENT_CONTEXT.md` as the start-here index.\n2. Domain glossary entries must map project-specific terms directly to implementation files.\n3. JSDoc/docstring work should be incremental and reviewable, not one giant diff.\n4. Structural reorganizations (barrels and backend type centralization) should only proceed after initial discoverability/docstring gains are in place.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Improve discoverability docs:\n   - route-to-handler discoverability in canonical context docs\n   - domain glossary with concrete file pointers\n2. Improve code intent readability:\n   - JSDoc/docstring coverage on exported APIs and key Python classes/methods\n3. Improve typing discoverability:\n   - explicit return types on frontend hooks\n   - targeted missing Python type hints\n4. Stage structural refactors separately:\n   - barrels and centralized type files remain optional/deferred unless clear value and low risk are demonstrated.",
+        "non_goals": ""
+      }
+    }
+  }
+}

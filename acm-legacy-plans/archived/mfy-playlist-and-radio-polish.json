@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "feature_id": "mfy-playlist-and-radio-polish",
+  "feature_title": "Plan - Made For You Playlist and Radio Polish",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/mfy-playlist-and-radio-polish.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/mfy-playlist-and-radio-polish/PLAN.json",
+    "plan_dir": ".agents/plans/archived/mfy-playlist-and-radio-polish",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/mfy-playlist-and-radio-polish/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Made For You Playlist and Radio Polish\n\n## Document Status\n\n- Last updated: 2026-02-19\n- Feature: Made For You diversity, 37-track targets, Soundtracks stability, and queue continuity polish\n- Scope: Backend playlist/radio generation + frontend station visibility + targeted verification\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n\n## Goal\n\nAddress user-reported playback/discoverability issues in one scoped pass: reduce repeated artists in Made For You playlists, set Made For You output to 37 tracks, set Mood Mixer output to 37 tracks, recover Soundtracks radio behavior without UI hard-coding, and keep playback going by auto-triggering Match Vibe at queue end (outside Listen Together).\n\n## Reuse/Consolidation Check\n\n- Reuse existing recommendation/radio generation utilities and apply diversity caps consistently instead of introducing separate selection code.\n- Reuse existing frontend radio station composition flow in `LibraryRadioStations`.\n- Keep playlist-size changes centralized to shared constants/config where practical.\n\n## Spec Outline\n\n1. Identify where Made For You and Mood Mixer playlist sizes are set.\n2. Apply a single 37-track target for both generation paths.\n3. Tighten Made For You artist diversity to reduce repeated artists while preserving requested size.\n4. Investigate Soundtracks station sourcing and restore visibility or add fallback behavior.\n5. Verify via targeted backend tests and targeted frontend checks.\n\n## Refined Spec\n\n### In Scope\n\n1. Backend changes for recommendation/mix sizing and diversity.\n2. Frontend radio station availability/visibility updates tied to Soundtracks.\n3. Regression-focused tests for sizing/diversity/radio station presence.\n\n### Out of Scope\n\n1. Full recommendation-model redesign.\n2. New station taxonomy beyond Soundtracks restoration.\n3. Large UI redesign of Home/Radio pages.\n\n### Constraints\n\n1. Preserve existing contracts for unaffected radio/mix types.\n2. Keep behavior deterministic enough for test assertions.\n3. Maintain small, reviewable changes.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished with completion summary\n\n### Phase 0: Discovery\n\n#### Task 0.1: Map current Made For You and Mood Mixer generation paths\n- Status: Complete\n- Deliverable: File-level path map and current playlist-length/diversity rules.\n- Completion summary: Traced mix delivery through `backend/src/routes/mixes.ts`, `frontend/components/MoodMixer.tsx`, and `frontend/app/mix/[id]/page.tsx`; identified pre-change defaults of 20 tracks for Made For You mixes and 15 tracks for mood bucket mixes.\n\n#### Task 0.2: Trace Soundtracks station visibility path\n- Status: Complete\n- Deliverable: Root cause for missing Soundtracks station and chosen restoration approach.\n- Completion summary: Confirmed Soundtracks disappearance was rooted in backend genre-radio failures when legacy scalar JSON values were present; fixed backend SQL guards/coercion so stations can resolve dynamically without permanent static card injection.\n\n### Phase 1: Implementation\n\n#### Task 1.1: Set Made For You output size to 37 and reduce repeated artists\n- Status: Complete\n- Deliverable: Backend selection logic updated with explicit target size and diversity controls.\n- Completion summary: Added route-level mix normalization in `backend/src/routes/mixes.ts` to target 37 tracks and apply strict/relaxed per-artist caps with bounded backfill.\n\n#### Task 1.2: Set Mood Mixer output size to 37\n- Status: Complete\n- Deliverable: Mood mix generation returns 37-track output (or documented bounded fallback when library is smaller).\n- Completion summary: Updated mood endpoints in `backend/src/routes/mixes.ts` so `/mixes/mood` defaults to limit 37 and mood-bucket fetch/save calls request 37-track mixes.\n\n#### Task 1.3: Restore Soundtracks radio station visibility\n- Status: Complete\n- Deliverable: Soundtracks station appears again when source conditions are met, with safe fallback messaging/behavior if not.\n- Completion summary: Hardened backend genre-radio SQL to tolerate legacy scalar JSON genre fields without 500 responses, validated backend functionality, and removed previously-added static Soundtracks quick-start cards so UI now relies on functional backend results.\n\n#### Task 1.4: Auto-extend queue on final track outside Listen Together\n- Status: Complete\n- Deliverable: Last-track queue exhaustion auto-triggers Match Vibe and advances into newly-added tracks when repeat is off and Listen Together is inactive.\n- Completion summary: Added queue-end trigger helper (`frontend/components/player/autoMatchVibePlayback.ts`) and integrated guarded/in-flight deduped auto Match Vibe request handling in `frontend/components/player/HowlerAudioElement.tsx`, with fallback trigger on `end` and targeted unit coverage.\n\n### Phase 2: Verification\n\n#### Task 2.1: Add/update targeted tests\n- Status: Complete\n- Deliverable: Focused backend/frontend coverage for 37-track sizing, diversity constraints, and Soundtracks station behavior.\n- Completion summary: Extended `backend/src/routes/__tests__/mixesRuntime.test.ts` to cover 37-track normalization with dominant-artist control and 37-limit forwarding for mood endpoints.\n\n#### Task 2.2: Run targeted validation commands and summarize outcomes\n- Status: Complete\n- Deliverable: Command evidence and outcome mapping to all in-scope user requests.\n- Completion summary: Ran `cd backend && npm test -- src/routes/__tests__/mixesRuntime.test.ts` (pass, 8/8 tests) and `cd backend && npm test -- src/routes/__tests__/libraryRuntime.test.ts` (pass, 98/98 tests). Live API checks against local backend confirmed `/api/mixes/refresh` returns 5 mixes at 37 tracks each, `/api/mixes/mood/buckets/chill` returns 37 tracks, and `/api/library/radio?type=genre&value=soundtrack` returns HTTP 200 with soundtrack tracks after SQL hardening. Ran `cd frontend && node --test --experimental-strip-types tests/unit/autoMatchVibePlayback.test.ts` (pass, 5/5 tests). Frontend ESLint was not available in this environment.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.mfy-playlist-and-radio-polish.87d2d9fa1d",
+    "plan_key": "plan:legacy.archived.mfy-playlist-and-radio-polish.87d2d9fa1d",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Made For You Playlist and Radio Polish",
+      "objective": "1. Identify where Made For You and Mood Mixer playlist sizes are set.\n2. Apply a single 37-track target for both generation paths.\n3. Tighten Made For You artist diversity to reduce repeated artists while preserving requested size.\n4. Investigate Soundtracks station sourcing and restore visibility or add fallback behavior.\n5. Verify via targeted backend tests and targeted frontend checks.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Identify where Made For You and Mood Mixer playlist sizes are set.",
+        "2. Apply a single 37-track target for both generation paths.",
+        "3. Tighten Made For You artist diversity to reduce repeated artists while preserving requested size.",
+        "4. Investigate Soundtracks station sourcing and restore visibility or add fallback behavior.",
+        "5. Verify via targeted backend tests and targeted frontend checks."
+      ],
+      "out_of_scope": [
+        "1. Full recommendation-model redesign.",
+        "2. New station taxonomy beyond Soundtracks restoration.",
+        "3. Large UI redesign of Home/Radio pages."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/mfy-playlist-and-radio-polish.json",
+        ".agents/plans/archived/mfy-playlist-and-radio-polish/PLAN.json",
+        ".agents/plans/archived/mfy-playlist-and-radio-polish/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/mfy-playlist-and-radio-polish/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Identify where Made For You and Mood Mixer playlist sizes are set.\n2. Apply a single 37-track target for both generation paths.\n3. Tighten Made For You artist diversity to reduce repeated artists while preserving requested size.\n4. Investigate Soundtracks station sourcing and restore visibility or add fallback behavior.\n5. Verify via targeted backend tests and targeted frontend checks.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/mfy-playlist-and-radio-polish.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "mfy-playlist-and-radio-polish",
+    "feature_title": "Plan - Made For You Playlist and Radio Polish",
+    "plan_ref": ".agents/plans/archived/mfy-playlist-and-radio-polish/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Identify where Made For You and Mood Mixer playlist sizes are set.\n2. Apply a single 37-track target for both generation paths.\n3. Tighten Made For You artist diversity to reduce repeated artists while preserving requested size.\n4. Investigate Soundtracks station sourcing and restore visibility or add fallback behavior.\n5. Verify via targeted backend tests and targeted frontend checks.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Identify where Made For You and Mood Mixer playlist sizes are set.\n2. Apply a single 37-track target for both generation paths.\n3. Tighten Made For You artist diversity to reduce repeated artists while preserving requested size.\n4. Investigate Soundtracks station sourcing and restore visibility or add fallback behavior.\n5. Verify via targeted backend tests and targeted frontend checks.",
+        "non_goals": "1. Full recommendation-model redesign.\n2. New station taxonomy beyond Soundtracks restoration.\n3. Large UI redesign of Home/Radio pages."
+      }
+    }
+  }
+}

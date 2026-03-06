@@ -1,0 +1,588 @@
+{
+  "version": 1,
+  "feature_id": "musicnn-analyzer-long-term-review",
+  "feature_title": "Plan - MusiCNN Analyzer Long-Term Review",
+  "track": "current",
+  "export_path": "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+  "legacy": {
+    "plan_path": ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+    "plan_dir": ".agents/plans/current/musicnn-analyzer-long-term-review",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/current/musicnn-analyzer-long-term-review/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# Handoff - MusiCNN Analyzer Long-Term Review\n## Feature\n- MusiCNN analyzer long-term model/comparison review\n- Canonical plan: `.agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md`\n\n## Current State\n- Feature set initialized on 2026-02-14 by extracting remaining analyzer model-review/migration scope from:\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n- Current operating decision is explicit:\n  - stay on MusiCNN for now,\n  - no model migration in active fjord-port implementation scope.\n- This feature is review-only and non-blocking for the umbrella fjord feature-port queue.\n\n## Decisions Captured\n1. Umbrella Phase 7 model-comparison/migration tasks were closed as scope-extracted on 2026-02-14.\n2. Ownership for future benchmark/model-review work moved to this feature set.\n3. Any future migration requires explicit re-prioritization and an approved rollback-first runbook.\n\n## Next Actions\n1. Wait for user re-prioritization before starting Phase 1 benchmark design tasks.\n2. If re-prioritized, mark `Task 0.2` as `In Progress` first and define concrete triggers/success thresholds.\n\n## 2026-02-15 Operational Hotfix (Analyzer Image)\n- User-reported symptom from running deployments: analyzer jobs completed but enhanced mood fields stayed null; pod logs showed `No module named 'tensorflow'`.\n- Root cause verified in running pod (`ghcr.io/bonztm/lidify-audio-analyzer:nightly`): Essentia + model files existed, but Python `tensorflow` package was not installed.\n- Fix applied:\n  - `services/audio-analyzer/Dockerfile` now installs `\"tensorflow>=2.13.0,<2.16.0\"` together with `essentia-tensorflow`.\n  - Build verification now checks TensorFlow import + Essentia package presence without importing `essentia.standard` during image build (avoids build-environment entropy failures).\n- Validation:\n  - Local image rebuild succeeded end-to-end (`docker build -f services/audio-analyzer/Dockerfile ...`).\n  - Built image confirms `tensorflow` import is available.\n\n## 2026-02-15 Operational Hotfix (Mood Polarity + Recommendation Hardening)\n- User-reported symptom after analyzer runs: mood surfaces were semantically inverted (for example, chill tracks appearing as aggressive; coffee-shop mixes containing heavy tracks).\n- Root cause verified:\n  - Audio analyzer used a single fixed positive-class column (`preds[:, 1]`) for all MusicNN binary heads.\n  - Official Essentia model metadata shows mixed polarity by head (`positive=0` for aggressive/happy/acoustic/electronic/danceability/voice_instrumental; `positive=1` for sad/relaxed/party).\n- Fixes applied:\n  - `services/audio-analyzer/analyzer.py` now uses per-head positive-column mapping and bumps `ESSENTIA_VERSION` to `2.1b6-enhanced-v3`.\n  - `backend/src/services/moodBucketService.ts` now treats enhanced mood-head fields as reliable only for `analysisVersion` `2.1b6-enhanced-v3*`, and tightens aggressive mood gating with energy/arousal/relaxed corroboration.\n  - `backend/src/workers/moodBucketWorker.ts` now reconciles both unbucketed tracks and re-analyzed tracks (`MAX(moodBucket.updatedAt) < Track.analyzedAt`) so stale buckets are recomputed.\n  - `backend/src/services/programmaticPlaylists.ts` now gates enhanced-mode usage to reliable analyzer versions and hardens coffee-shop candidate selection to avoid high-intensity outliers.\n  - `backend/src/routes/mixes.ts` preset thresholds were tightened for chill/dark mood intent alignment.\n- Regression coverage added:\n  - `backend/src/__tests__/audioAnalyzerClassColumnContract.test.ts`\n  - `backend/src/__tests__/moodBucketWorkerReconciliationContract.test.ts`\n  - `backend/src/services/__tests__/moodBucketService.test.ts` (aggressive gating cases)\n"
+      },
+      {
+        "path": ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - MusiCNN Analyzer Long-Term Review\n\n## Document Status\n\n- Last updated: 2026-02-14\n- Feature: MusiCNN analyzer long-term model/comparison review\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Long-term review queue only; active production decision is to stay on MusiCNN for now.\n- Origin: Extracted from `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` Phase 7 on 2026-02-14\n\n## Goal\n\nMaintain analyzer reliability gains already shipped while deferring model-stack comparison/migration work into an explicit long-term review track that can be re-prioritized later without blocking fjord-port delivery.\n\n## Current Operating Decision\n\n1. Keep MusiCNN as the active analyzer stack in production.\n2. Do not start Discogs-EfficientNet migration work in this track until explicit re-prioritization.\n3. Preserve rollback-first safety expectations for any future model change.\n\n## Operational Hotfix Notes (Outside Migration Scope)\n\nThese are production reliability/correctness fixes applied while still keeping MusiCNN as the active stack:\n\n1. Analyzer image now installs TensorFlow explicitly for Essentia TensorFlow wrapper compatibility.\n2. Enhanced mood-head extraction now uses correct per-head class-column polarity (`ESSENTIA_VERSION=2.1b6-enhanced-v3`) and downstream mood consumers gate on reliable enhanced versioning.\n\n## Spec Outline\n\n1. Freeze current-state analyzer behavior and baseline references.\n2. Define benchmark corpus and scoring rubric for reliability + recommendation-impact deltas.\n3. Run comparative MusiCNN vs candidate-model analysis in an isolated review workflow.\n4. Produce explicit go/no-go decision memo with migration and rollback paths.\n5. Update operator docs only when/if a re-prioritized implementation decision is made.\n\n## Refined Spec\n\n### Constraints\n\n1. No production analyzer model switch in this feature set unless the user explicitly re-authorizes implementation.\n2. Analyzer service operational behavior (`services/audio-analyzer/analyzer.py`) must remain stable while this track is in review-only mode.\n3. Any benchmark plan must include reproducibility details (inputs, seeds, commands, output schema).\n4. Any proposed migration path must include:\n   - re-analysis blast-radius estimate,\n   - rollback plan,\n   - operator runbook.\n\n### Evidence Inputs\n\n1. Current analyzer implementation:\n   - `services/audio-analyzer/analyzer.py`\n2. Fjordnode analyzer reference:\n   - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n3. Existing reliability/baseline artifacts:\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT_PRE_TASK4_1_2026-02-13.md`\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\nCompletion summary template (required when task is `Complete`):\n\n- Delivered:\n- Files/functions/hooks touched:\n- Verification/testing:\n- Plain-English impact:\n\n## Phase 0: Scope Freeze and Decision Capture\n\n### Task 0.1: Capture current operating decision for analyzer stack\n- Status: Complete\n- Deliverable: Explicit written decision on whether this fork migrates off MusiCNN in current scope.\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n- Completion Summary:\n  - Delivered:\n    - Captured umbrella decision to stay on MusiCNN and extract model-review/migration work into this standalone long-term track.\n  - Files/functions/hooks touched:\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n    - `.agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md`\n  - Verification/testing:\n    - Plan-state verification via status updates in umbrella and long-term plan documents.\n  - Plain-English impact:\n    - Analyzer work is no longer blocking fjord feature ports; MusiCNN remains the active model.\n\n### Task 0.2: Define re-prioritization triggers\n- Status: Pending\n- Deliverable: Explicit triggers that justify promoting this long-term review back into active implementation.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `docs/FORK_DIFF.md`\n- Completion Summary: Pending\n\n## Phase 1: Benchmark and Corpus Design (Review-Only)\n\n### Task 1.1: Define representative fixture corpus\n- Status: Pending\n- Deliverable: Fixture classes covering small/large files, genre spread, known edge cases, and malformed inputs.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n### Task 1.2: Define scoring rubric and acceptance thresholds\n- Status: Pending\n- Deliverable: Reliability and output-quality rubric (throughput, fail/skip rates, mood/energy consistency, downstream recommendation-impact proxies).\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n- Completion Summary: Pending\n\n## Phase 2: Comparative Evaluation (Review-Only)\n\n### Task 2.1: Run MusiCNN baseline replay against frozen corpus\n- Status: Pending\n- Deliverable: Reproducible baseline run package with command/output evidence.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n### Task 2.2: Run candidate-model comparison and delta analysis\n- Status: Pending\n- Deliverable: Structured comparison report with confidence notes and known limitations.\n- References:\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n## Phase 3: Decision Gate and Runbook\n\n### Task 3.1: Produce go/no-go migration memo\n- Status: Pending\n- Deliverable: Decision memo with recommendation, risks, and required mitigations.\n- References:\n  - outputs from Phase 1 and Phase 2\n- Completion Summary: Pending\n\n### Task 3.2: Draft rollback-first operator runbook for any approved migration\n- Status: Pending\n- Deliverable: Stepwise migration and rollback procedure with validation checkpoints.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - analyzer deployment/runtime docs\n- Completion Summary: Pending\n\n## Phase 4: Documentation Sync (When Re-Prioritized)\n\n### Task 4.1: Update fork docs only after approved scope change\n- Status: Pending\n- Deliverable: Doc updates aligned to actual shipped behavior if migration is ever executed.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`\n- Completion Summary: Pending\n\n## Implementation Start Gate\n\nNo implementation in this feature set should begin until the user explicitly re-prioritizes this long-term review into active execution.\n"
+      },
+      {
+        "path": ".agents/plans/current/musicnn-analyzer-long-term-review/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-14 Session Prompt History (Feature Initialization)\n1. User asked whether remaining analyzer tasks in the fjord umbrella could be treated as complete based on shipped reliability work.\n2. Session confirmed reliability ports were complete but model-comparison/migration tasks were still pending in the umbrella plan.\n3. User directed to keep MusiCNN for now and move remaining analyzer model-review/migration scope into its own long-term feature set.\n4. Session created:\n   - `.agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md`\n   - `.agents/plans/current/musicnn-analyzer-long-term-review/HANDOFF.md`\n   - `.agents/plans/current/musicnn-analyzer-long-term-review/PROMPT_HISTORY.md`\n5. Session updated umbrella fjord planning docs to mark analyzer migration scope as extracted and non-blocking.\n\n## 2026-02-15 Session Prompt History (Operational Image Fix)\n1. User asked to fix the audio analyzer image build/runtime mismatch.\n2. Session verified in a live analyzer pod that TensorFlow was missing (`No module named 'tensorflow'`) while model files were present.\n3. Session patched `services/audio-analyzer/Dockerfile` to install TensorFlow explicitly with `essentia-tensorflow`.\n4. Session adjusted Dockerfile verification to avoid importing `essentia.standard` during build (entropy-related build-environment failure), while still asserting TensorFlow + Essentia package presence.\n5. Session rebuilt the image locally and confirmed successful build completion and TensorFlow import availability in the built image.\n\n## 2026-02-15 Session Prompt History (Mood Logic Hardening)\n1. User reported mood-semantic mismatches (`aggressive` playing chill tracks; coffee-shop playlists including heavy tracks) and asked to harden all mood logic.\n2. Session traced end-to-end mood flow (analyzer feature extraction, mood bucketing, mood presets, programmatic playlist generators, and worker reconciliation).\n3. Session compared behavior with `../lidify-fjordnode` and validated official Essentia model metadata; confirmed our analyzer used incorrect fixed positive-class extraction across mixed-polarity MusicNN heads.\n4. Session patched `services/audio-analyzer/analyzer.py` to use per-head positive-column mapping and bumped analyzer version to `2.1b6-enhanced-v3`.\n5. Session hardened backend mood/recommendation consumers to trust enhanced mood-head fields only for reliable analyzer versions and tightened aggressive/cozy filtering logic.\n6. Session added regression tests covering class-column contract, mood bucket re-analysis reconciliation, and aggressive gating behavior.\n7. Session re-ran targeted backend tests and TypeScript build to confirm code-path safety.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.current.musicnn-analyzer-long-term-review.fee677d709",
+    "plan_key": "plan:legacy.current.musicnn-analyzer-long-term-review.fee677d709",
+    "final_db_status": "pending",
+    "plan": {
+      "title": "Plan - MusiCNN Analyzer Long-Term Review",
+      "objective": "Maintain analyzer reliability gains already shipped while deferring model-stack comparison/migration work into an explicit long-term review track that can be re-prioritized later without blocking fjord-port delivery.",
+      "kind": "legacy_current",
+      "status": "pending",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Freeze current-state analyzer behavior and baseline references.",
+        "2. Define benchmark corpus and scoring rubric for reliability + recommendation-impact deltas.",
+        "3. Run comparative MusiCNN vs candidate-model analysis in an isolated review workflow.",
+        "4. Produce explicit go/no-go decision memo with migration and rollback paths.",
+        "5. Update operator docs only when/if a re-prioritized implementation decision is made."
+      ],
+      "out_of_scope": [
+        "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+        ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+        ".agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md",
+        ".agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md",
+        ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+        "docs/FORK_DIFF.md",
+        "services/audio-analyzer/analyzer.py",
+        "../lidify-fjordnode/services/audio-analyzer/analyzer.py",
+        ".agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md",
+        "CHANGELOG.md",
+        "docs/FORK_DIFF_COMMITS.md",
+        "README.md",
+        ".agents/plans/current/musicnn-analyzer-long-term-review/HANDOFF.md",
+        ".agents/plans/current/musicnn-analyzer-long-term-review/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/current/musicnn-analyzer-long-term-review/HANDOFF.md",
+        ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+        ".agents/plans/current/musicnn-analyzer-long-term-review/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.capture-current-operating-decision-for-analyzer-stack",
+        "summary": "Capture current operating decision for analyzer stack",
+        "status": "complete",
+        "acceptance_criteria": [
+          "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          ".agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md",
+          ".agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "Capture current operating decision for analyzer stack",
+        "evidence": [
+          "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+        ]
+      },
+      {
+        "key": "task.02.define-re-prioritization-triggers",
+        "summary": "Define re-prioritization triggers",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Define re-prioritization triggers"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+          "docs/FORK_DIFF.md",
+          "services/audio-analyzer/analyzer.py"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.03.define-representative-fixture-corpus",
+        "summary": "Define representative fixture corpus",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Define representative fixture corpus"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          "../lidify-fjordnode/services/audio-analyzer/analyzer.py",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+          "services/audio-analyzer/analyzer.py"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.04.define-scoring-rubric-and-acceptance-thresholds",
+        "summary": "Define scoring rubric and acceptance thresholds",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Define scoring rubric and acceptance thresholds"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          ".agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.05.run-musicnn-baseline-replay-against-frozen-corpus",
+        "summary": "Run MusiCNN baseline replay against frozen corpus",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Run MusiCNN baseline replay against frozen corpus"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+          "services/audio-analyzer/analyzer.py"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.06.run-candidate-model-comparison-and-delta-analysis",
+        "summary": "Run candidate-model comparison and delta analysis",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Run candidate-model comparison and delta analysis"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          "../lidify-fjordnode/services/audio-analyzer/analyzer.py",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.07.produce-go-no-go-migration-memo",
+        "summary": "Produce go/no-go migration memo",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Produce go/no-go migration memo"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.08.draft-rollback-first-operator-runbook-for-any-approved-migration",
+        "summary": "Draft rollback-first operator runbook for any approved migration",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Draft rollback-first operator runbook for any approved migration"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+          "services/audio-analyzer/analyzer.py"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.09.update-fork-docs-only-after-approved-scope-change",
+        "summary": "Update fork docs only after approved scope change",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Update fork docs only after approved scope change"
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+          ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+          "CHANGELOG.md",
+          "docs/FORK_DIFF_COMMITS.md",
+          "docs/FORK_DIFF.md",
+          "README.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/current/musicnn-analyzer-long-term-review.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "musicnn-analyzer-long-term-review",
+    "feature_title": "Plan - MusiCNN Analyzer Long-Term Review",
+    "plan_ref": ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Freeze current-state analyzer behavior and baseline references.\n2. Define benchmark corpus and scoring rubric for reliability + recommendation-impact deltas.\n3. Run comparative MusiCNN vs candidate-model analysis in an isolated review workflow.\n4. Produce explicit go/no-go decision memo with migration and rollback paths.\n5. Update operator docs only when/if a re-prioritized implementation decision is made.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "### Constraints\n\n1. No production analyzer model switch in this feature set unless the user explicitly re-authorizes implementation.\n2. Analyzer service operational behavior (`services/audio-analyzer/analyzer.py`) must remain stable while this track is in review-only mode.\n3. Any benchmark plan must include reproducibility details (inputs, seeds, commands, output schema).\n4. Any proposed migration path must include:\n   - re-analysis blast-radius estimate,\n   - rollback plan,\n   - operator runbook.\n\n### Evidence Inputs\n\n1. Current analyzer implementation:\n   - `services/audio-analyzer/analyzer.py`\n2. Fjordnode analyzer reference:\n   - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n3. Existing reliability/baseline artifacts:\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT_PRE_TASK4_1_2026-02-13.md`",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\nCompletion summary template (required when task is `Complete`):\n\n- Delivered:\n- Files/functions/hooks touched:\n- Verification/testing:\n- Plain-English impact:",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Capture current operating decision for analyzer stack",
+            "acceptance_criteria": [
+              "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+            ],
+            "references": [
+              ".agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md",
+              ".agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Capture current operating decision for analyzer stack"
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md",
+                ".agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md",
+                ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+                ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+              ],
+              "verification_testing": [
+                "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+              ]
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Define re-prioritization triggers",
+            "acceptance_criteria": [
+              "Complete deliverable: Define re-prioritization triggers"
+            ],
+            "references": [
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+              "docs/FORK_DIFF.md",
+              "services/audio-analyzer/analyzer.py"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Define representative fixture corpus",
+            "acceptance_criteria": [
+              "Complete deliverable: Define representative fixture corpus"
+            ],
+            "references": [
+              "../lidify-fjordnode/services/audio-analyzer/analyzer.py",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+              "services/audio-analyzer/analyzer.py"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Define scoring rubric and acceptance thresholds",
+            "acceptance_criteria": [
+              "Complete deliverable: Define scoring rubric and acceptance thresholds"
+            ],
+            "references": [
+              ".agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Run MusiCNN baseline replay against frozen corpus",
+            "acceptance_criteria": [
+              "Complete deliverable: Run MusiCNN baseline replay against frozen corpus"
+            ],
+            "references": [
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+              "services/audio-analyzer/analyzer.py"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Run candidate-model comparison and delta analysis",
+            "acceptance_criteria": [
+              "Complete deliverable: Run candidate-model comparison and delta analysis"
+            ],
+            "references": [
+              "../lidify-fjordnode/services/audio-analyzer/analyzer.py",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Produce go/no-go migration memo",
+            "acceptance_criteria": [
+              "Complete deliverable: Produce go/no-go migration memo"
+            ],
+            "references": [
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Draft rollback-first operator runbook for any approved migration",
+            "acceptance_criteria": [
+              "Complete deliverable: Draft rollback-first operator runbook for any approved migration"
+            ],
+            "references": [
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+              "services/audio-analyzer/analyzer.py"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Update fork docs only after approved scope change",
+            "acceptance_criteria": [
+              "Complete deliverable: Update fork docs only after approved scope change"
+            ],
+            "references": [
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.json",
+              ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+              "CHANGELOG.md",
+              "docs/FORK_DIFF_COMMITS.md",
+              "docs/FORK_DIFF.md",
+              "README.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Maintain analyzer reliability gains already shipped while deferring model-stack comparison/migration work into an explicit long-term review track that can be re-prioritized later without blocking fjord-port delivery.",
+        "non_goals": "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      },
+      "plan_md_sync": {
+        "source_plan_md": ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:23:03.690Z",
+        "steps_generated": 9,
+        "task_heading_count": 9,
+        "gap_notes": [
+          "Missing explicit Non-Goals/Out of Scope section.",
+          "Task \"Task 0.1: Capture current operating decision for analyzer stack\" had no deliverable list; used heading title.",
+          "Task \"Task 0.2: Define re-prioritization triggers\" had no deliverable list; used heading title.",
+          "Task \"Task 1.1: Define representative fixture corpus\" had no deliverable list; used heading title.",
+          "Task \"Task 1.2: Define scoring rubric and acceptance thresholds\" had no deliverable list; used heading title.",
+          "Task \"Task 2.1: Run MusiCNN baseline replay against frozen corpus\" had no deliverable list; used heading title.",
+          "Task \"Task 2.2: Run candidate-model comparison and delta analysis\" had no deliverable list; used heading title.",
+          "Task \"Task 3.1: Produce go/no-go migration memo\" had no deliverable list; used heading title.",
+          "Task \"Task 3.2: Draft rollback-first operator runbook for any approved migration\" had no deliverable list; used heading title.",
+          "Task \"Task 4.1: Update fork docs only after approved scope change\" had no deliverable list; used heading title."
+        ]
+      },
+      "plan_md_context": {
+        "source_plan_md": ".agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:26:42.904Z",
+        "markdown_sha256": "2891969c7a5c1d1129f40fd42b9c1476dc0f6d68e2fbe55fc024348204608950",
+        "sections": [
+          {
+            "heading": "# Plan - MusiCNN Analyzer Long-Term Review",
+            "content": "## Document Status\n\n- Last updated: 2026-02-14\n- Feature: MusiCNN analyzer long-term model/comparison review\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Long-term review queue only; active production decision is to stay on MusiCNN for now.\n- Origin: Extracted from `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` Phase 7 on 2026-02-14\n\n## Goal\n\nMaintain analyzer reliability gains already shipped while deferring model-stack comparison/migration work into an explicit long-term review track that can be re-prioritized later without blocking fjord-port delivery.\n\n## Current Operating Decision\n\n1. Keep MusiCNN as the active analyzer stack in production.\n2. Do not start Discogs-EfficientNet migration work in this track until explicit re-prioritization.\n3. Preserve rollback-first safety expectations for any future model change.\n\n## Operational Hotfix Notes (Outside Migration Scope)\n\nThese are production reliability/correctness fixes applied while still keeping MusiCNN as the active stack:\n\n1. Analyzer image now installs TensorFlow explicitly for Essentia TensorFlow wrapper compatibility.\n2. Enhanced mood-head extraction now uses correct per-head class-column polarity (`ESSENTIA_VERSION=2.1b6-enhanced-v3`) and downstream mood consumers gate on reliable enhanced versioning.\n\n## Spec Outline\n\n1. Freeze current-state analyzer behavior and baseline references.\n2. Define benchmark corpus and scoring rubric for reliability + recommendation-impact deltas.\n3. Run comparative MusiCNN vs candidate-model analysis in an isolated review workflow.\n4. Produce explicit go/no-go decision memo with migration and rollback paths.\n5. Update operator docs only when/if a re-prioritized implementation decision is made.\n\n## Refined Spec\n\n### Constraints\n\n1. No production analyzer model switch in this feature set unless the user explicitly re-authorizes implementation.\n2. Analyzer service operational behavior (`services/audio-analyzer/analyzer.py`) must remain stable while this track is in review-only mode.\n3. Any benchmark plan must include reproducibility details (inputs, seeds, commands, output schema).\n4. Any proposed migration path must include:\n   - re-analysis blast-radius estimate,\n   - rollback plan,\n   - operator runbook.\n\n### Evidence Inputs\n\n1. Current analyzer implementation:\n   - `services/audio-analyzer/analyzer.py`\n2. Fjordnode analyzer reference:\n   - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n3. Existing reliability/baseline artifacts:\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT_PRE_TASK4_1_2026-02-13.md`\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\nCompletion summary template (required when task is `Complete`):\n\n- Delivered:\n- Files/functions/hooks touched:\n- Verification/testing:\n- Plain-English impact:\n\n## Phase 0: Scope Freeze and Decision Capture\n\n### Task 0.1: Capture current operating decision for analyzer stack\n- Status: Complete\n- Deliverable: Explicit written decision on whether this fork migrates off MusiCNN in current scope.\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n- Completion Summary:\n  - Delivered:\n    - Captured umbrella decision to stay on MusiCNN and extract model-review/migration work into this standalone long-term track.\n  - Files/functions/hooks touched:\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n    - `.agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md`\n  - Verification/testing:\n    - Plan-state verification via status updates in umbrella and long-term plan documents.\n  - Plain-English impact:\n    - Analyzer work is no longer blocking fjord feature ports; MusiCNN remains the active model.\n\n### Task 0.2: Define re-prioritization triggers\n- Status: Pending\n- Deliverable: Explicit triggers that justify promoting this long-term review back into active implementation.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `docs/FORK_DIFF.md`\n- Completion Summary: Pending\n\n## Phase 1: Benchmark and Corpus Design (Review-Only)\n\n### Task 1.1: Define representative fixture corpus\n- Status: Pending\n- Deliverable: Fixture classes covering small/large files, genre spread, known edge cases, and malformed inputs.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n### Task 1.2: Define scoring rubric and acceptance thresholds\n- Status: Pending\n- Deliverable: Reliability and output-quality rubric (throughput, fail/skip rates, mood/energy consistency, downstream recommendation-impact proxies).\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n- Completion Summary: Pending\n\n## Phase 2: Comparative Evaluation (Review-Only)\n\n### Task 2.1: Run MusiCNN baseline replay against frozen corpus\n- Status: Pending\n- Deliverable: Reproducible baseline run package with command/output evidence.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n### Task 2.2: Run candidate-model comparison and delta analysis\n- Status: Pending\n- Deliverable: Structured comparison report with confidence notes and known limitations.\n- References:\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n## Phase 3: Decision Gate and Runbook\n\n### Task 3.1: Produce go/no-go migration memo\n- Status: Pending\n- Deliverable: Decision memo with recommendation, risks, and required mitigations.\n- References:\n  - outputs from Phase 1 and Phase 2\n- Completion Summary: Pending\n\n### Task 3.2: Draft rollback-first operator runbook for any approved migration\n- Status: Pending\n- Deliverable: Stepwise migration and rollback procedure with validation checkpoints.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - analyzer deployment/runtime docs\n- Completion Summary: Pending\n\n## Phase 4: Documentation Sync (When Re-Prioritized)\n\n### Task 4.1: Update fork docs only after approved scope change\n- Status: Pending\n- Deliverable: Doc updates aligned to actual shipped behavior if migration is ever executed.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`\n- Completion Summary: Pending\n\n## Implementation Start Gate\n\nNo implementation in this feature set should begin until the user explicitly re-prioritizes this long-term review into active execution."
+          },
+          {
+            "heading": "## Document Status",
+            "content": "- Last updated: 2026-02-14\n- Feature: MusiCNN analyzer long-term model/comparison review\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Long-term review queue only; active production decision is to stay on MusiCNN for now.\n- Origin: Extracted from `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` Phase 7 on 2026-02-14"
+          },
+          {
+            "heading": "## Goal",
+            "content": "Maintain analyzer reliability gains already shipped while deferring model-stack comparison/migration work into an explicit long-term review track that can be re-prioritized later without blocking fjord-port delivery."
+          },
+          {
+            "heading": "## Current Operating Decision",
+            "content": "1. Keep MusiCNN as the active analyzer stack in production.\n2. Do not start Discogs-EfficientNet migration work in this track until explicit re-prioritization.\n3. Preserve rollback-first safety expectations for any future model change."
+          },
+          {
+            "heading": "## Operational Hotfix Notes (Outside Migration Scope)",
+            "content": "These are production reliability/correctness fixes applied while still keeping MusiCNN as the active stack:\n\n1. Analyzer image now installs TensorFlow explicitly for Essentia TensorFlow wrapper compatibility.\n2. Enhanced mood-head extraction now uses correct per-head class-column polarity (`ESSENTIA_VERSION=2.1b6-enhanced-v3`) and downstream mood consumers gate on reliable enhanced versioning."
+          },
+          {
+            "heading": "## Spec Outline",
+            "content": "1. Freeze current-state analyzer behavior and baseline references.\n2. Define benchmark corpus and scoring rubric for reliability + recommendation-impact deltas.\n3. Run comparative MusiCNN vs candidate-model analysis in an isolated review workflow.\n4. Produce explicit go/no-go decision memo with migration and rollback paths.\n5. Update operator docs only when/if a re-prioritized implementation decision is made."
+          },
+          {
+            "heading": "## Refined Spec",
+            "content": "### Constraints\n\n1. No production analyzer model switch in this feature set unless the user explicitly re-authorizes implementation.\n2. Analyzer service operational behavior (`services/audio-analyzer/analyzer.py`) must remain stable while this track is in review-only mode.\n3. Any benchmark plan must include reproducibility details (inputs, seeds, commands, output schema).\n4. Any proposed migration path must include:\n   - re-analysis blast-radius estimate,\n   - rollback plan,\n   - operator runbook.\n\n### Evidence Inputs\n\n1. Current analyzer implementation:\n   - `services/audio-analyzer/analyzer.py`\n2. Fjordnode analyzer reference:\n   - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n3. Existing reliability/baseline artifacts:\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT_PRE_TASK4_1_2026-02-13.md`"
+          },
+          {
+            "heading": "### Constraints",
+            "content": "1. No production analyzer model switch in this feature set unless the user explicitly re-authorizes implementation.\n2. Analyzer service operational behavior (`services/audio-analyzer/analyzer.py`) must remain stable while this track is in review-only mode.\n3. Any benchmark plan must include reproducibility details (inputs, seeds, commands, output schema).\n4. Any proposed migration path must include:\n   - re-analysis blast-radius estimate,\n   - rollback plan,\n   - operator runbook."
+          },
+          {
+            "heading": "### Evidence Inputs",
+            "content": "1. Current analyzer implementation:\n   - `services/audio-analyzer/analyzer.py`\n2. Fjordnode analyzer reference:\n   - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n3. Existing reliability/baseline artifacts:\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n   - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT_PRE_TASK4_1_2026-02-13.md`"
+          },
+          {
+            "heading": "## Detailed Implementation Plan (Atomic Tasks)",
+            "content": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\nCompletion summary template (required when task is `Complete`):\n\n- Delivered:\n- Files/functions/hooks touched:\n- Verification/testing:\n- Plain-English impact:"
+          },
+          {
+            "heading": "### Status Legend",
+            "content": "- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\nCompletion summary template (required when task is `Complete`):\n\n- Delivered:\n- Files/functions/hooks touched:\n- Verification/testing:\n- Plain-English impact:"
+          },
+          {
+            "heading": "## Phase 0: Scope Freeze and Decision Capture",
+            "content": "### Task 0.1: Capture current operating decision for analyzer stack\n- Status: Complete\n- Deliverable: Explicit written decision on whether this fork migrates off MusiCNN in current scope.\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n- Completion Summary:\n  - Delivered:\n    - Captured umbrella decision to stay on MusiCNN and extract model-review/migration work into this standalone long-term track.\n  - Files/functions/hooks touched:\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n    - `.agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md`\n  - Verification/testing:\n    - Plan-state verification via status updates in umbrella and long-term plan documents.\n  - Plain-English impact:\n    - Analyzer work is no longer blocking fjord feature ports; MusiCNN remains the active model.\n\n### Task 0.2: Define re-prioritization triggers\n- Status: Pending\n- Deliverable: Explicit triggers that justify promoting this long-term review back into active implementation.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `docs/FORK_DIFF.md`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 0.1: Capture current operating decision for analyzer stack",
+            "content": "- Status: Complete\n- Deliverable: Explicit written decision on whether this fork migrates off MusiCNN in current scope.\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n  - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n- Completion Summary:\n  - Delivered:\n    - Captured umbrella decision to stay on MusiCNN and extract model-review/migration work into this standalone long-term track.\n  - Files/functions/hooks touched:\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md`\n    - `.agents/plans/archived/fjordnode-feature-port-umbrella/HANDOFF.md`\n    - `.agents/plans/current/musicnn-analyzer-long-term-review/PLAN.md`\n  - Verification/testing:\n    - Plan-state verification via status updates in umbrella and long-term plan documents.\n  - Plain-English impact:\n    - Analyzer work is no longer blocking fjord feature ports; MusiCNN remains the active model."
+          },
+          {
+            "heading": "### Task 0.2: Define re-prioritization triggers",
+            "content": "- Status: Pending\n- Deliverable: Explicit triggers that justify promoting this long-term review back into active implementation.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `docs/FORK_DIFF.md`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "## Phase 1: Benchmark and Corpus Design (Review-Only)",
+            "content": "### Task 1.1: Define representative fixture corpus\n- Status: Pending\n- Deliverable: Fixture classes covering small/large files, genre spread, known edge cases, and malformed inputs.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n### Task 1.2: Define scoring rubric and acceptance thresholds\n- Status: Pending\n- Deliverable: Reliability and output-quality rubric (throughput, fail/skip rates, mood/energy consistency, downstream recommendation-impact proxies).\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 1.1: Define representative fixture corpus",
+            "content": "- Status: Pending\n- Deliverable: Fixture classes covering small/large files, genre spread, known edge cases, and malformed inputs.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 1.2: Define scoring rubric and acceptance thresholds",
+            "content": "- Status: Pending\n- Deliverable: Reliability and output-quality rubric (throughput, fail/skip rates, mood/energy consistency, downstream recommendation-impact proxies).\n- References:\n  - `.agents/plans/archived/fjordnode-feature-port-ml-analysis-playlist-diversity/ANALYZER_ENHANCED_BASELINE_REPORT.md`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "## Phase 2: Comparative Evaluation (Review-Only)",
+            "content": "### Task 2.1: Run MusiCNN baseline replay against frozen corpus\n- Status: Pending\n- Deliverable: Reproducible baseline run package with command/output evidence.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending\n\n### Task 2.2: Run candidate-model comparison and delta analysis\n- Status: Pending\n- Deliverable: Structured comparison report with confidence notes and known limitations.\n- References:\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 2.1: Run MusiCNN baseline replay against frozen corpus",
+            "content": "- Status: Pending\n- Deliverable: Reproducible baseline run package with command/output evidence.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 2.2: Run candidate-model comparison and delta analysis",
+            "content": "- Status: Pending\n- Deliverable: Structured comparison report with confidence notes and known limitations.\n- References:\n  - `../lidify-fjordnode/services/audio-analyzer/analyzer.py`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "## Phase 3: Decision Gate and Runbook",
+            "content": "### Task 3.1: Produce go/no-go migration memo\n- Status: Pending\n- Deliverable: Decision memo with recommendation, risks, and required mitigations.\n- References:\n  - outputs from Phase 1 and Phase 2\n- Completion Summary: Pending\n\n### Task 3.2: Draft rollback-first operator runbook for any approved migration\n- Status: Pending\n- Deliverable: Stepwise migration and rollback procedure with validation checkpoints.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - analyzer deployment/runtime docs\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 3.1: Produce go/no-go migration memo",
+            "content": "- Status: Pending\n- Deliverable: Decision memo with recommendation, risks, and required mitigations.\n- References:\n  - outputs from Phase 1 and Phase 2\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 3.2: Draft rollback-first operator runbook for any approved migration",
+            "content": "- Status: Pending\n- Deliverable: Stepwise migration and rollback procedure with validation checkpoints.\n- References:\n  - `services/audio-analyzer/analyzer.py`\n  - analyzer deployment/runtime docs\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "## Phase 4: Documentation Sync (When Re-Prioritized)",
+            "content": "### Task 4.1: Update fork docs only after approved scope change\n- Status: Pending\n- Deliverable: Doc updates aligned to actual shipped behavior if migration is ever executed.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "### Task 4.1: Update fork docs only after approved scope change",
+            "content": "- Status: Pending\n- Deliverable: Doc updates aligned to actual shipped behavior if migration is ever executed.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`\n- Completion Summary: Pending"
+          },
+          {
+            "heading": "## Implementation Start Gate",
+            "content": "No implementation in this feature set should begin until the user explicitly re-prioritizes this long-term review into active execution."
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    }
+  }
+}

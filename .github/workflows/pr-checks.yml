@@ -6,8 +6,8 @@ on:
     branches: [main]
 
 jobs:
-  policy-as-code:
-    name: Policy as Code
+  acm-health:
+    name: ACM Health
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -15,37 +15,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          node-version: '20'
+          go-version: '1.26.0'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install ACM
+        run: |
+          go install github.com/bonztm/agent-context-manager/cmd/acm@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Enforce agent policies (CI profile)
-        run: npm run policy:check:ci
+      - name: Bootstrap ACM
+        run: acm bootstrap --project soundspan --project-root .
 
-      - name: Check managed workflow drift
-        run: npm run agent:managed -- --mode check
+      - name: Sync ACM
+        run: acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
 
-      - name: Install backend dependencies
-        run: npm ci --prefix backend
+      - name: Verify ACM Onboarding Surface
+        run: |
+          acm verify \
+            --project soundspan \
+            --phase review \
+            --file-changed AGENTS.md \
+            --file-changed .acm/acm-rules.yaml \
+            --file-changed scripts/acm-legacy-plans.mjs
 
-      - name: Install frontend dependencies
-        run: npm ci --prefix frontend
+      - name: ACM Health
+        run: acm health --project soundspan --include-details
 
-      - name: Run test coverage baseline suites
-        run: npm run test-coverage:run
-
-      - name: Verify test coverage baseline
-        run: npm run test-coverage:verify
-
-      - name: Verify release runtime contract
-        run: npm run release:contract:check
-
-      - name: Enforce template-impact declaration
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: npm run agent:template-impact:check -- --base-ref origin/${{ github.base_ref }}
+      - name: ACM Context Smoke
+        run: acm get-context --project soundspan --task-text "CI ACM smoke check" --phase plan > /tmp/acm-context.json

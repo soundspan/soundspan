@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "feature_id": "discover-provider-gap-fill-tightening",
+  "feature_title": "Plan - Discover Provider Gap-Fill Tightening",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/discover-provider-gap-fill-tightening.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/discover-provider-gap-fill-tightening/PLAN.json",
+    "plan_dir": ".agents/plans/archived/discover-provider-gap-fill-tightening",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/discover-provider-gap-fill-tightening/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Discover Provider Gap-Fill Tightening\n\n## Document Status\n\n- Last updated: 2026-02-19\n- Feature: Discover Weekly provider source tightening (local-first playback)\n- Scope: Frontend discover gap-fill assignment + targeted tests/docs\n- Planning maturity: `Detailed Implementation Plan` complete\n\n## Goal\n\nEnsure Discover Weekly playlist playback prefers local library tracks when available, and only uses TIDAL/YouTube gap-fill for tracks that are unavailable locally.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished with completion summary\n\n### Task 1: Isolate and tighten provider slot assignment logic\n- Status: Complete\n- Deliverable: Provider assignment only considers gap-fill-eligible tracks (unavailable local tracks), while preserving existing slot caps.\n- Completion summary: Moved provider slot assignment to `frontend/features/discover/utils/providerGapFill.ts`, changed candidate selection to `available === false`, and reduced provider share from 30% to 20% (`PROVIDER_SHARE = 0.2`) while retaining the existing max slot cap.\n\n### Task 2: Add targeted unit coverage for provider assignment behavior\n- Status: Complete\n- Deliverable: Unit tests proving local tracks are not converted to streaming sources and unavailable tracks can still be gap-filled within cap logic.\n- Completion summary: Updated `frontend/features/discover/hooks/useDiscoverProviderGapFill.test.ts` to validate local-first behavior plus slot-capped assignment for unavailable tracks; test script passed with `node --import ../backend/node_modules/tsx/dist/loader.mjs`.\n\n### Task 3: Update discover UX copy/changelog and verify\n- Status: Complete\n- Deliverable: How-it-works text and changelog updated to reflect local-first behavior; targeted tests/commands run and summarized.\n- Completion summary: Updated discover copy in `frontend/features/discover/components/HowItWorks.tsx` and changelog entry in `CHANGELOG.md`; verified provider gap-fill tests pass and confirmed `useDiscoverActions.test.ts` remains blocked in this worktree due missing `react` dependency.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.discover-provider-gap-fill-tightening.0c61537149",
+    "plan_key": "plan:legacy.archived.discover-provider-gap-fill-tightening.0c61537149",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Discover Provider Gap-Fill Tightening",
+      "objective": "Plan - Discover Provider Gap-Fill Tightening",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/discover-provider-gap-fill-tightening.json",
+        ".agents/plans/archived/discover-provider-gap-fill-tightening/PLAN.json",
+        ".agents/plans/archived/discover-provider-gap-fill-tightening/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/discover-provider-gap-fill-tightening/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "Plan - Discover Provider Gap-Fill Tightening",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/discover-provider-gap-fill-tightening.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "discover-provider-gap-fill-tightening",
+    "feature_title": "Plan - Discover Provider Gap-Fill Tightening",
+    "plan_ref": ".agents/plans/archived/discover-provider-gap-fill-tightening/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "",
+        "non_goals": ""
+      }
+    }
+  }
+}

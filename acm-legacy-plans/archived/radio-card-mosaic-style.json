@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "feature_id": "radio-card-mosaic-style",
+  "feature_title": "Radio Cards Mosaic Artwork Treatment",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/radio-card-mosaic-style.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/radio-card-mosaic-style/PLAN.json",
+    "plan_dir": ".agents/plans/archived/radio-card-mosaic-style",
+    "status": "complete",
+    "updated_at": "2026-03-03T00:40:08.199Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.radio-card-mosaic-style.d4da3528fe",
+    "plan_key": "plan:legacy.archived.radio-card-mosaic-style.d4da3528fe",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Radio Cards Mosaic Artwork Treatment",
+      "objective": "Apply a playlist-style mosaic visual treatment to radio cards using station-relevant artwork while preserving clear card labels and playability.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Render radio cards with station-specific mosaic tiles",
+        "/radio cards render a 3x2 artwork mosaic with top and bottom sliver overlays"
+      ],
+      "out_of_scope": [
+        "Do not change radio station generation rules, queue behavior, or broader page layout beyond card presentation and station-art preview selection."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/radio-card-mosaic-style.json",
+        ".agents/plans/archived/radio-card-mosaic-style/PLAN.json",
+        "frontend/app/radio/page.tsx",
+        "frontend/app/radio/RadioStationMosaic.tsx",
+        "frontend/app/radio/radioStationMosaicSelection.ts",
+        "frontend/tests/unit/radioStationMosaicSelection.test.ts",
+        "frontend/features/home/components/LibraryRadioStations.tsx",
+        "frontend/tests/unit"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.add-shared-radio-mosaic-tile-selection-render-integration-across-both-radio-card-surfaces-with-regression-tests",
+        "summary": "Add shared radio mosaic tile selection + render integration across both radio card surfaces with regression tests",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Utility tests validate uniqueness/fallback behavior",
+          "Home and Radio cards display the new mosaic layout",
+          "Targeted lint and test commands pass"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/radio-card-mosaic-style.json",
+          "frontend/features/home/components/LibraryRadioStations.tsx",
+          "frontend/app/radio/page.tsx",
+          "frontend/tests/unit"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added a reusable /radio mosaic component that fetches station-relevant tracks and renders a 3x2 tile mosaic. | Implemented uniqueness-first tile selection that avoids reusing artist/cover tiles unless insufficient unique options exist. | Updated /radio station cards to use mosaic backgrounds while preserving top Radio and bottom metadata slivers.",
+        "evidence": [
+          "verify: cd frontend && node --test --experimental-strip-types tests/unit/radioStationMosaicSelection.test.ts tests/unit/libraryRadioStationsGenreSelection.test.ts",
+          "verify: cd frontend && npx eslint app/radio/page.tsx app/radio/RadioStationMosaic.tsx app/radio/radioStationMosaicSelection.ts tests/unit/radioStationMosaicSelection.test.ts tests/unit/libraryRadioStationsGenreSelection.test.ts",
+          "verify: npm run agent:preflight"
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "radio-card-mosaic-style",
+    "feature_title": "Radio Cards Mosaic Artwork Treatment",
+    "plan_ref": ".agents/plans/archived/radio-card-mosaic-style/PLAN.json",
+    "status": "complete",
+    "updated_at": "2026-03-03T00:40:08.199Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Apply a playlist-style mosaic visual treatment to radio cards using station-relevant artwork while preserving clear card labels and playability.",
+        "non_goals": "Do not change radio station generation rules, queue behavior, or broader page layout beyond card presentation and station-art preview selection."
+      },
+      "spec_outline": {
+        "summary": "Apply a 6-tile rectangular mosaic treatment to /radio cards using station-relevant artwork with uniqueness-first tile selection.",
+        "full_spec_outline": [
+          {
+            "id": "radio-mosaic-cards",
+            "objective": "Render radio cards with station-specific mosaic tiles",
+            "deliverable": "/radio cards render a 3x2 artwork mosaic with top and bottom sliver overlays",
+            "acceptance_criteria": [
+              "Each card renders six mosaic slots",
+              "Tiles prioritize unique artist and unique cover art",
+              "Tile reuse happens only when not enough unique artists/cover arts are available",
+              "Top and bottom slivers remain readable over artwork"
+            ],
+            "references": [
+              "frontend/app/radio/page.tsx",
+              "frontend/app/radio/RadioStationMosaic.tsx",
+              "frontend/app/radio/radioStationMosaicSelection.ts"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Use a shared utility for deterministic tile selection and a shared component for rendering/fetching mosaic art to keep behavior consistent across both card surfaces.",
+        "full_refined_spec": [
+          {
+            "id": "shared-mosaic-contract",
+            "decision": "Implement shared `buildRadioMosaicTiles` logic plus reusable `RadioStationMosaic` component",
+            "rationale": "One source of truth avoids drift between Home and Radio page cards and enables direct unit testing of uniqueness rules.",
+            "acceptance_criteria": [
+              "Failing tests are added before final implementation",
+              "/radio cards consume the shared mosaic component",
+              "Targeted tests and lint pass for touched files"
+            ],
+            "references": [
+              "frontend/tests/unit/radioStationMosaicSelection.test.ts",
+              "frontend/app/radio/page.tsx",
+              "frontend/app/radio/RadioStationMosaic.tsx"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "1) Add failing utility tests, 2) implement shared mosaic utility/component, 3) wire into Home and Radio cards, 4) verify and sync policy artifacts.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Add shared radio mosaic tile selection + render integration across both radio card surfaces with regression tests",
+            "acceptance_criteria": [
+              "Utility tests validate uniqueness/fallback behavior",
+              "Home and Radio cards display the new mosaic layout",
+              "Targeted lint and test commands pass"
+            ],
+            "references": [
+              "frontend/features/home/components/LibraryRadioStations.tsx",
+              "frontend/app/radio/page.tsx",
+              "frontend/tests/unit"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added a reusable /radio mosaic component that fetches station-relevant tracks and renders a 3x2 tile mosaic.",
+                "Implemented uniqueness-first tile selection that avoids reusing artist/cover tiles unless insufficient unique options exist.",
+                "Updated /radio station cards to use mosaic backgrounds while preserving top Radio and bottom metadata slivers."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/app/radio/RadioStationMosaic.tsx:RadioStationMosaic",
+                "frontend/app/radio/radioStationMosaicSelection.ts:createRadioMosaicCandidates",
+                "frontend/app/radio/radioStationMosaicSelection.ts:selectRadioMosaicTiles",
+                "frontend/app/radio/page.tsx:RadioStationCard"
+              ],
+              "verification_testing": [
+                "verify: cd frontend && node --test --experimental-strip-types tests/unit/radioStationMosaicSelection.test.ts tests/unit/libraryRadioStationsGenreSelection.test.ts",
+                "verify: cd frontend && npx eslint app/radio/page.tsx app/radio/RadioStationMosaic.tsx app/radio/radioStationMosaicSelection.ts tests/unit/radioStationMosaicSelection.test.ts tests/unit/libraryRadioStationsGenreSelection.test.ts",
+                "verify: npm run agent:preflight"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "recommended",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": "codex"
+    }
+  }
+}

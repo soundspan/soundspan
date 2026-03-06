@@ -167,11 +167,19 @@ Backend coverage artifacts include:
 - `backend/coverage/jest-results.json`
 - generated markdown summary (`backend/coverage/coverage-summary.md`)
 
-Policy and governance checks:
+ACM repo-contract checks:
 
-- `.github/workflows/pr-checks.yml` (`policy-as-code` job)
-- `.agents-config/scripts/enforce-agent-policies.mjs`
-- `.agents-config/policies/agent-governance.json`
+- `.github/workflows/pr-checks.yml` (`acm-health` job)
+- `AGENTS.md`
+- `.acm/acm-rules.yaml`
+- `.acm/acm-tests.yaml`
+
+Recommended local ACM validation:
+
+```bash
+acm verify --project soundspan --phase review --file-changed <path>
+acm health --project soundspan --include-details
+```
 
 ## Sidecar Test Standard
 

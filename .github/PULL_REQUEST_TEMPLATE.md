@@ -2,19 +2,9 @@
 
 <!-- Briefly describe what this PR changes and why. -->
 
-## Template Impact
+## ACM Impact
 
-Template-Impact: yes|none
-Template-Ref:
-Template-Impact-Reason:
-
-<!--
-Rules:
-- If this PR changes meaningful agent workflow paths, set `Template-Impact: yes`
-  and provide a `Template-Ref` (template PR/commit/ref).
-- If this PR does not need template updates, set `Template-Impact: none`
-  and provide a concise `Template-Impact-Reason`.
--->
+<!-- Describe any ACM contract/rules/tests/tags/workflow impact. -->
 
 ## Type of Change
 
@@ -37,9 +27,10 @@ Fixes #
 
 ## Verification
 
--   [ ] `node .agents-config/scripts/enforce-agent-policies.mjs`
--   [ ] `npm run agent:managed -- --mode check`
--   [ ] `npm run agent:preflight`
+-   [ ] `acm bootstrap --project soundspan --project-root .`
+-   [ ] `acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .`
+-   [ ] `acm verify --project soundspan --phase review --file-changed ...`
+-   [ ] `acm health --project soundspan --include-details`
 -   [ ] Additional targeted checks (list below)
 
 ## Additional Verification Details

@@ -1,0 +1,721 @@
+{
+  "version": 1,
+  "feature_id": "lidarr-quality-delete-safety-long-term-review",
+  "feature_title": "Plan - Lidarr Quality Delete Safety Long-Term Review",
+  "track": "current",
+  "export_path": "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+  "legacy": {
+    "plan_path": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+    "plan_dir": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# Handoff - Lidarr Quality Delete Safety Long-Term Review\n## Feature\n- Lidarr quality-profile configuration + queue-aware delete safety parity\n- Plan: `.agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md`\n\n## Current State\n- Feature extracted from Bundle F deferred scope (`Task 5.5`) on 2026-02-14.\n- Planning-only track created; no implementation started.\n- Purpose is to isolate schema/settings + delete semantics work from low-risk Bundle F polish.\n\n## Scope Snapshot\n- In scope for future slices:\n  - persisted `lidarrQualityProfileId` setting\n  - Lidarr service usage of configured quality profile\n  - queue-aware artist delete safeguards\n- Out of scope until explicit promotion:\n  - broad discovery workflow redesign\n  - unrelated metadata editor UX changes\n\n## Next Actions\n1. Run Phase 0 (`Task 0.1`, `Task 0.2`) in the Lidarr long-term review plan.\n2. Confirm Slice A start (schema/settings only) before runtime/delete behavior changes.\n3. Validate call-site semantics in discover/library cleanup paths prior to implementation.\n"
+      },
+      {
+        "path": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Lidarr Quality Delete Safety Long-Term Review\n\n## Document Status\n\n- Last updated: 2026-02-14\n- Feature: Lidarr quality-profile configuration + queue-aware delete safety parity\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-bundle-f-metadata-library-polish/PLAN.md` (`Task 5.5` extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)\n\n## Why This Was Split Out\n\nBundle F deferred this work because it introduces settings/schema/runtime behavior changes with higher operational risk than the already shipped metadata polish items.\n\n## Goal\n\nAdd controlled Lidarr reliability improvements so operators can:\n1. choose a preferred Lidarr quality profile from settings,\n2. ensure add/search flows use that profile consistently,\n3. prevent unsafe artist deletion while active Lidarr queue work is still in flight.\n\n## Known-Gap Ledger Review\n\nReviewed on 2026-02-14:\n1. Current fork hardcodes profile ID fallback (`1`) in key Lidarr add/search paths.\n2. Current delete methods do not embed the fjord-style active-queue guard.\n3. Scope decision: move to standalone reliability track with staged rollout and explicit verification gates.\n\n## Full-Stack Request Path Baseline\n\n1. Client URL/base path:\n   - Settings UI via frontend `/api/*` proxy path.\n2. Frontend proxy behavior:\n   - Settings calls through `frontend/lib/api.ts`.\n3. Backend route/service path:\n   - `backend/src/routes/systemSettings.ts`\n   - `backend/src/services/lidarr.ts`\n   - cleanup call sites (`backend/src/routes/discover.ts`, `backend/src/services/discoverWeekly.ts`, `backend/src/routes/library.ts`)\n4. Downstream dependencies:\n   - PostgreSQL/Prisma for persisted system settings\n   - Lidarr API queue/artist/album endpoints\n5. Deployment modes to validate:\n   - `docker-compose.aio.yml`\n   - `docker-compose.yml`\n   - local host-run (`docker-compose.local.yml` + host backend/frontend)\n\n## Spec Outline\n\n1. Add persisted optional `lidarrQualityProfileId` setting (schema + route validation + settings response).\n2. Use configured quality profile in Lidarr search/add fallback and add flows.\n3. Add queue-aware delete safety guard for artist deletion paths.\n4. Preserve backward-compatible behavior when setting is unset or Lidarr is unavailable.\n5. Validate with focused route/service tests plus live probe evidence.\n\n## Refined Spec\n\n### Constraints\n\n1. Migration must be additive and safe for existing installs.\n2. Existing settings payload contracts must remain backward compatible.\n3. Delete safety guard must fail safely (do not hard-error cleanup loops if queue read fails).\n4. Any behavior shift in cleanup/deletion should be explicitly documented before ship.\n5. Rollout should be sliced to isolate schema/settings risk from delete-semantics risk.\n\n### Primary Touchpoints\n\n1. Schema/settings:\n   - `backend/prisma/schema.prisma`\n   - migration files under `backend/prisma/migrations/`\n   - `backend/src/routes/systemSettings.ts`\n2. Lidarr runtime:\n   - `backend/src/services/lidarr.ts`\n3. Call sites impacted by delete semantics:\n   - `backend/src/routes/discover.ts`\n   - `backend/src/services/discoverWeekly.ts`\n   - `backend/src/routes/library.ts`\n4. Frontend settings UX (if profile selection UI is added):\n   - settings feature files + `frontend/lib/api.ts`\n\n### Acceptance Criteria\n\n1. Operators can persist a Lidarr quality profile ID in settings.\n2. Lidarr add/search flows use configured quality profile when present, defaulting safely otherwise.\n3. Delete flows skip artist deletion when active queue work exists, with clear logging/return messaging.\n4. Route/service tests and full-stack probes confirm no regressions in existing settings and cleanup workflows.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\n## Phase 0: Re-Context + Safety Contract\n\n### Task 0.1: Confirm parity deltas and compatibility boundaries\n- Status: Pending\n- Deliverable: exact mapping of current vs fjord quality/delete behavior and non-goals.\n- References:\n  - `backend/src/services/lidarr.ts`\n  - `../lidify-fjordnode/backend/src/services/lidarr.ts`\n  - `backend/src/routes/systemSettings.ts`\n  - `../lidify-fjordnode/backend/src/routes/systemSettings.ts`\n\n### Task 0.2: Define rollout flag/guard strategy\n- Status: Pending\n- Deliverable: explicit decision whether delete guard is unconditional or toggle/soft-guarded for first ship.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n\n## Phase 1: Schema + Settings Contract\n\n### Task 1.1: Add schema field and migration\n- Status: Pending\n- Deliverable: additive `lidarrQualityProfileId` persistence field.\n- References:\n  - `backend/prisma/schema.prisma`\n  - `backend/prisma/migrations/`\n\n### Task 1.2: Extend settings validation/read/write contract\n- Status: Pending\n- Deliverable: system settings route accepts/returns encrypted-safe payload with quality profile ID.\n- References:\n  - `backend/src/routes/systemSettings.ts`\n\n### Task 1.3: Add settings route tests\n- Status: Pending\n- Deliverable: route coverage for quality profile persistence and backward compatibility.\n- References:\n  - `backend/src/routes/__tests__/`\n\n## Phase 2: Lidarr Service Runtime Wiring\n\n### Task 2.1: Apply configured quality profile in add/search fallback paths\n- Status: Pending\n- Deliverable: `lidarrQualityProfileId` usage in relevant Lidarr payloads with safe fallback to existing default behavior.\n- References:\n  - `backend/src/services/lidarr.ts`\n\n### Task 2.2: Add service-level regression coverage\n- Status: Pending\n- Deliverable: tests proving configured and default profile behavior.\n- References:\n  - `backend/src/services/__tests__/`\n\n## Phase 3: Queue-Aware Delete Safety\n\n### Task 3.1: Implement active queue guard for artist delete paths\n- Status: Pending\n- Deliverable: guard checks before delete in `deleteArtist`/`deleteArtistById` semantics.\n- References:\n  - `backend/src/services/lidarr.ts`\n\n### Task 3.2: Reconcile cleanup call-site behavior\n- Status: Pending\n- Deliverable: call sites handle \"active queue\" skip state predictably without false failures.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n  - `backend/src/routes/library.ts`\n\n### Task 3.3: Add delete-safety compatibility tests\n- Status: Pending\n- Deliverable: regression coverage for active queue skip behavior and fallback semantics.\n- References:\n  - `backend/src/routes/__tests__/`\n  - `backend/src/services/__tests__/`\n\n## Phase 4: Full-Stack Verification + Docs\n\n### Task 4.1: Full-stack checkpoint\n- Status: Pending\n- Deliverable: backend-direct and frontend-base settings + delete-flow probe evidence.\n- References:\n  - `docker-compose.local.yml`\n  - host-run startup commands\n\n### Task 4.2: Docs sync for shipped behavior\n- Status: Pending\n- Deliverable: scoped updates if this feature is promoted and shipped.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`\n\n## Follow-up Slice Recommendations\n\n1. Slice A (recommended first): Schema/settings only\n- Add `lidarrQualityProfileId` persistence and route contract tests.\n- Keep Lidarr runtime behavior unchanged in this slice.\n- Expected risk: low-medium.\n\n2. Slice B: Runtime quality-profile wiring\n- Apply configured profile in service payloads with fallback.\n- Expected risk: medium.\n\n3. Slice C: Delete safety guard\n- Add active queue checks and call-site handling.\n- Expected risk: medium-high (behavior semantics change).\n\n4. Slice D: Hardening + observability\n- Improve logs/metrics and operator feedback around skipped deletes and profile application.\n- Expected risk: low.\n"
+      },
+      {
+        "path": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-14 Session Prompt History (Feature Extraction Setup)\n1. User requested splitting Bundle F's two larger deferred items into standalone future features.\n2. Session created this Lidarr-focused long-term feature track from Bundle F deferred `Task 5.5`.\n3. Added planning artifacts:\n   - `PLAN.md`\n   - `HANDOFF.md`\n   - `PROMPT_HISTORY.md`\n4. No implementation started; this track currently holds planning and slice recommendations only.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.current.lidarr-quality-delete-safety-long-term-review.b92d0c6150",
+    "plan_key": "plan:legacy.current.lidarr-quality-delete-safety-long-term-review.b92d0c6150",
+    "final_db_status": "pending",
+    "plan": {
+      "title": "Plan - Lidarr Quality Delete Safety Long-Term Review",
+      "objective": "Add controlled Lidarr reliability improvements so operators can:\n1. choose a preferred Lidarr quality profile from settings,\n2. ensure add/search flows use that profile consistently,\n3. prevent unsafe artist deletion while active Lidarr queue work is still in flight.",
+      "kind": "legacy_current",
+      "status": "pending",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Add persisted optional `lidarrQualityProfileId` setting (schema + route validation + settings response).",
+        "2. Use configured quality profile in Lidarr search/add fallback and add flows.",
+        "3. Add queue-aware delete safety guard for artist deletion paths.",
+        "4. Preserve backward-compatible behavior when setting is unset or Lidarr is unavailable.",
+        "5. Validate with focused route/service tests plus live probe evidence."
+      ],
+      "out_of_scope": [
+        "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+        ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+        "../lidify-fjordnode/backend/src/routes/systemSettings.ts",
+        "../lidify-fjordnode/backend/src/services/lidarr.ts",
+        ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+        "backend/src/routes/systemSettings.ts",
+        "backend/src/services/lidarr.ts",
+        "backend/src/routes/discover.ts",
+        "backend/src/services/discoverWeekly.ts",
+        "backend/prisma/migrations/",
+        "backend/prisma/schema.prisma",
+        "backend/src/routes/__tests__/",
+        "backend/src/services/__tests__/",
+        "backend/src/routes/library.ts",
+        "docker-compose.local.yml",
+        "CHANGELOG.md",
+        "docs/FORK_DIFF_COMMITS.md",
+        "docs/FORK_DIFF.md",
+        "README.md",
+        ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/HANDOFF.md",
+        ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/HANDOFF.md",
+        ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+        ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.confirm-parity-deltas-and-compatibility-boundaries",
+        "summary": "Confirm parity deltas and compatibility boundaries",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Confirm parity deltas and compatibility boundaries"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          "../lidify-fjordnode/backend/src/routes/systemSettings.ts",
+          "../lidify-fjordnode/backend/src/services/lidarr.ts",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/routes/systemSettings.ts",
+          "backend/src/services/lidarr.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.02.define-rollout-flag-guard-strategy",
+        "summary": "Define rollout flag/guard strategy",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Define rollout flag/guard strategy"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/routes/discover.ts",
+          "backend/src/services/discoverWeekly.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.03.add-schema-field-and-migration",
+        "summary": "Add schema field and migration",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Add schema field and migration"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/prisma/migrations/",
+          "backend/prisma/schema.prisma"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.04.extend-settings-validation-read-write-contract",
+        "summary": "Extend settings validation/read/write contract",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Extend settings validation/read/write contract"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/routes/systemSettings.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.05.add-settings-route-tests",
+        "summary": "Add settings route tests",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Add settings route tests"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/routes/__tests__/"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.06.apply-configured-quality-profile-in-add-search-fallback-paths",
+        "summary": "Apply configured quality profile in add/search fallback paths",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Apply configured quality profile in add/search fallback paths"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/services/lidarr.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.07.add-service-level-regression-coverage",
+        "summary": "Add service-level regression coverage",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Add service-level regression coverage"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/services/__tests__/"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.08.implement-active-queue-guard-for-artist-delete-paths",
+        "summary": "Implement active queue guard for artist delete paths",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Implement active queue guard for artist delete paths"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/services/lidarr.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.09.reconcile-cleanup-call-site-behavior",
+        "summary": "Reconcile cleanup call-site behavior",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Reconcile cleanup call-site behavior"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/routes/discover.ts",
+          "backend/src/routes/library.ts",
+          "backend/src/services/discoverWeekly.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.10.add-delete-safety-compatibility-tests",
+        "summary": "Add delete-safety compatibility tests",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Add delete-safety compatibility tests"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "backend/src/routes/__tests__/",
+          "backend/src/services/__tests__/"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.11.full-stack-checkpoint",
+        "summary": "Full-stack checkpoint",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Full-stack checkpoint"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "docker-compose.local.yml"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.12.docs-sync-for-shipped-behavior",
+        "summary": "Docs sync for shipped behavior",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Docs sync for shipped behavior"
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+          ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+          "CHANGELOG.md",
+          "docs/FORK_DIFF_COMMITS.md",
+          "docs/FORK_DIFF.md",
+          "README.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/current/lidarr-quality-delete-safety-long-term-review.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "lidarr-quality-delete-safety-long-term-review",
+    "feature_title": "Plan - Lidarr Quality Delete Safety Long-Term Review",
+    "plan_ref": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Add persisted optional `lidarrQualityProfileId` setting (schema + route validation + settings response).\n2. Use configured quality profile in Lidarr search/add fallback and add flows.\n3. Add queue-aware delete safety guard for artist deletion paths.\n4. Preserve backward-compatible behavior when setting is unset or Lidarr is unavailable.\n5. Validate with focused route/service tests plus live probe evidence.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "### Constraints\n\n1. Migration must be additive and safe for existing installs.\n2. Existing settings payload contracts must remain backward compatible.\n3. Delete safety guard must fail safely (do not hard-error cleanup loops if queue read fails).\n4. Any behavior shift in cleanup/deletion should be explicitly documented before ship.\n5. Rollout should be sliced to isolate schema/settings risk from delete-semantics risk.\n\n### Primary Touchpoints\n\n1. Schema/settings:\n   - `backend/prisma/schema.prisma`\n   - migration files under `backend/prisma/migrations/`\n   - `backend/src/routes/systemSettings.ts`\n2. Lidarr runtime:\n   - `backend/src/services/lidarr.ts`\n3. Call sites impacted by delete semantics:\n   - `backend/src/routes/discover.ts`\n   - `backend/src/services/discoverWeekly.ts`\n   - `backend/src/routes/library.ts`\n4. Frontend settings UX (if profile selection UI is added):\n   - settings feature files + `frontend/lib/api.ts`\n\n### Acceptance Criteria\n\n1. Operators can persist a Lidarr quality profile ID in settings.\n2. Lidarr add/search flows use configured quality profile when present, defaulting safely otherwise.\n3. Delete flows skip artist deletion when active queue work exists, with clear logging/return messaging.\n4. Route/service tests and full-stack probes confirm no regressions in existing settings and cleanup workflows.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary",
+        "steps": [
+          {
+            "status": "pending",
+            "deliverable": "Confirm parity deltas and compatibility boundaries",
+            "acceptance_criteria": [
+              "Complete deliverable: Confirm parity deltas and compatibility boundaries"
+            ],
+            "references": [
+              "../lidify-fjordnode/backend/src/routes/systemSettings.ts",
+              "../lidify-fjordnode/backend/src/services/lidarr.ts",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/routes/systemSettings.ts",
+              "backend/src/services/lidarr.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Define rollout flag/guard strategy",
+            "acceptance_criteria": [
+              "Complete deliverable: Define rollout flag/guard strategy"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/routes/discover.ts",
+              "backend/src/services/discoverWeekly.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Add schema field and migration",
+            "acceptance_criteria": [
+              "Complete deliverable: Add schema field and migration"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/prisma/migrations/",
+              "backend/prisma/schema.prisma"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Extend settings validation/read/write contract",
+            "acceptance_criteria": [
+              "Complete deliverable: Extend settings validation/read/write contract"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/routes/systemSettings.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Add settings route tests",
+            "acceptance_criteria": [
+              "Complete deliverable: Add settings route tests"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/routes/__tests__/"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Apply configured quality profile in add/search fallback paths",
+            "acceptance_criteria": [
+              "Complete deliverable: Apply configured quality profile in add/search fallback paths"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/services/lidarr.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Add service-level regression coverage",
+            "acceptance_criteria": [
+              "Complete deliverable: Add service-level regression coverage"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/services/__tests__/"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Implement active queue guard for artist delete paths",
+            "acceptance_criteria": [
+              "Complete deliverable: Implement active queue guard for artist delete paths"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/services/lidarr.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Reconcile cleanup call-site behavior",
+            "acceptance_criteria": [
+              "Complete deliverable: Reconcile cleanup call-site behavior"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/routes/discover.ts",
+              "backend/src/routes/library.ts",
+              "backend/src/services/discoverWeekly.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Add delete-safety compatibility tests",
+            "acceptance_criteria": [
+              "Complete deliverable: Add delete-safety compatibility tests"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "backend/src/routes/__tests__/",
+              "backend/src/services/__tests__/"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Full-stack checkpoint",
+            "acceptance_criteria": [
+              "Complete deliverable: Full-stack checkpoint"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "docker-compose.local.yml"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Docs sync for shipped behavior",
+            "acceptance_criteria": [
+              "Complete deliverable: Docs sync for shipped behavior"
+            ],
+            "references": [
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.json",
+              ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+              "CHANGELOG.md",
+              "docs/FORK_DIFF_COMMITS.md",
+              "docs/FORK_DIFF.md",
+              "README.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Add controlled Lidarr reliability improvements so operators can:\n1. choose a preferred Lidarr quality profile from settings,\n2. ensure add/search flows use that profile consistently,\n3. prevent unsafe artist deletion while active Lidarr queue work is still in flight.",
+        "non_goals": "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      },
+      "plan_md_sync": {
+        "source_plan_md": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:23:03.690Z",
+        "steps_generated": 12,
+        "task_heading_count": 12,
+        "gap_notes": [
+          "Missing explicit Non-Goals/Out of Scope section.",
+          "Task \"Task 0.1: Confirm parity deltas and compatibility boundaries\" had no deliverable list; used heading title.",
+          "Task \"Task 0.2: Define rollout flag/guard strategy\" had no deliverable list; used heading title.",
+          "Task \"Task 1.1: Add schema field and migration\" had no deliverable list; used heading title.",
+          "Task \"Task 1.2: Extend settings validation/read/write contract\" had no deliverable list; used heading title.",
+          "Task \"Task 1.3: Add settings route tests\" had no deliverable list; used heading title.",
+          "Task \"Task 2.1: Apply configured quality profile in add/search fallback paths\" had no deliverable list; used heading title.",
+          "Task \"Task 2.2: Add service-level regression coverage\" had no deliverable list; used heading title.",
+          "Task \"Task 3.1: Implement active queue guard for artist delete paths\" had no deliverable list; used heading title.",
+          "Task \"Task 3.2: Reconcile cleanup call-site behavior\" had no deliverable list; used heading title.",
+          "Task \"Task 3.3: Add delete-safety compatibility tests\" had no deliverable list; used heading title.",
+          "Task \"Task 4.1: Full-stack checkpoint\" had no deliverable list; used heading title.",
+          "Task \"Task 4.2: Docs sync for shipped behavior\" had no deliverable list; used heading title."
+        ]
+      },
+      "plan_md_context": {
+        "source_plan_md": ".agents/plans/current/lidarr-quality-delete-safety-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:26:42.903Z",
+        "markdown_sha256": "62fad1538fa51b2a5b455104bb9f0891d5773e64e474ed844a1031da5cae0b15",
+        "sections": [
+          {
+            "heading": "# Plan - Lidarr Quality Delete Safety Long-Term Review",
+            "content": "## Document Status\n\n- Last updated: 2026-02-14\n- Feature: Lidarr quality-profile configuration + queue-aware delete safety parity\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-bundle-f-metadata-library-polish/PLAN.md` (`Task 5.5` extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)\n\n## Why This Was Split Out\n\nBundle F deferred this work because it introduces settings/schema/runtime behavior changes with higher operational risk than the already shipped metadata polish items.\n\n## Goal\n\nAdd controlled Lidarr reliability improvements so operators can:\n1. choose a preferred Lidarr quality profile from settings,\n2. ensure add/search flows use that profile consistently,\n3. prevent unsafe artist deletion while active Lidarr queue work is still in flight.\n\n## Known-Gap Ledger Review\n\nReviewed on 2026-02-14:\n1. Current fork hardcodes profile ID fallback (`1`) in key Lidarr add/search paths.\n2. Current delete methods do not embed the fjord-style active-queue guard.\n3. Scope decision: move to standalone reliability track with staged rollout and explicit verification gates.\n\n## Full-Stack Request Path Baseline\n\n1. Client URL/base path:\n   - Settings UI via frontend `/api/*` proxy path.\n2. Frontend proxy behavior:\n   - Settings calls through `frontend/lib/api.ts`.\n3. Backend route/service path:\n   - `backend/src/routes/systemSettings.ts`\n   - `backend/src/services/lidarr.ts`\n   - cleanup call sites (`backend/src/routes/discover.ts`, `backend/src/services/discoverWeekly.ts`, `backend/src/routes/library.ts`)\n4. Downstream dependencies:\n   - PostgreSQL/Prisma for persisted system settings\n   - Lidarr API queue/artist/album endpoints\n5. Deployment modes to validate:\n   - `docker-compose.aio.yml`\n   - `docker-compose.yml`\n   - local host-run (`docker-compose.local.yml` + host backend/frontend)\n\n## Spec Outline\n\n1. Add persisted optional `lidarrQualityProfileId` setting (schema + route validation + settings response).\n2. Use configured quality profile in Lidarr search/add fallback and add flows.\n3. Add queue-aware delete safety guard for artist deletion paths.\n4. Preserve backward-compatible behavior when setting is unset or Lidarr is unavailable.\n5. Validate with focused route/service tests plus live probe evidence.\n\n## Refined Spec\n\n### Constraints\n\n1. Migration must be additive and safe for existing installs.\n2. Existing settings payload contracts must remain backward compatible.\n3. Delete safety guard must fail safely (do not hard-error cleanup loops if queue read fails).\n4. Any behavior shift in cleanup/deletion should be explicitly documented before ship.\n5. Rollout should be sliced to isolate schema/settings risk from delete-semantics risk.\n\n### Primary Touchpoints\n\n1. Schema/settings:\n   - `backend/prisma/schema.prisma`\n   - migration files under `backend/prisma/migrations/`\n   - `backend/src/routes/systemSettings.ts`\n2. Lidarr runtime:\n   - `backend/src/services/lidarr.ts`\n3. Call sites impacted by delete semantics:\n   - `backend/src/routes/discover.ts`\n   - `backend/src/services/discoverWeekly.ts`\n   - `backend/src/routes/library.ts`\n4. Frontend settings UX (if profile selection UI is added):\n   - settings feature files + `frontend/lib/api.ts`\n\n### Acceptance Criteria\n\n1. Operators can persist a Lidarr quality profile ID in settings.\n2. Lidarr add/search flows use configured quality profile when present, defaulting safely otherwise.\n3. Delete flows skip artist deletion when active queue work exists, with clear logging/return messaging.\n4. Route/service tests and full-stack probes confirm no regressions in existing settings and cleanup workflows.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\n## Phase 0: Re-Context + Safety Contract\n\n### Task 0.1: Confirm parity deltas and compatibility boundaries\n- Status: Pending\n- Deliverable: exact mapping of current vs fjord quality/delete behavior and non-goals.\n- References:\n  - `backend/src/services/lidarr.ts`\n  - `../lidify-fjordnode/backend/src/services/lidarr.ts`\n  - `backend/src/routes/systemSettings.ts`\n  - `../lidify-fjordnode/backend/src/routes/systemSettings.ts`\n\n### Task 0.2: Define rollout flag/guard strategy\n- Status: Pending\n- Deliverable: explicit decision whether delete guard is unconditional or toggle/soft-guarded for first ship.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n\n## Phase 1: Schema + Settings Contract\n\n### Task 1.1: Add schema field and migration\n- Status: Pending\n- Deliverable: additive `lidarrQualityProfileId` persistence field.\n- References:\n  - `backend/prisma/schema.prisma`\n  - `backend/prisma/migrations/`\n\n### Task 1.2: Extend settings validation/read/write contract\n- Status: Pending\n- Deliverable: system settings route accepts/returns encrypted-safe payload with quality profile ID.\n- References:\n  - `backend/src/routes/systemSettings.ts`\n\n### Task 1.3: Add settings route tests\n- Status: Pending\n- Deliverable: route coverage for quality profile persistence and backward compatibility.\n- References:\n  - `backend/src/routes/__tests__/`\n\n## Phase 2: Lidarr Service Runtime Wiring\n\n### Task 2.1: Apply configured quality profile in add/search fallback paths\n- Status: Pending\n- Deliverable: `lidarrQualityProfileId` usage in relevant Lidarr payloads with safe fallback to existing default behavior.\n- References:\n  - `backend/src/services/lidarr.ts`\n\n### Task 2.2: Add service-level regression coverage\n- Status: Pending\n- Deliverable: tests proving configured and default profile behavior.\n- References:\n  - `backend/src/services/__tests__/`\n\n## Phase 3: Queue-Aware Delete Safety\n\n### Task 3.1: Implement active queue guard for artist delete paths\n- Status: Pending\n- Deliverable: guard checks before delete in `deleteArtist`/`deleteArtistById` semantics.\n- References:\n  - `backend/src/services/lidarr.ts`\n\n### Task 3.2: Reconcile cleanup call-site behavior\n- Status: Pending\n- Deliverable: call sites handle \"active queue\" skip state predictably without false failures.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n  - `backend/src/routes/library.ts`\n\n### Task 3.3: Add delete-safety compatibility tests\n- Status: Pending\n- Deliverable: regression coverage for active queue skip behavior and fallback semantics.\n- References:\n  - `backend/src/routes/__tests__/`\n  - `backend/src/services/__tests__/`\n\n## Phase 4: Full-Stack Verification + Docs\n\n### Task 4.1: Full-stack checkpoint\n- Status: Pending\n- Deliverable: backend-direct and frontend-base settings + delete-flow probe evidence.\n- References:\n  - `docker-compose.local.yml`\n  - host-run startup commands\n\n### Task 4.2: Docs sync for shipped behavior\n- Status: Pending\n- Deliverable: scoped updates if this feature is promoted and shipped.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`\n\n## Follow-up Slice Recommendations\n\n1. Slice A (recommended first): Schema/settings only\n- Add `lidarrQualityProfileId` persistence and route contract tests.\n- Keep Lidarr runtime behavior unchanged in this slice.\n- Expected risk: low-medium.\n\n2. Slice B: Runtime quality-profile wiring\n- Apply configured profile in service payloads with fallback.\n- Expected risk: medium.\n\n3. Slice C: Delete safety guard\n- Add active queue checks and call-site handling.\n- Expected risk: medium-high (behavior semantics change).\n\n4. Slice D: Hardening + observability\n- Improve logs/metrics and operator feedback around skipped deletes and profile application.\n- Expected risk: low."
+          },
+          {
+            "heading": "## Document Status",
+            "content": "- Last updated: 2026-02-14\n- Feature: Lidarr quality-profile configuration + queue-aware delete safety parity\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-bundle-f-metadata-library-polish/PLAN.md` (`Task 5.5` extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)"
+          },
+          {
+            "heading": "## Why This Was Split Out",
+            "content": "Bundle F deferred this work because it introduces settings/schema/runtime behavior changes with higher operational risk than the already shipped metadata polish items."
+          },
+          {
+            "heading": "## Goal",
+            "content": "Add controlled Lidarr reliability improvements so operators can:\n1. choose a preferred Lidarr quality profile from settings,\n2. ensure add/search flows use that profile consistently,\n3. prevent unsafe artist deletion while active Lidarr queue work is still in flight."
+          },
+          {
+            "heading": "## Known-Gap Ledger Review",
+            "content": "Reviewed on 2026-02-14:\n1. Current fork hardcodes profile ID fallback (`1`) in key Lidarr add/search paths.\n2. Current delete methods do not embed the fjord-style active-queue guard.\n3. Scope decision: move to standalone reliability track with staged rollout and explicit verification gates."
+          },
+          {
+            "heading": "## Full-Stack Request Path Baseline",
+            "content": "1. Client URL/base path:\n   - Settings UI via frontend `/api/*` proxy path.\n2. Frontend proxy behavior:\n   - Settings calls through `frontend/lib/api.ts`.\n3. Backend route/service path:\n   - `backend/src/routes/systemSettings.ts`\n   - `backend/src/services/lidarr.ts`\n   - cleanup call sites (`backend/src/routes/discover.ts`, `backend/src/services/discoverWeekly.ts`, `backend/src/routes/library.ts`)\n4. Downstream dependencies:\n   - PostgreSQL/Prisma for persisted system settings\n   - Lidarr API queue/artist/album endpoints\n5. Deployment modes to validate:\n   - `docker-compose.aio.yml`\n   - `docker-compose.yml`\n   - local host-run (`docker-compose.local.yml` + host backend/frontend)"
+          },
+          {
+            "heading": "## Spec Outline",
+            "content": "1. Add persisted optional `lidarrQualityProfileId` setting (schema + route validation + settings response).\n2. Use configured quality profile in Lidarr search/add fallback and add flows.\n3. Add queue-aware delete safety guard for artist deletion paths.\n4. Preserve backward-compatible behavior when setting is unset or Lidarr is unavailable.\n5. Validate with focused route/service tests plus live probe evidence."
+          },
+          {
+            "heading": "## Refined Spec",
+            "content": "### Constraints\n\n1. Migration must be additive and safe for existing installs.\n2. Existing settings payload contracts must remain backward compatible.\n3. Delete safety guard must fail safely (do not hard-error cleanup loops if queue read fails).\n4. Any behavior shift in cleanup/deletion should be explicitly documented before ship.\n5. Rollout should be sliced to isolate schema/settings risk from delete-semantics risk.\n\n### Primary Touchpoints\n\n1. Schema/settings:\n   - `backend/prisma/schema.prisma`\n   - migration files under `backend/prisma/migrations/`\n   - `backend/src/routes/systemSettings.ts`\n2. Lidarr runtime:\n   - `backend/src/services/lidarr.ts`\n3. Call sites impacted by delete semantics:\n   - `backend/src/routes/discover.ts`\n   - `backend/src/services/discoverWeekly.ts`\n   - `backend/src/routes/library.ts`\n4. Frontend settings UX (if profile selection UI is added):\n   - settings feature files + `frontend/lib/api.ts`\n\n### Acceptance Criteria\n\n1. Operators can persist a Lidarr quality profile ID in settings.\n2. Lidarr add/search flows use configured quality profile when present, defaulting safely otherwise.\n3. Delete flows skip artist deletion when active queue work exists, with clear logging/return messaging.\n4. Route/service tests and full-stack probes confirm no regressions in existing settings and cleanup workflows."
+          },
+          {
+            "heading": "### Constraints",
+            "content": "1. Migration must be additive and safe for existing installs.\n2. Existing settings payload contracts must remain backward compatible.\n3. Delete safety guard must fail safely (do not hard-error cleanup loops if queue read fails).\n4. Any behavior shift in cleanup/deletion should be explicitly documented before ship.\n5. Rollout should be sliced to isolate schema/settings risk from delete-semantics risk."
+          },
+          {
+            "heading": "### Primary Touchpoints",
+            "content": "1. Schema/settings:\n   - `backend/prisma/schema.prisma`\n   - migration files under `backend/prisma/migrations/`\n   - `backend/src/routes/systemSettings.ts`\n2. Lidarr runtime:\n   - `backend/src/services/lidarr.ts`\n3. Call sites impacted by delete semantics:\n   - `backend/src/routes/discover.ts`\n   - `backend/src/services/discoverWeekly.ts`\n   - `backend/src/routes/library.ts`\n4. Frontend settings UX (if profile selection UI is added):\n   - settings feature files + `frontend/lib/api.ts`"
+          },
+          {
+            "heading": "### Acceptance Criteria",
+            "content": "1. Operators can persist a Lidarr quality profile ID in settings.\n2. Lidarr add/search flows use configured quality profile when present, defaulting safely otherwise.\n3. Delete flows skip artist deletion when active queue work exists, with clear logging/return messaging.\n4. Route/service tests and full-stack probes confirm no regressions in existing settings and cleanup workflows."
+          },
+          {
+            "heading": "## Detailed Implementation Plan (Atomic Tasks)",
+            "content": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary"
+          },
+          {
+            "heading": "### Status Legend",
+            "content": "- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary"
+          },
+          {
+            "heading": "## Phase 0: Re-Context + Safety Contract",
+            "content": "### Task 0.1: Confirm parity deltas and compatibility boundaries\n- Status: Pending\n- Deliverable: exact mapping of current vs fjord quality/delete behavior and non-goals.\n- References:\n  - `backend/src/services/lidarr.ts`\n  - `../lidify-fjordnode/backend/src/services/lidarr.ts`\n  - `backend/src/routes/systemSettings.ts`\n  - `../lidify-fjordnode/backend/src/routes/systemSettings.ts`\n\n### Task 0.2: Define rollout flag/guard strategy\n- Status: Pending\n- Deliverable: explicit decision whether delete guard is unconditional or toggle/soft-guarded for first ship.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`"
+          },
+          {
+            "heading": "### Task 0.1: Confirm parity deltas and compatibility boundaries",
+            "content": "- Status: Pending\n- Deliverable: exact mapping of current vs fjord quality/delete behavior and non-goals.\n- References:\n  - `backend/src/services/lidarr.ts`\n  - `../lidify-fjordnode/backend/src/services/lidarr.ts`\n  - `backend/src/routes/systemSettings.ts`\n  - `../lidify-fjordnode/backend/src/routes/systemSettings.ts`"
+          },
+          {
+            "heading": "### Task 0.2: Define rollout flag/guard strategy",
+            "content": "- Status: Pending\n- Deliverable: explicit decision whether delete guard is unconditional or toggle/soft-guarded for first ship.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`"
+          },
+          {
+            "heading": "## Phase 1: Schema + Settings Contract",
+            "content": "### Task 1.1: Add schema field and migration\n- Status: Pending\n- Deliverable: additive `lidarrQualityProfileId` persistence field.\n- References:\n  - `backend/prisma/schema.prisma`\n  - `backend/prisma/migrations/`\n\n### Task 1.2: Extend settings validation/read/write contract\n- Status: Pending\n- Deliverable: system settings route accepts/returns encrypted-safe payload with quality profile ID.\n- References:\n  - `backend/src/routes/systemSettings.ts`\n\n### Task 1.3: Add settings route tests\n- Status: Pending\n- Deliverable: route coverage for quality profile persistence and backward compatibility.\n- References:\n  - `backend/src/routes/__tests__/`"
+          },
+          {
+            "heading": "### Task 1.1: Add schema field and migration",
+            "content": "- Status: Pending\n- Deliverable: additive `lidarrQualityProfileId` persistence field.\n- References:\n  - `backend/prisma/schema.prisma`\n  - `backend/prisma/migrations/`"
+          },
+          {
+            "heading": "### Task 1.2: Extend settings validation/read/write contract",
+            "content": "- Status: Pending\n- Deliverable: system settings route accepts/returns encrypted-safe payload with quality profile ID.\n- References:\n  - `backend/src/routes/systemSettings.ts`"
+          },
+          {
+            "heading": "### Task 1.3: Add settings route tests",
+            "content": "- Status: Pending\n- Deliverable: route coverage for quality profile persistence and backward compatibility.\n- References:\n  - `backend/src/routes/__tests__/`"
+          },
+          {
+            "heading": "## Phase 2: Lidarr Service Runtime Wiring",
+            "content": "### Task 2.1: Apply configured quality profile in add/search fallback paths\n- Status: Pending\n- Deliverable: `lidarrQualityProfileId` usage in relevant Lidarr payloads with safe fallback to existing default behavior.\n- References:\n  - `backend/src/services/lidarr.ts`\n\n### Task 2.2: Add service-level regression coverage\n- Status: Pending\n- Deliverable: tests proving configured and default profile behavior.\n- References:\n  - `backend/src/services/__tests__/`"
+          },
+          {
+            "heading": "### Task 2.1: Apply configured quality profile in add/search fallback paths",
+            "content": "- Status: Pending\n- Deliverable: `lidarrQualityProfileId` usage in relevant Lidarr payloads with safe fallback to existing default behavior.\n- References:\n  - `backend/src/services/lidarr.ts`"
+          },
+          {
+            "heading": "### Task 2.2: Add service-level regression coverage",
+            "content": "- Status: Pending\n- Deliverable: tests proving configured and default profile behavior.\n- References:\n  - `backend/src/services/__tests__/`"
+          },
+          {
+            "heading": "## Phase 3: Queue-Aware Delete Safety",
+            "content": "### Task 3.1: Implement active queue guard for artist delete paths\n- Status: Pending\n- Deliverable: guard checks before delete in `deleteArtist`/`deleteArtistById` semantics.\n- References:\n  - `backend/src/services/lidarr.ts`\n\n### Task 3.2: Reconcile cleanup call-site behavior\n- Status: Pending\n- Deliverable: call sites handle \"active queue\" skip state predictably without false failures.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n  - `backend/src/routes/library.ts`\n\n### Task 3.3: Add delete-safety compatibility tests\n- Status: Pending\n- Deliverable: regression coverage for active queue skip behavior and fallback semantics.\n- References:\n  - `backend/src/routes/__tests__/`\n  - `backend/src/services/__tests__/`"
+          },
+          {
+            "heading": "### Task 3.1: Implement active queue guard for artist delete paths",
+            "content": "- Status: Pending\n- Deliverable: guard checks before delete in `deleteArtist`/`deleteArtistById` semantics.\n- References:\n  - `backend/src/services/lidarr.ts`"
+          },
+          {
+            "heading": "### Task 3.2: Reconcile cleanup call-site behavior",
+            "content": "- Status: Pending\n- Deliverable: call sites handle \"active queue\" skip state predictably without false failures.\n- References:\n  - `backend/src/routes/discover.ts`\n  - `backend/src/services/discoverWeekly.ts`\n  - `backend/src/routes/library.ts`"
+          },
+          {
+            "heading": "### Task 3.3: Add delete-safety compatibility tests",
+            "content": "- Status: Pending\n- Deliverable: regression coverage for active queue skip behavior and fallback semantics.\n- References:\n  - `backend/src/routes/__tests__/`\n  - `backend/src/services/__tests__/`"
+          },
+          {
+            "heading": "## Phase 4: Full-Stack Verification + Docs",
+            "content": "### Task 4.1: Full-stack checkpoint\n- Status: Pending\n- Deliverable: backend-direct and frontend-base settings + delete-flow probe evidence.\n- References:\n  - `docker-compose.local.yml`\n  - host-run startup commands\n\n### Task 4.2: Docs sync for shipped behavior\n- Status: Pending\n- Deliverable: scoped updates if this feature is promoted and shipped.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`"
+          },
+          {
+            "heading": "### Task 4.1: Full-stack checkpoint",
+            "content": "- Status: Pending\n- Deliverable: backend-direct and frontend-base settings + delete-flow probe evidence.\n- References:\n  - `docker-compose.local.yml`\n  - host-run startup commands"
+          },
+          {
+            "heading": "### Task 4.2: Docs sync for shipped behavior",
+            "content": "- Status: Pending\n- Deliverable: scoped updates if this feature is promoted and shipped.\n- References:\n  - `CHANGELOG.md`\n  - `README.md`\n  - `docs/FORK_DIFF.md`\n  - `docs/FORK_DIFF_COMMITS.md`"
+          },
+          {
+            "heading": "## Follow-up Slice Recommendations",
+            "content": "1. Slice A (recommended first): Schema/settings only\n- Add `lidarrQualityProfileId` persistence and route contract tests.\n- Keep Lidarr runtime behavior unchanged in this slice.\n- Expected risk: low-medium.\n\n2. Slice B: Runtime quality-profile wiring\n- Apply configured profile in service payloads with fallback.\n- Expected risk: medium.\n\n3. Slice C: Delete safety guard\n- Add active queue checks and call-site handling.\n- Expected risk: medium-high (behavior semantics change).\n\n4. Slice D: Hardening + observability\n- Improve logs/metrics and operator feedback around skipped deletes and profile application.\n- Expected risk: low."
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    }
+  }
+}

@@ -128,6 +128,12 @@ frontend/test-*.tsx
 .claude/
 **/.claude/
 !.claude/commands/
+!.claude/
+!.claude/commands/**
+!.claude/acm-broker/
+!.claude/acm-broker/**
+.claude/settings.local.json
+**/.claude/settings.local.json
 .cursor/
 **/.cursor/
 .roo/
@@ -144,8 +150,13 @@ frontend/test-*.tsx
 .agents
 .agents/
 .agents/**
+.acm/context.db
+.acm/context.db-shm
+.acm/context.db-wal
+.acm/bootstrap_candidates.json
 .claudeignore
-CLAUDE.md
+/CLAUDE.md
+!.claude/acm-broker/CLAUDE.md
 
 # Internal Documentation (public docs are in project root)
 docs/
@@ -155,6 +166,8 @@ docs/
 !docs/FORK_DIFF_COMMITS.md
 archived/
 **/archived/
+!acm-legacy-plans/archived/
+!acm-legacy-plans/archived/**
 context_portal/
 issues/
 .agents/plans/

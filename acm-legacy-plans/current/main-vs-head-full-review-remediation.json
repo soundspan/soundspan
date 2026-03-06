@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "feature_id": "main-vs-head-full-review-remediation",
+  "feature_title": "Plan - Main vs HEAD Full Review and Remediation",
+  "track": "current",
+  "export_path": "acm-legacy-plans/current/main-vs-head-full-review-remediation.json",
+  "legacy": {
+    "plan_path": ".agents/plans/current/main-vs-head-full-review-remediation/PLAN.json",
+    "plan_dir": ".agents/plans/current/main-vs-head-full-review-remediation",
+    "status": "in_progress",
+    "updated_at": "2026-03-04T00:00:00Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.current.main-vs-head-full-review-remediation.cf9c43e821",
+    "plan_key": "plan:legacy.current.main-vs-head-full-review-remediation.cf9c43e821",
+    "final_db_status": "in_progress",
+    "plan": {
+      "title": "Plan - Main vs HEAD Full Review and Remediation",
+      "objective": "Perform an exhaustive review of all branch changes relative to main, identify correctness/regression/security/maintainability issues, and remediate confirmed issues with strict tests-first TDD.",
+      "kind": "legacy_current",
+      "status": "in_progress",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Produce a complete technical review and close all confirmed in-scope defects.",
+        "Reviewed and remediated branch with verification evidence and explicit residual risk notes."
+      ],
+      "out_of_scope": [
+        "No unrelated feature work or broad architectural rewrites outside issues directly discovered in this branch delta review."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/current/main-vs-head-full-review-remediation.json",
+        ".agents/plans/current/main-vs-head-full-review-remediation/PLAN.json",
+        "git diff main...HEAD",
+        ".agents/EXECUTION_QUEUE.json",
+        "backend/src/**",
+        "frontend/**",
+        "backend/src/routes/__tests__",
+        "backend/src/services/**/__tests__",
+        "frontend/tests/e2e",
+        "git diff --name-status main...HEAD",
+        "npm run agent:preflight"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.complete-main-vs-head-review-with-issue-remediation-and-verification-evidence",
+        "summary": "Complete main-vs-HEAD review with issue remediation and verification evidence",
+        "status": "in_progress",
+        "acceptance_criteria": [
+          "All changed files are reviewed and findings are captured with severity and rationale",
+          "All confirmed issues are fixed and validated with failing-then-passing tests",
+          "Independent subagent review is executed after implementation and any findings are resolved"
+        ],
+        "references": [
+          "acm-legacy-plans/current/main-vs-head-full-review-remediation.json",
+          "git diff --name-status main...HEAD",
+          "git diff main...HEAD",
+          "npm run agent:preflight"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/current/main-vs-head-full-review-remediation.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "main-vs-head-full-review-remediation",
+    "feature_title": "Plan - Main vs HEAD Full Review and Remediation",
+    "plan_ref": ".agents/plans/current/main-vs-head-full-review-remediation/PLAN.json",
+    "status": "in_progress",
+    "updated_at": "2026-03-04T00:00:00Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Perform an exhaustive review of all branch changes relative to main, identify correctness/regression/security/maintainability issues, and remediate confirmed issues with strict tests-first TDD.",
+        "non_goals": "No unrelated feature work or broad architectural rewrites outside issues directly discovered in this branch delta review."
+      },
+      "spec_outline": {
+        "summary": "Review all diffs from main to HEAD, validate behavior via targeted tests, and fix confirmed defects while preserving intended feature scope.",
+        "full_spec_outline": [
+          {
+            "id": "full-branch-review",
+            "objective": "Produce a complete technical review and close all confirmed in-scope defects.",
+            "deliverable": "Reviewed and remediated branch with verification evidence and explicit residual risk notes.",
+            "acceptance_criteria": [
+              "All files changed from main to HEAD are reviewed for correctness, regressions, edge cases, maintainability, and security risks",
+              "Each confirmed defect is fixed with strict tests-first TDD and verification evidence",
+              "Post-implementation subagent review is completed and findings are either fixed or explicitly documented"
+            ],
+            "references": [
+              "git diff main...HEAD",
+              ".agents/EXECUTION_QUEUE.json",
+              "backend/src/**",
+              "frontend/**"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Prioritize high-severity correctness and security issues first, then maintainability/simplification opportunities, always proving behavioral safety with targeted failing-then-passing tests.",
+        "full_refined_spec": [
+          {
+            "id": "severity-first-remediation",
+            "decision": "Use severity-ordered triage and batch fixes by shared root cause to reduce churn and retest cost.",
+            "rationale": "A full-branch review can surface many related findings; grouping by root cause improves correctness and keeps changes minimal.",
+            "acceptance_criteria": [
+              "Critical/high issues are addressed before medium/low findings",
+              "Each fix includes failing test evidence before implementation",
+              "Targeted regression tests cover edge cases introduced by each fix"
+            ],
+            "references": [
+              "backend/src/routes/__tests__",
+              "backend/src/services/**/__tests__",
+              "frontend/tests/e2e"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Diff, triage, implement TDD fixes in small batches, run targeted verification, then perform independent subagent review and final policy checks.",
+        "steps": [
+          {
+            "status": "in_progress",
+            "deliverable": "Complete main-vs-HEAD review with issue remediation and verification evidence",
+            "acceptance_criteria": [
+              "All changed files are reviewed and findings are captured with severity and rationale",
+              "All confirmed issues are fixed and validated with failing-then-passing tests",
+              "Independent subagent review is executed after implementation and any findings are resolved"
+            ],
+            "references": [
+              "git diff --name-status main...HEAD",
+              "git diff main...HEAD",
+              "npm run agent:preflight"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "required",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": "orchestrator"
+    }
+  }
+}

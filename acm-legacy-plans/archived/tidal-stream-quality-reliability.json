@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "feature_id": "tidal-stream-quality-reliability",
+  "feature_title": "Plan - Tidal Stream Quality Reliability",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/tidal-stream-quality-reliability.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/tidal-stream-quality-reliability/PLAN.json",
+    "plan_dir": ".agents/plans/archived/tidal-stream-quality-reliability",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/tidal-stream-quality-reliability/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Tidal Stream Quality Reliability\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: TIDAL stream reliability and quality fidelity\n- Scope: Fix inconsistent TIDAL stream failures, enforce quality-selection fidelity for Max setting, and reduce badge latency\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Requested by user (2026-02-20)\n- Implementation status: Complete (2026-02-20)\n\n## User Goals Captured\n\n1. Reduce or eliminate intermittent TIDAL stream failures users report as \"not working\".\n2. Ensure Max quality does not silently degrade to 320kbps AAC when higher-quality streams are available.\n3. Make TIDAL quality badge metadata load faster and more consistently.\n\n## Spec Outline\n\n1. Validate quality-setting mapping path from user settings to TIDAL sidecar request.\n2. Validate stream URL caching and expiry/retry behavior.\n3. Validate stream-info path used by badge rendering for latency bottlenecks.\n4. Implement minimal, backward-safe fixes plus targeted regression coverage.\n\n## Refined Spec\n\n1. Preserve current API contracts while tightening quality selection semantics.\n2. Ensure cache keys/TTL include quality-sensitive dimensions when needed.\n3. Prefer deterministic fallback with explicit logging over silent downgrades.\n4. Add targeted tests for quality mapping and stale-cache behavior.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Task 1: Inspect quality selection and stream retrieval path\n- Status: Complete\n- Acceptance criteria:\n  - Exact file/function chain identified for setting -> stream payload.\n  - Failure/degradation points captured with concrete references.\n  - Completed: located quality-fallback mismatch (`backend/src/routes/tidalStreaming.ts`) and quality-insensitive cache key (`services/tidal-downloader/app.py`).\n\n### Task 2: Implement backend-side reliability/quality fixes\n- Status: Complete\n- Acceptance criteria:\n  - Quality selection honors Max intent where provider permits.\n  - Stream cache behavior no longer serves stale/incorrect quality entries.\n  - Badge info path uses improved caching or reduced expensive calls.\n  - Completed:\n    - `stream-info` now falls back to user quality setting when query quality is absent.\n    - Sidecar stream cache key includes quality dimension.\n    - Sidecar retries once with forced URL refresh on upstream `401/403`.\n    - Frontend quality hook now dedupes in-flight calls across mounted players.\n\n### Task 3: Add/adjust targeted regression tests\n- Status: Complete\n- Acceptance criteria:\n  - Tests cover quality mapping and cache/expiry-sensitive flow.\n  - Tests fail before fix and pass after fix.\n  - Completed: extended `backend/src/routes/__tests__/tidalStreamingRuntime.test.ts` with stream-info default-quality and DB-fallback coverage; tests pass.\n\n### Task 4: Verify and close out\n- Status: Complete\n- Acceptance criteria:\n  - Targeted test suite passes.\n  - `npm run agent:preflight` passes.\n  - Plain-English summary provided for operators/users.\n  - Completed:\n    - Targeted backend route runtime tests pass.\n    - Sidecar Python syntax compile check passes.\n    - Frontend component tests pass for touched interaction surfaces.\n    - Final close-out run executed.\n\n## Verification Evidence\n\n- `npm --prefix backend test -- src/routes/__tests__/tidalStreamingRuntime.test.ts` (pass)\n- `python3 -m py_compile services/tidal-downloader/app.py` (pass)\n- `npm --prefix frontend run test:component -- tests/component/trackPreferenceButtons.component.test.ts tests/component/miniPlayerEnhancements.component.test.ts` (pass)\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.tidal-stream-quality-reliability.b12c1fd763",
+    "plan_key": "plan:legacy.archived.tidal-stream-quality-reliability.b12c1fd763",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Tidal Stream Quality Reliability",
+      "objective": "1. Validate quality-setting mapping path from user settings to TIDAL sidecar request.\n2. Validate stream URL caching and expiry/retry behavior.\n3. Validate stream-info path used by badge rendering for latency bottlenecks.\n4. Implement minimal, backward-safe fixes plus targeted regression coverage.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Validate quality-setting mapping path from user settings to TIDAL sidecar request.",
+        "2. Validate stream URL caching and expiry/retry behavior.",
+        "3. Validate stream-info path used by badge rendering for latency bottlenecks.",
+        "4. Implement minimal, backward-safe fixes plus targeted regression coverage."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/tidal-stream-quality-reliability.json",
+        ".agents/plans/archived/tidal-stream-quality-reliability/PLAN.json",
+        ".agents/plans/archived/tidal-stream-quality-reliability/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/tidal-stream-quality-reliability/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Validate quality-setting mapping path from user settings to TIDAL sidecar request.\n2. Validate stream URL caching and expiry/retry behavior.\n3. Validate stream-info path used by badge rendering for latency bottlenecks.\n4. Implement minimal, backward-safe fixes plus targeted regression coverage.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/tidal-stream-quality-reliability.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "tidal-stream-quality-reliability",
+    "feature_title": "Plan - Tidal Stream Quality Reliability",
+    "plan_ref": ".agents/plans/archived/tidal-stream-quality-reliability/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Validate quality-setting mapping path from user settings to TIDAL sidecar request.\n2. Validate stream URL caching and expiry/retry behavior.\n3. Validate stream-info path used by badge rendering for latency bottlenecks.\n4. Implement minimal, backward-safe fixes plus targeted regression coverage.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "1. Preserve current API contracts while tightening quality selection semantics.\n2. Ensure cache keys/TTL include quality-sensitive dimensions when needed.\n3. Prefer deterministic fallback with explicit logging over silent downgrades.\n4. Add targeted tests for quality mapping and stale-cache behavior.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Validate quality-setting mapping path from user settings to TIDAL sidecar request.\n2. Validate stream URL caching and expiry/retry behavior.\n3. Validate stream-info path used by badge rendering for latency bottlenecks.\n4. Implement minimal, backward-safe fixes plus targeted regression coverage.",
+        "non_goals": ""
+      }
+    }
+  }
+}

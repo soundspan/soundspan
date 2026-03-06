@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "feature_id": "player-ux-and-streaming-reliability",
+  "feature_title": "Plan - Player UX and Streaming Reliability",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/player-ux-and-streaming-reliability.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/player-ux-and-streaming-reliability/PLAN.json",
+    "plan_dir": ".agents/plans/archived/player-ux-and-streaming-reliability",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/player-ux-and-streaming-reliability/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Player UX and Streaming Reliability\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: Player/runtime reliability and streaming gap-fill correctness\n- Scope:\n  - Lyrics false-negative on first open\n  - Album-level thumbs up/down batch action\n  - Native cover-art missing-file self-heal\n  - Volume consistency on full reload\n  - Playback continuity across reload/rolling backend updates\n  - Unowned album stream gap-fill not activating (TIDAL/YouTube)\n  - Settings hydration consistency across browsers\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Approved and implemented\n\n## Chunking Protocol (Context-Safe Execution)\n\n1. Execute one phase at a time.\n2. Max two atomic tasks per implementation pass before checkpoint.\n3. After each pass: run targeted tests, summarize outcomes, and commit.\n4. Defer cross-cutting refactors unless required by acceptance criteria.\n\n## Spec Outline\n\n1. Eliminate false \"No lyrics available\" states when lyrics exist.\n2. Add album-level thumbs up/down actions that batch-apply to tracks.\n3. Heal missing native cover files immediately instead of repeatedly failing and redirecting.\n4. Stabilize volume state across full page reloads.\n5. Preserve play/pause intent and resume position through reloads and backend pod replacement events.\n6. Ensure unowned album tracks get TIDAL/YouTube gap-fill matches when providers are available.\n7. Ensure settings UI reflects persisted DB settings consistently across browser sessions.\n\n## Refined Spec\n\n1. Fix first-open lyrics race/caching behavior so temporary empty/fallback responses do not become long-lived false negatives.\n2. Implement server-side batch preference mutation for album tracks, with frontend optimistic progress and failure reporting.\n3. On native cover miss, attempt immediate download-and-store to `native:` path and persist repaired `coverUrl`.\n4. Consolidate volume source-of-truth between audio state and Howler initialization.\n5. Extend playback-state persistence contract to include play intent, then restore media + intent safely on hydration.\n6. Remove/mitigate false-negative provider status caching and ensure TIDAL status includes lazy OAuth restore.\n7. Gate settings rendering on real settings load and refresh on auth/focus to avoid default-value flash or stale display.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Phase 1: UX Correctness First\n\n#### Task 1.1: Lyrics first-open reliability\n- Status: Complete\n- Acceptance criteria:\n  - Opening Lyrics tab does not cache temporary empty fallback as a long-lived success state.\n  - Switching tabs is no longer required to see lyrics when lyrics exist.\n  - Regression tests cover first-open metadata/race path.\n- Primary files:\n  - `frontend/hooks/useLyrics.ts`\n  - `frontend/lib/lyrics-cache-policy.ts`\n  - `frontend/tests/unit/useLyrics.test.ts`\n  - `frontend/components/player/OverlayPlayer.tsx`\n  - `frontend/components/player/HowlerAudioElement.tsx`\n  - `backend/src/routes/lyrics.ts`\n  - `backend/src/routes/__tests__/lyricsRuntime.test.ts`\n- Completion summary:\n  - Raised route timeout ceiling and changed timeout/service-failure responses to `504`/`503` instead of returning empty-lyrics fallbacks.\n  - Removed frontend fallback-to-empty on request errors and added short stale-time refresh policy for `source=none` empty lyrics payloads.\n  - Added coverage for new backend timeout/error contract and lyrics stale-time policy behavior.\n  - Verification:\n    - `npm --prefix backend test -- --runTestsByPath src/routes/__tests__/lyricsRuntime.test.ts`\n    - `npm --prefix frontend run test:unit -- tests/unit/useLyrics.test.ts`\n    - `npm --prefix frontend run lint -- hooks/useLyrics.ts lib/lyrics-cache-policy.ts tests/unit/useLyrics.test.ts`\n\n#### Task 1.2: Settings hydration consistency across browsers\n- Status: Complete\n- Acceptance criteria:\n  - Settings page does not render default settings as final state before DB fetch resolves.\n  - User/system settings reload reliably on auth-ready and focus/reconnect paths.\n  - Targeted settings hook/page tests cover hydration and fallback behavior.\n- Primary files:\n  - `frontend/features/settings/hooks/settingsHydration.ts`\n  - `frontend/features/settings/hooks/useSettingsData.ts`\n  - `frontend/features/settings/hooks/useSystemSettings.ts`\n  - `frontend/app/settings/page.tsx`\n  - `frontend/tests/unit/settingsHydration.test.ts`\n- Completion summary:\n  - Added explicit settings-page loading gate so default local hook state is not rendered as final UI before API hydration completes.\n  - Hardened settings hooks with failed-load retry on focus/online/visibility recovery paths using cooldown-based retry gating.\n  - Added unit coverage for hydration loading gate and background retry policy helpers.\n  - Verification:\n    - `npm --prefix frontend run test:unit -- tests/unit/settingsHydration.test.ts tests/unit/useLyrics.test.ts`\n    - `npm --prefix frontend run lint -- app/settings/page.tsx features/settings/hooks/useSettingsData.ts features/settings/hooks/useSystemSettings.ts features/settings/hooks/settingsHydration.ts tests/unit/settingsHydration.test.ts hooks/useLyrics.ts lib/lyrics-cache-policy.ts tests/unit/useLyrics.test.ts`\n\n#### Task 1.3: Volume reload stability\n- Status: Complete\n- Acceptance criteria:\n  - Full page reload preserves effective volume/mute state deterministically.\n  - No conflicting initialization paths can overwrite intended volume on mount.\n  - Targeted audio state test(s) cover reload initialization order.\n- Primary files:\n  - `frontend/lib/audio-volume.ts`\n  - `frontend/lib/audio-state-context.tsx`\n  - `frontend/lib/howler-engine.ts`\n  - `frontend/components/player/HowlerAudioElement.tsx`\n  - `frontend/tests/unit/audioVolume.test.ts`\n- Completion summary:\n  - Consolidated persisted volume parsing/clamping into shared helper utilities for deterministic reload hydration.\n  - Removed independent Howler startup storage initialization so AudioState drives runtime volume/mute state as the single source of truth.\n  - Added targeted unit coverage for volume clamping and persisted-volume parsing behavior.\n  - Verification:\n    - `npm --prefix frontend run test:unit -- tests/unit/audioVolume.test.ts tests/unit/settingsHydration.test.ts tests/unit/useLyrics.test.ts`\n    - `npm --prefix frontend run lint -- app/settings/page.tsx features/settings/hooks/useSettingsData.ts features/settings/hooks/useSystemSettings.ts features/settings/hooks/settingsHydration.ts hooks/useLyrics.ts lib/lyrics-cache-policy.ts lib/audio-volume.ts lib/audio-state-context.tsx lib/howler-engine.ts components/player/HowlerAudioElement.tsx tests/unit/audioVolume.test.ts tests/unit/settingsHydration.test.ts tests/unit/useLyrics.test.ts`\n\n### Phase 2: Stream Continuity and Provider Matching\n\n#### Task 2.1: Unowned album gap-fill reliability (TIDAL/YouTube)\n- Status: Complete\n- Acceptance criteria:\n  - TIDAL status endpoint can report authenticated after lazy restore (no false unauthenticated when valid DB OAuth exists).\n  - Frontend negative status cache does not suppress matching for extended periods after transient failures.\n  - Unowned discovery/library album tracks correctly receive `streamSource` enrichment when provider auth is valid.\n  - Runtime/unit coverage added for status + gap-fill behavior.\n- Primary files:\n  - `backend/src/routes/tidalStreaming.ts`\n  - `frontend/features/album/hooks/useTidalGapFill.ts`\n  - `frontend/features/album/hooks/useYtMusicGapFill.ts`\n  - `frontend/app/album/[id]/page.tsx`\n- Completion summary:\n  - Updated `GET /api/tidal-streaming/status` to run lazy per-user OAuth restore so sidecar restarts no longer report false unauthenticated when DB tokens are valid.\n  - Added shared provider-status cache policy with short negative TTL and in-flight dedupe to reduce false-negative suppression windows while avoiding duplicate status calls.\n  - Added backend runtime coverage for status-triggered restore and frontend unit coverage for positive/negative provider cache behavior.\n  - Verification:\n    - `npm --prefix backend test -- --runTestsByPath src/routes/__tests__/tidalStreamingRuntime.test.ts`\n    - `npm --prefix frontend run test:unit -- tests/unit/providerStatusCache.test.ts`\n    - `npm --prefix frontend run lint -- features/album/hooks/useTidalGapFill.ts features/album/hooks/useYtMusicGapFill.ts features/album/hooks/providerStatusCache.ts tests/unit/providerStatusCache.test.ts`\n\n#### Task 2.2: Playback continuity through reload/rolling updates\n- Status: Complete\n- Acceptance criteria:\n  - Persisted playback state includes play intent (`isPlaying`) in addition to media/position.\n  - On reload, previously playing sessions resume playback automatically; paused sessions remain paused.\n  - Resume logic is bounded and safe (no autoplay loops, no forced resume after explicit pause).\n  - Backend + frontend tests cover resumed vs paused states.\n- Primary files:\n  - `backend/prisma/schema.prisma` (+ migration)\n  - `backend/src/routes/playbackState.ts`\n  - `frontend/lib/audio-playback-context.tsx`\n  - `frontend/lib/audio-state-context.tsx`\n  - `frontend/lib/audio-controls-context.tsx`\n- Completion summary:\n  - Extended `PlaybackState` persistence contract with explicit `isPlaying` intent (`backend/prisma/schema.prisma` + migration) and wired route save/get flows to carry play/pause intent safely.\n  - Preserved backward compatibility by avoiding overwrite of existing persisted intent when clients omit `isPlaying` in save payloads.\n  - Added startup hydration in `AudioPlaybackProvider` to restore resumed-vs-paused state from backend and persisted the play-intent flag alongside existing playback progress sync writes.\n  - Added backend runtime coverage for play-intent persistence behavior and frontend unit coverage for resumed/paused hydration semantics.\n  - Verification:\n    - `npx prisma generate` (in `backend/`)\n    - `npm --prefix backend test -- --runTestsByPath src/routes/__tests__/playbackStateRuntime.test.ts`\n    - `npm --prefix backend run build`\n    - `npm --prefix frontend run test:unit -- tests/unit/playbackIntent.test.ts tests/unit/providerStatusCache.test.ts`\n    - `npm --prefix frontend run build`\n\n### Phase 3: Bulk Actions and Cover-Art Self-Heal\n\n#### Task 3.1: Album-level thumbs up/down batch\n- Status: Complete\n- Acceptance criteria:\n  - New API supports batch applying `thumbs_up`/`thumbs_down`/`clear` across album tracks.\n  - Frontend exposes album-level actions with clear progress/result feedback.\n  - Batch operation uses bounded DB writes and handles partial failures safely.\n  - Route/runtime coverage added for new endpoint semantics.\n- Primary files:\n  - `backend/src/routes/library.ts`\n  - `frontend/features/album/components/AlbumActionBar.tsx`\n  - `frontend/features/album/hooks/useAlbumActions.ts`\n  - `frontend/lib/api.ts`\n- Completion summary:\n  - Added `POST /api/library/albums/:id/preference` to apply thumbs-up/down/clear in bounded batch writes across all album tracks.\n  - Added album action-bar batch thumbs controls with in-flight feedback and success/failure messaging.\n  - Updated frontend preference cache for album tracks immediately after successful mutation response.\n  - Added runtime coverage for new batch preference endpoint semantics.\n  - Verification:\n    - `npm --prefix backend test -- src/routes/__tests__/libraryRuntime.test.ts`\n    - `npm --prefix frontend run test:unit`\n\n#### Task 3.2: Immediate native cover-art repair\n- Status: Complete\n- Acceptance criteria:\n  - Native cover miss triggers immediate repair attempt that stores a local `native:` image when possible.\n  - Successful repair updates album `coverUrl` and avoids repeated miss warnings for the same album.\n  - Fallback path remains safe if providers fail (returns 404 without crash).\n  - Runtime tests cover native miss -> repair success/failure paths.\n- Primary files:\n  - `backend/src/routes/library.ts`\n  - `backend/src/services/imageStorage.ts`\n  - `backend/src/services/deezer.ts` (if needed for fetch contract reuse)\n- Completion summary:\n  - Updated native cover miss flow to download/store repaired cover locally via image storage and persist `coverUrl` to `native:...` when successful.\n  - Added redirect normalization so repaired covers route through local cover-art proxy path.\n  - Added short-circuit branch to reuse already-healed native paths and skip repeated Deezer fetches.\n  - Added runtime + compat coverage for native miss repair success and healed-path reuse behavior.\n  - Verification:\n    - `npm --prefix backend test -- src/routes/__tests__/libraryRuntime.test.ts src/routes/__tests__/libraryCoverArtCompat.test.ts`\n\n### Phase 4: Verification and Drift-Proof Closeout\n\n#### Task 4.1: Verification matrix and docs/index sync\n- Status: Complete\n- Acceptance criteria:\n  - All touched domains have targeted tests in `docs/TEST_MATRIX.md` if commands changed.\n  - `docs/FEATURE_INDEX.json` entries updated/verified for changed features.\n  - `CHANGELOG.md` updated in plain English under `Unreleased`.\n  - `node .github/scripts/enforce-agent-policies.mjs` and `npm run agent:preflight` pass.\n- Completion summary:\n  - Updated changelog entries in plain English and regenerated route map/JSDoc/domain README artifacts after feature changes.\n  - Verified backend/frontend targeted tests and production builds across touched domains.\n  - Ran preflight successfully after regeneration and queue updates.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.player-ux-and-streaming-reliability.a0ddb1d458",
+    "plan_key": "plan:legacy.archived.player-ux-and-streaming-reliability.a0ddb1d458",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Player UX and Streaming Reliability",
+      "objective": "1. Eliminate false \"No lyrics available\" states when lyrics exist.\n2. Add album-level thumbs up/down actions that batch-apply to tracks.\n3. Heal missing native cover files immediately instead of repeatedly failing and redirecting.\n4. Stabilize volume state across full page reloads.\n5. Preserve play/pause intent and resume position through reloads and backend pod replacement events.\n6. Ensure unowned album tracks get TIDAL/YouTube gap-fill matches when providers are available.\n7. Ensure settings UI reflects persisted DB settings consistently across browser sessions.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Eliminate false \"No lyrics available\" states when lyrics exist.",
+        "2. Add album-level thumbs up/down actions that batch-apply to tracks.",
+        "3. Heal missing native cover files immediately instead of repeatedly failing and redirecting.",
+        "4. Stabilize volume state across full page reloads.",
+        "5. Preserve play/pause intent and resume position through reloads and backend pod replacement events.",
+        "6. Ensure unowned album tracks get TIDAL/YouTube gap-fill matches when providers are available.",
+        "7. Ensure settings UI reflects persisted DB settings consistently across browser sessions."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/player-ux-and-streaming-reliability.json",
+        ".agents/plans/archived/player-ux-and-streaming-reliability/PLAN.json",
+        ".agents/plans/archived/player-ux-and-streaming-reliability/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/player-ux-and-streaming-reliability/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Eliminate false \"No lyrics available\" states when lyrics exist.\n2. Add album-level thumbs up/down actions that batch-apply to tracks.\n3. Heal missing native cover files immediately instead of repeatedly failing and redirecting.\n4. Stabilize volume state across full page reloads.\n5. Preserve play/pause intent and resume position through reloads and backend pod replacement events.\n6. Ensure unowned album tracks get TIDAL/YouTube gap-fill matches when providers are available.\n7. Ensure settings UI reflects persisted DB settings consistently across browser sessions.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/player-ux-and-streaming-reliability.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "player-ux-and-streaming-reliability",
+    "feature_title": "Plan - Player UX and Streaming Reliability",
+    "plan_ref": ".agents/plans/archived/player-ux-and-streaming-reliability/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Eliminate false \"No lyrics available\" states when lyrics exist.\n2. Add album-level thumbs up/down actions that batch-apply to tracks.\n3. Heal missing native cover files immediately instead of repeatedly failing and redirecting.\n4. Stabilize volume state across full page reloads.\n5. Preserve play/pause intent and resume position through reloads and backend pod replacement events.\n6. Ensure unowned album tracks get TIDAL/YouTube gap-fill matches when providers are available.\n7. Ensure settings UI reflects persisted DB settings consistently across browser sessions.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "1. Fix first-open lyrics race/caching behavior so temporary empty/fallback responses do not become long-lived false negatives.\n2. Implement server-side batch preference mutation for album tracks, with frontend optimistic progress and failure reporting.\n3. On native cover miss, attempt immediate download-and-store to `native:` path and persist repaired `coverUrl`.\n4. Consolidate volume source-of-truth between audio state and Howler initialization.\n5. Extend playback-state persistence contract to include play intent, then restore media + intent safely on hydration.\n6. Remove/mitigate false-negative provider status caching and ensure TIDAL status includes lazy OAuth restore.\n7. Gate settings rendering on real settings load and refresh on auth/focus to avoid default-value flash or stale display.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Eliminate false \"No lyrics available\" states when lyrics exist.\n2. Add album-level thumbs up/down actions that batch-apply to tracks.\n3. Heal missing native cover files immediately instead of repeatedly failing and redirecting.\n4. Stabilize volume state across full page reloads.\n5. Preserve play/pause intent and resume position through reloads and backend pod replacement events.\n6. Ensure unowned album tracks get TIDAL/YouTube gap-fill matches when providers are available.\n7. Ensure settings UI reflects persisted DB settings consistently across browser sessions.",
+        "non_goals": ""
+      }
+    }
+  }
+}

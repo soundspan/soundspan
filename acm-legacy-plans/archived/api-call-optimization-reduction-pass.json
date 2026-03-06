@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "feature_id": "api-call-optimization-reduction-pass",
+  "feature_title": "Plan - API Call Optimization Reduction Pass",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/api-call-optimization-reduction-pass.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/api-call-optimization-reduction-pass/PLAN.json",
+    "plan_dir": ".agents/plans/archived/api-call-optimization-reduction-pass",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/api-call-optimization-reduction-pass/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - API Call Optimization Reduction Pass\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: API call optimization and reduction\n- Scope: Reduce redundant frontend API requests and expensive repeated backend metadata reads without changing user-facing behavior\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Requested by user (2026-02-20)\n- Implementation status: Complete (2026-02-20)\n\n## User Goals Captured\n\n1. Reduce unnecessary API calls across the app.\n2. Improve responsiveness in API-heavy user interactions.\n3. Preserve existing functionality while tightening request behavior.\n\n## Spec Outline\n\n1. Identify bursty/duplicate call paths in frontend API usage.\n2. Add safe request dedupe where identical idempotent requests overlap.\n3. Reduce backend expensive repeat work for stable per-track metadata lookups.\n4. Validate with targeted tests and linting.\n\n## Refined Spec\n\n1. Implement frontend GET in-flight dedupe at the API client layer.\n2. Tune polling-style hooks to avoid redundant focus-triggered refetches when interval polling is already active.\n3. Add backend in-memory cache for `/library/tracks/:id/audio-info` keyed by stable file identity.\n4. Keep API contracts and payload shapes unchanged.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Task 1: Frontend request dedupe\n- Status: Complete\n- Acceptance criteria:\n  - Identical concurrent GET requests are deduped in `frontend/lib/api.ts`.\n  - Behavior is unchanged for non-idempotent methods.\n  - Completed:\n    - Added API-client in-flight GET dedupe keyed by endpoint/token/timeout.\n    - Retried requests bypass dedupe to avoid recursive self-joins.\n\n### Task 2: Polling query tightening\n- Status: Complete\n- Acceptance criteria:\n  - Polling queries avoid redundant refetches caused by focus/reconnect churn where safe.\n  - Existing polling cadence and data semantics remain intact.\n  - Completed:\n    - Added `staleTime` + disabled focus/reconnect refetch for social and notification polling hooks/components.\n    - Increased track-preference query `staleTime` to reduce repeat fetches on frequent remounts.\n\n### Task 3: Backend audio-info caching\n- Status: Complete\n- Acceptance criteria:\n  - `/library/tracks/:id/audio-info` uses bounded/TTL cache keyed by file identity.\n  - Returned payload remains unchanged.\n  - Completed:\n    - Added bounded in-memory cache for audio metadata reads with 10-minute TTL.\n    - Added stable cache key using `trackId + filePath + fileModified`.\n    - Added regression test verifying repeated requests reuse cached metadata.\n\n### Task 4: Verification and close-out\n- Status: Complete\n- Acceptance criteria:\n  - Targeted backend tests pass.\n  - Targeted frontend tests/lint pass for touched areas.\n  - `npm run agent:preflight` passes.\n  - Completed:\n    - Backend runtime tests pass for library routes.\n    - Frontend component tests pass for touched UI surfaces.\n    - Frontend lint run completed for touched files (warnings only; no errors).\n    - Preflight passes after route-map regeneration.\n\n## Verification Evidence\n\n- `npm --prefix backend test -- src/routes/__tests__/libraryRuntime.test.ts` (pass)\n- `npm --prefix frontend run lint -- lib/api.ts hooks/useSocialPresence.ts hooks/useNotifications.ts components/activity/NotificationsTab.tsx hooks/useTrackPreference.ts` (warnings only, no errors)\n- `npm --prefix frontend run test:component -- tests/component/socialTab.component.test.ts tests/component/sidebar.component.test.ts tests/component/trackPreferenceButtons.component.test.ts` (pass)\n- `npm run agent:preflight` (pass)\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.api-call-optimization-reduction-pass.116ef7a0d9",
+    "plan_key": "plan:legacy.archived.api-call-optimization-reduction-pass.116ef7a0d9",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - API Call Optimization Reduction Pass",
+      "objective": "1. Identify bursty/duplicate call paths in frontend API usage.\n2. Add safe request dedupe where identical idempotent requests overlap.\n3. Reduce backend expensive repeat work for stable per-track metadata lookups.\n4. Validate with targeted tests and linting.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Identify bursty/duplicate call paths in frontend API usage.",
+        "2. Add safe request dedupe where identical idempotent requests overlap.",
+        "3. Reduce backend expensive repeat work for stable per-track metadata lookups.",
+        "4. Validate with targeted tests and linting."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/api-call-optimization-reduction-pass.json",
+        ".agents/plans/archived/api-call-optimization-reduction-pass/PLAN.json",
+        ".agents/plans/archived/api-call-optimization-reduction-pass/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/api-call-optimization-reduction-pass/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Identify bursty/duplicate call paths in frontend API usage.\n2. Add safe request dedupe where identical idempotent requests overlap.\n3. Reduce backend expensive repeat work for stable per-track metadata lookups.\n4. Validate with targeted tests and linting.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/api-call-optimization-reduction-pass.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "api-call-optimization-reduction-pass",
+    "feature_title": "Plan - API Call Optimization Reduction Pass",
+    "plan_ref": ".agents/plans/archived/api-call-optimization-reduction-pass/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Identify bursty/duplicate call paths in frontend API usage.\n2. Add safe request dedupe where identical idempotent requests overlap.\n3. Reduce backend expensive repeat work for stable per-track metadata lookups.\n4. Validate with targeted tests and linting.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "1. Implement frontend GET in-flight dedupe at the API client layer.\n2. Tune polling-style hooks to avoid redundant focus-triggered refetches when interval polling is already active.\n3. Add backend in-memory cache for `/library/tracks/:id/audio-info` keyed by stable file identity.\n4. Keep API contracts and payload shapes unchanged.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Identify bursty/duplicate call paths in frontend API usage.\n2. Add safe request dedupe where identical idempotent requests overlap.\n3. Reduce backend expensive repeat work for stable per-track metadata lookups.\n4. Validate with targeted tests and linting.",
+        "non_goals": ""
+      }
+    }
+  }
+}

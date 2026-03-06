@@ -1,0 +1,573 @@
+{
+  "version": 1,
+  "feature_id": "podcast-external-automation-long-term-review",
+  "feature_title": "Plan - Podcast External Automation Long-Term Review",
+  "track": "current",
+  "export_path": "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+  "legacy": {
+    "plan_path": ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+    "plan_dir": ".agents/plans/current/podcast-external-automation-long-term-review",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/current/podcast-external-automation-long-term-review/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# Handoff - Podcast External Automation Long-Term Review\n## Feature\n- Podcast external automation long-term review (`PLAN.md`)\n\n## Current State\n- Extracted from fjordnode umbrella remaining scope (`Bundle E`, former Phase 6).\n- Planning only; no implementation started.\n\n## Anti-Staleness Guardrails\n1. Re-read plan/handoff/history before each task.\n2. Re-check route/schema assumptions at each phase boundary.\n3. Keep external endpoint behavior test-driven with error-path assertions.\n4. Capture backend-direct + frontend-proxy probe evidence before closing any phase.\n5. Run plan-link hygiene checks during handoff/archival operations.\n\n## Next Actions\n1. Complete Phase 0 baseline and safety model.\n2. Start backend token/external-route foundation.\n3. Keep feature disabled by default until verification gates pass.\n"
+      },
+      {
+        "path": ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Podcast External Automation Long-Term Review\n\n## Document Status\n\n- Last updated: 2026-02-14\n- Feature: Bundle E extraction from fjordnode umbrella (`Podcast external consumption + automation`)\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` (Phase 6 extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)\n\n## Why This Was Split Out\n\nBundle E is operationally sensitive (external feeds, tokenized access, optional ad-removal automation). Isolating it prevents umbrella drift and keeps rollout risk explicit.\n\n## Goal\n\nAdd tokenized external podcast consumption and automation safely, with explicit fallback/disable controls and regression protection for existing podcast behavior.\n\n## Staleness and Rework Prevention Protocol (Mandatory)\n\n1. Re-context before each atomic task:\n- read this plan, `HANDOFF.md`, and `PROMPT_HISTORY.md` in full,\n- inspect current podcast routes/services before proposing implementation.\n2. Dependency drift checks at phase boundaries:\n- confirm schema assumptions and route contracts still match current code,\n- reconcile any drift in this plan before writing code.\n3. Regression-first discipline:\n- add contract tests for token auth, feed generation, refresh, and ad-removal optional paths,\n- assert both success and failure behavior.\n4. Full-stack probe discipline:\n- verify backend-direct and frontend-proxied behavior for external-facing podcast surfaces.\n5. Stale-link hygiene:\n- run plan-link check at session start and before handoff.\n\n## Full-Stack Request Path Baseline\n\n1. Client URL/base path:\n- podcast UI via frontend `/api/*` routes.\n2. Frontend boundary:\n- all calls through `frontend/lib/api.ts`.\n3. Backend path candidates:\n- `backend/src/routes/podcasts.ts`\n- `backend/src/routes/systemSettings.ts` (feature controls)\n- `backend/src/services/podcastDownload.ts`\n- `backend/src/services/podcastCache.ts`\n- planned: `backend/src/services/podcastRefresh.ts`, `backend/src/services/podcastAdRemoval.ts`, `backend/src/utils/podcastToken.ts`\n4. Downstream dependencies:\n- PostgreSQL/Prisma\n- external podcast feeds\n5. Deployment modes:\n- `docker-compose.aio.yml`\n- `docker-compose.yml`\n- local host-run with `docker-compose.local.yml`\n\n## Spec Outline\n\n1. Add per-podcast token strategy and persistence hooks.\n2. Add tokenized external endpoints (`playlist.m3u`, `feed.xml`).\n3. Add refresh orchestration for manual and stale-refresh workflows.\n4. Add optional ad-removal pipeline behind explicit enablement.\n5. Add frontend controls and regression/full-stack verification.\n\n## Refined Spec\n\n### Constraints\n\n1. Backward compatibility for current podcast subscribers and playback/progress routes.\n2. New external endpoints must be revocable and safely disabled.\n3. Ad-removal remains opt-in and failure-tolerant.\n4. Feature controls must allow rollback without data loss.\n\n### Acceptance Criteria\n\n1. External tokenized feeds are revocable and functionally correct.\n2. Refresh automation is observable and non-disruptive.\n3. Optional ad-removal is gated and does not break base podcast flows.\n4. Regression and full-stack probes show no breakage in existing podcast usage.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\n## Phase 0: Re-Context and Contract Freeze\n\n### Task 0.1: Freeze baseline podcast contracts\n- Status: Pending\n- Deliverable: current route contract snapshot and known-gap ledger.\n\n### Task 0.2: Define token and rollout safety model\n- Status: Pending\n- Deliverable: revocation model, feature toggles, and rollback rules.\n\n## Phase 1: Backend Foundation\n\n### Task 1.1: Token utility and persistence hooks\n- Status: Pending\n- Deliverable: token generation/validation path with persistence wiring.\n\n### Task 1.2: External M3U/RSS route surfaces\n- Status: Pending\n- Deliverable: secure tokenized endpoint handlers.\n\n### Task 1.3: Refresh orchestration service\n- Status: Pending\n- Deliverable: manual + stale-refresh workflow integration.\n\n## Phase 2: Optional Automation\n\n### Task 2.1: Ad-removal service integration\n- Status: Pending\n- Deliverable: opt-in ad-removal path with clear failure semantics.\n\n### Task 2.2: Frontend control surfaces\n- Status: Pending\n- Deliverable: settings/subscription controls via centralized API client.\n\n## Phase 3: Verification and Docs\n\n### Task 3.1: Regression and compatibility tests\n- Status: Pending\n- Deliverable: route/service tests for success/error/rollback conditions.\n\n### Task 3.2: Full-stack verification checkpoint\n- Status: Pending\n- Deliverable: backend-direct + frontend-proxy evidence.\n\n### Task 3.3: Docs sync\n- Status: Pending\n- Deliverable: scoped doc updates for shipped behavior.\n"
+      },
+      {
+        "path": ".agents/plans/current/podcast-external-automation-long-term-review/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-14 Session Prompt History (Feature Extraction Bootstrap)\n1. This feature was created by extracting open Bundle E scope from the former fjordnode umbrella track.\n2. Scope was isolated to avoid umbrella staleness and reduce cross-workstream rework.\n3. Anti-staleness and regression-first instructions were embedded at feature creation time.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.current.podcast-external-automation-long-term-review.9b613167b2",
+    "plan_key": "plan:legacy.current.podcast-external-automation-long-term-review.9b613167b2",
+    "final_db_status": "pending",
+    "plan": {
+      "title": "Plan - Podcast External Automation Long-Term Review",
+      "objective": "Add tokenized external podcast consumption and automation safely, with explicit fallback/disable controls and regression protection for existing podcast behavior.",
+      "kind": "legacy_current",
+      "status": "pending",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Add per-podcast token strategy and persistence hooks.",
+        "2. Add tokenized external endpoints (`playlist.m3u`, `feed.xml`).",
+        "3. Add refresh orchestration for manual and stale-refresh workflows.",
+        "4. Add optional ad-removal pipeline behind explicit enablement.",
+        "5. Add frontend controls and regression/full-stack verification."
+      ],
+      "out_of_scope": [
+        "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+        ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+        ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md",
+        ".agents/plans/current/podcast-external-automation-long-term-review/HANDOFF.md",
+        ".agents/plans/current/podcast-external-automation-long-term-review/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/current/podcast-external-automation-long-term-review/HANDOFF.md",
+        ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md",
+        ".agents/plans/current/podcast-external-automation-long-term-review/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.freeze-baseline-podcast-contracts",
+        "summary": "Freeze baseline podcast contracts",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Freeze baseline podcast contracts"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.02.define-token-and-rollout-safety-model",
+        "summary": "Define token and rollout safety model",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Define token and rollout safety model"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.03.token-utility-and-persistence-hooks",
+        "summary": "Token utility and persistence hooks",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Token utility and persistence hooks"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.04.external-m3u-rss-route-surfaces",
+        "summary": "External M3U/RSS route surfaces",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: External M3U/RSS route surfaces"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.05.refresh-orchestration-service",
+        "summary": "Refresh orchestration service",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Refresh orchestration service"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.06.ad-removal-service-integration",
+        "summary": "Ad-removal service integration",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Ad-removal service integration"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.07.frontend-control-surfaces",
+        "summary": "Frontend control surfaces",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Frontend control surfaces"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.08.regression-and-compatibility-tests",
+        "summary": "Regression and compatibility tests",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Regression and compatibility tests"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.09.full-stack-verification-checkpoint",
+        "summary": "Full-stack verification checkpoint",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Full-stack verification checkpoint"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.10.docs-sync",
+        "summary": "Docs sync",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Docs sync"
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+          ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/current/podcast-external-automation-long-term-review.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "podcast-external-automation-long-term-review",
+    "feature_title": "Plan - Podcast External Automation Long-Term Review",
+    "plan_ref": ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Add per-podcast token strategy and persistence hooks.\n2. Add tokenized external endpoints (`playlist.m3u`, `feed.xml`).\n3. Add refresh orchestration for manual and stale-refresh workflows.\n4. Add optional ad-removal pipeline behind explicit enablement.\n5. Add frontend controls and regression/full-stack verification.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "### Constraints\n\n1. Backward compatibility for current podcast subscribers and playback/progress routes.\n2. New external endpoints must be revocable and safely disabled.\n3. Ad-removal remains opt-in and failure-tolerant.\n4. Feature controls must allow rollback without data loss.\n\n### Acceptance Criteria\n\n1. External tokenized feeds are revocable and functionally correct.\n2. Refresh automation is observable and non-disruptive.\n3. Optional ad-removal is gated and does not break base podcast flows.\n4. Regression and full-stack probes show no breakage in existing podcast usage.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary",
+        "steps": [
+          {
+            "status": "pending",
+            "deliverable": "Freeze baseline podcast contracts",
+            "acceptance_criteria": [
+              "Complete deliverable: Freeze baseline podcast contracts"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Define token and rollout safety model",
+            "acceptance_criteria": [
+              "Complete deliverable: Define token and rollout safety model"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Token utility and persistence hooks",
+            "acceptance_criteria": [
+              "Complete deliverable: Token utility and persistence hooks"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "External M3U/RSS route surfaces",
+            "acceptance_criteria": [
+              "Complete deliverable: External M3U/RSS route surfaces"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Refresh orchestration service",
+            "acceptance_criteria": [
+              "Complete deliverable: Refresh orchestration service"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Ad-removal service integration",
+            "acceptance_criteria": [
+              "Complete deliverable: Ad-removal service integration"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Frontend control surfaces",
+            "acceptance_criteria": [
+              "Complete deliverable: Frontend control surfaces"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Regression and compatibility tests",
+            "acceptance_criteria": [
+              "Complete deliverable: Regression and compatibility tests"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Full-stack verification checkpoint",
+            "acceptance_criteria": [
+              "Complete deliverable: Full-stack verification checkpoint"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Docs sync",
+            "acceptance_criteria": [
+              "Complete deliverable: Docs sync"
+            ],
+            "references": [
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.json",
+              ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Add tokenized external podcast consumption and automation safely, with explicit fallback/disable controls and regression protection for existing podcast behavior.",
+        "non_goals": "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      },
+      "plan_md_sync": {
+        "source_plan_md": ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:23:03.692Z",
+        "steps_generated": 10,
+        "task_heading_count": 10,
+        "gap_notes": [
+          "Missing explicit Non-Goals/Out of Scope section.",
+          "Task \"Task 0.1: Freeze baseline podcast contracts\" had no deliverable list; used heading title.",
+          "Task \"Task 0.2: Define token and rollout safety model\" had no deliverable list; used heading title.",
+          "Task \"Task 1.1: Token utility and persistence hooks\" had no deliverable list; used heading title.",
+          "Task \"Task 1.2: External M3U/RSS route surfaces\" had no deliverable list; used heading title.",
+          "Task \"Task 1.3: Refresh orchestration service\" had no deliverable list; used heading title.",
+          "Task \"Task 2.1: Ad-removal service integration\" had no deliverable list; used heading title.",
+          "Task \"Task 2.2: Frontend control surfaces\" had no deliverable list; used heading title.",
+          "Task \"Task 3.1: Regression and compatibility tests\" had no deliverable list; used heading title.",
+          "Task \"Task 3.2: Full-stack verification checkpoint\" had no deliverable list; used heading title.",
+          "Task \"Task 3.3: Docs sync\" had no deliverable list; used heading title."
+        ]
+      },
+      "plan_md_context": {
+        "source_plan_md": ".agents/plans/current/podcast-external-automation-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:26:42.904Z",
+        "markdown_sha256": "072f08cb8815f18abd7bf4f77a8534824910cf9861cf25fc40e8ccb26d560f91",
+        "sections": [
+          {
+            "heading": "# Plan - Podcast External Automation Long-Term Review",
+            "content": "## Document Status\n\n- Last updated: 2026-02-14\n- Feature: Bundle E extraction from fjordnode umbrella (`Podcast external consumption + automation`)\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` (Phase 6 extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)\n\n## Why This Was Split Out\n\nBundle E is operationally sensitive (external feeds, tokenized access, optional ad-removal automation). Isolating it prevents umbrella drift and keeps rollout risk explicit.\n\n## Goal\n\nAdd tokenized external podcast consumption and automation safely, with explicit fallback/disable controls and regression protection for existing podcast behavior.\n\n## Staleness and Rework Prevention Protocol (Mandatory)\n\n1. Re-context before each atomic task:\n- read this plan, `HANDOFF.md`, and `PROMPT_HISTORY.md` in full,\n- inspect current podcast routes/services before proposing implementation.\n2. Dependency drift checks at phase boundaries:\n- confirm schema assumptions and route contracts still match current code,\n- reconcile any drift in this plan before writing code.\n3. Regression-first discipline:\n- add contract tests for token auth, feed generation, refresh, and ad-removal optional paths,\n- assert both success and failure behavior.\n4. Full-stack probe discipline:\n- verify backend-direct and frontend-proxied behavior for external-facing podcast surfaces.\n5. Stale-link hygiene:\n- run plan-link check at session start and before handoff.\n\n## Full-Stack Request Path Baseline\n\n1. Client URL/base path:\n- podcast UI via frontend `/api/*` routes.\n2. Frontend boundary:\n- all calls through `frontend/lib/api.ts`.\n3. Backend path candidates:\n- `backend/src/routes/podcasts.ts`\n- `backend/src/routes/systemSettings.ts` (feature controls)\n- `backend/src/services/podcastDownload.ts`\n- `backend/src/services/podcastCache.ts`\n- planned: `backend/src/services/podcastRefresh.ts`, `backend/src/services/podcastAdRemoval.ts`, `backend/src/utils/podcastToken.ts`\n4. Downstream dependencies:\n- PostgreSQL/Prisma\n- external podcast feeds\n5. Deployment modes:\n- `docker-compose.aio.yml`\n- `docker-compose.yml`\n- local host-run with `docker-compose.local.yml`\n\n## Spec Outline\n\n1. Add per-podcast token strategy and persistence hooks.\n2. Add tokenized external endpoints (`playlist.m3u`, `feed.xml`).\n3. Add refresh orchestration for manual and stale-refresh workflows.\n4. Add optional ad-removal pipeline behind explicit enablement.\n5. Add frontend controls and regression/full-stack verification.\n\n## Refined Spec\n\n### Constraints\n\n1. Backward compatibility for current podcast subscribers and playback/progress routes.\n2. New external endpoints must be revocable and safely disabled.\n3. Ad-removal remains opt-in and failure-tolerant.\n4. Feature controls must allow rollback without data loss.\n\n### Acceptance Criteria\n\n1. External tokenized feeds are revocable and functionally correct.\n2. Refresh automation is observable and non-disruptive.\n3. Optional ad-removal is gated and does not break base podcast flows.\n4. Regression and full-stack probes show no breakage in existing podcast usage.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\n## Phase 0: Re-Context and Contract Freeze\n\n### Task 0.1: Freeze baseline podcast contracts\n- Status: Pending\n- Deliverable: current route contract snapshot and known-gap ledger.\n\n### Task 0.2: Define token and rollout safety model\n- Status: Pending\n- Deliverable: revocation model, feature toggles, and rollback rules.\n\n## Phase 1: Backend Foundation\n\n### Task 1.1: Token utility and persistence hooks\n- Status: Pending\n- Deliverable: token generation/validation path with persistence wiring.\n\n### Task 1.2: External M3U/RSS route surfaces\n- Status: Pending\n- Deliverable: secure tokenized endpoint handlers.\n\n### Task 1.3: Refresh orchestration service\n- Status: Pending\n- Deliverable: manual + stale-refresh workflow integration.\n\n## Phase 2: Optional Automation\n\n### Task 2.1: Ad-removal service integration\n- Status: Pending\n- Deliverable: opt-in ad-removal path with clear failure semantics.\n\n### Task 2.2: Frontend control surfaces\n- Status: Pending\n- Deliverable: settings/subscription controls via centralized API client.\n\n## Phase 3: Verification and Docs\n\n### Task 3.1: Regression and compatibility tests\n- Status: Pending\n- Deliverable: route/service tests for success/error/rollback conditions.\n\n### Task 3.2: Full-stack verification checkpoint\n- Status: Pending\n- Deliverable: backend-direct + frontend-proxy evidence.\n\n### Task 3.3: Docs sync\n- Status: Pending\n- Deliverable: scoped doc updates for shipped behavior."
+          },
+          {
+            "heading": "## Document Status",
+            "content": "- Last updated: 2026-02-14\n- Feature: Bundle E extraction from fjordnode umbrella (`Podcast external consumption + automation`)\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` (Phase 6 extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)"
+          },
+          {
+            "heading": "## Why This Was Split Out",
+            "content": "Bundle E is operationally sensitive (external feeds, tokenized access, optional ad-removal automation). Isolating it prevents umbrella drift and keeps rollout risk explicit."
+          },
+          {
+            "heading": "## Goal",
+            "content": "Add tokenized external podcast consumption and automation safely, with explicit fallback/disable controls and regression protection for existing podcast behavior."
+          },
+          {
+            "heading": "## Staleness and Rework Prevention Protocol (Mandatory)",
+            "content": "1. Re-context before each atomic task:\n- read this plan, `HANDOFF.md`, and `PROMPT_HISTORY.md` in full,\n- inspect current podcast routes/services before proposing implementation.\n2. Dependency drift checks at phase boundaries:\n- confirm schema assumptions and route contracts still match current code,\n- reconcile any drift in this plan before writing code.\n3. Regression-first discipline:\n- add contract tests for token auth, feed generation, refresh, and ad-removal optional paths,\n- assert both success and failure behavior.\n4. Full-stack probe discipline:\n- verify backend-direct and frontend-proxied behavior for external-facing podcast surfaces.\n5. Stale-link hygiene:\n- run plan-link check at session start and before handoff."
+          },
+          {
+            "heading": "## Full-Stack Request Path Baseline",
+            "content": "1. Client URL/base path:\n- podcast UI via frontend `/api/*` routes.\n2. Frontend boundary:\n- all calls through `frontend/lib/api.ts`.\n3. Backend path candidates:\n- `backend/src/routes/podcasts.ts`\n- `backend/src/routes/systemSettings.ts` (feature controls)\n- `backend/src/services/podcastDownload.ts`\n- `backend/src/services/podcastCache.ts`\n- planned: `backend/src/services/podcastRefresh.ts`, `backend/src/services/podcastAdRemoval.ts`, `backend/src/utils/podcastToken.ts`\n4. Downstream dependencies:\n- PostgreSQL/Prisma\n- external podcast feeds\n5. Deployment modes:\n- `docker-compose.aio.yml`\n- `docker-compose.yml`\n- local host-run with `docker-compose.local.yml`"
+          },
+          {
+            "heading": "## Spec Outline",
+            "content": "1. Add per-podcast token strategy and persistence hooks.\n2. Add tokenized external endpoints (`playlist.m3u`, `feed.xml`).\n3. Add refresh orchestration for manual and stale-refresh workflows.\n4. Add optional ad-removal pipeline behind explicit enablement.\n5. Add frontend controls and regression/full-stack verification."
+          },
+          {
+            "heading": "## Refined Spec",
+            "content": "### Constraints\n\n1. Backward compatibility for current podcast subscribers and playback/progress routes.\n2. New external endpoints must be revocable and safely disabled.\n3. Ad-removal remains opt-in and failure-tolerant.\n4. Feature controls must allow rollback without data loss.\n\n### Acceptance Criteria\n\n1. External tokenized feeds are revocable and functionally correct.\n2. Refresh automation is observable and non-disruptive.\n3. Optional ad-removal is gated and does not break base podcast flows.\n4. Regression and full-stack probes show no breakage in existing podcast usage."
+          },
+          {
+            "heading": "### Constraints",
+            "content": "1. Backward compatibility for current podcast subscribers and playback/progress routes.\n2. New external endpoints must be revocable and safely disabled.\n3. Ad-removal remains opt-in and failure-tolerant.\n4. Feature controls must allow rollback without data loss."
+          },
+          {
+            "heading": "### Acceptance Criteria",
+            "content": "1. External tokenized feeds are revocable and functionally correct.\n2. Refresh automation is observable and non-disruptive.\n3. Optional ad-removal is gated and does not break base podcast flows.\n4. Regression and full-stack probes show no breakage in existing podcast usage."
+          },
+          {
+            "heading": "## Detailed Implementation Plan (Atomic Tasks)",
+            "content": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary"
+          },
+          {
+            "heading": "### Status Legend",
+            "content": "- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary"
+          },
+          {
+            "heading": "## Phase 0: Re-Context and Contract Freeze",
+            "content": "### Task 0.1: Freeze baseline podcast contracts\n- Status: Pending\n- Deliverable: current route contract snapshot and known-gap ledger.\n\n### Task 0.2: Define token and rollout safety model\n- Status: Pending\n- Deliverable: revocation model, feature toggles, and rollback rules."
+          },
+          {
+            "heading": "### Task 0.1: Freeze baseline podcast contracts",
+            "content": "- Status: Pending\n- Deliverable: current route contract snapshot and known-gap ledger."
+          },
+          {
+            "heading": "### Task 0.2: Define token and rollout safety model",
+            "content": "- Status: Pending\n- Deliverable: revocation model, feature toggles, and rollback rules."
+          },
+          {
+            "heading": "## Phase 1: Backend Foundation",
+            "content": "### Task 1.1: Token utility and persistence hooks\n- Status: Pending\n- Deliverable: token generation/validation path with persistence wiring.\n\n### Task 1.2: External M3U/RSS route surfaces\n- Status: Pending\n- Deliverable: secure tokenized endpoint handlers.\n\n### Task 1.3: Refresh orchestration service\n- Status: Pending\n- Deliverable: manual + stale-refresh workflow integration."
+          },
+          {
+            "heading": "### Task 1.1: Token utility and persistence hooks",
+            "content": "- Status: Pending\n- Deliverable: token generation/validation path with persistence wiring."
+          },
+          {
+            "heading": "### Task 1.2: External M3U/RSS route surfaces",
+            "content": "- Status: Pending\n- Deliverable: secure tokenized endpoint handlers."
+          },
+          {
+            "heading": "### Task 1.3: Refresh orchestration service",
+            "content": "- Status: Pending\n- Deliverable: manual + stale-refresh workflow integration."
+          },
+          {
+            "heading": "## Phase 2: Optional Automation",
+            "content": "### Task 2.1: Ad-removal service integration\n- Status: Pending\n- Deliverable: opt-in ad-removal path with clear failure semantics.\n\n### Task 2.2: Frontend control surfaces\n- Status: Pending\n- Deliverable: settings/subscription controls via centralized API client."
+          },
+          {
+            "heading": "### Task 2.1: Ad-removal service integration",
+            "content": "- Status: Pending\n- Deliverable: opt-in ad-removal path with clear failure semantics."
+          },
+          {
+            "heading": "### Task 2.2: Frontend control surfaces",
+            "content": "- Status: Pending\n- Deliverable: settings/subscription controls via centralized API client."
+          },
+          {
+            "heading": "## Phase 3: Verification and Docs",
+            "content": "### Task 3.1: Regression and compatibility tests\n- Status: Pending\n- Deliverable: route/service tests for success/error/rollback conditions.\n\n### Task 3.2: Full-stack verification checkpoint\n- Status: Pending\n- Deliverable: backend-direct + frontend-proxy evidence.\n\n### Task 3.3: Docs sync\n- Status: Pending\n- Deliverable: scoped doc updates for shipped behavior."
+          },
+          {
+            "heading": "### Task 3.1: Regression and compatibility tests",
+            "content": "- Status: Pending\n- Deliverable: route/service tests for success/error/rollback conditions."
+          },
+          {
+            "heading": "### Task 3.2: Full-stack verification checkpoint",
+            "content": "- Status: Pending\n- Deliverable: backend-direct + frontend-proxy evidence."
+          },
+          {
+            "heading": "### Task 3.3: Docs sync",
+            "content": "- Status: Pending\n- Deliverable: scoped doc updates for shipped behavior."
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    }
+  }
+}

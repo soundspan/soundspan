@@ -1,0 +1,405 @@
+{
+  "version": 1,
+  "feature_id": "kh-mobile-playback-hardening",
+  "feature_title": "Kima Hub Upstream — Mobile Playback Hardening",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/kh-mobile-playback-hardening.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/kh-mobile-playback-hardening/PLAN.json",
+    "plan_dir": ".agents/plans/archived/kh-mobile-playback-hardening",
+    "status": "complete",
+    "updated_at": "2026-03-02T16:08:27.786Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/kh-mobile-playback-hardening/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Kima Hub Upstream — Mobile Playback Hardening\n\n## Document Status\n- Last updated: 2026-03-02\n- Feature: Mobile playback hardening adoption from Kima Hub v1.6.0 (KH-06, KH-07, KH-08, KH-26)\n- Scope: Implementation\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)\n\n## Origin\n\nUpstream: `chevron7locked/kima-hub` v1.5.0 → v1.6.0 changelog analysis.\n\n## Goal\n\nAdopt four mobile/player hardening improvements to fix iOS playback reliability, eliminate inter-track silence, prevent infinite error loops, and add system-level media controls via MediaSession API.\n\n## Spec Outline\n\n### KH-06: iOS Foreground Recovery\n- **Priority**: Medium-High | **Effort**: 3-4 hours\n- Add `visibilitychange` + `pageshow` handlers that detect app resume and retry playback.\n- `MEDIA_ERR_NETWORK` (code 2) preserves current track instead of clearing.\n- `resumeWithGesture()` pattern across programmatic `play()` call sites.\n- `playback-state-machine.ts` already has `RECOVERING` state with valid transitions (`ERROR → RECOVERING → LOADING → PLAYING`).\n- Files: `frontend/lib/audio-playback-context.tsx`, `frontend/lib/audio/playback-state-machine.ts`, `frontend/lib/audio-controls-context.tsx`\n\n### KH-07: Pre-Load Next Track from Ended Handler\n- **Priority**: Medium-High | **Effort**: 2-3 hours\n- Pre-load next track audio from the `ended` event handler before React state update cycle.\n- Eliminates silence gap on iOS where OS reclaims audio session between tracks.\n- Existing preload infrastructure: `preloadHowl`, `preloadSrc` fields at audio engine.\n- Handle edge cases: shuffle mode, repeat-one, end-of-queue.\n- Files: `frontend/lib/audio-engine/index.ts`, `frontend/lib/audio-controls-context.tsx`\n\n### KH-08: Consecutive Error Circuit Breaker\n- **Priority**: Medium | **Effort**: 1 hour\n- After 3 consecutive playback errors, stop auto-advancing to prevent rapid error loop.\n- Existing per-track `retryCount`/`maxRetries` is not sufficient — need cross-track consecutive counter.\n- Counter resets on any successful play.\n- Show toast when circuit breaker trips.\n- Files: `frontend/lib/audio-engine/index.ts`, `frontend/lib/audio-controls-context.tsx`\n\n### KH-26: MediaSession API Integration\n- **Priority**: Medium | **Effort**: 3-4 hours\n- Currently **zero** MediaSession API usage — no lock-screen controls, no media notification card, no system media keys, no CarPlay/Android Auto metadata.\n- Implement: metadata on track change, action handlers (play/pause/previous/next/seekforward/seekbackward), position state updates, playback state from engine events.\n- Action handlers must call engine methods directly (not through React state) to preserve iOS user-gesture context.\n- Files: `frontend/lib/audio-playback-context.tsx`, `frontend/lib/audio-controls-context.tsx`\n\n## Refined Spec\n\n### Constraints\n1. All changes are frontend-only (audio engine + context layers).\n2. No player UI component changes except error toast in KH-08.\n3. Audio engine API surface must be preserved.\n4. All existing playback tests must continue to pass.\n5. MediaSession actions must use engine methods directly, not React state, for iOS gesture context.\n\n### Acceptance Criteria\n1. iOS app resume automatically retries playback after background reclaim.\n2. Track transitions have no audible gap on iOS.\n3. Player stops auto-advancing after 3 consecutive failures with user notification.\n4. Lock-screen/notification media controls work on iOS and Android.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Task 1: KH-06 — iOS Foreground Recovery\n- Status: Pending\n- Deliverable: visibilitychange listener, RECOVERING state transition, resumeWithGesture() pattern\n\n### Task 2: KH-07 — Pre-Load Next Track\n- Status: Pending\n- Deliverable: Promote preloaded audio from ended handler before React state cycle\n\n### Task 3: KH-08 — Consecutive Error Circuit Breaker\n- Status: Pending\n- Deliverable: Cross-track error counter, auto-advance cutoff at 3, toast notification\n\n### Task 4: KH-26 — MediaSession API Integration\n- Status: Pending\n- Deliverable: Full MediaSession metadata, actions, position state, and playback state\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.kh-mobile-playback-hardening.925767638f",
+    "plan_key": "plan:legacy.archived.kh-mobile-playback-hardening.925767638f",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Kima Hub Upstream — Mobile Playback Hardening",
+      "objective": "Adopt four mobile/player hardening items from Kima Hub v1.6.0 (KH-06, KH-07, KH-08, KH-26): iOS foreground recovery, pre-load next track, consecutive error circuit breaker, and MediaSession API integration.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Add iOS foreground recovery via visibilitychange + pageshow handlers",
+        "Playback automatically retries on app resume after iOS reclaims audio session",
+        "Pre-load next track from ended handler before React state update",
+        "Gapless track transitions on iOS by pre-loading audio before state cycle",
+        "Add consecutive error circuit breaker to prevent infinite error loops",
+        "Player stops auto-advancing after 3 consecutive track failures",
+        "Integrate MediaSession API for lock-screen and system media controls",
+        "Full MediaSession metadata, action handlers, and position state updates"
+      ],
+      "out_of_scope": [
+        "No audio engine swap or architecture changes. No changes to segmented streaming pipeline. No new player UI surfaces beyond MediaSession metadata. No changes to desktop-only player behavior unless they improve mobile parity."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/kh-mobile-playback-hardening.json",
+        ".agents/plans/archived/kh-mobile-playback-hardening/PLAN.json",
+        "frontend/lib/audio-playback-context.tsx",
+        "frontend/lib/audio/playback-state-machine.ts",
+        "frontend/lib/audio-controls-context.tsx",
+        "frontend/lib/audio-engine/index.ts",
+        "frontend/lib/audio-engine/foregroundRecoveryPolicy.ts",
+        "frontend/tests/unit/foregroundRecoveryPolicy.test.ts",
+        "frontend/components/player/AudioPlaybackOrchestrator.tsx",
+        "frontend/lib/audio-engine/nextTrackPreloadPolicy.ts",
+        "frontend/tests/unit/nextTrackPreloadPolicy.test.ts",
+        "frontend/lib/audio-engine/consecutiveErrorBreaker.ts",
+        "frontend/tests/unit/consecutiveErrorBreaker.test.ts",
+        "frontend/hooks/useMediaSession.ts",
+        "frontend/components/player/MediaControlsHandler.tsx",
+        ".agents/plans/archived/kh-mobile-playback-hardening/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/kh-mobile-playback-hardening/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.kh-06:-add-ios-foreground-recovery-with-visibilitychange-listener-recovering-state-transition-and-network-error-preserv",
+        "summary": "KH-06: Add iOS foreground recovery with visibilitychange listener, RECOVERING state transition, and network error preservation",
+        "status": "complete",
+        "acceptance_criteria": [
+          "visibilitychange handler detects resume and retries playback",
+          "Network errors preserve current track",
+          "RECOVERING transition verified",
+          "Regression tests added"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/kh-mobile-playback-hardening.json",
+          "frontend/lib/audio-engine/foregroundRecoveryPolicy.ts",
+          "frontend/tests/unit/foregroundRecoveryPolicy.test.ts",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Pure-logic foregroundRecoveryPolicy module with resolveForegroundRecoveryDecision, isPreservableNetworkError, shouldThrottleForegroundRecovery | visibilitychange useEffect in AudioPlaybackOrchestrator detects resume and retries playback via RECOVERING state | MEDIA_ERR_NETWORK (code 2) error handler preserves current track instead of clearing | 2-second throttle prevents rapid-fire recovery attempts",
+        "evidence": [
+          "verify: 15/15 unit tests pass for foregroundRecoveryPolicy",
+          "verify: TypeScript compilation clean (npx tsc --noEmit)"
+        ]
+      },
+      {
+        "key": "task.02.kh-07:-pre-load-next-track-from-ended-handler-to-eliminate-inter-track-silence-on-ios",
+        "summary": "KH-07: Pre-load next track from ended handler to eliminate inter-track silence on iOS",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Preloaded audio promoted before React state update",
+          "Next track determined and preloaded on current track start",
+          "Edge cases handled: shuffle, repeat-one, end-of-queue"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/kh-mobile-playback-hardening.json",
+          "frontend/lib/audio-engine/nextTrackPreloadPolicy.ts",
+          "frontend/tests/unit/nextTrackPreloadPolicy.test.ts",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Pure-logic nextTrackPreloadPolicy module with resolveNextTrackPreloadDecision | Eager preload logic in handleEnd: resolves next track URL and calls audioEngine.load(url, { autoplay: true }) before React state update | Edge cases: podcast/audiobook excluded, repeat-one excluded, listen-together excluded, already-loading excluded, null playbackType excluded",
+        "evidence": [
+          "verify: 8/8 unit tests pass for nextTrackPreloadPolicy",
+          "verify: TypeScript compilation clean (npx tsc --noEmit)"
+        ]
+      },
+      {
+        "key": "task.03.kh-08:-add-consecutive-error-circuit-breaker-stop-auto-advancing-after-3-consecutive-track-failures",
+        "summary": "KH-08: Add consecutive error circuit breaker — stop auto-advancing after 3 consecutive track failures",
+        "status": "complete",
+        "acceptance_criteria": [
+          "consecutiveTrackErrors counter in engine",
+          "Resets on successful play",
+          "Stops advancing after threshold",
+          "Toast notification when tripped"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/kh-mobile-playback-hardening.json",
+          "frontend/lib/audio-engine/consecutiveErrorBreaker.ts",
+          "frontend/tests/unit/consecutiveErrorBreaker.test.ts",
+          "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Pure-logic consecutiveErrorBreaker module with createConsecutiveErrorBreaker factory | Wired into AudioPlaybackOrchestrator: recordSuccess() in handlePlay, recordError() + trip check in scheduleTrackErrorSkip | Toast notification when breaker trips: 'Playback stopped — multiple tracks failed in a row' | Default threshold 3, configurable via factory parameter",
+        "evidence": [
+          "verify: 10/10 unit tests pass for consecutiveErrorBreaker",
+          "verify: TypeScript compilation clean (npx tsc --noEmit)"
+        ]
+      },
+      {
+        "key": "task.04.kh-26:-mediasession-api-already-fully-implemented-in-existing-codebase",
+        "summary": "KH-26: MediaSession API — already fully implemented in existing codebase",
+        "status": "complete",
+        "acceptance_criteria": [
+          "MediaSession metadata updates on track change",
+          "All action handlers registered and functional",
+          "Position state driven by engine events",
+          "Lock-screen controls verified on iOS/Android"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/kh-mobile-playback-hardening.json",
+          "frontend/hooks/useMediaSession.ts",
+          "frontend/components/player/MediaControlsHandler.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Pre-existing: useMediaSession hook with full metadata (track/audiobook/podcast), action handlers (play/pause/next/prev/seekforward/seekbackward/seekto), position state, playback state sync, cross-device interference prevention | Pre-existing: MediaControlsHandler component wires useMediaSession at app root",
+        "evidence": [
+          "verify: All KH-26 acceptance criteria met by existing implementation",
+          "verify: useMediaSession.ts covers metadata, 7 action handlers, position state, playback state sync"
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "kh-mobile-playback-hardening",
+    "feature_title": "Kima Hub Upstream — Mobile Playback Hardening",
+    "plan_ref": ".agents/plans/archived/kh-mobile-playback-hardening/PLAN.json",
+    "status": "complete",
+    "updated_at": "2026-03-02T16:08:27.786Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Adopt four mobile/player hardening items from Kima Hub v1.6.0 (KH-06, KH-07, KH-08, KH-26): iOS foreground recovery, pre-load next track, consecutive error circuit breaker, and MediaSession API integration.",
+        "non_goals": "No audio engine swap or architecture changes. No changes to segmented streaming pipeline. No new player UI surfaces beyond MediaSession metadata. No changes to desktop-only player behavior unless they improve mobile parity."
+      },
+      "spec_outline": {
+        "summary": "Four player improvements targeting mobile reliability: iOS foreground recovery with visibilitychange listeners, pre-loading next track from ended handler to eliminate inter-track silence, consecutive error circuit breaker to prevent infinite error loops, and full MediaSession API integration for lock-screen controls and system media keys.",
+        "full_spec_outline": [
+          {
+            "id": "KH-06",
+            "objective": "Add iOS foreground recovery via visibilitychange + pageshow handlers",
+            "deliverable": "Playback automatically retries on app resume after iOS reclaims audio session",
+            "acceptance_criteria": [
+              "visibilitychange listener detects app resume and retries playback",
+              "MEDIA_ERR_NETWORK (code 2) preserves current track instead of clearing it",
+              "RECOVERING state transition path is verified in playback-state-machine.ts",
+              "resumeWithGesture() pattern applied to programmatic play() call sites"
+            ],
+            "references": [
+              "frontend/lib/audio-playback-context.tsx",
+              "frontend/lib/audio/playback-state-machine.ts",
+              "frontend/lib/audio-controls-context.tsx"
+            ]
+          },
+          {
+            "id": "KH-07",
+            "objective": "Pre-load next track from ended handler before React state update",
+            "deliverable": "Gapless track transitions on iOS by pre-loading audio before state cycle",
+            "acceptance_criteria": [
+              "onend callback promotes preloaded Howl to active before firing React callback",
+              "Next track URL determined and preloaded once current track starts playing",
+              "Shuffle, repeat-one, and end-of-queue edge cases handled"
+            ],
+            "references": [
+              "frontend/lib/audio-engine/index.ts",
+              "frontend/lib/audio-controls-context.tsx"
+            ]
+          },
+          {
+            "id": "KH-08",
+            "objective": "Add consecutive error circuit breaker to prevent infinite error loops",
+            "deliverable": "Player stops auto-advancing after 3 consecutive track failures",
+            "acceptance_criteria": [
+              "consecutiveTrackErrors counter in audio engine",
+              "Counter resets on successful play",
+              "Auto-advance stops after 3 consecutive failures",
+              "Toast notification shown when circuit breaker trips"
+            ],
+            "references": [
+              "frontend/lib/audio-engine/index.ts",
+              "frontend/lib/audio-controls-context.tsx"
+            ]
+          },
+          {
+            "id": "KH-26",
+            "objective": "Integrate MediaSession API for lock-screen and system media controls",
+            "deliverable": "Full MediaSession metadata, action handlers, and position state updates",
+            "acceptance_criteria": [
+              "navigator.mediaSession.metadata updated on track change",
+              "Action handlers registered for play/pause/previous/next/seekforward/seekbackward",
+              "Position state updated from audio engine events (not React state)",
+              "Playback state synced to MediaSession from engine events",
+              "Lock-screen controls work on iOS and Android"
+            ],
+            "references": [
+              "frontend/lib/audio-playback-context.tsx",
+              "frontend/lib/audio-controls-context.tsx"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "All four items are frontend-only. KH-06 and KH-26 interact with audio-playback-context and audio-controls-context. KH-07 uses the existing preload infrastructure in the audio engine. KH-08 adds a simple counter. KH-26 action handlers must call engine methods directly (not through React state) to preserve iOS user-gesture context.",
+        "full_refined_spec": [
+          {
+            "id": "mobile-playback-constraints",
+            "decision": "All changes target the audio engine and context layers; no player UI component changes needed except for error toast in KH-08",
+            "rationale": "The audio engine abstraction layer isolates these changes from UI components. MediaSession API integration should be driven by engine events, not React state, to maintain iOS gesture context.",
+            "acceptance_criteria": [
+              "No changes to MiniPlayer/OverlayPlayer component logic",
+              "Audio engine API surface preserved",
+              "All existing playback tests continue to pass",
+              "iOS Safari and Android Chrome tested"
+            ],
+            "references": [
+              "frontend/lib/audio-engine/index.ts",
+              "frontend/lib/audio-playback-context.tsx",
+              "frontend/lib/audio-controls-context.tsx",
+              "frontend/lib/audio/playback-state-machine.ts"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Four steps, one per KH item. KH-06 and KH-26 share context around iOS gesture handling. KH-07 builds on existing preload infrastructure. KH-08 is independent.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "KH-06: Add iOS foreground recovery with visibilitychange listener, RECOVERING state transition, and network error preservation",
+            "acceptance_criteria": [
+              "visibilitychange handler detects resume and retries playback",
+              "Network errors preserve current track",
+              "RECOVERING transition verified",
+              "Regression tests added"
+            ],
+            "references": [
+              "frontend/lib/audio-engine/foregroundRecoveryPolicy.ts",
+              "frontend/tests/unit/foregroundRecoveryPolicy.test.ts",
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Pure-logic foregroundRecoveryPolicy module with resolveForegroundRecoveryDecision, isPreservableNetworkError, shouldThrottleForegroundRecovery",
+                "visibilitychange useEffect in AudioPlaybackOrchestrator detects resume and retries playback via RECOVERING state",
+                "MEDIA_ERR_NETWORK (code 2) error handler preserves current track instead of clearing",
+                "2-second throttle prevents rapid-fire recovery attempts"
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/lib/audio-engine/foregroundRecoveryPolicy.ts (new)",
+                "frontend/tests/unit/foregroundRecoveryPolicy.test.ts (new, 15 tests)",
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx (visibilitychange effect, error handler network preservation)"
+              ],
+              "verification_testing": [
+                "verify: 15/15 unit tests pass for foregroundRecoveryPolicy",
+                "verify: TypeScript compilation clean (npx tsc --noEmit)"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "KH-07: Pre-load next track from ended handler to eliminate inter-track silence on iOS",
+            "acceptance_criteria": [
+              "Preloaded audio promoted before React state update",
+              "Next track determined and preloaded on current track start",
+              "Edge cases handled: shuffle, repeat-one, end-of-queue"
+            ],
+            "references": [
+              "frontend/lib/audio-engine/nextTrackPreloadPolicy.ts",
+              "frontend/tests/unit/nextTrackPreloadPolicy.test.ts",
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Pure-logic nextTrackPreloadPolicy module with resolveNextTrackPreloadDecision",
+                "Eager preload logic in handleEnd: resolves next track URL and calls audioEngine.load(url, { autoplay: true }) before React state update",
+                "Edge cases: podcast/audiobook excluded, repeat-one excluded, listen-together excluded, already-loading excluded, null playbackType excluded"
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/lib/audio-engine/nextTrackPreloadPolicy.ts (new)",
+                "frontend/tests/unit/nextTrackPreloadPolicy.test.ts (new, 8 tests)",
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx (handleEnd eager preload)"
+              ],
+              "verification_testing": [
+                "verify: 8/8 unit tests pass for nextTrackPreloadPolicy",
+                "verify: TypeScript compilation clean (npx tsc --noEmit)"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "KH-08: Add consecutive error circuit breaker — stop auto-advancing after 3 consecutive track failures",
+            "acceptance_criteria": [
+              "consecutiveTrackErrors counter in engine",
+              "Resets on successful play",
+              "Stops advancing after threshold",
+              "Toast notification when tripped"
+            ],
+            "references": [
+              "frontend/lib/audio-engine/consecutiveErrorBreaker.ts",
+              "frontend/tests/unit/consecutiveErrorBreaker.test.ts",
+              "frontend/components/player/AudioPlaybackOrchestrator.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Pure-logic consecutiveErrorBreaker module with createConsecutiveErrorBreaker factory",
+                "Wired into AudioPlaybackOrchestrator: recordSuccess() in handlePlay, recordError() + trip check in scheduleTrackErrorSkip",
+                "Toast notification when breaker trips: 'Playback stopped — multiple tracks failed in a row'",
+                "Default threshold 3, configurable via factory parameter"
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/lib/audio-engine/consecutiveErrorBreaker.ts (new)",
+                "frontend/tests/unit/consecutiveErrorBreaker.test.ts (new, 10 tests)",
+                "frontend/components/player/AudioPlaybackOrchestrator.tsx (handlePlay success reset, scheduleTrackErrorSkip error recording + trip gate)"
+              ],
+              "verification_testing": [
+                "verify: 10/10 unit tests pass for consecutiveErrorBreaker",
+                "verify: TypeScript compilation clean (npx tsc --noEmit)"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "KH-26: MediaSession API — already fully implemented in existing codebase",
+            "acceptance_criteria": [
+              "MediaSession metadata updates on track change",
+              "All action handlers registered and functional",
+              "Position state driven by engine events",
+              "Lock-screen controls verified on iOS/Android"
+            ],
+            "references": [
+              "frontend/hooks/useMediaSession.ts",
+              "frontend/components/player/MediaControlsHandler.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Pre-existing: useMediaSession hook with full metadata (track/audiobook/podcast), action handlers (play/pause/next/prev/seekforward/seekbackward/seekto), position state, playback state sync, cross-device interference prevention",
+                "Pre-existing: MediaControlsHandler component wires useMediaSession at app root"
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/hooks/useMediaSession.ts (pre-existing, no changes needed)",
+                "frontend/components/player/MediaControlsHandler.tsx (pre-existing, no changes needed)"
+              ],
+              "verification_testing": [
+                "verify: All KH-26 acceptance criteria met by existing implementation",
+                "verify: useMediaSession.ts covers metadata, 7 action handlers, position state, playback state sync"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "recommended",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": "claude-opus-4-6"
+    }
+  }
+}

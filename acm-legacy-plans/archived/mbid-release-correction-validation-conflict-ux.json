@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "feature_id": "mbid-release-correction-validation-conflict-ux",
+  "feature_title": "MBID_RELEASE_CORRECTION_VALIDATION_CONFLICT_UX_PLAN.md",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/mbid-release-correction-validation-conflict-ux.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PLAN.json",
+    "plan_dir": ".agents/plans/archived/mbid-release-correction-validation-conflict-ux",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# LLM_SESSION_HANDOFF.md\n\n## Feature\n- Slice F: MBID validation and conflict UX hardening\n- Plan: `plans/current/mbid-release-correction-validation-conflict-ux/MBID_RELEASE_CORRECTION_VALIDATION_CONFLICT_UX_PLAN.md`\n\n## Current State\n\n1. Slice implementation is complete through Phase 2 (backend contracts/tests + frontend UX hardening).\n2. Checkpoint commits:\n- `66208e5` backend MBID validation/conflict contracts + compat tests\n- `75ea6d8` metadata editor + lookup validation UX mapping\n3. Parent MBID feature remains archived; this slice is now in closeout/docs-sync state.\n\n## Next Action\n\n1. Decide whether to ship docs delta now (Phase 3) or batch with later MBID slices.\n2. If shipping standalone, update `CHANGELOG.md` and `docs/FORK_DIFF.md` before final closeout.\n"
+      },
+      {
+        "path": ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# MBID_RELEASE_CORRECTION_VALIDATION_CONFLICT_UX_PLAN.md\n\n## Document Status\n\n- Last updated: 2026-02-14\n- Feature: Slice F - MBID validation and conflict UX hardening\n- Parent context: `.agents/plans/archived/mbid-release-correction-long-term-review/PLAN.md`\n- Scope: Planning/design only\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Pending explicit implementation approval\n\n## Goal\n\nReduce operator error by enforcing valid MBID/RG MBID input and improving conflict feedback when canonical MBID updates collide.\n\n## Reuse/Consolidation Check\n\n1. Existing patterns reused:\n- route validation + JSON error contracts in `backend/src/routes/enrichment.ts`\n- route-compat test harness in `backend/src/routes/__tests__/`\n- metadata editor error/toast patterns in `frontend/components/MetadataEditor.tsx`\n2. Duplication intentionally kept:\n- retain current metadata editor layout; only validation/conflict affordances are added.\n3. Consolidation deferred:\n- deep schema-level MBID normalization remains out-of-scope.\n\n## Spec Outline\n\n1. Validate MBID/RG MBID format at API boundary.\n2. Return clearer conflict payloads for `409` responses.\n3. Surface actionable conflict guidance in metadata editor UX.\n4. Add regression tests for valid/invalid/conflict input paths.\n\n## Refined Spec\n\n### Constraints\n\n1. Preserve existing endpoint URLs and base contracts.\n2. Avoid blocking non-MBID override edits when MBID field is unchanged.\n3. Keep validation deterministic and inexpensive.\n\n### Primary Touchpoints\n\n1. `backend/src/routes/enrichment.ts`\n2. `backend/src/routes/__tests__/enrichmentMetadataCompat.test.ts`\n3. `frontend/components/MetadataEditor.tsx`\n4. `frontend/lib/api.ts` (typed conflict payload handling if needed)\n\n### Acceptance Criteria\n\n1. Invalid MBID input returns `400` with explicit field-level message.\n2. Valid but colliding MBID input returns `409` with clear operator guidance.\n3. Metadata editor shows conflict/validation messages without losing form state.\n4. Regression tests cover invalid + conflict + success cases.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Phase 0: Contract Freeze\n\n#### Task 0.1: Define MBID format policy\n- Status: Complete\n- Deliverable: exact regex/normalization policy for artist MBID and album RG MBID\n- References:\n  - `backend/src/routes/enrichment.ts`\nCompletion summary:\n- Added strict UUID MBID validation policy at route boundary and codified unchanged-temp-MBID bypass for non-MBID override edits.\n\n#### Task 0.2: Define conflict response envelope\n- Status: Complete\n- Deliverable: stable `409` payload schema consumable by frontend\n- References:\n  - `backend/src/routes/enrichment.ts`\n  - `frontend/components/MetadataEditor.tsx`\nCompletion summary:\n- Standardized `409` conflict payload fields (`code`, `field`, `hint`) for artist MBID and album RG MBID conflicts.\n\n### Phase 1: Backend Validation + Tests\n\n#### Task 1.1: Implement MBID input validation\n- Status: Complete\n- Deliverable: backend validation for artist/album metadata update routes\n- References:\n  - `backend/src/routes/enrichment.ts`\nCompletion summary:\n- Implemented strict MBID/RG MBID format validation with `400` contracts and expected-format hints while preserving unchanged temporary ID edit flow.\n\n#### Task 1.2: Add route-compat regression coverage\n- Status: Complete\n- Deliverable: tests for invalid format and collision response contracts\n- References:\n  - `backend/src/routes/__tests__/enrichmentMetadataCompat.test.ts`\nCompletion summary:\n- Added/updated compat tests for artist + album invalid-format and conflict envelopes; verified with targeted Jest run and backend build.\n\n### Phase 2: Frontend UX Hardening\n\n#### Task 2.1: Map backend validation/conflict errors to operator-friendly UI\n- Status: Complete\n- Deliverable: metadata editor field-level and toast messaging improvements\n- References:\n  - `frontend/components/MetadataEditor.tsx`\nCompletion summary:\n- Added field-level/form-level error handling in metadata editor using backend `field/code/hint/expectedFormat`; preserved modal state and improved MBID guidance.\n\n#### Task 2.2: Verification checkpoint\n- Status: Complete\n- Deliverable: targeted test/lint/build evidence for touched surfaces\n- References:\n  - `backend/package.json`\n  - `frontend/package.json`\nCompletion summary:\n- Backend: `npm test -- --runInBand src/routes/__tests__/enrichmentMetadataCompat.test.ts` and `npm run build` passed.\n- Frontend: full lint remains blocked by pre-existing repo-wide issues; targeted lint passed for touched files (`components/MetadataEditor.tsx`, `components/ui/MusicBrainzLookup.tsx`).\n\n### Phase 3: Docs + Handoff\n\n#### Task 3.1: Sync fork delta docs (if behavior changes ship)\n- Status: Complete\n- Deliverable: changelog/fork-diff updates for validation UX changes\n- References:\n  - `CHANGELOG.md`\n  - `docs/FORK_DIFF.md`\nCompletion summary:\n- Validation/conflict UX deltas were captured in shipped docs sync (`e554e95`) across `CHANGELOG.md` and `docs/FORK_DIFF.md`.\n"
+      },
+      {
+        "path": ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-14 Session Prompt History (Slice F Staging)\n\n1. User requested planning/staging Slice F/G/H before starting Slice E implementation.\n2. Created Slice F planning artifacts under `plans/current/mbid-release-correction-validation-conflict-ux/`.\n3. Captured spec outline, refined spec, and detailed atomic implementation plan.\n4. No implementation has started for this slice.\n\n## 2026-02-14 Session Prompt History (Slice F Implementation)\n\n1. Implemented backend MBID/RG MBID validation and conflict response envelope hardening in enrichment metadata routes.\n2. Added regression coverage for invalid format, conflict payload fields, and temporary unchanged MBID override edits.\n3. Implemented frontend metadata editor field-level MBID error messaging and conflict guidance.\n4. Aligned MusicBrainz manual UUID validation with backend format policy.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.mbid-release-correction-validation-conflict-ux.6e3d12747c",
+    "plan_key": "plan:legacy.archived.mbid-release-correction-validation-conflict-ux.6e3d12747c",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "MBID_RELEASE_CORRECTION_VALIDATION_CONFLICT_UX_PLAN.md",
+      "objective": "1. Validate MBID/RG MBID format at API boundary.\n2. Return clearer conflict payloads for `409` responses.\n3. Surface actionable conflict guidance in metadata editor UX.\n4. Add regression tests for valid/invalid/conflict input paths.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Validate MBID/RG MBID format at API boundary.",
+        "2. Return clearer conflict payloads for `409` responses.",
+        "3. Surface actionable conflict guidance in metadata editor UX.",
+        "4. Add regression tests for valid/invalid/conflict input paths."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/mbid-release-correction-validation-conflict-ux.json",
+        ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PLAN.json",
+        ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/HANDOFF.md",
+        ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PLAN.md",
+        ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/HANDOFF.md",
+        ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PLAN.md",
+        ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Validate MBID/RG MBID format at API boundary.\n2. Return clearer conflict payloads for `409` responses.\n3. Surface actionable conflict guidance in metadata editor UX.\n4. Add regression tests for valid/invalid/conflict input paths.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/mbid-release-correction-validation-conflict-ux.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "mbid-release-correction-validation-conflict-ux",
+    "feature_title": "MBID_RELEASE_CORRECTION_VALIDATION_CONFLICT_UX_PLAN.md",
+    "plan_ref": ".agents/plans/archived/mbid-release-correction-validation-conflict-ux/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Validate MBID/RG MBID format at API boundary.\n2. Return clearer conflict payloads for `409` responses.\n3. Surface actionable conflict guidance in metadata editor UX.\n4. Add regression tests for valid/invalid/conflict input paths.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Validate MBID/RG MBID format at API boundary.\n2. Return clearer conflict payloads for `409` responses.\n3. Surface actionable conflict guidance in metadata editor UX.\n4. Add regression tests for valid/invalid/conflict input paths.",
+        "non_goals": ""
+      }
+    }
+  }
+}

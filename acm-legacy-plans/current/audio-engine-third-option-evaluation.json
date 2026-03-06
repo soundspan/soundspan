@@ -1,0 +1,228 @@
+{
+  "version": 1,
+  "feature_id": "audio-engine-third-option-evaluation",
+  "feature_title": "Plan - Third Audio Engine Option Evaluation",
+  "track": "current",
+  "export_path": "acm-legacy-plans/current/audio-engine-third-option-evaluation.json",
+  "legacy": {
+    "plan_path": ".agents/plans/current/audio-engine-third-option-evaluation/PLAN.json",
+    "plan_dir": ".agents/plans/current/audio-engine-third-option-evaluation",
+    "status": "ready",
+    "updated_at": "2026-02-26T20:17:40.729Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.current.audio-engine-third-option-evaluation.69474ef191",
+    "plan_key": "plan:legacy.current.audio-engine-third-option-evaluation.69474ef191",
+    "final_db_status": "pending",
+    "plan": {
+      "title": "Plan - Third Audio Engine Option Evaluation",
+      "objective": "Evaluate whether a native HTML5 direct audio-engine mode should be accepted as a viable third option, with explicit decision gates covering product fit, technical risk, and operational sustainability before any implementation commitment.",
+      "kind": "legacy_current",
+      "status": "pending",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Define candidate scope for native HTML5 direct playback, required baseline behaviors, explicit exclusions, and evaluation gates needed to determine if deeper implementation planning is justified."
+      ],
+      "out_of_scope": [
+        "This plan does not authorize code changes, rollout sequencing, migration execution, or production enablement. Existing engine behavior and roadmap commitments remain unchanged until a separate implementation proposal is approved."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/current/audio-engine-third-option-evaluation.json",
+        ".agents/plans/current/audio-engine-third-option-evaluation/PLAN.json",
+        "Current audio engine requirement checklist",
+        "Historical playback incident categories",
+        "Playback reliability SLOs and user-impact metrics",
+        "Cross-platform QA coverage expectations",
+        "Gate-1 capability baseline output",
+        "Gate-2 rubric and evidence output"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.capability-baseline-and-constraint-inventory",
+        "summary": "Capability Baseline And Constraint Inventory",
+        "status": "pending",
+        "acceptance_criteria": [
+          "All baseline user-facing playback requirements are mapped to supported, partial, or unsupported status",
+          "Top risk areas are explicitly identified with confidence level annotations"
+        ],
+        "references": [
+          "acm-legacy-plans/current/audio-engine-third-option-evaluation.json",
+          "Current audio engine requirement checklist",
+          "Historical playback incident categories"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.02.evaluation-method-and-evidence-definition",
+        "summary": "Evaluation Method And Evidence Definition",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Each go/no-go criterion has an objective pass/fail threshold",
+          "Evidence collection approach is reviewed for repeatability and bias reduction"
+        ],
+        "references": [
+          "acm-legacy-plans/current/audio-engine-third-option-evaluation.json",
+          "Playback reliability SLOs and user-impact metrics",
+          "Cross-platform QA coverage expectations"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.03.decision-readout-and-recommendation",
+        "summary": "Decision Readout And Recommendation",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Recommendation is traceable to documented gate outcomes",
+          "Open risks and follow-up questions are captured with ownership suggestions"
+        ],
+        "references": [
+          "acm-legacy-plans/current/audio-engine-third-option-evaluation.json",
+          "Gate-1 capability baseline output",
+          "Gate-2 rubric and evidence output"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/current/audio-engine-third-option-evaluation.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "audio-engine-third-option-evaluation",
+    "feature_title": "Plan - Third Audio Engine Option Evaluation",
+    "plan_ref": ".agents/plans/current/audio-engine-third-option-evaluation/PLAN.json",
+    "status": "ready",
+    "updated_at": "2026-02-26T20:17:40.729Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Evaluate whether a native HTML5 direct audio-engine mode should be accepted as a viable third option, with explicit decision gates covering product fit, technical risk, and operational sustainability before any implementation commitment.",
+        "non_goals": "This plan does not authorize code changes, rollout sequencing, migration execution, or production enablement. Existing engine behavior and roadmap commitments remain unchanged until a separate implementation proposal is approved."
+      },
+      "spec_outline": {
+        "summary": "Assess a potential third audio-engine mode (native HTML5 direct) against current engine options with clear go/no-go criteria and evidence requirements.",
+        "full_spec_outline": [
+          {
+            "objective": "Define candidate scope for native HTML5 direct playback, required baseline behaviors, explicit exclusions, and evaluation gates needed to determine if deeper implementation planning is justified.",
+            "deliverable": "Define candidate scope for native HTML5 direct playback, required baseline behaviors, explicit exclusions, and evaluation gates needed to determine if deeper implementation planning is justified.",
+            "id": "define-candidate-scope-for-native-html5-direct-playback-required",
+            "acceptance_criteria": [
+              "Complete deliverable: Define candidate scope for native HTML5 direct playback, required baseline behaviors, explicit exclusions, and evaluation gates needed to determine if deeper implementation planning is justified."
+            ],
+            "references": [
+              ".agents/plans/current/audio-engine-third-option-evaluation/PLAN.json"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Convert the evaluation into measurable gates that determine whether the native HTML5 direct option should be rejected, parked, or advanced to a later implementation proposal.",
+        "full_refined_spec": [
+          {
+            "decision": "Set threshold criteria for compatibility coverage, startup/seek reliability, buffering and recovery behavior, telemetry observability, and maintainability cost relative to existing engines, with documented pass/fail outcomes.",
+            "rationale": "Set threshold criteria for compatibility coverage, startup/seek reliability, buffering and recovery behavior, telemetry observability, and maintainability cost relative to existing engines, with documented pass/fail outcomes.",
+            "id": "set-threshold-criteria-for-compatibility-coverage-startup-seek-r",
+            "acceptance_criteria": [
+              "Validate decision: Set threshold criteria for compatibility coverage, startup/seek reliability, buffering and recovery behavior, telemetry observability, and maintainability cost relative to existing engines, with documented pass/fail outcomes."
+            ],
+            "references": [
+              ".agents/plans/current/audio-engine-third-option-evaluation/PLAN.json"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Execute an evaluation-only process for the native HTML5 direct option and produce a decision package without committing to build work.",
+        "steps": [
+          {
+            "status": "pending",
+            "deliverable": "Capability Baseline And Constraint Inventory",
+            "acceptance_criteria": [
+              "All baseline user-facing playback requirements are mapped to supported, partial, or unsupported status",
+              "Top risk areas are explicitly identified with confidence level annotations"
+            ],
+            "references": [
+              "Current audio engine requirement checklist",
+              "Historical playback incident categories"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Evaluation Method And Evidence Definition",
+            "acceptance_criteria": [
+              "Each go/no-go criterion has an objective pass/fail threshold",
+              "Evidence collection approach is reviewed for repeatability and bias reduction"
+            ],
+            "references": [
+              "Playback reliability SLOs and user-impact metrics",
+              "Cross-platform QA coverage expectations"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Decision Readout And Recommendation",
+            "acceptance_criteria": [
+              "Recommendation is traceable to documented gate outcomes",
+              "Open risks and follow-up questions are captured with ownership suggestions"
+            ],
+            "references": [
+              "Gate-1 capability baseline output",
+              "Gate-2 rubric and evidence output"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "recommended",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    }
+  }
+}

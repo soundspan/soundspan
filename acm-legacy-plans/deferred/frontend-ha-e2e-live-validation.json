@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "feature_id": "frontend-ha-e2e-live-validation",
+  "feature_title": "Plan - Frontend HA E2E Live Validation",
+  "track": "deferred",
+  "export_path": "acm-legacy-plans/deferred/frontend-ha-e2e-live-validation.json",
+  "legacy": {
+    "plan_path": ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+    "plan_dir": ".agents/plans/deferred/frontend-ha-e2e-live-validation",
+    "status": "deferred",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Frontend HA E2E Live Validation\n\n## Document Status\n\n- Last updated: 2026-02-17\n- Track: Deferred follow-up for frontend live E2E validation after HA/scalability implementation\n- Source feature: `backend-frontend-horizontal-scaling-rollout-resilience`\n- Status: Deferred\n\n## Why Deferred\n\n1. Current feature closure prioritized backend/runtime resiliency and non-disruptive live validation.\n2. Full frontend E2E continuity checks require a reachable backend/API test environment and/or controlled live rollout windows.\n3. In the current local run, frontend predeploy E2E spec execution was environment-blocked by backend unavailability (`ECONNREFUSED 127.0.0.1:3006`).\n\n## Scope\n\n1. Validate frontend Listen Together continuity during backend/frontend rolling updates.\n2. Validate user-facing recovery behavior without hard refresh for host and guest flows.\n3. Validate websocket/socket probe routing behavior under rollout and pod replacement events.\n\n## Deferred Tasks\n\n### Task F1: Provision deterministic E2E runtime\n- Status: Pending\n- Deliverable: reproducible frontend+backend test runtime for Playwright predeploy suite.\n- Notes: ensure `LIDIFY_UI_BASE_URL`, test auth user, and backend API reachability are all available.\n\n### Task F2: Execute frontend predeploy Listen Together suite in HA runtime\n- Status: Pending\n- Deliverable: pass/fail evidence for `frontend/tests/e2e/predeploy/listen-together.spec.ts` under HA topology.\n\n### Task F3: Add rolling-update continuity scenario to frontend E2E\n- Status: Pending\n- Deliverable: explicit frontend continuity assertion for host+guest playback state during backend/frontend restarts.\n\n### Task F4: Record operational acceptance evidence\n- Status: Pending\n- Deliverable: command logs/results showing bounded reconnect and no permanent playback halt.\n\n## Exit Criteria\n\n1. Frontend Listen Together predeploy suite passes in HA-capable runtime.\n2. Rolling update continuity checks for host and guest pass without requiring full page reload.\n3. Evidence is captured in plan/handoff notes and linked from relevant docs/runbook.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.deferred.frontend-ha-e2e-live-validation.eb2611b061",
+    "plan_key": "plan:legacy.deferred.frontend-ha-e2e-live-validation.eb2611b061",
+    "final_db_status": "blocked",
+    "plan": {
+      "title": "Plan - Frontend HA E2E Live Validation",
+      "objective": "UNCONFIRMED: explicit goal/purpose section not found in PLAN.md.",
+      "kind": "legacy_deferred",
+      "status": "blocked",
+      "stages": {
+        "spec_outline": "pending",
+        "refined_spec": "pending",
+        "implementation_plan": "pending"
+      },
+      "in_scope": [
+        "UNCONFIRMED: Spec Outline section not found in PLAN.md."
+      ],
+      "out_of_scope": [
+        "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/deferred/frontend-ha-e2e-live-validation.json",
+        ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+        ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md",
+        "frontend/tests/e2e/predeploy/listen-together.spec.ts"
+      ],
+      "external_refs": [
+        ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.provision-deterministic-e2e-runtime",
+        "summary": "Provision deterministic E2E runtime",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Provision deterministic E2E runtime"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-ha-e2e-live-validation.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.02.execute-frontend-predeploy-listen-together-suite-in-ha-runtime",
+        "summary": "Execute frontend predeploy Listen Together suite in HA runtime",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Execute frontend predeploy Listen Together suite in HA runtime"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-ha-e2e-live-validation.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md",
+          "frontend/tests/e2e/predeploy/listen-together.spec.ts"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.03.add-rolling-update-continuity-scenario-to-frontend-e2e",
+        "summary": "Add rolling-update continuity scenario to frontend E2E",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Add rolling-update continuity scenario to frontend E2E"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-ha-e2e-live-validation.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.04.record-operational-acceptance-evidence",
+        "summary": "Record operational acceptance evidence",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Record operational acceptance evidence"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-ha-e2e-live-validation.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+          ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-ha-e2e-live-validation.json"
+        ],
+        "blocked_reason": "Legacy plan is deferred until explicitly resumed.",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "frontend-ha-e2e-live-validation",
+    "feature_title": "Plan - Frontend HA E2E Live Validation",
+    "plan_ref": ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+    "status": "deferred",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "planning_stages": {
+      "spec_outline": "pending",
+      "refined_spec": "pending",
+      "implementation_plan": "pending"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "UNCONFIRMED: Spec Outline section not found in PLAN.md.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "UNCONFIRMED: Refined Spec section not found in PLAN.md.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "### Task F1: Provision deterministic E2E runtime\n- Status: Pending\n- Deliverable: reproducible frontend+backend test runtime for Playwright predeploy suite.\n- Notes: ensure `LIDIFY_UI_BASE_URL`, test auth user, and backend API reachability are all available.\n\n### Task F2: Execute frontend predeploy Listen Together suite in HA runtime\n- Status: Pending\n- Deliverable: pass/fail evidence for `frontend/tests/e2e/predeploy/listen-together.spec.ts` under HA topology.\n\n### Task F3: Add rolling-update continuity scenario to frontend E2E\n- Status: Pending\n- Deliverable: explicit frontend continuity assertion for host+guest playback state during backend/frontend restarts.\n\n### Task F4: Record operational acceptance evidence\n- Status: Pending\n- Deliverable: command logs/results showing bounded reconnect and no permanent playback halt.",
+        "steps": [
+          {
+            "status": "pending",
+            "deliverable": "Provision deterministic E2E runtime",
+            "acceptance_criteria": [
+              "Complete deliverable: Provision deterministic E2E runtime"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Execute frontend predeploy Listen Together suite in HA runtime",
+            "acceptance_criteria": [
+              "Complete deliverable: Execute frontend predeploy Listen Together suite in HA runtime"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md",
+              "frontend/tests/e2e/predeploy/listen-together.spec.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Add rolling-update continuity scenario to frontend E2E",
+            "acceptance_criteria": [
+              "Complete deliverable: Add rolling-update continuity scenario to frontend E2E"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Record operational acceptance evidence",
+            "acceptance_criteria": [
+              "Complete deliverable: Record operational acceptance evidence"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.json",
+              ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "UNCONFIRMED: explicit goal/purpose section not found in PLAN.md.",
+        "non_goals": "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      },
+      "plan_md_sync": {
+        "source_plan_md": ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md",
+        "synced_at": "2026-02-24T17:23:03.694Z",
+        "steps_generated": 4,
+        "task_heading_count": 4,
+        "gap_notes": [
+          "Missing explicit Goal/Purpose section.",
+          "Missing explicit Non-Goals/Out of Scope section.",
+          "Missing Spec Outline section.",
+          "Missing Refined Spec section.",
+          "Task \"Task F1: Provision deterministic E2E runtime\" had no deliverable list; used heading title.",
+          "Task \"Task F2: Execute frontend predeploy Listen Together suite in HA runtime\" had no deliverable list; used heading title.",
+          "Task \"Task F3: Add rolling-update continuity scenario to frontend E2E\" had no deliverable list; used heading title.",
+          "Task \"Task F4: Record operational acceptance evidence\" had no deliverable list; used heading title."
+        ]
+      },
+      "plan_md_context": {
+        "source_plan_md": ".agents/plans/deferred/frontend-ha-e2e-live-validation/PLAN.md",
+        "synced_at": "2026-02-24T17:26:42.906Z",
+        "markdown_sha256": "a39c1161c138cc9d158647199025b9e9e2b5cc978a5c7a0a9667f63e248db0ed",
+        "sections": [
+          {
+            "heading": "# Plan - Frontend HA E2E Live Validation",
+            "content": "## Document Status\n\n- Last updated: 2026-02-17\n- Track: Deferred follow-up for frontend live E2E validation after HA/scalability implementation\n- Source feature: `backend-frontend-horizontal-scaling-rollout-resilience`\n- Status: Deferred\n\n## Why Deferred\n\n1. Current feature closure prioritized backend/runtime resiliency and non-disruptive live validation.\n2. Full frontend E2E continuity checks require a reachable backend/API test environment and/or controlled live rollout windows.\n3. In the current local run, frontend predeploy E2E spec execution was environment-blocked by backend unavailability (`ECONNREFUSED 127.0.0.1:3006`).\n\n## Scope\n\n1. Validate frontend Listen Together continuity during backend/frontend rolling updates.\n2. Validate user-facing recovery behavior without hard refresh for host and guest flows.\n3. Validate websocket/socket probe routing behavior under rollout and pod replacement events.\n\n## Deferred Tasks\n\n### Task F1: Provision deterministic E2E runtime\n- Status: Pending\n- Deliverable: reproducible frontend+backend test runtime for Playwright predeploy suite.\n- Notes: ensure `LIDIFY_UI_BASE_URL`, test auth user, and backend API reachability are all available.\n\n### Task F2: Execute frontend predeploy Listen Together suite in HA runtime\n- Status: Pending\n- Deliverable: pass/fail evidence for `frontend/tests/e2e/predeploy/listen-together.spec.ts` under HA topology.\n\n### Task F3: Add rolling-update continuity scenario to frontend E2E\n- Status: Pending\n- Deliverable: explicit frontend continuity assertion for host+guest playback state during backend/frontend restarts.\n\n### Task F4: Record operational acceptance evidence\n- Status: Pending\n- Deliverable: command logs/results showing bounded reconnect and no permanent playback halt.\n\n## Exit Criteria\n\n1. Frontend Listen Together predeploy suite passes in HA-capable runtime.\n2. Rolling update continuity checks for host and guest pass without requiring full page reload.\n3. Evidence is captured in plan/handoff notes and linked from relevant docs/runbook."
+          },
+          {
+            "heading": "## Document Status",
+            "content": "- Last updated: 2026-02-17\n- Track: Deferred follow-up for frontend live E2E validation after HA/scalability implementation\n- Source feature: `backend-frontend-horizontal-scaling-rollout-resilience`\n- Status: Deferred"
+          },
+          {
+            "heading": "## Why Deferred",
+            "content": "1. Current feature closure prioritized backend/runtime resiliency and non-disruptive live validation.\n2. Full frontend E2E continuity checks require a reachable backend/API test environment and/or controlled live rollout windows.\n3. In the current local run, frontend predeploy E2E spec execution was environment-blocked by backend unavailability (`ECONNREFUSED 127.0.0.1:3006`)."
+          },
+          {
+            "heading": "## Scope",
+            "content": "1. Validate frontend Listen Together continuity during backend/frontend rolling updates.\n2. Validate user-facing recovery behavior without hard refresh for host and guest flows.\n3. Validate websocket/socket probe routing behavior under rollout and pod replacement events."
+          },
+          {
+            "heading": "## Deferred Tasks",
+            "content": "### Task F1: Provision deterministic E2E runtime\n- Status: Pending\n- Deliverable: reproducible frontend+backend test runtime for Playwright predeploy suite.\n- Notes: ensure `LIDIFY_UI_BASE_URL`, test auth user, and backend API reachability are all available.\n\n### Task F2: Execute frontend predeploy Listen Together suite in HA runtime\n- Status: Pending\n- Deliverable: pass/fail evidence for `frontend/tests/e2e/predeploy/listen-together.spec.ts` under HA topology.\n\n### Task F3: Add rolling-update continuity scenario to frontend E2E\n- Status: Pending\n- Deliverable: explicit frontend continuity assertion for host+guest playback state during backend/frontend restarts.\n\n### Task F4: Record operational acceptance evidence\n- Status: Pending\n- Deliverable: command logs/results showing bounded reconnect and no permanent playback halt."
+          },
+          {
+            "heading": "### Task F1: Provision deterministic E2E runtime",
+            "content": "- Status: Pending\n- Deliverable: reproducible frontend+backend test runtime for Playwright predeploy suite.\n- Notes: ensure `LIDIFY_UI_BASE_URL`, test auth user, and backend API reachability are all available."
+          },
+          {
+            "heading": "### Task F2: Execute frontend predeploy Listen Together suite in HA runtime",
+            "content": "- Status: Pending\n- Deliverable: pass/fail evidence for `frontend/tests/e2e/predeploy/listen-together.spec.ts` under HA topology."
+          },
+          {
+            "heading": "### Task F3: Add rolling-update continuity scenario to frontend E2E",
+            "content": "- Status: Pending\n- Deliverable: explicit frontend continuity assertion for host+guest playback state during backend/frontend restarts."
+          },
+          {
+            "heading": "### Task F4: Record operational acceptance evidence",
+            "content": "- Status: Pending\n- Deliverable: command logs/results showing bounded reconnect and no permanent playback halt."
+          },
+          {
+            "heading": "## Exit Criteria",
+            "content": "1. Frontend Listen Together predeploy suite passes in HA-capable runtime.\n2. Rolling update continuity checks for host and guest pass without requiring full page reload.\n3. Evidence is captured in plan/handoff notes and linked from relevant docs/runbook."
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    }
+  }
+}

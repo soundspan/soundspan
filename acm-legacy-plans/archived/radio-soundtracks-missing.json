@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "feature_id": "radio-soundtracks-missing",
+  "feature_title": "Radio Soundtracks Station Visibility Regression",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/radio-soundtracks-missing.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/radio-soundtracks-missing/PLAN.json",
+    "plan_dir": ".agents/plans/archived/radio-soundtracks-missing",
+    "status": "complete",
+    "updated_at": "2026-03-03T00:40:08.199Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.radio-soundtracks-missing.6a97de2489",
+    "plan_key": "plan:legacy.archived.radio-soundtracks-missing.6a97de2489",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Radio Soundtracks Station Visibility Regression",
+      "objective": "Restore expected Radio station visibility so users can reliably access the Soundtracks station when their library contains enough soundtrack tracks.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Make the Soundtracks station render when qualifying data exists",
+        "Radio station list includes Soundtracks again in expected conditions"
+      ],
+      "out_of_scope": [
+        "Do not redesign the Radio screen, do not change unrelated station ordering, and do not alter backend radio queue generation rules unless required for this specific visibility bug."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/radio-soundtracks-missing.json",
+        ".agents/plans/archived/radio-soundtracks-missing/PLAN.json",
+        "frontend/features/home/components/LibraryRadioStations.tsx",
+        "frontend/tests/component/homePage.component.test.ts",
+        "backend/src/routes/library.ts"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.add-regression-test-and-implement-soundtracks-station-visibility-fix-in-radio-station-source-filter-path",
+        "summary": "Add regression test and implement Soundtracks station visibility fix in radio station source/filter path",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Test fails before the fix",
+          "Test passes after the fix",
+          "No new lint/type errors introduced in touched files"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/radio-soundtracks-missing.json",
+          "frontend/tests/component/homePage.component.test.ts",
+          "frontend/features/home/components/LibraryRadioStations.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Pinned qualifying soundtrack genres into the featured radio genre set so Soundtracks remains visible when over threshold. | Extracted genre-selection logic into a reusable utility used by LibraryRadioStations.",
+        "evidence": [
+          "verify: cd frontend && node --test --experimental-strip-types tests/unit/libraryRadioStationsGenreSelection.test.ts",
+          "verify: cd frontend && npx eslint features/home/components/LibraryRadioStations.tsx features/home/components/libraryRadioStationsGenreSelection.ts tests/unit/libraryRadioStationsGenreSelection.test.ts"
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "radio-soundtracks-missing",
+    "feature_title": "Radio Soundtracks Station Visibility Regression",
+    "plan_ref": ".agents/plans/archived/radio-soundtracks-missing/PLAN.json",
+    "status": "complete",
+    "updated_at": "2026-03-03T00:40:08.199Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Restore expected Radio station visibility so users can reliably access the Soundtracks station when their library contains enough soundtrack tracks.",
+        "non_goals": "Do not redesign the Radio screen, do not change unrelated station ordering, and do not alter backend radio queue generation rules unless required for this specific visibility bug."
+      },
+      "spec_outline": {
+        "summary": "Investigate and fix the regression that removed Soundtracks from Radio station cards while preserving existing station gating behavior and user expectations.",
+        "full_spec_outline": [
+          {
+            "id": "soundtracks-visibility",
+            "objective": "Make the Soundtracks station render when qualifying data exists",
+            "deliverable": "Radio station list includes Soundtracks again in expected conditions",
+            "acceptance_criteria": [
+              "Soundtracks station appears when the source track count threshold is met",
+              "No unrelated stations disappear as a side effect",
+              "Regression coverage captures the station filtering behavior"
+            ],
+            "references": [
+              "frontend/features/home/components/LibraryRadioStations.tsx",
+              "frontend/tests/component/homePage.component.test.ts",
+              "backend/src/routes/library.ts"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Primary hypothesis is frontend filtering or station configuration drift. Confirm source of truth and add focused tests before final implementation.",
+        "full_refined_spec": [
+          {
+            "id": "visibility-contract",
+            "decision": "Enforce explicit inclusion contract for Soundtracks in station definitions and filtering logic",
+            "rationale": "The issue is a user-facing regression on station discoverability, so a stable inclusion contract plus targeted tests prevents repeat breakage.",
+            "acceptance_criteria": [
+              "A failing test first reproduces missing Soundtracks",
+              "Implementation restores Soundtracks visibility",
+              "Updated tests pass in targeted run"
+            ],
+            "references": [
+              "frontend/features/home/components/LibraryRadioStations.tsx",
+              "frontend/tests/component/homePage.component.test.ts"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "1) Add failing test for Soundtracks visibility, 2) patch station filtering/configuration, 3) run targeted verification.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Add regression test and implement Soundtracks station visibility fix in radio station source/filter path",
+            "acceptance_criteria": [
+              "Test fails before the fix",
+              "Test passes after the fix",
+              "No new lint/type errors introduced in touched files"
+            ],
+            "references": [
+              "frontend/tests/component/homePage.component.test.ts",
+              "frontend/features/home/components/LibraryRadioStations.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Pinned qualifying soundtrack genres into the featured radio genre set so Soundtracks remains visible when over threshold.",
+                "Extracted genre-selection logic into a reusable utility used by LibraryRadioStations."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/features/home/components/libraryRadioStationsGenreSelection.ts:selectFeaturedRadioGenres",
+                "frontend/features/home/components/LibraryRadioStations.tsx"
+              ],
+              "verification_testing": [
+                "verify: cd frontend && node --test --experimental-strip-types tests/unit/libraryRadioStationsGenreSelection.test.ts",
+                "verify: cd frontend && npx eslint features/home/components/LibraryRadioStations.tsx features/home/components/libraryRadioStationsGenreSelection.ts tests/unit/libraryRadioStationsGenreSelection.test.ts"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "recommended",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": "codex"
+    }
+  }
+}

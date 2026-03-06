@@ -151,18 +151,21 @@ Recommended rollout:
 3. Make visibility workflow blocking.
 4. Add required status checks in branch protection for release branches/tags.
 
-## Policy as Code (Fail-Fast Governance)
+## ACM Repo Contract
 
-Agent/process governance is validated by executable checks, not prose alone.
+Repository workflow and verification now run through ACM rather than the legacy agents-template toolchain.
 
-- Policy manifest: `.agents-config/policies/agent-governance.json`
-- Runner: `.agents-config/scripts/enforce-agent-policies.mjs`
-- PR gate: `.github/workflows/pr-checks.yml` (`policy-as-code` job)
+- Repo contract: `AGENTS.md`
+- ACM rules: `.acm/acm-rules.yaml`
+- ACM tests: `.acm/acm-tests.yaml`
+- PR gate: `.github/workflows/pr-checks.yml` (`acm-health` job)
 
 Run locally before pushing:
 
 ```bash
-npm run policy:check
+acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
+acm verify --project soundspan --phase review --file-changed <path>
+acm health --project soundspan --include-details
 ```
 
 ## Pull Request Process

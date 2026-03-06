@@ -1,0 +1,740 @@
+{
+  "version": 1,
+  "feature_id": "openrouter-ai-recommendation-long-term-review",
+  "feature_title": "Plan - OpenRouter AI Recommendation Long-Term Review",
+  "track": "current",
+  "export_path": "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+  "legacy": {
+    "plan_path": ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+    "plan_dir": ".agents/plans/current/openrouter-ai-recommendation-long-term-review",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/current/openrouter-ai-recommendation-long-term-review/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# Handoff - OpenRouter AI Recommendation Long-Term Review\n## Feature\n- OpenRouter AI recommendation long-term review (`PLAN.md`)\n\n## Current State\n- Extracted from fjordnode umbrella remaining scope (`Bundle D`, former Phase 4).\n- Planning only; no implementation started.\n- Phase 0 completed on 2026-02-15 via live contract re-audit and explicit regression matrix definition.\n\n## 2026-02-15 Contract Audit Highlights\n1. Discover generation does not currently use OpenAI service; it is Last.fm/Lidarr/queue driven.\n2. `backend/src/services/openai.ts` is currently present but not actively wired to runtime recommendation routes.\n3. No OpenRouter surfaces exist yet (service, endpoints, or settings fields).\n4. No artist AI chat route exists yet (`/api/artists/ai-chat/:artistId` pending).\n5. Settings UI currently exposes artwork-oriented controls (Fanart/Last.fm), with OpenAI references in hooks/types/API.\n6. Product direction updated: do not expose user-facing chat UI for similar-artist recommendations; implement one-click results flow instead.\n\n## Anti-Staleness Guardrails\n1. Re-read plan + handoff + prompt history before proposing code changes.\n2. Re-validate settings/route assumptions against current code at each phase boundary.\n3. Record regression-impact test IDs before coding each atomic task.\n4. Capture backend-direct + frontend-proxy probe evidence for externally reachable changes.\n5. Update stale plan links immediately when files move.\n\n## Next Actions\n1. Start Phase 1 (`Task 1.1`) provider abstraction contract + adapters.\n2. Implement OpenRouter runtime (`Task 1.2`) with normalized timeout/error mapping.\n3. Perform settings bridge work (`Task 1.3`) before artist-route/frontend integration.\n4. Use `OR-*` regression IDs from plan as non-optional gate in Phase 4.\n5. Implement artist AI as `/artists/ai-similar` + non-chat UI only; keep chat route out of scope unless product direction changes.\n"
+      },
+      {
+        "path": ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - OpenRouter AI Recommendation Long-Term Review\n\n## Document Status\n\n- Last updated: 2026-02-15\n- Feature: Bundle D extraction from fjordnode umbrella (`AI recommendation stack`)\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` (Phase 4 extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)\n\n## Why This Was Split Out\n\nThe former umbrella contained multiple independent workstreams. Bundle D has cross-cutting API/settings/UI impact and is safer to execute as a standalone track with explicit regression controls.\n\n## Goal\n\nDeliver provider-safe AI recommendation surfaces (OpenRouter + existing fallback paths) without breaking current OpenAI/local behavior or frontend contract stability.\n\n## Staleness and Rework Prevention Protocol (Mandatory)\n\n1. Run a re-context checkpoint at session start and before each atomic task:\n- read this plan, `HANDOFF.md`, and `PROMPT_HISTORY.md` in full,\n- check `git status` and latest touched files for impacted surfaces.\n2. Maintain a living dependency check at each phase boundary:\n- verify current settings schema/API fields and route contracts still match planned assumptions,\n- update this plan immediately if assumptions drift.\n3. Maintain regression-first execution:\n- add targeted error-path contract tests for each new/changed endpoint,\n- record backend-direct and frontend-proxied probe evidence for externally reachable paths.\n4. Prevent stale references:\n- run plan-link checks at session start and before handoff,\n- update inbound references when files are moved/archived.\n5. Prevent quiet rework:\n- before coding, record whether each touched surface is `Reuse`, `Adapt`, or `New`,\n- after each task, record what was actually changed and why prior behavior remains safe.\n\n## Full-Stack Request Path Baseline\n\n1. Client URL/base path:\n- Settings and recommendation UIs via frontend `/api/*` proxies.\n2. Frontend proxy behavior:\n- all calls must route through `frontend/lib/api.ts`.\n3. Backend path candidates:\n- `backend/src/routes/systemSettings.ts`\n- `backend/src/routes/recommendations.ts`\n- `backend/src/routes/artists.ts`\n- `backend/src/routes/discover.ts`\n4. Service/config candidates:\n- `backend/src/services/openai.ts`\n- `backend/src/services/openrouter.ts` (planned)\n- `backend/src/config.ts`\n5. Downstream dependencies:\n- OpenAI/OpenRouter external APIs\n- PostgreSQL (`SystemSettings`)\n6. Deployment modes to validate:\n- `docker-compose.aio.yml`\n- `docker-compose.yml`\n- local host-run (`docker-compose.local.yml` + host frontend/backend)\n\n## 2026-02-15 Reality Check (De-Stale Snapshot)\n\n1. Current AI/provider state:\n- OpenAI settings fields exist in DB/API/UI (`openaiEnabled`, `openaiApiKey`, `openaiModel`, `openaiBaseUrl`).\n- `backend/src/services/openai.ts` exists but currently has no call sites; it is not driving active recommendation routes.\n- No OpenRouter service/routes/settings surfaces exist yet.\n2. Current recommendation/discovery behavior:\n- `backend/src/routes/recommendations.ts` is Last.fm/DB/fuzzy-match based (no LLM path).\n- `backend/src/routes/discover.ts` generation flow is queue + Last.fm/Lidarr pipeline (no OpenAI/OpenRouter dependency).\n- There is no `/api/artists/ai-chat/:artistId` endpoint at present.\n3. Current frontend state:\n- Settings currently expose Artwork services (`AIServicesSection`) for Fanart/Last.fm only.\n- System settings hooks/types/API client still reference OpenAI test/settings paths.\n- Artist page integration point is `frontend/features/artist/components/ArtistActionBar.tsx` and `frontend/app/artist/[id]/page.tsx`.\n4. Scope impact from this snapshot:\n- The migration is additive/new-feature work, not a direct replacement of currently-used OpenAI runtime logic in discover/recommendations.\n- Contract risk is highest in settings schema/API compatibility and new artist-chat route behavior.\n5. Product direction update (2026-02-15):\n- No user-facing conversational chat UI should be introduced for this feature.\n- AI similar-artist UX must be one-click retrieval (button -> results list/panel), not chat input/history.\n\n## Spec Outline\n\n1. Add provider abstraction for recommendation/chat workloads.\n2. Add OpenRouter service adapter with strict parsing, timeouts, and retries.\n3. Extend settings APIs for provider status/model/test controls.\n4. Add guarded AI route surfaces (artist chat + AI weekly + discover parity).\n5. Wire frontend controls/surfaces through centralized API client.\n6. Add fallback/regression coverage and full-stack probes.\n\n## Refined Spec\n\n### Constraints\n\n1. Preserve current route payload shapes for existing consumers.\n2. Do not remove existing fallback behavior while introducing new provider.\n3. Keep provider selection operator-visible and reversible.\n4. Any new settings fields must be backward compatible.\n5. Treat provider failures as expected runtime conditions (not exceptional-only paths).\n6. No user-facing chat interaction for similar-artist recommendations.\n\n### Acceptance Criteria\n\n1. Provider status/model/test surfaces are operational.\n2. One-click similar-artist AI retrieval works with deterministic fallback behavior.\n3. Route contracts remain stable under timeout/error conditions.\n4. Backend-direct and frontend-base probes succeed for all shipped endpoints.\n5. No chat input/history bubble UI is exposed to users for this feature.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\n## Phase 0: Re-Context and Contract Freeze\n\n### Task 0.1: Freeze current contracts and fallback semantics\n- Status: Complete\n- Deliverable: baseline route/status/settings contract notes and fallback expectations.\n- Completion summary:\n  - Re-context complete against live code paths in `backend/src/routes/systemSettings.ts`, `backend/src/routes/recommendations.ts`, `backend/src/routes/discover.ts`, `backend/src/routes/artists.ts`, `backend/src/services/openai.ts`, `frontend/lib/api.ts`, `frontend/features/settings/types.ts`, `frontend/features/settings/hooks/useSystemSettings.ts`, `frontend/app/settings/page.tsx`, and `frontend/features/settings/components/sections/AIServicesSection.tsx`.\n  - Confirmed no active AI route for artist chat and no OpenRouter surfaces yet.\n  - Confirmed discover generation path is not currently OpenAI-dependent.\n  - Verification: static route/client contract inspection only (no runtime command execution required for this freeze step).\n\n### Task 0.2: Define test matrix and failure injections\n- Status: Complete\n- Deliverable: explicit test IDs for timeout, malformed payload, provider-down, and fallback correctness.\n- Completion summary:\n  - Defined initial regression matrix IDs (to be implemented in Phase 4):\n    - `OR-A1`: settings provider status endpoint returns configured/unconfigured contract-safe payload.\n    - `OR-A2`: provider test endpoint success path with valid model.\n    - `OR-A3`: provider test endpoint timeout/downstream failure maps to stable `{ error }` response.\n    - `OR-B1`: artist AI chat returns schema-valid recommendations with model echo.\n    - `OR-B2`: artist AI chat malformed provider payload returns deterministic fallback/error envelope.\n    - `OR-B3`: artist AI chat provider down/429 path degrades without crashing route.\n    - `OR-C1`: discover/weekly parity path remains unchanged when AI provider is disabled.\n    - `OR-C2`: provider-enabled path does not regress existing non-AI recommendation routes.\n    - `OR-FS1`: frontend `/api/*` proxy calls for new provider endpoints resolve correctly.\n    - `OR-FS2`: backend-direct endpoint probes for new provider endpoints resolve correctly.\n  - Verification: matrix documented and mapped to planned phases; implementation pending.\n\n## Reuse/Consolidation Check (2026-02-15)\n\n- Reused patterns:\n  - Backend system settings route/test pattern in `backend/src/routes/systemSettings.ts`.\n  - Frontend API boundary in `frontend/lib/api.ts`.\n  - Frontend settings state pattern in `frontend/features/settings/hooks/useSystemSettings.ts`.\n  - Artist page action-bar insertion pattern in `frontend/features/artist/components/ArtistActionBar.tsx`.\n- Duplication intentionally kept:\n  - Existing OpenAI settings fields remain during planning; rename/cutover deferred to dedicated migration step to avoid breaking current settings reads.\n- Consolidation deferred:\n  - Provider abstraction shared across any future LLM consumers (discover/other assistants) will be designed in Phase 1 before adding multiple ad-hoc clients.\n\n## Phase 1: Backend Provider Foundation\n\n### Task 1.1: Provider abstraction contract and adapters\n- Status: Pending\n- Deliverable: provider interface + OpenAI/OpenRouter adapter wiring.\n\n### Task 1.2: OpenRouter service implementation\n- Status: Pending\n- Deliverable: strict parser, bounded retries/timeouts, normalized error mapping.\n\n### Task 1.3: Settings API surface extension\n- Status: Pending\n- Deliverable: provider status/model/test endpoints and persisted controls.\n\n## Proposed Execution Slices (Post-Phase-0)\n\n1. Slice S1: Provider Contract Scaffold\n- Add provider interface + OpenAI adapter wrap + OpenRouter adapter skeleton in backend service layer.\n- No route behavior change yet; compile-only safety.\n2. Slice S2: OpenRouter Runtime + Error Normalization\n- Implement OpenRouter chat/models/status helpers with strict parsing, timeout, retry bounds, and normalized errors.\n3. Slice S3: Settings Schema/API Bridge (compat-first)\n- Introduce OpenRouter fields/endpoints while preserving existing OpenAI fields for transition compatibility.\n- Add migration + read/write bridge logic so old settings do not hard-break.\n4. Slice S4: Artist AI Chat Route + Redis Conversation State\n- Add `/api/artists/ai-similar/:artistId` with deterministic response envelope and Redis result caching (no conversation state).\n5. Slice S5: Frontend Settings/UI Integration\n- Add provider enable/model picker/test flows in settings UI and `frontend/lib/api.ts`.\n- Keep existing Artwork section behavior intact.\n6. Slice S6: Artist Page UX Integration\n- Add action trigger on artist page and non-chat recommendations surface (panel/list), regenerate/model label, safe navigation to discovery search.\n7. Slice S7: Regression + Full-Stack Verification\n- Implement `OR-*` tests; run backend-direct and frontend-proxy probes.\n8. Slice S8: Docs + Closeout\n- Update `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md`; capture operator setup instructions.\n\n## Phase 2: Route Surface Integration\n\n### Task 2.1: AI weekly + one-shot similar-artist integration\n- Status: Pending\n- Deliverable: guarded routes with deterministic fallback (chat route omitted by product decision).\n\n### Task 2.2: Discover route parity integration\n- Status: Pending\n- Deliverable: provider-aware discover behavior with contract-safe output.\n\n## Phase 3: Frontend Wiring\n\n### Task 3.1: Settings and controls integration\n- Status: Pending\n- Deliverable: frontend settings UI + API methods for provider management.\n\n### Task 3.2: AI weekly/artist surfaces integration\n- Status: Pending\n- Deliverable: frontend one-click similar-artist usage paths wired via `frontend/lib/api.ts` (no chat controls).\n\n## Phase 4: Verification and Hardening\n\n### Task 4.1: Regression/fallback test suite\n- Status: Pending\n- Deliverable: backend route tests covering success + failure contracts.\n\n### Task 4.2: Full-stack verification checkpoint\n- Status: Pending\n- Deliverable: backend-direct and frontend-proxy evidence for shipped endpoints.\n\n## Phase 5: Docs and Operational Closeout\n\n### Task 5.1: Sync docs for shipped behavior\n- Status: Pending\n- Deliverable: `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md` updates.\n"
+      },
+      {
+        "path": ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-14 Session Prompt History (Feature Extraction Bootstrap)\n1. This plan was created by extracting remaining Bundle D scope from the archived fjordnode umbrella plan.\n2. Scope was narrowed to standalone OpenRouter/provider integration work to reduce cross-bundle coordination overhead.\n3. Anti-staleness and regression-aversion guardrails were added at creation time to prevent drift and rework.\n\n## 2026-02-15 Session Prompt History (Reality Check + Replan)\n1. User requested a raw comparison of fjord OpenRouter AI recommendations versus this fork and asked to continue with plan review.\n2. Agent performed full contract audit of backend/frontend surfaces named in the plan and corrected stale assumptions.\n3. Plan was updated to mark Phase 0 complete, capture discover-not-OpenAI reality, add explicit `OR-*` regression IDs, and define concrete execution slices `S1..S8`.\n4. User set a hard UX direction: no user-facing chat implementation; AI similar artists must be one-click retrieval of results.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.current.openrouter-ai-recommendation-long-term-review.6c51d3661b",
+    "plan_key": "plan:legacy.current.openrouter-ai-recommendation-long-term-review.6c51d3661b",
+    "final_db_status": "pending",
+    "plan": {
+      "title": "Plan - OpenRouter AI Recommendation Long-Term Review",
+      "objective": "Deliver provider-safe AI recommendation surfaces (OpenRouter + existing fallback paths) without breaking current OpenAI/local behavior or frontend contract stability.",
+      "kind": "legacy_current",
+      "status": "pending",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Add provider abstraction for recommendation/chat workloads.",
+        "2. Add OpenRouter service adapter with strict parsing, timeouts, and retries.",
+        "3. Extend settings APIs for provider status/model/test controls.",
+        "4. Add guarded AI route surfaces (artist chat + AI weekly + discover parity).",
+        "5. Wire frontend controls/surfaces through centralized API client.",
+        "6. Add fallback/regression coverage and full-stack probes."
+      ],
+      "out_of_scope": [
+        "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+        ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+        ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+        "backend/src/routes/artists.ts",
+        "backend/src/routes/discover.ts",
+        "backend/src/routes/recommendations.ts",
+        "backend/src/routes/systemSettings.ts",
+        "backend/src/services/openai.ts",
+        "frontend/app/settings/page.tsx",
+        "frontend/features/settings/components/sections/AIServicesSection.tsx",
+        "frontend/features/settings/hooks/useSystemSettings.ts",
+        "frontend/features/settings/types.ts",
+        "frontend/lib/api.ts",
+        "CHANGELOG.md",
+        "docs/FORK_DIFF_COMMITS.md",
+        "docs/FORK_DIFF.md",
+        "README.md",
+        ".agents/plans/current/openrouter-ai-recommendation-long-term-review/HANDOFF.md",
+        ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/current/openrouter-ai-recommendation-long-term-review/HANDOFF.md",
+        ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+        ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.freeze-current-contracts-and-fallback-semantics",
+        "summary": "Freeze current contracts and fallback semantics",
+        "status": "complete",
+        "acceptance_criteria": [
+          "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+          "backend/src/routes/artists.ts",
+          "backend/src/routes/discover.ts",
+          "backend/src/routes/recommendations.ts",
+          "backend/src/routes/systemSettings.ts",
+          "backend/src/services/openai.ts",
+          "frontend/app/settings/page.tsx",
+          "frontend/features/settings/components/sections/AIServicesSection.tsx",
+          "frontend/features/settings/hooks/useSystemSettings.ts",
+          "frontend/features/settings/types.ts",
+          "frontend/lib/api.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Freeze current contracts and fallback semantics",
+        "evidence": [
+          "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+        ]
+      },
+      {
+        "key": "task.02.define-test-matrix-and-failure-injections",
+        "summary": "Define test matrix and failure injections",
+        "status": "complete",
+        "acceptance_criteria": [
+          "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "Define test matrix and failure injections",
+        "evidence": [
+          "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+        ]
+      },
+      {
+        "key": "task.03.provider-abstraction-contract-and-adapters",
+        "summary": "Provider abstraction contract and adapters",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Provider abstraction contract and adapters"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.04.openrouter-service-implementation",
+        "summary": "OpenRouter service implementation",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: OpenRouter service implementation"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.05.settings-api-surface-extension",
+        "summary": "Settings API surface extension",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Settings API surface extension"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.06.ai-weekly-one-shot-similar-artist-integration",
+        "summary": "AI weekly + one-shot similar-artist integration",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: AI weekly + one-shot similar-artist integration"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.07.discover-route-parity-integration",
+        "summary": "Discover route parity integration",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Discover route parity integration"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.08.settings-and-controls-integration",
+        "summary": "Settings and controls integration",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Settings and controls integration"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.09.ai-weekly-artist-surfaces-integration",
+        "summary": "AI weekly/artist surfaces integration",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: AI weekly/artist surfaces integration"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+          "frontend/lib/api.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.10.regression-fallback-test-suite",
+        "summary": "Regression/fallback test suite",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Regression/fallback test suite"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.11.full-stack-verification-checkpoint",
+        "summary": "Full-stack verification checkpoint",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Full-stack verification checkpoint"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.12.sync-docs-for-shipped-behavior",
+        "summary": "Sync docs for shipped behavior",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Complete deliverable: Sync docs for shipped behavior"
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+          ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+          "CHANGELOG.md",
+          "docs/FORK_DIFF_COMMITS.md",
+          "docs/FORK_DIFF.md",
+          "README.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/current/openrouter-ai-recommendation-long-term-review.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "openrouter-ai-recommendation-long-term-review",
+    "feature_title": "Plan - OpenRouter AI Recommendation Long-Term Review",
+    "plan_ref": ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+    "status": "ready",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Add provider abstraction for recommendation/chat workloads.\n2. Add OpenRouter service adapter with strict parsing, timeouts, and retries.\n3. Extend settings APIs for provider status/model/test controls.\n4. Add guarded AI route surfaces (artist chat + AI weekly + discover parity).\n5. Wire frontend controls/surfaces through centralized API client.\n6. Add fallback/regression coverage and full-stack probes.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "### Constraints\n\n1. Preserve current route payload shapes for existing consumers.\n2. Do not remove existing fallback behavior while introducing new provider.\n3. Keep provider selection operator-visible and reversible.\n4. Any new settings fields must be backward compatible.\n5. Treat provider failures as expected runtime conditions (not exceptional-only paths).\n6. No user-facing chat interaction for similar-artist recommendations.\n\n### Acceptance Criteria\n\n1. Provider status/model/test surfaces are operational.\n2. One-click similar-artist AI retrieval works with deterministic fallback behavior.\n3. Route contracts remain stable under timeout/error conditions.\n4. Backend-direct and frontend-base probes succeed for all shipped endpoints.\n5. No chat input/history bubble UI is exposed to users for this feature.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Freeze current contracts and fallback semantics",
+            "acceptance_criteria": [
+              "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+              "backend/src/routes/artists.ts",
+              "backend/src/routes/discover.ts",
+              "backend/src/routes/recommendations.ts",
+              "backend/src/routes/systemSettings.ts",
+              "backend/src/services/openai.ts",
+              "frontend/app/settings/page.tsx",
+              "frontend/features/settings/components/sections/AIServicesSection.tsx",
+              "frontend/features/settings/hooks/useSystemSettings.ts",
+              "frontend/features/settings/types.ts",
+              "frontend/lib/api.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Freeze current contracts and fallback semantics"
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+                ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+                "backend/src/routes/artists.ts",
+                "backend/src/routes/discover.ts",
+                "backend/src/routes/recommendations.ts",
+                "backend/src/routes/systemSettings.ts",
+                "backend/src/services/openai.ts",
+                "frontend/app/settings/page.tsx",
+                "frontend/features/settings/components/sections/AIServicesSection.tsx",
+                "frontend/features/settings/hooks/useSystemSettings.ts",
+                "frontend/features/settings/types.ts",
+                "frontend/lib/api.ts"
+              ],
+              "verification_testing": [
+                "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Define test matrix and failure injections",
+            "acceptance_criteria": [
+              "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Define test matrix and failure injections"
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+                ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+              ],
+              "verification_testing": [
+                "UNCONFIRMED: explicit verification not specified in PLAN.md block."
+              ]
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Provider abstraction contract and adapters",
+            "acceptance_criteria": [
+              "Complete deliverable: Provider abstraction contract and adapters"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "OpenRouter service implementation",
+            "acceptance_criteria": [
+              "Complete deliverable: OpenRouter service implementation"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Settings API surface extension",
+            "acceptance_criteria": [
+              "Complete deliverable: Settings API surface extension"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "AI weekly + one-shot similar-artist integration",
+            "acceptance_criteria": [
+              "Complete deliverable: AI weekly + one-shot similar-artist integration"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Discover route parity integration",
+            "acceptance_criteria": [
+              "Complete deliverable: Discover route parity integration"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Settings and controls integration",
+            "acceptance_criteria": [
+              "Complete deliverable: Settings and controls integration"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "AI weekly/artist surfaces integration",
+            "acceptance_criteria": [
+              "Complete deliverable: AI weekly/artist surfaces integration"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+              "frontend/lib/api.ts"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Regression/fallback test suite",
+            "acceptance_criteria": [
+              "Complete deliverable: Regression/fallback test suite"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Full-stack verification checkpoint",
+            "acceptance_criteria": [
+              "Complete deliverable: Full-stack verification checkpoint"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Sync docs for shipped behavior",
+            "acceptance_criteria": [
+              "Complete deliverable: Sync docs for shipped behavior"
+            ],
+            "references": [
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.json",
+              ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+              "CHANGELOG.md",
+              "docs/FORK_DIFF_COMMITS.md",
+              "docs/FORK_DIFF.md",
+              "README.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Deliver provider-safe AI recommendation surfaces (OpenRouter + existing fallback paths) without breaking current OpenAI/local behavior or frontend contract stability.",
+        "non_goals": "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      },
+      "plan_md_sync": {
+        "source_plan_md": ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:23:03.691Z",
+        "steps_generated": 12,
+        "task_heading_count": 12,
+        "gap_notes": [
+          "Missing explicit Non-Goals/Out of Scope section.",
+          "Task \"Task 0.1: Freeze current contracts and fallback semantics\" had no deliverable list; used heading title.",
+          "Task \"Task 0.2: Define test matrix and failure injections\" had no deliverable list; used heading title.",
+          "Task \"Task 1.1: Provider abstraction contract and adapters\" had no deliverable list; used heading title.",
+          "Task \"Task 1.2: OpenRouter service implementation\" had no deliverable list; used heading title.",
+          "Task \"Task 1.3: Settings API surface extension\" had no deliverable list; used heading title.",
+          "Task \"Task 2.1: AI weekly + one-shot similar-artist integration\" had no deliverable list; used heading title.",
+          "Task \"Task 2.2: Discover route parity integration\" had no deliverable list; used heading title.",
+          "Task \"Task 3.1: Settings and controls integration\" had no deliverable list; used heading title.",
+          "Task \"Task 3.2: AI weekly/artist surfaces integration\" had no deliverable list; used heading title.",
+          "Task \"Task 4.1: Regression/fallback test suite\" had no deliverable list; used heading title.",
+          "Task \"Task 4.2: Full-stack verification checkpoint\" had no deliverable list; used heading title.",
+          "Task \"Task 5.1: Sync docs for shipped behavior\" had no deliverable list; used heading title."
+        ]
+      },
+      "plan_md_context": {
+        "source_plan_md": ".agents/plans/current/openrouter-ai-recommendation-long-term-review/PLAN.md",
+        "synced_at": "2026-02-24T17:26:42.904Z",
+        "markdown_sha256": "385e85312c1fd918215cddf4b9b8fd15288c8c8d61c7f1959936c9454d083d54",
+        "sections": [
+          {
+            "heading": "# Plan - OpenRouter AI Recommendation Long-Term Review",
+            "content": "## Document Status\n\n- Last updated: 2026-02-15\n- Feature: Bundle D extraction from fjordnode umbrella (`AI recommendation stack`)\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` (Phase 4 extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)\n\n## Why This Was Split Out\n\nThe former umbrella contained multiple independent workstreams. Bundle D has cross-cutting API/settings/UI impact and is safer to execute as a standalone track with explicit regression controls.\n\n## Goal\n\nDeliver provider-safe AI recommendation surfaces (OpenRouter + existing fallback paths) without breaking current OpenAI/local behavior or frontend contract stability.\n\n## Staleness and Rework Prevention Protocol (Mandatory)\n\n1. Run a re-context checkpoint at session start and before each atomic task:\n- read this plan, `HANDOFF.md`, and `PROMPT_HISTORY.md` in full,\n- check `git status` and latest touched files for impacted surfaces.\n2. Maintain a living dependency check at each phase boundary:\n- verify current settings schema/API fields and route contracts still match planned assumptions,\n- update this plan immediately if assumptions drift.\n3. Maintain regression-first execution:\n- add targeted error-path contract tests for each new/changed endpoint,\n- record backend-direct and frontend-proxied probe evidence for externally reachable paths.\n4. Prevent stale references:\n- run plan-link checks at session start and before handoff,\n- update inbound references when files are moved/archived.\n5. Prevent quiet rework:\n- before coding, record whether each touched surface is `Reuse`, `Adapt`, or `New`,\n- after each task, record what was actually changed and why prior behavior remains safe.\n\n## Full-Stack Request Path Baseline\n\n1. Client URL/base path:\n- Settings and recommendation UIs via frontend `/api/*` proxies.\n2. Frontend proxy behavior:\n- all calls must route through `frontend/lib/api.ts`.\n3. Backend path candidates:\n- `backend/src/routes/systemSettings.ts`\n- `backend/src/routes/recommendations.ts`\n- `backend/src/routes/artists.ts`\n- `backend/src/routes/discover.ts`\n4. Service/config candidates:\n- `backend/src/services/openai.ts`\n- `backend/src/services/openrouter.ts` (planned)\n- `backend/src/config.ts`\n5. Downstream dependencies:\n- OpenAI/OpenRouter external APIs\n- PostgreSQL (`SystemSettings`)\n6. Deployment modes to validate:\n- `docker-compose.aio.yml`\n- `docker-compose.yml`\n- local host-run (`docker-compose.local.yml` + host frontend/backend)\n\n## 2026-02-15 Reality Check (De-Stale Snapshot)\n\n1. Current AI/provider state:\n- OpenAI settings fields exist in DB/API/UI (`openaiEnabled`, `openaiApiKey`, `openaiModel`, `openaiBaseUrl`).\n- `backend/src/services/openai.ts` exists but currently has no call sites; it is not driving active recommendation routes.\n- No OpenRouter service/routes/settings surfaces exist yet.\n2. Current recommendation/discovery behavior:\n- `backend/src/routes/recommendations.ts` is Last.fm/DB/fuzzy-match based (no LLM path).\n- `backend/src/routes/discover.ts` generation flow is queue + Last.fm/Lidarr pipeline (no OpenAI/OpenRouter dependency).\n- There is no `/api/artists/ai-chat/:artistId` endpoint at present.\n3. Current frontend state:\n- Settings currently expose Artwork services (`AIServicesSection`) for Fanart/Last.fm only.\n- System settings hooks/types/API client still reference OpenAI test/settings paths.\n- Artist page integration point is `frontend/features/artist/components/ArtistActionBar.tsx` and `frontend/app/artist/[id]/page.tsx`.\n4. Scope impact from this snapshot:\n- The migration is additive/new-feature work, not a direct replacement of currently-used OpenAI runtime logic in discover/recommendations.\n- Contract risk is highest in settings schema/API compatibility and new artist-chat route behavior.\n5. Product direction update (2026-02-15):\n- No user-facing conversational chat UI should be introduced for this feature.\n- AI similar-artist UX must be one-click retrieval (button -> results list/panel), not chat input/history.\n\n## Spec Outline\n\n1. Add provider abstraction for recommendation/chat workloads.\n2. Add OpenRouter service adapter with strict parsing, timeouts, and retries.\n3. Extend settings APIs for provider status/model/test controls.\n4. Add guarded AI route surfaces (artist chat + AI weekly + discover parity).\n5. Wire frontend controls/surfaces through centralized API client.\n6. Add fallback/regression coverage and full-stack probes.\n\n## Refined Spec\n\n### Constraints\n\n1. Preserve current route payload shapes for existing consumers.\n2. Do not remove existing fallback behavior while introducing new provider.\n3. Keep provider selection operator-visible and reversible.\n4. Any new settings fields must be backward compatible.\n5. Treat provider failures as expected runtime conditions (not exceptional-only paths).\n6. No user-facing chat interaction for similar-artist recommendations.\n\n### Acceptance Criteria\n\n1. Provider status/model/test surfaces are operational.\n2. One-click similar-artist AI retrieval works with deterministic fallback behavior.\n3. Route contracts remain stable under timeout/error conditions.\n4. Backend-direct and frontend-base probes succeed for all shipped endpoints.\n5. No chat input/history bubble UI is exposed to users for this feature.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\n## Phase 0: Re-Context and Contract Freeze\n\n### Task 0.1: Freeze current contracts and fallback semantics\n- Status: Complete\n- Deliverable: baseline route/status/settings contract notes and fallback expectations.\n- Completion summary:\n  - Re-context complete against live code paths in `backend/src/routes/systemSettings.ts`, `backend/src/routes/recommendations.ts`, `backend/src/routes/discover.ts`, `backend/src/routes/artists.ts`, `backend/src/services/openai.ts`, `frontend/lib/api.ts`, `frontend/features/settings/types.ts`, `frontend/features/settings/hooks/useSystemSettings.ts`, `frontend/app/settings/page.tsx`, and `frontend/features/settings/components/sections/AIServicesSection.tsx`.\n  - Confirmed no active AI route for artist chat and no OpenRouter surfaces yet.\n  - Confirmed discover generation path is not currently OpenAI-dependent.\n  - Verification: static route/client contract inspection only (no runtime command execution required for this freeze step).\n\n### Task 0.2: Define test matrix and failure injections\n- Status: Complete\n- Deliverable: explicit test IDs for timeout, malformed payload, provider-down, and fallback correctness.\n- Completion summary:\n  - Defined initial regression matrix IDs (to be implemented in Phase 4):\n    - `OR-A1`: settings provider status endpoint returns configured/unconfigured contract-safe payload.\n    - `OR-A2`: provider test endpoint success path with valid model.\n    - `OR-A3`: provider test endpoint timeout/downstream failure maps to stable `{ error }` response.\n    - `OR-B1`: artist AI chat returns schema-valid recommendations with model echo.\n    - `OR-B2`: artist AI chat malformed provider payload returns deterministic fallback/error envelope.\n    - `OR-B3`: artist AI chat provider down/429 path degrades without crashing route.\n    - `OR-C1`: discover/weekly parity path remains unchanged when AI provider is disabled.\n    - `OR-C2`: provider-enabled path does not regress existing non-AI recommendation routes.\n    - `OR-FS1`: frontend `/api/*` proxy calls for new provider endpoints resolve correctly.\n    - `OR-FS2`: backend-direct endpoint probes for new provider endpoints resolve correctly.\n  - Verification: matrix documented and mapped to planned phases; implementation pending.\n\n## Reuse/Consolidation Check (2026-02-15)\n\n- Reused patterns:\n  - Backend system settings route/test pattern in `backend/src/routes/systemSettings.ts`.\n  - Frontend API boundary in `frontend/lib/api.ts`.\n  - Frontend settings state pattern in `frontend/features/settings/hooks/useSystemSettings.ts`.\n  - Artist page action-bar insertion pattern in `frontend/features/artist/components/ArtistActionBar.tsx`.\n- Duplication intentionally kept:\n  - Existing OpenAI settings fields remain during planning; rename/cutover deferred to dedicated migration step to avoid breaking current settings reads.\n- Consolidation deferred:\n  - Provider abstraction shared across any future LLM consumers (discover/other assistants) will be designed in Phase 1 before adding multiple ad-hoc clients.\n\n## Phase 1: Backend Provider Foundation\n\n### Task 1.1: Provider abstraction contract and adapters\n- Status: Pending\n- Deliverable: provider interface + OpenAI/OpenRouter adapter wiring.\n\n### Task 1.2: OpenRouter service implementation\n- Status: Pending\n- Deliverable: strict parser, bounded retries/timeouts, normalized error mapping.\n\n### Task 1.3: Settings API surface extension\n- Status: Pending\n- Deliverable: provider status/model/test endpoints and persisted controls.\n\n## Proposed Execution Slices (Post-Phase-0)\n\n1. Slice S1: Provider Contract Scaffold\n- Add provider interface + OpenAI adapter wrap + OpenRouter adapter skeleton in backend service layer.\n- No route behavior change yet; compile-only safety.\n2. Slice S2: OpenRouter Runtime + Error Normalization\n- Implement OpenRouter chat/models/status helpers with strict parsing, timeout, retry bounds, and normalized errors.\n3. Slice S3: Settings Schema/API Bridge (compat-first)\n- Introduce OpenRouter fields/endpoints while preserving existing OpenAI fields for transition compatibility.\n- Add migration + read/write bridge logic so old settings do not hard-break.\n4. Slice S4: Artist AI Chat Route + Redis Conversation State\n- Add `/api/artists/ai-similar/:artistId` with deterministic response envelope and Redis result caching (no conversation state).\n5. Slice S5: Frontend Settings/UI Integration\n- Add provider enable/model picker/test flows in settings UI and `frontend/lib/api.ts`.\n- Keep existing Artwork section behavior intact.\n6. Slice S6: Artist Page UX Integration\n- Add action trigger on artist page and non-chat recommendations surface (panel/list), regenerate/model label, safe navigation to discovery search.\n7. Slice S7: Regression + Full-Stack Verification\n- Implement `OR-*` tests; run backend-direct and frontend-proxy probes.\n8. Slice S8: Docs + Closeout\n- Update `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md`; capture operator setup instructions.\n\n## Phase 2: Route Surface Integration\n\n### Task 2.1: AI weekly + one-shot similar-artist integration\n- Status: Pending\n- Deliverable: guarded routes with deterministic fallback (chat route omitted by product decision).\n\n### Task 2.2: Discover route parity integration\n- Status: Pending\n- Deliverable: provider-aware discover behavior with contract-safe output.\n\n## Phase 3: Frontend Wiring\n\n### Task 3.1: Settings and controls integration\n- Status: Pending\n- Deliverable: frontend settings UI + API methods for provider management.\n\n### Task 3.2: AI weekly/artist surfaces integration\n- Status: Pending\n- Deliverable: frontend one-click similar-artist usage paths wired via `frontend/lib/api.ts` (no chat controls).\n\n## Phase 4: Verification and Hardening\n\n### Task 4.1: Regression/fallback test suite\n- Status: Pending\n- Deliverable: backend route tests covering success + failure contracts.\n\n### Task 4.2: Full-stack verification checkpoint\n- Status: Pending\n- Deliverable: backend-direct and frontend-proxy evidence for shipped endpoints.\n\n## Phase 5: Docs and Operational Closeout\n\n### Task 5.1: Sync docs for shipped behavior\n- Status: Pending\n- Deliverable: `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md` updates."
+          },
+          {
+            "heading": "## Document Status",
+            "content": "- Last updated: 2026-02-15\n- Feature: Bundle D extraction from fjordnode umbrella (`AI recommendation stack`)\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` (Phase 4 extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Backlog candidate (not started)"
+          },
+          {
+            "heading": "## Why This Was Split Out",
+            "content": "The former umbrella contained multiple independent workstreams. Bundle D has cross-cutting API/settings/UI impact and is safer to execute as a standalone track with explicit regression controls."
+          },
+          {
+            "heading": "## Goal",
+            "content": "Deliver provider-safe AI recommendation surfaces (OpenRouter + existing fallback paths) without breaking current OpenAI/local behavior or frontend contract stability."
+          },
+          {
+            "heading": "## Staleness and Rework Prevention Protocol (Mandatory)",
+            "content": "1. Run a re-context checkpoint at session start and before each atomic task:\n- read this plan, `HANDOFF.md`, and `PROMPT_HISTORY.md` in full,\n- check `git status` and latest touched files for impacted surfaces.\n2. Maintain a living dependency check at each phase boundary:\n- verify current settings schema/API fields and route contracts still match planned assumptions,\n- update this plan immediately if assumptions drift.\n3. Maintain regression-first execution:\n- add targeted error-path contract tests for each new/changed endpoint,\n- record backend-direct and frontend-proxied probe evidence for externally reachable paths.\n4. Prevent stale references:\n- run plan-link checks at session start and before handoff,\n- update inbound references when files are moved/archived.\n5. Prevent quiet rework:\n- before coding, record whether each touched surface is `Reuse`, `Adapt`, or `New`,\n- after each task, record what was actually changed and why prior behavior remains safe."
+          },
+          {
+            "heading": "## Full-Stack Request Path Baseline",
+            "content": "1. Client URL/base path:\n- Settings and recommendation UIs via frontend `/api/*` proxies.\n2. Frontend proxy behavior:\n- all calls must route through `frontend/lib/api.ts`.\n3. Backend path candidates:\n- `backend/src/routes/systemSettings.ts`\n- `backend/src/routes/recommendations.ts`\n- `backend/src/routes/artists.ts`\n- `backend/src/routes/discover.ts`\n4. Service/config candidates:\n- `backend/src/services/openai.ts`\n- `backend/src/services/openrouter.ts` (planned)\n- `backend/src/config.ts`\n5. Downstream dependencies:\n- OpenAI/OpenRouter external APIs\n- PostgreSQL (`SystemSettings`)\n6. Deployment modes to validate:\n- `docker-compose.aio.yml`\n- `docker-compose.yml`\n- local host-run (`docker-compose.local.yml` + host frontend/backend)"
+          },
+          {
+            "heading": "## 2026-02-15 Reality Check (De-Stale Snapshot)",
+            "content": "1. Current AI/provider state:\n- OpenAI settings fields exist in DB/API/UI (`openaiEnabled`, `openaiApiKey`, `openaiModel`, `openaiBaseUrl`).\n- `backend/src/services/openai.ts` exists but currently has no call sites; it is not driving active recommendation routes.\n- No OpenRouter service/routes/settings surfaces exist yet.\n2. Current recommendation/discovery behavior:\n- `backend/src/routes/recommendations.ts` is Last.fm/DB/fuzzy-match based (no LLM path).\n- `backend/src/routes/discover.ts` generation flow is queue + Last.fm/Lidarr pipeline (no OpenAI/OpenRouter dependency).\n- There is no `/api/artists/ai-chat/:artistId` endpoint at present.\n3. Current frontend state:\n- Settings currently expose Artwork services (`AIServicesSection`) for Fanart/Last.fm only.\n- System settings hooks/types/API client still reference OpenAI test/settings paths.\n- Artist page integration point is `frontend/features/artist/components/ArtistActionBar.tsx` and `frontend/app/artist/[id]/page.tsx`.\n4. Scope impact from this snapshot:\n- The migration is additive/new-feature work, not a direct replacement of currently-used OpenAI runtime logic in discover/recommendations.\n- Contract risk is highest in settings schema/API compatibility and new artist-chat route behavior.\n5. Product direction update (2026-02-15):\n- No user-facing conversational chat UI should be introduced for this feature.\n- AI similar-artist UX must be one-click retrieval (button -> results list/panel), not chat input/history."
+          },
+          {
+            "heading": "## Spec Outline",
+            "content": "1. Add provider abstraction for recommendation/chat workloads.\n2. Add OpenRouter service adapter with strict parsing, timeouts, and retries.\n3. Extend settings APIs for provider status/model/test controls.\n4. Add guarded AI route surfaces (artist chat + AI weekly + discover parity).\n5. Wire frontend controls/surfaces through centralized API client.\n6. Add fallback/regression coverage and full-stack probes."
+          },
+          {
+            "heading": "## Refined Spec",
+            "content": "### Constraints\n\n1. Preserve current route payload shapes for existing consumers.\n2. Do not remove existing fallback behavior while introducing new provider.\n3. Keep provider selection operator-visible and reversible.\n4. Any new settings fields must be backward compatible.\n5. Treat provider failures as expected runtime conditions (not exceptional-only paths).\n6. No user-facing chat interaction for similar-artist recommendations.\n\n### Acceptance Criteria\n\n1. Provider status/model/test surfaces are operational.\n2. One-click similar-artist AI retrieval works with deterministic fallback behavior.\n3. Route contracts remain stable under timeout/error conditions.\n4. Backend-direct and frontend-base probes succeed for all shipped endpoints.\n5. No chat input/history bubble UI is exposed to users for this feature."
+          },
+          {
+            "heading": "### Constraints",
+            "content": "1. Preserve current route payload shapes for existing consumers.\n2. Do not remove existing fallback behavior while introducing new provider.\n3. Keep provider selection operator-visible and reversible.\n4. Any new settings fields must be backward compatible.\n5. Treat provider failures as expected runtime conditions (not exceptional-only paths).\n6. No user-facing chat interaction for similar-artist recommendations."
+          },
+          {
+            "heading": "### Acceptance Criteria",
+            "content": "1. Provider status/model/test surfaces are operational.\n2. One-click similar-artist AI retrieval works with deterministic fallback behavior.\n3. Route contracts remain stable under timeout/error conditions.\n4. Backend-direct and frontend-base probes succeed for all shipped endpoints.\n5. No chat input/history bubble UI is exposed to users for this feature."
+          },
+          {
+            "heading": "## Detailed Implementation Plan (Atomic Tasks)",
+            "content": "### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary"
+          },
+          {
+            "heading": "### Status Legend",
+            "content": "- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary"
+          },
+          {
+            "heading": "## Phase 0: Re-Context and Contract Freeze",
+            "content": "### Task 0.1: Freeze current contracts and fallback semantics\n- Status: Complete\n- Deliverable: baseline route/status/settings contract notes and fallback expectations.\n- Completion summary:\n  - Re-context complete against live code paths in `backend/src/routes/systemSettings.ts`, `backend/src/routes/recommendations.ts`, `backend/src/routes/discover.ts`, `backend/src/routes/artists.ts`, `backend/src/services/openai.ts`, `frontend/lib/api.ts`, `frontend/features/settings/types.ts`, `frontend/features/settings/hooks/useSystemSettings.ts`, `frontend/app/settings/page.tsx`, and `frontend/features/settings/components/sections/AIServicesSection.tsx`.\n  - Confirmed no active AI route for artist chat and no OpenRouter surfaces yet.\n  - Confirmed discover generation path is not currently OpenAI-dependent.\n  - Verification: static route/client contract inspection only (no runtime command execution required for this freeze step).\n\n### Task 0.2: Define test matrix and failure injections\n- Status: Complete\n- Deliverable: explicit test IDs for timeout, malformed payload, provider-down, and fallback correctness.\n- Completion summary:\n  - Defined initial regression matrix IDs (to be implemented in Phase 4):\n    - `OR-A1`: settings provider status endpoint returns configured/unconfigured contract-safe payload.\n    - `OR-A2`: provider test endpoint success path with valid model.\n    - `OR-A3`: provider test endpoint timeout/downstream failure maps to stable `{ error }` response.\n    - `OR-B1`: artist AI chat returns schema-valid recommendations with model echo.\n    - `OR-B2`: artist AI chat malformed provider payload returns deterministic fallback/error envelope.\n    - `OR-B3`: artist AI chat provider down/429 path degrades without crashing route.\n    - `OR-C1`: discover/weekly parity path remains unchanged when AI provider is disabled.\n    - `OR-C2`: provider-enabled path does not regress existing non-AI recommendation routes.\n    - `OR-FS1`: frontend `/api/*` proxy calls for new provider endpoints resolve correctly.\n    - `OR-FS2`: backend-direct endpoint probes for new provider endpoints resolve correctly.\n  - Verification: matrix documented and mapped to planned phases; implementation pending."
+          },
+          {
+            "heading": "### Task 0.1: Freeze current contracts and fallback semantics",
+            "content": "- Status: Complete\n- Deliverable: baseline route/status/settings contract notes and fallback expectations.\n- Completion summary:\n  - Re-context complete against live code paths in `backend/src/routes/systemSettings.ts`, `backend/src/routes/recommendations.ts`, `backend/src/routes/discover.ts`, `backend/src/routes/artists.ts`, `backend/src/services/openai.ts`, `frontend/lib/api.ts`, `frontend/features/settings/types.ts`, `frontend/features/settings/hooks/useSystemSettings.ts`, `frontend/app/settings/page.tsx`, and `frontend/features/settings/components/sections/AIServicesSection.tsx`.\n  - Confirmed no active AI route for artist chat and no OpenRouter surfaces yet.\n  - Confirmed discover generation path is not currently OpenAI-dependent.\n  - Verification: static route/client contract inspection only (no runtime command execution required for this freeze step)."
+          },
+          {
+            "heading": "### Task 0.2: Define test matrix and failure injections",
+            "content": "- Status: Complete\n- Deliverable: explicit test IDs for timeout, malformed payload, provider-down, and fallback correctness.\n- Completion summary:\n  - Defined initial regression matrix IDs (to be implemented in Phase 4):\n    - `OR-A1`: settings provider status endpoint returns configured/unconfigured contract-safe payload.\n    - `OR-A2`: provider test endpoint success path with valid model.\n    - `OR-A3`: provider test endpoint timeout/downstream failure maps to stable `{ error }` response.\n    - `OR-B1`: artist AI chat returns schema-valid recommendations with model echo.\n    - `OR-B2`: artist AI chat malformed provider payload returns deterministic fallback/error envelope.\n    - `OR-B3`: artist AI chat provider down/429 path degrades without crashing route.\n    - `OR-C1`: discover/weekly parity path remains unchanged when AI provider is disabled.\n    - `OR-C2`: provider-enabled path does not regress existing non-AI recommendation routes.\n    - `OR-FS1`: frontend `/api/*` proxy calls for new provider endpoints resolve correctly.\n    - `OR-FS2`: backend-direct endpoint probes for new provider endpoints resolve correctly.\n  - Verification: matrix documented and mapped to planned phases; implementation pending."
+          },
+          {
+            "heading": "## Reuse/Consolidation Check (2026-02-15)",
+            "content": "- Reused patterns:\n  - Backend system settings route/test pattern in `backend/src/routes/systemSettings.ts`.\n  - Frontend API boundary in `frontend/lib/api.ts`.\n  - Frontend settings state pattern in `frontend/features/settings/hooks/useSystemSettings.ts`.\n  - Artist page action-bar insertion pattern in `frontend/features/artist/components/ArtistActionBar.tsx`.\n- Duplication intentionally kept:\n  - Existing OpenAI settings fields remain during planning; rename/cutover deferred to dedicated migration step to avoid breaking current settings reads.\n- Consolidation deferred:\n  - Provider abstraction shared across any future LLM consumers (discover/other assistants) will be designed in Phase 1 before adding multiple ad-hoc clients."
+          },
+          {
+            "heading": "## Phase 1: Backend Provider Foundation",
+            "content": "### Task 1.1: Provider abstraction contract and adapters\n- Status: Pending\n- Deliverable: provider interface + OpenAI/OpenRouter adapter wiring.\n\n### Task 1.2: OpenRouter service implementation\n- Status: Pending\n- Deliverable: strict parser, bounded retries/timeouts, normalized error mapping.\n\n### Task 1.3: Settings API surface extension\n- Status: Pending\n- Deliverable: provider status/model/test endpoints and persisted controls."
+          },
+          {
+            "heading": "### Task 1.1: Provider abstraction contract and adapters",
+            "content": "- Status: Pending\n- Deliverable: provider interface + OpenAI/OpenRouter adapter wiring."
+          },
+          {
+            "heading": "### Task 1.2: OpenRouter service implementation",
+            "content": "- Status: Pending\n- Deliverable: strict parser, bounded retries/timeouts, normalized error mapping."
+          },
+          {
+            "heading": "### Task 1.3: Settings API surface extension",
+            "content": "- Status: Pending\n- Deliverable: provider status/model/test endpoints and persisted controls."
+          },
+          {
+            "heading": "## Proposed Execution Slices (Post-Phase-0)",
+            "content": "1. Slice S1: Provider Contract Scaffold\n- Add provider interface + OpenAI adapter wrap + OpenRouter adapter skeleton in backend service layer.\n- No route behavior change yet; compile-only safety.\n2. Slice S2: OpenRouter Runtime + Error Normalization\n- Implement OpenRouter chat/models/status helpers with strict parsing, timeout, retry bounds, and normalized errors.\n3. Slice S3: Settings Schema/API Bridge (compat-first)\n- Introduce OpenRouter fields/endpoints while preserving existing OpenAI fields for transition compatibility.\n- Add migration + read/write bridge logic so old settings do not hard-break.\n4. Slice S4: Artist AI Chat Route + Redis Conversation State\n- Add `/api/artists/ai-similar/:artistId` with deterministic response envelope and Redis result caching (no conversation state).\n5. Slice S5: Frontend Settings/UI Integration\n- Add provider enable/model picker/test flows in settings UI and `frontend/lib/api.ts`.\n- Keep existing Artwork section behavior intact.\n6. Slice S6: Artist Page UX Integration\n- Add action trigger on artist page and non-chat recommendations surface (panel/list), regenerate/model label, safe navigation to discovery search.\n7. Slice S7: Regression + Full-Stack Verification\n- Implement `OR-*` tests; run backend-direct and frontend-proxy probes.\n8. Slice S8: Docs + Closeout\n- Update `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md`; capture operator setup instructions."
+          },
+          {
+            "heading": "## Phase 2: Route Surface Integration",
+            "content": "### Task 2.1: AI weekly + one-shot similar-artist integration\n- Status: Pending\n- Deliverable: guarded routes with deterministic fallback (chat route omitted by product decision).\n\n### Task 2.2: Discover route parity integration\n- Status: Pending\n- Deliverable: provider-aware discover behavior with contract-safe output."
+          },
+          {
+            "heading": "### Task 2.1: AI weekly + one-shot similar-artist integration",
+            "content": "- Status: Pending\n- Deliverable: guarded routes with deterministic fallback (chat route omitted by product decision)."
+          },
+          {
+            "heading": "### Task 2.2: Discover route parity integration",
+            "content": "- Status: Pending\n- Deliverable: provider-aware discover behavior with contract-safe output."
+          },
+          {
+            "heading": "## Phase 3: Frontend Wiring",
+            "content": "### Task 3.1: Settings and controls integration\n- Status: Pending\n- Deliverable: frontend settings UI + API methods for provider management.\n\n### Task 3.2: AI weekly/artist surfaces integration\n- Status: Pending\n- Deliverable: frontend one-click similar-artist usage paths wired via `frontend/lib/api.ts` (no chat controls)."
+          },
+          {
+            "heading": "### Task 3.1: Settings and controls integration",
+            "content": "- Status: Pending\n- Deliverable: frontend settings UI + API methods for provider management."
+          },
+          {
+            "heading": "### Task 3.2: AI weekly/artist surfaces integration",
+            "content": "- Status: Pending\n- Deliverable: frontend one-click similar-artist usage paths wired via `frontend/lib/api.ts` (no chat controls)."
+          },
+          {
+            "heading": "## Phase 4: Verification and Hardening",
+            "content": "### Task 4.1: Regression/fallback test suite\n- Status: Pending\n- Deliverable: backend route tests covering success + failure contracts.\n\n### Task 4.2: Full-stack verification checkpoint\n- Status: Pending\n- Deliverable: backend-direct and frontend-proxy evidence for shipped endpoints."
+          },
+          {
+            "heading": "### Task 4.1: Regression/fallback test suite",
+            "content": "- Status: Pending\n- Deliverable: backend route tests covering success + failure contracts."
+          },
+          {
+            "heading": "### Task 4.2: Full-stack verification checkpoint",
+            "content": "- Status: Pending\n- Deliverable: backend-direct and frontend-proxy evidence for shipped endpoints."
+          },
+          {
+            "heading": "## Phase 5: Docs and Operational Closeout",
+            "content": "### Task 5.1: Sync docs for shipped behavior\n- Status: Pending\n- Deliverable: `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md` updates."
+          },
+          {
+            "heading": "### Task 5.1: Sync docs for shipped behavior",
+            "content": "- Status: Pending\n- Deliverable: `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md` updates."
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    }
+  }
+}

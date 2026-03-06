@@ -1,0 +1,347 @@
+{
+  "version": 1,
+  "feature_id": "acm-onboarding-migration",
+  "feature_title": "Plan - ACM Onboarding Migration",
+  "track": "current",
+  "export_path": "acm-legacy-plans/current/acm-onboarding-migration.json",
+  "legacy": {
+    "plan_path": ".agents/plans/current/acm-onboarding-migration/PLAN.json",
+    "plan_dir": ".agents/plans/current/acm-onboarding-migration",
+    "status": "in_progress",
+    "updated_at": "2026-03-06T02:42:30Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.current.acm-onboarding-migration.1febfb47f6",
+    "plan_key": "plan:legacy.current.acm-onboarding-migration.1febfb47f6",
+    "final_db_status": "in_progress",
+    "plan": {
+      "title": "Plan - ACM Onboarding Migration",
+      "objective": "Replace the legacy agents-template bootstrap in soundspan with a working ACM onboarding flow, convert agent-facing contract files, and preserve legacy planning history by making current, deferred, and archived plans retrievable through ACM.",
+      "kind": "legacy_current",
+      "status": "in_progress",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Replace template-managed onboarding surfaces with ACM-native repo contract files.",
+        "Soundspan has ACM-native `AGENTS.md`, `CLAUDE.md`, `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, and `.acm/acm-tests.yaml` wired for this repo.",
+        "Preserve legacy plan state during the migration.",
+        "Current and deferred plans are mirrored into ACM work tracking, and archived/current/deferred legacy plan files are retrievable through ACM indexing."
+      ],
+      "out_of_scope": [
+        "Do not change soundspan product behavior outside repository governance/onboarding surfaces, and do not discard legacy plan artifacts until ACM indexing and import verification show that the migration landed cleanly."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/current/acm-onboarding-migration.json",
+        ".agents/plans/current/acm-onboarding-migration/PLAN.json",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "/home/joshd/git/agent-context-manager/docs/getting-started.md",
+        "/home/joshd/git/agent-context-manager/docs/examples/AGENTS.md",
+        "/home/joshd/git/agent-context-manager/docs/examples/CLAUDE.md",
+        ".agents/plans/current",
+        ".agents/plans/deferred",
+        ".agents/plans/archived",
+        "/home/joshd/git/agent-context-manager/spec/v1/README.md",
+        "/home/joshd/git/agent-context-manager/internal/contracts/v1/types.go",
+        "/home/joshd/git/agent-context-manager/internal/service/postgres/get_context.go",
+        ".agents-config/agent-managed.json",
+        "package.json",
+        ".gitignore",
+        "/home/joshd/git/agent-context-manager/scripts/install-skill-pack.sh",
+        ".env.example",
+        ".claude",
+        "/home/joshd/git/agent-context-manager/skills/acm-broker/claude/README.md",
+        "AGENTS.append.md"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.define-soundspan-acm-repo-contract-and-supporting-acm-files",
+        "summary": "Define soundspan ACM repo contract and supporting ACM files",
+        "status": "in_progress",
+        "acceptance_criteria": [
+          "Root `AGENTS.md` and `CLAUDE.md` describe the ACM workflow for soundspan",
+          "`.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, and `.acm/acm-tests.yaml` exist with soundspan-specific content",
+          "Legacy template surfaces that would confuse onboarding are removed or redirected"
+        ],
+        "references": [
+          "acm-legacy-plans/current/acm-onboarding-migration.json",
+          "AGENTS.md",
+          "CLAUDE.md",
+          ".gitignore",
+          ".env.example",
+          "/home/joshd/git/agent-context-manager/docs/getting-started.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.02.install-and-align-claude-acm-command-assets-for-this-repo",
+        "summary": "Install and align Claude ACM command assets for this repo",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Repo-local Claude command assets exist for ACM workflow",
+          "Tracked ignore rules allow the intended Claude assets to remain in the repo",
+          "Claude companion docs map back to the root ACM contract"
+        ],
+        "references": [
+          "acm-legacy-plans/current/acm-onboarding-migration.json",
+          ".claude",
+          ".gitignore",
+          "/home/joshd/git/agent-context-manager/skills/acm-broker/claude/README.md",
+          "/home/joshd/git/agent-context-manager/scripts/install-skill-pack.sh"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.03.bootstrap-acm-and-import-legacy-plan-state",
+        "summary": "Bootstrap ACM and import legacy plan state",
+        "status": "pending",
+        "acceptance_criteria": [
+          "ACM bootstrap/sync/health run successfully for `soundspan`",
+          "Legacy plan files are indexed for retrieval",
+          "Current/deferred plans are mirrored into ACM work plans with useful tasks and metadata"
+        ],
+        "references": [
+          "acm-legacy-plans/current/acm-onboarding-migration.json",
+          ".agents/plans/current",
+          ".agents/plans/deferred",
+          ".agents/plans/archived",
+          "/home/joshd/git/agent-context-manager/docs/getting-started.md",
+          "/home/joshd/git/agent-context-manager/spec/v1/README.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.04.verify-the-migration-and-capture-review-findings",
+        "summary": "Verify the migration and capture review findings",
+        "status": "pending",
+        "acceptance_criteria": [
+          "ACM health and targeted retrieval/import checks pass or are explained",
+          "Soundspan repo diff is reviewed with an xhigh codex pass",
+          "Residual risks and any follow-up cleanup are documented"
+        ],
+        "references": [
+          "acm-legacy-plans/current/acm-onboarding-migration.json",
+          "/home/joshd/git/agent-context-manager/docs/getting-started.md",
+          "AGENTS.append.md"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "pending",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/current/acm-onboarding-migration.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "acm-onboarding-migration",
+    "feature_title": "Plan - ACM Onboarding Migration",
+    "plan_ref": ".agents/plans/current/acm-onboarding-migration/PLAN.json",
+    "status": "in_progress",
+    "updated_at": "2026-03-06T02:42:30Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Replace the legacy agents-template bootstrap in soundspan with a working ACM onboarding flow, convert agent-facing contract files, and preserve legacy planning history by making current, deferred, and archived plans retrievable through ACM.",
+        "non_goals": "Do not change soundspan product behavior outside repository governance/onboarding surfaces, and do not discard legacy plan artifacts until ACM indexing and import verification show that the migration landed cleanly."
+      },
+      "spec_outline": {
+        "summary": "Migrate soundspan from the agents-template governance stack to ACM by replacing root agent contracts, seeding ACM repo-local rules/tags/tests, wiring Claude command assets, and importing legacy planning artifacts in a way that keeps active work resumable and archived plans retrievable.",
+        "full_spec_outline": [
+          {
+            "id": "acm-contract-surface",
+            "objective": "Replace template-managed onboarding surfaces with ACM-native repo contract files.",
+            "deliverable": "Soundspan has ACM-native `AGENTS.md`, `CLAUDE.md`, `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, and `.acm/acm-tests.yaml` wired for this repo.",
+            "acceptance_criteria": [
+              "Root agent instructions point to ACM task flow instead of agents-template bootstrap",
+              "ACM rules, tags, and verification definitions exist and reflect soundspan-specific constraints",
+              "Bootstrap/sync/health can run against the repo without manual repair"
+            ],
+            "references": [
+              "AGENTS.md",
+              "CLAUDE.md",
+              "/home/joshd/git/agent-context-manager/docs/getting-started.md",
+              "/home/joshd/git/agent-context-manager/docs/examples/AGENTS.md",
+              "/home/joshd/git/agent-context-manager/docs/examples/CLAUDE.md"
+            ]
+          },
+          {
+            "id": "legacy-plan-preservation",
+            "objective": "Preserve legacy plan state during the migration.",
+            "deliverable": "Current and deferred plans are mirrored into ACM work tracking, and archived/current/deferred legacy plan files are retrievable through ACM indexing.",
+            "acceptance_criteria": [
+              "ACM can surface active migrated plans for soundspan",
+              "Legacy plan artifacts remain available for retrieval after onboarding",
+              "Migration process is documented well enough to rerun safely"
+            ],
+            "references": [
+              ".agents/plans/current",
+              ".agents/plans/deferred",
+              ".agents/plans/archived",
+              "/home/joshd/git/agent-context-manager/spec/v1/README.md",
+              "/home/joshd/git/agent-context-manager/internal/contracts/v1/types.go"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Use a hybrid migration: convert the live repo-facing contract to ACM, seed soundspan-specific ACM rules/tags/tests from current repo conventions, install Claude ACM command assets, bootstrap ACM with gitignore disabled once so ignored legacy plan files are discoverable, then mirror current/deferred plan state into ACM work plans while leaving archived plans indexed as historical artifacts instead of cluttering the active work list.",
+        "full_refined_spec": [
+          {
+            "id": "hybrid-plan-migration",
+            "decision": "Store active current/deferred plan state in ACM work plans, but preserve archived plans through ACM indexing rather than active work rows.",
+            "rationale": "ACM `get_context` returns active work plans; importing archived plans as live work rows would pollute the active plan surface, while indexed archived artifacts remain fetchable without crowding execution context.",
+            "acceptance_criteria": [
+              "Current/deferred plan state is visible through ACM work tracking",
+              "Archived plan history remains fetchable without appearing as active work",
+              "Migration does not depend on mutating ACM internals directly"
+            ],
+            "references": [
+              "/home/joshd/git/agent-context-manager/docs/getting-started.md",
+              "/home/joshd/git/agent-context-manager/internal/service/postgres/get_context.go",
+              "/home/joshd/git/agent-context-manager/internal/contracts/v1/types.go"
+            ]
+          },
+          {
+            "id": "template-to-acm-scope",
+            "decision": "Retire template-managed agent bootstrap files and scripts from the primary workflow, but keep useful repo documentation/content unless it must change to support ACM.",
+            "rationale": "The migration target is ACM governance, not a broad deletion pass. Useful docs can stay as repo knowledge while the control plane moves from `.agents-config`/template scripts to `.acm` and ACM commands.",
+            "acceptance_criteria": [
+              "Soundspan’s primary onboarding path is ACM-native",
+              "Obsolete template-managed surfaces are removed or clearly deprecated",
+              "Useful non-governance docs are preserved unless ACM requires replacement"
+            ],
+            "references": [
+              ".agents-config/agent-managed.json",
+              "package.json",
+              ".gitignore",
+              "/home/joshd/git/agent-context-manager/scripts/install-skill-pack.sh"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Convert the repo contract and ACM config first, wire Claude assets second, then bootstrap/index/import legacy planning state and verify the resulting ACM health/context surfaces.",
+        "steps": [
+          {
+            "status": "in_progress",
+            "deliverable": "Define soundspan ACM repo contract and supporting ACM files",
+            "acceptance_criteria": [
+              "Root `AGENTS.md` and `CLAUDE.md` describe the ACM workflow for soundspan",
+              "`.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, and `.acm/acm-tests.yaml` exist with soundspan-specific content",
+              "Legacy template surfaces that would confuse onboarding are removed or redirected"
+            ],
+            "references": [
+              "AGENTS.md",
+              "CLAUDE.md",
+              ".gitignore",
+              ".env.example",
+              "/home/joshd/git/agent-context-manager/docs/getting-started.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Install and align Claude ACM command assets for this repo",
+            "acceptance_criteria": [
+              "Repo-local Claude command assets exist for ACM workflow",
+              "Tracked ignore rules allow the intended Claude assets to remain in the repo",
+              "Claude companion docs map back to the root ACM contract"
+            ],
+            "references": [
+              ".claude",
+              ".gitignore",
+              "/home/joshd/git/agent-context-manager/skills/acm-broker/claude/README.md",
+              "/home/joshd/git/agent-context-manager/scripts/install-skill-pack.sh"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Bootstrap ACM and import legacy plan state",
+            "acceptance_criteria": [
+              "ACM bootstrap/sync/health run successfully for `soundspan`",
+              "Legacy plan files are indexed for retrieval",
+              "Current/deferred plans are mirrored into ACM work plans with useful tasks and metadata"
+            ],
+            "references": [
+              ".agents/plans/current",
+              ".agents/plans/deferred",
+              ".agents/plans/archived",
+              "/home/joshd/git/agent-context-manager/docs/getting-started.md",
+              "/home/joshd/git/agent-context-manager/spec/v1/README.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Verify the migration and capture review findings",
+            "acceptance_criteria": [
+              "ACM health and targeted retrieval/import checks pass or are explained",
+              "Soundspan repo diff is reviewed with an xhigh codex pass",
+              "Residual risks and any follow-up cleanup are documented"
+            ],
+            "references": [
+              "/home/joshd/git/agent-context-manager/docs/getting-started.md",
+              "AGENTS.append.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "required",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": "orchestrator"
+    }
+  }
+}

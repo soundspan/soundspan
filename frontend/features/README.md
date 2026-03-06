@@ -4,9 +4,9 @@ Start-here index for domain modules under `frontend/features`.
 
 ## Start Here
 
-1. Route entrypoints: `frontend/app/**/page.tsx` and `.agents-config/docs/ROUTE_MAP.md`.
-2. Feature ownership map: `.agents-config/docs/FEATURE_INDEX.json`.
-3. Targeted regression commands: `.agents-config/docs/TEST_MATRIX.md`.
+1. Route entrypoints: `frontend/app/**/page.tsx`.
+2. Domain-specific guides: `frontend/features/*/README.md`.
+3. Regression coverage: `frontend/tests/component/` and `frontend/tests/unit/`.
 
 ## Feature Domains
 

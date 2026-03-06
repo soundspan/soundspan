@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "feature_id": "queue-click-seek-regression",
+  "feature_title": "Plan - Queue Click Seek Regression",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/queue-click-seek-regression.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/queue-click-seek-regression/PLAN.json",
+    "plan_dir": ".agents/plans/archived/queue-click-seek-regression",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/queue-click-seek-regression/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Queue Click Seek Regression\n\n## Document Status\n\n- Last updated: 2026-02-21\n- Track: Current\n- Status: Active\n- Goal: prevent queue-clicked tracks from inheriting stale segmented/direct resume offsets and starting mid-track.\n\n## Scope\n\n1. Frontend playback orchestration seek/resume application paths.\n2. Handoff/local-authoritative recovery guards for explicit track switches.\n3. Targeted regression coverage for queue-click behavior.\n\n## Non-Goals\n\n1. No protocol changes (DASH vs direct).\n2. No new rollout knobs.\n3. No broad playback architecture refactor.\n\n## Tasks\n\n### Task QCSR1: Root-cause trace in seek/resume paths\n- Status: Complete\n- Scope:\n  - `frontend/components/player/AudioPlaybackOrchestrator.tsx`\n  - `frontend/lib/audio-engine/segmentedPlaybackRegressionPolicy.ts`\n- Acceptance criteria:\n  1. Identify exact stale state path that can apply non-zero seek to a different track after queue click.\n  2. Document guard point where track identity must be enforced.\n- Completion summary:\n  1. Identified stale fallback path: `readTrustedTrackPositionSec` could use `currentTimeSnapshotRef` from the previous track before new-track time reset propagated.\n  2. Guard point selected: `resolveTrustedTrackPositionSec` fallback branch now validates fallback-track identity before permitting non-zero resume.\n\n### Task QCSR2: Track-identity guard fix\n- Status: Complete\n- Dependencies: QCSR1\n- Scope:\n  - `frontend/components/player/AudioPlaybackOrchestrator.tsx`\n  - helper(s) in `frontend/lib/audio-engine/*` as needed\n- Acceptance criteria:\n  1. Explicit queue-clicked track starts at `0` unless same-track resume is intentionally requested.\n  2. Handoff/proactive recovery cannot apply stale seek from a previous track id/session.\n  3. Existing direct-startup-to-segmented-handoff behavior remains intact for same-track transitions.\n- Completion summary:\n  1. Added `fallbackTrackId` contract to trusted-position helper and hard-gated stale cross-track fallback to `0`.\n  2. Added `currentTimeSnapshotTrackIdRef` in `AudioPlaybackOrchestrator` and wired it into trusted-position resolution, preserving same-track local-authoritative behavior while preventing cross-track seek inheritance.\n\n### Task QCSR3: Regression tests and verification\n- Status: Complete\n- Dependencies: QCSR2\n- Scope:\n  - Frontend unit/component tests around playback orchestrator seek/handoff\n- Acceptance criteria:\n  1. Add at least one automated regression that fails pre-fix and passes post-fix.\n  2. Run targeted frontend tests and lint for touched files.\n- Completion summary:\n  1. Added stale fallback regression coverage in `frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts`.\n  2. Verification passed:\n     - `node --test --experimental-strip-types frontend/tests/unit/segmentedPlaybackRegressionPolicy.test.ts`\n     - `npm --prefix frontend run lint -- lib/audio-engine/segmentedPlaybackRegressionPolicy.ts components/player/AudioPlaybackOrchestrator.tsx tests/unit/segmentedPlaybackRegressionPolicy.test.ts`\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.queue-click-seek-regression.d5585bce24",
+    "plan_key": "plan:legacy.archived.queue-click-seek-regression.d5585bce24",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Queue Click Seek Regression",
+      "objective": "Plan - Queue Click Seek Regression",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [],
+      "out_of_scope": [
+        "1. No protocol changes (DASH vs direct).",
+        "2. No new rollout knobs.",
+        "3. No broad playback architecture refactor."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/queue-click-seek-regression.json",
+        ".agents/plans/archived/queue-click-seek-regression/PLAN.json",
+        ".agents/plans/archived/queue-click-seek-regression/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/queue-click-seek-regression/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "Plan - Queue Click Seek Regression",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/queue-click-seek-regression.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "queue-click-seek-regression",
+    "feature_title": "Plan - Queue Click Seek Regression",
+    "plan_ref": ".agents/plans/archived/queue-click-seek-regression/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "",
+        "non_goals": "1. No protocol changes (DASH vs direct).\n2. No new rollout knobs.\n3. No broad playback architecture refactor."
+      }
+    }
+  }
+}

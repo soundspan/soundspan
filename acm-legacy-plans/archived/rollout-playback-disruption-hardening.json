@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "feature_id": "rollout-playback-disruption-hardening",
+  "feature_title": "Plan - Rollout Playback Disruption Hardening",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/rollout-playback-disruption-hardening.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/rollout-playback-disruption-hardening/PLAN.json",
+    "plan_dir": ".agents/plans/archived/rollout-playback-disruption-hardening",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/rollout-playback-disruption-hardening/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Rollout Playback Disruption Hardening\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: Minimize playback disruption during backend/frontend pod cycling\n- Scope:\n  - Backend graceful HTTP drain behavior for rolling updates\n  - Kubernetes lifecycle and termination grace tuning in Helm templates\n  - Frontend playback error recovery path during transient stream drop events\n  - Selective/deferred UI reload behavior while playback is active\n  - Deferred architecture plan for segmented streaming handoff\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Approved by user\n\n## Spec Outline\n\n1. Prevent abrupt in-flight stream interruption during backend pod termination where possible.\n2. Ensure Kubernetes rollout lifecycle settings support graceful drain and keep old pod serving while replacement becomes ready.\n3. Recover active track playback after transient stream failures (including rollout window disconnects) before skipping tracks.\n4. Avoid user-visible full-app reload while audio is actively playing.\n5. Produce a concrete deferred HLS/DASH architecture plan for future exploration.\n\n## Refined Spec\n\n1. Backend should enter drain mode, stop accepting new connections, and allow in-flight requests to complete within a bounded grace window.\n2. Helm backend/frontend deployments should explicitly set termination grace and preStop delay to allow readiness removal and LB propagation before process exit.\n3. Frontend player should perform bounded retry/reload+seek recovery for track playback errors before fallback skip.\n4. Service worker update activation should be deferred while playback is active and applied when playback is idle/paused.\n5. Add a deferred plan doc that decomposes HLS/DASH migration into phases with acceptance gates, risks, and compatibility constraints.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Phase 1: Runtime Hardening\n\n#### Task 1.1: Backend graceful drain on termination\n- Status: Pending\n- Acceptance criteria:\n  - Backend tracks active sockets/requests and stops accepting new connections on drain.\n  - Shutdown waits for in-flight requests up to a bounded timeout before forced socket close.\n  - Readiness remains false while draining.\n- Primary files:\n  - `backend/src/index.ts`\n  - `backend/src/__tests__/apiEntrypointRuntime.test.ts` (if needed)\n\n#### Task 1.2: Helm lifecycle and grace-period tuning\n- Status: Pending\n- Acceptance criteria:\n  - Backend and frontend pods include explicit `terminationGracePeriodSeconds` and `preStop` hooks.\n  - Values are configurable via `charts/soundspan/values.yaml`.\n  - Defaults support safer rolling update behavior without changing deployment mode semantics.\n- Primary files:\n  - `charts/soundspan/values.yaml`\n  - `charts/soundspan/templates/individual/backend.yaml`\n  - `charts/soundspan/templates/individual/frontend.yaml`\n  - `charts/soundspan/templates/aio/deployment.yaml` (if needed)\n\n#### Task 1.3: Frontend playback retry and selective update apply\n- Status: Pending\n- Acceptance criteria:\n  - Track playback errors attempt bounded recovery before skip/stop.\n  - If a service worker update is ready while playback is active, update is deferred and applied when playback is inactive.\n  - Targeted unit/runtime coverage added for new logic.\n- Primary files:\n  - `frontend/components/player/HowlerAudioElement.tsx`\n  - `frontend/components/ServiceWorkerRegistration.tsx`\n  - `frontend/tests/unit/serviceWorkerNavigationBypass.test.ts` (or new targeted tests)\n\n### Phase 2: Deferred Architecture Plan\n\n#### Task 2.1: Segmented streaming handoff plan (HLS/DASH)\n- Status: Pending\n- Acceptance criteria:\n  - New deferred plan defines phased migration approach, compatibility strategy, observability, and rollback gates.\n  - Plan includes API/storage/caching/CDN implications and client playback model changes.\n  - Plan is linked to queue as deferred follow-up work.\n- Primary files:\n  - `.agents/plans/archived/segmented-streaming-handoff-architecture/PLAN.md`\n\n### Phase 3: Verification and Closeout\n\n#### Task 3.1: Verification, docs, and queue closeout\n- Status: Pending\n- Acceptance criteria:\n  - Targeted backend/frontend tests and builds pass for touched areas.\n  - `npm run agent:preflight` passes after artifact sync.\n  - Queue items are completed with evidence.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.rollout-playback-disruption-hardening.38bdcc3b82",
+    "plan_key": "plan:legacy.archived.rollout-playback-disruption-hardening.38bdcc3b82",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Rollout Playback Disruption Hardening",
+      "objective": "1. Prevent abrupt in-flight stream interruption during backend pod termination where possible.\n2. Ensure Kubernetes rollout lifecycle settings support graceful drain and keep old pod serving while replacement becomes ready.\n3. Recover active track playback after transient stream failures (including rollout window disconnects) before skipping tracks.\n4. Avoid user-visible full-app reload while audio is actively playing.\n5. Produce a concrete deferred HLS/DASH architecture plan for future exploration.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Prevent abrupt in-flight stream interruption during backend pod termination where possible.",
+        "2. Ensure Kubernetes rollout lifecycle settings support graceful drain and keep old pod serving while replacement becomes ready.",
+        "3. Recover active track playback after transient stream failures (including rollout window disconnects) before skipping tracks.",
+        "4. Avoid user-visible full-app reload while audio is actively playing.",
+        "5. Produce a concrete deferred HLS/DASH architecture plan for future exploration."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/rollout-playback-disruption-hardening.json",
+        ".agents/plans/archived/rollout-playback-disruption-hardening/PLAN.json",
+        ".agents/plans/archived/rollout-playback-disruption-hardening/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/rollout-playback-disruption-hardening/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Prevent abrupt in-flight stream interruption during backend pod termination where possible.\n2. Ensure Kubernetes rollout lifecycle settings support graceful drain and keep old pod serving while replacement becomes ready.\n3. Recover active track playback after transient stream failures (including rollout window disconnects) before skipping tracks.\n4. Avoid user-visible full-app reload while audio is actively playing.\n5. Produce a concrete deferred HLS/DASH architecture plan for future exploration.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/rollout-playback-disruption-hardening.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "rollout-playback-disruption-hardening",
+    "feature_title": "Plan - Rollout Playback Disruption Hardening",
+    "plan_ref": ".agents/plans/archived/rollout-playback-disruption-hardening/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Prevent abrupt in-flight stream interruption during backend pod termination where possible.\n2. Ensure Kubernetes rollout lifecycle settings support graceful drain and keep old pod serving while replacement becomes ready.\n3. Recover active track playback after transient stream failures (including rollout window disconnects) before skipping tracks.\n4. Avoid user-visible full-app reload while audio is actively playing.\n5. Produce a concrete deferred HLS/DASH architecture plan for future exploration.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "1. Backend should enter drain mode, stop accepting new connections, and allow in-flight requests to complete within a bounded grace window.\n2. Helm backend/frontend deployments should explicitly set termination grace and preStop delay to allow readiness removal and LB propagation before process exit.\n3. Frontend player should perform bounded retry/reload+seek recovery for track playback errors before fallback skip.\n4. Service worker update activation should be deferred while playback is active and applied when playback is idle/paused.\n5. Add a deferred plan doc that decomposes HLS/DASH migration into phases with acceptance gates, risks, and compatibility constraints.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Prevent abrupt in-flight stream interruption during backend pod termination where possible.\n2. Ensure Kubernetes rollout lifecycle settings support graceful drain and keep old pod serving while replacement becomes ready.\n3. Recover active track playback after transient stream failures (including rollout window disconnects) before skipping tracks.\n4. Avoid user-visible full-app reload while audio is actively playing.\n5. Produce a concrete deferred HLS/DASH architecture plan for future exploration.",
+        "non_goals": ""
+      }
+    }
+  }
+}

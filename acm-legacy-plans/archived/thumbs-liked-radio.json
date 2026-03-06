@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "feature_id": "thumbs-liked-radio",
+  "feature_title": "Plan - Thumbs Scoring and My Liked Radio",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/thumbs-liked-radio.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/thumbs-liked-radio/PLAN.json",
+    "plan_dir": ".agents/plans/archived/thumbs-liked-radio",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/thumbs-liked-radio/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Thumbs Scoring and My Liked Radio\n\n## Document Status\n\n- Last updated: 2026-02-19\n- Feature: Thumbs-up / thumbs-down scoring with My Liked playlist integration\n- Scope: Backend scoring contract + radio/home integration + UI entry points + verification\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Feature status: `Complete`\n\n## Goal\n\nIntroduce a simple, scalable scoring system driven by thumbs-up/down interactions and use it to power a deterministic `My Liked` radio playlist that appears as the second radio option and plays liked tracks in shuffled order.\n\n## Reuse/Consolidation Check\n\n- Reuse existing `LikedTrack` and `DislikedEntity` persistence models rather than adding parallel tables.\n- Reuse `/library/radio` contract by adding a `liked` type instead of introducing a separate endpoint for playback selection.\n- Keep scoring abstraction extensible so future weighted or multi-signal ranking can build on it.\n\n## Spec Outline\n\n1. Define and persist track preference score changes from thumbs-up/down.\n2. Expose API contract for setting and reading per-track preference state.\n3. Add `My Liked` radio source in both Radio tab and Home radio cards (second position).\n4. Ensure `My Liked` set is all liked tracks and playback order is shuffled at play time.\n5. Validate end-to-end behavior and guardrails.\n\n## Refined Spec\n\n### In Scope\n\n1. Backend preference scoring helper and request handlers for thumbs interactions.\n2. `library/radio?type=liked` support returning all liked tracks (bounded by safety cap where needed).\n3. Frontend radio source updates for `My Liked` ordering and playback wiring.\n4. Initial player/thumb UI hooks required to mark track liked/disliked.\n\n### Out of Scope\n\n1. Personalized recommendation model redesign.\n2. Multi-user collaborative likes.\n3. Historical analytics dashboards for score trends.\n\n### Constraints\n\n1. Keep compatibility with existing `LikedTrack` usage paths.\n2. Preserve current radio/discovery behavior for non-liked sources.\n3. Keep implementation testable with targeted backend/frontend coverage.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished with completion summary\n\n### Phase 0: Contract and Data Path Validation\n\n#### Task 0.1: Validate existing like/dislike persistence paths\n- Status: Complete\n- Deliverable: File-level map of current write/read paths for `LikedTrack` and `DislikedEntity`.\n- Completion Summary:\n  - Confirmed existing persistence via `LikedTrack` plus reusable `DislikedEntity` without schema changes.\n  - Confirmed no app-native thumbs route existed in `library` routes before implementation.\n\n#### Task 0.2: Define scalable score abstraction for thumbs signals\n- Status: Complete\n- Deliverable: Minimal utility for translating thumbs states into extensible score values.\n- Completion Summary:\n  - Added `backend/src/services/trackPreference.ts` with normalized thumbs signal parsing and centralized score resolution (`+1/-1/0`).\n  - Added deterministic conflict resolution when both liked/disliked signals exist.\n\n### Phase 1: Backend Implementation\n\n#### Task 1.1: Add/extend API endpoints for thumbs state updates and retrieval\n- Status: Complete\n- Deliverable: Backend routes/services allowing thumb up/down toggles on tracks.\n- Completion Summary:\n  - Added `GET /library/tracks/:id/preference` and `POST /library/tracks/:id/preference`.\n  - Implemented up/down/clear mutations with mutual exclusion between `LikedTrack` and `DislikedEntity`.\n\n#### Task 1.2: Add `liked` radio source to `/library/radio`\n- Status: Complete\n- Deliverable: `type=liked` returns liked tracks set for playback, with deterministic membership and shuffled play order.\n- Completion Summary:\n  - Added `radioType=liked` branch returning liked tracks ordered by `likedAt`.\n  - Preserved deterministic membership/order server-side for `liked` and `vibe` branches and avoided server-side shuffle for those modes.\n  - Kept limit safety cap while allowing liked mode to request up to `MAX_LIMIT`.\n\n### Phase 2: Frontend Integration\n\n#### Task 2.1: Add thumbs-up/down controls to active playback UI surfaces\n- Status: Complete\n- Deliverable: User can set/remove thumb states for current track.\n- Completion Summary:\n  - Added reusable hook `frontend/hooks/useTrackPreference.ts`.\n  - Added thumbs-up/down controls to `FullPlayer` and `OverlayPlayer` with toggle-to-clear behavior.\n\n#### Task 2.2: Add `My Liked` radio card/list entry in required position\n- Status: Complete\n- Deliverable: Radio tab and Home show `My Liked` second, immediately right of `Shuffle All`.\n- Completion Summary:\n  - Added `My Liked` as the second static station in `frontend/app/radio/page.tsx` and `frontend/features/home/components/LibraryRadioStations.tsx`.\n  - Updated liked radio requests to ask for full liked membership (`limit=10000`), then shuffle client-side at playback start.\n\n### Phase 3: Verification and Closeout\n\n#### Task 3.1: Add/update targeted tests\n- Status: Complete\n- Deliverable: Coverage for thumbs scoring state transitions and liked radio source behavior.\n- Completion Summary:\n  - Extended `backend/src/routes/__tests__/libraryRuntime.test.ts` with route coverage for preference read/write and liked-radio deterministic ordering.\n\n#### Task 3.2: Run targeted validation commands and summarize outcomes\n- Status: Complete\n- Deliverable: Command evidence and outcome mapping to requirements.\n- Completion Summary:\n  - `cd backend && ./node_modules/.bin/jest src/routes/__tests__/libraryRuntime.test.ts --runInBand` passed (98 tests).\n  - Frontend targeted eslint run completed with no errors; warnings were existing `no-explicit-any` in untouched `frontend/lib/api.ts` lines outside this feature scope.\n\n## Feature Closeout Summary\n\n- Added centralized thumbs signal scoring (`+1/-1/0`) and deterministic preference conflict resolution.\n- Implemented track preference read/write API plus liked/disliked mutual exclusion semantics.\n- Added `library/radio?type=liked` support and wired `My Liked` as the second station in Home and Radio views.\n- Added reusable frontend track-preference hook and player controls with toggle-to-clear behavior.\n- Added targeted backend runtime coverage for preference mutations and liked-radio response behavior.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.thumbs-liked-radio.77c32dd0c0",
+    "plan_key": "plan:legacy.archived.thumbs-liked-radio.77c32dd0c0",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Thumbs Scoring and My Liked Radio",
+      "objective": "1. Define and persist track preference score changes from thumbs-up/down.\n2. Expose API contract for setting and reading per-track preference state.\n3. Add `My Liked` radio source in both Radio tab and Home radio cards (second position).\n4. Ensure `My Liked` set is all liked tracks and playback order is shuffled at play time.\n5. Validate end-to-end behavior and guardrails.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Define and persist track preference score changes from thumbs-up/down.",
+        "2. Expose API contract for setting and reading per-track preference state.",
+        "3. Add `My Liked` radio source in both Radio tab and Home radio cards (second position).",
+        "4. Ensure `My Liked` set is all liked tracks and playback order is shuffled at play time.",
+        "5. Validate end-to-end behavior and guardrails."
+      ],
+      "out_of_scope": [
+        "1. Personalized recommendation model redesign.",
+        "2. Multi-user collaborative likes.",
+        "3. Historical analytics dashboards for score trends."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/thumbs-liked-radio.json",
+        ".agents/plans/archived/thumbs-liked-radio/PLAN.json",
+        ".agents/plans/archived/thumbs-liked-radio/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/thumbs-liked-radio/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Define and persist track preference score changes from thumbs-up/down.\n2. Expose API contract for setting and reading per-track preference state.\n3. Add `My Liked` radio source in both Radio tab and Home radio cards (second position).\n4. Ensure `My Liked` set is all liked tracks and playback order is shuffled at play time.\n5. Validate end-to-end behavior and guardrails.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/thumbs-liked-radio.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "thumbs-liked-radio",
+    "feature_title": "Plan - Thumbs Scoring and My Liked Radio",
+    "plan_ref": ".agents/plans/archived/thumbs-liked-radio/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Define and persist track preference score changes from thumbs-up/down.\n2. Expose API contract for setting and reading per-track preference state.\n3. Add `My Liked` radio source in both Radio tab and Home radio cards (second position).\n4. Ensure `My Liked` set is all liked tracks and playback order is shuffled at play time.\n5. Validate end-to-end behavior and guardrails.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Define and persist track preference score changes from thumbs-up/down.\n2. Expose API contract for setting and reading per-track preference state.\n3. Add `My Liked` radio source in both Radio tab and Home radio cards (second position).\n4. Ensure `My Liked` set is all liked tracks and playback order is shuffled at play time.\n5. Validate end-to-end behavior and guardrails.",
+        "non_goals": "1. Personalized recommendation model redesign.\n2. Multi-user collaborative likes.\n3. Historical analytics dashboards for score trends."
+      }
+    }
+  }
+}

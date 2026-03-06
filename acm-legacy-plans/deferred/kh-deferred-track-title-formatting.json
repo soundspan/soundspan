@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "feature_id": "kh-deferred-track-title-formatting",
+  "feature_title": "Kima Hub Upstream — Deferred: Track Title Formatting (KH-14)",
+  "track": "deferred",
+  "export_path": "acm-legacy-plans/deferred/kh-deferred-track-title-formatting.json",
+  "legacy": {
+    "plan_path": ".agents/plans/deferred/kh-deferred-track-title-formatting/PLAN.json",
+    "plan_dir": ".agents/plans/deferred/kh-deferred-track-title-formatting",
+    "status": "deferred",
+    "updated_at": "2026-03-02T18:00:00Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/deferred/kh-deferred-track-title-formatting/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Kima Hub Upstream — Deferred: Track Title Formatting (KH-14)\n\n## Document Status\n- Last updated: 2026-03-02\n- Feature: Foobar2000-style track title format strings\n- Scope: Deferred — not adopting\n- Implementation state: Deferred\n\n## Origin\n\nUpstream: `chevron7locked/kima-hub` v1.5.0 → v1.6.0, item KH-14.\n\n## What the Upstream Change Does\n\nA self-contained ~133-line expression evaluator implementing Foobar2000-style format strings for runtime track title display customization (e.g., `%artist% - %title%`).\n\n## Deferral Reasoning\n\nSoundspan uses database-level `displayTitle`/`displayTrackNo` overrides (per-track user overrides in Prisma schema) — a fundamentally different approach. Adopting would require:\n\n1. A new system/user setting for format string templates\n2. Integration into every track display location (player, queue, library, search, Subsonic responses)\n3. A migration path from current DB overrides\n4. Runtime format evaluation on every track render\n\nLow user demand; no functional gap addressed by this feature.\n\n## Revisit Criteria\n\n- User feedback specifically requests configurable track display formatting\n- Multiple users report friction with per-track displayTitle overrides\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.deferred.kh-deferred-track-title-formatting.04d75675a5",
+    "plan_key": "plan:legacy.deferred.kh-deferred-track-title-formatting.04d75675a5",
+    "final_db_status": "blocked",
+    "plan": {
+      "title": "Kima Hub Upstream — Deferred: Track Title Formatting (KH-14)",
+      "objective": "Evaluate Foobar2000-style track title format strings (KH-14) from Kima Hub v1.6.0 — a ~133-line expression evaluator for runtime display customization (e.g., %artist% - %title%).",
+      "kind": "legacy_deferred",
+      "status": "blocked",
+      "stages": {
+        "spec_outline": "pending",
+        "refined_spec": "pending",
+        "implementation_plan": "pending"
+      },
+      "in_scope": [
+        "Deferred: Foobar2000-style track title formatting expression evaluator. Soundspan uses per-track database displayTitle overrides instead of runtime format strings."
+      ],
+      "out_of_scope": [
+        "Not adopting: soundspan uses database-level displayTitle/displayTrackNo overrides (per-track user overrides in Prisma schema), a fundamentally different approach. Low user demand. Adopting would require a new system/user setting, integration into every track display location (player, queue, library, search, Subsonic), and a migration path from current DB overrides."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/deferred/kh-deferred-track-title-formatting.json",
+        ".agents/plans/deferred/kh-deferred-track-title-formatting/PLAN.json",
+        ".agents/plans/deferred/kh-deferred-track-title-formatting/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/deferred/kh-deferred-track-title-formatting/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "Evaluate Foobar2000-style track title format strings (KH-14) from Kima Hub v1.6.0 — a ~133-line expression evaluator for runtime display customization (e.g., %artist% - %title%).",
+        "status": "blocked",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/deferred/kh-deferred-track-title-formatting.json"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/kh-deferred-track-title-formatting.json"
+        ],
+        "blocked_reason": "Legacy plan is deferred until explicitly resumed.",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "kh-deferred-track-title-formatting",
+    "feature_title": "Kima Hub Upstream — Deferred: Track Title Formatting (KH-14)",
+    "plan_ref": ".agents/plans/deferred/kh-deferred-track-title-formatting/PLAN.json",
+    "status": "deferred",
+    "updated_at": "2026-03-02T18:00:00Z",
+    "planning_stages": {
+      "spec_outline": "pending",
+      "refined_spec": "pending",
+      "implementation_plan": "pending"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Evaluate Foobar2000-style track title format strings (KH-14) from Kima Hub v1.6.0 — a ~133-line expression evaluator for runtime display customization (e.g., %artist% - %title%).",
+        "non_goals": "Not adopting: soundspan uses database-level displayTitle/displayTrackNo overrides (per-track user overrides in Prisma schema), a fundamentally different approach. Low user demand. Adopting would require a new system/user setting, integration into every track display location (player, queue, library, search, Subsonic), and a migration path from current DB overrides."
+      },
+      "spec_outline": {
+        "summary": "Deferred: Foobar2000-style track title formatting expression evaluator. Soundspan uses per-track database displayTitle overrides instead of runtime format strings.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "Deferred: No refined spec needed. Deferral reason is architectural approach difference, not complexity.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "Deferred: No implementation planned. Revisit when user feedback specifically requests configurable track display formatting.",
+        "steps": []
+      }
+    },
+    "subagent": {
+      "requirement": "none",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": null
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "feature_id": "repo-indexing-drift-hardening",
+  "feature_title": "Plan - Repo Indexing Drift Hardening",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/repo-indexing-drift-hardening.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/repo-indexing-drift-hardening/PLAN.json",
+    "plan_dir": ".agents/plans/archived/repo-indexing-drift-hardening",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/repo-indexing-drift-hardening/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Repo Indexing Drift Hardening\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: Local repository indexing/vectorization for low-context, fast retrieval\n- Scope: Build deterministic, resilient index artifacts with drift detection and exhaustive operator docs\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Approved by user instruction (\"build it resilient and averse from drift, as well as document it exhaustively\")\n- Feature status: `Complete`\n- Closed at: `2026-02-20T01:06:39Z`\n\n## Goal\n\nDeliver a local indexing subsystem that:\n\n1. Builds deterministic structural + chunk indexes from selected repo files.\n2. Vectorizes chunks using a deterministic local embedding model to avoid provider/model drift.\n3. Supports incremental rebuilds by file hash.\n4. Detects and reports index drift/corruption with strict integrity verification.\n5. Provides exhaustive usage/operations documentation.\n\n## Constraints\n\n1. Keep implementation local-first and dependency-light.\n2. Do not index heavy or low-value paths (`node_modules`, build artifacts, coverage, binary assets).\n3. Preserve repository governance and context discipline.\n\n## Reuse/Consolidation Check\n\n- Reused existing repo conventions (`.github/scripts/*.mjs`, JSON artifact style from session preflight).\n- Intentionally not adding external vector databases to keep deterministic local behavior and minimize operational drift.\n- Deferred optional provider-backed embeddings as future enhancement.\n\n## Detailed Implementation Plan\n\n1. `Complete` - Add indexing CLI and config artifacts.\n   - Files: `tools/index/index.config.json`, `tools/index/indexer.mjs`\n   - Outcome: Commands for `build`, `query`, and `verify` with deterministic vectorization, incremental reuse, and integrity contracts.\n   - Completion summary: Added deterministic hash-TF vector engine, chunk/symbol extraction, atomic artifact writes, lock handling, and drift/integrity verification.\n\n2. `Complete` - Add npm scripts and generated artifact ignore rules.\n   - Files: `package.json`, `.gitignore` (if needed)\n   - Outcome: Easy operator commands and no accidental commit of generated index output.\n   - Completion summary: Added `index:build`, `index:rebuild`, `index:query`, and `index:verify` scripts. Generated output remains under already-ignored `.agents/**`.\n\n3. `Complete` - Add exhaustive operator documentation.\n   - Files: `docs/REPO_INDEXING.md`\n   - Outcome: Architecture, drift controls, chunking rules, troubleshooting, operational playbooks.\n   - Completion summary: Added end-to-end guide and linked it from `docs/README.md`.\n\n4. `Complete` - Validate end-to-end behavior with sample build/query/verify commands.\n   - Evidence: command output capture in completion summary.\n   - Outcome: Proven functionality and reproducibility.\n   - Verification:\n     - `npm run index:rebuild` (full build succeeds; 616 files, 13,982 chunks, 13,161 symbols)\n     - `npm run index:build` (incremental build succeeds; full reuse for unchanged files/chunks/symbols)\n     - `npm run index:query -- \"social presence route\" --top 5` (returns relevant backend/frontend chunks)\n     - `npm run index:verify` (strict verify passes; no drift, no integrity errors)\n\n## Feature Closeout Summary\n\n- Delivered deterministic local repository indexing with incremental rebuilds and strict integrity/drift verification.\n- Added operator-facing index tooling commands (`index:build`, `index:rebuild`, `index:query`, `index:verify`) and exhaustive runbook documentation.\n- Verified reproducible end-to-end behavior for full build, incremental build, query relevance, and strict verification checks.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.repo-indexing-drift-hardening.41e3c882ce",
+    "plan_key": "plan:legacy.archived.repo-indexing-drift-hardening.41e3c882ce",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Repo Indexing Drift Hardening",
+      "objective": "Plan - Repo Indexing Drift Hardening",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/repo-indexing-drift-hardening.json",
+        ".agents/plans/archived/repo-indexing-drift-hardening/PLAN.json",
+        ".agents/plans/archived/repo-indexing-drift-hardening/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/repo-indexing-drift-hardening/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "Plan - Repo Indexing Drift Hardening",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/repo-indexing-drift-hardening.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "repo-indexing-drift-hardening",
+    "feature_title": "Plan - Repo Indexing Drift Hardening",
+    "plan_ref": ".agents/plans/archived/repo-indexing-drift-hardening/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "1. `Complete` - Add indexing CLI and config artifacts.\n   - Files: `tools/index/index.config.json`, `tools/index/indexer.mjs`\n   - Outcome: Commands for `build`, `query`, and `verify` with deterministic vectorization, incremental reuse, and integrity contracts.\n   - Completion summary: Added deterministic hash-TF vector engine, chunk/symbol extraction, atomic artifact writes, lock handling, and drift/integrity verification.\n\n2. `Complete` - Add npm scripts and generated artifact ignore rules.\n   - Files: `package.json`, `.gitignore` (if needed)\n   - Outcome: Easy operator commands and no accidental commit of generated index output.\n   - Completion summary: Added `index:build`, `index:rebuild`, `index:query`, and `index:verify` scripts. Generated output remains under already-ignored `.agents/**`.\n\n3. `Complete` - Add exhaustive operator documentation.\n   - Files: `docs/REPO_INDEXING.md`\n   - Outcome: Architecture, drift controls, chunking rules, troubleshooting, operational playbooks.\n   - Completion summary: Added end-to-end guide and linked it from `docs/README.md`.\n\n4. `Complete` - Validate end-to-end behavior with sample build/query/verify commands.\n   - Evidence: command output capture in completion summary.\n   - Outcome: Proven functionality and reproducibility.\n   - Verification:\n     - `npm run index:rebuild` (full build succeeds; 616 files, 13,982 chunks, 13,161 symbols)\n     - `npm run index:build` (incremental build succeeds; full reuse for unchanged files/chunks/symbols)\n     - `npm run index:query -- \"social presence route\" --top 5` (returns relevant backend/frontend chunks)\n     - `npm run index:verify` (strict verify passes; no drift, no integrity errors)",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "",
+        "non_goals": ""
+      }
+    }
+  }
+}

@@ -26,12 +26,11 @@ This index is the central navigation page for all project documentation under `d
 ### Contributors and maintainers
 
 1. Start with [`TESTING.md`](TESTING.md) for test framework/layout/command standards
-2. Use [`FEATURE_INDEX.json`](../.agents-config/docs/FEATURE_INDEX.json) to locate feature entrypoints quickly
-3. Use [`TEST_MATRIX.md`](../.agents-config/docs/TEST_MATRIX.md) to run targeted impacted checks before broader suites
-4. Use [`ROUTE_MAP.md`](../.agents-config/docs/ROUTE_MAP.md) to jump straight to backend endpoint and frontend page handlers
-5. Use domain start-here guides in [`../backend/src/routes/README.md`](../backend/src/routes/README.md), [`../backend/src/services/README.md`](../backend/src/services/README.md), and [`../frontend/features/README.md`](../frontend/features/README.md)
-6. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-7. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
+2. Use [`../AGENTS.md`](../AGENTS.md) for the active ACM repo contract
+3. Use domain start-here guides in [`../backend/src/routes/README.md`](../backend/src/routes/README.md), [`../backend/src/services/README.md`](../backend/src/services/README.md), and [`../frontend/features/README.md`](../frontend/features/README.md)
+4. Use [`maintainers/README.md`](maintainers/README.md) for retained maintainer-only guidance
+5. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+6. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
 
 ---
 
@@ -56,13 +55,10 @@ This index is the central navigation page for all project documentation under `d
 | Document | Audience | Purpose |
 | --- | --- | --- |
 | [`TESTING.md`](TESTING.md) | Contributors/operators | Test frameworks, directory structure, commands, CI coverage visibility, and manual-vs-automated boundaries |
-| [`REPO_INDEXING.md`](../.agents-config/docs/REPO_INDEXING.md) | Contributors/agents | Deterministic local indexing/vectorization, drift controls, and retrieval operations |
-| [`FEATURE_INDEX.json`](../.agents-config/docs/FEATURE_INDEX.json) | Contributors/agents | Machine-readable feature map linking domains to implementation files, tests, and docs |
-| [`TEST_MATRIX.md`](../.agents-config/docs/TEST_MATRIX.md) | Contributors/agents | Canonical feature-to-targeted-test command matrix for fast local validation |
-| [`ROUTE_MAP.md`](../.agents-config/docs/ROUTE_MAP.md) | Contributors/agents | Generated backend endpoint and frontend route map for quick entrypoint discovery |
-| [`JSDOC_COVERAGE.md`](../.agents-config/docs/JSDOC_COVERAGE.md) | Contributors/agents | Generated baseline of exported-symbol JSDoc coverage by backend/frontend area |
-| [`LOGGING_STANDARDS.md`](../.agents-config/docs/LOGGING_STANDARDS.md) | Contributors/agents | Canonical frontend/backend/python logging contract and compliance workflow |
-| [`RELEASE_NOTES_TEMPLATE.md`](../.agents-config/docs/RELEASE_NOTES_TEMPLATE.md) | Maintainers | Canonical release-notes format and command (`npm run release:notes -- --version <X.Y.Z> --from <tag> [--to <ref>] [--output <path>]`) |
+| [`../AGENTS.md`](../AGENTS.md) | Contributors/agents | Active ACM repo contract and task loop |
+| [`maintainers/README.md`](maintainers/README.md) | Maintainers | Index of retained maintainer-only guidance |
+| [`maintainers/LOGGING_STANDARDS.md`](maintainers/LOGGING_STANDARDS.md) | Maintainers | Current shared logging guidance for runtime code |
+| [`maintainers/RELEASE_NOTES_TEMPLATE.md`](maintainers/RELEASE_NOTES_TEMPLATE.md) | Maintainers | Manual release-notes scaffold for published releases |
 
 ## Compatibility and Brand
 
@@ -74,9 +70,8 @@ This index is the central navigation page for all project documentation under `d
 
 ---
 
-Quick helper commands:
-- `npm run feature-index:verify` validates `.agents-config/docs/FEATURE_INDEX.json` coverage against `frontend/features/*`.
-- `npm run route-map:verify` validates `.agents-config/docs/ROUTE_MAP.md` is up to date with backend/frontend route sources.
-- `npm run domain-readmes:verify` validates per-domain start-here READMEs are up to date.
-- `npm run jsdoc-coverage:verify` validates `.agents-config/docs/JSDOC_COVERAGE.md` is up to date with current exported-symbol scan results.
-- `npm run logging:compliance:verify` validates raw logging callsites against the enforced baseline contract.
+Key ACM helper commands:
+- `acm get-context --project soundspan --task-text "<task>" --phase plan` starts scoped work.
+- `acm verify --project soundspan --phase review --file-changed <path>` runs repo-defined verification.
+- `acm health --project soundspan --include-details` checks ACM index/rules health.
+- `node scripts/acm-legacy-plans.mjs validate --source acm-legacy-plans --map ACM_LEGACY_PLAN_MAP.json` validates retained legacy-plan export metadata.

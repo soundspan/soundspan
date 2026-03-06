@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "feature_id": "podcast-search",
+  "feature_title": "PODCAST_SEARCH_NOTIFICATIONS_PLAN",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/podcast-search.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/podcast-search/PLAN.json",
+    "plan_dir": ".agents/plans/archived/podcast-search",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/podcast-search/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# PODCAST_SEARCH_NOTIFICATIONS_PLAN\n\n## Date\n- 2026-02-12\n\n## Scope\n- Podcast episode queue behavior when starting playback from older episodes.\n- Main search experience improvements for podcast discovery.\n- Suppress duplicate enrichment completion notifications after stack restart.\n\n## Problems To Solve\n1. Podcast playback currently queues all episodes and can auto-advance in the wrong direction for \"older episode\" playback.\n2. Main search lacks a dedicated podcasts filter/tab and clear podcast-focused result views.\n3. Enrichment completion notifications can be recreated after app restart even when enrichment was already complete.\n\n## Implementation Plan\n1. Podcast Queue Logic\n- Update `frontend/features/podcast/hooks/usePodcastActions.ts`.\n- Build an ascending-by-date episode sequence from the selected episode to latest.\n- If selected episode is latest: clear queue (`setPodcastEpisodeQueue(null)`).\n- If selected episode is older: set queue to selected+newer episodes only.\n\n2. Search: Dedicated Podcasts Tab\n- Update filter union and UI button:\n- `frontend/features/search/types.ts`\n- `frontend/features/search/components/SearchFilters.tsx`\n- Extend search hook input to allow query type control:\n- `frontend/features/search/hooks/useSearchData.ts`\n- Update main page rendering and conditions:\n- `frontend/app/search/page.tsx`\n- Ensure podcast results link to podcast pages (`/podcasts/[id]`), for both library and discover podcast results.\n\n3. Notification Dedup On Restart\n- Update `backend/src/workers/unifiedEnrichment.ts`.\n- Detect whether enrichment cycle started with outstanding work.\n- Only send completion notification if the session actually had work remaining or processed work.\n- Mark completion notification state to prevent repeated checks when starting from already-complete state.\n\n4. Documentation\n- Update `CHANGELOG.md` under `[1.5.0] - Unreleased`.\n\n5. Validation\n- Run frontend lint.\n- Run backend validation command if feasible in current environment.\n\n## Risks / Edge Cases\n- Episode timestamps can tie or be missing precision; queue logic should rely on stable order after date sort.\n- Podcast tab should not regress existing search sections (tracks/albums/artists/soulseek).\n- Completion notification suppression must not block legitimate completion notifications for active sessions.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.podcast-search.2d8fb8ccc0",
+    "plan_key": "plan:legacy.archived.podcast-search.2d8fb8ccc0",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "PODCAST_SEARCH_NOTIFICATIONS_PLAN",
+      "objective": "PODCAST_SEARCH_NOTIFICATIONS_PLAN",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/podcast-search.json",
+        ".agents/plans/archived/podcast-search/PLAN.json",
+        ".agents/plans/archived/podcast-search/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/podcast-search/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "PODCAST_SEARCH_NOTIFICATIONS_PLAN",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/podcast-search.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "podcast-search",
+    "feature_title": "PODCAST_SEARCH_NOTIFICATIONS_PLAN",
+    "plan_ref": ".agents/plans/archived/podcast-search/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "1. Podcast Queue Logic\n- Update `frontend/features/podcast/hooks/usePodcastActions.ts`.\n- Build an ascending-by-date episode sequence from the selected episode to latest.\n- If selected episode is latest: clear queue (`setPodcastEpisodeQueue(null)`).\n- If selected episode is older: set queue to selected+newer episodes only.\n\n2. Search: Dedicated Podcasts Tab\n- Update filter union and UI button:\n- `frontend/features/search/types.ts`\n- `frontend/features/search/components/SearchFilters.tsx`\n- Extend search hook input to allow query type control:\n- `frontend/features/search/hooks/useSearchData.ts`\n- Update main page rendering and conditions:\n- `frontend/app/search/page.tsx`\n- Ensure podcast results link to podcast pages (`/podcasts/[id]`), for both library and discover podcast results.\n\n3. Notification Dedup On Restart\n- Update `backend/src/workers/unifiedEnrichment.ts`.\n- Detect whether enrichment cycle started with outstanding work.\n- Only send completion notification if the session actually had work remaining or processed work.\n- Mark completion notification state to prevent repeated checks when starting from already-complete state.\n\n4. Documentation\n- Update `CHANGELOG.md` under `[1.5.0] - Unreleased`.\n\n5. Validation\n- Run frontend lint.\n- Run backend validation command if feasible in current environment.",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "",
+        "non_goals": ""
+      }
+    }
+  }
+}

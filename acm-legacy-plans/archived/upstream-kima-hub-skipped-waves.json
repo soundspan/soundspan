@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "feature_id": "upstream-kima-hub-skipped-waves",
+  "feature_title": "Plan - Upstream Kima Hub Skipped Waves (Archived Closed)",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/upstream-kima-hub-skipped-waves.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/upstream-kima-hub-skipped-waves/PLAN.json",
+    "plan_dir": ".agents/plans/archived/upstream-kima-hub-skipped-waves",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/upstream-kima-hub-skipped-waves/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Upstream Kima Hub Skipped Waves (Archived Closed)\n\n## Document Status\n\n- Last updated: 2026-02-18\n- Feature: Permanently archived wave scopes for upstream kima-hub sync\n- State: Archived/closed by explicit user priority\n\n## Purpose\n\nRecord non-priority upstream reconciliation waves that were explicitly closed and archived with no planned reactivation.\n\n## Archived Closed Waves\n\n1. `wave-00-baseline-remote-hygiene`\n2. `wave-01-toolchain-infra`\n3. `wave-02-db-schema-migrations`\n4. `wave-06-frontend-pages-features-api`\n5. `wave-07-sidecars-assets-services`\n6. `wave-08-docs-release-ledgers`\n7. `wave-09-integration-hardening`\n\nWave planning documents are stored in `waves/` under this archived directory.\n\n## Closure Reason\n\nUser-directed scope narrowing to prioritize only:\n\n1. backend core (`wave-03`)\n2. soulseek stack (`wave-04`)\n3. frontend audio/howler replacement (`wave-05`)\n\n## Reactivation\n\nNo reactivation is planned. Any future re-open requires a new explicit user instruction and a new plan/queue track.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.upstream-kima-hub-skipped-waves.9fd70636a7",
+    "plan_key": "plan:legacy.archived.upstream-kima-hub-skipped-waves.9fd70636a7",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Upstream Kima Hub Skipped Waves (Archived Closed)",
+      "objective": "Record non-priority upstream reconciliation waves that were explicitly closed and archived with no planned reactivation.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/upstream-kima-hub-skipped-waves.json",
+        ".agents/plans/archived/upstream-kima-hub-skipped-waves/PLAN.json",
+        ".agents/plans/archived/upstream-kima-hub-skipped-waves/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/upstream-kima-hub-skipped-waves/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "Record non-priority upstream reconciliation waves that were explicitly closed and archived with no planned reactivation.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/upstream-kima-hub-skipped-waves.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "upstream-kima-hub-skipped-waves",
+    "feature_title": "Plan - Upstream Kima Hub Skipped Waves (Archived Closed)",
+    "plan_ref": ".agents/plans/archived/upstream-kima-hub-skipped-waves/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Record non-priority upstream reconciliation waves that were explicitly closed and archived with no planned reactivation.",
+        "non_goals": ""
+      }
+    }
+  }
+}

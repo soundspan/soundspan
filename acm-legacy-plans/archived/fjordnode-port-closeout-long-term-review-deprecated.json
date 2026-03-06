@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "feature_id": "fjordnode-port-closeout-long-term-review-deprecated",
+  "feature_title": "FJORDNODE_PORT_CLOSEOUT_LONG_TERM_REVIEW_PLAN.md",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/fjordnode-port-closeout-long-term-review-deprecated.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PLAN.json",
+    "plan_dir": ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/ARCHIVE_NOTE.md",
+        "name": "ARCHIVE_NOTE.md",
+        "content": "# ARCHIVE_NOTE.md\n\n## Archive/Deprecation Event\n\n- Date: 2026-02-14\n- Path: `plans/archived/fjordnode-port-closeout-long-term-review-deprecated/`\n- Status: Deprecated historical artifact\n\n## Reason\n\nUser decision: no standalone \"fjordnode port closeout\" feature is needed; umbrella closure already fulfilled that purpose.\n\n## Execution Policy\n\n1. Do not treat this directory as active scope.\n2. Do not create new tasks under this feature.\n3. Keep only for historical traceability.\n"
+      },
+      {
+        "path": ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# LLM_SESSION_HANDOFF.md\n\n## Feature\n- Fjordnode port closeout long-term review (`FJORDNODE_PORT_CLOSEOUT_LONG_TERM_REVIEW_PLAN.md`)\n\n## Current State\n- Deprecated archival artifact.\n- User explicitly rejected standalone closeout feature scope on 2026-02-14.\n- No active implementation should proceed from this track.\n\n## Anti-Staleness Guardrails\n1. Update this track whenever any extracted fjordnode feature changes state.\n2. Run stale-link checks before each closeout handoff.\n3. Keep docs sync status evidence-based (command/output references).\n4. Avoid duplicate closeout work by recording completed vs pending items explicitly.\n\n## Next Actions\n1. None for active execution.\n2. Preserve for historical reference only.\n"
+      },
+      {
+        "path": ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# FJORDNODE_PORT_CLOSEOUT_LONG_TERM_REVIEW_PLAN.md\n\n## Document Status\n\n- Last updated: 2026-02-14\n- Feature: Umbrella closeout extraction from fjordnode umbrella (`Phase 8`)\n- Parent context: `.agents/plans/archived/fjordnode-feature-port-umbrella/PLAN.md` (Phase 8 extraction)\n- Scope: Planning/design only (no implementation in this document)\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Deprecated/archived per user decision (no standalone closeout feature required)\n\n## Deprecation Note (2026-02-14)\n\nUser decision: a standalone \\\"fjordnode port closeout\\\" feature is not needed because umbrella closure already handled that role.\n\nExecution policy:\n1. Do not resume this track.\n2. Treat this file as historical context only.\n3. Keep closeout hygiene within umbrella archival procedure and AGENTS-defined closeout flow.\n\n## Why This Was Split Out\n\nCloseout work is cross-cutting documentation/process hardening and should be tracked independently from feature implementation queues to avoid stale umbrellas and repeated rework.\n\n## Goal\n\nMaintain an always-current fjordnode-port closeout track that keeps docs, delta summaries, and feature archive state consistent as independent bundles ship.\n\n## Staleness and Rework Prevention Protocol (Mandatory)\n\n1. Treat this track as an always-on hygiene ledger, not a one-time task.\n2. At each bundle milestone completion (any extracted feature), update closeout status in this plan before the next bundle starts.\n3. Run stale-link checks across all related `plans/current` and `plans/archived` feature docs at each update cycle.\n4. Reconcile docs (`CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md`) against actual shipped behavior, not planned behavior.\n5. Prevent duplicate/redundant closeout work:\n- record what was already synchronized,\n- record what remains intentionally deferred and why.\n\n## Spec Outline\n\n1. Track cross-feature docs synchronization state.\n2. Enforce changelog section policy on every closeout pass.\n3. Verify archive-state consistency after each feature archive move.\n4. Keep umbrella-decomposition map current so no workstream is orphaned.\n\n## Refined Spec\n\n### Constraints\n\n1. No stale references to non-canonical plan locations.\n2. No closeout completion claimed without evidence of docs + archive consistency.\n3. `Fixed` section discipline in changelog must stay aligned with AGENTS policy.\n\n### Acceptance Criteria\n\n1. All extracted feature tracks are mapped and discoverable.\n2. Docs reflect shipped behavior accurately after each feature milestone.\n3. Archive-state checks confirm no residual files remain in retired `plans/current/*` paths.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Status Legend\n\n- `Pending`: Not started\n- `In Progress`: Actively being worked\n- `Complete`: Finished and includes completion summary\n\n## Phase 0: Baseline Mapping\n\n### Task 0.1: Maintain extracted-feature registry\n- Status: Pending\n- Deliverable: canonical map of extracted tracks and states (`B`, `D`, `E`, analyzer/MBID/Lidarr, etc.).\n\n### Task 0.2: Maintain stale-link hygiene checklist\n- Status: Pending\n- Deliverable: repeatable check/report workflow for plan linkage integrity.\n\n## Phase 1: Documentation Synchronization\n\n### Task 1.1: Release-doc synchronization pass\n- Status: Pending\n- Deliverable: delta sync state for `CHANGELOG.md`, `README.md`, `docs/FORK_DIFF.md`, `docs/FORK_DIFF_COMMITS.md`.\n\n### Task 1.2: Changelog policy enforcement pass\n- Status: Pending\n- Deliverable: explicit `Fixed` vs `Added/Changed` compliance verification.\n\n## Phase 2: Archive and Continuity Integrity\n\n### Task 2.1: Archive-state verification after each feature closeout\n- Status: Pending\n- Deliverable: evidence that archived feature files are moved and `plans/current/<feature>` has no residue.\n\n### Task 2.2: Continuity handoff integrity\n- Status: Pending\n- Deliverable: current cross-feature next-actions summary and dependency status.\n"
+      },
+      {
+        "path": ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-14 Session Prompt History (Feature Extraction Bootstrap)\n1. This closeout track was created by extracting former umbrella Phase 8 into an independent long-term review feature.\n2. Purpose is to prevent umbrella staleness and repeated docs/archive reconciliation work.\n3. Mandatory anti-staleness and anti-rework rules were embedded at creation time.\n\n## 2026-02-14 Session Prompt History (Feature Decommission)\n1. User explicitly stated a standalone closeout feature was unnecessary.\n2. Track was removed from `plans/current`, relocated to archived as deprecated history, and marked non-executable.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.fjordnode-port-closeout-long-term-review-deprecated.a4b8f42b37",
+    "plan_key": "plan:legacy.archived.fjordnode-port-closeout-long-term-review-deprecated.a4b8f42b37",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "FJORDNODE_PORT_CLOSEOUT_LONG_TERM_REVIEW_PLAN.md",
+      "objective": "1. Track cross-feature docs synchronization state.\n2. Enforce changelog section policy on every closeout pass.\n3. Verify archive-state consistency after each feature archive move.\n4. Keep umbrella-decomposition map current so no workstream is orphaned.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Track cross-feature docs synchronization state.",
+        "2. Enforce changelog section policy on every closeout pass.",
+        "3. Verify archive-state consistency after each feature archive move.",
+        "4. Keep umbrella-decomposition map current so no workstream is orphaned."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/fjordnode-port-closeout-long-term-review-deprecated.json",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PLAN.json",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/ARCHIVE_NOTE.md",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/HANDOFF.md",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PLAN.md",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/ARCHIVE_NOTE.md",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/HANDOFF.md",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PLAN.md",
+        ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Track cross-feature docs synchronization state.\n2. Enforce changelog section policy on every closeout pass.\n3. Verify archive-state consistency after each feature archive move.\n4. Keep umbrella-decomposition map current so no workstream is orphaned.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/fjordnode-port-closeout-long-term-review-deprecated.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "fjordnode-port-closeout-long-term-review-deprecated",
+    "feature_title": "FJORDNODE_PORT_CLOSEOUT_LONG_TERM_REVIEW_PLAN.md",
+    "plan_ref": ".agents/plans/archived/fjordnode-port-closeout-long-term-review-deprecated/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Track cross-feature docs synchronization state.\n2. Enforce changelog section policy on every closeout pass.\n3. Verify archive-state consistency after each feature archive move.\n4. Keep umbrella-decomposition map current so no workstream is orphaned.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Track cross-feature docs synchronization state.\n2. Enforce changelog section policy on every closeout pass.\n3. Verify archive-state consistency after each feature archive move.\n4. Keep umbrella-decomposition map current so no workstream is orphaned.",
+        "non_goals": ""
+      }
+    }
+  }
+}

@@ -1,0 +1,314 @@
+{
+  "version": 1,
+  "feature_id": "frontend-backend-coverage-95-orchestrated",
+  "feature_title": "Plan - Frontend/Backend Coverage 95 Orchestrated",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/frontend-backend-coverage-95-orchestrated.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/frontend-backend-coverage-95-orchestrated/PLAN.json",
+    "plan_dir": ".agents/plans/archived/frontend-backend-coverage-95-orchestrated",
+    "status": "complete",
+    "updated_at": "2026-03-02T05:07:48.978Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.frontend-backend-coverage-95-orchestrated.aaca24aa44",
+    "plan_key": "plan:legacy.archived.frontend-backend-coverage-95-orchestrated.aaca24aa44",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Frontend/Backend Coverage 95 Orchestrated",
+      "objective": "Raise practical automated test coverage for both backend and frontend to at least 95 percent on all tracked metrics in this campaign, using realistic regression-oriented tests and orchestrated atomic subagent execution.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Define measurable coverage scope, identify current gaps, and align command-level evidence strategy with memory and queue constraints.",
+        "Coverage baseline inventory with explicit target metrics and feasible command matrix."
+      ],
+      "out_of_scope": [
+        "Do not run monolithic full-suite commands that are known to exceed local RAM limits. Do not add synthetic or brittle tests that only inflate numbers without validating user-facing behavior or core service contracts."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/frontend-backend-coverage-95-orchestrated.json",
+        ".agents/plans/archived/frontend-backend-coverage-95-orchestrated/PLAN.json",
+        ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json",
+        "backend/package.json",
+        "frontend/package.json",
+        ".agents-config/docs/AGENT_RULES.md",
+        ".agents/EXECUTION_QUEUE.json",
+        "backend/src",
+        "backend/src/**/__tests__",
+        "frontend/tests/unit",
+        "frontend/tests/component"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.baseline-and-scope-normalization",
+        "summary": "Baseline And Scope Normalization",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Current backend/frontend coverage baselines are captured from runnable targeted commands",
+          "Checklist schema reflects both backend and frontend sections with command provenance"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/frontend-backend-coverage-95-orchestrated.json",
+          ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json",
+          "backend/package.json",
+          "frontend/package.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "Captured backend and frontend baseline scoped metrics before test expansion. | Established refreshed checklist schema for dual-scope coverage tracking.",
+        "evidence": [
+          "verify:test -f backend/coverage/scope-backend-firstslice/coverage-summary.json",
+          "verify:test -f frontend/coverage/scope-frontend-firstslice/coverage-summary.json"
+        ]
+      },
+      {
+        "key": "task.02.backend-coverage-lift-to-95",
+        "summary": "Backend Coverage Lift To >=95",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Backend tracked coverage metrics meet or exceed 95 percent",
+          "New backend tests validate realistic success and failure behavior for previously under-covered logic"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/frontend-backend-coverage-95-orchestrated.json",
+          "backend/src",
+          "backend/src/**/__tests__",
+          "backend/package.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added realistic backend tests for auth, notification, and error fallback paths. | Raised backend scoped metrics to >=95 across statements/branches/functions/lines.",
+        "evidence": [
+          "verify:node -e \"const j=require('./backend/coverage/scope-backend-firstslice/coverage-summary.json').total; if([j.statements.pct,j.branches.pct,j.functions.pct,j.lines.pct].some(v=>v<95))process.exit(1);\""
+        ]
+      },
+      {
+        "key": "task.03.frontend-coverage-lift-to-95",
+        "summary": "Frontend Coverage Lift To >=95",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Frontend tracked coverage metrics meet or exceed 95 percent",
+          "New frontend tests validate realistic UI/runtime behavior, not only static rendering"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/frontend-backend-coverage-95-orchestrated.json",
+          "frontend/tests/unit",
+          "frontend/tests/component",
+          "frontend/package.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added deterministic frontend tests for playback reconciliation, API base URL resolution, queue insertion, auto-match guards, and recovery policy edge paths. | Raised frontend scoped metrics to >=95 across statements/branches/functions/lines.",
+        "evidence": [
+          "verify:node -e \"const j=require('./frontend/coverage/scope-frontend-firstslice/coverage-summary.json').total; if([j.statements.pct,j.branches.pct,j.functions.pct,j.lines.pct].some(v=>v<95))process.exit(1);\""
+        ]
+      },
+      {
+        "key": "task.04.checklist-finalization-and-evidence-lock",
+        "summary": "Checklist Finalization And Evidence Lock",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Checklist contains final coverage metrics for frontend and backend with timestamps and commands",
+          "Queue item completion evidence includes explicit verify-prefixed entries"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/frontend-backend-coverage-95-orchestrated.json",
+          ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json",
+          ".agents/EXECUTION_QUEUE.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "Incremented and rewrote machine-readable checklist with baseline/final metrics, commands, artifacts, and aggregate pass state. | Recorded dual-scope campaign metadata and retained legacy snapshot context.",
+        "evidence": [
+          "verify:node -e \"const j=require('./.agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json'); if(!j.aggregate_gate || !j.aggregate_gate.overall_pass) process.exit(1);\""
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "frontend-backend-coverage-95-orchestrated",
+    "feature_title": "Plan - Frontend/Backend Coverage 95 Orchestrated",
+    "plan_ref": ".agents/plans/archived/frontend-backend-coverage-95-orchestrated/PLAN.json",
+    "status": "complete",
+    "updated_at": "2026-03-02T05:07:48.978Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Raise practical automated test coverage for both backend and frontend to at least 95 percent on all tracked metrics in this campaign, using realistic regression-oriented tests and orchestrated atomic subagent execution.",
+        "non_goals": "Do not run monolithic full-suite commands that are known to exceed local RAM limits. Do not add synthetic or brittle tests that only inflate numbers without validating user-facing behavior or core service contracts."
+      },
+      "spec_outline": {
+        "summary": "Establish a constrained, orchestrated coverage campaign that reaches and proves 95 percent minimum coverage for frontend and backend tracked surfaces while keeping tests meaningful and maintainable.",
+        "full_spec_outline": [
+          {
+            "id": "scope-and-baseline-definition",
+            "objective": "Define measurable coverage scope, identify current gaps, and align command-level evidence strategy with memory and queue constraints.",
+            "deliverable": "Coverage baseline inventory with explicit target metrics and feasible command matrix.",
+            "acceptance_criteria": [
+              "Coverage sources and metrics are documented for frontend and backend",
+              "Outdated checklist scope is corrected and replaced with current campaign schema"
+            ],
+            "references": [
+              ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json",
+              "backend/package.json",
+              "frontend/package.json"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Execute through atomic subagent tasks: baseline measurement, targeted backend test lifts, targeted frontend test lifts, and final checklist synchronization with verification artifacts.",
+        "full_refined_spec": [
+          {
+            "id": "orchestrated-atomic-execution",
+            "decision": "Use worker/explorer subagents for all substantive discovery and implementation tasks, reserving orchestrator work for queue control, plan updates, integration review, and mandatory verification commands.",
+            "rationale": "This follows repository orchestration policy and allows parallel, bounded slices of work while minimizing merge conflicts and preserving test quality through focused ownership.",
+            "acceptance_criteria": [
+              "Each subagent is assigned a single atomic objective with file ownership boundaries",
+              "Each completed slice includes targeted verification output that can be traced back to checklist evidence"
+            ],
+            "references": [
+              ".agents-config/docs/AGENT_RULES.md",
+              ".agents/EXECUTION_QUEUE.json"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Drive iterative coverage waves with measurable checkpoints and keep machine-readable coverage checklist synchronized after each verified increment until both frontend and backend metrics satisfy the 95 percent floor.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Baseline And Scope Normalization",
+            "acceptance_criteria": [
+              "Current backend/frontend coverage baselines are captured from runnable targeted commands",
+              "Checklist schema reflects both backend and frontend sections with command provenance"
+            ],
+            "references": [
+              ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json",
+              "backend/package.json",
+              "frontend/package.json"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Captured backend and frontend baseline scoped metrics before test expansion.",
+                "Established refreshed checklist schema for dual-scope coverage tracking."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json"
+              ],
+              "verification_testing": [
+                "verify:test -f backend/coverage/scope-backend-firstslice/coverage-summary.json",
+                "verify:test -f frontend/coverage/scope-frontend-firstslice/coverage-summary.json"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Backend Coverage Lift To >=95",
+            "acceptance_criteria": [
+              "Backend tracked coverage metrics meet or exceed 95 percent",
+              "New backend tests validate realistic success and failure behavior for previously under-covered logic"
+            ],
+            "references": [
+              "backend/src",
+              "backend/src/**/__tests__",
+              "backend/package.json"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added realistic backend tests for auth, notification, and error fallback paths.",
+                "Raised backend scoped metrics to >=95 across statements/branches/functions/lines."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/middleware/__tests__/subsonicAuth.test.ts",
+                "backend/src/services/__tests__/notificationService.test.ts",
+                "backend/src/middleware/__tests__/errorHandler.test.ts",
+                "backend/coverage/scope-backend-firstslice/coverage-summary.json"
+              ],
+              "verification_testing": [
+                "verify:node -e \"const j=require('./backend/coverage/scope-backend-firstslice/coverage-summary.json').total; if([j.statements.pct,j.branches.pct,j.functions.pct,j.lines.pct].some(v=>v<95))process.exit(1);\""
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Frontend Coverage Lift To >=95",
+            "acceptance_criteria": [
+              "Frontend tracked coverage metrics meet or exceed 95 percent",
+              "New frontend tests validate realistic UI/runtime behavior, not only static rendering"
+            ],
+            "references": [
+              "frontend/tests/unit",
+              "frontend/tests/component",
+              "frontend/package.json"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added deterministic frontend tests for playback reconciliation, API base URL resolution, queue insertion, auto-match guards, and recovery policy edge paths.",
+                "Raised frontend scoped metrics to >=95 across statements/branches/functions/lines."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/tests/unit/playbackStateReconciliation.test.ts",
+                "frontend/tests/unit/apiBaseUrl.test.ts",
+                "frontend/tests/unit/playNowQueueLogic.test.ts",
+                "frontend/tests/unit/autoMatchVibePlayback.test.ts",
+                "frontend/tests/unit/recoveryPolicy.test.ts",
+                "frontend/coverage/scope-frontend-firstslice/coverage-summary.json"
+              ],
+              "verification_testing": [
+                "verify:node -e \"const j=require('./frontend/coverage/scope-frontend-firstslice/coverage-summary.json').total; if([j.statements.pct,j.branches.pct,j.functions.pct,j.lines.pct].some(v=>v<95))process.exit(1);\""
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Checklist Finalization And Evidence Lock",
+            "acceptance_criteria": [
+              "Checklist contains final coverage metrics for frontend and backend with timestamps and commands",
+              "Queue item completion evidence includes explicit verify-prefixed entries"
+            ],
+            "references": [
+              ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json",
+              ".agents/EXECUTION_QUEUE.json"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Incremented and rewrote machine-readable checklist with baseline/final metrics, commands, artifacts, and aggregate pass state.",
+                "Recorded dual-scope campaign metadata and retained legacy snapshot context."
+              ],
+              "files_functions_hooks_touched": [
+                ".agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json",
+                ".agents/EXECUTION_QUEUE.json"
+              ],
+              "verification_testing": [
+                "verify:node -e \"const j=require('./.agents/MACHINE_READABLE_COVERAGE_CHECKLIST.json'); if(!j.aggregate_gate || !j.aggregate_gate.overall_pass) process.exit(1);\""
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "required",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator",
+        "worker:backend",
+        "worker:frontend"
+      ],
+      "last_executor": "orchestrator"
+    }
+  }
+}

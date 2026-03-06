@@ -1,0 +1,559 @@
+{
+  "version": 1,
+  "feature_id": "vivid-roaming-moth",
+  "feature_title": "Plan - Provider Strategy & Track Mapping Redesign (vivid-roaming-moth)",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/vivid-roaming-moth.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/vivid-roaming-moth/PLAN.json",
+    "plan_dir": ".agents/plans/archived/vivid-roaming-moth",
+    "status": "complete",
+    "updated_at": "2026-02-28T17:37:05.640Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/vivid-roaming-moth/README.md",
+        "name": "README.md",
+        "content": "# vivid-roaming-moth archival provenance\n\n## Purpose\nThis archived feature directory preserves source provenance for the completed `vivid-roaming-moth` execution and documents the split between completed scope and deferred follow-up work.\n\n## Provenance Sources Captured Here\n- `claude-memory-MEMORY.md` from `/home/joshd/.claude/projects/-home-joshd-git-soundspan/memory/MEMORY.md`\n- `claude-memory-provider-strategy-track-mapping.md` from `/home/joshd/.claude/projects/-home-joshd-git-soundspan/memory/provider-strategy-track-mapping.md`\n- `claude-plan-vivid-roaming-moth.md` from `/home/joshd/.claude/plans/vivid-roaming-moth.md`\n- `claude-plan-vivid-roaming-moth-summary.md` from `/home/joshd/.claude/plans/vivid-roaming-moth-summary.md`\n\n## Complete vs Deferred Split\n- Completed implementation scope is recorded in `PLAN.json` at this archive location with `status: complete` and all implementation steps marked complete from the Claude summary phases.\n- Deferred scope is tracked in `.agents/plans/archived/vivid-roaming-moth-followups/PLAN.json` with pending steps for:\n  - Explicit Claude-summary deferred items: Step 4.5, Step 4.6, Step 5.5, Step 7.2\n  - Branch-review follow-ups: migration validation, unauthenticated stream hardening/observability, and end-to-end regression coverage expansion\n\n## Notes\nThis directory is archival/provenance state only; new implementation activity should occur through the deferred follow-up plan track.\n"
+      },
+      {
+        "path": ".agents/plans/archived/vivid-roaming-moth/claude-memory-MEMORY.md",
+        "name": "claude-memory-MEMORY.md",
+        "content": "# Soundspan Memory Index\n\n## Key Design Documents\n- [Provider Strategy & Track Mapping Redesign](./provider-strategy-track-mapping.md) — Comprehensive plan for Browse overhaul, playlist restructuring, and new TrackMapping data model (brainstormed 2026-02-28)\n\n## Architecture Notes\n- Gap-fill pattern: Tidal (priority) > YT Music > local preview. Both use sidecar services (Tidal :8585, YT Music :8586) with device-code OAuth per user.\n- Browse page is currently Deezer-only. Planned: replace with YT Music as default, add Tidal tab for connected users.\n- Spotify API has 5-user dev cap, not viable for streaming/gap-fill. Keep anonymous playlist URL parsing only.\n- Track table = local file, must not be modified. New provider tables (TrackTidal, TrackYtMusic) and TrackMapping layer are additive.\n- ytmusic sidecar: `ytmusicapi` handles search (unauthenticated), `yt-dlp` handles stream extraction (also unauthenticated under the hood, but endpoints currently gated behind OAuth check)\n- YouTube `videoId` is permanent; stream URLs from yt-dlp expire in hours — store videoId, extract stream URL at playback time\n\n## Project Context\n- Soundspan is self-hosted, AGPL3 licensed\n- Target deployment: ~15-20 users max (friends/family)\n- User preference: additive/non-breaking changes, deprecate-in-place over breaking migrations\n- User preference: no auto-creation of user-facing artifacts (playlists, etc.) — let users explicitly choose\n- Lazy backfill over bulk operations\n"
+      },
+      {
+        "path": ".agents/plans/archived/vivid-roaming-moth/claude-memory-provider-strategy-track-mapping.md",
+        "name": "claude-memory-provider-strategy-track-mapping.md",
+        "content": "# Provider Strategy & Track Mapping Redesign\n\nBrainstormed 2026-02-28. Status: design phase, no implementation yet.\n\n---\n\n## Provider Strategy\n\n### Deezer: Remove from user-facing features\n- Browse page today is a Deezer storefront, but 30-second preview cap without account makes it frustrating\n- Not worth investing in gap-fill\n- Keep backend Deezer service for cover art/metadata fallback only\n\n### Spotify: Remove from user-facing streaming\n- API 5-user development cap; app verification has strict commercial requirements\n- Keep anonymous playlist URL parsing (no user OAuth) for playlist imports\n- Strip indexer/download logic from import flow\n- No \"connect Spotify,\" no Spotify streaming, no Spotify gap-fill\n\n### YouTube Music: Elevate to primary free-tier provider\n- Full-length playback works for free, no app verification issues, no meaningful API limits\n- Becomes default Browse experience and first-class gap-fill provider\n- No concerns about OAuth limits per user's confirmation\n- **Universal fallback:** YT Music serves as automatic free-tier resolution for ALL playlist imports, even for users with no connected services\n- Search already works unauthenticated (uses `YTMusic()` with no credentials, avoids polluting user's YT history)\n- Streaming currently gated behind OAuth in sidecar code, but underlying yt-dlp extraction is unauthenticated — small sidecar modification needed to allow unauthenticated streaming path\n- Sidecar details: `_get_ytmusic(user_id)` check at top of `/stream` and `/proxy` endpoints (lines ~1586, ~1613 in app.py) is the only gate; yt-dlp (`_get_stream_url_sync`) doesn't use OAuth\n- `ytmusicapi` = search/matching (unauthenticated), `yt-dlp` = stream URL extraction (unauthenticated)\n\n### Tidal: Keep as premium gap-fill\n- Works well today via device-code OAuth\n- Remains highest-priority streaming source for connected users\n\n---\n\n## Browse Page Overhaul\n\n- Replace Deezer Browse with YouTube Music Browse (full-length free playback for everyone)\n- YT Music Browse always visible and playable (baseline for all users)\n- Tidal Browse appears as additional tab/section when user has Tidal connected\n- Optional: non-connected users see \"connect Tidal to unlock\" state on Tidal tab\n- **Browse → Play flow:** Clicking play on a Browse playlist creates an inline temporary queue — full track playback, no import required\n- Users can optionally \"Import this playlist\" to save it as their own playlist in the platform\n- Do NOT auto-create playlists or transient playlists — avoid compounding into unmanageable state\n- Deprecate existing Deezer Browse UX, add new YT Music Browse alongside\n\n---\n\n## Playlist Restructuring\n\n### Core change: playlists accept remote sources\n- Today: playlist = list of local files\n- Future: playlist = list of track references that resolve per-user based on available sources\n\n### Import flow (Spotify, YT Music, Tidal URL imports)\n1. Pull track list metadata from source URL\n2. Match against local library first (ISRC, then artist+title+album+duration)\n3. Check existing TrackMapping/TrackTidal/TrackYtMusic entries\n4. **Tracks with no local match and no existing mapping:** auto-search YT Music unauthenticated, create TrackYtMusic + TrackMapping — ensures playlist is playable even with zero connected services\n5. **Also resolve all available providers at import time** (e.g., if user has Tidal, match Tidal AND YT Music) so fallback is automatic if a service is later disconnected\n6. No download queue, no indexer matching — resolution only\n7. Result: most playlists are fully playable on import via YT Music free tier as universal fallback\n\n### PlaylistItem changes\n- Adds `trackTidalId?` and `trackYtMusicId?` (new nullable FKs)\n- Existing `trackId` stays untouched — all current playlists work as before\n\n### Unplayable tracks in shared playlists\n- Tracks user can't resolve: red/greyed out with tooltip (\"Connect Tidal to play this track\")\n- Skip-on-play behavior (don't halt queue)\n- Summary at top: \"12 of 15 tracks playable\"\n\n### Service disconnection handling\n- Per-user per-track resolution (local > tidal > youtube) handles this naturally\n- Since all providers are resolved at import time, disconnecting Tidal falls back to YT Music automatically\n- No special re-resolution needed — the mappings already exist\n\n### Existing PlaylistPendingTrack\n- Keep existing functionality in place (additive/backwards compatible, no breaking changes)\n- Deprecate in favor of new import flow\n- Clean up cruft later once new system is stable\n\n---\n\n## New Data Model\n\n### New Tables\n\n**TrackTidal** — Tidal's representation of a track:\n- `id`, `tidalId` (numeric, **unique constraint**), `title`, `artist`, `album`, `duration`, `isrc`, `quality`, `explicit`, `createdAt`\n\n**TrackYtMusic** — YouTube Music's representation of a track:\n- `id`, `videoId` (**unique constraint**), `title`, `artist`, `album`, `duration`, `thumbnailUrl`, `createdAt`\n- Note: `videoId` is a permanent YouTube identifier. Stream URLs are extracted at playback time via yt-dlp and expire after a few hours — only `videoId` is stored, never the stream URL.\n\n**TrackMapping** — assertion/glue layer (\"we believe these are the same track\"):\n- `id`\n- `trackId?` -> Track (nullable)\n- `trackTidalId?` -> TrackTidal (nullable)\n- `trackYtMusicId?` -> TrackYtMusic (nullable)\n- `confidence` — match certainty\n- `source` — enum: `gap-fill`, `isrc`, `import-match`, `manual`\n- `createdAt`\n\n### Provider table deduplication\n- Unique constraints on `TrackTidal.tidalId` and `TrackYtMusic.videoId`\n- Import logic does upsert: find existing by provider ID, create only if new\n- Prevents duplicate rows from multiple imports of the same track\n\n### Existing Tables (unchanged)\n- **Track** — completely untouched. Local files, album relationships, analysis data.\n- **PlaylistItem** — adds two new nullable FKs, existing `trackId` FK unchanged.\n\n### Key Design Principles\n\n1. **TrackMapping is advisory, not authoritative.** Doesn't own data. Connects independent records. Wrong mapping? Delete it, nothing else affected. If TrackMapping table disappeared, local playback and direct provider streaming still work.\n\n2. **No uniqueness constraints on TrackMapping FKs.** A Track/TrackTidal/TrackYtMusic can appear in multiple mapping rows. Handles same song on multiple albums correctly.\n\n3. **Local tracks are authoritative but not merged.** New local track does NOT attach to existing TrackMapping/remote entries. Stays in its album. Forward gap-fill runs instead (find Tidal/YT equivalents for this specific album context). Background worker separately reconciles remote-only entries.\n\n4. **Everything is additive/non-breaking.** Track table untouched. Existing playlists untouched. Old functionality identical until ready to remove cruft.\n\n---\n\n## Flow Details\n\n### Album Page Gap-Fill (evolution of existing)\n1. Album loads, local Tracks displayed (unchanged)\n2. **Check TrackMapping first** — if mappings exist for these tracks, skip API calls\n3. For tracks without mappings: gap-fill runs against Tidal/YT Music APIs (existing behavior)\n4. **New:** Results persisted — TrackTidal/TrackYtMusic rows created, TrackMapping rows linking to local Track\n5. Next user: TrackMapping exists, instant resolution\n6. Frontend hooks (`useYtMusicGapFill`, `useTidalGapFill`) become \"check cache, then fill gaps in cache\"\n\n### Playlist Import (new)\n1. User pastes Spotify/Tidal/YT Music playlist URL\n2. Track metadata pulled from source\n3. Each track: match against local library first (ISRC, then artist+title+album+duration)\n4. Each track: check existing TrackMapping/TrackTidal/TrackYtMusic entries\n5. **Tracks with no local match and no existing mapping:** auto-search YT Music unauthenticated, create TrackYtMusic + TrackMapping\n6. **Also match against user's other connected providers** (resolve Tidal AND YT at import time for fallback resilience)\n7. Create PlaylistItem pointing to best reference found (trackId for local, trackTidalId/trackYtMusicId for remote)\n\n### Playback Resolution (per-user, per-track)\nPriority: Local file > Tidal (if connected) > YT Music (if connected or free) > Unplayable (red, skipped)\n\nFor items with only trackTidalId, resolution checks TrackMapping for local Track or TrackYtMusic equivalents.\n\n### New Local Track Scan (forward gap-fill on ingest)\n1. Library scan finds new file -> Track row created (unchanged)\n2. **New:** Forward gap-fill runs for this track, scoped to its album context\n3. TrackTidal/TrackYtMusic and TrackMapping rows created\n4. Album context (artist+title+album+duration) prevents conflating studio/live/remaster versions\n5. Does NOT attempt to attach to existing remote-only TrackMapping entries — keeps album-track integrity\n\n### Background Reconciliation Worker (new)\n- Runs on schedule, purely additive, never modifies existing records\n- Finds TrackTidal/TrackYtMusic without TrackMapping to local Track\n- Attempts matching against local library (ISRC first, then metadata)\n- Creates TrackMapping rows for high-confidence matches only\n- Effect: remote-only playlist tracks can resolve to local playback over time\n\n### Backfilling Existing Libraries\n- **Lazy, not bulk.** No mass gap-fill on deployment.\n- TrackMapping populated on first album page view (same cold-start cost as today)\n- Existing local playback is unaffected — albums work identically until gap-fill runs\n\n---\n\n## Dead Mapping Handling\n\n- YouTube videos get taken down, Tidal tracks get delisted\n- If a stream request fails (404/410/unavailable), keep the TrackTidal/TrackYtMusic row but mark it as stale\n- Playlist UI: gray out the track as \"No longer available\" rather than deleting\n- Attempt fallback to next provider in priority chain\n- Do NOT delete TrackMapping rows — the mapping was correct, the content just disappeared\n\n---\n\n## YT Music as Universal Fallback\n\n- Any playlist import (Spotify, Tidal, YT Music URL) automatically resolves unmatched tracks through YT Music free tier\n- Users with zero connected services still get fully playable playlists\n- Creates a natural tiered experience:\n\n| Tier | Experience |\n|---|---|\n| No accounts | Full playback via free YT Music (lower quality) |\n| YT Music connected | Better quality, ad-free YT streams |\n| Tidal connected | Premium/lossless quality on matched tracks |\n| Local files | Best quality, no external dependency |\n\n- Import resolution waterfall: local match → existing TrackMapping → auto YT Music search → unplayable (rare)\n- Sidecar needs minor modification: add unauthenticated code path in `/proxy` endpoint (skip OAuth check, yt-dlp extraction is already unauthenticated)\n\n---\n\n## Region Handling\n\n- Edge case given self-hosted nature (target: ~15-20 users max, friends/family)\n- Hardcoded US default for provider region\n- Configurable via exposed runtime variable for non-US deployments\n- When user connects YT Music/Tidal OAuth, could auto-detect region from their account and update provider config\n- Failed streams due to region restrictions: fall to next provider reactively\n\n---\n\n## Search Across Providers (Future Consideration)\n\n- Currently out of immediate scope but high-value\n- Search results could include remote-only tracks (from TrackYtMusic/TrackTidal) alongside local results\n- \"We don't have this locally, but you can stream it\" — makes search much more powerful\n- Would leverage existing TrackMapping/provider tables\n\n---\n\n## Risks / Open Items\n\n- **yt-dlp 403/429 rate limiting:** Unauthenticated yt-dlp requests to YouTube are susceptible to 403 Forbidden and 429 rate limit responses. Need to verify current User-Agent and header configuration — may need to pass a browser-like User-Agent, use yt-dlp's `--extractor-args` for PO tokens, or implement request throttling/backoff. This risk increases significantly with unauthenticated streaming at scale since there's no OAuth session to lean on. Investigate what yt-dlp headers/config the sidecar currently sends.\n- **Player/queue mixed sources:** Queue could have local/Tidal/YT interleaved. Works fine today on album pages; investigate further when approaching playlist implementation.\n- **Stream URL expiry:** Not a storage concern — `videoId` is permanent, stream URLs extracted at playback time via yt-dlp. But need graceful handling if extraction fails (retry, fallback).\n\n---\n\n## Outcome Summary\n- **Self-improving:** Every gap-fill, import, and scan enriches the mapping layer\n- **Non-breaking:** All new tables/FKs are additive; existing functionality untouched\n- **Per-user resolution:** Same playlist renders differently based on each user's providers/library\n- **Provider-agnostic playlists:** Imported from Spotify, resolvable through Tidal/YT/local\n- **Zero-friction onboarding:** New users can import and play playlists immediately via YT Music free tier\n- **Deprecate-in-place:** Old Deezer Browse and PlaylistPendingTrack stay functional, new features built alongside, cruft cleaned later\n"
+      },
+      {
+        "path": ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+        "name": "claude-plan-vivid-roaming-moth-summary.md",
+        "content": "  Implementation Summary\n\n  Phase 1: Data Model Foundation\n\n  - Added TrackTidal, TrackYtMusic, TrackMapping models to Prisma schema\n  - Extended PlaylistItem with nullable trackId and provider FKs (trackTidalId, trackYtMusicId)\n  - Hand-written migration SQL (no local DB)\n  - 14 unit tests passing\n\n  Phase 2: Gap-Fill Persistence Layer\n\n  - Created TrackMappingService with upsert/create/find/markStale methods\n  - Added /api/track-mappings/album/:albumId and POST /batch routes\n  - Extended YT Music and Tidal match-batch handlers with fire-and-forget persistence\n  - Frontend gap-fill hooks now check persisted mappings before API calls\n  - 14 unit tests passing\n\n  Phase 3: Sidecar Unauthenticated Streaming\n\n  - Sidecar __public__ user_id bypass for proxy/stream-info endpoints\n  - Public stream routes in backend (/stream-public/:videoId, /stream-info-public/:videoId)\n  - Frontend player uses public stream URLs\n  - Removed OAuth requirement from YT Music gap-fill status check\n  - 6 unit tests passing\n\n  Phase 4: Playlist Import Rework\n\n  - Extracted shared matching logic into trackMatching.ts\n  - Created PlaylistImportService (local -> YT Music -> Tidal resolution chain)\n  - Added /api/import/preview and /api/import/execute routes\n  - 9 unit tests passing\n\n  Phase 5: Browse Page Overhaul\n\n  - Sidecar browse endpoints (/charts, /moods-and-genres, /playlist/:id)\n  - Backend YT Music browse routes with 5-min TTL cache\n  - Service methods: getCharts(), getMoodCategories(), getBrowsePlaylist()\n  - Frontend browse page redesigned with YT Music charts and mood/genre categories\n  - Playlist detail page with inline playback via queue system (play all, add to queue)\n\n  Phase 6: Background Reconciliation Worker\n\n  - TrackReconciliationService — links remote-only mappings to local tracks via metadata matching\n  - Registered as Bull scheduled job (startup + every 6 hours)\n  - Also triggered after library scan completion\n  - 10 unit tests passing\n\n  Phase 7: Deprecation & Cleanup\n\n  - Deezer browse routes return 410 Gone (URL parse kept for imports)\n  - PlaylistPendingTrack model marked as deprecated in schema\n  - Frontend browse pages fully converted from Deezer to YT Music\n\n  Total: 53 new tests, all passing. 100 existing spotify import tests still passing.\n\n  Deferred items:\n  - Step 4.5: Frontend import page UI (design-heavy)\n  - Step 4.6: Playlist detail mixed-provider rendering\n  - Step 5.5: Optional Tidal browse tab\n  - Step 7.2: Stripping Spotify download/indexer logic (large refactor, risky to do in this session)"
+      },
+      {
+        "path": ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+        "name": "claude-plan-vivid-roaming-moth.md",
+        "content": "# Provider Strategy & Track Mapping Redesign\n\n## Context\n\nSoundspan's Browse page is currently a Deezer storefront with 30-second preview limits. Spotify's API has a 5-user dev cap making it unviable for streaming/gap-fill. YouTube Music offers free full-length playback with no API restrictions. This redesign repositions YT Music as the universal free-tier provider, introduces a persistent track-mapping layer to eliminate redundant gap-fill API calls, and restructures playlists to accept remote streaming sources.\n\n**Design document:** `/home/joshd/.claude/projects/-home-joshd-git-soundspan/memory/provider-strategy-track-mapping.md`\n\n**Feature ID:** `provider-strategy-track-mapping`\n**Plan root (source artifact literal):** `.agents /plans/current/provider-strategy-track-mapping/`\n\n---\n\n## Phase 1: Data Model Foundation\n\n**Goal:** Add three new Prisma tables and extend PlaylistItem. No runtime behavior changes.\n\n### Step 1.1 -- Add TrackTidal and TrackYtMusic Prisma models\n\nAdd two new model blocks to schema.prisma. TrackTidal stores Tidal-specific track data (tidalId Int @unique, title, artist, album, duration, isrc?, quality?, explicit?, createdAt). TrackYtMusic stores YT Music track data (videoId String @unique, title, artist, album, duration, thumbnailUrl?, createdAt). Both have relation arrays for TrackMapping[] and PlaylistItem[].\n\n- **Files:** `backend/prisma/schema.prisma`\n- **Acceptance:** `npx prisma validate` passes; unique constraints on tidalId and videoId; no changes to existing models\n\n### Step 1.2 -- Add TrackMapping model\n\nAdd TrackMapping model with nullable FKs to Track, TrackTidal, TrackYtMusic. Fields: id, trackId?, trackTidalId?, trackYtMusicId?, confidence (Float), source (String: \"gap-fill\"|\"isrc\"|\"import-match\"|\"manual\"), stale (Boolean @default(false)), createdAt. Add `mappings TrackMapping[]` relation to existing Track model (only addition to Track). No uniqueness constraints on FKs. Indexes on trackId, trackTidalId, trackYtMusicId.\n\n- **Files:** `backend/prisma/schema.prisma`\n- **Acceptance:** `npx prisma validate` passes; Track model only gains one relation field\n\n### Step 1.3 -- Extend PlaylistItem with nullable provider FKs\n\nMake existing trackId nullable. Add trackTidalId? and trackYtMusicId? nullable FKs. Add indexes on new FKs. Keep composite unique `[playlistId, trackId]` (PostgreSQL treats NULLs as distinct, so multiple NULL-trackId rows per playlist are allowed).\n\n- **Files:** `backend/prisma/schema.prisma`\n- **Acceptance:** Existing PlaylistItem rows unaffected; `npx prisma validate` passes\n\n### Step 1.4 -- Generate and apply Prisma migration\n\nRun `npx prisma migrate dev --name add_track_mapping_tables`. Verify migration SQL contains only CREATE TABLE and ALTER TABLE ADD COLUMN (no DROP). Run `npx prisma generate`. Run existing backend tests to confirm no regressions.\n\n- **Files:** `backend/prisma/migrations/<timestamp>_add_track_mapping_tables/migration.sql`\n- **Acceptance:** Migration applies cleanly; `npm test` passes in backend\n\n### Step 1.5 -- Unit tests for new data model\n\nTest file validating CRUD on all three new tables and extended PlaylistItem: upsert TrackTidal on tidalId, upsert TrackYtMusic on videoId, create TrackMapping linking all three, TrackMapping with only trackYtMusicId (no local), PlaylistItem with null trackId + trackYtMusicId populated, multiple TrackMappings referencing same Track (no unique violation), onDelete SetNull cascade.\n\n- **Files:** `backend/src/services/__tests__/trackMapping.test.ts` (new)\n- **Acceptance:** All tests pass; covers upsert idempotency and cascade behavior\n\n---\n\n## Phase 2: Gap-Fill Persistence Layer\n\n**Goal:** Backend TrackMapping CRUD service. Evolve album page gap-fill to write/read persisted mappings while keeping in-memory cache for instant revisit UX.\n\n**Depends on:** Phase 1\n\n### Step 2.1 -- Create TrackMappingService\n\nNew service with methods: `upsertTrackTidal(tidalId, metadata)`, `upsertTrackYtMusic(videoId, metadata)`, `createMapping(...)`, `findMappingsForTrack(trackId)`, `getMappingsForAlbum(albumId)` (bulk query, single DB round-trip), `markStale(mappingId)`. All use Prisma upsert where appropriate.\n\n- **Files:** `backend/src/services/trackMappingService.ts` (new)\n- **Reuse:** Prisma client from `backend/src/utils/db.ts`, logger from `backend/src/utils/logger.ts`\n- **Acceptance:** All methods functional with proper error handling/logging\n\n### Step 2.2 -- Unit tests for TrackMappingService\n\nCover all service methods: upsert idempotency, stale marking, album-level bulk fetch, mocked Prisma client.\n\n- **Files:** `backend/src/services/__tests__/trackMappingService.test.ts` (new)\n\n### Step 2.3 -- Add backend API routes for TrackMapping\n\nRoutes: `GET /api/track-mappings/album/:albumId` (returns mappings for all album tracks), `POST /api/track-mappings/batch` (batch create, used by gap-fill persistence). Behind `requireAuth`. Zod validation.\n\n- **Files:** `backend/src/routes/trackMappings.ts` (new), mount in `backend/src/index.ts`\n- **Reuse:** Auth middleware from `backend/src/middleware/auth.ts`, Zod patterns from existing routes\n\n### Step 2.4 -- Extend match-batch endpoints to persist provider rows\n\nIn `/api/ytmusic/match-batch` handler (`backend/src/routes/youtubeMusic.ts` ~line 1143), after getting matches from sidecar, call `trackMappingService.upsertTrackYtMusic()` + `createMapping()` for each match. Same for Tidal in `backend/src/routes/tidalStreaming.ts`. Persistence is fire-and-forget (non-blocking). Response shape unchanged.\n\n- **Files:** `backend/src/routes/youtubeMusic.ts`, `backend/src/routes/tidalStreaming.ts`\n- **Acceptance:** Existing match-batch tests pass; new provider rows created on match\n\n### Step 2.5 -- Frontend: Add API client methods for track-mapping endpoints\n\nAdd `api.getAlbumMappings(albumId)` to `frontend/lib/api.ts`. Type-safe response interface.\n\n- **Files:** `frontend/lib/api.ts`\n\n### Step 2.6 -- Frontend: Evolve useYtMusicGapFill to check persisted mappings first\n\nAfter global cache miss, check `api.getAlbumMappings(albumId)`. If mappings exist, populate matches from persisted data. Only call `api.matchYtMusicBatch()` for tracks without persisted mappings. Keep in-memory `_matchCache` for instant revisit.\n\n- **Files:** `frontend/features/album/hooks/useYtMusicGapFill.ts`\n- **Acceptance:** First visit: sidecar call (no persisted data). Second visit (any user): persisted mappings, no sidecar call. Partial: sidecar for unmapped only.\n\n### Step 2.7 -- Frontend: Evolve useTidalGapFill to check persisted mappings first\n\nSame pattern as 2.6 for Tidal.\n\n- **Files:** `frontend/features/album/hooks/useTidalGapFill.ts`\n\n---\n\n## Phase 3: Sidecar Unauthenticated Streaming\n\n**Goal:** Enable ytmusic-streamer to serve `/proxy/{video_id}` without per-user OAuth. Foundation for YT Music as universal free-tier provider.\n\n**Depends on:** None (can parallel with Phase 2)\n\n### Step 3.1 -- Sidecar: Add unauthenticated proxy path\n\nIn `app.py` `/proxy/{video_id}` handler (~line 1613), skip `_get_ytmusic(user_id)` when `user_id == \"__public__\"`. yt-dlp extraction (`_get_stream_url_sync`) is already unauthenticated. Cache key becomes `__public__:{video_id}`. Rate limiting still applies via existing `_extract_lock` + throttle.\n\n- **Files:** `services/ytmusic-streamer/app.py` (~line 1601-1613)\n- **Acceptance:** `GET /proxy/{video_id}?user_id=__public__&quality=HIGH` returns audio stream; authenticated users unaffected\n\n### Step 3.2 -- Sidecar: Add unauthenticated stream-info endpoint\n\nSame pattern for `/stream-info/{video_id}` — skip OAuth when `user_id=__public__`.\n\n- **Files:** `services/ytmusic-streamer/app.py`\n\n### Step 3.3 -- Backend: Add public YT Music stream route\n\nNew route `GET /api/ytmusic/stream-public/:videoId`. Uses `requireAuthOrToken` (user logged in) + `requireYtMusicEnabled` (admin toggle). Does NOT call `requireUserOAuth`. Proxies via `ytMusicService.getStreamProxy(\"__public__\", videoId, quality, rangeHeader)`.\n\n- **Files:** `backend/src/routes/youtubeMusic.ts`\n- **Acceptance:** Users without YT Music OAuth can stream; admin toggle respected; existing auth route unchanged\n\n### Step 3.4 -- Backend: Add public stream-info route\n\n`GET /api/ytmusic/stream-info-public/:videoId` — same pattern as 3.3.\n\n- **Files:** `backend/src/routes/youtubeMusic.ts`\n\n### Step 3.5 -- Frontend: Update player to use public stream route when user lacks OAuth\n\nModify audio player stream URL resolution. When `streamSource === \"youtube\"`, check if user has YT Music OAuth. If yes: existing `/api/ytmusic/stream/:videoId`. If no: new `/api/ytmusic/stream-public/:videoId`.\n\n- **Files:** Frontend audio player/context files (grep `streamSource.*youtube`), `frontend/lib/api.ts`\n- **Acceptance:** YT Music tracks play for all users; OAuth users get quality preference; non-OAuth get default\n\n### Step 3.6 -- Frontend: Remove OAuth requirement from useYtMusicGapFill status check\n\nCurrently checks `status.enabled && status.available && status.authenticated` (~line 47). Change to `status.enabled && status.available`. Search is already unauthenticated. Streaming now unauthenticated via public route.\n\n- **Files:** `frontend/features/album/hooks/useYtMusicGapFill.ts` (~line 47)\n- **Acceptance:** YT Music gap-fill activates for all users when admin has enabled YT Music\n\n### Step 3.7 -- Tests for unauthenticated streaming path\n\nBackend tests: public stream returns audio when ytMusicEnabled=true; returns 403 when disabled; returns 401 without session; rate limiting applies.\n\n- **Files:** `backend/src/routes/__tests__/youtubeMusicPublicStream.test.ts` (new)\n\n---\n\n## Phase 4: Playlist Import Rework\n\n**Goal:** New multi-provider import flow. Resolve tracks: local library first, then YT Music (universal fallback), then Tidal if connected. Create PlaylistItems with appropriate provider FKs.\n\n**Depends on:** Phase 1, Phase 3\n\n### Step 4.1 -- Extract reusable matching logic from spotifyImport\n\nExtract `normalizeString()`, `normalizeTrackTitle()`, `normalizeAlbumForMatching()`, `stringSimilarity()`, and the local library matching pipeline (exact → normalized album → artist+title → fuzzy at 70%) from `spotifyImport.ts` into shared `backend/src/utils/trackMatching.ts`. spotifyImport imports from shared module. No behavior change.\n\n- **Files:** `backend/src/utils/trackMatching.ts` (new), `backend/src/services/spotifyImport.ts` (refactor imports)\n- **Reuse:** Existing matching strategies from spotifyImport.ts lines 494-920\n- **Acceptance:** Existing spotify import tests pass; matching logic importable from new location\n\n### Step 4.2 -- Create PlaylistImportService\n\nNew service with methods: `resolveTrack(trackMeta, userId)` (returns localTrack?, ytMusicTrack?, tidalTrack?), `previewImport(userId, sourceUrl)` (returns per-track resolution status), `importPlaylist(userId, sourceUrl, playlistName)` (creates Playlist + mixed PlaylistItems). Uses shared matching from Step 4.1. Calls unauthenticated YT Music search for all unmatched tracks (universal fallback). Calls Tidal match only if user has Tidal OAuth. Creates TrackYtMusic/TrackTidal rows via upsert + TrackMapping rows.\n\n- **Files:** `backend/src/services/playlistImportService.ts` (new)\n- **Reuse:** `trackMatching.ts` (Step 4.1), `trackMappingService.ts` (Step 2.1), `spotifyService.parseUrl()`, `deezerService.getPlaylist()`\n\n### Step 4.3 -- Add backend routes for new import flow\n\nNew routes: `POST /api/import/preview` (resolve all tracks, return match status), `POST /api/import/execute` (create playlist + items). Zod validation. Supports Spotify and Deezer URL input.\n\n- **Files:** `backend/src/routes/playlistImport.ts` (new), mount in `backend/src/index.ts`\n\n### Step 4.4 -- Tests for PlaylistImportService\n\nTests: local match returns trackId; no local match but YT match returns trackYtMusicId; both YT and Tidal matched; track not found anywhere; ISRC matching priority; upsert reuses existing TrackYtMusic.\n\n- **Files:** `backend/src/services/__tests__/playlistImportService.test.ts` (new)\n\n### Step 4.5 -- Frontend: New import page with multi-provider resolution UI\n\nNew or refactored page at `frontend/app/import/page.tsx`. Flow: paste URL → preview shows per-track resolution (local/YT/Tidal/unavailable badges) → execute button creates playlist. No download queue. Progress indicator.\n\n- **Files:** `frontend/app/import/page.tsx` (new or refactored from existing spotify import page)\n\n### Step 4.6 -- Update playlist detail page for mixed-provider items\n\nBackend: extend GET `/api/playlists/:id` handler to include trackTidal and trackYtMusic relations on PlaylistItem. Frontend: render playlist items with provider badges, play button routes to correct stream endpoint based on provider. Unplayable tracks (no matching provider for user) shown greyed/red with tooltip. Track count summary: \"12 of 15 tracks playable.\"\n\n- **Files:** `backend/src/routes/playlists.ts` (GET /:id handler ~line 210), frontend playlist detail components\n\n---\n\n## Phase 5: Browse Page Overhaul\n\n**Goal:** Replace Deezer browse with YT Music. Inline playback queue. Optional Tidal tab for connected users.\n\n**Depends on:** Phase 3\n\n### Step 5.1 -- Sidecar: Add browse endpoints (charts, moods/genres, playlists)\n\nNew unauthenticated FastAPI endpoints: `GET /charts?country=US` (uses `get_charts()`), `GET /moods-and-genres` (uses `get_mood_categories()`), `GET /playlist/{playlistId}` (public playlist fetch with track videoIds). All use `_get_public_ytmusic()`.\n\n- **Files:** `services/ytmusic-streamer/app.py`\n\n### Step 5.2 -- Backend: Create YT Music browse routes\n\nNew routes: `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id`. Behind requireAuthOrToken. Does NOT require YT Music OAuth. Requires ytMusicEnabled. Results cached (5-min TTL). Region via `YTMUSIC_REGION` env var (default US).\n\n- **Files:** `backend/src/routes/browse.ts` (extend)\n\n### Step 5.3 -- Frontend: Redesign browse page with YT Music content\n\nReplace Deezer featured playlists with YT Music charts. Replace Deezer genres with YT Music mood/genre categories. Keep URL import modal (Spotify + Deezer URLs). Add \"Import Playlist\" button on browse playlist detail.\n\n- **Files:** `frontend/app/browse/playlists/page.tsx`, `frontend/app/browse/playlists/[id]/page.tsx`\n\n### Step 5.4 -- Frontend: Implement inline playback queue from browse\n\nClick play on a browse playlist creates a temporary in-memory queue and starts playback via unauthenticated YT Music proxy. No Playlist entity created in DB. User can explicitly \"Save as Playlist\" as separate action. Queue shows in existing player UI.\n\n- **Files:** Frontend audio context/player files, `frontend/app/browse/playlists/[id]/page.tsx`\n\n### Step 5.5 -- (Optional) Tidal browse tab for connected users\n\nAdd Tidal tab that appears when user has Tidal OAuth. Shows Tidal editorial playlists. Full ad-free playback through Tidal gap-fill. Non-connected users see \"Connect Tidal to unlock\" state.\n\n- **Files:** `frontend/app/browse/playlists/page.tsx`, backend Tidal browse routes if needed\n\n---\n\n## Phase 6: Background Reconciliation Worker\n\n**Goal:** Scheduled job linking remote-only tracks to local library.\n\n**Depends on:** Phase 1, Phase 2\n\n### Step 6.1 -- Create reconciliation service\n\nQuery TrackMapping rows where trackId IS NULL. For each, attempt local library match using linked TrackTidal/TrackYtMusic metadata (ISRC first, then artist+title+album+duration). If match found with high confidence, update TrackMapping.trackId. Process in batches (default 50). Idempotent.\n\n- **Files:** `backend/src/services/trackReconciliation.ts` (new)\n- **Reuse:** `trackMatching.ts` (Step 4.1), `trackMappingService.ts` (Step 2.1)\n\n### Step 6.2 -- Register as scheduled job\n\nRun after library scan completion. Also run on configurable cron schedule (default every 6 hours). Early exit if no unlinked mappings exist.\n\n- **Files:** Backend scheduler/cron registration files\n\n### Step 6.3 -- Tests for reconciliation\n\nUnlinked mapping with local match gets linked; no local match stays unlinked; batch size respected; idempotent re-runs.\n\n- **Files:** `backend/src/services/__tests__/trackReconciliation.test.ts` (new)\n\n---\n\n## Phase 7: Deprecation & Cleanup\n\n**Goal:** Remove user-facing Deezer, strip Spotify download logic, deprecate PlaylistPendingTrack.\n\n**Depends on:** All prior phases\n\n### Step 7.1 -- Remove Deezer from browse routes\n\nRemove Deezer-specific browse endpoints (featured, search, genres, radios, /all). Keep `/api/browse/playlists/parse` (still parses Deezer URLs for import). Keep `deezerService` for cover art/metadata fallback. Removed routes return 410 Gone.\n\n- **Files:** `backend/src/routes/browse.ts`\n\n### Step 7.2 -- Strip Spotify download/indexer logic from import\n\nRemove download-via-Soulseek/indexer path from old Spotify import flow. Old `/api/spotify/import` route stays but no longer triggers downloads. No `acquisitionService` calls from import flow.\n\n- **Files:** `backend/src/services/spotifyImport.ts`, `backend/src/routes/spotify.ts`\n\n### Step 7.3 -- Deprecate PlaylistPendingTrack\n\nAdd deprecation comment in schema. Stop writing new rows. Keep reading for backward compat. Do NOT drop table.\n\n- **Files:** `backend/prisma/schema.prisma`, `backend/src/services/spotifyImport.ts`, `backend/src/routes/playlists.ts`\n\n### Step 7.4 -- Frontend: Remove Deezer branding\n\nRemove DeezerIcon, \"Powered by Deezer\" text, Deezer-specific styling. YT Music branding where appropriate. URL import modal still accepts Deezer URLs.\n\n- **Files:** `frontend/app/browse/playlists/page.tsx`, `frontend/app/browse/playlists/[id]/page.tsx`\n\n---\n\n## Dependency Graph\n\n```\nPhase 1 ──┬── Phase 2 ──┬── Phase 4 ──┐\n           │             │             │\n           ├── Phase 3 ──┤── Phase 5   ├── Phase 7\n           │             │             │\n           └─────────────┴── Phase 6 ──┘\n```\n\nPhases 2, 3, and 6 can execute in parallel after Phase 1 completes.\n\n---\n\n## Risks & Open Items\n\n1. **yt-dlp 403/429 rate limiting:** Unauthenticated streaming increases exposure. Current mitigations: browser User-Agent, android_music player client, 0.5-2.0s extraction delay with jitter. May need PO tokens or request throttling at scale. Investigate current sidecar headers before opening unauthenticated path.\n\n2. **YT Music browse API stability:** `ytmusicapi` `get_charts()` and `get_mood_categories()` use undocumented YouTube internal APIs. Could break without notice. Mitigate with aggressive caching and graceful degradation.\n\n3. **TrackMapping table growth:** Lazy creation on every gap-fill could grow large. Consider periodic cleanup of orphaned stale mappings older than N days.\n\n4. **Stream URL expiry:** YouTube `videoId` is permanent. Stream URLs from yt-dlp expire in ~6 hours. TrackYtMusic stores videoId only; stream URL extracted at playback time. Graceful handling if extraction fails (retry, fallback).\n\n5. **Region:** Hardcoded US default via `YTMUSIC_REGION` env var. Auto-detect from YT Music/Tidal OAuth account when user connects.\n\n---\n\n## Verification Strategy\n\n- **Per-step:** Each step includes acceptance criteria. Backend steps run `npm test`. Frontend steps verify no lint errors.\n- **Per-phase integration:**\n  - Phase 1: migration applies, rollback works, existing tests pass\n  - Phase 2: album page gap-fill persists mappings, second visit skips API calls\n  - Phase 3: unauthenticated user can stream YT Music tracks\n  - Phase 4: import Spotify playlist URL → playable playlist with mixed providers\n  - Phase 5: browse page shows YT Music content, inline play works\n  - Phase 6: downloaded track auto-links to existing remote mapping\n  - Phase 7: no Deezer in UI, old imports still functional\n- **End-to-end:** New user with no connected services pastes Spotify playlist URL → all tracks resolve via YT Music → full playback works\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.vivid-roaming-moth.67225da826",
+    "plan_key": "plan:legacy.archived.vivid-roaming-moth.67225da826",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Provider Strategy & Track Mapping Redesign (vivid-roaming-moth)",
+      "objective": "Complete archival of the vivid-roaming-moth execution with machine-readable, phase-by-phase implementation evidence and explicit linkage to source planning artifacts.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Replace Deezer-centric browse/gap-fill assumptions with a YT Music-first provider strategy while preserving Tidal and local-library quality paths.",
+        "Backend, sidecar, and frontend capability set for YT Music-first browse, gap-fill persistence, and universal fallback playback behavior.",
+        "Persist cross-provider track mappings and use them to reduce repeated gap-fill calls while enabling mixed-source playlist/import workflows.",
+        "TrackMapping persistence model plus service and route support used by import, reconciliation, and playback readiness paths."
+      ],
+      "out_of_scope": [
+        "Do not re-open shipped implementation scope inside this archive artifact; unresolved or risk-managed work is tracked only in the dedicated deferred follow-up plan."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/vivid-roaming-moth.json",
+        ".agents/plans/archived/vivid-roaming-moth/PLAN.json",
+        ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+        ".agents/plans/archived/vivid-roaming-moth/claude-memory-provider-strategy-track-mapping.md",
+        ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+        "backend/prisma/schema.prisma",
+        "backend/src/services/trackMappingService.ts",
+        ".agents/plans/deferred/vivid-roaming-moth-followups/PLAN.json",
+        ".agents/plans/archived/vivid-roaming-moth/README.md",
+        "backend/prisma/migrations",
+        "backend/src/services/__tests__/trackMapping.test.ts",
+        "backend/src/routes/trackMappings.ts",
+        "frontend/features/album/hooks/useYtMusicGapFill.ts",
+        "frontend/features/album/hooks/useTidalGapFill.ts",
+        "services/ytmusic-streamer/app.py",
+        "backend/src/routes/youtubeMusic.ts",
+        "frontend/lib/api.ts",
+        "backend/src/utils/trackMatching.ts",
+        "backend/src/services/playlistImportService.ts",
+        "backend/src/routes/playlistImport.ts",
+        "backend/src/routes/browse.ts",
+        "frontend/app/browse/playlists/page.tsx",
+        "frontend/app/browse/playlists/[id]/page.tsx",
+        "backend/src/services/trackReconciliation.ts",
+        "backend/src/workers",
+        "backend/src/services/__tests__/trackReconciliation.test.ts",
+        ".agents/plans/archived/vivid-roaming-moth/claude-memory-MEMORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/vivid-roaming-moth/README.md",
+        ".agents/plans/archived/vivid-roaming-moth/claude-memory-MEMORY.md",
+        ".agents/plans/archived/vivid-roaming-moth/claude-memory-provider-strategy-track-mapping.md",
+        ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+        ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.phase-1-foundation-delivered-tracktidal-trackytmusic-trackmapping-schema-and-playlistitem-provider-foreign-key-expansio",
+        "summary": "Phase 1 foundation delivered TrackTidal/TrackYtMusic/TrackMapping schema and PlaylistItem provider foreign-key expansion.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Prisma schema contains additive provider tables and mapping model with playlist-item FK extensions.",
+          "Migration and model-level unit coverage for foundational schema behavior is present."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/prisma/schema.prisma",
+          "backend/prisma/migrations",
+          "backend/src/services/__tests__/trackMapping.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added TrackTidal, TrackYtMusic, and TrackMapping schema entities plus nullable provider FKs on PlaylistItem. | Generated handwritten migration SQL and validated foundational mapping-model test coverage (14 tests) per Claude summary.",
+        "evidence": [
+          "verify: Claude summary records 14 unit tests passing for Phase 1 data model foundation."
+        ]
+      },
+      {
+        "key": "task.02.phase-2-gap-fill-persistence-layer-delivered-trackmapping-service-routes-and-hook-level-persisted-mapping-reuse-before-",
+        "summary": "Phase 2 gap-fill persistence layer delivered TrackMapping service, routes, and hook-level persisted-mapping reuse before fresh API calls.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Backend includes track-mapping CRUD/read endpoints and service operations used by provider match flows.",
+          "Frontend gap-fill hooks query persisted mappings before match-batch calls."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/src/services/trackMappingService.ts",
+          "backend/src/routes/trackMappings.ts",
+          "frontend/features/album/hooks/useYtMusicGapFill.ts",
+          "frontend/features/album/hooks/useTidalGapFill.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented TrackMappingService methods for provider upsert, mapping create/read, and stale marking. | Added album and batch mapping routes, then integrated persistence into YT Music and Tidal match-batch handlers. | Updated frontend gap-fill hooks to prefer persisted mappings before issuing provider match requests (14 tests in summary).",
+        "evidence": [
+          "verify: Claude summary records 14 unit tests passing for Phase 2 gap-fill persistence."
+        ]
+      },
+      {
+        "key": "task.03.phase-3-sidecar-and-backend-frontend-support-delivered-unauthenticated-public-yt-music-stream-and-stream-info-execution",
+        "summary": "Phase 3 sidecar and backend/frontend support delivered unauthenticated public YT Music stream and stream-info execution paths.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Public stream endpoints exist in sidecar and backend with correct auth-gating behavior.",
+          "Frontend player route selection supports public streaming and gap-fill status no longer requires OAuth."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "services/ytmusic-streamer/app.py",
+          "backend/src/routes/youtubeMusic.ts",
+          "frontend/lib/api.ts",
+          "frontend/features/album/hooks/useYtMusicGapFill.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added __public__ user handling for sidecar proxy/stream-info paths and exposed backend public stream routes. | Updated frontend player and gap-fill readiness checks for unauthenticated YT Music flow (6 tests in summary).",
+        "evidence": [
+          "verify: Claude summary records 6 unit tests passing for Phase 3 public-stream path."
+        ]
+      },
+      {
+        "key": "task.04.phase-4-backend-playlist-import-rework-delivered-shared-track-matching-playlist-import-service-and-preview-execute-api-",
+        "summary": "Phase 4 backend playlist import rework delivered shared track matching, playlist import service, and preview/execute API routes.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Track-matching logic is shared and import service resolves local/YT Music/Tidal chain.",
+          "Preview and execute import APIs are available with test coverage."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/src/utils/trackMatching.ts",
+          "backend/src/services/playlistImportService.ts",
+          "backend/src/routes/playlistImport.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Extracted reusable matching utilities and implemented PlaylistImportService resolution chain. | Added import preview and execute routes with corresponding service tests (9 tests in summary).",
+        "evidence": [
+          "verify: Claude summary records 9 unit tests passing for Phase 4 playlist import rework."
+        ]
+      },
+      {
+        "key": "task.05.phase-5-browse-overhaul-delivered-yt-music-browse-endpoints-backend-cache-backed-browse-routes-and-frontend-browse-deta",
+        "summary": "Phase 5 browse overhaul delivered YT Music browse endpoints, backend cache-backed browse routes, and frontend browse/detail playback queue integration.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Browse surfaces use YT Music charts/category/playlist sources and inline queue playback integration.",
+          "Backend browse paths include TTL caching and required service methods."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "services/ytmusic-streamer/app.py",
+          "backend/src/routes/browse.ts",
+          "frontend/app/browse/playlists/page.tsx",
+          "frontend/app/browse/playlists/[id]/page.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented sidecar browse endpoints for charts, moods/genres, and playlist detail. | Added backend YT Music browse routes with five-minute cache behavior and frontend browse redesign plus inline playback queue actions.",
+        "evidence": [
+          "verify: Claude summary confirms Phase 5 browse overhaul shipped with integrated frontend behavior changes."
+        ]
+      },
+      {
+        "key": "task.06.phase-6-background-reconciliation-worker-delivered-scheduled-and-scan-triggered-remote-to-local-mapping-linkage.",
+        "summary": "Phase 6 background reconciliation worker delivered scheduled and scan-triggered remote-to-local mapping linkage.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Reconciliation service links remote-only mappings to local tracks via metadata matching.",
+          "Worker runs on startup/interval and after scan completion with test coverage."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/src/services/trackReconciliation.ts",
+          "backend/src/workers",
+          "backend/src/services/__tests__/trackReconciliation.test.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented TrackReconciliationService to back-link remote mapping records to local tracks via metadata matching. | Registered reconciliation as scheduled Bull job and scan-completion trigger (10 tests in summary).",
+        "evidence": [
+          "verify: Claude summary records 10 unit tests passing for Phase 6 reconciliation worker."
+        ]
+      },
+      {
+        "key": "task.07.phase-7-cleanup-completed-deezer-browse-deprecation-responses-and-frontend-conversion-while-preserving-import-url-parse",
+        "summary": "Phase 7 cleanup completed Deezer browse deprecation responses and frontend conversion while preserving import URL parse compatibility.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Deezer browse routes return 410 and browse UI is converted to YT Music.",
+          "PlaylistPendingTrack remains present but explicitly deprecated as part of cleanup scope."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/src/routes/browse.ts",
+          "backend/prisma/schema.prisma",
+          "frontend/app/browse/playlists/page.tsx",
+          "frontend/app/browse/playlists/[id]/page.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Set Deezer browse routes to 410 Gone while retaining Deezer URL parsing compatibility for imports. | Marked PlaylistPendingTrack as deprecated and completed frontend browse conversion away from Deezer surfaces. | Captured end-state regression confidence from summary: 53 new tests passing plus 100 existing Spotify import tests still passing.",
+        "evidence": [
+          "verify: Claude summary states total 53 new tests passing and 100 existing spotify import tests still passing."
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "vivid-roaming-moth",
+    "feature_title": "Plan - Provider Strategy & Track Mapping Redesign (vivid-roaming-moth)",
+    "plan_ref": ".agents/plans/archived/vivid-roaming-moth/PLAN.json",
+    "status": "complete",
+    "created_at": "2026-02-28T17:37:05.640Z",
+    "updated_at": "2026-02-28T17:37:05.640Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "The implementation delivered the provider-strategy redesign by adding persistent provider-track mapping, playlist import and browse overhauls, and unauthenticated YT Music streaming while keeping additive, non-breaking data-model constraints.",
+        "full_spec_outline": [
+          {
+            "id": "spec-provider-strategy-pivot",
+            "objective": "Replace Deezer-centric browse/gap-fill assumptions with a YT Music-first provider strategy while preserving Tidal and local-library quality paths.",
+            "deliverable": "Backend, sidecar, and frontend capability set for YT Music-first browse, gap-fill persistence, and universal fallback playback behavior.",
+            "acceptance_criteria": [
+              "Browse and gap-fill paths use YT Music-first behavior with additive compatibility for existing flows.",
+              "Provider strategy remains non-breaking for existing local-track and playlist behaviors."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+              ".agents/plans/archived/vivid-roaming-moth/claude-memory-provider-strategy-track-mapping.md"
+            ]
+          },
+          {
+            "id": "spec-persistent-mapping-playback",
+            "objective": "Persist cross-provider track mappings and use them to reduce repeated gap-fill calls while enabling mixed-source playlist/import workflows.",
+            "deliverable": "TrackMapping persistence model plus service and route support used by import, reconciliation, and playback readiness paths.",
+            "acceptance_criteria": [
+              "Track mappings are persisted and reused before issuing fresh gap-fill calls.",
+              "Reconciliation and import flows can consume/add mapping records without destructive schema changes."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/prisma/schema.prisma",
+              "backend/src/services/trackMappingService.ts"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Execution prioritized additive schema/runtime slices with focused tests per phase, then deferred higher-risk UX and refactor items into a dedicated follow-up track for controlled rollout.",
+        "full_refined_spec": [
+          {
+            "id": "refined-additive-delivery-slices",
+            "decision": "Ship the redesign in phased slices that preserve existing contracts and avoid broad destructive refactors inside the initial execution window.",
+            "rationale": "The feature crossed schema, backend, sidecar, and frontend boundaries; phased additive delivery lowered regression risk while still shipping core value.",
+            "acceptance_criteria": [
+              "Core mapping, streaming, browse, and reconciliation capabilities are implemented and test-covered.",
+              "Legacy-compatible behavior is maintained where explicit removal was deferred."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md"
+            ]
+          },
+          {
+            "id": "refined-risk-managed-deferral",
+            "decision": "Move UI-heavy and high-risk refactor slices plus branch-review hardening items into a deferred plan with explicit pending implementation steps.",
+            "rationale": "Keeping riskier work separate protects shipped behavior while retaining complete traceability for unresolved scope.",
+            "acceptance_criteria": [
+              "Deferred items are recorded in a dedicated deferred plan with no in-progress steps.",
+              "Archive README and provenance artifacts document complete-vs-deferred boundaries."
+            ],
+            "references": [
+              ".agents/plans/deferred/vivid-roaming-moth-followups/PLAN.json",
+              ".agents/plans/archived/vivid-roaming-moth/README.md"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Seven implemented phases from the Claude execution summary were captured as complete implementation steps with concrete outputs, touched surfaces, and verification evidence references.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Phase 1 foundation delivered TrackTidal/TrackYtMusic/TrackMapping schema and PlaylistItem provider foreign-key expansion.",
+            "acceptance_criteria": [
+              "Prisma schema contains additive provider tables and mapping model with playlist-item FK extensions.",
+              "Migration and model-level unit coverage for foundational schema behavior is present."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/prisma/schema.prisma",
+              "backend/prisma/migrations",
+              "backend/src/services/__tests__/trackMapping.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added TrackTidal, TrackYtMusic, and TrackMapping schema entities plus nullable provider FKs on PlaylistItem.",
+                "Generated handwritten migration SQL and validated foundational mapping-model test coverage (14 tests) per Claude summary."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/prisma/schema.prisma",
+                "backend/prisma/migrations/*_add_track_mapping_tables/migration.sql",
+                "backend/src/services/__tests__/trackMapping.test.ts"
+              ],
+              "verification_testing": [
+                "verify: Claude summary records 14 unit tests passing for Phase 1 data model foundation."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Phase 2 gap-fill persistence layer delivered TrackMapping service, routes, and hook-level persisted-mapping reuse before fresh API calls.",
+            "acceptance_criteria": [
+              "Backend includes track-mapping CRUD/read endpoints and service operations used by provider match flows.",
+              "Frontend gap-fill hooks query persisted mappings before match-batch calls."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/src/services/trackMappingService.ts",
+              "backend/src/routes/trackMappings.ts",
+              "frontend/features/album/hooks/useYtMusicGapFill.ts",
+              "frontend/features/album/hooks/useTidalGapFill.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented TrackMappingService methods for provider upsert, mapping create/read, and stale marking.",
+                "Added album and batch mapping routes, then integrated persistence into YT Music and Tidal match-batch handlers.",
+                "Updated frontend gap-fill hooks to prefer persisted mappings before issuing provider match requests (14 tests in summary)."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/services/trackMappingService.ts",
+                "backend/src/routes/trackMappings.ts",
+                "backend/src/routes/youtubeMusic.ts",
+                "backend/src/routes/tidalStreaming.ts",
+                "frontend/features/album/hooks/useYtMusicGapFill.ts",
+                "frontend/features/album/hooks/useTidalGapFill.ts"
+              ],
+              "verification_testing": [
+                "verify: Claude summary records 14 unit tests passing for Phase 2 gap-fill persistence."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Phase 3 sidecar and backend/frontend support delivered unauthenticated public YT Music stream and stream-info execution paths.",
+            "acceptance_criteria": [
+              "Public stream endpoints exist in sidecar and backend with correct auth-gating behavior.",
+              "Frontend player route selection supports public streaming and gap-fill status no longer requires OAuth."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "services/ytmusic-streamer/app.py",
+              "backend/src/routes/youtubeMusic.ts",
+              "frontend/lib/api.ts",
+              "frontend/features/album/hooks/useYtMusicGapFill.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added __public__ user handling for sidecar proxy/stream-info paths and exposed backend public stream routes.",
+                "Updated frontend player and gap-fill readiness checks for unauthenticated YT Music flow (6 tests in summary)."
+              ],
+              "files_functions_hooks_touched": [
+                "services/ytmusic-streamer/app.py",
+                "backend/src/routes/youtubeMusic.ts",
+                "frontend/lib/api.ts",
+                "frontend/features/album/hooks/useYtMusicGapFill.ts"
+              ],
+              "verification_testing": [
+                "verify: Claude summary records 6 unit tests passing for Phase 3 public-stream path."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Phase 4 backend playlist import rework delivered shared track matching, playlist import service, and preview/execute API routes.",
+            "acceptance_criteria": [
+              "Track-matching logic is shared and import service resolves local/YT Music/Tidal chain.",
+              "Preview and execute import APIs are available with test coverage."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/src/utils/trackMatching.ts",
+              "backend/src/services/playlistImportService.ts",
+              "backend/src/routes/playlistImport.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Extracted reusable matching utilities and implemented PlaylistImportService resolution chain.",
+                "Added import preview and execute routes with corresponding service tests (9 tests in summary)."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/utils/trackMatching.ts",
+                "backend/src/services/playlistImportService.ts",
+                "backend/src/routes/playlistImport.ts"
+              ],
+              "verification_testing": [
+                "verify: Claude summary records 9 unit tests passing for Phase 4 playlist import rework."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Phase 5 browse overhaul delivered YT Music browse endpoints, backend cache-backed browse routes, and frontend browse/detail playback queue integration.",
+            "acceptance_criteria": [
+              "Browse surfaces use YT Music charts/category/playlist sources and inline queue playback integration.",
+              "Backend browse paths include TTL caching and required service methods."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "services/ytmusic-streamer/app.py",
+              "backend/src/routes/browse.ts",
+              "frontend/app/browse/playlists/page.tsx",
+              "frontend/app/browse/playlists/[id]/page.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented sidecar browse endpoints for charts, moods/genres, and playlist detail.",
+                "Added backend YT Music browse routes with five-minute cache behavior and frontend browse redesign plus inline playback queue actions."
+              ],
+              "files_functions_hooks_touched": [
+                "services/ytmusic-streamer/app.py",
+                "backend/src/routes/browse.ts",
+                "frontend/app/browse/playlists/page.tsx",
+                "frontend/app/browse/playlists/[id]/page.tsx"
+              ],
+              "verification_testing": [
+                "verify: Claude summary confirms Phase 5 browse overhaul shipped with integrated frontend behavior changes."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Phase 6 background reconciliation worker delivered scheduled and scan-triggered remote-to-local mapping linkage.",
+            "acceptance_criteria": [
+              "Reconciliation service links remote-only mappings to local tracks via metadata matching.",
+              "Worker runs on startup/interval and after scan completion with test coverage."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/src/services/trackReconciliation.ts",
+              "backend/src/workers",
+              "backend/src/services/__tests__/trackReconciliation.test.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented TrackReconciliationService to back-link remote mapping records to local tracks via metadata matching.",
+                "Registered reconciliation as scheduled Bull job and scan-completion trigger (10 tests in summary)."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/services/trackReconciliation.ts",
+                "backend/src/workers/index.ts",
+                "backend/src/services/__tests__/trackReconciliation.test.ts"
+              ],
+              "verification_testing": [
+                "verify: Claude summary records 10 unit tests passing for Phase 6 reconciliation worker."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Phase 7 cleanup completed Deezer browse deprecation responses and frontend conversion while preserving import URL parse compatibility.",
+            "acceptance_criteria": [
+              "Deezer browse routes return 410 and browse UI is converted to YT Music.",
+              "PlaylistPendingTrack remains present but explicitly deprecated as part of cleanup scope."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/src/routes/browse.ts",
+              "backend/prisma/schema.prisma",
+              "frontend/app/browse/playlists/page.tsx",
+              "frontend/app/browse/playlists/[id]/page.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Set Deezer browse routes to 410 Gone while retaining Deezer URL parsing compatibility for imports.",
+                "Marked PlaylistPendingTrack as deprecated and completed frontend browse conversion away from Deezer surfaces.",
+                "Captured end-state regression confidence from summary: 53 new tests passing plus 100 existing Spotify import tests still passing."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/browse.ts",
+                "backend/prisma/schema.prisma",
+                "frontend/app/browse/playlists/page.tsx",
+                "frontend/app/browse/playlists/[id]/page.tsx"
+              ],
+              "verification_testing": [
+                "verify: Claude summary states total 53 new tests passing and 100 existing spotify import tests still passing."
+              ]
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Complete archival of the vivid-roaming-moth execution with machine-readable, phase-by-phase implementation evidence and explicit linkage to source planning artifacts.",
+        "non_goals": "Do not re-open shipped implementation scope inside this archive artifact; unresolved or risk-managed work is tracked only in the dedicated deferred follow-up plan."
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": "claude",
+      "execution_agents": [
+        "claude"
+      ],
+      "last_executor": "claude"
+    }
+  }
+}

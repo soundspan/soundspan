@@ -1,0 +1,377 @@
+{
+  "version": 1,
+  "feature_id": "frontend-rollout-refresh-on-deploy",
+  "feature_title": "Plan - Frontend Rollout Refresh on Deploy",
+  "track": "deferred",
+  "export_path": "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+  "legacy": {
+    "plan_path": ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+    "plan_dir": ".agents/plans/deferred/frontend-rollout-refresh-on-deploy",
+    "status": "deferred",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Frontend Rollout Refresh on Deploy\n\n## Document Status\n\n- Last updated: 2026-02-24\n- Track: Deferred\n- Feature: Force-safe frontend refresh across rolling deploys\n- Status: Deferred (saved for later)\n\n## Deferral Notice\n\n- Deferred on: 2026-02-24\n- Deferred by: User request\n- Deferral location: `.agents/plans/deferred/frontend-rollout-refresh-on-deploy/`\n- Reactivation condition: Explicit user instruction to resume rollout-refresh implementation.\n\n## Objective\n\nEnsure clients reliably pick up new frontend builds during rolling deployments without interrupting active playback.\n\n## Why Deferred\n\n1. Current playback stability work was prioritized ahead of rollout-refresh automation.\n2. Existing behavior is acceptable short-term; this is operational hardening.\n3. Implementation should be resumed with dedicated validation windows for rollout behavior.\n\n## Scope\n\n1. Add a monotonic deploy token (for example `FRONTEND_ROLLOUT_ID`) into runtime config.\n2. Poll `/runtime-config` in service-worker registration and detect token changes.\n3. Confirm token change across 2 consecutive polls to avoid mixed-pod rollout flaps.\n4. Trigger SW update and `SKIP_WAITING`, then reload when playback is idle.\n5. Defer refresh while playback is active, then execute once playback stops.\n6. Add telemetry and tests for detection/defer/refresh flows.\n\n## Deferred Tasks\n\n### Task R1: Runtime config token plumbing\n- Status: Pending\n- Deliverable: normalized runtime config includes `FRONTEND_ROLLOUT_ID` end-to-end.\n\n### Task R2: Token polling and flap guard\n- Status: Pending\n- Deliverable: service worker registration polls `/runtime-config` and requires 2 matching changed polls before action.\n\n### Task R3: Safe refresh orchestration\n- Status: Pending\n- Deliverable: `registration.update()`, `SKIP_WAITING`, and full reload path gated by playback-active state.\n\n### Task R4: Deferred activation path\n- Status: Pending\n- Deliverable: queued refresh executes automatically after playback becomes idle.\n\n### Task R5: Observability\n- Status: Pending\n- Deliverable: telemetry/log markers for token changes, defer decisions, and reload execution.\n\n### Task R6: Verification\n- Status: Pending\n- Deliverable: unit/integration coverage for token change handling and deferred refresh behavior.\n\n## Exit Criteria\n\n1. New frontend deploy token is visible through `/runtime-config` in runtime environments.\n2. Clients reliably refresh to latest build during rollouts without mid-playback disruption.\n3. No refresh loops observed from cache revalidation headers.\n4. Automated tests cover token polling, defer/resume behavior, and reload triggering.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.deferred.frontend-rollout-refresh-on-deploy.7761a76a77",
+    "plan_key": "plan:legacy.deferred.frontend-rollout-refresh-on-deploy.7761a76a77",
+    "final_db_status": "blocked",
+    "plan": {
+      "title": "Plan - Frontend Rollout Refresh on Deploy",
+      "objective": "Ensure clients reliably pick up new frontend builds during rolling deployments without interrupting active playback.",
+      "kind": "legacy_deferred",
+      "status": "blocked",
+      "stages": {
+        "spec_outline": "pending",
+        "refined_spec": "pending",
+        "implementation_plan": "pending"
+      },
+      "in_scope": [
+        "UNCONFIRMED: Spec Outline section not found in PLAN.md."
+      ],
+      "out_of_scope": [
+        "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+        ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+        ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.runtime-config-token-plumbing",
+        "summary": "Runtime config token plumbing",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Runtime config token plumbing"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.02.token-polling-and-flap-guard",
+        "summary": "Token polling and flap guard",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Token polling and flap guard"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.03.safe-refresh-orchestration",
+        "summary": "Safe refresh orchestration",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Safe refresh orchestration"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.04.deferred-activation-path",
+        "summary": "Deferred activation path",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Deferred activation path"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.05.observability",
+        "summary": "Observability",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Observability"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "task.06.verification",
+        "summary": "Verification",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Complete deliverable: Verification"
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+          ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/frontend-rollout-refresh-on-deploy.json"
+        ],
+        "blocked_reason": "Legacy plan is deferred until explicitly resumed.",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "frontend-rollout-refresh-on-deploy",
+    "feature_title": "Plan - Frontend Rollout Refresh on Deploy",
+    "plan_ref": ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+    "status": "deferred",
+    "updated_at": "2026-02-24T17:25:49.406Z",
+    "planning_stages": {
+      "spec_outline": "pending",
+      "refined_spec": "pending",
+      "implementation_plan": "pending"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "UNCONFIRMED: Spec Outline section not found in PLAN.md.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "UNCONFIRMED: Refined Spec section not found in PLAN.md.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "### Task R1: Runtime config token plumbing\n- Status: Pending\n- Deliverable: normalized runtime config includes `FRONTEND_ROLLOUT_ID` end-to-end.\n\n### Task R2: Token polling and flap guard\n- Status: Pending\n- Deliverable: service worker registration polls `/runtime-config` and requires 2 matching changed polls before action.\n\n### Task R3: Safe refresh orchestration\n- Status: Pending\n- Deliverable: `registration.update()`, `SKIP_WAITING`, and full reload path gated by playback-active state.\n\n### Task R4: Deferred activation path\n- Status: Pending\n- Deliverable: queued refresh executes automatically after playback becomes idle.\n\n### Task R5: Observability\n- Status: Pending\n- Deliverable: telemetry/log markers for token changes, defer decisions, and reload execution.\n\n### Task R6: Verification\n- Status: Pending\n- Deliverable: unit/integration coverage for token change handling and deferred refresh behavior.",
+        "steps": [
+          {
+            "status": "pending",
+            "deliverable": "Runtime config token plumbing",
+            "acceptance_criteria": [
+              "Complete deliverable: Runtime config token plumbing"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Token polling and flap guard",
+            "acceptance_criteria": [
+              "Complete deliverable: Token polling and flap guard"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Safe refresh orchestration",
+            "acceptance_criteria": [
+              "Complete deliverable: Safe refresh orchestration"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Deferred activation path",
+            "acceptance_criteria": [
+              "Complete deliverable: Deferred activation path"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Observability",
+            "acceptance_criteria": [
+              "Complete deliverable: Observability"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          },
+          {
+            "status": "pending",
+            "deliverable": "Verification",
+            "acceptance_criteria": [
+              "Complete deliverable: Verification"
+            ],
+            "references": [
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.json",
+              ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md"
+            ],
+            "completion_summary": {
+              "delivered": [],
+              "files_functions_hooks_touched": [],
+              "verification_testing": []
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Ensure clients reliably pick up new frontend builds during rolling deployments without interrupting active playback.",
+        "non_goals": "UNCONFIRMED: explicit non-goals/out-of-scope section not found in PLAN.md."
+      },
+      "plan_md_sync": {
+        "source_plan_md": ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md",
+        "synced_at": "2026-02-24T17:23:03.694Z",
+        "steps_generated": 6,
+        "task_heading_count": 6,
+        "gap_notes": [
+          "Missing explicit Non-Goals/Out of Scope section.",
+          "Missing Spec Outline section.",
+          "Missing Refined Spec section.",
+          "Task \"Task R1: Runtime config token plumbing\" had no deliverable list; used heading title.",
+          "Task \"Task R2: Token polling and flap guard\" had no deliverable list; used heading title.",
+          "Task \"Task R3: Safe refresh orchestration\" had no deliverable list; used heading title.",
+          "Task \"Task R4: Deferred activation path\" had no deliverable list; used heading title.",
+          "Task \"Task R5: Observability\" had no deliverable list; used heading title.",
+          "Task \"Task R6: Verification\" had no deliverable list; used heading title."
+        ]
+      },
+      "plan_md_context": {
+        "source_plan_md": ".agents/plans/deferred/frontend-rollout-refresh-on-deploy/PLAN.md",
+        "synced_at": "2026-02-24T17:26:42.906Z",
+        "markdown_sha256": "f2344bd8d91b8cdc0ecfe48f6d0d00ed86439d1e3c1f4fc4938a2f4569e15d4f",
+        "sections": [
+          {
+            "heading": "# Plan - Frontend Rollout Refresh on Deploy",
+            "content": "## Document Status\n\n- Last updated: 2026-02-24\n- Track: Deferred\n- Feature: Force-safe frontend refresh across rolling deploys\n- Status: Deferred (saved for later)\n\n## Deferral Notice\n\n- Deferred on: 2026-02-24\n- Deferred by: User request\n- Deferral location: `.agents/plans/deferred/frontend-rollout-refresh-on-deploy/`\n- Reactivation condition: Explicit user instruction to resume rollout-refresh implementation.\n\n## Objective\n\nEnsure clients reliably pick up new frontend builds during rolling deployments without interrupting active playback.\n\n## Why Deferred\n\n1. Current playback stability work was prioritized ahead of rollout-refresh automation.\n2. Existing behavior is acceptable short-term; this is operational hardening.\n3. Implementation should be resumed with dedicated validation windows for rollout behavior.\n\n## Scope\n\n1. Add a monotonic deploy token (for example `FRONTEND_ROLLOUT_ID`) into runtime config.\n2. Poll `/runtime-config` in service-worker registration and detect token changes.\n3. Confirm token change across 2 consecutive polls to avoid mixed-pod rollout flaps.\n4. Trigger SW update and `SKIP_WAITING`, then reload when playback is idle.\n5. Defer refresh while playback is active, then execute once playback stops.\n6. Add telemetry and tests for detection/defer/refresh flows.\n\n## Deferred Tasks\n\n### Task R1: Runtime config token plumbing\n- Status: Pending\n- Deliverable: normalized runtime config includes `FRONTEND_ROLLOUT_ID` end-to-end.\n\n### Task R2: Token polling and flap guard\n- Status: Pending\n- Deliverable: service worker registration polls `/runtime-config` and requires 2 matching changed polls before action.\n\n### Task R3: Safe refresh orchestration\n- Status: Pending\n- Deliverable: `registration.update()`, `SKIP_WAITING`, and full reload path gated by playback-active state.\n\n### Task R4: Deferred activation path\n- Status: Pending\n- Deliverable: queued refresh executes automatically after playback becomes idle.\n\n### Task R5: Observability\n- Status: Pending\n- Deliverable: telemetry/log markers for token changes, defer decisions, and reload execution.\n\n### Task R6: Verification\n- Status: Pending\n- Deliverable: unit/integration coverage for token change handling and deferred refresh behavior.\n\n## Exit Criteria\n\n1. New frontend deploy token is visible through `/runtime-config` in runtime environments.\n2. Clients reliably refresh to latest build during rollouts without mid-playback disruption.\n3. No refresh loops observed from cache revalidation headers.\n4. Automated tests cover token polling, defer/resume behavior, and reload triggering."
+          },
+          {
+            "heading": "## Document Status",
+            "content": "- Last updated: 2026-02-24\n- Track: Deferred\n- Feature: Force-safe frontend refresh across rolling deploys\n- Status: Deferred (saved for later)"
+          },
+          {
+            "heading": "## Deferral Notice",
+            "content": "- Deferred on: 2026-02-24\n- Deferred by: User request\n- Deferral location: `.agents/plans/deferred/frontend-rollout-refresh-on-deploy/`\n- Reactivation condition: Explicit user instruction to resume rollout-refresh implementation."
+          },
+          {
+            "heading": "## Objective",
+            "content": "Ensure clients reliably pick up new frontend builds during rolling deployments without interrupting active playback."
+          },
+          {
+            "heading": "## Why Deferred",
+            "content": "1. Current playback stability work was prioritized ahead of rollout-refresh automation.\n2. Existing behavior is acceptable short-term; this is operational hardening.\n3. Implementation should be resumed with dedicated validation windows for rollout behavior."
+          },
+          {
+            "heading": "## Scope",
+            "content": "1. Add a monotonic deploy token (for example `FRONTEND_ROLLOUT_ID`) into runtime config.\n2. Poll `/runtime-config` in service-worker registration and detect token changes.\n3. Confirm token change across 2 consecutive polls to avoid mixed-pod rollout flaps.\n4. Trigger SW update and `SKIP_WAITING`, then reload when playback is idle.\n5. Defer refresh while playback is active, then execute once playback stops.\n6. Add telemetry and tests for detection/defer/refresh flows."
+          },
+          {
+            "heading": "## Deferred Tasks",
+            "content": "### Task R1: Runtime config token plumbing\n- Status: Pending\n- Deliverable: normalized runtime config includes `FRONTEND_ROLLOUT_ID` end-to-end.\n\n### Task R2: Token polling and flap guard\n- Status: Pending\n- Deliverable: service worker registration polls `/runtime-config` and requires 2 matching changed polls before action.\n\n### Task R3: Safe refresh orchestration\n- Status: Pending\n- Deliverable: `registration.update()`, `SKIP_WAITING`, and full reload path gated by playback-active state.\n\n### Task R4: Deferred activation path\n- Status: Pending\n- Deliverable: queued refresh executes automatically after playback becomes idle.\n\n### Task R5: Observability\n- Status: Pending\n- Deliverable: telemetry/log markers for token changes, defer decisions, and reload execution.\n\n### Task R6: Verification\n- Status: Pending\n- Deliverable: unit/integration coverage for token change handling and deferred refresh behavior."
+          },
+          {
+            "heading": "### Task R1: Runtime config token plumbing",
+            "content": "- Status: Pending\n- Deliverable: normalized runtime config includes `FRONTEND_ROLLOUT_ID` end-to-end."
+          },
+          {
+            "heading": "### Task R2: Token polling and flap guard",
+            "content": "- Status: Pending\n- Deliverable: service worker registration polls `/runtime-config` and requires 2 matching changed polls before action."
+          },
+          {
+            "heading": "### Task R3: Safe refresh orchestration",
+            "content": "- Status: Pending\n- Deliverable: `registration.update()`, `SKIP_WAITING`, and full reload path gated by playback-active state."
+          },
+          {
+            "heading": "### Task R4: Deferred activation path",
+            "content": "- Status: Pending\n- Deliverable: queued refresh executes automatically after playback becomes idle."
+          },
+          {
+            "heading": "### Task R5: Observability",
+            "content": "- Status: Pending\n- Deliverable: telemetry/log markers for token changes, defer decisions, and reload execution."
+          },
+          {
+            "heading": "### Task R6: Verification",
+            "content": "- Status: Pending\n- Deliverable: unit/integration coverage for token change handling and deferred refresh behavior."
+          },
+          {
+            "heading": "## Exit Criteria",
+            "content": "1. New frontend deploy token is visible through `/runtime-config` in runtime environments.\n2. Clients reliably refresh to latest build during rollouts without mid-playback disruption.\n3. No refresh loops observed from cache revalidation headers.\n4. Automated tests cover token polling, defer/resume behavior, and reload triggering."
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    }
+  }
+}

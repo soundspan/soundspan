@@ -1,0 +1,45 @@
+version: acm.tests.v1
+defaults:
+  cwd: .
+  timeout_sec: 900
+tests:
+  - id: context-smoke
+    summary: Ensure ACM can return scoped context for soundspan
+    command:
+      argv: ["acm", "get-context", "--project", "soundspan", "--task-text", "soundspan ACM smoke test", "--phase", "plan"]
+    select:
+      always_run: true
+    expected:
+      exit_code: 0
+
+  - id: acm-health
+    summary: Ensure the ACM repo contract remains healthy
+    command:
+      argv: ["acm", "health", "--project", "soundspan", "--include-details"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        [
+          "AGENTS.md",
+          "CLAUDE.md",
+          ".acm/**",
+          ".claude/**",
+          ".gitignore",
+          ".env.example",
+          ".github/workflows/pr-checks.yml",
+          ".github/PULL_REQUEST_TEMPLATE.md",
+          "scripts/acm-legacy-plans.mjs"
+        ]
+    expected:
+      exit_code: 0
+
+  - id: legacy-plan-export-validate
+    summary: Validate committed legacy plan export metadata
+    command:
+      argv: ["node", "scripts/acm-legacy-plans.mjs", "validate", "--source", "acm-legacy-plans", "--map", "ACM_LEGACY_PLAN_MAP.json"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        ["scripts/acm-legacy-plans.mjs", "acm-legacy-plans/**", "ACM_LEGACY_PLAN_MAP.json"]
+    expected:
+      exit_code: 0

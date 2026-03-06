@@ -1,0 +1,510 @@
+{
+  "version": 1,
+  "feature_id": "explore-page-consolidation",
+  "feature_title": "Explore Page Consolidation",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/explore-page-consolidation.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/explore-page-consolidation/PLAN.json",
+    "plan_dir": ".agents/plans/archived/explore-page-consolidation",
+    "status": "complete",
+    "updated_at": "2026-03-03T12:45:49.010Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/explore-page-consolidation/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Explore Page Consolidation — Design Document\n\n**Status:** Design phase — awaiting approval before implementation\n**Date:** 2026-03-02\n**Branch:** TBD (suggested: `feature/explore-page`)\n\n---\n\n## 1. Problem Statement\n\nSoundspan's \"what should I listen to?\" experience is fragmented across five surfaces spanning four pages:\n\n| Surface | Location | Source |\n|---|---|---|\n| Made For You mixes | Home (row 5 of ~10) | Local library mood buckets |\n| Radio stations | Home (row 1 carousel) + dedicated `/radio` page | Local library genres/decades |\n| Browse | Dedicated `/browse/playlists` page | Remote (YT Music, TIDAL) |\n| Featured Playlists | Home (row 8) | Remote (YT Music charts) |\n| Discover Weekly | Dedicated `/discover` page | Local + remote gap-fill |\n\nUsers must visit 3–4 different pages to see everything Soundspan can surface for them. Code is duplicated (Radio logic exists twice), data is fetched redundantly (YT Music charts on both Home and Browse), and the sidebar has 8 items where 5 would suffice.\n\n---\n\n## 2. Goal\n\nReplace Home (`/`), Browse (`/browse/playlists`), Radio (`/radio`), and Discovery (`/discover`) with a single **Explore** page (`/explore`) that becomes the default landing experience.\n\n### Non-goals\n- Changing any backend API contracts or data models\n- Modifying the Discover Weekly generation pipeline\n- Enriching \"Continue Listening\" or \"Recently Added\" beyond their current data (planned for v2)\n- Breaking existing direct-URL access to deprecated pages\n- Touching Podcasts, Audiobooks, or Library pages\n\n---\n\n## 3. Page Layout\n\n```\n/explore (default landing, replaces /)\n\n┌─────────────────────────────────────────────────────────┐\n│  Continue Listening                                     │\n│  [horizontal scroll of recent artist cards]             │\n├─────────────────────────────────────────────────────────┤\n│  Recently Added                                         │\n│  [horizontal scroll of recently added artist cards]     │\n├─────────────────────────────────────────────────────────┤\n│  ┌──────────┐ ┌──────────┐ ┌────────────────┐          │\n│  │ For You  │ │ Trending │ │ Moods & Genres │          │\n│  └──────────┘ └──────────┘ └────────────────┘          │\n├─────────────────────────────────────────────────────────┤\n│                                                         │\n│  (tab content — vertically scrollable sections)         │\n│                                                         │\n└─────────────────────────────────────────────────────────┘\n```\n\n### Above-tabs zone (always visible, all tabs)\n\nThese two rows sit above the tab bar and remain visible regardless of which tab is active. They represent personal activity context (\"welcome back\"), not discovery.\n\n**Continue Listening**\n- Data: `useRecentlyListenedQuery(10)` → `ListenedItem[]`\n- Renders: Horizontal carousel of artist cards (current Home behavior)\n- Conditionally hidden if empty (no recent plays)\n\n**Recently Added**\n- Data: `useRecentlyAddedQuery(10)` → `Artist[]`\n- Renders: Horizontal carousel of artist cards (current Home behavior)\n- Conditionally hidden if empty (no recent imports)\n\n### Tab: For You\n\nPersonal, algorithmically generated content from the user's own library and listening history.\n\n**Section 1 — Your Playlists (horizontal carousel of playlist cards)**\n\n| Card | Source | Behavior |\n|---|---|---|\n| My Liked | `useLikedPlaylistQuery()` → track count + cover art | Click → `/playlist/my-liked` (existing page, hidden from nav) |\n| Discover Weekly | `api.getCurrentDiscoverWeekly()` → playlist + track count | Click → `/discover` (existing page, hidden from nav). If no playlist exists yet, card shows \"Generate your first Discover Weekly\" CTA that triggers generation inline. |\n| Made For You mixes | `useMixesQuery()` → `Mix[]` | Each mix is a card. Click → plays the mix (existing behavior). \"Refresh\" button on section header calls `useRefreshMixesMutation()`. |\n\nThe playlist cards should share a unified visual treatment — cover art mosaic (or single art), title, subtitle (track count / \"Updated 2 days ago\"), and a play button overlay on hover. My Liked and Discover Weekly are just the first two cards in the row, followed by the dynamically generated mixes.\n\n**Section 2 — Your Radio Stations (horizontal carousel)**\n\nQuick-start stations + personalized genre/decade stations from the user's library.\n\n- Static stations: Shuffle All, Workout, Discovery, Favorites (from `STATIC_STATIONS`)\n- Genre stations: dynamically built from `GET /library/genres` (filtered to count >= 15)\n- Decade stations: dynamically built from `GET /library/decades`\n- Each card: `<RadioStationCard>` with mosaic background + gradient overlay\n- Click → `startRadio()` fetches tracks and starts playback (existing behavior)\n- Show a configurable subset (e.g., 4 static + top 4 genres + top 4 decades = ~12 cards), with \"Show All\" linking to a full radio view (could be a modal or expanded inline section)\n\n**Section 3 — Recommended For You (horizontal carousel)**\n- Data: `useRecommendationsQuery(10)` → `Artist[]`\n- Badge: \"Last.fm\"\n- Renders: Artist cards (existing Home behavior)\n\n**Section 4 — Mood Mixer (entry point)**\n- A single CTA card or button that opens the `<MoodMixer />` modal (already lazy-loaded on Home)\n- Provides access to the 12 mood presets (happy, sad, chill, energetic, etc.) from `GET /mixes/mood/presets`\n\n### Tab: Trending\n\nWhat's popular right now from remote providers. This is essentially the current Browse page content reorganized.\n\n**Section 1 — Featured (YT Music home shelves)**\n- Data: `GET /browse/ytmusic/home` → `{ shelves: HomeShelf[] }`\n- Each shelf becomes a horizontal row: title + scrollable `HomeShelfItem` cards\n- Card click behavior: playlist cards → play the playlist; video cards → play the video; album cards → navigate to album detail\n\n**Section 2 — Charts (YT Music charts)**\n- Data: `GET /browse/ytmusic/charts` → `{ charts: Record<string, YtMusicChartItem[]> }`\n- Sections: Top Songs, Top Music Videos, Trending, Top Artists\n- Cards show rank badge overlay (existing Browse behavior)\n\n**Section 3 — TIDAL Spotlight (conditional)**\n- Visible only when user has TIDAL connected (`api.getTidalStreamingStatus()`)\n- When not connected: optionally show a \"Connect TIDAL for premium content\" card (or omit entirely)\n- When connected: show TIDAL personalized content (current Browse TIDAL tab behavior)\n- When TIDAL is connected but no personalized content API exists yet: show the 6 hardcoded spotlight search cards (Rising Tracks, Global Pop, etc.) that navigate to `/search`\n\n**Section 4 — Popular Artists (horizontal carousel)**\n- Data: `usePopularArtistsQuery(20)` → `PopularArtist[]`\n- Badge: \"Last.fm\"\n- Renders: Artist cards (existing Home behavior)\n\n### Tab: Moods & Genres\n\nA merged view of YT Music mood/genre categories and local library genre/decade radio stations.\n\n**Section 1 — Mood Categories (YT Music)**\n- Data: `GET /browse/ytmusic/categories` → `{ categories: YtMusicCategory[] }`, filtered to exclude `GENRE_KEYWORDS`\n- Renders: Horizontal rows of color-gradient mood category buttons\n- Click → drill-down: `GET /browse/ytmusic/mood-playlists?params=<encoded>` → grid of `MoodPlaylist` cards\n\n**Section 2 — Genre Categories (YT Music)**\n- Data: same categories endpoint, filtered to include `GENRE_KEYWORDS` only\n- Same drill-down behavior as Moods\n\n**Section 3 — Your Library by Genre (local radio stations)**\n- Data: `GET /library/genres` → `GenreCount[]`\n- Renders: `<RadioStationCard>` for each genre with count >= 15\n- Click → `startRadio({ type: \"genre\", value: genreName })`\n- Contextual header: \"From Your Library\"\n\n**Section 4 — Your Library by Decade (local radio stations)**\n- Data: `GET /library/decades` → `DecadeCount[]`\n- Renders: `<RadioStationCard>` for each decade\n- Click → `startRadio({ type: \"decade\", value: decadeYear })`\n- Contextual header: \"From Your Library\"\n\n---\n\n## 4. Navigation Changes\n\n### Sidebar (desktop)\n\n**Before (8 items):**\n```\nLibrary, My Liked, Radio, Discovery, Listen Together, Audiobooks, Podcasts, Browse\n```\n\n**After (5 items):**\n```typescript\nexport const SIDEBAR_NAVIGATION: SidebarNavigationItem[] = [\n    { name: \"Explore\",        href: \"/explore\" },\n    { name: \"Library\",        href: \"/library\" },\n    { name: \"Listen Together\", href: \"/listen-together\" },\n    { name: \"Audiobooks\",     href: \"/audiobooks\" },\n    { name: \"Podcasts\",       href: \"/podcasts\" },\n];\n```\n\n### Mobile quick links\n\n**Before:**\n```\nDiscover, My Liked, Radio, Listen Together\n```\n\n**After:**\n```typescript\nexport const MOBILE_QUICK_LINKS: MobileQuickLinkItem[] = [\n    { name: \"Explore\",        href: \"/explore\" },\n    { name: \"Library\",        href: \"/library\" },\n    { name: \"Listen Together\", href: \"/listen-together\" },\n];\n```\n\n### URL routing\n\n| Route | Behavior |\n|---|---|\n| `/explore` | New Explore page (canonical) |\n| `/` | Redirect to `/explore` |\n| `/radio` | Stays alive, renders existing Radio page (hidden from nav) |\n| `/discover` | Stays alive, renders existing Discover page (hidden from nav) |\n| `/browse/playlists` | Stays alive, renders existing Browse page (hidden from nav) |\n| `/playlist/my-liked` | Stays alive, renders existing My Liked page (hidden from nav) |\n\n---\n\n## 5. Component Architecture\n\n### New files\n\n```\nfrontend/\n├── app/explore/\n│   └── page.tsx                          # Explore page shell (tabs + above-tabs)\n├── features/explore/\n│   ├── components/\n│   │   ├── ExploreTabBar.tsx             # Tab navigation (For You / Trending / Moods & Genres)\n│   │   ├── ForYouTab.tsx                 # For You tab content\n│   │   ├── TrendingTab.tsx               # Trending tab content\n│   │   ├── MoodsGenresTab.tsx            # Moods & Genres tab content\n│   │   ├── PlaylistCardRow.tsx           # Unified row: My Liked + Discover Weekly + Mixes\n│   │   ├── PlaylistCard.tsx              # Individual playlist card (unified visual)\n│   │   └── RadioStationSection.tsx       # Shared radio station grid/carousel\n│   ├── hooks/\n│   │   ├── useExploreData.ts             # Orchestrating hook (composes existing query hooks)\n│   │   ├── useTrendingData.ts            # Browse data fetching (migrated to React Query)\n│   │   └── useMoodsGenresData.ts         # Categories + local genre/decade data\n│   └── types.ts                          # Explore-specific types\n```\n\n### Reused existing components (no changes needed)\n\n| Component | Current location | Used in |\n|---|---|---|\n| `<MixCard>` | `frontend/features/home/components/MixCard.tsx` | For You tab |\n| `<RadioStationMosaic>` | `frontend/app/radio/RadioStationMosaic.tsx` | For You tab, Moods & Genres tab |\n| `<MoodMixer>` | `frontend/components/MoodMixer.tsx` | For You tab (lazy-loaded) |\n| `<HorizontalCarousel>` | `frontend/components/ui/` (or equivalent) | All tabs |\n| `<PageHeader>` | `frontend/components/layout/PageHeader.tsx` | Explore page shell |\n\n### Extracted/refactored shared logic\n\n| Current duplication | Refactored into |\n|---|---|\n| `STATIC_STATIONS` in radio/page.tsx + LibraryRadioStations.tsx | `frontend/features/explore/constants/radioStations.ts` (single source of truth) |\n| `GENRE_COLORS` / `DECADE_COLORS` in both files | Same constants file |\n| `startRadio()` logic in both files | `frontend/features/explore/hooks/useRadioPlayback.ts` (shared hook) |\n| `getGenreColor()` / `getDecadeColor()` / `getDecadeName()` | Same constants file or utility |\n| Browse page manual fetch logic | `useTrendingData.ts` (migrated to React Query) |\n\n### Deprecated components (kept alive but no longer imported from nav paths)\n\n- `frontend/features/home/components/LibraryRadioStations.tsx` — replaced by `RadioStationSection.tsx`\n- `frontend/features/home/hooks/useHomeData.ts` — replaced by `useExploreData.ts` (which composes the same underlying query hooks)\n- Home page rows for Made For You, Featured Playlists, Recommended, Popular Artists — absorbed into Explore tabs\n\n---\n\n## 6. Data Fetching Strategy\n\n### useExploreData (orchestrating hook)\n\nComposes existing React Query hooks plus new Browse queries. Only fetches data for the active tab to avoid unnecessary network calls.\n\n```typescript\n// Pseudocode\nfunction useExploreData(activeTab: \"for-you\" | \"trending\" | \"moods-genres\") {\n    // Always fetched (above-tabs zone)\n    const recentlyListened = useRecentlyListenedQuery(10);\n    const recentlyAdded = useRecentlyAddedQuery(10);\n\n    // For You tab\n    const likedPlaylist = useLikedPlaylistQuery({ enabled: activeTab === \"for-you\" });\n    const discoverWeekly = useDiscoverWeeklyQuery({ enabled: activeTab === \"for-you\" });\n    const mixes = useMixesQuery({ enabled: activeTab === \"for-you\" });\n    const genres = useLibraryGenresQuery({ enabled: activeTab === \"for-you\" });\n    const decades = useLibraryDecadesQuery({ enabled: activeTab === \"for-you\" });\n    const recommended = useRecommendationsQuery(10, { enabled: activeTab === \"for-you\" });\n\n    // Trending tab\n    const ytHomeShelves = useYtMusicHomeQuery({ enabled: activeTab === \"trending\" });\n    const ytCharts = useYtMusicChartsQuery({ enabled: activeTab === \"trending\" });\n    const tidalStatus = useTidalStatusQuery({ enabled: activeTab === \"trending\" });\n    const popularArtists = usePopularArtistsQuery(20, { enabled: activeTab === \"trending\" });\n\n    // Moods & Genres tab\n    const ytCategories = useYtMusicCategoriesQuery({ enabled: activeTab === \"moods-genres\" });\n    const libraryGenres = useLibraryGenresQuery({ enabled: activeTab === \"moods-genres\" });\n    const libraryDecades = useLibraryDecadesQuery({ enabled: activeTab === \"moods-genres\" });\n    // Note: libraryGenres/libraryDecades shared with For You — React Query deduplicates\n\n    return { /* all of the above, organized by tab */ };\n}\n```\n\n### New React Query hooks needed\n\nThe Browse page currently uses manual `useState`/`useEffect` fetching. These need to become proper React Query hooks for consistency and caching:\n\n```typescript\n// frontend/hooks/useQueries.ts (additions)\n\nuseYtMusicHomeQuery(options?)\n// queryKey: [\"browse\", \"ytmusic\", \"home\"]\n// queryFn: () => api.get(\"/browse/ytmusic/home\")\n// staleTime: 10 minutes\n\nuseYtMusicChartsQuery(options?)\n// queryKey: [\"browse\", \"ytmusic\", \"charts\"]\n// queryFn: () => api.get(\"/browse/ytmusic/charts\")\n// staleTime: 10 minutes\n\nuseYtMusicCategoriesQuery(options?)\n// queryKey: [\"browse\", \"ytmusic\", \"categories\"]\n// queryFn: () => api.get(\"/browse/ytmusic/categories\")\n// staleTime: 30 minutes\n\nuseYtMusicMoodPlaylistsQuery(params: string, options?)\n// queryKey: [\"browse\", \"ytmusic\", \"mood-playlists\", params]\n// queryFn: () => api.get(`/browse/ytmusic/mood-playlists?params=${params}`)\n// staleTime: 10 minutes\n\nuseDiscoverWeeklyQuery(options?)\n// queryKey: [\"discover\", \"current\"]\n// queryFn: () => api.getCurrentDiscoverWeekly()\n// staleTime: 5 minutes\n// Returns null if no playlist exists (not an error)\n\nuseTidalStatusQuery(options?)\n// queryKey: [\"tidal\", \"status\"]\n// queryFn: () => api.getTidalStreamingStatus()\n// staleTime: 5 minutes\n```\n\n---\n\n## 7. Tab State Management\n\nTab selection is managed via URL search params for shareability and back-button support:\n\n```\n/explore              → defaults to \"for-you\" tab\n/explore?tab=trending → Trending tab\n/explore?tab=moods    → Moods & Genres tab\n```\n\nImplementation: `useSearchParams()` from Next.js. Tab changes use `router.replace()` (not `push`) to avoid polluting browser history with tab switches.\n\nMood drill-down state (clicking a mood category to see its playlists) is managed as local component state within `MoodsGenresTab.tsx` — not in the URL. Back arrow within the drill-down returns to the category grid.\n\n---\n\n## 8. Playlist Card Design\n\nThe \"Your Playlists\" row in the For You tab introduces a unified card treatment for My Liked, Discover Weekly, and Made For You mixes. These should look cohesive:\n\n```\n┌─────────────────────┐\n│  ┌───────┬────────┐ │\n│  │ art 1 │ art 2  │ │\n│  ├───────┼────────┤ │  ← 2x2 mosaic (or single art for My Liked)\n│  │ art 3 │ art 4  │ │\n│  └───────┴────────┘ │\n│  Title               │  ← \"My Liked\", \"Discover Weekly\", \"Your 2000s Mix\"\n│  Subtitle            │  ← \"142 tracks\", \"Updated Monday\", \"25 tracks\"\n│  ▶ Play              │  ← hover overlay\n└─────────────────────┘\n```\n\n- **My Liked:** Uses the liked playlist's cover art (or a mosaic of first 4 liked track covers). Subtitle: track count.\n- **Discover Weekly:** Mosaic from playlist's track covers. Subtitle: \"Updated [relative date]\" or \"Generate now\" CTA if absent.\n- **Made For You mixes:** Already have `coverUrls: string[]` (up to 4) for mosaic. Subtitle: track count.\n\nThe `<PlaylistCard>` component accepts:\n```typescript\ninterface PlaylistCardProps {\n    title: string;\n    subtitle: string;\n    coverUrls: string[];          // 1–4 URLs for single/mosaic display\n    onClick: () => void;\n    onPlay?: () => void;          // play button overlay\n    badge?: string;               // e.g., \"New\" for fresh Discover Weekly\n    emptyState?: React.ReactNode; // CTA for \"Generate now\"\n}\n```\n\n---\n\n## 9. Phased Implementation Plan\n\n### Phase 1 — Explore page shell + nav update\n\n**Goal:** Explore page exists and is navigable. Composed from existing components with minimal refactoring.\n\n1. Create `frontend/app/explore/page.tsx` with tab bar and above-tabs zone\n2. Create `frontend/features/explore/` directory structure\n3. Build `ExploreTabBar.tsx` with For You / Trending / Moods & Genres tabs (URL search param driven)\n4. Build `ForYouTab.tsx` — compose `<PlaylistCardRow>` (My Liked + Discover Weekly + MixesGrid) + inline radio stations (reuse `LibraryRadioStations` as-is initially) + recommendations\n5. Build `TrendingTab.tsx` — lift Browse page's Featured + Charts sections into this component (still using manual fetch initially)\n6. Build `MoodsGenresTab.tsx` — lift Browse page's Moods + Genres sections + add local genre/decade radio cards\n7. Wire Continue Listening + Recently Added above tabs (lift from Home page)\n8. Update `socialNavigation.ts`: replace 8-item nav with 5-item nav\n9. Add `/` → `/explore` redirect in `frontend/app/page.tsx` (or Next.js middleware)\n10. Verify all old routes (`/radio`, `/discover`, `/browse/playlists`, `/playlist/my-liked`) still work\n\n**Acceptance:** Explore page renders all content from all 4 absorbed pages. Old pages still accessible via direct URL. Sidebar shows 5 items.\n\n### Phase 2 — Unify duplicated logic + React Query migration\n\n**Goal:** Clean code, consistent data fetching, single source of truth for radio logic.\n\n1. Extract shared radio constants into `frontend/features/explore/constants/radioStations.ts` (STATIC_STATIONS, GENRE_COLORS, DECADE_COLORS, helper functions)\n2. Create `useRadioPlayback.ts` hook — single `startRadio()` implementation with artist diversification option\n3. Refactor `RadioStationSection.tsx` to use shared constants + hook\n4. Backport shared constants to `/radio/page.tsx` (keeps working, now imports from shared source)\n5. Migrate Browse data fetching to React Query hooks (`useYtMusicHomeQuery`, `useYtMusicChartsQuery`, `useYtMusicCategoriesQuery`, `useYtMusicMoodPlaylistsQuery`)\n6. Create `useDiscoverWeeklyQuery` React Query hook (lightweight — just fetches current playlist, no polling)\n7. Create `useTidalStatusQuery` React Query hook\n8. Build `useExploreData.ts` orchestrating hook that composes all query hooks with tab-aware `enabled` flags\n9. Replace manual fetch logic in `TrendingTab` and `MoodsGenresTab` with new React Query hooks\n10. Create `<PlaylistCard>` component with unified visual treatment\n11. Wire `<PlaylistCardRow>` to render My Liked, Discover Weekly, and mixes as unified cards\n\n**Acceptance:** No duplicated radio logic. All Browse data goes through React Query. Explore page uses single orchestrating hook.\n\n### Phase 3 — Polish + deprecation\n\n**Goal:** Explore is the polished default experience. Old routes gracefully redirect or stay as deep-links.\n\n1. Move playlist import (Spotify URL parsing) from Browse page to playlist management page\n2. Add tab-aware loading skeletons (skeleton cards while data loads per tab)\n3. Add empty states per section (e.g., \"Connect TIDAL for premium content\", \"No mixes yet — play some music first\")\n4. Test mobile responsive behavior for all three tabs\n5. Add Discover Weekly inline generation CTA (if playlist absent, card triggers `api.generateDiscoverWeekly()` and shows progress)\n6. Remove `LibraryRadioStations.tsx` (fully replaced by `RadioStationSection.tsx`)\n7. Remove Home page discovery rows (Made For You, Featured Playlists, Recommended, Popular Artists, Radio preview) — or remove the Home page component entirely since `/` now redirects\n8. Update Subsonic compatibility if any client relies on Home page endpoints\n9. Verify mobile quick links work correctly\n\n**Acceptance:** Explore is the default landing. No dead code from absorbed pages. Mobile responsive. Loading states and empty states handled.\n\n---\n\n## 10. Migration Risks and Mitigations\n\n| Risk | Impact | Mitigation |\n|---|---|---|\n| Old bookmarks/links to `/radio`, `/discover`, `/browse/playlists` break | User frustration | Keep all old routes alive indefinitely. They render the same content, just hidden from nav. |\n| Explore page is slow (fetches too much data on load) | Poor first impression | Tab-aware `enabled` flags — only fetch data for active tab. Above-tabs queries are lightweight. |\n| Browse manual fetch → React Query migration introduces regressions | Broken Trending/Moods tabs | Phase 2 is isolated. Test each query hook independently. Keep old Browse page alive as reference. |\n| Discover Weekly generation blocks the For You tab | Tab feels broken while generating | Generation CTA is async. Card shows polling progress. Rest of For You tab renders normally. |\n| Radio logic unification breaks the standalone `/radio` page | Users who bookmarked `/radio` see breakage | Phase 2 backports shared constants to `/radio/page.tsx`. It still works, just imports from a shared source. |\n| Mobile layout regression | Bad experience on phones | Phase 3 explicitly includes mobile responsive testing. Tab bar must be touch-friendly. |\n\n---\n\n## 11. Backend Changes\n\n**None required.** All existing API endpoints are reused as-is:\n\n| Endpoint | Used by |\n|---|---|\n| `GET /library/recently-listened` | Above-tabs: Continue Listening |\n| `GET /library/recently-added` | Above-tabs: Recently Added |\n| `GET /library/genres` | For You + Moods & Genres: radio stations |\n| `GET /library/decades` | For You + Moods & Genres: radio stations |\n| `GET /library/radio` | For You + Moods & Genres: station playback |\n| `GET /mixes` | For You: Made For You mixes |\n| `POST /mixes/refresh` | For You: refresh mixes |\n| `GET /mixes/mood/presets` | For You: mood mixer |\n| `GET /discover/current` | For You: Discover Weekly card |\n| `GET /browse/ytmusic/home` | Trending: featured shelves |\n| `GET /browse/ytmusic/charts` | Trending: charts |\n| `GET /browse/ytmusic/categories` | Moods & Genres: YT Music categories |\n| `GET /browse/ytmusic/mood-playlists` | Moods & Genres: category drill-down |\n| `GET /api/tidal/streaming/status` | Trending: TIDAL spotlight visibility |\n| `GET /recommendations` | For You: Last.fm recommendations |\n| `GET /popular-artists` | Trending: Last.fm popular artists |\n| `GET /liked-playlist` | For You: My Liked card |\n\n---\n\n## 12. Testing Strategy\n\n### Unit tests\n- `useExploreData` hook: verify tab-aware enabled flags, verify data composition\n- `useRadioPlayback` hook: verify startRadio behavior, artist diversification\n- `<PlaylistCard>` component: render states (normal, empty, loading, badge)\n- `<ExploreTabBar>` component: tab switching updates URL params\n\n### Integration tests\n- Each tab renders expected sections when data is present\n- Each tab handles loading/empty/error states gracefully\n- Tab switching preserves above-tabs content\n- Mood drill-down navigation works within Moods & Genres tab\n\n### E2E tests (Playwright)\n- Navigate to `/explore` — page loads, default tab is For You\n- Switch tabs — URL params update, content changes\n- Click a radio station — playback starts\n- Click Discover Weekly card — navigates to `/discover`\n- Click My Liked card — navigates to `/playlist/my-liked`\n- Navigate to `/radio` directly — old page still works\n- Navigate to `/` — redirects to `/explore`\n- Mobile viewport — tabs are accessible, content scrolls correctly\n\n---\n\n## 13. Open Questions\n\n1. **Tab persistence across sessions:** Should we remember the user's last-active tab (localStorage) or always default to For You?\n2. **Radio \"Show All\" behavior:** When the For You tab shows a subset of radio stations, does \"Show All\" expand inline, open a modal, or switch to the Moods & Genres tab?\n3. **TIDAL personalized content:** The current TIDAL tab in Browse shows hardcoded spotlight cards. Is there a TIDAL API for personalized shelves/playlists? If so, the Trending tab could show richer TIDAL content for connected users.\n4. **Discover Weekly auto-generation:** If a user visits Explore for the first time and has never generated a Discover Weekly, should we auto-trigger generation or show a manual CTA? (User preference: no auto-creation — CTA is likely the right call.)\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.explore-page-consolidation.6e92dffb93",
+    "plan_key": "plan:legacy.archived.explore-page-consolidation.6e92dffb93",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Explore Page Consolidation",
+      "objective": "Consolidate fragmented discovery surfaces (Home, Browse, Radio, Discovery) into a single Explore page that answers 'what should I listen to next?' in one place.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Create /explore route with tab navigation (For You | Trending | Moods & Genres)",
+        "Above-tabs: Continue Listening + Recently Added sections (always visible)",
+        "For You tab: My Liked card, Discover Weekly card, Made For You mixes, personal radio stations, recommended artists",
+        "Trending tab: YT Music featured shelves, YT Music charts, TIDAL spotlight, Popular artists",
+        "Moods & Genres tab: YT Music moods, genres, local genre/decade radio stations",
+        "Update sidebar nav: Explore, Library, Listen Together, Audiobooks, Podcasts (5 items down from 8)",
+        "Old routes stay alive for backwards compat but hidden from nav"
+      ],
+      "out_of_scope": [
+        "- Changing any backend API contracts or data models",
+        "- Modifying the Discover Weekly generation pipeline",
+        "- Enriching Continue Listening or Recently Added beyond current data (v2)",
+        "- Breaking existing direct-URL access to deprecated pages",
+        "- Touching Podcasts, Audiobooks, or Library pages"
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/explore-page-consolidation.json",
+        ".agents/plans/archived/explore-page-consolidation/PLAN.json",
+        "frontend/hooks/useQueries.ts",
+        "backend/src/routes/browse.ts",
+        "frontend/features/explore/hooks/useExploreData.ts",
+        "frontend/features/home/hooks/useHomeData.ts",
+        "frontend/app/explore/page.tsx",
+        "frontend/features/explore/components/",
+        "frontend/features/explore/components/ForYouTab.tsx",
+        "frontend/features/explore/components/TrendingTab.tsx",
+        "frontend/features/explore/components/MoodsGenresTab.tsx",
+        "frontend/components/layout/socialNavigation.ts",
+        "frontend/components/layout/MobileSidebar.tsx",
+        "frontend/app/page.tsx",
+        ".agents/plans/archived/explore-page-consolidation/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/explore-page-consolidation/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.01.create-yt-music-browse-react-query-hooks",
+        "summary": "Create YT Music browse React Query hooks",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Unit tests for hook return shapes"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/explore-page-consolidation.json",
+          "frontend/hooks/useQueries.ts",
+          "backend/src/routes/browse.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added React Query integration for browse/trending/mood data used by the consolidated explore experience.",
+        "evidence": [
+          "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+        ]
+      },
+      {
+        "key": "task.02.create-useexploredata-hook",
+        "summary": "Create useExploreData hook",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Unit test for data composition and loading state logic"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/explore-page-consolidation.json",
+          "frontend/features/explore/hooks/useExploreData.ts",
+          "frontend/features/home/hooks/useHomeData.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented `useExploreData` to compose continue listening, recently added, recommendations, trending, and mood/genre datasets.",
+        "evidence": [
+          "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+        ]
+      },
+      {
+        "key": "task.03.create-explore-page-shell-with-tabs",
+        "summary": "Create Explore page shell with tabs",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Component test: renders tabs, above-tabs sections, default tab content"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/explore-page-consolidation.json",
+          "frontend/app/explore/page.tsx",
+          "frontend/features/explore/components/"
+        ],
+        "blocked_reason": "",
+        "outcome": "Created `/explore` page shell with sticky tab navigation plus always-visible Continue Listening and Recently Added sections.",
+        "evidence": [
+          "verify: cd frontend && node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/explorePage.component.test.ts"
+        ]
+      },
+      {
+        "key": "task.04.create-tab-content-components",
+        "summary": "Create tab content components",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Component tests for each tab's rendered sections"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/explore-page-consolidation.json",
+          "frontend/features/explore/components/ForYouTab.tsx",
+          "frontend/features/explore/components/TrendingTab.tsx",
+          "frontend/features/explore/components/MoodsGenresTab.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Built For You, Trending, and Moods & Genres tab components and integrated provider/deep-link rendering paths.",
+        "evidence": [
+          "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+        ]
+      },
+      {
+        "key": "task.05.update-sidebar-navigation",
+        "summary": "Update sidebar navigation",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Unit test for new nav configuration, component test for sidebar rendering"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/explore-page-consolidation.json",
+          "frontend/components/layout/socialNavigation.ts",
+          "frontend/components/layout/MobileSidebar.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Updated sidebar/mobile navigation to the 5-item explore-first layout and removed legacy primary navigation emphasis.",
+        "evidence": [
+          "verify: cd frontend && node --test --experimental-strip-types tests/unit/socialNavigation.test.ts"
+        ]
+      },
+      {
+        "key": "task.06.make-redirect-to-explore",
+        "summary": "Make / redirect to /explore",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Component test for redirect behavior"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/explore-page-consolidation.json",
+          "frontend/app/page.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Root route now redirects to `/explore`, making Explore the default landing surface.",
+        "evidence": [
+          "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "explore-page-consolidation",
+    "feature_title": "Explore Page Consolidation",
+    "plan_ref": ".agents/plans/archived/explore-page-consolidation/PLAN.json",
+    "status": "complete",
+    "updated_at": "2026-03-03T12:45:49.010Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "Consolidate Home, Browse, Radio, and Discovery pages into a single Explore page (/explore) that becomes the default landing experience with tabs: For You, Trending, Moods & Genres.",
+        "full_spec_outline": [
+          {
+            "objective": "Create /explore route with tab navigation (For You | Trending | Moods & Genres)",
+            "deliverable": "Create /explore route with tab navigation (For You | Trending | Moods & Genres)",
+            "id": "create-explore-route-with-tab-navigation-for-you-trending-moods-",
+            "acceptance_criteria": [
+              "Complete deliverable: Create /explore route with tab navigation (For You | Trending | Moods & Genres)"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "objective": "Above-tabs: Continue Listening + Recently Added sections (always visible)",
+            "deliverable": "Above-tabs: Continue Listening + Recently Added sections (always visible)",
+            "id": "above-tabs-continue-listening-recently-added-sections-always-vis",
+            "acceptance_criteria": [
+              "Complete deliverable: Above-tabs: Continue Listening + Recently Added sections (always visible)"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "objective": "For You tab: My Liked card, Discover Weekly card, Made For You mixes, personal radio stations, recommended artists",
+            "deliverable": "For You tab: My Liked card, Discover Weekly card, Made For You mixes, personal radio stations, recommended artists",
+            "id": "for-you-tab-my-liked-card-discover-weekly-card-made-for-you-mixe",
+            "acceptance_criteria": [
+              "Complete deliverable: For You tab: My Liked card, Discover Weekly card, Made For You mixes, personal radio stations, recommended artists"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "objective": "Trending tab: YT Music featured shelves, YT Music charts, TIDAL spotlight, Popular artists",
+            "deliverable": "Trending tab: YT Music featured shelves, YT Music charts, TIDAL spotlight, Popular artists",
+            "id": "trending-tab-yt-music-featured-shelves-yt-music-charts-tidal-spo",
+            "acceptance_criteria": [
+              "Complete deliverable: Trending tab: YT Music featured shelves, YT Music charts, TIDAL spotlight, Popular artists"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "objective": "Moods & Genres tab: YT Music moods, genres, local genre/decade radio stations",
+            "deliverable": "Moods & Genres tab: YT Music moods, genres, local genre/decade radio stations",
+            "id": "moods-genres-tab-yt-music-moods-genres-local-genre-decade-radio-",
+            "acceptance_criteria": [
+              "Complete deliverable: Moods & Genres tab: YT Music moods, genres, local genre/decade radio stations"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "objective": "Update sidebar nav: Explore, Library, Listen Together, Audiobooks, Podcasts (5 items down from 8)",
+            "deliverable": "Update sidebar nav: Explore, Library, Listen Together, Audiobooks, Podcasts (5 items down from 8)",
+            "id": "update-sidebar-nav-explore-library-listen-together-audiobooks-po",
+            "acceptance_criteria": [
+              "Complete deliverable: Update sidebar nav: Explore, Library, Listen Together, Audiobooks, Podcasts (5 items down from 8)"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "objective": "Old routes stay alive for backwards compat but hidden from nav",
+            "deliverable": "Old routes stay alive for backwards compat but hidden from nav",
+            "id": "old-routes-stay-alive-for-backwards-compat-but-hidden-from-nav",
+            "acceptance_criteria": [
+              "Complete deliverable: Old routes stay alive for backwards compat but hidden from nav"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Phase 1 composes from existing components. Phase 2 refactors duplicated radio logic and migrates Browse to React Query. Phase 3 makes / redirect to /explore.",
+        "full_refined_spec": [
+          {
+            "decision": "Phase 1: Build shell, compose from existing components, update nav",
+            "rationale": "Phase 1: Build shell, compose from existing components, update nav",
+            "id": "phase-1-build-shell-compose-from-existing-components-update-nav",
+            "acceptance_criteria": [
+              "Validate decision: Phase 1: Build shell, compose from existing components, update nav"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "decision": "Create useExploreData hook composing existing React Query hooks + new browse data hooks",
+            "rationale": "Create useExploreData hook composing existing React Query hooks + new browse data hooks",
+            "id": "create-useexploredata-hook-composing-existing-react-query-hooks-",
+            "acceptance_criteria": [
+              "Validate decision: Create useExploreData hook composing existing React Query hooks + new browse data hooks"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "decision": "Create React Query hooks for YT Music browse endpoints (shelves, charts, categories, mood-playlists)",
+            "rationale": "Create React Query hooks for YT Music browse endpoints (shelves, charts, categories, mood-playlists)",
+            "id": "create-react-query-hooks-for-yt-music-browse-endpoints-shelves-c",
+            "acceptance_criteria": [
+              "Validate decision: Create React Query hooks for YT Music browse endpoints (shelves, charts, categories, mood-playlists)"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "decision": "Build ExplorePage with ExploreTabNavigation and three tab content components",
+            "rationale": "Build ExplorePage with ExploreTabNavigation and three tab content components",
+            "id": "build-explorepage-with-exploretabnavigation-and-three-tab-conten",
+            "acceptance_criteria": [
+              "Validate decision: Build ExplorePage with ExploreTabNavigation and three tab content components"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "decision": "Update socialNavigation.ts to new 5-item layout",
+            "rationale": "Update socialNavigation.ts to new 5-item layout",
+            "id": "update-socialnavigation-ts-to-new-5-item-layout",
+            "acceptance_criteria": [
+              "Validate decision: Update socialNavigation.ts to new 5-item layout"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          },
+          {
+            "decision": "All tests TDD: component tests for page render, unit tests for data hooks",
+            "rationale": "All tests TDD: component tests for page render, unit tests for data hooks",
+            "id": "all-tests-tdd-component-tests-for-page-render-unit-tests-for-dat",
+            "acceptance_criteria": [
+              "Validate decision: All tests TDD: component tests for page render, unit tests for data hooks"
+            ],
+            "references": [
+              ".agents/plans/archived/explore-page-consolidation/PLAN.json"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Phase 1 implementation in 6 steps with TDD at each step.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Create YT Music browse React Query hooks",
+            "acceptance_criteria": [
+              "Unit tests for hook return shapes"
+            ],
+            "references": [
+              "frontend/hooks/useQueries.ts",
+              "backend/src/routes/browse.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added React Query integration for browse/trending/mood data used by the consolidated explore experience."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/hooks/useQueries.ts (browse/explore query hooks)",
+                "backend/src/routes/browse.ts (data contract consumed by new hooks)"
+              ],
+              "verification_testing": [
+                "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Create useExploreData hook",
+            "acceptance_criteria": [
+              "Unit test for data composition and loading state logic"
+            ],
+            "references": [
+              "frontend/features/explore/hooks/useExploreData.ts",
+              "frontend/features/home/hooks/useHomeData.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented `useExploreData` to compose continue listening, recently added, recommendations, trending, and mood/genre datasets."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/features/explore/hooks/useExploreData.ts",
+                "frontend/features/home/hooks/useHomeData.ts (composition parity checks)"
+              ],
+              "verification_testing": [
+                "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Create Explore page shell with tabs",
+            "acceptance_criteria": [
+              "Component test: renders tabs, above-tabs sections, default tab content"
+            ],
+            "references": [
+              "frontend/app/explore/page.tsx",
+              "frontend/features/explore/components/"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Created `/explore` page shell with sticky tab navigation plus always-visible Continue Listening and Recently Added sections."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/app/explore/page.tsx",
+                "frontend/tests/component/explorePage.component.test.ts"
+              ],
+              "verification_testing": [
+                "verify: cd frontend && node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/explorePage.component.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Create tab content components",
+            "acceptance_criteria": [
+              "Component tests for each tab's rendered sections"
+            ],
+            "references": [
+              "frontend/features/explore/components/ForYouTab.tsx",
+              "frontend/features/explore/components/TrendingTab.tsx",
+              "frontend/features/explore/components/MoodsGenresTab.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Built For You, Trending, and Moods & Genres tab components and integrated provider/deep-link rendering paths."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/features/explore/components/ForYouTab.tsx",
+                "frontend/features/explore/components/TrendingTab.tsx",
+                "frontend/features/explore/components/MoodsGenresTab.tsx",
+                "frontend/tests/component/exploreForYouTab.component.test.ts",
+                "frontend/tests/component/exploreTrendingTab.component.test.ts",
+                "frontend/tests/component/exploreMoodsGenresTab.component.test.ts"
+              ],
+              "verification_testing": [
+                "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Update sidebar navigation",
+            "acceptance_criteria": [
+              "Unit test for new nav configuration, component test for sidebar rendering"
+            ],
+            "references": [
+              "frontend/components/layout/socialNavigation.ts",
+              "frontend/components/layout/MobileSidebar.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Updated sidebar/mobile navigation to the 5-item explore-first layout and removed legacy primary navigation emphasis."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/components/layout/socialNavigation.ts",
+                "frontend/components/layout/Sidebar.tsx",
+                "frontend/tests/unit/socialNavigation.test.ts",
+                "frontend/tests/component/sidebar.component.test.ts"
+              ],
+              "verification_testing": [
+                "verify: cd frontend && node --test --experimental-strip-types tests/unit/socialNavigation.test.ts"
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Make / redirect to /explore",
+            "acceptance_criteria": [
+              "Component test for redirect behavior"
+            ],
+            "references": [
+              "frontend/app/page.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Root route now redirects to `/explore`, making Explore the default landing surface."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/app/page.tsx",
+                "frontend/tests/component/homeRedirect.component.test.ts"
+              ],
+              "verification_testing": [
+                "verify: git show --name-only --pretty=format:\"%h %s\" e4fe14f"
+              ]
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Consolidate fragmented discovery surfaces (Home, Browse, Radio, Discovery) into a single Explore page that answers 'what should I listen to next?' in one place.",
+        "non_goals": "- Changing any backend API contracts or data models\n- Modifying the Discover Weekly generation pipeline\n- Enriching Continue Listening or Recently Added beyond current data (v2)\n- Breaking existing direct-URL access to deprecated pages\n- Touching Podcasts, Audiobooks, or Library pages"
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": "claude-opus",
+      "execution_agents": [],
+      "last_executor": "claude-opus"
+    }
+  }
+}

@@ -238,37 +238,39 @@ docker compose up -d
 
 Use semantic versions without a `v` prefix (example: `1.6.0`).
 
-1. Prepare all release version surfaces in one command:
+1. Prepare and verify the release version surfaces in one command:
 
 ```bash
-npm run release:prepare -- --version 1.6.0
+node scripts/release/version-sync.mjs --write --version 1.6.0
 ```
 
 This updates and verifies:
-- `package.json` + `package-lock.json`
-- `frontend/package.json` + `frontend/package-lock.json`
 - `backend/package.json` + `backend/package-lock.json`
+- `frontend/package.json` + `frontend/package-lock.json`
 - `charts/soundspan/Chart.yaml` (`version` + `appVersion`)
 - `charts/soundspan/values.yaml` image tags for release images
 - `CHANGELOG.md` (`[Unreleased]` promotion + scaffold reset)
 
-It also validates hard-coded package names:
-- `soundspan`
-- `soundspan-frontend`
+It also validates the expected package names:
 - `soundspan-backend`
+- `soundspan-frontend`
 
 2. Commit and push the release prep:
 
 ```bash
-git add package.json package-lock.json frontend/package.json frontend/package-lock.json backend/package.json backend/package-lock.json charts/soundspan/Chart.yaml charts/soundspan/values.yaml CHANGELOG.md
+git add frontend/package.json frontend/package-lock.json backend/package.json backend/package-lock.json charts/soundspan/Chart.yaml charts/soundspan/values.yaml CHANGELOG.md
 git commit -m "chore(release): prepare 1.6.0"
 git push origin main
 ```
 
-3. Generate release notes from the previous release tag to the release commit:
+3. Draft release notes from the previous release tag to the release commit. This renders the maintainer template in `docs/maintainers/RELEASE_NOTES_TEMPLATE.md` against the prepared changelog section:
 
 ```bash
-npm run release:notes -- --version 1.6.0 --from 1.5.0 --to main --output /tmp/soundspan-1.6.0-release-notes.md
+node scripts/release/generate-notes.mjs \
+  --version 1.6.0 \
+  --from 1.5.0 \
+  --to main \
+  --output /tmp/soundspan-1.6.0-release-notes.md
 ```
 
 Helm release reference for notes and operator docs:

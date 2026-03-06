@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "feature_id": "mbid-release-correction-release-route-consolidation",
+  "feature_title": "MBID_RELEASE_CORRECTION_RELEASE_ROUTE_CONSOLIDATION_PLAN.md",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/mbid-release-correction-release-route-consolidation.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PLAN.json",
+    "plan_dir": ".agents/plans/archived/mbid-release-correction-release-route-consolidation",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/mbid-release-correction-release-route-consolidation/HANDOFF.md",
+        "name": "HANDOFF.md",
+        "content": "# LLM_SESSION_HANDOFF.md\n\n## Feature\n- Slice H: release route/service consolidation\n- Plan: `plans/current/mbid-release-correction-release-route-consolidation/MBID_RELEASE_CORRECTION_RELEASE_ROUTE_CONSOLIDATION_PLAN.md`\n\n## Current State\n\n1. Slice implementation completed through Phase 2 with parity-safe helper extraction.\n2. Checkpoint commit planned for consolidation of `downloads.ts` + `releases.ts` via shared `releaseContracts` service helpers.\n3. Sequence dependency on Slice E/F/G is satisfied.\n\n## Next Action\n\n1. Decide whether to ship docs delta immediately or batch MBID slice docs together.\n2. If shipping now, apply Phase 3 doc updates (`CHANGELOG.md`, `docs/FORK_DIFF.md`).\n"
+      },
+      {
+        "path": ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# MBID_RELEASE_CORRECTION_RELEASE_ROUTE_CONSOLIDATION_PLAN.md\n\n## Document Status\n\n- Last updated: 2026-02-14\n- Feature: Slice H - release route/service consolidation\n- Parent context: `.agents/plans/archived/mbid-release-correction-long-term-review/PLAN.md`\n- Scope: Planning/design only\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation state: Pending explicit implementation approval\n\n## Goal\n\nReduce long-term regression risk by consolidating overlapping release behavior currently split across `downloads.ts` and `releases.ts` into clearer shared service contracts.\n\n## Reuse/Consolidation Check\n\n1. Existing patterns reused:\n- current route families in `backend/src/routes/downloads.ts` and `backend/src/routes/releases.ts`\n- `lidarrService` entry points in `backend/src/services/lidarr.ts`\n- route-compat testing pattern in `backend/src/routes/__tests__/`\n2. Duplication intentionally kept:\n- no behavioral changes during initial extraction step; parity first.\n3. Consolidation deferred:\n- any schema migrations remain out-of-scope unless unavoidable.\n\n## Spec Outline\n\n1. Map overlap between release-radar and interactive release routes.\n2. Extract shared release lookup/grab mapping into service/helper layer.\n3. Keep route-level contracts stable while reducing duplication.\n4. Add compatibility tests guarding pre-consolidation behavior.\n\n## Refined Spec\n\n### Constraints\n\n1. No endpoint URL changes in first consolidation pass.\n2. Preserve auth and response contracts exactly.\n3. Prefer extraction + composition over behavioral rewrites.\n\n### Primary Touchpoints\n\n1. `backend/src/routes/downloads.ts`\n2. `backend/src/routes/releases.ts`\n3. `backend/src/services/lidarr.ts`\n4. `backend/src/routes/__tests__/downloadsInteractiveCompat.test.ts`\n5. `backend/src/routes/__tests__/downloadsReleasesCompat.test.ts`\n\n### Acceptance Criteria\n\n1. Duplicate release mapping/lookup logic is centralized.\n2. Existing endpoint contracts remain unchanged.\n3. Regression suites pass unchanged or with explicit equivalent assertions.\n4. Operator-visible behavior is unchanged unless explicitly documented.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Phase 0: Consolidation Design\n\n#### Task 0.1: Build overlap inventory and extraction boundaries\n- Status: Complete\n- Deliverable: concrete list of duplicated logic and extraction targets\n- References:\n  - `backend/src/routes/downloads.ts`\n  - `backend/src/routes/releases.ts`\nCompletion summary:\n- Identified cross-route duplication in release response shaping (`sizeFormatted`, quality defaults), radar release classification, and repeated date sorting logic.\n\n#### Task 0.2: Freeze contract parity checklist\n- Status: Complete\n- Deliverable: endpoint-by-endpoint contract checklist for post-refactor verification\n- References:\n  - `backend/src/routes/__tests__/downloadsInteractiveCompat.test.ts`\n  - `backend/src/routes/__tests__/downloadsReleasesCompat.test.ts`\nCompletion summary:\n- Locked parity verification on interactive release compat and release-radar compat suites plus backend `tsc` build gate.\n\n### Phase 1: Extraction + Route Wiring\n\n#### Task 1.1: Extract shared release helper/service logic\n- Status: Complete\n- Deliverable: reusable service/helper for release lookup/formatting/grab setup\n- References:\n  - `backend/src/services/`\n  - `backend/src/routes/downloads.ts`\n  - `backend/src/routes/releases.ts`\nCompletion summary:\n- Added `backend/src/services/releaseContracts.ts` with shared interactive-release mapping, radar mapping, byte formatting, and date sort utilities.\n\n#### Task 1.2: Rewire routes to shared helper with no contract change\n- Status: Complete\n- Deliverable: thinner route handlers with preserved response behavior\n- References:\n  - `backend/src/routes/downloads.ts`\n  - `backend/src/routes/releases.ts`\nCompletion summary:\n- Replaced inline formatting/classification/sort logic in both routes with shared helper calls while preserving endpoint URLs and response shapes.\n\n### Phase 2: Regression Validation\n\n#### Task 2.1: Expand/refresh compat tests around consolidated paths\n- Status: Complete\n- Deliverable: deterministic parity coverage before/after consolidation\n- References:\n  - `backend/src/routes/__tests__/downloadsInteractiveCompat.test.ts`\n  - `backend/src/routes/__tests__/downloadsReleasesCompat.test.ts`\nCompletion summary:\n- Reused existing compat suites as parity gates and verified no assertion changes were required after consolidation.\n\n#### Task 2.2: Build + targeted suite checkpoint\n- Status: Complete\n- Deliverable: passing targeted tests and backend build evidence\n- References:\n  - `backend/package.json`\nCompletion summary:\n- `npm test -- --runInBand src/routes/__tests__/downloadsInteractiveCompat.test.ts src/routes/__tests__/downloadsReleasesCompat.test.ts` passed.\n- `npm run build` passed.\n\n### Phase 3: Docs + Handoff\n\n#### Task 3.1: Document consolidation outcomes (if shipped)\n- Status: Complete\n- Deliverable: short delta notes in changelog/fork-diff and handoff context\n- References:\n  - `CHANGELOG.md`\n  - `docs/FORK_DIFF.md`\nCompletion summary:\n- Consolidation outcomes were documented in shipped docs sync (`e554e95`) with explicit notes in `CHANGELOG.md` and `docs/FORK_DIFF.md`.\n"
+      },
+      {
+        "path": ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PROMPT_HISTORY.md",
+        "name": "PROMPT_HISTORY.md",
+        "content": "# PROMPT_HISTORY.md\n\n## 2026-02-14 Session Prompt History (Slice H Staging)\n\n1. User requested planning/staging Slice F/G/H before starting Slice E implementation.\n2. Created Slice H planning artifacts under `plans/current/mbid-release-correction-release-route-consolidation/`.\n3. Captured spec outline, refined spec, and detailed atomic plan.\n4. No implementation has started for this slice.\n\n## 2026-02-14 Session Prompt History (Slice H Implementation)\n\n1. Extracted shared release contract helpers into `backend/src/services/releaseContracts.ts`.\n2. Rewired `downloads.ts` interactive release formatting to shared mapper helpers.\n3. Rewired `releases.ts` radar/upcoming/recent mapping + sorting to shared helpers.\n4. Verified parity with targeted compat suites and backend build.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.mbid-release-correction-release-route-consolidation.22bd048653",
+    "plan_key": "plan:legacy.archived.mbid-release-correction-release-route-consolidation.22bd048653",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "MBID_RELEASE_CORRECTION_RELEASE_ROUTE_CONSOLIDATION_PLAN.md",
+      "objective": "1. Map overlap between release-radar and interactive release routes.\n2. Extract shared release lookup/grab mapping into service/helper layer.\n3. Keep route-level contracts stable while reducing duplication.\n4. Add compatibility tests guarding pre-consolidation behavior.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Map overlap between release-radar and interactive release routes.",
+        "2. Extract shared release lookup/grab mapping into service/helper layer.",
+        "3. Keep route-level contracts stable while reducing duplication.",
+        "4. Add compatibility tests guarding pre-consolidation behavior."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/mbid-release-correction-release-route-consolidation.json",
+        ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PLAN.json",
+        ".agents/plans/archived/mbid-release-correction-release-route-consolidation/HANDOFF.md",
+        ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PLAN.md",
+        ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PROMPT_HISTORY.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/mbid-release-correction-release-route-consolidation/HANDOFF.md",
+        ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PLAN.md",
+        ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PROMPT_HISTORY.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Map overlap between release-radar and interactive release routes.\n2. Extract shared release lookup/grab mapping into service/helper layer.\n3. Keep route-level contracts stable while reducing duplication.\n4. Add compatibility tests guarding pre-consolidation behavior.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/mbid-release-correction-release-route-consolidation.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "mbid-release-correction-release-route-consolidation",
+    "feature_title": "MBID_RELEASE_CORRECTION_RELEASE_ROUTE_CONSOLIDATION_PLAN.md",
+    "plan_ref": ".agents/plans/archived/mbid-release-correction-release-route-consolidation/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Map overlap between release-radar and interactive release routes.\n2. Extract shared release lookup/grab mapping into service/helper layer.\n3. Keep route-level contracts stable while reducing duplication.\n4. Add compatibility tests guarding pre-consolidation behavior.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Map overlap between release-radar and interactive release routes.\n2. Extract shared release lookup/grab mapping into service/helper layer.\n3. Keep route-level contracts stable while reducing duplication.\n4. Add compatibility tests guarding pre-consolidation behavior.",
+        "non_goals": ""
+      }
+    }
+  }
+}

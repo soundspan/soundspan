@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "feature_id": "release-notes-changelog-reconciliation",
+  "feature_title": "Plan - Release Notes Changelog Reconciliation",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/release-notes-changelog-reconciliation.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/release-notes-changelog-reconciliation/PLAN.json",
+    "plan_dir": ".agents/plans/archived/release-notes-changelog-reconciliation",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/release-notes-changelog-reconciliation/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Release Notes Changelog Reconciliation\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: Changelog completeness reconciliation against repository release-note sources\n- Scope: Compare generated release notes and changelog sections; semantically merge missing items into changelog with plain-English wording\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Active (user requested immediate reconciliation)\n\n## Spec Outline\n\n1. Gather release-note sources in-repo and generated deltas from release tags.\n2. Compare with `CHANGELOG.md` release sections and unreleased entries.\n3. Merge missing user-visible items into appropriate changelog sections without commit-jargon phrasing.\n4. Verify policy checks and preflight.\n\n## Refined Spec\n\n1. Use `npm run release:notes` as canonical release-note generator for tag ranges.\n2. Treat existing changelog content as source of truth for already-documented entries; only add missing, non-duplicative items.\n3. Keep wording user-facing and plain English.\n4. Preserve section structure (`Added`, `Changed`, `Fixed`) and avoid reorder churn.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Task 1: Source collection\n- Status: Complete\n- Acceptance criteria:\n  - Generated release notes for active unreleased delta are available for comparison.\n  - Existing changelog sections are parsed for current coverage.\n- Completion summary:\n  - Generated canonical release-note drafts with `npm run release:notes` for:\n    - `1.0.0..1.0.1`\n    - `1.0.1..1.1.0`\n    - `1.1.0..HEAD` (1.1.1 draft)\n  - Parsed current `CHANGELOG.md` sections and compared them semantically against generated release-note coverage.\n\n### Task 2: Semantic merge\n- Status: Complete\n- Acceptance criteria:\n  - Missing release-note items are merged into `CHANGELOG.md` in the right sections.\n  - Duplicate/overlapping wording is consolidated rather than duplicated.\n- Completion summary:\n  - Updated `CHANGELOG.md`:\n    - Expanded `Unreleased` with merged plain-English entries for newly surfaced additions/changes/fixes from `1.1.0..HEAD`.\n    - Reconciled missing `1.0.1` section coverage with consolidated `Changed` and `Fixed` bullets from `1.0.0..1.0.1` release-note content.\n  - Kept bullets user-facing and avoided raw commit-jargon phrasing.\n\n### Task 3: Verification\n- Status: Complete\n- Acceptance criteria:\n  - `npm run agent:preflight` passes.\n  - No unrelated file changes are introduced by this reconciliation.\n- Completion summary:\n  - Passed `npm run agent:preflight` after changelog reconciliation.\n  - Reconciliation edits were limited to `CHANGELOG.md` plus plan/queue bookkeeping artifacts.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.release-notes-changelog-reconciliation.bbb57d788c",
+    "plan_key": "plan:legacy.archived.release-notes-changelog-reconciliation.bbb57d788c",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Release Notes Changelog Reconciliation",
+      "objective": "1. Gather release-note sources in-repo and generated deltas from release tags.\n2. Compare with `CHANGELOG.md` release sections and unreleased entries.\n3. Merge missing user-visible items into appropriate changelog sections without commit-jargon phrasing.\n4. Verify policy checks and preflight.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Gather release-note sources in-repo and generated deltas from release tags.",
+        "2. Compare with `CHANGELOG.md` release sections and unreleased entries.",
+        "3. Merge missing user-visible items into appropriate changelog sections without commit-jargon phrasing.",
+        "4. Verify policy checks and preflight."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/release-notes-changelog-reconciliation.json",
+        ".agents/plans/archived/release-notes-changelog-reconciliation/PLAN.json",
+        ".agents/plans/archived/release-notes-changelog-reconciliation/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/release-notes-changelog-reconciliation/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Gather release-note sources in-repo and generated deltas from release tags.\n2. Compare with `CHANGELOG.md` release sections and unreleased entries.\n3. Merge missing user-visible items into appropriate changelog sections without commit-jargon phrasing.\n4. Verify policy checks and preflight.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/release-notes-changelog-reconciliation.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "release-notes-changelog-reconciliation",
+    "feature_title": "Plan - Release Notes Changelog Reconciliation",
+    "plan_ref": ".agents/plans/archived/release-notes-changelog-reconciliation/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Gather release-note sources in-repo and generated deltas from release tags.\n2. Compare with `CHANGELOG.md` release sections and unreleased entries.\n3. Merge missing user-visible items into appropriate changelog sections without commit-jargon phrasing.\n4. Verify policy checks and preflight.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "1. Use `npm run release:notes` as canonical release-note generator for tag ranges.\n2. Treat existing changelog content as source of truth for already-documented entries; only add missing, non-duplicative items.\n3. Keep wording user-facing and plain English.\n4. Preserve section structure (`Added`, `Changed`, `Fixed`) and avoid reorder churn.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Gather release-note sources in-repo and generated deltas from release tags.\n2. Compare with `CHANGELOG.md` release sections and unreleased entries.\n3. Merge missing user-visible items into appropriate changelog sections without commit-jargon phrasing.\n4. Verify policy checks and preflight.",
+        "non_goals": ""
+      }
+    }
+  }
+}

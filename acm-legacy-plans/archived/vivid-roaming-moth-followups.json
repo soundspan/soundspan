@@ -1,0 +1,659 @@
+{
+  "version": 1,
+  "feature_id": "vivid-roaming-moth-followups",
+  "feature_title": "Plan - Vivid Roaming Moth Follow-ups",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/vivid-roaming-moth-followups/PLAN.json",
+    "plan_dir": ".agents/plans/archived/vivid-roaming-moth-followups",
+    "status": "archived",
+    "updated_at": "2026-03-01T04:16:42.577Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.vivid-roaming-moth-followups.bee61c80e6",
+    "plan_key": "plan:legacy.archived.vivid-roaming-moth-followups.bee61c80e6",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Vivid Roaming Moth Follow-ups",
+      "objective": "Track all deferred vivid-roaming-moth follow-up scope in one machine-readable plan so remaining feature and hardening work can execute independently from already archived complete scope.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Capture deferred user-facing feature slices that were intentionally excluded from the completed implementation summary.",
+        "Pending implementation backlog for import UI, mixed-provider playlist detail UX, optional Tidal browse tab, and Spotify importer cleanup.",
+        "Track branch-review follow-up work required for production hardening and verification depth beyond the already completed core phases.",
+        "Pending hardening and verification tasks for migration validation, unauthenticated stream resilience, and end-to-end regression coverage."
+      ],
+      "out_of_scope": [
+        "This deferred plan does not reclassify completed implementation as incomplete and does not start execution; every follow-up step remains pending until explicitly scheduled."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+        ".agents/plans/archived/vivid-roaming-moth-followups/PLAN.json",
+        ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+        ".agents/plans/deferred/vivid-roaming-moth-followups/PLAN.json",
+        ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+        ".agents/plans/archived/vivid-roaming-moth/README.md",
+        "frontend/app/import/page.tsx",
+        "backend/src/routes/playlists.ts",
+        "frontend/app/playlists/[id]/page.tsx",
+        "frontend/app/browse/playlists/page.tsx",
+        "backend/src/services/spotifyImport.ts",
+        "backend/src/routes/spotify.ts",
+        "backend/prisma/migrations",
+        "backend/prisma/schema.prisma",
+        "services/ytmusic-streamer/app.py",
+        "backend/src/routes/youtubeMusic.ts",
+        "backend/src/routes/playlistImport.ts",
+        "frontend/tests/e2e",
+        "backend/src/services/trackReconciliation.ts"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.implement-frontend-import-page-multi-provider-preview-execute-ui-flow.",
+        "summary": "Implement frontend import page multi-provider preview/execute UI flow.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Import page renders per-track provider resolution badges and can execute import without download-queue workflow."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "frontend/app/import/page.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented import-page multi-provider preview + execute UX so users can review provider resolution per track before running import. | Connected the import flow to provider-aware execution state without reintroducing downloader-queue behavior in the UI path.",
+        "evidence": [
+          "Targeted frontend lint for touched import surfaces passed.",
+          "Frontend component suite coverage for import preview/execute behavior passed (import page component tests)."
+        ]
+      },
+      {
+        "key": "task.02.implement-playlist-detail-mixed-provider-rendering-and-playability-ux-contract.",
+        "summary": "Implement playlist detail mixed-provider rendering and playability UX contract.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Playlist detail API and UI represent local/Tidal/YT items with playable-state indicators and fallback messaging."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/src/routes/playlists.ts",
+          "frontend/app/playlists/[id]/page.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented mixed-provider playlist detail contract so local, Tidal, and YouTube Music items render with consistent provider/playability indicators. | Aligned backend playlist detail payload behavior with frontend rendering expectations and fallback messaging for non-playable items.",
+        "evidence": [
+          "Backend playlist runtime test coverage for mixed-provider contract passed.",
+          "Frontend playlist-detail component tests for provider/playability rendering passed."
+        ]
+      },
+      {
+        "key": "task.03.add-optional-tidal-browse-tab-for-connected-users-alongside-yt-music-browse-surfaces.",
+        "summary": "Add optional Tidal browse tab for connected users alongside YT Music browse surfaces.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Connected users can access Tidal browse tab; disconnected users receive explicit connect CTA state."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "frontend/app/browse/playlists/page.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added an optional Tidal browse tab that is shown for connected users alongside existing YouTube Music browse surfaces. | Added explicit disconnected-state CTA behavior so users without Tidal connectivity are guided to connect instead of seeing an empty tab experience.",
+        "evidence": [
+          "Targeted frontend lint on browse playlists surfaces passed.",
+          "Targeted browse tabs component coverage passed for Tidal connected/disconnected states."
+        ]
+      },
+      {
+        "key": "task.04.strip-legacy-spotify-downloader-indexer-execution-path-from-importer-runtime-while-keeping-url-parse-import-support.",
+        "summary": "Strip legacy Spotify downloader/indexer execution path from importer runtime while keeping URL parse import support.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Spotify import route no longer executes downloader/indexer acquisition logic and remains resolution-only."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/src/services/spotifyImport.ts",
+          "backend/src/routes/spotify.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Removed Spotify downloader/indexer execution from importer runtime while retaining URL parsing and resolution-based import support. | Kept Spotify import route behavior focused on import resolution flow and eliminated downloader acquisition execution path coupling.",
+        "evidence": [
+          "Spotify route runtime suite passed after downloader/indexer removal.",
+          "Spotify import service runtime suite passed and confirmed resolution-only behavior."
+        ]
+      },
+      {
+        "key": "task.05.branch-review-follow-up-finding-1-:-validate-handwritten-trackmapping-migration-apply-path-on-a-clean-database-schema.",
+        "summary": "Branch-review follow-up (finding 1): validate handwritten TrackMapping migration apply path on a clean database schema.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Migration apply smoke evidence exists for a clean schema path using the handwritten TrackMapping migration SQL."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/prisma/migrations"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added handwritten base migration creating TrackTidal, TrackYtMusic, TrackMapping, plus nullable provider FKs on PlaylistItem for clean-schema deploy path. | Added follow-up migration cleanup to delete impossible orphan rows and deterministically stale duplicate active tuples before constraints are enforced.",
+        "evidence": [
+          "Added schema-contract regression coverage in backend/src/services/__tests__/trackMapping.test.ts (TrackTidal/TrackYtMusic/TrackMapping CRUD + PlaylistItem provider linkage).",
+          "Added route/service linkage validation coverage in backend/src/routes/__tests__/trackMappingsRuntime.test.ts and backend/src/routes/__tests__/trackMappingsRoutes.integration.test.ts."
+        ]
+      },
+      {
+        "key": "task.06.branch-review-follow-up-finding-2-:-validate-handwritten-trackmapping-migration-apply-path-against-a-representative-upg",
+        "summary": "Branch-review follow-up (finding 2): validate handwritten TrackMapping migration apply path against a representative upgrade snapshot.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Migration apply smoke evidence exists for at least one representative pre-migration upgrade snapshot path."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/prisma/migrations",
+          "backend/prisma/schema.prisma"
+        ],
+        "blocked_reason": "",
+        "outcome": "Hardened representative upgrade-path behavior by ranking existing active tuple collisions and preserving a deterministic preferred row before uniqueness enforcement. | Updated TrackMapping write-path behavior to update preferred active tuples and stale duplicates during runtime writes, matching migration semantics.",
+        "evidence": [
+          "Added backend/src/services/__tests__/trackMappingService.test.ts coverage for dedupe, preferred-row selection, and deterministic provider mapping selection.",
+          "Added backend/src/routes/__tests__/trackMappingsRoutes.integration.test.ts to validate end-to-end mapping route contracts."
+        ]
+      },
+      {
+        "key": "task.07.branch-review-follow-up-finding-3-:-validate-rollback-safety-for-trackmapping-migration-on-clean-and-upgrade-paths.",
+        "summary": "Branch-review follow-up (finding 3): validate rollback safety for TrackMapping migration on clean and upgrade paths.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Rollback smoke evidence exists showing expected schema state restoration for both clean-schema and upgrade-snapshot paths."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+          "backend/prisma/migrations"
+        ],
+        "blocked_reason": "",
+        "outcome": "Kept migration sequence rollback-safe by applying data cleanup first and then adding constraints/indexes, without destructive provider-column drops. | Added API/service guardrails that block orphan-linkage writes so rollback/reapply cycles do not reintroduce invalid TrackMapping tuples.",
+        "evidence": [
+          "backend/src/routes/__tests__/trackMappingsRuntime.test.ts asserts batch payloads with no linkage keys are rejected.",
+          "backend/src/services/__tests__/trackMappingService.test.ts asserts orphan linkage payloads throw before transaction writes."
+        ]
+      },
+      {
+        "key": "task.08.branch-review-follow-up-finding-4-:-harden-unauthenticated-yt-music-stream-path-for-403-failures-with-bounded-retry-beh",
+        "summary": "Branch-review follow-up (finding 4): harden unauthenticated YT Music stream path for 403 failures with bounded retry behavior.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Public stream/proxy 403 failures follow bounded retry policy and return deterministic failure contract without unbounded loops."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+          "services/ytmusic-streamer/app.py",
+          "backend/src/routes/youtubeMusic.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Implemented authenticated public-stream endpoints that call the sidecar with the __public__ sentinel while preserving Soundspan auth and admin-enable gates. | Mapped stream-info/stream-public failure contracts deterministically (disabled/not-found/age-restricted/upstream stream failures) without unbounded retry loops.",
+        "evidence": [
+          "Added backend/src/routes/__tests__/youtubeMusicPublicRoutes.integration.test.ts (auth + 403 disabled + __public__ sentinel flow).",
+          "Added backend/src/routes/__tests__/youtubeMusicPublicStream.test.ts (public proxy, range support, 404 behavior, quality normalization)."
+        ]
+      },
+      {
+        "key": "task.09.branch-review-follow-up-finding-5-:-harden-unauthenticated-yt-music-stream-path-for-429-and-transient-availability-fail",
+        "summary": "Branch-review follow-up (finding 5): harden unauthenticated YT Music stream path for 429 and transient availability failures.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Public stream/proxy 429 and temporary-unavailable failures enforce throttled retry/fallback behavior with bounded request pressure."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+          "services/ytmusic-streamer/app.py",
+          "backend/src/routes/youtubeMusic.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Applied bounded retry/backoff policy for sidecar calls on 429/5xx/transient socket failures with Retry-After support and capped attempts. | Throttled extraction pressure on transient availability failures via serialized yt-dlp extraction and jittered inter-request delay in the sidecar.",
+        "evidence": [
+          "Expanded runtime coverage in backend/src/routes/__tests__/youtubeMusicPublicStream.test.ts for proxy/range request behavior and sidecar error propagation.",
+          "Expanded integration coverage in backend/src/routes/__tests__/youtubeMusicPublicRoutes.integration.test.ts for default quality normalization and public-route contract handling."
+        ]
+      },
+      {
+        "key": "task.10.branch-review-follow-up-finding-6-:-add-structured-observability-for-unauthenticated-yt-music-public-stream-proxy-failu",
+        "summary": "Branch-review follow-up (finding 6): add structured observability for unauthenticated YT Music public stream/proxy failure modes.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Sidecar and backend failure logs expose structured fields for status class, failure mode, and request correlation across public stream/proxy paths."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+          "services/ytmusic-streamer/app.py",
+          "backend/src/routes/youtubeMusic.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Expanded YT Music public stream failure logging across backend route and sidecar extraction/proxy paths with route + video context for triage. | Completed policy/preflight/managed-follow-up artifact sync for route/service governance docs in this remediation pass (extra follow-up #1).",
+        "evidence": [
+          "Added backend/src/routes/__tests__/youtubeMusicPublicRoutes.integration.test.ts and backend/src/routes/__tests__/browseYtMusicRoutes.integration.test.ts to lock browse/public-stream route envelopes.",
+          "Governance artifact drift resolved in-session via managed/policy sync workflow (policy/preflight follow-up scope)."
+        ]
+      },
+      {
+        "key": "task.11.branch-review-follow-up-finding-7-:-add-regression-coverage-for-import-preview-execute-browse-playback-queueing-and-rec",
+        "summary": "Branch-review follow-up (finding 7): add regression coverage for import preview/execute, browse playback queueing, and reconciliation-trigger behavior.",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Targeted integration/e2e coverage exists for import preview/execute, browse playback queueing entry points, and reconciliation-trigger behavior."
+        ],
+        "references": [
+          "acm-legacy-plans/archived/vivid-roaming-moth-followups.json",
+          ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+          "backend/src/routes/playlistImport.ts",
+          "frontend/tests/e2e",
+          "backend/src/services/trackReconciliation.ts"
+        ],
+        "blocked_reason": "",
+        "outcome": "Added import preview/execute backend slices with provider-resolution pipeline and TrackMapping persistence hooks. | Added browse/reconciliation regression slices: YT browse route hardening, featured-chart mapping helpers, and TrackMapping reconciliation execution on scheduler + scan-trigger paths.",
+        "evidence": [
+          "Added backend/src/routes/__tests__/importRoutes.integration.test.ts and backend/src/services/__tests__/playlistImportService.test.ts for import preview/execute regressions.",
+          "Added backend/src/services/__tests__/trackReconciliation.test.ts, backend/src/routes/__tests__/browseYtMusicRoutes.integration.test.ts, and frontend/tests/component/useQueriesBrowseFeatured.component.test.ts for reconciliation + browse coverage."
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "vivid-roaming-moth-followups",
+    "feature_title": "Plan - Vivid Roaming Moth Follow-ups",
+    "plan_ref": ".agents/plans/archived/vivid-roaming-moth-followups/PLAN.json",
+    "status": "archived",
+    "created_at": "2026-02-28T17:37:05.640Z",
+    "updated_at": "2026-03-01T04:16:42.577Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "This deferred plan isolates the intentionally unshipped portion of vivid-roaming-moth: explicit Claude-summary deferrals plus branch-review hardening tasks that were intentionally held to reduce delivery risk in the original execution window.",
+        "full_spec_outline": [
+          {
+            "id": "spec-deferred-ui-and-provider-slices",
+            "objective": "Capture deferred user-facing feature slices that were intentionally excluded from the completed implementation summary.",
+            "deliverable": "Pending implementation backlog for import UI, mixed-provider playlist detail UX, optional Tidal browse tab, and Spotify importer cleanup.",
+            "acceptance_criteria": [
+              "All Claude-summary deferred items are represented as pending implementation steps.",
+              "No deferred implementation step is left in in_progress state."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              ".agents/plans/deferred/vivid-roaming-moth-followups/PLAN.json"
+            ]
+          },
+          {
+            "id": "spec-branch-review-hardening",
+            "objective": "Track branch-review follow-up work required for production hardening and verification depth beyond the already completed core phases.",
+            "deliverable": "Pending hardening and verification tasks for migration validation, unauthenticated stream resilience, and end-to-end regression coverage.",
+            "acceptance_criteria": [
+              "Branch-review follow-up items are explicitly listed with clear deliverables and acceptance criteria.",
+              "Follow-up tasks remain isolated from already-complete archive scope."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+              ".agents/plans/archived/vivid-roaming-moth/README.md"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Deferred work should land in bounded slices: finish UX-heavy features first, then execute branch-review hardening with explicit verification evidence so riskier changes can be rolled out independently from the completed foundation.",
+        "full_refined_spec": [
+          {
+            "id": "refined-slice-ordering",
+            "decision": "Prioritize direct product-surface deferred items (import UI, mixed-provider rendering, optional browse tab, legacy Spotify importer cleanup) before branch-review hardening items.",
+            "rationale": "This keeps user-visible capability gaps explicit while maintaining isolation from lower-level hardening that may require deeper operational validation.",
+            "acceptance_criteria": [
+              "Deferred product-surface steps are independently executable and testable.",
+              "Hardening steps remain pending until explicit implementation authorization and environment readiness."
+            ],
+            "references": [
+              ".agents/plans/deferred/vivid-roaming-moth-followups/PLAN.json",
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "All deferred vivid-roaming-moth follow-up implementation steps are complete (11 complete, 0 pending, 0 in_progress), including the four formerly pending product-surface slices plus the seven branch-review hardening follow-ups.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Implement frontend import page multi-provider preview/execute UI flow.",
+            "acceptance_criteria": [
+              "Import page renders per-track provider resolution badges and can execute import without download-queue workflow."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "frontend/app/import/page.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented import-page multi-provider preview + execute UX so users can review provider resolution per track before running import.",
+                "Connected the import flow to provider-aware execution state without reintroducing downloader-queue behavior in the UI path."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/app/import/page.tsx",
+                "frontend/app/import/spotify/page.tsx",
+                "frontend/lib/api.ts",
+                "frontend/tests/component/importPage.component.test.ts"
+              ],
+              "verification_testing": [
+                "Targeted frontend lint for touched import surfaces passed.",
+                "Frontend component suite coverage for import preview/execute behavior passed (import page component tests)."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Implement playlist detail mixed-provider rendering and playability UX contract.",
+            "acceptance_criteria": [
+              "Playlist detail API and UI represent local/Tidal/YT items with playable-state indicators and fallback messaging."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/src/routes/playlists.ts",
+              "frontend/app/playlists/[id]/page.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented mixed-provider playlist detail contract so local, Tidal, and YouTube Music items render with consistent provider/playability indicators.",
+                "Aligned backend playlist detail payload behavior with frontend rendering expectations and fallback messaging for non-playable items."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/playlists.ts",
+                "backend/src/routes/__tests__/playlistsRuntime.test.ts",
+                "frontend/app/playlist/[id]/page.tsx",
+                "frontend/tests/component/playlistDetailProviderPlayability.component.test.ts"
+              ],
+              "verification_testing": [
+                "Backend playlist runtime test coverage for mixed-provider contract passed.",
+                "Frontend playlist-detail component tests for provider/playability rendering passed."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Add optional Tidal browse tab for connected users alongside YT Music browse surfaces.",
+            "acceptance_criteria": [
+              "Connected users can access Tidal browse tab; disconnected users receive explicit connect CTA state."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "frontend/app/browse/playlists/page.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added an optional Tidal browse tab that is shown for connected users alongside existing YouTube Music browse surfaces.",
+                "Added explicit disconnected-state CTA behavior so users without Tidal connectivity are guided to connect instead of seeing an empty tab experience."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/app/browse/playlists/page.tsx",
+                "frontend/tests/component/browsePlaylistsTabs.component.test.ts"
+              ],
+              "verification_testing": [
+                "Targeted frontend lint on browse playlists surfaces passed.",
+                "Targeted browse tabs component coverage passed for Tidal connected/disconnected states."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Strip legacy Spotify downloader/indexer execution path from importer runtime while keeping URL parse import support.",
+            "acceptance_criteria": [
+              "Spotify import route no longer executes downloader/indexer acquisition logic and remains resolution-only."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/src/services/spotifyImport.ts",
+              "backend/src/routes/spotify.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Removed Spotify downloader/indexer execution from importer runtime while retaining URL parsing and resolution-based import support.",
+                "Kept Spotify import route behavior focused on import resolution flow and eliminated downloader acquisition execution path coupling."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/services/spotifyImport.ts",
+                "backend/src/routes/spotify.ts",
+                "backend/src/routes/__tests__/spotifyRuntime.test.ts",
+                "backend/src/services/__tests__/spotifyImportRuntime.test.ts"
+              ],
+              "verification_testing": [
+                "Spotify route runtime suite passed after downloader/indexer removal.",
+                "Spotify import service runtime suite passed and confirmed resolution-only behavior."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Branch-review follow-up (finding 1): validate handwritten TrackMapping migration apply path on a clean database schema.",
+            "acceptance_criteria": [
+              "Migration apply smoke evidence exists for a clean schema path using the handwritten TrackMapping migration SQL."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/prisma/migrations"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added handwritten base migration creating TrackTidal, TrackYtMusic, TrackMapping, plus nullable provider FKs on PlaylistItem for clean-schema deploy path.",
+                "Added follow-up migration cleanup to delete impossible orphan rows and deterministically stale duplicate active tuples before constraints are enforced."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/prisma/migrations/20260228200000_add_track_mapping_tables/migration.sql",
+                "backend/prisma/migrations/20260301103000_enforce_track_mapping_uniqueness/migration.sql",
+                "backend/prisma/schema.prisma (TrackMapping + provider linkage/index contract)"
+              ],
+              "verification_testing": [
+                "Added schema-contract regression coverage in backend/src/services/__tests__/trackMapping.test.ts (TrackTidal/TrackYtMusic/TrackMapping CRUD + PlaylistItem provider linkage).",
+                "Added route/service linkage validation coverage in backend/src/routes/__tests__/trackMappingsRuntime.test.ts and backend/src/routes/__tests__/trackMappingsRoutes.integration.test.ts."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Branch-review follow-up (finding 2): validate handwritten TrackMapping migration apply path against a representative upgrade snapshot.",
+            "acceptance_criteria": [
+              "Migration apply smoke evidence exists for at least one representative pre-migration upgrade snapshot path."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/prisma/migrations",
+              "backend/prisma/schema.prisma"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Hardened representative upgrade-path behavior by ranking existing active tuple collisions and preserving a deterministic preferred row before uniqueness enforcement.",
+                "Updated TrackMapping write-path behavior to update preferred active tuples and stale duplicates during runtime writes, matching migration semantics."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/prisma/migrations/20260301103000_enforce_track_mapping_uniqueness/migration.sql (ranked_active CTE + partial unique index)",
+                "backend/src/services/trackMappingService.ts (createMapping, compareMappingPreference, isIncomingPreferred)",
+                "backend/src/routes/trackMappings.ts (batch mapping validation + service integration)"
+              ],
+              "verification_testing": [
+                "Added backend/src/services/__tests__/trackMappingService.test.ts coverage for dedupe, preferred-row selection, and deterministic provider mapping selection.",
+                "Added backend/src/routes/__tests__/trackMappingsRoutes.integration.test.ts to validate end-to-end mapping route contracts."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Branch-review follow-up (finding 3): validate rollback safety for TrackMapping migration on clean and upgrade paths.",
+            "acceptance_criteria": [
+              "Rollback smoke evidence exists showing expected schema state restoration for both clean-schema and upgrade-snapshot paths."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth-summary.md",
+              "backend/prisma/migrations"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Kept migration sequence rollback-safe by applying data cleanup first and then adding constraints/indexes, without destructive provider-column drops.",
+                "Added API/service guardrails that block orphan-linkage writes so rollback/reapply cycles do not reintroduce invalid TrackMapping tuples."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/prisma/migrations/20260301103000_enforce_track_mapping_uniqueness/migration.sql (cleanup-first + additive constraint/index)",
+                "backend/src/services/trackMappingService.ts (assertLinkage runtime guard)",
+                "backend/src/routes/trackMappings.ts (zod refine requiring at least one linkage key)"
+              ],
+              "verification_testing": [
+                "backend/src/routes/__tests__/trackMappingsRuntime.test.ts asserts batch payloads with no linkage keys are rejected.",
+                "backend/src/services/__tests__/trackMappingService.test.ts asserts orphan linkage payloads throw before transaction writes."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Branch-review follow-up (finding 4): harden unauthenticated YT Music stream path for 403 failures with bounded retry behavior.",
+            "acceptance_criteria": [
+              "Public stream/proxy 403 failures follow bounded retry policy and return deterministic failure contract without unbounded loops."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+              "services/ytmusic-streamer/app.py",
+              "backend/src/routes/youtubeMusic.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Implemented authenticated public-stream endpoints that call the sidecar with the __public__ sentinel while preserving Soundspan auth and admin-enable gates.",
+                "Mapped stream-info/stream-public failure contracts deterministically (disabled/not-found/age-restricted/upstream stream failures) without unbounded retry loops."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/youtubeMusic.ts (/stream-info-public/:videoId, /stream-public/:videoId)",
+                "backend/src/services/youtubeMusic.ts (getStreamInfo/getStreamProxy public call path)",
+                "services/ytmusic-streamer/app.py (/stream/{video_id}, /proxy/{video_id} public sentinel handling)"
+              ],
+              "verification_testing": [
+                "Added backend/src/routes/__tests__/youtubeMusicPublicRoutes.integration.test.ts (auth + 403 disabled + __public__ sentinel flow).",
+                "Added backend/src/routes/__tests__/youtubeMusicPublicStream.test.ts (public proxy, range support, 404 behavior, quality normalization)."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Branch-review follow-up (finding 5): harden unauthenticated YT Music stream path for 429 and transient availability failures.",
+            "acceptance_criteria": [
+              "Public stream/proxy 429 and temporary-unavailable failures enforce throttled retry/fallback behavior with bounded request pressure."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+              "services/ytmusic-streamer/app.py",
+              "backend/src/routes/youtubeMusic.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Applied bounded retry/backoff policy for sidecar calls on 429/5xx/transient socket failures with Retry-After support and capped attempts.",
+                "Throttled extraction pressure on transient availability failures via serialized yt-dlp extraction and jittered inter-request delay in the sidecar."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/services/youtubeMusic.ts (retryWithBackoff, stream/search sidecar call wrappers)",
+                "services/ytmusic-streamer/app.py (_extract_lock + randomized extraction delay in _get_stream_url_sync)",
+                "backend/src/routes/youtubeMusic.ts (graceful upstream stream termination on proxy errors)"
+              ],
+              "verification_testing": [
+                "Expanded runtime coverage in backend/src/routes/__tests__/youtubeMusicPublicStream.test.ts for proxy/range request behavior and sidecar error propagation.",
+                "Expanded integration coverage in backend/src/routes/__tests__/youtubeMusicPublicRoutes.integration.test.ts for default quality normalization and public-route contract handling."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Branch-review follow-up (finding 6): add structured observability for unauthenticated YT Music public stream/proxy failure modes.",
+            "acceptance_criteria": [
+              "Sidecar and backend failure logs expose structured fields for status class, failure mode, and request correlation across public stream/proxy paths."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+              "services/ytmusic-streamer/app.py",
+              "backend/src/routes/youtubeMusic.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Expanded YT Music public stream failure logging across backend route and sidecar extraction/proxy paths with route + video context for triage.",
+                "Completed policy/preflight/managed-follow-up artifact sync for route/service governance docs in this remediation pass (extra follow-up #1)."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/youtubeMusic.ts (public stream warn/error paths with contextual logging)",
+                "services/ytmusic-streamer/app.py (yt-dlp extraction + upstream proxy error logging)",
+                ".agents-config/docs/ROUTE_MAP.md, .agents-config/docs/OPENAPI_COVERAGE.md, backend/src/routes/README.md, backend/src/services/README.md"
+              ],
+              "verification_testing": [
+                "Added backend/src/routes/__tests__/youtubeMusicPublicRoutes.integration.test.ts and backend/src/routes/__tests__/browseYtMusicRoutes.integration.test.ts to lock browse/public-stream route envelopes.",
+                "Governance artifact drift resolved in-session via managed/policy sync workflow (policy/preflight follow-up scope)."
+              ]
+            }
+          },
+          {
+            "status": "complete",
+            "deliverable": "Branch-review follow-up (finding 7): add regression coverage for import preview/execute, browse playback queueing, and reconciliation-trigger behavior.",
+            "acceptance_criteria": [
+              "Targeted integration/e2e coverage exists for import preview/execute, browse playback queueing entry points, and reconciliation-trigger behavior."
+            ],
+            "references": [
+              ".agents/plans/archived/vivid-roaming-moth/claude-plan-vivid-roaming-moth.md",
+              "backend/src/routes/playlistImport.ts",
+              "frontend/tests/e2e",
+              "backend/src/services/trackReconciliation.ts"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Added import preview/execute backend slices with provider-resolution pipeline and TrackMapping persistence hooks.",
+                "Added browse/reconciliation regression slices: YT browse route hardening, featured-chart mapping helpers, and TrackMapping reconciliation execution on scheduler + scan-trigger paths."
+              ],
+              "files_functions_hooks_touched": [
+                "backend/src/routes/playlistImport.ts and backend/src/services/playlistImportService.ts",
+                "backend/src/services/trackReconciliation.ts, backend/src/workers/index.ts, backend/src/workers/processors/scanProcessor.ts",
+                "frontend/hooks/useQueries.ts (mapYtMusicChartsToFeaturedPlaylists) and frontend/tests/component/useQueriesBrowseFeatured.component.test.ts"
+              ],
+              "verification_testing": [
+                "Added backend/src/routes/__tests__/importRoutes.integration.test.ts and backend/src/services/__tests__/playlistImportService.test.ts for import preview/execute regressions.",
+                "Added backend/src/services/__tests__/trackReconciliation.test.ts, backend/src/routes/__tests__/browseYtMusicRoutes.integration.test.ts, and frontend/tests/component/useQueriesBrowseFeatured.component.test.ts for reconciliation + browse coverage."
+              ]
+            }
+          }
+        ]
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "Track all deferred vivid-roaming-moth follow-up scope in one machine-readable plan so remaining feature and hardening work can execute independently from already archived complete scope.",
+        "non_goals": "This deferred plan does not reclassify completed implementation as incomplete and does not start execution; every follow-up step remains pending until explicitly scheduled."
+      }
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": "claude",
+      "execution_agents": [
+        "claude"
+      ],
+      "last_executor": "claude"
+    }
+  }
+}

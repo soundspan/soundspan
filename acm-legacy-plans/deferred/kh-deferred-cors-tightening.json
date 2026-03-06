@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "feature_id": "kh-deferred-cors-tightening",
+  "feature_title": "Kima Hub Upstream — Deferred: CORS Tightening (KH-17)",
+  "track": "deferred",
+  "export_path": "acm-legacy-plans/deferred/kh-deferred-cors-tightening.json",
+  "legacy": {
+    "plan_path": ".agents/plans/deferred/kh-deferred-cors-tightening/PLAN.json",
+    "plan_dir": ".agents/plans/deferred/kh-deferred-cors-tightening",
+    "status": "deferred",
+    "updated_at": "2026-03-02T18:00:00Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/deferred/kh-deferred-cors-tightening/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Kima Hub Upstream — Deferred: CORS Tightening (KH-17)\n\n## Document Status\n- Last updated: 2026-03-02\n- Feature: CORS origin restriction\n- Scope: Deferred — not adopting\n- Implementation state: Deferred\n\n## Origin\n\nUpstream: `chevron7locked/kima-hub` v1.5.0 → v1.6.0, item KH-17.\n\n## What the Upstream Change Does\n\nRestricted CORS to reject requests from origins not on an explicit allowlist.\n\n## Deferral Reasoning\n\nSoundspan's CORS configuration (`backend/src/index.ts:133-169`) is explicitly permissive by design with documented reasoning:\n\n> \"For self-hosted apps: allow all origins by default. Users deploy on their own domains/IPs — we can't predict them. Security is handled by authentication, not CORS.\"\n\nRestricting CORS would break deployments behind:\n- Custom reverse proxies\n- Tailscale / WireGuard tunnels\n- Cloudflare Tunnel\n- Non-standard ports and subdomains\n\nSecurity posture relies on JWT auth + rate limiting, not CORS origin restrictions.\n\n## Revisit Criteria\n\n- A public-facing hosted tier added where the domain is controlled\n- Security audit specifically identifies CORS permissiveness as a risk vector in the self-hosted context\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.deferred.kh-deferred-cors-tightening.dd01b1ca21",
+    "plan_key": "plan:legacy.deferred.kh-deferred-cors-tightening.dd01b1ca21",
+    "final_db_status": "blocked",
+    "plan": {
+      "title": "Kima Hub Upstream — Deferred: CORS Tightening (KH-17)",
+      "objective": "Evaluate CORS tightening (KH-17) from Kima Hub v1.6.0 — restricting CORS to reject requests from origins not on an explicit allowlist.",
+      "kind": "legacy_deferred",
+      "status": "blocked",
+      "stages": {
+        "spec_outline": "pending",
+        "refined_spec": "pending",
+        "implementation_plan": "pending"
+      },
+      "in_scope": [
+        "Deferred: CORS origin restriction. Intentionally permissive for self-hosted deployment model."
+      ],
+      "out_of_scope": [
+        "Not adopting: soundspan's CORS is intentionally permissive for self-hosted deployment. Users deploy on their own domains/IPs — we cannot predict them. Security is handled by JWT authentication, not CORS origin restrictions. Restricting would break deployments behind reverse proxies, Tailscale, etc."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/deferred/kh-deferred-cors-tightening.json",
+        ".agents/plans/deferred/kh-deferred-cors-tightening/PLAN.json",
+        ".agents/plans/deferred/kh-deferred-cors-tightening/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/deferred/kh-deferred-cors-tightening/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "Evaluate CORS tightening (KH-17) from Kima Hub v1.6.0 — restricting CORS to reject requests from origins not on an explicit allowlist.",
+        "status": "blocked",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/deferred/kh-deferred-cors-tightening.json"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/kh-deferred-cors-tightening.json"
+        ],
+        "blocked_reason": "Legacy plan is deferred until explicitly resumed.",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "kh-deferred-cors-tightening",
+    "feature_title": "Kima Hub Upstream — Deferred: CORS Tightening (KH-17)",
+    "plan_ref": ".agents/plans/deferred/kh-deferred-cors-tightening/PLAN.json",
+    "status": "deferred",
+    "updated_at": "2026-03-02T18:00:00Z",
+    "planning_stages": {
+      "spec_outline": "pending",
+      "refined_spec": "pending",
+      "implementation_plan": "pending"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Evaluate CORS tightening (KH-17) from Kima Hub v1.6.0 — restricting CORS to reject requests from origins not on an explicit allowlist.",
+        "non_goals": "Not adopting: soundspan's CORS is intentionally permissive for self-hosted deployment. Users deploy on their own domains/IPs — we cannot predict them. Security is handled by JWT authentication, not CORS origin restrictions. Restricting would break deployments behind reverse proxies, Tailscale, etc."
+      },
+      "spec_outline": {
+        "summary": "Deferred: CORS origin restriction. Intentionally permissive for self-hosted deployment model.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "Deferred: No refined spec needed. Deferral is a deliberate architectural decision, not a deferral of work.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "Deferred: No implementation planned. Revisit if a public-facing hosted tier is added where the domain is controlled.",
+        "steps": []
+      }
+    },
+    "subagent": {
+      "requirement": "none",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": null
+    }
+  }
+}

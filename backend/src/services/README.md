@@ -5,8 +5,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 ## Start Here
 
 1. API call entrypoints: `backend/src/routes/*.ts`.
-2. Endpoint-to-handler map: `.agents-config/docs/ROUTE_MAP.md`.
-3. Feature-targeted verification commands: `.agents-config/docs/TEST_MATRIX.md`.
+2. Service-focused tests: `backend/src/services/__tests__/` and nested `__tests__/` directories under service domains.
+3. Shared runtime helpers: `backend/src/utils/`, `backend/src/lib/`, and adjacent service modules.
 
 ## Service Modules
 

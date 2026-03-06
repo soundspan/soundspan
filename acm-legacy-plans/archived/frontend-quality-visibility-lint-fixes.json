@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "feature_id": "frontend-quality-visibility-lint-fixes",
+  "feature_title": "Plan - Frontend Quality Visibility Lint Fixes",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/frontend-quality-visibility-lint-fixes.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/frontend-quality-visibility-lint-fixes/PLAN.json",
+    "plan_dir": ".agents/plans/archived/frontend-quality-visibility-lint-fixes",
+    "status": "complete",
+    "updated_at": "2026-03-02T13:06:05.857Z",
+    "companion_files": []
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.frontend-quality-visibility-lint-fixes.2f86890d7a",
+    "plan_key": "plan:legacy.archived.frontend-quality-visibility-lint-fixes.2f86890d7a",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Frontend Quality Visibility Lint Fixes",
+      "objective": "Resolve the reported Frontend Quality Visibility lint failures in a minimal, behavior-preserving change set so targeted lint checks pass cleanly.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "Fix only the reported frontend lint issues while preserving runtime behavior.",
+        "Clean targeted lint output for listed files and stable behavior semantics."
+      ],
+      "out_of_scope": [
+        "No unrelated refactors, no broad style churn, and no full-suite execution beyond targeted lint/test checks needed to validate these exact failures."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/frontend-quality-visibility-lint-fixes.json",
+        ".agents/plans/archived/frontend-quality-visibility-lint-fixes/PLAN.json",
+        "frontend/components/ui/TrackOverflowMenu.tsx",
+        "frontend/components/player/SyncedLyrics.tsx",
+        "frontend/components/player/PlaybackQualityBadgeWithStats.tsx",
+        "frontend/components/player/FullPlayer.tsx",
+        "frontend/components/layout/UserAvatarMenu.tsx",
+        "frontend/components/activity/SocialTab.tsx",
+        "frontend/package.json",
+        ".agents/EXECUTION_QUEUE.json"
+      ],
+      "external_refs": []
+    },
+    "tasks": [
+      {
+        "key": "task.01.patch-reported-frontend-lint-failures",
+        "summary": "Patch Reported Frontend Lint Failures",
+        "status": "complete",
+        "acceptance_criteria": [
+          "Reported hook dependency and unused variable findings are resolved",
+          "Reported no-img-element findings are resolved",
+          "Targeted lint passes for touched files"
+        ],
+        "references": [
+          "acm-legacy-plans/archived/frontend-quality-visibility-lint-fixes.json",
+          "frontend/components/ui/TrackOverflowMenu.tsx",
+          "frontend/components/player/SyncedLyrics.tsx",
+          "frontend/components/player/PlaybackQualityBadgeWithStats.tsx",
+          "frontend/components/player/FullPlayer.tsx",
+          "frontend/components/layout/UserAvatarMenu.tsx",
+          "frontend/components/activity/SocialTab.tsx"
+        ],
+        "blocked_reason": "",
+        "outcome": "Removed unnecessary useMemo dependencies for artist/album gap-fill hooks. | Resolved unused variable/argument lint findings in player and overflow components. | Replaced raw img usage with next/image in avatar surfaces flagged by quality checks.",
+        "evidence": [
+          "verify:cd frontend && npx eslint --max-warnings=0 features/artist/hooks/useTidalTopTracks.ts features/artist/hooks/useYtMusicTopTracks.ts features/album/hooks/useTidalGapFill.ts features/album/hooks/useYtMusicGapFill.ts components/ui/TrackOverflowMenu.tsx components/player/SyncedLyrics.tsx components/player/PlaybackQualityBadgeWithStats.tsx components/player/FullPlayer.tsx components/layout/UserAvatarMenu.tsx components/activity/SocialTab.tsx"
+        ]
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "frontend-quality-visibility-lint-fixes",
+    "feature_title": "Plan - Frontend Quality Visibility Lint Fixes",
+    "plan_ref": ".agents/plans/archived/frontend-quality-visibility-lint-fixes/PLAN.json",
+    "status": "complete",
+    "updated_at": "2026-03-02T13:06:05.857Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Resolve the reported Frontend Quality Visibility lint failures in a minimal, behavior-preserving change set so targeted lint checks pass cleanly.",
+        "non_goals": "No unrelated refactors, no broad style churn, and no full-suite execution beyond targeted lint/test checks needed to validate these exact failures."
+      },
+      "spec_outline": {
+        "summary": "Address unnecessary hook dependencies, unused variables/args, and Next.js no-img-element findings in the specific reported files.",
+        "full_spec_outline": [
+          {
+            "id": "lint-failure-remediation",
+            "objective": "Fix only the reported frontend lint issues while preserving runtime behavior.",
+            "deliverable": "Clean targeted lint output for listed files and stable behavior semantics.",
+            "acceptance_criteria": [
+              "All listed lint failures are removed",
+              "No new lint failures are introduced in touched files"
+            ],
+            "references": [
+              "frontend/components/ui/TrackOverflowMenu.tsx",
+              "frontend/components/player/SyncedLyrics.tsx",
+              "frontend/components/player/PlaybackQualityBadgeWithStats.tsx",
+              "frontend/components/player/FullPlayer.tsx",
+              "frontend/components/layout/UserAvatarMenu.tsx",
+              "frontend/components/activity/SocialTab.tsx"
+            ]
+          }
+        ]
+      },
+      "refined_spec": {
+        "summary": "Prefer minimal local fixes: correct dependency arrays, remove/rename unused bindings, and replace raw img usage with compliant Next.js patterns.",
+        "full_refined_spec": [
+          {
+            "id": "minimal-safe-edits",
+            "decision": "Apply the narrowest code edits per finding and run targeted lint verification for touched paths.",
+            "rationale": "This resolves CI visibility failures quickly with low regression risk and avoids unrelated churn in an already dirty workspace.",
+            "acceptance_criteria": [
+              "Targeted lint command exits successfully",
+              "Diff remains constrained to reported files"
+            ],
+            "references": [
+              "frontend/package.json",
+              ".agents/EXECUTION_QUEUE.json"
+            ]
+          }
+        ]
+      },
+      "implementation_plan": {
+        "summary": "Execute one atomic worker slice to patch all reported lint errors and verify via targeted lint on touched files.",
+        "steps": [
+          {
+            "status": "complete",
+            "deliverable": "Patch Reported Frontend Lint Failures",
+            "acceptance_criteria": [
+              "Reported hook dependency and unused variable findings are resolved",
+              "Reported no-img-element findings are resolved",
+              "Targeted lint passes for touched files"
+            ],
+            "references": [
+              "frontend/components/ui/TrackOverflowMenu.tsx",
+              "frontend/components/player/SyncedLyrics.tsx",
+              "frontend/components/player/PlaybackQualityBadgeWithStats.tsx",
+              "frontend/components/player/FullPlayer.tsx",
+              "frontend/components/layout/UserAvatarMenu.tsx",
+              "frontend/components/activity/SocialTab.tsx"
+            ],
+            "completion_summary": {
+              "delivered": [
+                "Removed unnecessary useMemo dependencies for artist/album gap-fill hooks.",
+                "Resolved unused variable/argument lint findings in player and overflow components.",
+                "Replaced raw img usage with next/image in avatar surfaces flagged by quality checks."
+              ],
+              "files_functions_hooks_touched": [
+                "frontend/features/artist/hooks/useTidalTopTracks.ts",
+                "frontend/features/artist/hooks/useYtMusicTopTracks.ts",
+                "frontend/features/album/hooks/useTidalGapFill.ts",
+                "frontend/features/album/hooks/useYtMusicGapFill.ts",
+                "frontend/components/ui/TrackOverflowMenu.tsx",
+                "frontend/components/player/SyncedLyrics.tsx",
+                "frontend/components/player/PlaybackQualityBadgeWithStats.tsx",
+                "frontend/components/player/FullPlayer.tsx",
+                "frontend/components/layout/UserAvatarMenu.tsx",
+                "frontend/components/activity/SocialTab.tsx"
+              ],
+              "verification_testing": [
+                "verify:cd frontend && npx eslint --max-warnings=0 features/artist/hooks/useTidalTopTracks.ts features/artist/hooks/useYtMusicTopTracks.ts features/album/hooks/useTidalGapFill.ts features/album/hooks/useYtMusicGapFill.ts components/ui/TrackOverflowMenu.tsx components/player/SyncedLyrics.tsx components/player/PlaybackQualityBadgeWithStats.tsx components/player/FullPlayer.tsx components/layout/UserAvatarMenu.tsx components/activity/SocialTab.tsx"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "subagent": {
+      "requirement": "required",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator",
+        "worker:frontend-lint"
+      ],
+      "last_executor": "orchestrator"
+    }
+  }
+}

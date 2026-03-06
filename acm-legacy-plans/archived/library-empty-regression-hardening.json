@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "feature_id": "library-empty-regression-hardening",
+  "feature_title": "Plan - Library Empty Regression Hardening",
+  "track": "archived",
+  "export_path": "acm-legacy-plans/archived/library-empty-regression-hardening.json",
+  "legacy": {
+    "plan_path": ".agents/plans/archived/library-empty-regression-hardening/PLAN.json",
+    "plan_dir": ".agents/plans/archived/library-empty-regression-hardening",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/archived/library-empty-regression-hardening/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Plan - Library Empty Regression Hardening\n\n## Document Status\n\n- Last updated: 2026-02-20\n- Feature: Library empty-state regression investigation and fix\n- Scope: Verify whether performance-easy-wins work changed library route behavior, and harden frontend API path auto-mode to avoid empty-data regressions when backend origin inference is wrong\n- Planning maturity: `Spec Outline` complete, `Refined Spec` complete, `Detailed Implementation Plan` complete\n- Implementation approval: Active (user requested regression investigation)\n\n## Spec Outline\n\n1. Verify backend library routes were not removed/renamed.\n2. Validate frontend API base URL resolution behavior introduced by performance work.\n3. Fix auto-mode behavior to avoid silent wrong-origin API calls.\n4. Add/adjust tests and docs to prevent recurrence.\n\n## Refined Spec\n\n1. Keep route contracts unchanged.\n2. Make `NEXT_PUBLIC_API_PATH_MODE=auto` default to same-origin proxy unless `NEXT_PUBLIC_API_URL` is explicitly set.\n3. Reserve direct backend calls for explicit `NEXT_PUBLIC_API_PATH_MODE=direct` mode.\n4. Update docs/tests/changelog accordingly.\n\n## Detailed Implementation Plan (Atomic Tasks)\n\n### Task 1: Confirm route contract stability\n- Status: Pending\n- Acceptance criteria:\n  - `GET /api/library/artists`, `/api/library/albums`, `/api/library/tracks` remain mapped in route map and backend route files.\n\n### Task 2: Fix API auto-mode regression risk\n- Status: Pending\n- Acceptance criteria:\n  - `frontend/lib/api-base-url.ts` auto mode no longer infers direct `:3006` backend from browser port.\n  - Explicit `direct` mode behavior remains unchanged.\n\n### Task 3: Update tests/docs/changelog\n- Status: Pending\n- Acceptance criteria:\n  - `frontend/tests/unit/apiBaseUrl.test.ts` reflects new safe auto behavior.\n  - Docs describing path-mode behavior are aligned.\n  - Changelog records regression fix.\n\n### Task 4: Verify\n- Status: Pending\n- Acceptance criteria:\n  - Frontend unit test for API base URL resolution passes.\n  - `npm run agent:preflight` passes.\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.archived.library-empty-regression-hardening.07809ee1fc",
+    "plan_key": "plan:legacy.archived.library-empty-regression-hardening.07809ee1fc",
+    "final_db_status": "completed",
+    "plan": {
+      "title": "Plan - Library Empty Regression Hardening",
+      "objective": "1. Verify backend library routes were not removed/renamed.\n2. Validate frontend API base URL resolution behavior introduced by performance work.\n3. Fix auto-mode behavior to avoid silent wrong-origin API calls.\n4. Add/adjust tests and docs to prevent recurrence.",
+      "kind": "legacy_archived",
+      "status": "complete",
+      "stages": {
+        "spec_outline": "complete",
+        "refined_spec": "complete",
+        "implementation_plan": "complete"
+      },
+      "in_scope": [
+        "1. Verify backend library routes were not removed/renamed.",
+        "2. Validate frontend API base URL resolution behavior introduced by performance work.",
+        "3. Fix auto-mode behavior to avoid silent wrong-origin API calls.",
+        "4. Add/adjust tests and docs to prevent recurrence."
+      ],
+      "out_of_scope": [],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/archived/library-empty-regression-hardening.json",
+        ".agents/plans/archived/library-empty-regression-hardening/PLAN.json",
+        ".agents/plans/archived/library-empty-regression-hardening/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/archived/library-empty-regression-hardening/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "1. Verify backend library routes were not removed/renamed.\n2. Validate frontend API base URL resolution behavior introduced by performance work.\n3. Fix auto-mode behavior to avoid silent wrong-origin API calls.\n4. Add/adjust tests and docs to prevent recurrence.",
+        "status": "complete",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/archived/library-empty-regression-hardening.json"
+        ],
+        "blocked_reason": "",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "library-empty-regression-hardening",
+    "feature_title": "Plan - Library Empty Regression Hardening",
+    "plan_ref": ".agents/plans/archived/library-empty-regression-hardening/PLAN.json",
+    "status": "archived",
+    "updated_at": "2026-02-24T16:36:26.969Z",
+    "planning_stages": {
+      "spec_outline": "complete",
+      "refined_spec": "complete",
+      "implementation_plan": "complete"
+    },
+    "subagent": {
+      "requirement": "optional",
+      "primary_agent": null,
+      "execution_agents": [],
+      "last_executor": null
+    },
+    "narrative": {
+      "spec_outline": {
+        "summary": "1. Verify backend library routes were not removed/renamed.\n2. Validate frontend API base URL resolution behavior introduced by performance work.\n3. Fix auto-mode behavior to avoid silent wrong-origin API calls.\n4. Add/adjust tests and docs to prevent recurrence.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "1. Keep route contracts unchanged.\n2. Make `NEXT_PUBLIC_API_PATH_MODE=auto` default to same-origin proxy unless `NEXT_PUBLIC_API_URL` is explicitly set.\n3. Reserve direct backend calls for explicit `NEXT_PUBLIC_API_PATH_MODE=direct` mode.\n4. Update docs/tests/changelog accordingly.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "",
+        "steps": []
+      },
+      "pre_spec_outline": {
+        "purpose_goals": "1. Verify backend library routes were not removed/renamed.\n2. Validate frontend API base URL resolution behavior introduced by performance work.\n3. Fix auto-mode behavior to avoid silent wrong-origin API calls.\n4. Add/adjust tests and docs to prevent recurrence.",
+        "non_goals": ""
+      }
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "feature_id": "kh-deferred-bullmq-migration",
+  "feature_title": "Kima Hub Upstream — Deferred: BullMQ Migration (KH-16)",
+  "track": "deferred",
+  "export_path": "acm-legacy-plans/deferred/kh-deferred-bullmq-migration.json",
+  "legacy": {
+    "plan_path": ".agents/plans/deferred/kh-deferred-bullmq-migration/PLAN.json",
+    "plan_dir": ".agents/plans/deferred/kh-deferred-bullmq-migration",
+    "status": "deferred",
+    "updated_at": "2026-03-02T18:00:00Z",
+    "companion_files": [
+      {
+        "path": ".agents/plans/deferred/kh-deferred-bullmq-migration/PLAN.md",
+        "name": "PLAN.md",
+        "content": "# Kima Hub Upstream — Deferred: BullMQ Migration (KH-16)\n\n## Document Status\n- Last updated: 2026-03-02\n- Feature: Migration from Bull v4 to BullMQ (v5)\n- Scope: Deferred — not adopting\n- Implementation state: Deferred\n\n## Origin\n\nUpstream: `chevron7locked/kima-hub` v1.5.0 → v1.6.0, item KH-16.\n\n## What the Upstream Change Does\n\nMigrated from Bull v4 to BullMQ (v5) for better TypeScript support, sandboxed processors, built-in rate limiting, and better flow/dependency management.\n\n## Deferral Reasoning\n\nSoundspan uses Bull v4 (`backend/src/workers/queues.ts`) with well-tuned settings plus raw Redis `BLPOP` for analysis queues (`backend/src/routes/analysis.ts:13-14`). Migration would require:\n\n1. Rewriting all 6+ queue definitions\n2. Rewriting all processor workers\n3. Migrating the Python CLAP analyzer from `BLPOP` to BullMQ Python client\n4. Testing all job lifecycle scenarios\n5. Maintaining backward compatibility during transition\n\nBull v4 is stable with no known issues in soundspan.\n\n## Revisit Criteria\n\n- Bull v4 reaches EOL or stops receiving security patches\n- BullMQ-specific features needed: flows, built-in rate limiting, sandboxed processors\n- Python BullMQ client matures enough to replace BLPOP-based analysis queue\n"
+      }
+    ]
+  },
+  "acm": {
+    "receipt_id": "legacy.deferred.kh-deferred-bullmq-migration.3c0b1f573d",
+    "plan_key": "plan:legacy.deferred.kh-deferred-bullmq-migration.3c0b1f573d",
+    "final_db_status": "blocked",
+    "plan": {
+      "title": "Kima Hub Upstream — Deferred: BullMQ Migration (KH-16)",
+      "objective": "Evaluate BullMQ migration (KH-16) from Kima Hub v1.6.0 — migrating from Bull v4 to BullMQ (v5) for better TypeScript support, sandboxed processors, built-in rate limiting, and flow/dependency management.",
+      "kind": "legacy_deferred",
+      "status": "blocked",
+      "stages": {
+        "spec_outline": "pending",
+        "refined_spec": "pending",
+        "implementation_plan": "pending"
+      },
+      "in_scope": [
+        "Deferred: Migration from Bull v4 to BullMQ. Bull v4 is stable; migration is high-risk for marginal benefit."
+      ],
+      "out_of_scope": [
+        "Not adopting: Bull v4 is stable with no known issues in soundspan. Migration requires rewriting 6+ queue definitions, all processor workers, the Python CLAP analyzer from BLPOP to BullMQ Python client, and testing all job lifecycle scenarios. Large migration risk for marginal gain."
+      ],
+      "constraints": [],
+      "references": [
+        "acm-legacy-plans/deferred/kh-deferred-bullmq-migration.json",
+        ".agents/plans/deferred/kh-deferred-bullmq-migration/PLAN.json",
+        ".agents/plans/deferred/kh-deferred-bullmq-migration/PLAN.md"
+      ],
+      "external_refs": [
+        ".agents/plans/deferred/kh-deferred-bullmq-migration/PLAN.md"
+      ]
+    },
+    "tasks": [
+      {
+        "key": "task.legacy-summary",
+        "summary": "Evaluate BullMQ migration (KH-16) from Kima Hub v1.6.0 — migrating from Bull v4 to BullMQ (v5) for better TypeScript support, sandboxed processors, built-in rate limiting, and flow/dependency management.",
+        "status": "blocked",
+        "acceptance_criteria": [],
+        "references": [
+          "acm-legacy-plans/deferred/kh-deferred-bullmq-migration.json"
+        ],
+        "blocked_reason": "Imported from deferred legacy plan.",
+        "outcome": "",
+        "evidence": []
+      },
+      {
+        "key": "verify:tests",
+        "summary": "Run verification for resumed soundspan work",
+        "status": "blocked",
+        "acceptance_criteria": [
+          "Run the repo-defined ACM verification tests before completion."
+        ],
+        "references": [
+          "acm-legacy-plans/deferred/kh-deferred-bullmq-migration.json"
+        ],
+        "blocked_reason": "Legacy plan is deferred until explicitly resumed.",
+        "outcome": "",
+        "evidence": []
+      }
+    ]
+  },
+  "source_plan": {
+    "schema_version": "1.0",
+    "feature_id": "kh-deferred-bullmq-migration",
+    "feature_title": "Kima Hub Upstream — Deferred: BullMQ Migration (KH-16)",
+    "plan_ref": ".agents/plans/deferred/kh-deferred-bullmq-migration/PLAN.json",
+    "status": "deferred",
+    "updated_at": "2026-03-02T18:00:00Z",
+    "planning_stages": {
+      "spec_outline": "pending",
+      "refined_spec": "pending",
+      "implementation_plan": "pending"
+    },
+    "narrative": {
+      "pre_spec_outline": {
+        "purpose_goals": "Evaluate BullMQ migration (KH-16) from Kima Hub v1.6.0 — migrating from Bull v4 to BullMQ (v5) for better TypeScript support, sandboxed processors, built-in rate limiting, and flow/dependency management.",
+        "non_goals": "Not adopting: Bull v4 is stable with no known issues in soundspan. Migration requires rewriting 6+ queue definitions, all processor workers, the Python CLAP analyzer from BLPOP to BullMQ Python client, and testing all job lifecycle scenarios. Large migration risk for marginal gain."
+      },
+      "spec_outline": {
+        "summary": "Deferred: Migration from Bull v4 to BullMQ. Bull v4 is stable; migration is high-risk for marginal benefit.",
+        "full_spec_outline": []
+      },
+      "refined_spec": {
+        "summary": "Deferred: No refined spec needed. Deferral reason is risk/reward assessment, not technical uncertainty.",
+        "full_refined_spec": []
+      },
+      "implementation_plan": {
+        "summary": "Deferred: No implementation planned. Revisit when Bull v4 reaches EOL or BullMQ-specific features are needed.",
+        "steps": []
+      }
+    },
+    "subagent": {
+      "requirement": "none",
+      "primary_agent": "orchestrator",
+      "execution_agents": [
+        "orchestrator"
+      ],
+      "last_executor": null
+    }
+  }
+}

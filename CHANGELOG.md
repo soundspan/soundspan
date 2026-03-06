@@ -291,7 +291,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a canonical release notes template (`.agents-config/docs/RELEASE_NOTES_TEMPLATE.md`) and generator workflow (`npm run release:notes`) for repeatable release publishing.
+- Added a canonical release notes template and generator workflow for repeatable release publishing.
 - Added queue-end auto Match Vibe continuation so playback can extend automatically when repeat is off and Listen Together is not active.
 - Added shared thumbs preference controls and supporting tests across player/list surfaces (`trackPreferenceSignals`, shared button component, and regression coverage).
 
