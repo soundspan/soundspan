@@ -800,7 +800,6 @@ describe("artists routes runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch album details",
-            message: "musicbrainz timeout",
         });
         expect(mockLoggerError).toHaveBeenCalled();
     });

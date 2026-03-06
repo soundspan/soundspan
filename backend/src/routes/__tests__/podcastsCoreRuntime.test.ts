@@ -198,7 +198,6 @@ describe("podcasts core runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Sync failed",
-            message: "cache service unavailable",
         });
     });
 
@@ -339,7 +338,6 @@ describe("podcasts core runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch podcasts",
-            message: "db read failed",
         });
     });
 
@@ -504,7 +502,6 @@ describe("podcasts core runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch podcast",
-            message: "db error",
         });
     });
 
@@ -603,7 +600,6 @@ describe("podcasts core runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to subscribe to podcast",
-            message: "invalid rss",
         });
     });
 
@@ -727,7 +723,6 @@ describe("podcasts core runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to subscribe to podcast",
-            message: "itunes lookup failed",
         });
     });
 
@@ -800,7 +795,6 @@ describe("podcasts core runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to unsubscribe",
-            message: "unsubscribe failed",
         });
     });
 
@@ -905,7 +899,6 @@ describe("podcasts core runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to refresh podcast",
-            message: "refresh parse failed",
         });
     });
 

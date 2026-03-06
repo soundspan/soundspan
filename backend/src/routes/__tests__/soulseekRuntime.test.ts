@@ -168,7 +168,6 @@ describe("soulseek runtime routes", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to get Soulseek status",
-            details: "status failed",
         });
         expect(mockLogger.error).toHaveBeenCalled();
     });
@@ -223,7 +222,6 @@ describe("soulseek runtime routes", () => {
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({
             error: "Failed to connect to Soulseek",
-            details: "connect failed",
         });
     });
 
@@ -367,7 +365,6 @@ describe("soulseek runtime routes", () => {
         expect(resultsRes.body).toMatchObject({
             error: "Failed to get results",
         });
-        expect(resultsRes.body.details).toEqual(expect.any(String));
         expect(mockLogger.error).toHaveBeenCalled();
     });
 
@@ -430,7 +427,6 @@ describe("soulseek runtime routes", () => {
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({
             error: "Download failed",
-            details: "download exploded",
         });
     });
 
@@ -495,6 +491,6 @@ describe("soulseek runtime routes", () => {
         await disconnectHandler(req, errorRes);
 
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "disconnect failed" });
+        expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 });

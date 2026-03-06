@@ -759,7 +759,6 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to stream episode",
-            message: "rss stream failed",
         });
     });
 
@@ -1051,7 +1050,6 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to stream episode",
-            message: "rss full request failed",
         });
     });
 
@@ -1177,7 +1175,6 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({
             error: "Failed to fetch similar podcasts",
-            message: "similar lookup failed",
         });
     });
 
@@ -1315,7 +1312,6 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(podcastRes.statusCode).toBe(500);
         expect(podcastRes.body).toEqual({
             error: "Failed to serve cover",
-            message: "podcast cover read failed",
         });
 
         prisma.podcastEpisode.findUnique.mockRejectedValueOnce(
@@ -1331,7 +1327,6 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(episodeRes.statusCode).toBe(500);
         expect(episodeRes.body).toEqual({
             error: "Failed to serve cover",
-            message: "episode cover read failed",
         });
     });
 });

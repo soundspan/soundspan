@@ -58,6 +58,12 @@ jest.mock("../../services/tidalStreaming", () => ({
     },
 }));
 
+jest.mock("../../services/browseImageCache", () => ({
+    browseImageCacheKey: jest.fn(() => "browse-image-cache-key"),
+    getBrowseImageFromCache: jest.fn(() => null),
+    fetchAndCacheBrowseImage: jest.fn(async () => null),
+}));
+
 const mockGetSystemSettings = jest.fn();
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
@@ -109,7 +115,7 @@ describe("browse ytmusic routes integration", () => {
             country: "CA",
             source: "ytmusic",
         });
-        expect(mockGetCharts).toHaveBeenCalledWith("CA");
+        expect(mockGetCharts).toHaveBeenCalledWith("CA", "user-1");
     });
 
     it("returns categories and marks source as ytmusic", async () => {
@@ -138,7 +144,7 @@ describe("browse ytmusic routes integration", () => {
             .set(AUTH_HEADER, AUTH_VALUE);
 
         expect(invalidLimitRes.status).toBe(200);
-        expect(mockGetHome).toHaveBeenCalledWith(1);
+        expect(mockGetHome).toHaveBeenCalledWith(1, "user-1");
 
         mockGetHome.mockResolvedValueOnce([{ title: "For You", contents: [] }]);
 
@@ -147,7 +153,7 @@ describe("browse ytmusic routes integration", () => {
             .set(AUTH_HEADER, AUTH_VALUE);
 
         expect(cappedLimitRes.status).toBe(200);
-        expect(mockGetHome).toHaveBeenCalledWith(20);
+        expect(mockGetHome).toHaveBeenCalledWith(20, "user-1");
     });
 
     it("validates mood params and returns payload", async () => {
@@ -171,7 +177,10 @@ describe("browse ytmusic routes integration", () => {
             ],
             source: "ytmusic",
         });
-        expect(mockGetMoodPlaylists).toHaveBeenCalledWith("focus_vibes");
+        expect(mockGetMoodPlaylists).toHaveBeenCalledWith(
+            "focus_vibes",
+            "user-1"
+        );
 
         const invalidRes = await request(app)
             .get("/api/browse/ytmusic/mood-playlists?params=%20%20%20")
@@ -324,7 +333,7 @@ describe("browse ytmusic routes integration", () => {
             shelves,
             source: "ytmusic",
         });
-        expect(mockGetHome).toHaveBeenCalledWith(6);
+        expect(mockGetHome).toHaveBeenCalledWith(6, "user-1");
     });
 
     it("returns personalized mixes from ytmusic with source metadata", async () => {

@@ -41,6 +41,12 @@ jest.mock("../../services/tidalStreaming", () => ({
     },
 }));
 
+jest.mock("../../services/browseImageCache", () => ({
+    browseImageCacheKey: jest.fn(() => "browse-image-cache-key"),
+    getBrowseImageFromCache: jest.fn(() => null),
+    fetchAndCacheBrowseImage: jest.fn(async () => null),
+}));
+
 const mockGetSystemSettings = jest.fn();
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
@@ -161,7 +167,7 @@ describe("browse route runtime", () => {
 
         expect(unsupportedRes.statusCode).toBe(400);
         expect(unsupportedRes.body).toEqual({
-            error: "Invalid or unsupported URL. Please provide a Spotify or Deezer playlist URL.",
+            error: "Invalid or unsupported URL. Supported: Spotify, Deezer, YouTube Music, and TIDAL playlist URLs.",
         });
 
         deezerService.parseUrl.mockImplementationOnce(() => {
@@ -176,6 +182,6 @@ describe("browse route runtime", () => {
         await parsePlaylistUrl(errorReq, errorRes);
 
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "parse exploded" });
+        expect(errorRes.body).toEqual({ error: "Failed to parse URL" });
     });
 });

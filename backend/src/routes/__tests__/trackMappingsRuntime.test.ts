@@ -1,5 +1,6 @@
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
+    requireAdmin: (_req: any, _res: any, next: () => void) => next(),
 }));
 
 jest.mock("../../utils/logger", () => ({

@@ -18,15 +18,17 @@ This folder provides Claude Code slash-command prompts that mirror the `acm-brok
 - `/acm-eval <eval-suite-path> [minimum-recall]`
   - runs retrieval evaluation against an explicit eval suite.
 
+For compact rediscovery of archived plans, receipts, runs, and durable memories, use direct CLI `acm work search --scope all ...` for plan-only lookup or `acm history search --entity all ...`, `acm history search --entity memory ...`, or MCP `history_search`, then `fetch` the returned `fetch_keys`. The default command pack does not add a dedicated `/acm-history` slash command.
+
 ## Install into a project
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/bonztm/agent-context-manager/main/scripts/install-skill-pack.sh) --claude .
+bash <(curl -fsSL https://raw.githubusercontent.com/bonztm/agent-context-manager/main/scripts/install-skill-pack.sh) --claude
 ```
 
-Then restart Claude Code so commands are reloaded.
+Run this from your project root, then restart Claude Code so commands are reloaded.
 
-If you already have this repo checked out locally, the equivalent command is `./scripts/install-skill-pack.sh --claude .`.
+If you already have this repo checked out locally, the equivalent command is `./scripts/install-skill-pack.sh --claude`.
 
 ## Runtime notes
 

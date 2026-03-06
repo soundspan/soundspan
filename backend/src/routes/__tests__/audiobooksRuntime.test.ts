@@ -184,7 +184,6 @@ describe("audiobooks route runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch continue listening",
-            message: "progress read failed",
         });
     });
 
@@ -248,7 +247,6 @@ describe("audiobooks route runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Sync failed",
-            message: "sync service down",
         });
     });
 

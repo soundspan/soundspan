@@ -365,7 +365,6 @@ describe("downloads interactive release compatibility", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch releases",
-            message: "lidarr search exploded",
         });
     });
 
@@ -534,7 +533,6 @@ describe("downloads interactive release compatibility", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to grab release",
-            message: "create failed",
         });
     });
 });

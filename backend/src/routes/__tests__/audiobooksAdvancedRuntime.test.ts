@@ -259,7 +259,7 @@ describe("audiobooks advanced runtime", () => {
         const errorRes = createRes();
         await debugSeriesHandler({ user: { id: "u1" } } as any, errorRes);
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "debug fetch failed" });
+        expect(errorRes.body).toEqual({ error: "Internal server error" });
     });
 
     it("serves OPTIONS preflight for cover endpoint", async () => {
@@ -365,7 +365,6 @@ describe("audiobooks advanced runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to serve cover",
-            message: "cover db failed",
         });
     });
 
@@ -488,7 +487,6 @@ describe("audiobooks advanced runtime", () => {
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({
             error: "Failed to fetch audiobook",
-            message: "details exploded",
         });
     });
 
@@ -565,7 +563,6 @@ describe("audiobooks advanced runtime", () => {
         expect(streamErrorRes.statusCode).toBe(500);
         expect(streamErrorRes.body).toEqual({
             error: "Failed to stream audiobook",
-            message: "stream write failed",
         });
 
         const postHeaderStream = createMockStream();
@@ -594,7 +591,6 @@ describe("audiobooks advanced runtime", () => {
         expect(catchRes.statusCode).toBe(500);
         expect(catchRes.body).toEqual({
             error: "Failed to stream audiobook",
-            message: "service stream failed",
         });
     });
 
@@ -738,7 +734,6 @@ describe("audiobooks advanced runtime", () => {
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({
             error: "Failed to update progress",
-            message: "progress failed",
         });
     });
 
@@ -815,7 +810,6 @@ describe("audiobooks advanced runtime", () => {
         expect(errorRes.statusCode).toBe(500);
         expect(errorRes.body).toEqual({
             error: "Failed to remove progress",
-            message: "delete failed",
         });
     });
 
@@ -840,7 +834,6 @@ describe("audiobooks advanced runtime", () => {
         expect(searchErrorRes.statusCode).toBe(500);
         expect(searchErrorRes.body).toEqual({
             error: "Failed to search audiobooks",
-            message: "search failed",
         });
 
         prisma.audiobook.findMany.mockResolvedValueOnce([]);
@@ -856,7 +849,6 @@ describe("audiobooks advanced runtime", () => {
         expect(listErrorRes.statusCode).toBe(500);
         expect(listErrorRes.body).toEqual({
             error: "Failed to fetch audiobooks",
-            message: "list failed",
         });
 
         prisma.audiobook.findMany.mockRejectedValueOnce(new Error("series failed"));
@@ -871,7 +863,6 @@ describe("audiobooks advanced runtime", () => {
         expect(seriesErrorRes.statusCode).toBe(500);
         expect(seriesErrorRes.body).toEqual({
             error: "Failed to fetch series",
-            message: "series failed",
         });
     });
 });

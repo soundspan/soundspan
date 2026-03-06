@@ -48,6 +48,8 @@ const prisma = {
     },
     trackMapping: {
         findMany: jest.fn(),
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
     },
     track: {
         findUnique: jest.fn(),
@@ -250,6 +252,8 @@ describe("playlists route runtime", () => {
             ytMusicEnabled: true,
         });
         prisma.trackMapping.findMany.mockResolvedValue([]);
+        prisma.trackMapping.findFirst.mockResolvedValue(null);
+        prisma.trackMapping.findUnique.mockResolvedValue(null);
         prisma.track.findUnique.mockResolvedValue({ id: "t-1" });
         prisma.track.findMany.mockResolvedValue([]);
         prisma.trackTidal.findMany.mockResolvedValue([]);

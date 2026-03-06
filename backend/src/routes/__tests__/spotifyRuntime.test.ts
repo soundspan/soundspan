@@ -311,7 +311,9 @@ describe("spotify route runtime", () => {
             await previewHandler(req, res);
 
             expect(res.statusCode).toBe(500);
-            expect(res.body).toEqual({ error: "preview failed" });
+            expect(res.body).toEqual({
+                error: "Failed to generate preview",
+            });
         });
     });
 
@@ -552,7 +554,9 @@ describe("spotify route runtime", () => {
             await importStatusHandler(req, res);
 
             expect(res.statusCode).toBe(500);
-            expect(res.body).toEqual({ error: "status failed" });
+            expect(res.body).toEqual({
+                error: "Failed to get job status",
+            });
         });
     });
 
@@ -595,7 +599,9 @@ describe("spotify route runtime", () => {
             await importsHandler(req, res);
 
             expect(res.statusCode).toBe(500);
-            expect(res.body).toEqual({ error: "list failed" });
+            expect(res.body).toEqual({
+                error: "Failed to get imports",
+            });
         });
     });
 
@@ -713,7 +719,9 @@ describe("spotify route runtime", () => {
             await refreshHandler(req, res);
 
             expect(res.statusCode).toBe(500);
-            expect(res.body).toEqual({ error: "refresh failed" });
+            expect(res.body).toEqual({
+                error: "Failed to refresh tracks",
+            });
         });
     });
 
@@ -823,7 +831,9 @@ describe("spotify route runtime", () => {
             await cancelHandler(req, res);
 
             expect(res.statusCode).toBe(500);
-            expect(res.body).toEqual({ error: "cancel failed" });
+            expect(res.body).toEqual({
+                error: "Failed to cancel import",
+            });
         });
     });
 
@@ -855,7 +865,9 @@ describe("spotify route runtime", () => {
             await sessionLogHandler(req, res);
 
             expect(res.statusCode).toBe(500);
-            expect(res.body).toEqual({ error: "session read failed" });
+            expect(res.body).toEqual({
+                error: "Failed to read session log",
+            });
         });
     });
 });
