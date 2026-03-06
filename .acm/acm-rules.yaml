@@ -42,11 +42,11 @@ rules:
     enforcement: hard
     tags: [docs, typescript, python, openapi]
 
-  - id: rule_legacy_plan_export_sync
-    summary: Keep committed legacy plan exports aligned with ACM.
-    content: When legacy plan migration data changes, refresh `acm-legacy-plans/` and `ACM_LEGACY_PLAN_MAP.json` with `node scripts/acm-legacy-plans.mjs export`, then re-import with `node scripts/acm-legacy-plans.mjs import --project soundspan`.
+  - id: rule_work_history_via_acm
+    summary: Use ACM work list and search for plan history.
+    content: For current, deferred, or completed work lookup, use `acm work list/search --project soundspan --scope all` and fetch the returned keys for details.
     enforcement: hard
-    tags: [plans, migration, acm]
+    tags: [plans, history, acm]
 
   - id: rule_xhigh_review
     summary: Run the repo-standard xhigh Codex review for substantial implementation work.

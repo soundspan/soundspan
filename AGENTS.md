@@ -7,7 +7,7 @@ Repository contract for `soundspan` after ACM onboarding.
 - Follow this file first.
 - Canonical ACM rules, tags, and verification definitions live in `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, and `.acm/acm-tests.yaml`.
 - `CLAUDE.md` and `.claude/acm-broker/**` are tool-specific companions only. If they disagree with this file, this file wins.
-- `acm-legacy-plans/` is the committed export of pre-ACM plan history. Refresh it with `node scripts/acm-legacy-plans.mjs export` if legacy plan data changes.
+- ACM work storage is the source of truth for active and historical plan state. Use `acm work list/search --scope all` when you need archived or completed history.
 
 ## Required Task Loop
 
@@ -36,6 +36,12 @@ Repository contract for `soundspan` after ACM onboarding.
 - If concurrent multi-agent plan storage is needed, configure `ACM_PG_DSN`. SQLite defaults to `.acm/context.db` and is repo-local.
 - Legacy `.agents/**` artifacts are migration input only. Active planning and resumable work now live in ACM.
 
+## Historical Work Lookup
+
+- Use `acm work search --project soundspan --scope all --query "<topic>"` to find archived, completed, deferred, or current work by topic.
+- Use `acm work list --project soundspan --scope all` when you need a broader inventory view.
+- Fetch the returned plan or receipt keys for details.
+
 ## When To Use `work`
 
 Use `acm work` when any of the following are true:
@@ -53,16 +59,7 @@ Bootstrap this repo with:
 
 - `acm bootstrap --project soundspan --project-root .`
 
-After editing `.acm/**`, root agent contracts, repo-local Claude ACM assets, or legacy-plan export files:
+After editing `.acm/**`, root agent contracts, or repo-local Claude ACM assets:
 
 1. `acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .`
 2. `acm health --project soundspan --include-details`
-
-## Legacy Plan Migration
-
-- Export committed legacy plan data with:
-  - `node scripts/acm-legacy-plans.mjs export`
-- Import that export into ACM work storage with:
-  - `node scripts/acm-legacy-plans.mjs import --project soundspan`
-- Validate the committed export and import metadata with:
-  - `node scripts/acm-legacy-plans.mjs validate`

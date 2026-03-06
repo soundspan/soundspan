@@ -27,19 +27,69 @@ tests:
           ".gitignore",
           ".env.example",
           ".github/workflows/pr-checks.yml",
-          ".github/PULL_REQUEST_TEMPLATE.md",
-          "scripts/acm-legacy-plans.mjs"
+          ".github/workflows/quality-visibility.yml",
+          ".github/PULL_REQUEST_TEMPLATE.md"
         ]
     expected:
       exit_code: 0
 
-  - id: legacy-plan-export-validate
-    summary: Validate committed legacy plan export metadata
+  - id: backend-test-coverage
+    summary: Run the backend Jest coverage suite
     command:
-      argv: ["node", "scripts/acm-legacy-plans.mjs", "validate", "--source", "acm-legacy-plans", "--map", "ACM_LEGACY_PLAN_MAP.json"]
+      argv: ["npm", "--prefix", "backend", "run", "test:coverage"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: backend-build
+    summary: Run the backend TypeScript build checks
+    command:
+      argv: ["npm", "--prefix", "backend", "run", "build"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: frontend-lint
+    summary: Run frontend ESLint checks
+    command:
+      argv: ["npm", "--prefix", "frontend", "run", "lint"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: frontend-build
+    summary: Run the frontend production build
+    command:
+      argv: ["npm", "--prefix", "frontend", "run", "build"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: frontend-targeted-coverage
+    summary: Run targeted frontend coverage checks
+    command:
+      argv: ["npm", "--prefix", "frontend", "run", "test:coverage"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: helm-chart-render-check
+    summary: Lint and render the Helm chart contract
+    command:
+      argv: ["./scripts/helm-chart-render-check.sh"]
     select:
       phases: ["execute", "review"]
       changed_paths_any:
-        ["scripts/acm-legacy-plans.mjs", "acm-legacy-plans/**", "ACM_LEGACY_PLAN_MAP.json"]
+        ["charts/**", "scripts/helm-chart-render-check.sh", ".github/workflows/helm-chart-release.yml"]
     expected:
       exit_code: 0

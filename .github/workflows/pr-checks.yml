@@ -31,14 +31,42 @@ jobs:
       - name: Sync ACM
         run: acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
 
-      - name: Verify ACM Onboarding Surface
+      - name: Collect changed files for ACM verify
+        shell: bash
         run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            range="${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+          elif [[ -n "${{ github.event.before }}" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+            range="${{ github.event.before }}...${{ github.sha }}"
+          else
+            range="$(git rev-list --max-parents=0 HEAD | tail -n 1)...${{ github.sha }}"
+          fi
+
+          git diff --name-only "$range" | sed '/^$/d' > /tmp/acm-changed-files.txt
+          if [[ ! -s /tmp/acm-changed-files.txt ]]; then
+            printf '%s\n' \
+              AGENTS.md \
+              .acm/acm-rules.yaml \
+              .acm/acm-tests.yaml \
+              .github/workflows/pr-checks.yml > /tmp/acm-changed-files.txt
+          fi
+
+          cat /tmp/acm-changed-files.txt
+
+      - name: Verify ACM Surface And Selected Quality Gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r path; do
+            args+=(--file-changed "$path")
+          done < /tmp/acm-changed-files.txt
+
           acm verify \
             --project soundspan \
             --phase review \
-            --file-changed AGENTS.md \
-            --file-changed .acm/acm-rules.yaml \
-            --file-changed scripts/acm-legacy-plans.mjs
+            "${args[@]}"
 
       - name: ACM Health
         run: acm health --project soundspan --include-details

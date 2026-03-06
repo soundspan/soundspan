@@ -166,8 +166,6 @@ docs/
 !docs/FORK_DIFF_COMMITS.md
 archived/
 **/archived/
-!acm-legacy-plans/archived/
-!acm-legacy-plans/archived/**
 context_portal/
 issues/
 .agents/plans/

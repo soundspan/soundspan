@@ -74,4 +74,5 @@ Key ACM helper commands:
 - `acm get-context --project soundspan --task-text "<task>" --phase plan` starts scoped work.
 - `acm verify --project soundspan --phase review --file-changed <path>` runs repo-defined verification.
 - `acm health --project soundspan --include-details` checks ACM index/rules health.
-- `node scripts/acm-legacy-plans.mjs validate --source acm-legacy-plans --map ACM_LEGACY_PLAN_MAP.json` validates retained legacy-plan export metadata.
+- `acm work search --project soundspan --scope all --query "<topic>"` finds current and historical work by topic.
+- `acm work list --project soundspan --scope all` lists the broader work inventory when you need to browse history.

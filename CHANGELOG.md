@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ACM verify now owns the repo-native backend coverage, frontend lint/build/coverage, and Helm chart render checks, and historical work lookup now goes through ACM `work list/search --scope all`.
+
 ### Fixed
 
 ## [1.3.1] - 2026-03-05

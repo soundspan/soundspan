@@ -43,7 +43,7 @@ jobs:
         run: npm run test:coverage -- --maxWorkers=${BACKEND_COVERAGE_MAX_WORKERS}
 
       - name: Build backend coverage summary
-        run: node .agents-config/scripts/backend-coverage-summary.mjs
+        run: node scripts/ci/backend-coverage-summary.mjs
         env:
           ENFORCE_COVERAGE_GATE: ${{ vars.CI_ENFORCE_TEST_GATE || 'false' }}
           COVERAGE_LINE_MIN: ${{ vars.COVERAGE_LINE_MIN || '0' }}

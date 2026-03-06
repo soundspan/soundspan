@@ -158,6 +158,7 @@ Current behavior:
 
 - backend Jest tests + coverage summary/artifacts,
 - frontend lint/build + targeted unit coverage and E2E inventory visibility,
+- Helm chart lint/render visibility,
 - non-blocking by default (configurable to blocking via repo vars).
 
 Backend coverage artifacts include:
@@ -174,12 +175,31 @@ ACM repo-contract checks:
 - `.acm/acm-rules.yaml`
 - `.acm/acm-tests.yaml`
 
+Promoted ACM verify quality gates:
+
+- `npm --prefix backend run build`
+- `npm --prefix backend run test:coverage`
+- `npm --prefix frontend run lint`
+- `npm --prefix frontend run build`
+- `npm --prefix frontend run test:coverage`
+- `./scripts/helm-chart-render-check.sh`
+
 Recommended local ACM validation:
 
 ```bash
 acm verify --project soundspan --phase review --file-changed <path>
 acm health --project soundspan --include-details
 ```
+
+Examples:
+
+```bash
+acm verify --project soundspan --phase review --file-changed backend/src/routes/social.ts
+acm verify --project soundspan --phase review --file-changed frontend/app/page.tsx
+acm verify --project soundspan --phase review --file-changed charts/soundspan/Chart.yaml
+```
+
+Release helpers remain maintainer-invoked workflows outside `acm verify`; use `scripts/release/*.mjs` when you are preparing an actual release rather than validating ordinary code changes.
 
 ## Sidecar Test Standard
 
