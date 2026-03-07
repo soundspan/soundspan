@@ -88,12 +88,6 @@ export const normalizeListenTogetherSegmentedPlaybackEnabled = (
     return normalizeBooleanConfig(value);
 };
 
-export const normalizeHowlerIosLockscreenWorkaroundsEnabled = (
-    value: string | null | undefined
-): boolean | null => {
-    return normalizeBooleanConfig(value);
-};
-
 export const normalizeSegmentedSessionPrewarmEnabled = (
     value: string | null | undefined
 ): boolean | null => {
@@ -159,14 +153,6 @@ export const buildRuntimeConfigPayload = (
         listenTogetherSegmentedPlaybackEnabled !== null
             ? String(listenTogetherSegmentedPlaybackEnabled)
             : "null";
-    const howlerIosLockscreenWorkaroundsEnabled =
-        normalizeHowlerIosLockscreenWorkaroundsEnabled(
-            env.HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED
-        );
-    const howlerIosLockscreenWorkaroundsEnabledJson =
-        howlerIosLockscreenWorkaroundsEnabled !== null
-            ? String(howlerIosLockscreenWorkaroundsEnabled)
-            : "null";
     const segmentedSessionPrewarmEnabled =
         normalizeSegmentedSessionPrewarmEnabled(
             env.SEGMENTED_SESSION_PREWARM_ENABLED
@@ -190,7 +176,6 @@ export const buildRuntimeConfigPayload = (
     SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC: ${segmentedEffectiveFragmentDurationSecJson},
     SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: ${segmentedStartupFallbackTimeoutJson},
     LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED: ${listenTogetherSegmentedPlaybackEnabledJson},
-    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: ${howlerIosLockscreenWorkaroundsEnabledJson},
     SEGMENTED_SESSION_PREWARM_ENABLED: ${segmentedSessionPrewarmEnabledJson},
   },
 );

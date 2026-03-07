@@ -1,9 +1,10 @@
 /**
- * iOS Foreground Recovery Policy
+ * Foreground Recovery Policy
  *
- * When iOS reclaims the audio session (e.g., user switches apps and returns),
- * the audio element may silently stop playing. This module detects the resume
- * via visibilitychange and determines whether playback should be retried.
+ * When the OS reclaims the audio session (e.g., user locks the screen, switches
+ * apps, or returns from a background tab), the audio element may silently stop
+ * playing. This module detects the resume via visibilitychange and determines
+ * whether playback should be retried.
  *
  * Recovery is attempted only when:
  * 1. The page transitions from hidden → visible

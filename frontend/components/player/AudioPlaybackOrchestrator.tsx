@@ -5007,9 +5007,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         noteSegmentedStartupVhsResponse,
     ]);
 
-    // iOS foreground recovery: when the page returns from background and
+    // Foreground recovery: when the page returns from background and
     // audio was playing when it went hidden but the engine is no longer
-    // playing (iOS reclaimed the audio session), retry playback.
+    // playing (OS reclaimed the audio session, or track ended while
+    // backgrounded), either advance to the next track or retry playback.
     // The playing state is snapshotted at the "hidden" transition — not from
     // a persistent "ever played" flag — to prevent spurious recovery on
     // desktop when a user pauses then switches tabs.
@@ -5035,7 +5036,6 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             });
 
             if (!decision.shouldRecover) return;
-            if (shouldThrottleForegroundRecovery()) return;
 
             const currentMediaId =
                 currentTrackRef.current?.id ??
@@ -5043,6 +5043,30 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 currentPodcast?.id ??
                 null;
             if (!currentMediaId) return;
+
+            // Detect whether the track finished while backgrounded.
+            // This check runs before the throttle gate so that a
+            // completed track is never suppressed by cooldown timing.
+            if (playbackType === "track") {
+                const trackEnded =
+                    typeof audioEngine.hasTrackEnded === "function"
+                        ? audioEngine.hasTrackEnded()
+                        : (() => {
+                              const d = audioEngine.getDuration();
+                              const p = audioEngine.getCurrentTime();
+                              return d > 0 && p >= d - 0.1;
+                          })();
+                if (trackEnded) {
+                    sharedFrontendLogger.info(
+                        "[AudioPlaybackOrchestrator] Foreground recovery: track ended while backgrounded, synthesizing end event",
+                        { trackId: currentMediaId },
+                    );
+                    audioEngine.notifyTrackEnded();
+                    return;
+                }
+            }
+
+            if (shouldThrottleForegroundRecovery()) return;
 
             sharedFrontendLogger.info(
                 "[AudioPlaybackOrchestrator] Foreground recovery: retrying playback after app resume",
@@ -5052,7 +5076,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             playbackStateMachine.forceTransition("RECOVERING");
             setIsBuffering(true);
 
-            // Small delay to let iOS audio session re-establish.
+            // Small delay to let the audio session re-establish.
             // Guarded by machine state: if something else transitions the
             // machine during the delay (user pause, media clear), recovery
             // is aborted.

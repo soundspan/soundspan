@@ -150,6 +150,8 @@ export interface AudioEngine {
   ): AudioEngineRepresentationFailoverResult | null;
   clearRepresentationQuarantine?(): void;
   getActualCurrentTime?(): number;
+  hasTrackEnded?(): boolean;
+  notifyTrackEnded?(): void;
   isCurrentlySeeking?(): boolean;
   getSeekTarget?(): number | null;
 }

@@ -75,6 +75,8 @@ interface HowlerEngineLike {
   ): void;
   reload(): void;
   getActualCurrentTime(): number;
+  hasTrackEnded(): boolean;
+  notifyTrackEnded(): void;
   isCurrentlySeeking(): boolean;
   getSeekTarget(): number | null;
 }
@@ -355,6 +357,14 @@ export class HowlerEngineAdapter implements AudioEngine {
 
   getActualCurrentTime(): number {
     return this.engine.getActualCurrentTime();
+  }
+
+  hasTrackEnded(): boolean {
+    return this.engine.hasTrackEnded();
+  }
+
+  notifyTrackEnded(): void {
+    this.engine.notifyTrackEnded();
   }
 
   isCurrentlySeeking(): boolean {

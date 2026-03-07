@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     buildRuntimeConfigPayload,
-    normalizeHowlerIosLockscreenWorkaroundsEnabled,
     normalizeListenTogetherSegmentedPlaybackEnabled,
     normalizeSegmentedEffectiveFragmentDurationSec,
     normalizeSegmentedSessionPrewarmEnabled,
@@ -48,22 +47,6 @@ test("normalizeListenTogetherSegmentedPlaybackEnabled trims, lowercases, and val
     assert.equal(normalizeListenTogetherSegmentedPlaybackEnabled(""), null);
     assert.equal(
         normalizeListenTogetherSegmentedPlaybackEnabled("enable"),
-        null
-    );
-});
-
-test("normalizeHowlerIosLockscreenWorkaroundsEnabled trims, lowercases, and validates values", () => {
-    assert.equal(
-        normalizeHowlerIosLockscreenWorkaroundsEnabled(" TRUE "),
-        true
-    );
-    assert.equal(
-        normalizeHowlerIosLockscreenWorkaroundsEnabled(" false "),
-        false
-    );
-    assert.equal(normalizeHowlerIosLockscreenWorkaroundsEnabled(""), null);
-    assert.equal(
-        normalizeHowlerIosLockscreenWorkaroundsEnabled("enable"),
         null
     );
 });
@@ -136,7 +119,6 @@ test("buildRuntimeConfigPayload emits expected runtime JS for valid env values",
         SEGMENTED_DASH_FRAGMENT_DURATION_RATIO: "0.25",
         SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: "1200",
         LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED: "true",
-        HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: " TRUE ",
         SEGMENTED_SESSION_PREWARM_ENABLED: "false",
     });
 
@@ -151,7 +133,6 @@ test("buildRuntimeConfigPayload emits expected runtime JS for valid env values",
     SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC: 0.125,
     SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: 1500,
     LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED: true,
-    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: true,
     SEGMENTED_SESSION_PREWARM_ENABLED: false,
   },
 );
@@ -165,7 +146,6 @@ test("buildRuntimeConfigPayload fails closed for invalid env values", () => {
         SEGMENTED_VHS_PROFILE: "not-a-profile",
         SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: "NaN",
         LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED: "not-a-bool",
-        HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "not-a-bool",
         SEGMENTED_SESSION_PREWARM_ENABLED: "not-a-bool",
     });
 
@@ -180,7 +160,6 @@ test("buildRuntimeConfigPayload fails closed for invalid env values", () => {
     SEGMENTED_EFFECTIVE_FRAGMENT_DURATION_SEC: 0.2,
     SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: null,
     LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED: null,
-    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: null,
     SEGMENTED_SESSION_PREWARM_ENABLED: null,
   },
 );

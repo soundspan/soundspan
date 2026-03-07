@@ -70,6 +70,7 @@ interface RuntimeAudioEngine extends AudioEngine {
   ): AudioEngineRepresentationFailoverResult | null;
   clearRepresentationQuarantine(): void;
   getActualCurrentTime(): number;
+  hasTrackEnded(): boolean;
   isCurrentlySeeking(): boolean;
   getSeekTarget(): number | null;
 }
@@ -279,6 +280,27 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
       return activeEngine.getActualCurrentTime();
     }
     return activeEngine.getCurrentTime();
+  }
+
+  hasTrackEnded(): boolean {
+    const activeEngine = this.getActiveEngine();
+    if (typeof activeEngine.hasTrackEnded === "function") {
+      return activeEngine.hasTrackEnded();
+    }
+    const duration = activeEngine.getDuration();
+    const position = activeEngine.getCurrentTime();
+    return duration > 0 && position >= duration - 0.1;
+  }
+
+  notifyTrackEnded(): void {
+    const activeEngine = this.getActiveEngine();
+    if (typeof activeEngine.notifyTrackEnded === "function") {
+      activeEngine.notifyTrackEnded();
+    } else {
+      // Engine doesn't implement notifyTrackEnded — emit end directly
+      // so foreground recovery can still advance tracks.
+      this.emit("end", undefined);
+    }
   }
 
   isCurrentlySeeking(): boolean {
