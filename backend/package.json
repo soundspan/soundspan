@@ -1,6 +1,6 @@
 {
     "name": "soundspan-backend",
-    "version": "1.3.2",
+    "version": "1.3.3",
     "description": "soundspan backend API server",
     "license": "GPL-3.0",
     "repository": {

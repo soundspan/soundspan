@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.3.3] - 2026-03-07
+
+### Added
+
+### Changed
+
+- Audio session management (auto-unlock, auto-suspend prevention, and navigator audio session type) is now always active on all platforms. The `HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED` environment variable has been removed — no configuration is needed for lock-screen playback on iOS or Android.
+- Foreground recovery now detects tracks that finished while the screen was locked and advances to the next track instead of replaying the same one.
+
+### Fixed
+
+- Fixed playback not advancing to the next queued track when the phone screen is locked (Android PWA and background tabs). Browsers throttle JavaScript timers when the page is hidden, preventing the audio engine from detecting track completion. The player now listens for the native HTML5 audio `ended` event as a fallback, and foreground recovery on unlock advances to the next track when the current one finished while backgrounded.
+
 ## [1.3.2] - 2026-03-06
 
 ### Added

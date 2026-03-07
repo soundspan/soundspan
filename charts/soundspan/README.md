@@ -395,20 +395,6 @@ This applies to:
 - `postgresql.env`
 - `redis.env`
 
-Example runtime override for iOS Howler lock-screen compatibility:
-
-```yaml
-# Individual mode frontend
-frontend:
-  env:
-    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
-
-# AIO mode
-aio:
-  env:
-    HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
-```
-
 ### Global Pod Labels, Annotations, and Scheduling Defaults
 
 Use `global.*` to avoid repeating pod metadata and scheduling config on each service:

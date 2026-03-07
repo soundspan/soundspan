@@ -118,10 +118,6 @@ Install soundspan as a PWA from your browser install flow for app-like behavior,
 
 PWA is the only current first-party mobile direction. soundspan does not currently ship a native iOS/Android app.
 
-#### Known issues
-
-iOS PWA users may experience playback stopping or failing to resume after the device lock screen activates. Set `HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED=true` on your frontend container to enable iOS-specific audio-session workarounds. See [`docs/ENVIRONMENT_VARIABLES.md`](docs/ENVIRONMENT_VARIABLES.md) for details.
-
 ### Subsonic-compatible apps
 
 For mobile native clients, use Subsonic-compatible apps through soundspan's OpenSubsonic `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).

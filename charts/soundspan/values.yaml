@@ -81,7 +81,7 @@ haMode:
 aio:
   image:
     repository: ghcr.io/soundspan/soundspan
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: IfNotPresent
   # Grace window + preStop sleep to drain requests before pod shutdown.
   terminationGracePeriodSeconds: 45
@@ -112,8 +112,6 @@ aio:
     AUDIO_ANALYSIS_BATCH_SIZE: "10"
     AUDIO_BRPOP_TIMEOUT: "30"
     AUDIO_MODEL_IDLE_TIMEOUT: "300"
-    # Frontend runtime knob (optional): enables iOS Howler lock-screen workarounds
-    # HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
   # -- Additional environment variable sources for AIO container.
   # Example:
   # envFrom:
@@ -133,7 +131,7 @@ aio:
 backend:
   image:
     repository: ghcr.io/soundspan/soundspan-backend
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: Always
   # -- Backend process role. Leave empty for auto:
   #    - "all" when backendWorker is disabled
@@ -208,7 +206,7 @@ backendWorker:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-backend-worker
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: Always
   # -- Worker process role override. Defaults to "worker".
   processRole: ""
@@ -261,7 +259,7 @@ backendWorker:
 frontend:
   image:
     repository: ghcr.io/soundspan/soundspan-frontend
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: Always
   replicas: 1
   strategy:
@@ -291,7 +289,6 @@ frontend:
   #   BACKEND_URL: http://my-release-backend:3006
   #   STREAMING_ENGINE_MODE: howler   # primary mode; videojs is segmented experimental mode
   #   SEGMENTED_VHS_PROFILE: balanced
-  #   HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED: "true"
   #   SEGMENTED_SESSION_PREWARM_ENABLED: "true"
   #   SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: "5000"
   #
@@ -390,7 +387,7 @@ tidalSidecar:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-tidal-downloader
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: Always
   port: 8585
   resources:
@@ -417,7 +414,7 @@ ytmusicStreamer:
   enabled: false
   image:
     repository: ghcr.io/soundspan/soundspan-ytmusic-streamer
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: Always
   port: 8586
   resources:
@@ -470,7 +467,7 @@ audioAnalyzer:
   replicas: 1
   image:
     repository: ghcr.io/soundspan/soundspan-audio-analyzer
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: Always
   resources:
     requests:
@@ -506,7 +503,7 @@ audioAnalyzerClap:
   replicas: 1
   image:
     repository: ghcr.io/soundspan/soundspan-audio-analyzer-clap
-    tag: 1.3.2
+    tag: 1.3.3
     pullPolicy: Always
   resources:
     requests:
@@ -702,6 +699,7 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
+
 
 
 
