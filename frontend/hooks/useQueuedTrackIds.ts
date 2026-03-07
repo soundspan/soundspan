@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useListenTogether } from "@/lib/listen-together-context";
-import { resolveStableQueuedTrackIdSet } from "@/lib/queue-identity";
+
+function serializeQueuedTrackIds(trackIds: readonly string[]): string {
+    return JSON.stringify(Array.from(new Set(trackIds)).sort());
+}
 
 /**
  * Executes useQueuedTrackIds.
@@ -11,21 +14,15 @@ import { resolveStableQueuedTrackIdSet } from "@/lib/queue-identity";
 export function useQueuedTrackIds(): ReadonlySet<string> {
     const { queue } = useAudioState();
     const { isInGroup, activeGroup } = useListenTogether();
-    const previousSetRef = useRef<ReadonlySet<string> | null>(null);
 
-    const result = useMemo(() => {
-        let nextSet: ReadonlySet<string>;
-        if (isInGroup) {
-            const groupQueue = activeGroup?.playback?.queue ?? [];
-            nextSet = new Set(groupQueue.map((track) => track.id));
-        } else {
-            nextSet = new Set(queue.map((track) => track.id));
-        }
-
-        return resolveStableQueuedTrackIdSet(nextSet, previousSetRef.current);
+    const queuedTrackIdSignature = useMemo(() => {
+        const activeQueue = isInGroup ? activeGroup?.playback?.queue ?? [] : queue;
+        return serializeQueuedTrackIds(activeQueue.map((track) => track.id));
     }, [isInGroup, activeGroup?.playback?.queue, queue]);
 
-    useEffect(() => { previousSetRef.current = result; });
-
-    return result;
+    return useMemo(
+        () =>
+            new Set(JSON.parse(queuedTrackIdSignature) as string[]) as ReadonlySet<string>,
+        [queuedTrackIdSignature]
+    );
 }
