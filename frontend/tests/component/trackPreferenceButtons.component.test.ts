@@ -21,6 +21,7 @@ mock.module("lucide-react", {
 
 mock.module("@/hooks/useTrackPreference", {
     namedExports: {
+        buildPreferenceMetadata: () => undefined,
         useTrackPreference: () => ({
             signal: state.signal,
             isSaving: state.isSaving,

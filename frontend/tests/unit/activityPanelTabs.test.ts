@@ -101,6 +101,40 @@ test("getActivityPanelBadgeState counts social-only activity for non-admin users
     );
 });
 
+test("getActivityPanelBadgeState keeps notification badges for non-admin users", () => {
+    assert.deepEqual(
+        getActivityPanelBadgeState({
+            unreadCount: 2,
+            activeDownloadCount: 3,
+            socialUserCount: 0,
+            isAdmin: false,
+        }),
+        {
+            notificationBadge: 2,
+            activeBadge: null,
+            socialBadge: null,
+            hasActivity: true,
+        }
+    );
+});
+
+test("getActivityPanelBadgeState reports no activity when every badge is empty", () => {
+    assert.deepEqual(
+        getActivityPanelBadgeState({
+            unreadCount: 0,
+            activeDownloadCount: 0,
+            socialUserCount: 0,
+            isAdmin: true,
+        }),
+        {
+            notificationBadge: null,
+            activeBadge: null,
+            socialBadge: null,
+            hasActivity: false,
+        }
+    );
+});
+
 test("getActivityTabBadge returns the right badge for each tab branch", () => {
     const badgeState = getActivityPanelBadgeState({
         unreadCount: 9,

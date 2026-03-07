@@ -174,6 +174,7 @@ mock.module("@/hooks/useStreamBitrate", {
 
 mock.module("@/hooks/useTrackPreference", {
     namedExports: {
+        buildPreferenceMetadata: () => undefined,
         useTrackPreference: () => ({
             signal: "clear",
             isSaving: false,

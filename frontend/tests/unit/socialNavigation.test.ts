@@ -22,6 +22,10 @@ test("hasMyHistoryLink returns true when my-history entry exists", () => {
     );
 });
 
+test("hasMyHistoryLink returns false for empty navigation", () => {
+    assert.equal(hasMyHistoryLink([]), false);
+});
+
 test("quick links and sidebar include listen together destination", () => {
     assert.equal(
         MOBILE_QUICK_LINKS.some((link) => link.href === "/listen-together"),

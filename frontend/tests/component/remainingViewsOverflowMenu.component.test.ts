@@ -111,6 +111,7 @@ mock.module("@tanstack/react-query", {
 
 mock.module("@/hooks/useTrackPreference", {
     namedExports: {
+        buildPreferenceMetadata: () => undefined,
         useTrackPreference: () => ({
             signal: null,
             isSaving: false,

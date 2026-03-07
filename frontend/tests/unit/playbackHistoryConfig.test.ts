@@ -32,3 +32,18 @@ test("getImpactedHistoryCount returns expected counts for each range", () => {
     assert.equal(getImpactedHistoryCount(summary, "365d"), 730);
     assert.equal(getImpactedHistoryCount(summary, "all"), 1000);
 });
+
+test("getImpactedHistoryCount preserves zero-valued ranges", () => {
+    assert.equal(
+        getImpactedHistoryCount(
+            {
+                allTime: 0,
+                last7Days: 0,
+                last30Days: 0,
+                last365Days: 0,
+            },
+            "all"
+        ),
+        0
+    );
+});
