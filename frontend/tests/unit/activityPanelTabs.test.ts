@@ -118,6 +118,23 @@ test("getActivityPanelBadgeState keeps notification badges for non-admin users",
     );
 });
 
+test("getActivityPanelBadgeState keeps active badge when admin activity is the only signal", () => {
+    assert.deepEqual(
+        getActivityPanelBadgeState({
+            unreadCount: 0,
+            activeDownloadCount: 3,
+            socialUserCount: 0,
+            isAdmin: true,
+        }),
+        {
+            notificationBadge: null,
+            activeBadge: 3,
+            socialBadge: null,
+            hasActivity: true,
+        }
+    );
+});
+
 test("getActivityPanelBadgeState reports no activity when every badge is empty", () => {
     assert.deepEqual(
         getActivityPanelBadgeState({
@@ -147,4 +164,8 @@ test("getActivityTabBadge returns the right badge for each tab branch", () => {
     assert.equal(getActivityTabBadge("active", badgeState), 7);
     assert.equal(getActivityTabBadge("social", badgeState), 6);
     assert.equal(getActivityTabBadge("history", badgeState), null);
+});
+
+test("resolveActivityTab uses notifications as the default fallback", () => {
+    assert.equal(resolveActivityTab("history", []), "notifications");
 });

@@ -22,6 +22,16 @@ test("hasMyHistoryLink returns true when my-history entry exists", () => {
     );
 });
 
+test("hasMyHistoryLink short-circuits when my-history is the first entry", () => {
+    assert.equal(
+        hasMyHistoryLink([
+            { href: "/my-history" },
+            { href: "/library" },
+        ]),
+        true
+    );
+});
+
 test("hasMyHistoryLink returns false for empty navigation", () => {
     assert.equal(hasMyHistoryLink([]), false);
 });
