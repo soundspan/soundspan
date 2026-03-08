@@ -22,3 +22,4 @@ Constraints:
 - Use `verify` before `report_completion` for code changes.
 - Do not invent `files_changed` paths or receipt context.
 - If selection is unexpectedly empty, inspect the repo’s `.acm/acm-tests.yaml` selectors before forcing completion.
+- Repo-local verify scripts may enforce richer feature-plan schemas using `ACM_PLAN_KEY` / `ACM_RECEIPT_ID`. Keep the plan metadata and task structure current before running them.

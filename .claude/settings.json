@@ -1,8 +1,29 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-session-context.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-session-context.sh"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|NotebookEdit",
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit",
         "hooks": [
           {
             "type": "command",
@@ -13,11 +34,30 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-edit-state.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-receipt-mark.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-stop-guard.sh"
           }
         ]
       }
