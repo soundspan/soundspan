@@ -24,3 +24,4 @@ Use this companion when running `acm-broker` workflow inside Claude Code.
 - `verify:tests` is the built-in executable verification gate; `verify:diff-review` is optional workflow metadata.
 - `.acm/acm-workflows.yaml` may require additional task keys before `report_completion` should pass.
 - If retrieval is insufficient, refine task text and retrieve again.
+- For runtime or setup debugging, prefer direct CLI `acm status`; `acm doctor` is only an alias.

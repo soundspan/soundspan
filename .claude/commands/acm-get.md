@@ -21,6 +21,7 @@ Steps:
    - If status is `ok`, capture `receipt_id`.
    - Extract the `get_context` rules block (or rule pointers) and restate as hard MUST-follow rules.
    - Extract code/doc/test pointers and label them as advisory suggestions.
+   - If the user is debugging runtime or repo setup rather than asking for task context, prefer direct CLI `acm status` after retrieval.
 6. If plan/work contract artifacts are needed, build a `fetch` request with `receipt_id` shorthand first (add explicit `keys` only when targeting specific artifacts) and run:
    - `acm validate --in <fetch-request.json>`
    - `acm run --in <fetch-request.json>`

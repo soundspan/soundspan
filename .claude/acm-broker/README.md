@@ -21,6 +21,7 @@ This folder provides Claude Code slash-command prompts that mirror the `acm-brok
   - runs retrieval evaluation against an explicit eval suite.
 
 For compact rediscovery of archived plans, receipts, runs, and durable memories, use direct CLI `acm work search --scope all ...` for plan-only lookup or `acm history search --entity all ...`, `acm history search --entity memory ...`, or MCP `history_search`, then `fetch` the returned `fetch_keys`. The default command pack does not add a dedicated `/acm-history` slash command.
+For runtime and setup diagnostics, use direct CLI `acm status`. It reports active project/backend state, loaded ACM files, integrations, missing setup, and optional retrieval reasoning. `acm doctor` is only an alias.
 
 ## Install into a project
 
