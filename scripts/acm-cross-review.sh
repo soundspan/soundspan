@@ -102,6 +102,8 @@ receipt_fetch_path="${tmp_dir}/receipt-fetch.json"
 receipt_scope_paths_path="${tmp_dir}/receipt-scope-paths.txt"
 tracked_scope_path="${tmp_dir}/tracked-scope-paths.txt"
 untracked_scope_path="${tmp_dir}/untracked-scope-paths.txt"
+repo_changed_count=0
+scoped_changed_count=0
 
 cat >"${schema_path}" <<'JSON'
 {
@@ -183,6 +185,7 @@ PY
     printf '%s\n' "${tracked_changed}"
     printf '%s\n' "${untracked_changed}"
   } | awk 'NF && !seen[$0]++' >"${changed_files_path}"
+  repo_changed_count="$(grep -c '.' "${changed_files_path}" || true)"
 
   python3 - "${changed_files_path}" "${receipt_scope_paths_path}" <<'PY' >"${tmp_dir}/changed-files-scoped.txt"
 import sys
@@ -210,6 +213,12 @@ with open(changed_path, "r", encoding="utf-8") as handle:
             print(path)
 PY
   mv "${tmp_dir}/changed-files-scoped.txt" "${changed_files_path}"
+  scoped_changed_count="$(grep -c '.' "${changed_files_path}" || true)"
+
+  if (( repo_changed_count > 0 && scoped_changed_count == 0 )); then
+    printf 'FAIL: Review gate blocked before model execution: %s repo change(s), %s scoped change(s). Refresh /acm-get with a broader task before rerunning /acm-review.\n' "${repo_changed_count}" "${scoped_changed_count}"
+    exit 1
+  fi
 
   : >"${tracked_scope_path}"
   : >"${untracked_scope_path}"
@@ -266,6 +275,10 @@ $(if [[ -s "${changed_files_path}" ]]; then cat "${changed_files_path}"; else ec
 Diff summary:
 $(if [[ -s "${diff_summary_path}" ]]; then cat "${diff_summary_path}"; else echo "(no diff summary available)"; fi)
 
+Scope counts:
+- repo_changed: ${repo_changed_count}
+- scoped_changed: ${scoped_changed_count}
+
 Instructions:
 - Start by reading AGENTS.md and .acm/acm-workflows.yaml when present.
 - Treat the review scope as the active receipt scope plus ACM-managed governance files already allowed by completion reporting. Ignore dirty files outside the filtered changed-file list above.
@@ -301,7 +314,7 @@ codex_args=(
 
 codex "${codex_args[@]}" <"${prompt_path}"
 
-python3 - "${output_path}" <<'PY'
+python3 - "${output_path}" "${repo_changed_count}" "${scoped_changed_count}" <<'PY'
 import json
 import sys
 
@@ -314,10 +327,10 @@ summary = payload["summary"].strip()
 findings = [item.strip() for item in payload.get("findings", []) if item.strip()]
 
 if status == "pass":
-    print(f"PASS: {summary}")
+    print(f"PASS: {summary} (scoped {sys.argv[3]}/{sys.argv[2]} changed files)")
     sys.exit(0)
 
-print(f"FAIL: {summary}")
+print(f"FAIL: {summary} (scoped {sys.argv[3]}/{sys.argv[2]} changed files)")
 for index, finding in enumerate(findings, start=1):
     print(f"{index}. {finding}")
 sys.exit(1)

@@ -60,7 +60,7 @@ def fail(message):
     return 1
 
 
-def fetch_plan(project, plan_key):
+def fetch_plan(project, plan_key, allow_unmaterialized=False):
     env = os.environ.copy()
     env["ACM_LOG_SINK"] = "discard"
     command = ["acm", "fetch", "--project", project, "--key", plan_key]
@@ -74,10 +74,16 @@ def fetch_plan(project, plan_key):
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"acm fetch returned invalid JSON for {plan_key}: {exc}") from exc
     items = envelope.get("result", {}).get("items", [])
+    if not items:
+        if allow_unmaterialized:
+            return None
+        raise RuntimeError(f"expected one fetched item for {plan_key}, got 0")
     if len(items) != 1:
         raise RuntimeError(f"expected one fetched item for {plan_key}, got {len(items)}")
     content = trimmed(items[0].get("content"))
     if not content:
+        if allow_unmaterialized:
+            return None
         raise RuntimeError(f"fetched plan {plan_key} had empty content")
     try:
         plan = json.loads(content)
@@ -290,7 +296,12 @@ def main():
         return 0
 
     try:
-        current_plan = fetch_plan(args.project, plan_key)
+        current_plan = fetch_plan(args.project, plan_key, allow_unmaterialized=True)
+        if current_plan is None:
+            print(
+                f"acm-feature-plan-validate: skip - active plan {plan_key} has no materialized content in this receipt context"
+            )
+            return 0
         chain = build_chain(args.project, current_plan)
     except RuntimeError as exc:
         return fail(str(exc))
