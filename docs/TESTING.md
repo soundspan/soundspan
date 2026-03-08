@@ -174,9 +174,12 @@ ACM repo-contract checks:
 - `AGENTS.md`
 - `.acm/acm-rules.yaml`
 - `.acm/acm-tests.yaml`
+- `.acm/acm-workflows.yaml`
+- `scripts/acm-cross-review.sh`
 
 Promoted ACM verify quality gates:
 
+- `bash scripts/acm-cross-review.sh --help` (when the ACM review gate surface changes)
 - `npm --prefix backend run build`
 - `npm --prefix backend run test:coverage`
 - `npm --prefix frontend run lint`
@@ -189,6 +192,12 @@ Recommended local ACM validation:
 ```bash
 acm verify --project soundspan --phase review --file-changed <path>
 acm health --project soundspan --include-details
+```
+
+When the active receipt matches a repo-defined review gate in `.acm/acm-workflows.yaml`, run this before `acm report-completion`:
+
+```bash
+acm review --run --project soundspan --receipt-id <receipt-id>
 ```
 
 Examples:

@@ -13,7 +13,7 @@ tests:
       exit_code: 0
 
   - id: acm-health
-    summary: Ensure the ACM repo contract remains healthy
+    summary: Ensure the ACM repo contract and workflow gates remain healthy
     command:
       argv: ["acm", "health", "--project", "soundspan", "--include-details"]
     select:
@@ -24,12 +24,27 @@ tests:
           "CLAUDE.md",
           ".acm/**",
           ".claude/**",
+          ".githooks/**",
           ".gitignore",
           ".env.example",
+          "CONTRIBUTING.md",
+          "docs/README.md",
+          "docs/TESTING.md",
           ".github/workflows/pr-checks.yml",
           ".github/workflows/quality-visibility.yml",
-          ".github/PULL_REQUEST_TEMPLATE.md"
+          ".github/PULL_REQUEST_TEMPLATE.md",
+          "scripts/acm-cross-review.sh"
         ]
+    expected:
+      exit_code: 0
+
+  - id: acm-cross-review-help
+    summary: Ensure the ACM cross-review gate script parses and exposes help
+    command:
+      argv: ["bash", "scripts/acm-cross-review.sh", "--help"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["scripts/acm-cross-review.sh", ".acm/acm-workflows.yaml"]
     expected:
       exit_code: 0
 

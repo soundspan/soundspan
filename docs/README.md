@@ -73,6 +73,7 @@ This index is the central navigation page for all project documentation under `d
 Key ACM helper commands:
 - `acm get-context --project soundspan --task-text "<task>" --phase plan` starts scoped work.
 - `acm verify --project soundspan --phase review --file-changed <path>` runs repo-defined verification.
+- `acm review --run --project soundspan --receipt-id <receipt-id>` satisfies repo-defined workflow gates when `.acm/acm-workflows.yaml` selects the current task.
 - `acm health --project soundspan --include-details` checks ACM index/rules health.
 - `acm work search --project soundspan --scope all --query "<topic>"` finds current and historical work by topic.
 - `acm work list --project soundspan --scope all` lists the broader work inventory when you need to browse history.

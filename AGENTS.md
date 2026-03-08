@@ -5,7 +5,7 @@ Repository contract for `soundspan` after ACM onboarding.
 ## Source Of Truth
 
 - Follow this file first.
-- Canonical ACM rules, tags, and verification definitions live in `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, and `.acm/acm-tests.yaml`.
+- Canonical ACM rules, tags, verification definitions, and workflow-gate definitions live in `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, `.acm/acm-tests.yaml`, and `.acm/acm-workflows.yaml`.
 - `CLAUDE.md` and `.claude/acm-broker/**` are tool-specific companions only. If they disagree with this file, this file wins.
 - ACM work storage is the source of truth for active and historical plan state. Use `acm work list/search --scope all` when you need archived or completed history.
 
@@ -16,8 +16,9 @@ Repository contract for `soundspan` after ACM onboarding.
 3. Read the returned hard rules and fetch only the keys needed for the current step.
 4. If the task spans multiple steps, multiple files, or likely handoff, create or update ACM work with `acm work --project soundspan ...`.
 5. For code, config, onboarding, schema, or behavior changes, run `acm verify --project soundspan ...` before completion.
-6. Close the task with `acm report-completion --project soundspan ...`. Changed files must stay within the active receipt scope.
-7. Record reusable decisions and pitfalls with `acm propose-memory --project soundspan ...`. Evidence keys must come from the active receipt scope.
+6. If `.acm/acm-workflows.yaml` requires a review task such as `review:cross-llm`, satisfy it with `acm review --run --project soundspan --receipt-id <receipt-id>` when the task defines a `run` block; otherwise use manual review fields or `acm work`.
+7. Close the task with `acm report-completion --project soundspan ...`. Changed files must stay within the active receipt scope.
+8. Record reusable decisions and pitfalls with `acm propose-memory --project soundspan ...`. Evidence keys must come from the active receipt scope.
 
 ## Working Rules
 
@@ -39,10 +40,38 @@ Repository contract for `soundspan` after ACM onboarding.
   - exported TypeScript symbols should stay fully documented,
   - runtime Python modules should stay fully docstring-covered,
   - implemented OpenAPI routes should stay documented.
-- For non-trivial implementation work, run a read-only xhigh Codex review before final completion:
-  - `codex exec -c model="gpt-5.4" -c model_reasoning_effort="xhigh" --sandbox read-only --ephemeral "<context here>"`
+- For non-trivial implementation work, satisfy the repo-standard xhigh cross-LLM review gate before final completion:
+  - `acm review --run --project soundspan --receipt-id <receipt-id>`
+  - model and reasoning settings live in `.acm/acm-workflows.yaml`
 - If concurrent multi-agent plan storage is needed, configure `ACM_PG_DSN`. SQLite defaults to `.acm/context.db` and is repo-local.
 - Legacy `.agents/**` artifacts are migration input only. Active planning and resumable work now live in ACM.
+
+## Verification Evidence Protocol
+
+- Run the verification command. Read the COMPLETE output. Do not assume success.
+- Prefix all evidence claims with `verify:` (e.g., "verify: backend-build exit 0, 0 errors").
+- Never use: "should work", "probably fine", "looks correct", "appears to pass".
+- Evidence is stale after any subsequent code change. Re-verify after edits.
+- If verification fails, fix the issue OR report the failure honestly. Never claim success.
+
+## Debugging Protocol
+
+1. **Investigate**: Read full error output. Reproduce the issue. Trace data flow.
+2. **Analyze**: Compare to working code. Identify what changed.
+3. **Hypothesize**: Form ONE specific root-cause hypothesis.
+4. **Implement**: Apply targeted fix. Verify root cause resolved, not symptoms masked.
+5. **Escalate**: If 3 consecutive fix attempts fail, stop. Document what was tried and why each failed. Ask the user before continuing.
+
+## Definition of Done
+
+Before reporting completion, confirm ALL:
+
+- Requested change implemented; behavior explained (what, where, why).
+- `acm verify` passed for code/config/schema changes (paste evidence with `verify:` prefix).
+- Required workflow gates from `.acm/acm-workflows.yaml` satisfied before completion reporting.
+- `CHANGELOG.md` updated for behavior-visible changes.
+- No scope expansion beyond original request.
+- Documentation updated for new/changed exports, routes, or schemas.
 
 ## Historical Work Lookup
 
@@ -61,6 +90,8 @@ Use `acm work` when any of the following are true:
 - durable task state should survive compaction or session reset
 
 For executable changes, include a `verify:tests` task.
+
+For single review-gate updates, `acm review` is the thinner wrapper around `acm work`; use `acm review --run` for runnable workflow gates and reserve manual `status` / `outcome` / `evidence` fields for non-run mode.
 
 ## ACM Maintenance
 

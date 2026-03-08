@@ -18,6 +18,12 @@ rules:
     enforcement: hard
     tags: [work, planning]
 
+  - id: rule_workflow_gates_sync
+    summary: Keep workflow gates and ACM guidance aligned.
+    content: Changes to ACM workflow-gate behavior or repo-local review automation must keep `.acm/acm-workflows.yaml`, the root agent contracts, `.claude/acm-broker/**`, and any impacted maintainer docs or CI files semantically aligned. Update whichever of those surfaces the behavior change actually affects.
+    enforcement: hard
+    tags: [workflow, docs, claude]
+
   - id: rule_verify_before_completion
     summary: Verify executable changes before completion.
     content: For code, config, onboarding, schema, or behavior changes, run `acm verify --project soundspan ...` before `report_completion`.
@@ -48,8 +54,28 @@ rules:
     enforcement: hard
     tags: [plans, history, acm]
 
+  - id: rule_plan_before_code
+    summary: Plan multi-step work before writing implementation code.
+    content: |
+      For tasks with more than one implementation step, create ACM work
+      (via acm work) with explicit steps and acceptance criteria before
+      writing any implementation code. Single-file, single-purpose fixes
+      are exempt.
+    enforcement: hard
+    tags: [planning, workflow]
+
+  - id: rule_three_failure_escalation
+    summary: Stop and reassess after three failed fix attempts.
+    content: |
+      If three consecutive attempts to fix the same issue fail, stop.
+      Document what was tried and why each attempt failed. Reassess the
+      root-cause hypothesis before continuing. Ask the user for guidance
+      if the root cause is unclear.
+    enforcement: hard
+    tags: [debugging, workflow]
+
   - id: rule_xhigh_review
-    summary: Run the repo-standard xhigh Codex review for substantial implementation work.
-    content: Before final completion on non-trivial implementation work, run the read-only xhigh Codex review command and incorporate or report the findings.
+    summary: Run the repo-standard xhigh cross-LLM review for substantial implementation work.
+    content: Before final completion on non-trivial implementation work, satisfy the repo review gate with `acm review --run --project soundspan --receipt-id <receipt-id>`. Keep model and reasoning settings in `.acm/acm-workflows.yaml`.
     enforcement: soft
-    tags: [review, codex]
+    tags: [review, codex, workflow]

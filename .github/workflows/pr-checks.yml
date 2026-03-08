@@ -49,6 +49,7 @@ jobs:
               AGENTS.md \
               .acm/acm-rules.yaml \
               .acm/acm-tests.yaml \
+              .acm/acm-workflows.yaml \
               .github/workflows/pr-checks.yml > /tmp/acm-changed-files.txt
           fi
 

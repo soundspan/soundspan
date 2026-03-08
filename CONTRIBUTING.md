@@ -9,6 +9,16 @@ First off, thanks for taking the time to contribute! 🎉
 3. Set up the development environment (see README.md)
 4. Create a new branch from `main` for your changes
 
+## Git Hooks
+
+After cloning, activate the repo's pre-commit hook:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This runs `acm verify` on staged code files before each commit.
+
 ## Branch Strategy
 
 All development happens on the `main` branch:
@@ -158,6 +168,7 @@ Repository workflow and verification now run through ACM rather than the legacy 
 - Repo contract: `AGENTS.md`
 - ACM rules: `.acm/acm-rules.yaml`
 - ACM tests: `.acm/acm-tests.yaml`
+- ACM workflow gates: `.acm/acm-workflows.yaml`
 - PR gate: `.github/workflows/pr-checks.yml` (`acm-health` job)
 
 Run locally before pushing:
@@ -166,6 +177,12 @@ Run locally before pushing:
 acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
 acm verify --project soundspan --phase review --file-changed <path>
 acm health --project soundspan --include-details
+```
+
+When the active receipt matches a repo-defined review gate, also run:
+
+```bash
+acm review --run --project soundspan --receipt-id <receipt-id>
 ```
 
 ## Pull Request Process

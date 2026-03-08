@@ -10,7 +10,7 @@ Steps:
    - receipt or plan context
    - `files_changed[]`
    - optional `phase`
-2. Build valid `acm.v1` `verify` JSON using the active `project_id`.
+2. Build valid `acm.v1` `verify` JSON using the active `project_id` (or omit it when `ACM_PROJECT_ID` / repo-root inference is already configured).
 3. Include `receipt_id` or `plan_key` when available so `verify` can update `verify:tests`.
 4. Validate:
    - `acm validate --in <request.json>`
