@@ -104,7 +104,12 @@ describe("listen together socket runtime behavior", () => {
             next: jest.fn(),
             previous: jest.fn(),
             setTrack: jest.fn(),
-            modifyQueue: jest.fn(),
+            modifyQueue: jest.fn(() => ({
+                queue: [{ id: "track-1" }],
+                currentIndex: 0,
+                trackId: "track-1",
+                stateVersion: 1,
+            })),
             reportReady: jest.fn(),
         };
         const joinGroupById = jest.fn(async () => ({
@@ -159,6 +164,7 @@ describe("listen together socket runtime behavior", () => {
         jest.doMock("../listenTogetherManager", () => ({
             groupManager,
             GroupError: MockGroupError,
+            MAX_QUEUE_SIZE: 500,
         }));
         jest.doMock("../listenTogether", () => ({
             joinGroupById,
@@ -367,7 +373,43 @@ describe("listen together socket runtime behavior", () => {
             "user-1",
             { action: "add", items: [{ id: "track-1" }] }
         );
-        expect(queueAddAck).toHaveBeenCalledWith({ ok: true });
+        expect(queueAddAck).toHaveBeenCalledWith({
+            ok: true,
+            acceptedCount: 1,
+            skippedCount: 0,
+            truncated: false,
+        });
+
+        mocks.groupManager.snapshotById.mockReturnValue({
+            playback: {
+                queue: Array.from({ length: 499 }, (_, index) => ({
+                    id: `existing-${index}`,
+                })),
+            },
+        });
+        mocks.validateQueueTracks.mockResolvedValueOnce([{ id: "track-a" }]);
+        mocks.groupManager.modifyQueue.mockReturnValueOnce({
+            queue: Array.from({ length: 500 }, (_, index) => ({
+                id: index === 499 ? "track-a" : `existing-${index}`,
+            })),
+            currentIndex: 0,
+            trackId: "track-a",
+            stateVersion: 2,
+        });
+        const queueTruncateAck = jest.fn();
+        await eventHandlers["queue"](
+            { action: "add", trackIds: ["track-a", "track-b"] },
+            queueTruncateAck
+        );
+        expect(mocks.validateQueueTracks).toHaveBeenLastCalledWith([
+            { trackId: "track-a" },
+        ]);
+        expect(queueTruncateAck).toHaveBeenCalledWith({
+            ok: true,
+            acceptedCount: 1,
+            skippedCount: 1,
+            truncated: true,
+        });
 
         const readyAck = jest.fn();
         await eventHandlers["ready"](readyAck);

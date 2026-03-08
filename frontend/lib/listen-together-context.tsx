@@ -1390,12 +1390,7 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 }
             }
 
-            if (queueTracks.length > 500) {
-                const msg = `Queue has ${queueTracks.length} tracks — Listen Together supports up to 500. Remove some tracks and try again.`;
-                setError(msg);
-                toast.error(msg);
-                return null;
-            }
+            const requestedQueueTrackCount = queueTracks.length;
 
             const group = await api.createListenGroup({
                 name: options?.name,
@@ -1405,6 +1400,12 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 currentTimeMs,
                 isPlaying,
             });
+
+            if (requestedQueueTrackCount > 500) {
+                toast.info(
+                    "Listen Together kept the first 500 tracks from the current queue"
+                );
+            }
 
             lastAppliedVersionRef.current = group.playback?.stateVersion ?? 0;
             activeGroupRef.current = group;

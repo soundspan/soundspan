@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Listen Together queue creation and shared-queue additions once again truncate overflow beyond the 500-track cap instead of rejecting oversized requests outright.
+
 ## [1.3.3] - 2026-03-07
 
 ### Added

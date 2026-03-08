@@ -23,6 +23,7 @@ import {
 import {
     groupManager,
     GroupError,
+    MAX_QUEUE_SIZE,
     type ManagerCallbacks,
     type GroupSnapshot,
     type PlaybackDelta,
@@ -806,6 +807,8 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                     return;
                 }
 
+                let ackPayload: Record<string, unknown> = { ok: true };
+
                 switch (data.action) {
                     case "add": {
                         const queueTrackInputs =
@@ -818,21 +821,60 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                             sendAck(ack, { error: "trackIds required" });
                             return;
                         }
-                        const items = await validateQueueTracks(queueTrackInputs);
+
+                        const queueLength =
+                            groupManager.snapshotById(groupId)?.playback.queue.length ?? 0;
+                        const allowedInputs = queueTrackInputs.slice(
+                            0,
+                            Math.max(0, MAX_QUEUE_SIZE - queueLength)
+                        );
+                        if (allowedInputs.length === 0) {
+                            ackPayload = {
+                                ok: true,
+                                acceptedCount: 0,
+                                skippedCount: queueTrackInputs.length,
+                                truncated: queueTrackInputs.length > 0,
+                            };
+                            break;
+                        }
+
+                        const items = await validateQueueTracks(allowedInputs);
                         if (items.length === 0) {
                             sendAck(ack, { error: "No valid tracks found" });
                             return;
                         }
+
+                        let acceptedCount = 0;
+                        let truncated = allowedInputs.length < queueTrackInputs.length;
                         await withGroupMutationLock(
                             groupId,
                             "queue:add",
                             async () => {
-                                groupManager.modifyQueue(groupId, userId, {
+                                const beforeQueueLength =
+                                    groupManager.snapshotById(groupId)?.playback.queue.length ??
+                                    0;
+                                const delta = groupManager.modifyQueue(groupId, userId, {
                                     action: "add",
                                     items,
                                 });
+                                acceptedCount = Math.max(
+                                    0,
+                                    delta.queue.length - beforeQueueLength
+                                );
+                                if (acceptedCount < items.length) {
+                                    truncated = true;
+                                }
                             }
                         );
+                        ackPayload = {
+                            ok: true,
+                            acceptedCount,
+                            skippedCount: Math.max(
+                                0,
+                                queueTrackInputs.length - acceptedCount
+                            ),
+                            truncated,
+                        };
                         break;
                     }
                     case "insert-next": {
@@ -846,23 +888,60 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                             sendAck(ack, { error: "trackIds required" });
                             return;
                         }
-                        const insertItems = await validateQueueTracks(
-                            queueTrackInputs
+
+                        const queueLength =
+                            groupManager.snapshotById(groupId)?.playback.queue.length ?? 0;
+                        const allowedInputs = queueTrackInputs.slice(
+                            0,
+                            Math.max(0, MAX_QUEUE_SIZE - queueLength)
                         );
+                        if (allowedInputs.length === 0) {
+                            ackPayload = {
+                                ok: true,
+                                acceptedCount: 0,
+                                skippedCount: queueTrackInputs.length,
+                                truncated: queueTrackInputs.length > 0,
+                            };
+                            break;
+                        }
+
+                        const insertItems = await validateQueueTracks(allowedInputs);
                         if (insertItems.length === 0) {
                             sendAck(ack, { error: "No valid tracks found" });
                             return;
                         }
+
+                        let acceptedCount = 0;
+                        let truncated = allowedInputs.length < queueTrackInputs.length;
                         await withGroupMutationLock(
                             groupId,
                             "queue:insert-next",
                             async () => {
-                                groupManager.modifyQueue(groupId, userId, {
+                                const beforeQueueLength =
+                                    groupManager.snapshotById(groupId)?.playback.queue.length ??
+                                    0;
+                                const delta = groupManager.modifyQueue(groupId, userId, {
                                     action: "insert-next",
                                     items: insertItems,
                                 });
+                                acceptedCount = Math.max(
+                                    0,
+                                    delta.queue.length - beforeQueueLength
+                                );
+                                if (acceptedCount < insertItems.length) {
+                                    truncated = true;
+                                }
                             }
                         );
+                        ackPayload = {
+                            ok: true,
+                            acceptedCount,
+                            skippedCount: Math.max(
+                                0,
+                                queueTrackInputs.length - acceptedCount
+                            ),
+                            truncated,
+                        };
                         break;
                     }
                     case "remove": {
@@ -918,7 +997,7 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                         sendAck(ack, { error: `Unknown action: ${data.action}` });
                         return;
                 }
-                sendAck(ack, { ok: true });
+                sendAck(ack, ackPayload);
             } catch (err) {
                 const message = err instanceof GroupError ? err.message : "Queue error";
                 if (err instanceof GroupError && err.code === "CONFLICT") {

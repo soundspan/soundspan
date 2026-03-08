@@ -195,6 +195,9 @@ interface ListenTogetherAckResponse {
     transient?: boolean;
     retryable?: boolean;
     retryAfterMs?: number;
+    acceptedCount?: number;
+    skippedCount?: number;
+    truncated?: boolean;
 }
 
 interface EmitRetryPolicy {
@@ -558,12 +561,24 @@ export class ListenTogetherSocket {
         return this.emit("playback", { action: "set-track", index }, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
-    addToQueue(tracks: string[] | QueueTrackInput[]): Promise<void> {
-        return this.emit("queue", this.buildQueuePayload("add", tracks));
+    async addToQueue(
+        tracks: string[] | QueueTrackInput[]
+    ): Promise<{ acceptedCount: number; skippedCount: number; truncated: boolean }> {
+        const response = await this.emitWithResponse(
+            "queue",
+            this.buildQueuePayload("add", tracks)
+        );
+        return this.resolveQueueMutationResult(response, tracks.length);
     }
 
-    insertNext(tracks: string[] | QueueTrackInput[]): Promise<void> {
-        return this.emit("queue", this.buildQueuePayload("insert-next", tracks));
+    async insertNext(
+        tracks: string[] | QueueTrackInput[]
+    ): Promise<{ acceptedCount: number; skippedCount: number; truncated: boolean }> {
+        const response = await this.emitWithResponse(
+            "queue",
+            this.buildQueuePayload("insert-next", tracks)
+        );
+        return this.resolveQueueMutationResult(response, tracks.length);
     }
 
     removeFromQueue(index: number): Promise<void> {
@@ -613,12 +628,22 @@ export class ListenTogetherSocket {
         data?: unknown,
         retryPolicy?: EmitRetryPolicy
     ): Promise<void> {
+        await this.emitWithResponse(event, data, retryPolicy);
+    }
+
+    private async emitWithResponse<
+        TResponse extends ListenTogetherAckResponse = ListenTogetherAckResponse,
+    >(
+        event: string,
+        data?: unknown,
+        retryPolicy?: EmitRetryPolicy
+    ): Promise<TResponse> {
         let retries = 0;
 
         while (true) {
             const response = await this.emitOnce(event, data);
             if (!response?.error) {
-                return;
+                return response as TResponse;
             }
 
             if (
@@ -667,6 +692,25 @@ export class ListenTogetherSocket {
             return { action, trackIds: tracks as string[] };
         }
         return { action, tracks: tracks as QueueTrackInput[] };
+    }
+
+    private resolveQueueMutationResult(
+        response: ListenTogetherAckResponse,
+        requestedCount: number
+    ): { acceptedCount: number; skippedCount: number; truncated: boolean } {
+        const acceptedCount =
+            typeof response.acceptedCount === "number" && Number.isFinite(response.acceptedCount)
+                ? Math.max(0, Math.trunc(response.acceptedCount))
+                : requestedCount;
+        const skippedCount =
+            typeof response.skippedCount === "number" && Number.isFinite(response.skippedCount)
+                ? Math.max(0, Math.trunc(response.skippedCount))
+                : Math.max(0, requestedCount - acceptedCount);
+        return {
+            acceptedCount,
+            skippedCount,
+            truncated: response.truncated === true,
+        };
     }
 
     private isTransientConflictAck(response: ListenTogetherAckResponse): boolean {

@@ -172,6 +172,14 @@ function clampIndex(index: number, length: number): number {
     return clamp(index, 0, length - 1);
 }
 
+function truncateQueueItemsToAvailableCapacity(
+    queueLength: number,
+    items: SyncQueueItem[]
+): SyncQueueItem[] {
+    const remainingCapacity = Math.max(0, MAX_QUEUE_SIZE - queueLength);
+    return remainingCapacity > 0 ? items.slice(0, remainingCapacity) : [];
+}
+
 /** Compute the "live" position in ms, accounting for elapsed time. */
 function computePosition(pb: GroupPlayback): number {
     if (!pb.isPlaying) return pb.positionMs;
@@ -749,37 +757,42 @@ class GroupManager {
         this.requireQueueEdit(group, userId);
 
         const pb = group.playback;
+        let queueChanged = false;
 
         switch (action.action) {
             case "add": {
-                if (pb.queue.length + action.items.length > MAX_QUEUE_SIZE) {
-                    throw new GroupError(
-                        "INVALID",
-                        `Queue cannot exceed ${MAX_QUEUE_SIZE} tracks`,
-                    );
+                const acceptedItems = truncateQueueItemsToAvailableCapacity(
+                    pb.queue.length,
+                    action.items
+                );
+                if (acceptedItems.length === 0) {
+                    return this.queueDelta(group);
                 }
-                pb.queue.push(...action.items);
+                pb.queue.push(...acceptedItems);
                 // If queue was empty and we just added tracks, set up the first track
-                if (pb.queue.length === action.items.length) {
+                if (pb.queue.length === acceptedItems.length) {
                     pb.currentIndex = 0;
                     group.syncState = "paused";
                 }
+                queueChanged = true;
                 break;
             }
             case "insert-next": {
-                if (pb.queue.length + action.items.length > MAX_QUEUE_SIZE) {
-                    throw new GroupError(
-                        "INVALID",
-                        `Queue cannot exceed ${MAX_QUEUE_SIZE} tracks`,
-                    );
+                const acceptedItems = truncateQueueItemsToAvailableCapacity(
+                    pb.queue.length,
+                    action.items
+                );
+                if (acceptedItems.length === 0) {
+                    return this.queueDelta(group);
                 }
                 const insertAt = pb.currentIndex + 1;
-                pb.queue.splice(insertAt, 0, ...action.items);
+                pb.queue.splice(insertAt, 0, ...acceptedItems);
                 // If queue was empty before, set up the first track
-                if (pb.queue.length === action.items.length) {
+                if (pb.queue.length === acceptedItems.length) {
                     pb.currentIndex = 0;
                     group.syncState = "paused";
                 }
+                queueChanged = true;
                 break;
             }
             case "remove": {
@@ -803,6 +816,7 @@ class GroupManager {
                     pb.positionMs = 0;
                     pb.lastPositionUpdate = Date.now();
                 }
+                queueChanged = true;
                 break;
             }
             case "reorder": {
@@ -815,21 +829,20 @@ class GroupManager {
                 pb.positionMs = 0;
                 pb.lastPositionUpdate = Date.now();
                 group.syncState = "idle";
+                queueChanged = true;
                 break;
             }
+        }
+
+        if (!queueChanged) {
+            return this.queueDelta(group);
         }
 
         pb.stateVersion++;
         group.lastActivity = Date.now();
         group.dirty = true;
 
-        const delta: QueueDelta = {
-            queue: pb.queue,
-            currentIndex: pb.currentIndex,
-            trackId: currentTrackId(pb),
-            stateVersion: pb.stateVersion,
-        };
-
+        const delta = this.queueDelta(group);
         this.callbacks?.onQueueDelta(groupId, delta);
         return delta;
     }
@@ -1048,6 +1061,16 @@ class GroupManager {
             stateVersion: pb.stateVersion,
             currentIndex: pb.currentIndex,
             trackId: currentTrackId(pb),
+        };
+    }
+
+    private queueDelta(group: GroupState): QueueDelta {
+        const pb = group.playback;
+        return {
+            queue: pb.queue,
+            currentIndex: pb.currentIndex,
+            trackId: currentTrackId(pb),
+            stateVersion: pb.stateVersion,
         };
     }
 

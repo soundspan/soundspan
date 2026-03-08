@@ -1108,7 +1108,7 @@ describe("listenTogetherManager runtime behavior", () => {
         });
     });
 
-    it("enforces MAX_QUEUE_SIZE on add and insert-next", () => {
+    it("truncates add and insert-next operations to MAX_QUEUE_SIZE", () => {
         const callbacks = createCallbacks();
         groupManager.setCallbacks(callbacks);
 
@@ -1130,34 +1130,46 @@ describe("listenTogetherManager runtime behavior", () => {
         });
         groupManager.addMember("g-cap", "u1", "User 1");
 
-        // Adding 1 track to a queue of MAX-1 should succeed (hits exactly MAX)
-        const delta = groupManager.modifyQueue("g-cap", "u1", {
+        const partialAdd = groupManager.modifyQueue("g-cap", "u1", {
             action: "add",
-            items: [track("fill")],
+            items: [track("fill"), track("overflow")],
         });
-        expect(delta.queue).toHaveLength(MAX_QUEUE_SIZE);
+        expect(partialAdd.queue).toHaveLength(MAX_QUEUE_SIZE);
+        expect(partialAdd.queue.at(-1)?.id).toBe("fill");
+        expect(partialAdd.queue.some((item) => item.id === "overflow")).toBe(false);
 
-        // Adding another track should fail — already at cap
-        expect(() =>
-            groupManager.modifyQueue("g-cap", "u1", {
-                action: "add",
-                items: [track("overflow")],
-            })
-        ).toThrow(GroupError);
-        expect(() =>
-            groupManager.modifyQueue("g-cap", "u1", {
-                action: "add",
-                items: [track("overflow")],
-            })
-        ).toThrow(/queue.*500/i);
+        const noOpAdd = groupManager.modifyQueue("g-cap", "u1", {
+            action: "add",
+            items: [track("overflow-2")],
+        });
+        expect(noOpAdd.queue).toHaveLength(MAX_QUEUE_SIZE);
+        expect(noOpAdd.stateVersion).toBe(partialAdd.stateVersion);
 
-        // insert-next should also fail at cap
-        expect(() =>
-            groupManager.modifyQueue("g-cap", "u1", {
-                action: "insert-next",
-                items: [track("overflow-insert")],
-            })
-        ).toThrow(GroupError);
+        const insertTracks = Array.from({ length: MAX_QUEUE_SIZE - 1 }, (_, i) =>
+            track(`insert-${i}`)
+        );
+        groupManager.create("g-cap-insert", {
+            name: "Cap Insert Test",
+            joinCode: "CAP2",
+            groupType: "collaborative",
+            visibility: "public",
+            hostUserId: "u2",
+            hostUsername: "User 2",
+            queue: insertTracks,
+            currentIndex: 0,
+            currentTimeMs: 0,
+            isPlaying: false,
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-cap-insert", "u2", "User 2");
+
+        const partialInsert = groupManager.modifyQueue("g-cap-insert", "u2", {
+            action: "insert-next",
+            items: [track("inserted"), track("dropped")],
+        });
+        expect(partialInsert.queue).toHaveLength(MAX_QUEUE_SIZE);
+        expect(partialInsert.queue[1]?.id).toBe("inserted");
+        expect(partialInsert.queue.some((item) => item.id === "dropped")).toBe(false);
     });
 
     it("truncates oversized queue on hydrate", () => {

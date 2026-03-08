@@ -85,6 +85,43 @@ function toListenTogetherQueueTrack(
     }
 }
 
+function showListenTogetherQueueMutationToasts(
+    result: { acceptedCount: number; skippedCount: number; truncated: boolean },
+    messages: {
+        singleAccepted: string;
+        multiAccepted: (acceptedCount: number) => string;
+        noneAccepted?: string;
+    }
+): void {
+    if (result.acceptedCount > 0) {
+        toast.success(
+            result.acceptedCount === 1
+                ? messages.singleAccepted
+                : messages.multiAccepted(result.acceptedCount)
+        );
+    } else {
+        toast.info(
+            messages.noneAccepted ??
+                "Group queue is already at the 500-track cap"
+        );
+    }
+
+    if (result.truncated && result.skippedCount > 0) {
+        toast.info(
+            result.acceptedCount > 0
+                ? `${result.skippedCount} track${result.skippedCount === 1 ? " was" : "s were"} skipped because Listen Together queues keep only the first 500 tracks`
+                : "Listen Together queues keep only the first 500 tracks. The group queue is already full."
+        );
+        return;
+    }
+
+    if (result.skippedCount > 0) {
+        toast.info(
+            `Skipped ${result.skippedCount} track${result.skippedCount === 1 ? "" : "s"} while updating the group queue`
+        );
+    }
+}
+
 export type QueueNavigationAction = "next" | "previous";
 
 export interface ResolveQueueNavigationIndexInput {
@@ -428,7 +465,15 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
                 void listenTogetherSocket
                     .addToQueue([queueTrack])
-                    .then(() => toast.success(`Added "${track.title}" to group queue`))
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                acceptedCount === 1
+                                    ? `Added "${track.title}" to group queue`
+                                    : `Added ${acceptedCount} tracks to group queue`,
+                        });
+                    })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
                     });
@@ -492,13 +537,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 const trackPayloads = queueTracks.map((entry) => entry.queueTrack);
                 void listenTogetherSocket
                     .addToQueue(trackPayloads)
-                    .then(() => {
-                        const count = trackPayloads.length;
-                        toast.success(
-                            count === 1
-                                ? `Added "${queueTracks[0].track.title}" to group queue`
-                                : `Added ${count} tracks to group queue`
-                        );
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${queueTracks[0].track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                `Added ${acceptedCount} tracks to group queue`,
+                        });
                     })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add tracks to Listen Together queue");
@@ -877,13 +921,13 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 const trackPayloads = queueTracks.map((entry) => entry.queueTrack);
                 listenTogetherSocket
                     .addToQueue(trackPayloads)
-                    .then(() => {
+                    .then((result) => {
                         if (!shouldToastSuccess) return;
-                        if (queueTracks.length === 1) {
-                            toast.success(`Added "${queueTracks[0].track.title}" to group queue`);
-                        } else {
-                            toast.success(`Added ${queueTracks.length} tracks to group queue`);
-                        }
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${queueTracks[0].track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                `Added ${acceptedCount} tracks to group queue`,
+                        });
                     })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
@@ -1005,7 +1049,15 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 }
                 void listenTogetherSocket
                     .insertNext([queueTrack])
-                    .then(() => toast.success(`Playing "${track.title}" next in group queue`))
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Playing "${track.title}" next in group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                acceptedCount === 1
+                                    ? `Playing "${track.title}" next in group queue`
+                                    : `Added ${acceptedCount} tracks to group queue`,
+                        });
+                    })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
                     });
@@ -1084,7 +1136,15 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 }
                 void listenTogetherSocket
                     .addToQueue([queueTrack])
-                    .then(() => toast.success(`Added "${track.title}" to group queue`))
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                acceptedCount === 1
+                                    ? `Added "${track.title}" to group queue`
+                                    : `Added ${acceptedCount} tracks to group queue`,
+                        });
+                    })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
                     });
@@ -1502,13 +1562,18 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     }
                 }
 
-                await listenTogetherSocket.addToQueue(uniqueQueueIds);
-                toast.success(
-                    uniqueQueueIds.length === 1
-                        ? "Added 1 track to group queue"
-                        : `Added ${uniqueQueueIds.length} tracks to group queue`
+                const queueResult = await listenTogetherSocket.addToQueue(
+                    uniqueQueueIds
                 );
-                return { success: true, trackCount: uniqueQueueIds.length };
+                showListenTogetherQueueMutationToasts(queueResult, {
+                    singleAccepted: "Added 1 track to group queue",
+                    multiAccepted: (acceptedCount) =>
+                        `Added ${acceptedCount} tracks to group queue`,
+                });
+                return {
+                    success: queueResult.acceptedCount > 0,
+                    trackCount: queueResult.acceptedCount,
+                };
             }
 
             // Disable shuffle when vibe mode starts - vibe queue is sorted by similarity
