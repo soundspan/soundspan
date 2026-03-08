@@ -24,4 +24,4 @@
 - ACM rules/tags/tests/workflows: `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, `.acm/acm-tests.yaml`, `.acm/acm-workflows.yaml`
 - Claude command assets: `.claude/commands/`, `.claude/acm-broker/`
 - If command assets are missing, reinstall the command pack with `bash <(curl -fsSL https://raw.githubusercontent.com/bonztm/agent-context-manager/main/scripts/install-skill-pack.sh) --claude`
-- Do not start every task with `acm sync`. Use `sync` or `health-fix` only when context is stale or after editing `.acm/**` or agent-steering files.
+- Do not start every task with `acm sync`. Use `sync`, `health --apply`, or targeted `health --fix <name> --apply` only when context is stale or after editing `.acm/**` or agent-steering files.

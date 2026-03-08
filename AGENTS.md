@@ -110,7 +110,7 @@ Bootstrap this repo with:
 
 - `acm bootstrap --project soundspan --project-root .`
 
-Do not prepend `acm sync` to every workflow. Start with `acm get-context`; use `sync` or `health-fix` when context looks stale, when newly created files are missing from retrieval, after editing `.acm/**` or repo-local agent-steering assets, or when entering a fresh worktree that has not been synced yet.
+Do not prepend `acm sync` to every workflow. Start with `acm get-context`; use `sync`, `health --apply`, or targeted `health --fix <name> --apply` when context looks stale, when newly created files are missing from retrieval, after editing `.acm/**` or repo-local agent-steering assets, or when entering a fresh worktree that has not been synced yet.
 
 After editing `.acm/**`, root agent contracts, or repo-local Claude ACM assets:
 
@@ -119,7 +119,8 @@ After editing `.acm/**`, root agent contracts, or repo-local Claude ACM assets:
 
 Useful maintenance commands:
 
-- `acm health-fix --project soundspan --apply` when ACM-managed state needs repair without a broader manual sync flow
+- `acm health --project soundspan --apply` when ACM-managed state needs repair without a broader manual sync flow
+- `acm health --project soundspan --fix sync_ruleset --apply` when you only need to refresh canonical rules
 - `acm coverage --project soundspan --project-root .` to measure indexing coverage and spot retrieval gaps
 
 ## Worktrees
