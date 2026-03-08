@@ -12,6 +12,7 @@
 8. EVIDENCE: When claiming verification passed, show actual command output. NEVER say "should work", "probably fine", or "looks correct".
 9. MULTI-STEP WORK: Use `/acm-work` for tasks spanning multiple files or steps. Include `verify:tests` for executable changes.
 10. BOUNDARIES: API calls through `frontend/lib/api.ts`. Logging through shared helpers. DB access through Prisma. No exceptions.
+11. FEATURE PLANS: For net-new feature work, create a root ACM plan with `kind=feature`, explicit scope metadata, top-level `stage:*` tasks, and child tasks linked with `parent_task_key`. Use `kind=feature_stream` plus `parent_plan_key` for split execution streams, and let `acm verify` run `acm-feature-plan-validate` against the active receipt/plan when relevant work changes.
 
 ## Workflow
 

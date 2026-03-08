@@ -169,6 +169,7 @@ Repository workflow and verification now run through ACM rather than the legacy 
 - ACM rules: `.acm/acm-rules.yaml`
 - ACM tests: `.acm/acm-tests.yaml`
 - ACM workflow gates: `.acm/acm-workflows.yaml`
+- ACM feature plan schema: `docs/ACM_FEATURE_PLANS.md`
 - PR gate: `.github/workflows/pr-checks.yml` (`acm-health` job)
 
 Run locally before pushing:
@@ -184,6 +185,8 @@ When the active receipt matches a repo-defined review gate, also run:
 ```bash
 acm review --run --project soundspan --receipt-id <receipt-id>
 ```
+
+For net-new feature work, use the repo-local ACM feature plan schema from `docs/ACM_FEATURE_PLANS.md`: root plans use `kind=feature`, split execution streams use `kind=feature_stream`, and `acm verify` enforces the required hierarchy and metadata through `scripts/acm-feature-plan-validate.py`.
 
 ## Pull Request Process
 

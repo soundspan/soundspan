@@ -93,6 +93,17 @@ For executable changes, include a `verify:tests` task.
 
 For single review-gate updates, `acm review` is the thinner wrapper around `acm work`; use `acm review --run` for runnable workflow gates and reserve manual `status` / `outcome` / `evidence` fields for non-run mode.
 
+## Feature Plans
+
+- For net-new feature work, create a root ACM plan with `kind=feature` before implementation.
+- Root feature plans must include `objective`, `in_scope`, `out_of_scope`, `constraints`, `references`, and stage statuses for `spec_outline`, `refined_spec`, and `implementation_plan`.
+- Root feature plans must include top-level `stage:spec-outline`, `stage:refined-spec`, and `stage:implementation-plan` tasks. Put concrete child tasks beneath them with `parent_task_key`.
+- If a feature splits into multiple execution streams, create child plans with `kind=feature_stream` and `parent_plan_key=<root plan key>`.
+- Feature and feature-stream plans must carry `verify:tests`, and implementation leaf tasks must carry explicit `acceptance_criteria`.
+- `acm verify` selects `acm-feature-plan-validate` for feature-relevant work and runs `scripts/acm-feature-plan-validate.py` with the active receipt/plan context.
+- The validator enforces the schema for `kind=feature` and `kind=feature_stream` plans and exits cleanly for other plan kinds.
+- See `docs/ACM_FEATURE_PLANS.md` for examples and command shapes.
+
 ## ACM Maintenance
 
 Bootstrap this repo with:

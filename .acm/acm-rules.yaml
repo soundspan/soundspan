@@ -64,6 +64,12 @@ rules:
     enforcement: hard
     tags: [planning, workflow]
 
+  - id: rule_feature_plan_schema
+    summary: Use the repo-local ACM feature plan schema for net-new feature work.
+    content: For net-new feature work, create a root ACM plan with `kind=feature`, explicit objective and scope metadata, `spec_outline` / `refined_spec` / `implementation_plan` stage statuses, and top-level `stage:*` tasks that own child tasks through `parent_task_key`. When a feature splits into multiple workstreams, create child plans with `kind=feature_stream` and `parent_plan_key` pointing at the root feature plan. `acm verify` enforces this schema through `scripts/acm-feature-plan-validate.py`.
+    enforcement: hard
+    tags: [planning, workflow, docs]
+
   - id: rule_three_failure_escalation
     summary: Stop and reassess after three failed fix attempts.
     content: |

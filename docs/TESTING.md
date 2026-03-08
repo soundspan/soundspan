@@ -176,6 +176,7 @@ ACM repo-contract checks:
 - `.acm/acm-tests.yaml`
 - `.acm/acm-workflows.yaml`
 - `scripts/acm-cross-review.sh`
+- `scripts/acm-feature-plan-validate.py`
 
 Promoted ACM verify quality gates:
 
@@ -199,6 +200,14 @@ When the active receipt matches a repo-defined review gate in `.acm/acm-workflow
 ```bash
 acm review --run --project soundspan --receipt-id <receipt-id>
 ```
+
+When the active plan is a repo-local feature plan, keep the plan itself in the ACM `kind=feature` / `kind=feature_stream` schema described in `docs/ACM_FEATURE_PLANS.md`, then run `acm verify` with the active receipt and changed files so the validator is selected:
+
+```bash
+acm verify --project soundspan --receipt-id <receipt-id> --phase review --file-changed backend/src/routes/social.ts
+```
+
+That verify check executes `scripts/acm-feature-plan-validate.py` with the active receipt and plan context before completion.
 
 Examples:
 

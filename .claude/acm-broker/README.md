@@ -9,6 +9,7 @@ This folder provides Claude Code slash-command prompts that mirror the `acm-brok
   - includes a `fetch` step with `receipt_id` shorthand (or explicit keys when needed).
 - `/acm-work <receipt_id-or-plan_key> <tasks-json> [plan-json]`
   - publishes plan/task updates through `work`; use `plan-json` when you need named-plan metadata such as `title` or `mode`.
+  - in soundspan, net-new feature work should use the repo-local feature plan schema from `docs/ACM_FEATURE_PLANS.md`.
 - `/acm-review <receipt_id-or-plan_key> [review-json]`
   - records a single review gate through the thin `review` surface, defaulting to `review:cross-llm`; use `{"run":true}` when the repo workflow defines a runnable review gate.
 - `/acm-verify <receipt_id-or-plan_key> <comma-separated files> [phase]`

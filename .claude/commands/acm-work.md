@@ -21,6 +21,7 @@ Steps:
 Constraints:
 - Use `tasks`.
 - Use `plan` when you need plan metadata such as `title`, `mode`, `objective`, `kind`, `parent_plan_key`, or `external_refs`.
+- In soundspan, net-new feature work should use the repo-local feature plan schema: root `kind=feature` plans, optional `kind=feature_stream` child plans, and `parent_task_key`-grouped stage tasks as documented in `docs/ACM_FEATURE_PLANS.md`.
 - Use `/acm-review` instead when you only need to record a single review-gate outcome.
 - Use `verify:tests` as the executable verification task key.
 - `verify:diff-review` is optional if the repo tracks a separate manual diff review step.
