@@ -41,6 +41,7 @@ acm bootstrap [--project <id>] [--project-root .] --apply-template claude-comman
 
 Add `--apply-template claude-receipt-guard` when you also want the optional Claude receipt guard hooks.
 Add `--apply-template git-hooks-precommit` when you also want the staged-file `acm verify` pre-commit hook template.
+For repo-local verification scaffolding, pair bootstrap with `--apply-template verify-generic` for the lowest-friction default, or choose `verify-go`, `verify-ts`, `verify-python`, or `verify-rust` for a language-oriented starter.
 
 ## Runtime notes
 
