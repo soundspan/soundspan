@@ -132,6 +132,9 @@ frontend/test-*.tsx
 !.claude/commands/**
 !.claude/acm-broker/
 !.claude/acm-broker/**
+!.claude/hooks/
+!.claude/hooks/**
+!.claude/settings.json
 .claude/settings.local.json
 **/.claude/settings.local.json
 .cursor/
@@ -153,9 +156,7 @@ frontend/test-*.tsx
 .acm/context.db
 .acm/context.db-shm
 .acm/context.db-wal
-.acm/bootstrap_candidates.json
 .claudeignore
-/CLAUDE.md
 !.claude/acm-broker/CLAUDE.md
 
 # Internal Documentation (public docs are in project root)

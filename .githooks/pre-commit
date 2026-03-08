@@ -1,0 +1,37 @@
+#!/bin/bash
+# Pre-commit hook: run acm verify on staged code files.
+# Install: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+changed=$(git diff --cached --name-only)
+
+# Skip if no code files staged
+if ! echo "$changed" | grep -qE '\.(ts|tsx|js|jsx|py|prisma)$'; then
+  exit 0
+fi
+
+# Build --file-changed args for acm verify
+file_args=""
+while IFS= read -r f; do
+  [ -n "$f" ] && file_args="$file_args --file-changed $f"
+done <<< "$changed"
+
+if [ -n "$file_args" ]; then
+  echo "Running acm verify (pre-commit gate)..."
+  # shellcheck disable=SC2086
+  acm verify --project soundspan --phase review $file_args || {
+    echo ""
+    echo "COMMIT BLOCKED: acm verify failed."
+    echo "Fix the issues above, then try again."
+    exit 1
+  }
+fi
+
+# Warning: CHANGELOG check for route/feature changes
+if echo "$changed" | grep -qE '(backend/src/routes|frontend/features)' && \
+   ! echo "$changed" | grep -q 'CHANGELOG.md'; then
+  echo ""
+  echo "WARNING: Route/feature changes without CHANGELOG.md update."
+  echo "Consider adding a CHANGELOG entry if this is user-visible."
+fi

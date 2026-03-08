@@ -1,0 +1,57 @@
+version: acm.workflows.v1
+
+completion:
+  required_tasks:
+    - key: verify:tests
+      select:
+        changed_paths_any:
+          - ".acm/**"
+          - ".claude/**"
+          - ".githooks/**"
+          - ".github/**"
+          - "AGENTS.md"
+          - "CLAUDE.md"
+          - "CHANGELOG.md"
+          - "CONTRIBUTING.md"
+          - "backend/**"
+          - "charts/**"
+          - "docker-compose*.yml"
+          - "docs/**"
+          - "frontend/**"
+          - "package-lock.json"
+          - "package.json"
+          - "scripts/**"
+          - "services/**"
+    - key: review:cross-llm
+      summary: Cross-LLM review
+      rerun_requires_new_fingerprint: true
+      select:
+        phases:
+          - review
+        changed_paths_any:
+          - ".acm/**"
+          - ".claude/**"
+          - ".githooks/**"
+          - ".github/**"
+          - "AGENTS.md"
+          - "CLAUDE.md"
+          - "CHANGELOG.md"
+          - "CONTRIBUTING.md"
+          - "backend/**"
+          - "charts/**"
+          - "docker-compose*.yml"
+          - "docs/**"
+          - "frontend/**"
+          - "package-lock.json"
+          - "package.json"
+          - "scripts/**"
+          - "services/**"
+      run:
+        argv:
+          - "scripts/acm-cross-review.sh"
+          - "--model"
+          - "gpt-5.3-codex"
+          - "--reasoning-effort"
+          - "xhigh"
+        cwd: .
+        timeout_sec: 1800
