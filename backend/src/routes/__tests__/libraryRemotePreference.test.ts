@@ -170,14 +170,32 @@ jest.mock("../../services/trackMappingService", () => ({
     },
 }));
 
+jest.mock("../../services/remoteTrackMetadataResolver", () => ({
+    resolveRemoteTrackMetadataForRequest: jest.fn(async ({ metadata }: any) => ({
+        title: metadata.title ?? "Unknown",
+        artist: metadata.artist ?? "Unknown",
+        album: metadata.album ?? "Unknown",
+        duration: metadata.duration ?? 180,
+        thumbnailUrl: metadata.thumbnailUrl,
+        isrc: metadata.isrc,
+        explicit: metadata.explicit,
+        quality: metadata.quality,
+    })),
+}));
+
 // ── Router under test ────────────────────────────────────────────
 
 import router from "../library";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
 import { trackMappingService } from "../../services/trackMappingService";
+import {
+    resolveRemoteTrackMetadataForRequest,
+} from "../../services/remoteTrackMetadataResolver";
 
 const app = createRouteTestApp("/api/library", router);
 const mockEnsureRemoteTrack = trackMappingService.ensureRemoteTrack as jest.Mock;
+const mockResolveRemoteTrackMetadataForRequest =
+    resolveRemoteTrackMetadataForRequest as jest.Mock;
 
 // ── Tests ────────────────────────────────────────────────────────
 
@@ -189,6 +207,18 @@ describe("library remote track preference endpoints", () => {
             id: input.provider === "tidal" ? "tt-default" : "yt-default",
             created: false,
         }));
+        mockResolveRemoteTrackMetadataForRequest.mockReset().mockImplementation(
+            async ({ metadata }: any) => ({
+                title: metadata.title ?? "Unknown",
+                artist: metadata.artist ?? "Unknown",
+                album: metadata.album ?? "Unknown",
+                duration: metadata.duration ?? 180,
+                thumbnailUrl: metadata.thumbnailUrl,
+                isrc: metadata.isrc,
+                explicit: metadata.explicit,
+                quality: metadata.quality,
+            })
+        );
     });
 
     // ── parseRemoteTrackId validation ────────────────────────────
@@ -369,6 +399,57 @@ describe("library remote track preference endpoints", () => {
                 })
             );
 
+        });
+
+        it("repairs placeholder metadata inline before liking a tidal track", async () => {
+            mockEnsureRemoteTrack.mockResolvedValueOnce({
+                provider: "tidal",
+                id: "tt-repaired",
+                created: false,
+            });
+            mockPrisma.likedRemoteTrack.upsert.mockResolvedValueOnce({});
+            mockResolveRemoteTrackMetadataForRequest.mockResolvedValueOnce({
+                title: "Blinded By The Light",
+                artist: "Manfred Mann's Earth Band",
+                album: "The Roaring Silence",
+                duration: 428,
+                isrc: "USWB10800347",
+                explicit: false,
+            });
+
+            const res = await request(app)
+                .post("/api/library/remote-tracks/tidal:69778330/preference")
+                .set(AUTH_HEADER, AUTH_VALUE)
+                .send({
+                    signal: "thumbs_up",
+                    metadata: {
+                        title: "Unknown",
+                        artist: "Unknown",
+                        album: "Unknown",
+                        duration: 180,
+                    },
+                });
+
+            expect(res.status).toBe(200);
+            expect(mockResolveRemoteTrackMetadataForRequest).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    provider: "tidal",
+                    userId: TEST_USER_ID,
+                    tidalId: 69778330,
+                })
+            );
+            expect(mockEnsureRemoteTrack).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    provider: "tidal",
+                    tidalId: 69778330,
+                    title: "Blinded By The Light",
+                    artist: "Manfred Mann's Earth Band",
+                    album: "The Roaring Silence",
+                    duration: 428,
+                    isrc: "USWB10800347",
+                    explicit: false,
+                })
+            );
         });
 
         it("upserts tidal: track on thumbs_up", async () => {

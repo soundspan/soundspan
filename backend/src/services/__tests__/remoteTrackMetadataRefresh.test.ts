@@ -8,7 +8,7 @@ const mockPrisma = {
         update: jest.fn(),
     },
     userSettings: {
-        findFirst: jest.fn(),
+        findMany: jest.fn(),
     },
 };
 
@@ -45,7 +45,7 @@ describe("RemoteTrackMetadataRefreshService", () => {
         mockPrisma.trackTidal.update.mockReset();
         mockPrisma.trackYtMusic.findMany.mockReset().mockResolvedValue([]);
         mockPrisma.trackYtMusic.update.mockReset();
-        mockPrisma.userSettings.findFirst.mockReset().mockResolvedValue(null);
+        mockPrisma.userSettings.findMany.mockReset().mockResolvedValue([]);
     });
 
     describe("refreshUnknownMetadata", () => {
@@ -56,12 +56,11 @@ describe("RemoteTrackMetadataRefreshService", () => {
 
         it("refreshes TrackTidal rows with Unknown metadata", async () => {
             mockPrisma.trackTidal.findMany.mockResolvedValueOnce([
-                { id: "tt-1", tidalId: 12345 },
+                { id: "tt-1", tidalId: 12345, likedBy: [] },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce({
-                userId: "user-1",
-                tidalOAuthJson: "{}",
-            });
+            mockPrisma.userSettings.findMany.mockResolvedValueOnce([
+                { userId: "user-1", tidalOAuthJson: "{}" },
+            ]);
             mockTidalGetTrack.mockResolvedValueOnce({
                 id: 12345,
                 title: "Real Title",
@@ -84,14 +83,51 @@ describe("RemoteTrackMetadataRefreshService", () => {
             });
         });
 
+        it("falls back to a later Tidal-authenticated user when the first user returns no metadata", async () => {
+            mockPrisma.trackTidal.findMany.mockResolvedValueOnce([
+                {
+                    id: "tt-fallback",
+                    tidalId: 69778330,
+                    likedBy: [{ userId: "user-2" }],
+                },
+            ]);
+            mockPrisma.userSettings.findMany.mockResolvedValueOnce([
+                { userId: "user-1", tidalOAuthJson: "{}" },
+                { userId: "user-2", tidalOAuthJson: "{}" },
+            ]);
+            mockTidalGetTrack
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce({
+                    id: 69778330,
+                    title: "Blinded By The Light",
+                    artist: "Manfred Mann's Earth Band",
+                    duration: 428,
+                    album: { title: "The Roaring Silence" },
+                });
+
+            const result = await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
+
+            expect(result).toEqual({ updated: 1, failed: 0 });
+            expect(mockTidalGetTrack).toHaveBeenNthCalledWith(
+                1,
+                "user-2",
+                69778330
+            );
+            expect(mockPrisma.trackTidal.update).toHaveBeenCalledWith({
+                where: { id: "tt-fallback" },
+                data: expect.objectContaining({
+                    title: "Blinded By The Light",
+                    artist: "Manfred Mann's Earth Band",
+                    album: "The Roaring Silence",
+                    duration: 428,
+                }),
+            });
+        });
+
         it("refreshes TrackYtMusic rows with Unknown metadata", async () => {
             mockPrisma.trackYtMusic.findMany.mockResolvedValueOnce([
                 { id: "yt-1", videoId: "abc123" },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce({
-                userId: "user-2",
-                ytMusicOAuthJson: "{}",
-            });
             mockYtGetSong.mockResolvedValueOnce({
                 videoId: "abc123",
                 title: "Real YT Title",
@@ -115,11 +151,34 @@ describe("RemoteTrackMetadataRefreshService", () => {
             });
         });
 
+        it("queries album placeholders for both providers", async () => {
+            await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
+
+            expect(mockPrisma.trackTidal.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        OR: expect.arrayContaining([
+                            { album: { in: expect.arrayContaining(["Unknown Album", "single"]) } },
+                        ]),
+                    }),
+                })
+            );
+            expect(mockPrisma.trackYtMusic.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        OR: expect.arrayContaining([
+                            { album: { in: expect.arrayContaining(["Unknown Album", "single"]) } },
+                        ]),
+                    }),
+                })
+            );
+        });
+
         it("skips tidal refresh when no authenticated user found and counts as failed", async () => {
             mockPrisma.trackTidal.findMany.mockResolvedValueOnce([
-                { id: "tt-1", tidalId: 12345 },
+                { id: "tt-1", tidalId: 12345, likedBy: [] },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValue(null);
+            mockPrisma.userSettings.findMany.mockResolvedValueOnce([]);
 
             const result = await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
 
@@ -130,13 +189,11 @@ describe("RemoteTrackMetadataRefreshService", () => {
 
         it("only writes real fields from partial API response", async () => {
             mockPrisma.trackTidal.findMany.mockResolvedValueOnce([
-                { id: "tt-partial", tidalId: 99999 },
+                { id: "tt-partial", tidalId: 99999, likedBy: [] },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce({
-                userId: "user-1",
-                tidalOAuthJson: "{}",
-            });
-            // API returns real title/artist but no album
+            mockPrisma.userSettings.findMany.mockResolvedValueOnce([
+                { userId: "user-1", tidalOAuthJson: "{}" },
+            ]);
             mockTidalGetTrack.mockResolvedValueOnce({
                 id: 99999,
                 title: "Real Title",
@@ -152,7 +209,6 @@ describe("RemoteTrackMetadataRefreshService", () => {
             expect(updateCall.data.title).toBe("Real Title");
             expect(updateCall.data.artist).toBe("Real Artist");
             expect(updateCall.data.duration).toBe(240);
-            // "Unknown" album should NOT be written
             expect(updateCall.data.album).toBeUndefined();
         });
 
@@ -160,7 +216,6 @@ describe("RemoteTrackMetadataRefreshService", () => {
             mockPrisma.trackYtMusic.findMany.mockResolvedValueOnce([
                 { id: "yt-1", videoId: "v1" },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce(null);
             mockYtGetSong.mockResolvedValueOnce({
                 videoId: "v1",
                 title: "Public Title",
@@ -175,14 +230,13 @@ describe("RemoteTrackMetadataRefreshService", () => {
             expect(result).toEqual({ updated: 1, failed: 0 });
         });
 
-        it("counts failures when API returns null", async () => {
+        it("counts failures when every Tidal credential returns null", async () => {
             mockPrisma.trackTidal.findMany.mockResolvedValueOnce([
-                { id: "tt-1", tidalId: 12345 },
+                { id: "tt-1", tidalId: 12345, likedBy: [] },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce({
-                userId: "user-1",
-                tidalOAuthJson: "{}",
-            });
+            mockPrisma.userSettings.findMany.mockResolvedValueOnce([
+                { userId: "user-1", tidalOAuthJson: "{}" },
+            ]);
             mockTidalGetTrack.mockResolvedValueOnce(null);
 
             const result = await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
@@ -194,12 +248,11 @@ describe("RemoteTrackMetadataRefreshService", () => {
 
         it("counts tidal API errors as failures", async () => {
             mockPrisma.trackTidal.findMany.mockResolvedValueOnce([
-                { id: "tt-err", tidalId: 11111 },
+                { id: "tt-err", tidalId: 11111, likedBy: [] },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce({
-                userId: "user-1",
-                tidalOAuthJson: "{}",
-            });
+            mockPrisma.userSettings.findMany.mockResolvedValueOnce([
+                { userId: "user-1", tidalOAuthJson: "{}" },
+            ]);
             mockTidalGetTrack.mockRejectedValueOnce(new Error("API timeout"));
 
             const result = await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
@@ -212,10 +265,6 @@ describe("RemoteTrackMetadataRefreshService", () => {
             mockPrisma.trackYtMusic.findMany.mockResolvedValueOnce([
                 { id: "yt-err", videoId: "err-vid" },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce({
-                userId: "user-1",
-                ytMusicOAuthJson: "{}",
-            });
             mockYtGetSong.mockRejectedValueOnce(new Error("Network error"));
 
             const result = await remoteTrackMetadataRefreshService.refreshUnknownMetadata();
@@ -228,11 +277,6 @@ describe("RemoteTrackMetadataRefreshService", () => {
             mockPrisma.trackYtMusic.findMany.mockResolvedValueOnce([
                 { id: "yt-unknown", videoId: "unk-vid" },
             ]);
-            mockPrisma.userSettings.findFirst.mockResolvedValueOnce({
-                userId: "user-1",
-                ytMusicOAuthJson: "{}",
-            });
-            // API returns but all fields are placeholders
             mockYtGetSong.mockResolvedValueOnce({
                 videoId: "unk-vid",
                 title: "Unknown",

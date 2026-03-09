@@ -35,8 +35,24 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+jest.mock("../../services/remoteTrackMetadataResolver", () => ({
+    resolveRemoteTrackMetadataForRequest: jest.fn(async ({ metadata }: any) => ({
+        title: metadata.title ?? "Unknown",
+        artist: metadata.artist ?? "Unknown",
+        album: metadata.album ?? "Unknown",
+        duration: metadata.duration ?? 180,
+        thumbnailUrl: metadata.thumbnailUrl,
+        isrc: metadata.isrc,
+        explicit: metadata.explicit,
+        quality: metadata.quality,
+    })),
+}));
+
 import router from "../plays";
 import { prisma } from "../../utils/db";
+import {
+    resolveRemoteTrackMetadataForRequest,
+} from "../../services/remoteTrackMetadataResolver";
 
 const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
 const mockTrackTidalFindUnique = prisma.trackTidal.findUnique as jest.Mock;
@@ -47,6 +63,8 @@ const mockPlayCreate = prisma.play.create as jest.Mock;
 const mockPlayFindMany = prisma.play.findMany as jest.Mock;
 const mockPlayCount = prisma.play.count as jest.Mock;
 const mockPlayDeleteMany = prisma.play.deleteMany as jest.Mock;
+const mockResolveRemoteTrackMetadataForRequest =
+    resolveRemoteTrackMetadataForRequest as jest.Mock;
 
 function getGetHandler(path: string) {
     const layer = (router as any).stack.find(
@@ -102,6 +120,18 @@ describe("plays history compatibility", () => {
         mockTrackTidalUpsert.mockResolvedValue({ id: "tt-1", tidalId: 123 });
         mockTrackYtMusicFindUnique.mockResolvedValue(null);
         mockTrackYtMusicUpsert.mockResolvedValue({ id: "yt-1", videoId: "abc123" });
+        mockResolveRemoteTrackMetadataForRequest.mockReset().mockImplementation(
+            async ({ metadata }: any) => ({
+                title: metadata.title ?? "Unknown",
+                artist: metadata.artist ?? "Unknown",
+                album: metadata.album ?? "Unknown",
+                duration: metadata.duration ?? 180,
+                thumbnailUrl: metadata.thumbnailUrl,
+                isrc: metadata.isrc,
+                explicit: metadata.explicit,
+                quality: metadata.quality,
+            })
+        );
         mockPlayCreate.mockResolvedValue({
             id: "play-1",
             userId: "user-1",
@@ -326,6 +356,69 @@ describe("plays history compatibility", () => {
                 source: "YOUTUBE_MUSIC",
             },
         });
+    });
+
+    it("repairs placeholder tidal metadata before logging the play", async () => {
+        mockTrackTidalUpsert.mockResolvedValueOnce({
+            id: "tt-repaired",
+            tidalId: 69778330,
+        });
+        mockPlayCreate.mockResolvedValueOnce({
+            id: "play-tidal-repaired",
+            userId: "user-1",
+            trackTidalId: "tt-repaired",
+            source: "TIDAL",
+        });
+        mockResolveRemoteTrackMetadataForRequest.mockResolvedValueOnce({
+            title: "Blinded By The Light",
+            artist: "Manfred Mann's Earth Band",
+            album: "The Roaring Silence",
+            duration: 428,
+            isrc: "USWB10800347",
+            explicit: false,
+        });
+
+        const req = {
+            session: { userId: "user-1" }, user: { id: "user-1" },
+            body: {
+                tidalTrackId: 69778330,
+                title: "Unknown",
+                artist: "Unknown",
+                album: "Unknown",
+                duration: 180,
+            },
+        } as any;
+        const res = createRes();
+        await createPlayHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockResolveRemoteTrackMetadataForRequest).toHaveBeenCalledWith(
+            expect.objectContaining({
+                provider: "tidal",
+                userId: "user-1",
+                tidalId: 69778330,
+            })
+        );
+        expect(mockTrackTidalUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    title: "Blinded By The Light",
+                    artist: "Manfred Mann's Earth Band",
+                    album: "The Roaring Silence",
+                    duration: 428,
+                    isrc: "USWB10800347",
+                    explicit: false,
+                }),
+                update: expect.objectContaining({
+                    title: "Blinded By The Light",
+                    artist: "Manfred Mann's Earth Band",
+                    album: "The Roaring Silence",
+                    duration: 428,
+                    isrc: "USWB10800347",
+                    explicit: false,
+                }),
+            })
+        );
     });
 
     it("lists recent plays with default/custom limits and handles failures", async () => {

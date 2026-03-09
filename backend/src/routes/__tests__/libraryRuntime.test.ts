@@ -283,6 +283,19 @@ jest.mock(
     { virtual: true }
 );
 
+jest.mock("../../services/remoteTrackMetadataResolver", () => ({
+    resolveRemoteTrackMetadataForRequest: jest.fn(async ({ metadata }: any) => ({
+        title: metadata.title ?? "Unknown",
+        artist: metadata.artist ?? "Unknown",
+        album: metadata.album ?? "Unknown",
+        duration: metadata.duration ?? 180,
+        thumbnailUrl: metadata.thumbnailUrl,
+        isrc: metadata.isrc,
+        explicit: metadata.explicit,
+        quality: metadata.quality,
+    })),
+}));
+
 import router from "../library";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";

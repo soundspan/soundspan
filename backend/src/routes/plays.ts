@@ -5,6 +5,9 @@ import { prisma } from "../utils/db";
 import { z } from "zod";
 import { trackMappingService } from "../services/trackMappingService";
 import {
+    resolveRemoteTrackMetadataForRequest,
+} from "../services/remoteTrackMetadataResolver";
+import {
     type UnifiedTrackResponse,
     normalizeLocalTrack,
     normalizeTidalTrack,
@@ -268,13 +271,27 @@ router.post("/", async (req, res) => {
         }
 
         if (payload.tidalTrackId) {
+            const resolvedMetadata =
+                await resolveRemoteTrackMetadataForRequest({
+                    provider: "tidal",
+                    userId,
+                    tidalId: payload.tidalTrackId,
+                    metadata: {
+                        title: payload.title,
+                        artist: payload.artist,
+                        album: payload.album,
+                        duration: payload.duration,
+                    },
+                });
             const ensured = await trackMappingService.ensureRemoteTrack({
                 provider: "tidal",
                 tidalId: payload.tidalTrackId,
-                title: payload.title!,
-                artist: payload.artist!,
-                album: payload.album!,
-                duration: payload.duration!,
+                title: resolvedMetadata.title,
+                artist: resolvedMetadata.artist,
+                album: resolvedMetadata.album,
+                duration: resolvedMetadata.duration,
+                isrc: resolvedMetadata.isrc,
+                explicit: resolvedMetadata.explicit,
             });
             const play = await prisma.play.create({
                 data: {
@@ -286,14 +303,26 @@ router.post("/", async (req, res) => {
             return res.json(play);
         }
 
+        const resolvedMetadata = await resolveRemoteTrackMetadataForRequest({
+            provider: "youtube",
+            userId,
+            videoId: payload.youtubeVideoId!,
+            metadata: {
+                title: payload.title,
+                artist: payload.artist,
+                album: payload.album,
+                duration: payload.duration,
+                thumbnailUrl: payload.thumbnailUrl,
+            },
+        });
         const ensured = await trackMappingService.ensureRemoteTrack({
             provider: "youtube",
             videoId: payload.youtubeVideoId!,
-            title: payload.title!,
-            artist: payload.artist!,
-            album: payload.album!,
-            duration: payload.duration!,
-            thumbnailUrl: payload.thumbnailUrl,
+            title: resolvedMetadata.title,
+            artist: resolvedMetadata.artist,
+            album: resolvedMetadata.album,
+            duration: resolvedMetadata.duration,
+            thumbnailUrl: resolvedMetadata.thumbnailUrl,
         });
         const play = await prisma.play.create({
             data: {

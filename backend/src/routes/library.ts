@@ -75,6 +75,9 @@ import {
 } from "../services/radioVibeEngine";
 import { trackMappingService } from "../services/trackMappingService";
 import {
+    resolveRemoteTrackMetadataForRequest,
+} from "../services/remoteTrackMetadataResolver";
+import {
     type UnifiedTrackResponse,
     normalizeLocalTrack,
     normalizeTidalTrack,
@@ -5432,56 +5435,62 @@ router.post("/remote-tracks/:id/preference", async (req, res) => {
             duration?: number;
             isrc?: string;
         };
-        const title =
-            typeof metadata.title === "string" && metadata.title.trim().length > 0
-                ? metadata.title.trim()
-                : "Unknown";
-        const artist =
-            typeof metadata.artist === "string" &&
-            metadata.artist.trim().length > 0
-                ? metadata.artist.trim()
-                : "Unknown";
-        const album =
-            typeof metadata.album === "string" && metadata.album.trim().length > 0
-                ? metadata.album.trim()
-                : "Unknown";
-        const duration =
-            typeof metadata.duration === "number" &&
-            Number.isFinite(metadata.duration) &&
-            metadata.duration > 0
-                ? Math.trunc(metadata.duration)
-                : 180;
         const now = new Date();
 
         if (signal === "thumbs_up") {
+            const tidalId =
+                parsed.provider === "tidal"
+                    ? Number.parseInt(parsed.externalId, 10)
+                    : undefined;
             if (parsed.provider === "tidal") {
-                const tidalId = Number.parseInt(parsed.externalId, 10);
-                if (!Number.isFinite(tidalId) || tidalId <= 0) {
+                if (
+                    typeof tidalId !== "number" ||
+                    !Number.isFinite(tidalId) ||
+                    tidalId <= 0
+                ) {
                     return res.status(400).json({
                         error: "Invalid remote track ID. Use yt:videoId or tidal:trackId format.",
                     });
                 }
             }
 
+            const resolvedMetadata =
+                await resolveRemoteTrackMetadataForRequest({
+                    provider: parsed.provider,
+                    userId,
+                    ...(parsed.provider === "tidal"
+                        ? { tidalId: tidalId as number }
+                        : { videoId: parsed.externalId }),
+                    metadata: {
+                        title: metadata.title,
+                        artist: metadata.artist,
+                        album: metadata.album,
+                        duration: metadata.duration,
+                        thumbnailUrl: metadata.thumbnailUrl,
+                        isrc: metadata.isrc,
+                    },
+                });
+
             const ensured =
                 parsed.provider === "tidal"
                     ? await trackMappingService.ensureRemoteTrack({
                           provider: "tidal",
-                          tidalId: Number.parseInt(parsed.externalId, 10),
-                          title,
-                          artist,
-                          album,
-                          duration,
-                          isrc: metadata.isrc,
+                          tidalId: tidalId as number,
+                          title: resolvedMetadata.title,
+                          artist: resolvedMetadata.artist,
+                          album: resolvedMetadata.album,
+                          duration: resolvedMetadata.duration,
+                          isrc: resolvedMetadata.isrc,
+                          explicit: resolvedMetadata.explicit,
                       })
                     : await trackMappingService.ensureRemoteTrack({
                           provider: "youtube",
                           videoId: parsed.externalId,
-                          title,
-                          artist,
-                          album,
-                          duration,
-                          thumbnailUrl: metadata.thumbnailUrl,
+                          title: resolvedMetadata.title,
+                          artist: resolvedMetadata.artist,
+                          album: resolvedMetadata.album,
+                          duration: resolvedMetadata.duration,
+                          thumbnailUrl: resolvedMetadata.thumbnailUrl,
                       });
 
             if (ensured.provider === "tidal") {
