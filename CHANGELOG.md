@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.3.4] - 2026-03-09
+
+### Added
+
+### Changed
+
+- Maintainer verification now runs through repo-local ACM review and feature-plan validation scripts, adds a semantic targeted frontend coverage check, and standardizes pytest scaffolds across Python sidecars.
+
+### Fixed
+
+- Frontend queued-track ID memoization now stays stable when queue membership is unchanged, reducing queue-derived state churn across local playback and Listen Together sessions.
 - Remote liked-track metadata now repairs itself when placeholder-only TIDAL or YouTube entries are liked or replayed, and the background TIDAL repair job no longer depends on whichever unrelated authenticated user happens to sort first in the database.
 - Listen Together queue creation and shared-queue additions once again truncate overflow beyond the 500-track cap instead of rejecting oversized requests outright.
 
