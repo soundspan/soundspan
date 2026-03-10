@@ -27,27 +27,31 @@ ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
 
+# Matches both bare "acm" and absolute-path "/path/to/acm" invocations.
+# Uses [^ ] instead of [^[:space:]] to avoid nested-bracket interpolation issues.
+ACM_RE='(acm|[^ ]*/acm)'
+
 is_task_get_context_command() {
   local command="$1"
-  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+get-context([[:space:]]|$)' || return 1
+  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+get-context([[:space:]]|$)" || return 1
   echo "$command" | grep -qE '(^|[[:space:]])(-h|--help)([[:space:]]|$)' && return 1
   echo "$command" | grep -qE '(^|[[:space:]])--task-(text|file)(=|[[:space:]])'
 }
 
 is_direct_work_command() {
   local command="$1"
-  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+work([[:space:]]|$)' || return 1
-  ! echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+work[[:space:]]+(list|search)([[:space:]]|$)'
+  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+work([[:space:]]|$)" || return 1
+  ! echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+work[[:space:]]+(list|search)([[:space:]]|$)"
 }
 
 is_direct_verify_command() {
   local command="$1"
-  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+verify([[:space:]]|$)'
+  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+verify([[:space:]]|$)"
 }
 
 is_direct_report_command() {
   local command="$1"
-  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+report-completion([[:space:]]|$)'
+  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+report-completion([[:space:]]|$)"
 }
 
 extract_acm_input_path() {
@@ -78,7 +82,7 @@ request_declares_command() {
 is_mcp_tool_command() {
   local command="$1"
   local tool_name="$2"
-  echo "$command" | grep -qE '(^|[[:space:]])acm-mcp[[:space:]]+invoke([[:space:]]|$)' || return 1
+  echo "$command" | grep -qE '(^|[[:space:]])(acm-mcp|[^ ]*/acm-mcp)[[:space:]]+invoke([[:space:]]|$)' || return 1
   echo "$command" | grep -qE "(^|[[:space:]])--tool(=|[[:space:]])${tool_name}([[:space:]]|$)"
 }
 
@@ -111,7 +115,7 @@ should_mark_reported=false
 
 if is_task_get_context_command "$COMMAND"; then
   should_mark_receipt=true
-elif echo "$COMMAND" | grep -qE '(^|[[:space:]])acm[[:space:]]+run([[:space:]]|$)'; then
+elif echo "$COMMAND" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+run([[:space:]]|$)"; then
   INPUT_PATH=$(extract_acm_input_path "$COMMAND")
   request_declares_command "$INPUT_PATH" "get_context" && should_mark_receipt=true
   request_declares_command "$INPUT_PATH" "work" && should_mark_work=true
