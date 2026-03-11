@@ -6,7 +6,7 @@ tests:
   - id: context-smoke
     summary: Ensure ACM can return scoped context for soundspan
     command:
-      argv: ["acm", "get-context", "--project", "soundspan", "--task-text", "soundspan ACM smoke test", "--phase", "plan"]
+      argv: ["acm", "context", "--project", "soundspan", "--task-text", "soundspan ACM smoke test", "--phase", "plan"]
     select:
       always_run: true
     expected:
@@ -156,5 +156,58 @@ tests:
       phases: ["execute", "review"]
       changed_paths_any:
         ["charts/**", "scripts/helm-chart-render-check.sh", ".github/workflows/helm-chart-release.yml"]
+    expected:
+      exit_code: 0
+
+  # ── Knowledge-layer drift checks ──────────────────────────────────
+
+  - id: architecture-freshness
+    summary: Check ARCHITECTURE.md is reviewed after topology changes
+    command:
+      argv: ["bash", "scripts/docs/check-architecture-freshness.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        ["docker-compose.yml", "docker-compose.*.yml", "backend/src/routes/**", "backend/src/services/**"]
+    expected:
+      exit_code: 0
+
+  - id: data-model-drift
+    summary: Check DATA_MODEL.md is reviewed after schema changes
+    command:
+      argv: ["bash", "scripts/docs/check-data-model-drift.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/prisma/schema.prisma"]
+    expected:
+      exit_code: 0
+
+  - id: feature-index-coverage
+    summary: All frontend feature dirs are mapped in FEATURE_INDEX.json
+    command:
+      argv: ["bash", "scripts/docs/check-feature-index.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/features/**", "docs/FEATURE_INDEX.json"]
+    expected:
+      exit_code: 0
+
+  - id: routes-readme-drift
+    summary: Routes README lists all route modules
+    command:
+      argv: ["bash", "scripts/docs/check-domain-readmes.sh", "routes"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/src/routes/**"]
+    expected:
+      exit_code: 0
+
+  - id: services-readme-drift
+    summary: Services README lists all service modules
+    command:
+      argv: ["bash", "scripts/docs/check-domain-readmes.sh", "services"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/src/services/**"]
     expected:
       exit_code: 0

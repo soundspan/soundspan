@@ -17,7 +17,7 @@ case "$TOOL_NAME" in
   *) exit 0 ;;
 esac
 
-STATE_DIR="/tmp/.acm-claude-{{project_id}}-${SESSION_ID}"
+STATE_DIR="/tmp/.acm-claude-soundspan-${SESSION_ID}"
 FILES_TRACKER="${STATE_DIR}/files.txt"
 TARGET_FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 

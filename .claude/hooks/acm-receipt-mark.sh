@@ -3,7 +3,7 @@
 # markers so the other Claude hooks can enforce the repo workflow.
 #
 # Fires after successful Bash tool calls. Tracks task-bearing
-# `acm get-context`, `acm work`, `acm verify`, and `acm report-completion`
+# `acm context`, `acm work`, `acm verify`, and `acm done`
 # invocations across direct CLI, `acm run --in <request.json>`, and
 # `acm-mcp invoke --tool ...` forms.
 
@@ -19,39 +19,35 @@ if [ -z "$SESSION_ID" ] || [ "$HOOK_EVENT" != "PostToolUse" ] || [ "$TOOL_NAME" 
 fi
 
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-STATE_DIR="/tmp/.acm-claude-{{project_id}}-${SESSION_ID}"
+STATE_DIR="/tmp/.acm-claude-soundspan-${SESSION_ID}"
 RECEIPT_MARKER="${STATE_DIR}/receipt"
-LEGACY_RECEIPT_MARKER="/tmp/.acm-receipt-{{project_id}}-${SESSION_ID}"
+LEGACY_RECEIPT_MARKER="/tmp/.acm-receipt-soundspan-${SESSION_ID}"
 
 ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
 
-# Matches both bare "acm" and absolute-path "/path/to/acm" invocations.
-# Uses [^ ] instead of [^[:space:]] to avoid nested-bracket interpolation issues.
-ACM_RE='(acm|[^ ]*/acm)'
-
-is_task_get_context_command() {
+is_task_context_command() {
   local command="$1"
-  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+get-context([[:space:]]|$)" || return 1
+  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+context([[:space:]]|$)' || return 1
   echo "$command" | grep -qE '(^|[[:space:]])(-h|--help)([[:space:]]|$)' && return 1
   echo "$command" | grep -qE '(^|[[:space:]])--task-(text|file)(=|[[:space:]])'
 }
 
 is_direct_work_command() {
   local command="$1"
-  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+work([[:space:]]|$)" || return 1
-  ! echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+work[[:space:]]+(list|search)([[:space:]]|$)"
+  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+work([[:space:]]|$)' || return 1
+  ! echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+work[[:space:]]+(list|search)([[:space:]]|$)'
 }
 
 is_direct_verify_command() {
   local command="$1"
-  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+verify([[:space:]]|$)"
+  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+verify([[:space:]]|$)'
 }
 
-is_direct_report_command() {
+is_direct_done_command() {
   local command="$1"
-  echo "$command" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+report-completion([[:space:]]|$)"
+  echo "$command" | grep -qE '(^|[[:space:]])acm[[:space:]]+done([[:space:]]|$)'
 }
 
 extract_acm_input_path() {
@@ -82,7 +78,7 @@ request_declares_command() {
 is_mcp_tool_command() {
   local command="$1"
   local tool_name="$2"
-  echo "$command" | grep -qE '(^|[[:space:]])(acm-mcp|[^ ]*/acm-mcp)[[:space:]]+invoke([[:space:]]|$)' || return 1
+  echo "$command" | grep -qE '(^|[[:space:]])acm-mcp[[:space:]]+invoke([[:space:]]|$)' || return 1
   echo "$command" | grep -qE "(^|[[:space:]])--tool(=|[[:space:]])${tool_name}([[:space:]]|$)"
 }
 
@@ -113,24 +109,24 @@ should_mark_work=false
 should_mark_verified=false
 should_mark_reported=false
 
-if is_task_get_context_command "$COMMAND"; then
+if is_task_context_command "$COMMAND"; then
   should_mark_receipt=true
-elif echo "$COMMAND" | grep -qE "(^|[[:space:]])${ACM_RE}[[:space:]]+run([[:space:]]|$)"; then
+elif echo "$COMMAND" | grep -qE '(^|[[:space:]])acm[[:space:]]+run([[:space:]]|$)'; then
   INPUT_PATH=$(extract_acm_input_path "$COMMAND")
-  request_declares_command "$INPUT_PATH" "get_context" && should_mark_receipt=true
+  request_declares_command "$INPUT_PATH" "context" && should_mark_receipt=true
   request_declares_command "$INPUT_PATH" "work" && should_mark_work=true
   request_declares_command "$INPUT_PATH" "verify" && should_mark_verified=true
-  request_declares_command "$INPUT_PATH" "report_completion" && should_mark_reported=true
+  request_declares_command "$INPUT_PATH" "done" && should_mark_reported=true
 fi
 
-is_mcp_tool_command "$COMMAND" "get_context" && should_mark_receipt=true
+is_mcp_tool_command "$COMMAND" "context" && should_mark_receipt=true
 is_mcp_tool_command "$COMMAND" "work" && should_mark_work=true
 is_mcp_tool_command "$COMMAND" "verify" && should_mark_verified=true
-is_mcp_tool_command "$COMMAND" "report_completion" && should_mark_reported=true
+is_mcp_tool_command "$COMMAND" "done" && should_mark_reported=true
 
 is_direct_work_command "$COMMAND" && should_mark_work=true
 is_direct_verify_command "$COMMAND" && should_mark_verified=true
-is_direct_report_command "$COMMAND" && should_mark_reported=true
+is_direct_done_command "$COMMAND" && should_mark_reported=true
 
 [ "$should_mark_receipt" = true ] && mark_receipt
 [ "$should_mark_work" = true ] && mark_work

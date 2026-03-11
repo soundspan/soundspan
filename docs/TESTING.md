@@ -195,7 +195,7 @@ acm verify --project soundspan --phase review --file-changed <path>
 acm health --project soundspan --include-details
 ```
 
-When the active receipt matches a repo-defined review gate in `.acm/acm-workflows.yaml`, run this before `acm report-completion`:
+When the active receipt matches a repo-defined review gate in `.acm/acm-workflows.yaml`, run this before `acm done`:
 
 ```bash
 acm review --run --project soundspan --receipt-id <receipt-id>

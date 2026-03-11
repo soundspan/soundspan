@@ -3,7 +3,7 @@
 # /acm-work once the session has expanded into multi-file changes.
 #
 # Receipt markers are created automatically by the PostToolUse Bash hook
-# (acm-receipt-mark.sh) when a successful acm get-context call is detected.
+# (acm-receipt-mark.sh) when a successful acm context call is detected.
 
 set -euo pipefail
 
@@ -15,9 +15,9 @@ if [ -z "$SESSION_ID" ]; then
   exit 0
 fi
 
-STATE_DIR="/tmp/.acm-claude-{{project_id}}-${SESSION_ID}"
+STATE_DIR="/tmp/.acm-claude-soundspan-${SESSION_ID}"
 RECEIPT_MARKER="${STATE_DIR}/receipt"
-LEGACY_RECEIPT_MARKER="/tmp/.acm-receipt-{{project_id}}-${SESSION_ID}"
+LEGACY_RECEIPT_MARKER="/tmp/.acm-receipt-soundspan-${SESSION_ID}"
 WORK_MARKER="${STATE_DIR}/work"
 FILES_TRACKER="${STATE_DIR}/files.txt"
 
@@ -34,7 +34,7 @@ deny() {
 }
 
 if [ ! -f "$RECEIPT_MARKER" ] && [ ! -f "$LEGACY_RECEIPT_MARKER" ]; then
-  deny "Edit blocked: no ACM receipt for this session. Run /acm-get <phase> <task text> first."
+  deny "Edit blocked: no ACM receipt for this session. Run /acm-context <phase> <task text> first."
 fi
 
 if [ -f "$WORK_MARKER" ] || [ -z "$TARGET_FILE" ] || [ ! -f "$FILES_TRACKER" ]; then

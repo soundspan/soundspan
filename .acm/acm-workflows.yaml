@@ -20,6 +20,7 @@ completion:
           - "frontend/**"
           - "package-lock.json"
           - "package.json"
+          - "packages/**"
           - "scripts/**"
           - "services/**"
     - key: review:cross-llm
@@ -44,6 +45,7 @@ completion:
           - "frontend/**"
           - "package-lock.json"
           - "package.json"
+          - "packages/**"
           - "scripts/**"
           - "services/**"
       run:

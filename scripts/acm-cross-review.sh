@@ -216,7 +216,7 @@ PY
   scoped_changed_count="$(grep -c '.' "${changed_files_path}" || true)"
 
   if (( repo_changed_count > 0 && scoped_changed_count == 0 )); then
-    printf 'FAIL: Review gate blocked before model execution: %s repo change(s), %s scoped change(s). Refresh /acm-get with a broader task before rerunning /acm-review.\n' "${repo_changed_count}" "${scoped_changed_count}"
+    printf 'FAIL: Review gate blocked before model execution: %s repo change(s), %s scoped change(s). Refresh /acm-context with a broader task before rerunning /acm-review.\n' "${repo_changed_count}" "${scoped_changed_count}"
     exit 1
   fi
 

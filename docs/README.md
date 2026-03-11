@@ -25,12 +25,16 @@ This index is the central navigation page for all project documentation under `d
 
 ### Contributors and maintainers
 
-1. Start with [`TESTING.md`](TESTING.md) for test framework/layout/command standards
-2. Use [`../AGENTS.md`](../AGENTS.md) for the active ACM repo contract
-3. Use domain start-here guides in [`../backend/src/routes/README.md`](../backend/src/routes/README.md), [`../backend/src/services/README.md`](../backend/src/services/README.md), and [`../frontend/features/README.md`](../frontend/features/README.md)
-4. Use [`maintainers/README.md`](maintainers/README.md) for retained maintainer-only guidance
-5. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-6. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
+1. Start with [`ARCHITECTURE.md`](ARCHITECTURE.md) for service topology and request flows
+2. Read [`DATA_MODEL.md`](DATA_MODEL.md) for entity relationships and resolution chains
+3. Use [`TEST_MATRIX.md`](TEST_MATRIX.md) for fast, targeted test commands by domain
+4. Use [`TESTING.md`](TESTING.md) for test framework/layout/command standards
+5. Use [`../AGENTS.md`](../AGENTS.md) for the active ACM repo contract
+6. Use domain start-here guides in [`../backend/src/routes/README.md`](../backend/src/routes/README.md), [`../backend/src/services/README.md`](../backend/src/services/README.md), and [`../frontend/features/README.md`](../frontend/features/README.md)
+7. Use [`FEATURE_INDEX.json`](FEATURE_INDEX.json) for machine-readable feature-to-code mapping
+8. Use [`maintainers/README.md`](maintainers/README.md) for retained maintainer-only guidance
+9. Follow contribution flow in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+10. Use CI visibility details in [`../CONTRIBUTING.md`](../CONTRIBUTING.md) and workflow summaries
 
 ---
 
@@ -54,12 +58,23 @@ This index is the central navigation page for all project documentation under `d
 
 | Document | Audience | Purpose |
 | --- | --- | --- |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Contributors/agents | Service topology, request flows, service communication map |
+| [`DATA_MODEL.md`](DATA_MODEL.md) | Contributors/agents | Entity relationships (mermaid ERD), classification, resolution chains |
+| [`TEST_MATRIX.md`](TEST_MATRIX.md) | Contributors/agents | Domain-to-test-file mapping for fast targeted verification |
+| [`FEATURE_INDEX.json`](FEATURE_INDEX.json) | Agents | Machine-readable feature-to-code mapping for navigation and verification |
 | [`TESTING.md`](TESTING.md) | Contributors/operators | Test frameworks, directory structure, commands, CI coverage visibility, and manual-vs-automated boundaries |
 | [`../AGENTS.md`](../AGENTS.md) | Contributors/agents | Active ACM repo contract and task loop |
 | [`ACM_FEATURE_PLANS.md`](ACM_FEATURE_PLANS.md) | Contributors/agents | Visible repo-local schema for formal feature plans stored in ACM |
 | [`maintainers/README.md`](maintainers/README.md) | Maintainers | Index of retained maintainer-only guidance |
 | [`maintainers/LOGGING_STANDARDS.md`](maintainers/LOGGING_STANDARDS.md) | Maintainers | Current shared logging guidance for runtime code |
 | [`maintainers/RELEASE_NOTES_TEMPLATE.md`](maintainers/RELEASE_NOTES_TEMPLATE.md) | Maintainers | Manual release-notes scaffold for published releases |
+
+## Design Documents
+
+| Document | Status | Purpose |
+| --- | --- | --- |
+| [`designs/provider-strategy-track-mapping.md`](designs/provider-strategy-track-mapping.md) | Design phase | Provider strategy overhaul, browse redesign, TrackMapping data model |
+| [`designs/explore-page-consolidation.md`](designs/explore-page-consolidation.md) | Design phase | Merge Home/Browse/Radio/Discovery into single Explore page |
 
 ## Compatibility and Brand
 
@@ -72,7 +87,7 @@ This index is the central navigation page for all project documentation under `d
 ---
 
 Key ACM helper commands:
-- `acm get-context --project soundspan --task-text "<task>" --phase plan` starts scoped work.
+- `acm context --project soundspan --task-text "<task>" --phase plan` starts scoped work.
 - `acm verify --project soundspan --phase review --file-changed <path>` runs repo-defined verification.
 - `acm review --run --project soundspan --receipt-id <receipt-id>` satisfies repo-defined workflow gates when `.acm/acm-workflows.yaml` selects the current task.
 - `acm verify --project soundspan --receipt-id <receipt-id> --phase review --file-changed <path>` selects `acm-feature-plan-validate` for feature-relevant work and runs it with active receipt/plan context.

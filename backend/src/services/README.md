@@ -71,6 +71,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/releaseContracts.ts` | Core |
 | `backend/src/services/remoteTrackBackfillService.ts` | Core |
 | `backend/src/services/remoteTrackMetadataRefresh.ts` | Core |
+| `backend/src/services/remoteTrackMetadataResolver.ts` | Core |
 | `backend/src/services/rss-parser.ts` | Core |
 | `backend/src/services/search.ts` | Core |
 | `backend/src/services/segmented-streaming/cacheService.ts` | Segmented Streaming |

@@ -1,50 +1,51 @@
 # AGENTS.md
 
-Repository contract for `soundspan` after ACM onboarding.
+Repository contract for soundspan.
 
 ## Source Of Truth
 
 - Follow this file first.
-- Canonical ACM rules, tags, verification definitions, and workflow-gate definitions live in `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, `.acm/acm-tests.yaml`, and `.acm/acm-workflows.yaml`.
-- `CLAUDE.md` and `.claude/acm-broker/**` are tool-specific companions only. If they disagree with this file, this file wins.
+- Canonical ACM rules, tags, verification definitions, and workflow gates live in `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, `.acm/acm-tests.yaml`, and `.acm/acm-workflows.yaml`.
+- `CLAUDE.md` and `.claude/acm-broker/**` are tool-specific companions. If they disagree with this file, this file wins.
 - ACM work storage is the source of truth for active and historical plan state. Use `acm work list/search --scope all` when you need archived or completed history.
 
 ## Required Task Loop
 
-1. Read `AGENTS.md` and the human task.
-2. Run `acm get-context --project soundspan --task-text "<current task>" --phase <plan|execute|review>`.
+1. Read this file and the human task.
+2. Run `acm context --project soundspan --task-text "<current task>" --phase <plan|execute|review>`.
 3. Read the returned hard rules and fetch only the keys needed for the current step.
 4. If the task spans multiple steps, multiple files, or likely handoff, create or update ACM work with `acm work --project soundspan ...`.
-5. For code, config, onboarding, schema, or behavior changes, run `acm verify --project soundspan ...` before completion.
+5. For code, config, schema, or behavior changes, run `acm verify --project soundspan ...` before completion.
 6. If `.acm/acm-workflows.yaml` requires a review task such as `review:cross-llm`, satisfy it with `acm review --run --project soundspan --receipt-id <receipt-id>` when the task defines a `run` block; otherwise use manual review fields or `acm work`.
-7. Close the task with `acm report-completion --project soundspan ...`. Changed files must stay within the active receipt scope.
-8. Record reusable decisions and pitfalls with `acm propose-memory --project soundspan ...`. Evidence keys must come from the active receipt scope.
+7. Close the task with `acm done --project soundspan ...`. Changed files must stay within the active receipt scope.
+8. Record reusable decisions and pitfalls with `acm memory --project soundspan ...`.
 
 ## Working Rules
 
-- Do not silently expand scope. Refresh context first if the task spills into adjacent systems.
-- Prefer small, reviewable changes over broad cleanup.
-- Do not invent product requirements, compatibility guarantees, or migration behavior when the repo does not define them.
-- If verification fails, either fix the issue or report the failure clearly. Do not claim the task is complete as if checks passed.
-- Keep work state current when you pause, hand off, or hit a blocker.
+- **Read before edit.** Read the full relevant source before making changes. Do not guess at file contents or structure.
+- **Smallest safe change.** Make the minimum change that solves the problem. Preserve existing style and conventions. Do not refactor adjacent code, add unsolicited features, or "improve" what wasn't asked for.
+- **TDD for executable changes.** For code, schema, or behavior changes, write or update a failing test first, then implement until it passes. Deviations require explicit user approval. Non-executable work (docs, config review, planning, workflow governance) is exempt.
+- **No silent scope expansion.** Refresh context first if the task spills into adjacent systems. Use `work.plan.discovered_paths` when later-discovered files must be declared for review or done.
+- **No invented requirements.** Do not invent product requirements, compatibility guarantees, or migration behavior when the repo does not define them. Surface the decision and wait for direction.
+- **Targeted testing only.** Do not run the full test suite — it maxes out available RAM. Run only the test files and suites relevant to the current changes.
+- **Keep work state current.** Update work when you pause, hand off, or hit a blocker.
+- **Prefer small, reviewable changes** over broad cleanup.
 
 ## Repository-Specific Rules
 
-- Use `frontend/lib/api.ts` as the frontend API boundary. Do not introduce direct component `fetch` calls.
-- Use shared logging helpers in runtime code:
+- **API boundary:** Use `frontend/lib/api.ts` as the frontend API boundary. No direct `fetch` calls from components.
+- **Backend config:** Read env through `backend/src/config.ts`.
+- **Database access:** All DB access through Prisma. No raw SQL.
+- **Logging helpers:** Use shared logging helpers in runtime code:
   - frontend: `frontend/lib/logger.ts`
   - backend: `backend/src/utils/logger.ts`
   - python sidecars: `services/common/logging_utils.py`
-- Keep `CHANGELOG.md` updated for user-visible or behavior-changing work.
-- Documentation coverage expectations remain strict:
-  - exported TypeScript symbols should stay fully documented,
-  - runtime Python modules should stay fully docstring-covered,
-  - implemented OpenAPI routes should stay documented.
-- For non-trivial implementation work, satisfy the repo-standard xhigh cross-LLM review gate before final completion:
+- **Changelog:** Keep `CHANGELOG.md` updated for user-visible or behavior-changing work.
+- **Documentation coverage:** Exported TypeScript symbols, runtime Python modules, and implemented OpenAPI routes should remain fully documented when touched.
+- **Cross-LLM review:** For non-trivial implementation work, satisfy the repo review gate before final completion:
   - `acm review --run --project soundspan --receipt-id <receipt-id>`
   - model and reasoning settings live in `.acm/acm-workflows.yaml`
-- If concurrent multi-agent plan storage is needed, configure `ACM_PG_DSN`. SQLite defaults to `.acm/context.db` and is repo-local.
-- Legacy `.agents/**` artifacts are migration input only. Active planning and resumable work now live in ACM.
+- **Storage:** SQLite at `.acm/context.db` by default. Configure `ACM_PG_DSN` for multi-agent coordination.
 
 ## Verification Evidence Protocol
 
@@ -68,17 +69,11 @@ Before reporting completion, confirm ALL:
 
 - Requested change implemented; behavior explained (what, where, why).
 - `acm verify` passed for code/config/schema changes (paste evidence with `verify:` prefix).
+- Tests added or updated for behavioral changes.
 - Required workflow gates from `.acm/acm-workflows.yaml` satisfied before completion reporting.
 - `CHANGELOG.md` updated for behavior-visible changes.
 - No scope expansion beyond original request.
 - Documentation updated for new/changed exports, routes, or schemas.
-
-## Historical Work Lookup
-
-- Use `acm work search --project soundspan --scope all --query "<topic>"` to find archived, completed, deferred, or current work by topic.
-- Use `acm work list --project soundspan --scope all` when you need a broader inventory view.
-- Fetch the returned plan or receipt keys for details.
-- If you need receipts, runs, or durable memories in addition to plans, use `acm history search --project soundspan --entity all ...` or `acm history search --project soundspan --entity memory ...`, then fetch the returned `fetch_keys`.
 
 ## When To Use `work`
 
@@ -101,16 +96,22 @@ For single review-gate updates, `acm review` is the thinner wrapper around `acm 
 - If a feature splits into multiple execution streams, create child plans with `kind=feature_stream` and `parent_plan_key=<root plan key>`.
 - Feature and feature-stream plans must carry `verify:tests`, and implementation leaf tasks must carry explicit `acceptance_criteria`.
 - `acm verify` selects `acm-feature-plan-validate` for feature-relevant work and runs `scripts/acm-feature-plan-validate.py` with the active receipt/plan context.
-- The validator enforces the schema for `kind=feature` and `kind=feature_stream` plans and exits cleanly for other plan kinds.
 - See `docs/ACM_FEATURE_PLANS.md` for examples and command shapes.
+
+## Historical Work Lookup
+
+- Use `acm work search --project soundspan --scope all --query "<topic>"` to find archived, completed, deferred, or current work by topic.
+- Use `acm work list --project soundspan --scope all` when you need a broader inventory view.
+- Fetch the returned plan or receipt keys for details.
+- If you need receipts, runs, or durable memories in addition to plans, use `acm history search --project soundspan --entity all ...` or `acm history search --project soundspan --entity memory ...`, then fetch the returned `fetch_keys`.
 
 ## ACM Maintenance
 
 Bootstrap this repo with:
 
-- `acm bootstrap --project soundspan --project-root .`
+- `acm init --project soundspan --project-root .`
 
-Do not prepend `acm sync` to every workflow. Start with `acm get-context`; use `sync`, `health --apply`, or targeted `health --fix <name> --apply` when context looks stale, when newly created files are missing from retrieval, after editing `.acm/**` or repo-local agent-steering assets, or when entering a fresh worktree that has not been synced yet.
+Do not prepend `acm sync` to every workflow. Start with `acm context`; use `sync`, `health --apply`, or targeted `health --fix <name> --apply` when context looks stale, when newly created files are missing from retrieval, after editing `.acm/**` or repo-local agent-steering assets, or when entering a fresh worktree that has not been synced yet.
 
 After editing `.acm/**`, root agent contracts, or repo-local Claude ACM assets:
 

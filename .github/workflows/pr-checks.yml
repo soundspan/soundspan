@@ -25,8 +25,8 @@ jobs:
           go install github.com/bonztm/agent-context-manager/cmd/acm@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Bootstrap ACM
-        run: acm bootstrap --project soundspan --project-root .
+      - name: Init ACM
+        run: acm init --project soundspan --project-root .
 
       - name: Sync ACM
         run: acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
@@ -73,4 +73,4 @@ jobs:
         run: acm health --project soundspan --include-details
 
       - name: ACM Context Smoke
-        run: acm get-context --project soundspan --task-text "CI ACM smoke check" --phase plan > /tmp/acm-context.json
+        run: acm context --project soundspan --task-text "CI ACM smoke check" --phase plan > /tmp/acm-context.json

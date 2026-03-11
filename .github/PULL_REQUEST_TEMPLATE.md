@@ -27,7 +27,7 @@ Fixes #
 
 ## Verification
 
--   [ ] `acm bootstrap --project soundspan --project-root .`
+-   [ ] `acm init --project soundspan --project-root .`
 -   [ ] `acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .`
 -   [ ] `acm verify --project soundspan --phase review --file-changed ...`
 -   [ ] `acm review --run --project soundspan --receipt-id <receipt-id>` (when `.acm/acm-workflows.yaml` requires it)

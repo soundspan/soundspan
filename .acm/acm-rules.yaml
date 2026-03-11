@@ -1,16 +1,24 @@
 version: acm.rules.v1
 rules:
+  # ── Core workflow ──────────────────────────────────────────────────
+
   - id: rule_start_with_context
     summary: Start every task with ACM context.
-    content: Run `acm get-context --project soundspan ...` before opening or editing files, then follow the returned hard rules.
+    content: Run `acm context --project soundspan ...` before opening or editing files, then follow the returned hard rules.
     enforcement: hard
     tags: [acm, context, workflow]
 
   - id: rule_fetch_minimal
     summary: Keep retrieved context tight.
-    content: Use `fetch` only for the files, plan artifacts, and memories needed for the active step instead of broad repository retrieval.
-    enforcement: hard
+    content: Use `fetch` only for the files, plan artifacts, and memories needed for the active step instead of broad repository retrieval. If the receipt is missing obvious context, rerun context with a better task description instead of bulk fetching.
+    enforcement: soft
     tags: [context, efficiency]
+
+  - id: rule_read_before_edit
+    summary: Read source files before editing them.
+    content: Read the full relevant source before making changes. Do not guess at file contents, structure, or conventions.
+    enforcement: hard
+    tags: [workflow, safety]
 
   - id: rule_track_multistep_work
     summary: Track multi-step work in ACM.
@@ -18,17 +26,52 @@ rules:
     enforcement: hard
     tags: [work, planning]
 
-  - id: rule_workflow_gates_sync
-    summary: Keep workflow gates and ACM guidance aligned.
-    content: Changes to ACM workflow-gate behavior or repo-local review automation must keep `.acm/acm-workflows.yaml`, the root agent contracts, `.claude/acm-broker/**`, and any impacted maintainer docs or CI files semantically aligned. Update whichever of those surfaces the behavior change actually affects.
+  - id: rule_plan_before_code
+    summary: Plan multi-step work before writing implementation code.
+    content: |
+      For tasks with more than one implementation step, create ACM work
+      with explicit steps and acceptance criteria before writing any
+      implementation code. Single-file, single-purpose fixes are exempt.
     enforcement: hard
-    tags: [workflow, docs, claude]
+    tags: [planning, workflow]
+
+  - id: rule_no_silent_scope_expansion
+    summary: Do not silently widen scope.
+    content: If the task spills into adjacent systems or files not represented in the current receipt, rerun context or record the later-discovered governed files through work.plan.discovered_paths before making file-backed changes.
+    enforcement: hard
+    tags: [scope, safety]
 
   - id: rule_verify_before_completion
     summary: Verify executable changes before completion.
-    content: For code, config, onboarding, schema, or behavior changes, run `acm verify --project soundspan ...` before `report_completion`.
+    content: For code, config, schema, or behavior changes, run `acm verify --project soundspan ...` before `done`.
     enforcement: hard
     tags: [verify, testing, completion]
+
+  - id: rule_done
+    summary: Finish every task with done.
+    content: Report every changed file for file-backed work when you know them and give a concise outcome summary. When the detected delta is empty, the closeout is effectively no-file.
+    enforcement: hard
+    tags: [completion, workflow]
+
+  # ── TDD and testing ────────────────────────────────────────────────
+
+  - id: rule_tdd_default
+    summary: Write or update failing tests before implementing executable changes.
+    content: |
+      For code, schema, or behavior changes, write or update a failing test
+      first, then implement until it passes. Deviations require explicit user
+      approval. Non-executable work (docs, config review, planning, workflow
+      governance) is exempt.
+    enforcement: hard
+    tags: [testing, workflow]
+
+  - id: rule_targeted_testing
+    summary: Run only targeted tests, not the full suite.
+    content: Do not run the full test suite — it maxes out available RAM. Run only the test files and suites relevant to the current changes.
+    enforcement: hard
+    tags: [testing, efficiency]
+
+  # ── Soundspan boundaries ──────────────────────────────────────────
 
   - id: rule_soundspan_runtime_boundaries
     summary: Preserve soundspan runtime boundaries and shared helpers.
@@ -48,27 +91,27 @@ rules:
     enforcement: hard
     tags: [docs, typescript, python, openapi]
 
+  # ── Workflow alignment ─────────────────────────────────────────────
+
+  - id: rule_workflow_gates_sync
+    summary: Keep workflow gates and ACM guidance aligned.
+    content: Changes to ACM workflow-gate behavior or repo-local review automation must keep `.acm/acm-workflows.yaml`, the root agent contracts, `.claude/acm-broker/**`, and any impacted maintainer docs or CI files semantically aligned.
+    enforcement: hard
+    tags: [workflow, docs, claude]
+
   - id: rule_work_history_via_acm
     summary: Use ACM work list and search for plan history.
     content: For current, deferred, or completed work lookup, use `acm work list/search --project soundspan --scope all` and fetch the returned keys for details.
     enforcement: hard
     tags: [plans, history, acm]
 
-  - id: rule_plan_before_code
-    summary: Plan multi-step work before writing implementation code.
-    content: |
-      For tasks with more than one implementation step, create ACM work
-      (via acm work) with explicit steps and acceptance criteria before
-      writing any implementation code. Single-file, single-purpose fixes
-      are exempt.
-    enforcement: hard
-    tags: [planning, workflow]
-
   - id: rule_feature_plan_schema
     summary: Use the repo-local ACM feature plan schema for net-new feature work.
-    content: For net-new feature work, create a root ACM plan with `kind=feature`, explicit objective and scope metadata, `spec_outline` / `refined_spec` / `implementation_plan` stage statuses, and top-level `stage:*` tasks that own child tasks through `parent_task_key`. When a feature splits into multiple workstreams, create child plans with `kind=feature_stream` and `parent_plan_key` pointing at the root feature plan. `acm verify` enforces this schema through `scripts/acm-feature-plan-validate.py`.
+    content: For net-new feature work, create a root ACM plan with `kind=feature`, explicit objective and scope metadata, stage statuses, and top-level `stage:*` tasks that own child tasks through `parent_task_key`. Use `kind=feature_stream` and `parent_plan_key` for split workstreams. `acm verify` enforces the schema through `scripts/acm-feature-plan-validate.py`.
     enforcement: hard
     tags: [planning, workflow, docs]
+
+  # ── Safety and escalation ──────────────────────────────────────────
 
   - id: rule_three_failure_escalation
     summary: Stop and reassess after three failed fix attempts.
@@ -79,6 +122,20 @@ rules:
       if the root cause is unclear.
     enforcement: hard
     tags: [debugging, workflow]
+
+  - id: rule_escalate_missing_decisions
+    summary: Escalate when a task depends on a missing product or architectural decision.
+    content: Do not invent product requirements, compatibility guarantees, migrations, or rollout behavior when the repo does not define them. Surface the decision and wait for direction.
+    enforcement: hard
+    tags: [safety, workflow]
+
+  # ── Soft guidance ──────────────────────────────────────────────────
+
+  - id: rule_capture_durable_memory
+    summary: Persist reusable decisions and gotchas with memory.
+    content: Record stable architectural decisions, recurring setup pitfalls, or operator preferences when future tasks would benefit from seeing them in later context calls.
+    enforcement: soft
+    tags: [memory, acm]
 
   - id: rule_xhigh_review
     summary: Run the repo-standard xhigh cross-LLM review for substantial implementation work.
