@@ -4,8 +4,6 @@ Canonical domain-to-test mapping for fast, targeted verification.
 
 ## Constraints
 
-- **Do NOT run the full test suite** — it maxes out available RAM for 20+ minutes.
-- Run only the test files and suites relevant to current changes.
 - Prefer targeted impacted commands from this matrix before broad suite runs.
 
 ## Fast Commands
