@@ -3,6 +3,7 @@ import type { StreamingEngineMode } from "../audio-engine/types";
 const VALID_STREAMING_ENGINE_MODES = new Set<StreamingEngineMode>([
     "videojs",
     "howler",
+    "tauri-native",
 ]);
 const VALID_SEGMENTED_VHS_PROFILES = new Set(["balanced", "legacy"]);
 const SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MIN_MS = 1500;
