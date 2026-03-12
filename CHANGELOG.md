@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Native desktop and mobile app support: the frontend can now detect when it's running inside the soundspan native app and automatically switch to a high-fidelity Rust audio backend on Windows and Android, bypassing Chromium's 48 kHz audio mixer cap for true hi-res playback at the system's native sample rate.
+- Audio engine factory that selects the best playback backend at runtime — Rust-based native audio on platforms that need it, standard web audio everywhere else.
+- Architecture overview, data model reference, and feature index added to project documentation.
+
 ### Changed
+
+- README architecture diagram updated to reflect current system layout.
 
 ### Fixed
 

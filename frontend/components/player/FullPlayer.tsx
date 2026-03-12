@@ -654,22 +654,24 @@ export function FullPlayer() {
                                     )}
                                 >
                                     <div className="flex flex-col items-center gap-2 h-28">
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="100"
-                                            value={volume * 100}
-                                            onChange={handleVolumeChange}
-                                            aria-label="Volume"
-                                            aria-valuemin={0}
-                                            aria-valuemax={100}
-                                            aria-valuenow={Math.round(volume * 100)}
-                                            aria-valuetext={`${Math.round(volume * 100)} percent`}
-                                            style={{
-                                                background: `linear-gradient(to right, #fff ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
-                                            }}
-                                            className="w-1 h-full rounded-full appearance-none cursor-pointer origin-center -rotate-0 [writing-mode:vertical-lr] [direction:rtl] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30"
-                                        />
+                                        <div className="relative h-full w-4 flex items-center justify-center">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={volume * 100}
+                                                onChange={handleVolumeChange}
+                                                aria-label="Volume"
+                                                aria-valuemin={0}
+                                                aria-valuemax={100}
+                                                aria-valuenow={Math.round(volume * 100)}
+                                                aria-valuetext={`${Math.round(volume * 100)} percent`}
+                                                style={{
+                                                    background: `linear-gradient(to right, #fff ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
+                                                }}
+                                                className="absolute w-28 h-1 rounded-full appearance-none cursor-pointer -rotate-90 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30"
+                                            />
+                                        </div>
                                         <span className="text-[10px] text-gray-400 tabular-nums">
                                             {Math.round(volume * 100)}
                                         </span>
