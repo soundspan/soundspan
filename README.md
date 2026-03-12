@@ -132,38 +132,28 @@ soundspan includes a TV-optimized browser interface with D-pad/remote navigation
 
 soundspan consists of several cooperating services:
 
-```
-                                   ┌─────────────────┐
-                                   │   Your Browser  │
-                                   └────────┬────────┘
-                                            │
-                                            ▼
-                                 ┌─────────────────────┐
-                                 │     Frontend        │
-                                 │   (Next.js :3030)   │
-                                 └──────────┬──────────┘
-                                            │
-                                            ▼
-┌─────────────────┐              ┌─────────────────────┐              ┌─────────────────┐
-│  Music Library  │◄────────────►│      Backend        │◄────────────►│  YT Music       │
-│   (Your Files)  │              │  (Express.js :3006) │              │ :8586 (Opt.)    │
-└─────────────────┘              └──────────┬──────────┘              └─────────────────┘
-┌─────────────────┐                         │                         ┌─────────────────┐
-│    Lidarr       │◄────────────────────────┤                         │  TIDAL Sidecar  │
-│   (Optional)    │                         ├────────────────────────►│ :8585 (Opt.)    │
-└─────────────────┘                         │                         └─────────────────┘
-┌─────────────────┐                         │
-│ Audiobookshelf  │◄────────────────────────┘
-│   (Optional)    │                         |
-└─────────────────┘                         |
-                                 ┌──────────┴──────────┐
-                                 │  ┌───────────────┐  │
-                                 │  │  PostgreSQL   │  │
-                                 │  └───────────────┘  │
-                                 │  ┌───────────────┐  │
-                                 │  │     Redis     │  │
-                                 │  └───────────────┘  │
-                                 └─────────────────────┘
+```mermaid
+graph TD
+    Browser["Your Browser"]
+    FE["Frontend<br/>(Next.js :3030)"]
+    BE["Backend<br/>(Express.js :3006)"]
+    Music["Music Library<br/>(Your Files)"]
+    PG["PostgreSQL"]
+    RD["Redis"]
+    YT["YT Music<br/>:8586 (Opt.)"]
+    TD["TIDAL Sidecar<br/>:8585 (Opt.)"]
+    Lidarr["Lidarr<br/>(Optional)"]
+    ABS["Audiobookshelf<br/>(Optional)"]
+
+    Browser --> FE
+    FE --> BE
+    Music <--> BE
+    BE <--> YT
+    BE <--> TD
+    BE <--> Lidarr
+    BE <--> ABS
+    BE --> PG
+    BE --> RD
 ```
 
 | Component | Purpose | Default Port |
