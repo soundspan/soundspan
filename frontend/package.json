@@ -36,6 +36,8 @@
     "@soundspan/media-metadata-contract": "file:../packages/media-metadata-contract",
     "@tanstack/react-query": "^5.90.10",
     "@tanstack/react-query-devtools": "^5.90.2",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-os": "^2.3.2",
     "@types/dompurify": "^3.0.5",
     "@types/howler": "^2.2.12",
     "clsx": "^2.1.1",
