@@ -132,6 +132,8 @@ backend writes track to Redis queue
 
 Analyzers run as independent workers. MusiCNN analyzer writes mood/feature columns on `Track`. CLAP analyzer writes to `TrackEmbedding` for vibe/similarity search via pgvector.
 
+The API process also serves `/api/vibe/map` by reading CLAP embeddings from PostgreSQL, projecting them through an in-process Node worker thread, and caching the normalized coordinates in Redis. That worker entrypoint must resolve in both tsx `src/` runtime and compiled `dist/` runtime layouts.
+
 ### Enrichment Pipeline
 
 ```

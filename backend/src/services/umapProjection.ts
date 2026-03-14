@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import path from "path";
 import { Worker } from "worker_threads";
 import { prisma } from "../utils/db";
@@ -65,6 +66,15 @@ const MOOD_FIELDS = [
 ] as const;
 
 let computePromise: Promise<VibeMapResponse> | null = null;
+
+function resolveUmapWorkerPath(): string {
+    const candidatePaths = [
+        path.join(__dirname, "../workers/umapWorker.js"),
+        path.join(__dirname, "../workers/umapWorker.ts"),
+    ];
+
+    return candidatePaths.find((candidatePath) => existsSync(candidatePath)) ?? candidatePaths[0];
+}
 
 function getDominantMood(
     track: Record<string, unknown>
@@ -166,12 +176,9 @@ function runUmapInWorker(
     nNeighbors: number
 ): Promise<number[][]> {
     return new Promise((resolve, reject) => {
-        const worker = new Worker(
-            path.join(__dirname, "../workers/umapWorker.js"),
-            {
-                workerData: { embeddings, nNeighbors },
-            }
-        );
+        const worker = new Worker(resolveUmapWorkerPath(), {
+            workerData: { embeddings, nNeighbors },
+        });
 
         let settled = false;
 

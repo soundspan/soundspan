@@ -16,12 +16,14 @@ type MockPipeline = {
 
 let pipeline: MockPipeline;
 let workerBehavior: ((worker: MockWorker) => void) | null = null;
+let lastWorkerFilename: string | null = null;
 
 class MockWorker {
     listeners = new Map<string, (payload?: unknown) => void>();
     terminate = jest.fn();
 
-    constructor(_filename: string, _options: unknown) {
+    constructor(filename: string, _options: unknown) {
+        lastWorkerFilename = filename;
         setImmediate(() => {
             workerBehavior?.(this);
         });
@@ -68,6 +70,7 @@ describe("computeMapProjection", () => {
         jest.resetModules();
         jest.clearAllMocks();
         workerBehavior = null;
+        lastWorkerFilename = null;
 
         pipeline = {
             setEx: jest.fn().mockReturnThis(),
@@ -236,5 +239,6 @@ describe("computeMapProjection", () => {
             ["track-1", "track-2", "track-3", "track-4", "track-5"]
         );
         expect(pipeline.exec).toHaveBeenCalledTimes(1);
+        expect(lastWorkerFilename).toMatch(/umapWorker\.ts$/);
     });
 });

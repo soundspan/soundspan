@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Backend vibe-map UMAP projection now resolves its worker entrypoint in both tsx source runtime and compiled dist builds, fixing `/api/vibe/map` failures in API containers that run from `src/`.
 - Backend outbound URL safety checks now run through a shared validator, keeping image fetch policy centralized and newly blocking IPv6 loopback, link-local, and unique-local redirect targets.
 - Last.fm configuration no longer falls back to a bundled application key; operators must provide an env or System Settings key, and runtime refresh now clears removed stored keys back to env-or-disabled behavior.
 - OpenSubsonic bookmark compatibility is no longer a no-op: bookmark create/list/delete now persist per-user track positions and return real bookmark payloads to compatible clients.
