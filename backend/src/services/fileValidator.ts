@@ -1,9 +1,23 @@
 import * as fs from "fs";
+import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import * as path from "path";
 import { prisma } from "../utils/db";
 import { config } from "../config";
 import PQueue from "p-queue";
+
+type LibraryHealthRecordDelegate = {
+    upsert(args: Prisma.LibraryHealthRecordUpsertArgs): Promise<unknown>;
+    deleteMany(args: Prisma.LibraryHealthRecordDeleteManyArgs): Promise<unknown>;
+};
+
+function getLibraryHealthRecordDelegate(): LibraryHealthRecordDelegate {
+    return (
+        prisma as typeof prisma & {
+            libraryHealthRecord: LibraryHealthRecordDelegate;
+        }
+    ).libraryHealthRecord;
+}
 
 export interface ValidationResult {
     tracksChecked: number;
@@ -18,8 +32,38 @@ export interface ValidationResult {
 export class FileValidatorService {
     private validationQueue = new PQueue({ concurrency: 50 });
 
+    private async markTrackMissing(
+        trackId: string,
+        filePath: string,
+        detail?: string
+    ): Promise<void> {
+        await getLibraryHealthRecordDelegate().upsert({
+            where: { trackId },
+            update: {
+                status: "MISSING_FROM_DISK",
+                filePath,
+                detail: detail ?? null,
+            },
+            create: {
+                trackId,
+                status: "MISSING_FROM_DISK",
+                filePath,
+                detail: detail ?? null,
+            },
+        });
+    }
+
+    private async clearTrackHealthRecord(trackId: string): Promise<void> {
+        await getLibraryHealthRecordDelegate().deleteMany({
+            where: {
+                trackId,
+                status: "MISSING_FROM_DISK",
+            },
+        });
+    }
+
     /**
-     * Validate all tracks in the library and remove missing files
+     * Validate all tracks in the library and record health issues for missing files.
      */
     async validateLibrary(): Promise<ValidationResult> {
         const startTime = Date.now();
@@ -47,6 +91,7 @@ export class FileValidatorService {
 
         // Check each track's file existence
         const missingTrackIds: string[] = [];
+        const healthyTrackIds: string[] = [];
 
         for (const track of tracks) {
             await this.validationQueue.add(async () => {
@@ -72,6 +117,8 @@ export class FileValidatorService {
                             `[FileValidator] Missing file: ${track.filePath} (${track.title})`
                         );
                         missingTrackIds.push(track.id);
+                    } else {
+                        healthyTrackIds.push(track.id);
                     }
 
                     result.tracksChecked++;
@@ -95,25 +142,34 @@ export class FileValidatorService {
 
         result.tracksMissing = missingTrackIds;
 
-        // Remove missing tracks from database
-        if (missingTrackIds.length > 0) {
-            logger.debug(
-                `[FileValidator] Removing ${missingTrackIds.length} missing tracks from database...`
-            );
-
-            await prisma.track.deleteMany({
+        if (healthyTrackIds.length > 0) {
+            await getLibraryHealthRecordDelegate().deleteMany({
                 where: {
-                    id: { in: missingTrackIds },
+                    trackId: { in: healthyTrackIds },
+                    status: "MISSING_FROM_DISK",
                 },
             });
+        }
 
-            result.tracksRemoved = missingTrackIds.length;
+        if (missingTrackIds.length > 0) {
+            logger.debug(
+                `[FileValidator] Recording ${missingTrackIds.length} missing tracks in library health...`
+            );
+
+            const missingTracks = tracks.filter((track) =>
+                missingTrackIds.includes(track.id)
+            );
+            await Promise.all(
+                missingTracks.map((track) =>
+                    this.markTrackMissing(track.id, track.filePath)
+                )
+            );
         }
 
         result.duration = Date.now() - startTime;
 
         logger.debug(
-            `[FileValidator] Validation complete: ${result.tracksChecked} checked, ${result.tracksRemoved} removed (${result.duration}ms)`
+            `[FileValidator] Validation complete: ${result.tracksChecked} checked, ${result.tracksMissing.length} unhealthy (${result.duration}ms)`
         );
 
         return result;
@@ -132,7 +188,7 @@ export class FileValidatorService {
     }
 
     /**
-     * Validate a single track and remove if missing
+     * Validate a single track and record or clear health issues as needed.
      */
     async validateTrack(trackId: string): Promise<boolean> {
         const track = await prisma.track.findUnique({
@@ -157,6 +213,11 @@ export class FileValidatorService {
             logger.warn(
                 `[FileValidator] Path traversal attempt detected: ${track.filePath}`
             );
+            await this.markTrackMissing(
+                track.id,
+                track.filePath,
+                "Path traversal attempt detected during validation"
+            );
             return false;
         }
 
@@ -164,14 +225,13 @@ export class FileValidatorService {
 
         if (!exists) {
             logger.debug(
-                `[FileValidator] Track file missing, removing from DB: ${track.title}`
+                `[FileValidator] Track file missing, recording health issue: ${track.title}`
             );
-            await prisma.track.delete({
-                where: { id: trackId },
-            });
+            await this.markTrackMissing(track.id, track.filePath);
             return false;
         }
 
+        await this.clearTrackHealthRecord(track.id);
         return true;
     }
 }

@@ -16,7 +16,7 @@ if (!input.includes("start of coverage report")) {
     process.exit(1);
 }
 
-const failMatch = input.match(/ℹ fail (\d+)/);
+const failMatch = input.match(/(?:ℹ|#) fail (\d+)/);
 if (!failMatch || failMatch[1] !== "0") {
     console.error("targeted coverage check failed: one or more tests failed");
     process.exit(1);

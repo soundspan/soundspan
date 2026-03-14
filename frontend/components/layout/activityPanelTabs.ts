@@ -1,9 +1,10 @@
-export type ActivityTab = "notifications" | "active" | "history" | "social";
+export type ActivityTab = "notifications" | "active" | "history" | "imports" | "social";
 
 const ALL_ACTIVITY_TAB_IDS: ActivityTab[] = [
     "notifications",
     "active",
     "history",
+    "imports",
     "social",
 ];
 
@@ -14,22 +15,17 @@ export interface ActivityPanelBadgeState {
     hasActivity: boolean;
 }
 
-interface ActivityPanelBadgeInput {
-    unreadCount: number;
-    activeDownloadCount: number;
-    socialUserCount: number;
-    isAdmin: boolean;
-}
-
-/**
- * Executes getActivityPanelBadgeState.
- */
 export function getActivityPanelBadgeState({
     unreadCount,
     activeDownloadCount,
     socialUserCount,
     isAdmin,
-}: ActivityPanelBadgeInput): ActivityPanelBadgeState {
+}: {
+    unreadCount: number;
+    activeDownloadCount: number;
+    socialUserCount: number;
+    isAdmin: boolean;
+}): ActivityPanelBadgeState {
     const notificationBadge = unreadCount > 0 ? unreadCount : null;
     const activeBadge =
         isAdmin && activeDownloadCount > 0 ? activeDownloadCount : null;
@@ -79,7 +75,7 @@ export function isActivityTabVisible(
         return true;
     }
 
-    return tab !== "active" && tab !== "history";
+    return tab !== "active" && tab !== "history" && tab !== "imports";
 }
 
 /**

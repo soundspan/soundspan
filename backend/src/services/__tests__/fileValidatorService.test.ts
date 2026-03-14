@@ -3,9 +3,9 @@ const mockLoggerDebug = jest.fn();
 const mockLoggerWarn = jest.fn();
 const mockLoggerError = jest.fn();
 const mockFindMany = jest.fn();
-const mockDeleteMany = jest.fn();
 const mockFindUnique = jest.fn();
-const mockDelete = jest.fn();
+const mockLibraryHealthUpsert = jest.fn();
+const mockLibraryHealthDeleteMany = jest.fn();
 
 jest.mock("fs", () => ({
     promises: {
@@ -28,9 +28,11 @@ jest.mock("../../utils/db", () => ({
     prisma: {
         track: {
             findMany: (...args: unknown[]) => mockFindMany(...args),
-            deleteMany: (...args: unknown[]) => mockDeleteMany(...args),
             findUnique: (...args: unknown[]) => mockFindUnique(...args),
-            delete: (...args: unknown[]) => mockDelete(...args),
+        },
+        libraryHealthRecord: {
+            upsert: (...args: unknown[]) => mockLibraryHealthUpsert(...args),
+            deleteMany: (...args: unknown[]) => mockLibraryHealthDeleteMany(...args),
         },
     },
 }));
@@ -61,8 +63,8 @@ import { FileValidatorService } from "../fileValidator";
 describe("FileValidatorService", () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        mockDeleteMany.mockResolvedValue({});
-        mockDelete.mockResolvedValue({});
+        mockLibraryHealthUpsert.mockResolvedValue({});
+        mockLibraryHealthDeleteMany.mockResolvedValue({});
         mockFsAccess.mockResolvedValue(undefined);
     });
 
@@ -103,14 +105,45 @@ describe("FileValidatorService", () => {
         const result = await service.validateLibrary();
 
         expect(result.tracksChecked).toBe(102);
-        expect(result.tracksRemoved).toBe(2);
+        expect(result.tracksRemoved).toBe(0);
         expect(result.tracksMissing.sort()).toEqual(["missing", "traversal"]);
         expect(result.duration).toBeGreaterThanOrEqual(0);
-        expect(mockDeleteMany).toHaveBeenCalledWith({
+        const missingRecordCall = mockLibraryHealthUpsert.mock.calls.find(
+            ([arg]) => arg.where?.trackId === "missing"
+        )?.[0];
+        const traversalRecordCall = mockLibraryHealthUpsert.mock.calls.find(
+            ([arg]) => arg.where?.trackId === "traversal"
+        )?.[0];
+
+        expect(missingRecordCall).toBeDefined();
+        expect(traversalRecordCall).toBeDefined();
+        expect(missingRecordCall.update.status).toBe("MISSING_FROM_DISK");
+        expect(traversalRecordCall.update.status).toBe("MISSING_FROM_DISK");
+        expect(mockLibraryHealthUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { trackId: "missing" },
+                update: expect.objectContaining({
+                    status: "MISSING_FROM_DISK",
+                    filePath: "missing.mp3",
+                }),
+            })
+        );
+        expect(mockLibraryHealthUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { trackId: "traversal" },
+                update: expect.objectContaining({
+                    filePath: "../../etc/passwd",
+                }),
+            })
+        );
+        expect(mockLibraryHealthDeleteMany).toHaveBeenCalledWith({
             where: {
-                id: {
-                    in: expect.arrayContaining(["traversal", "missing"]),
+                trackId: {
+                    in: expect.arrayContaining(
+                        Array.from({ length: 100 }, (_, i) => `ok-${i}`)
+                    ),
                 },
+                status: "MISSING_FROM_DISK",
             },
         });
         expect(mockLoggerWarn).toHaveBeenCalledWith(
@@ -127,7 +160,7 @@ describe("FileValidatorService", () => {
         );
     });
 
-    it("skips deleteMany when no tracks are missing", async () => {
+    it("clears health records when all tracks are healthy", async () => {
         const service = new FileValidatorService();
         mockFindMany.mockResolvedValue([
             {
@@ -147,7 +180,15 @@ describe("FileValidatorService", () => {
                 tracksMissing: [],
             })
         );
-        expect(mockDeleteMany).not.toHaveBeenCalled();
+        expect(mockLibraryHealthUpsert).not.toHaveBeenCalled();
+        expect(mockLibraryHealthDeleteMany).toHaveBeenCalledWith({
+            where: {
+                trackId: {
+                    in: ["ok"],
+                },
+                status: "MISSING_FROM_DISK",
+            },
+        });
     });
 
     it("returns false when validateTrack cannot find the track", async () => {
@@ -155,10 +196,11 @@ describe("FileValidatorService", () => {
         mockFindUnique.mockResolvedValueOnce(null);
 
         await expect(service.validateTrack("missing-track-id")).resolves.toBe(false);
-        expect(mockDelete).not.toHaveBeenCalled();
+        expect(mockLibraryHealthUpsert).not.toHaveBeenCalled();
+        expect(mockLibraryHealthDeleteMany).not.toHaveBeenCalled();
     });
 
-    it("returns false on validateTrack path traversal attempts", async () => {
+    it("marks validateTrack path traversal tracks as missing-from-disk health issues with detail", async () => {
         const service = new FileValidatorService();
         mockFindUnique.mockResolvedValueOnce({
             id: "track-1",
@@ -167,12 +209,26 @@ describe("FileValidatorService", () => {
         });
 
         await expect(service.validateTrack("track-1")).resolves.toBe(false);
+        expect(mockLibraryHealthUpsert).toHaveBeenCalledWith({
+            where: { trackId: "track-1" },
+            update: {
+                status: "MISSING_FROM_DISK",
+                filePath: "../escape.mp3",
+                detail: "Path traversal attempt detected during validation",
+            },
+            create: {
+                trackId: "track-1",
+                status: "MISSING_FROM_DISK",
+                filePath: "../escape.mp3",
+                detail: "Path traversal attempt detected during validation",
+            },
+        });
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "[FileValidator] Path traversal attempt detected: ../escape.mp3"
         );
     });
 
-    it("removes missing single tracks and returns false", async () => {
+    it("marks missing single tracks and returns false", async () => {
         const service = new FileValidatorService();
         mockFindUnique.mockResolvedValueOnce({
             id: "track-2",
@@ -182,15 +238,26 @@ describe("FileValidatorService", () => {
         mockFsAccess.mockRejectedValueOnce(new Error("ENOENT"));
 
         await expect(service.validateTrack("track-2")).resolves.toBe(false);
-        expect(mockDelete).toHaveBeenCalledWith({
-            where: { id: "track-2" },
+        expect(mockLibraryHealthUpsert).toHaveBeenCalledWith({
+            where: { trackId: "track-2" },
+            update: {
+                status: "MISSING_FROM_DISK",
+                filePath: "missing-track.mp3",
+                detail: null,
+            },
+            create: {
+                trackId: "track-2",
+                status: "MISSING_FROM_DISK",
+                filePath: "missing-track.mp3",
+                detail: null,
+            },
         });
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "[FileValidator] Track file missing, removing from DB: Missing Track"
+            "[FileValidator] Track file missing, recording health issue: Missing Track"
         );
     });
 
-    it("returns true for valid single tracks that exist", async () => {
+    it("clears health records for valid single tracks that exist", async () => {
         const service = new FileValidatorService();
         mockFindUnique.mockResolvedValueOnce({
             id: "track-3",
@@ -200,6 +267,31 @@ describe("FileValidatorService", () => {
         mockFsAccess.mockResolvedValueOnce(undefined);
 
         await expect(service.validateTrack("track-3")).resolves.toBe(true);
-        expect(mockDelete).not.toHaveBeenCalled();
+        expect(mockLibraryHealthDeleteMany).toHaveBeenCalledWith({
+            where: {
+                trackId: "track-3",
+                status: "MISSING_FROM_DISK",
+            },
+        });
+        expect(mockLibraryHealthUpsert).not.toHaveBeenCalled();
+    });
+
+    it("preserves unreadable metadata health records for tracks that still exist", async () => {
+        const service = new FileValidatorService();
+        mockFindUnique.mockResolvedValueOnce({
+            id: "track-4",
+            filePath: "exists.mp3",
+            title: "Exists",
+        });
+        mockFsAccess.mockResolvedValueOnce(undefined);
+
+        await expect(service.validateTrack("track-4")).resolves.toBe(true);
+
+        expect(mockLibraryHealthDeleteMany).toHaveBeenCalledWith({
+            where: {
+                trackId: "track-4",
+                status: "MISSING_FROM_DISK",
+            },
+        });
     });
 });

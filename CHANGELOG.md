@@ -11,12 +11,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native desktop and mobile app via [soundspan-app](https://github.com/soundspan/soundspan-app): multi-platform Tauri 2 app for Windows, macOS, Linux, Android, and iOS. On platforms where Chromium's audio mixer caps output at 48 kHz (Windows, Android), the app automatically switches to a high-fidelity Rust audio backend for true hi-res playback at the system's native sample rate.
 - Audio engine factory that selects the best playback backend at runtime — Rust-based native audio via soundspan-app on platforms that need it, standard web audio everywhere else.
 - Architecture overview, data model reference, and feature index added to project documentation.
+- Vibe backend now exposes cached `/api/vibe/map` projection data for tracks with CLAP embeddings, using a UMAP worker path with a circular fallback for very small libraries.
+- Backend playlist import now includes M3U and M3U8 parsing plus deterministic local-library matching tiers for file path, filename, exact metadata, and fuzzy metadata.
+- Backend generic import jobs now have dedicated persistence, job APIs, and detached background execution for source identity, lifecycle status, progress, summary counts, reconnect, cancellation, and result playlist linkage, without altering the existing Spotify-specific import flow.
+- Backend generic import now exposes job API endpoints (`/api/import/jobs`) for submit, dedup/reconnect, status, list, and cancel lifecycle control ahead of worker execution rollout.
+- M3U and M3U8 file import preview is now available through `POST /api/import/m3u/preview` with content validation and a 2 MB size limit.
+- Podcast subscriptions now support bulk refresh through `POST /api/podcasts/refresh-all`, which processes all subscribed feeds through conditional-GET refresh with per-feed error isolation.
+- Vibe discovery now includes song-path (`GET /api/vibe/path`) for interpolated musical journeys between two tracks and alchemy (`POST /api/vibe/alchemy`) for blending multiple track embeddings into new vibe discoveries.
 
 ### Changed
 
+- Import page now supports both streaming-service URL imports and local M3U/M3U8 file uploads with a tabbed input interface.
+- Add-to-playlist picker now supports multi-select mode for adding a track to multiple playlists in one action.
+- Sleep timer hook added with preset durations (15/30/45/60/90/120 min) and formatted countdown for integration into player controls.
+- Import page now offers a "Run in Background" option that submits URL imports as background jobs with progress tracking through the activity panel.
+- Activity panel now includes an Imports tab showing background import job progress, cancellation, and playlist links for completed jobs.
+- Vibe page now includes a Map tab with an interactive 2D scatter plot of the library's CLAP embedding projections, color-coded by dominant mood.
+- Admin panel now includes a Library Health section showing tracks flagged as missing from disk or having unreadable metadata during library scans.
 - README architecture diagram updated to reflect current system layout.
 
 ### Fixed
+
+- Backend outbound URL safety checks now run through a shared validator, keeping image fetch policy centralized and newly blocking IPv6 loopback, link-local, and unique-local redirect targets.
+- Last.fm configuration no longer falls back to a bundled application key; operators must provide an env or System Settings key, and runtime refresh now clears removed stored keys back to env-or-disabled behavior.
+- OpenSubsonic bookmark compatibility is no longer a no-op: bookmark create/list/delete now persist per-user track positions and return real bookmark payloads to compatible clients.
+- Podcast subscriptions now persist feed `ETag` and `Last-Modified` validators, and refresh reuses them for conditional GETs so 304 responses skip unnecessary episode rewrites.
+- Library validation and scan health now keep missing or unreadable tracks in the database and record issues in dedicated library-health rows instead of deleting the affected track records outright.
+- Generic import job cancellation now uses an intermediate `cancelling` state, records true completion when a playlist finishes after a late cancel request, and keeps vibe-map mood colors aligned with the backend projection payload.
+- ACM cross-review now takes its Codex sandbox mode from workflow/script arguments instead of hardcoding `read-only` in the script, so operators can tune it per host runtime.
+- ACM cross-LLM review now sends an untrimmed scoped review packet into the nested Codex reviewer so the read-only sandbox no longer depends on inner shell access.
 
 ## [1.3.4] - 2026-03-09
 
@@ -389,3 +412,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Rebrand baseline initialized for soundspan.
+- fix: preserve non-missing library health warnings during file validation, report in-progress import cancellations more accurately, and align vibe map colors with projected mood keys

@@ -99,6 +99,49 @@ export interface PlaylistImportExecuteResponse {
     summary: PlaylistImportSummary;
 }
 
+/** Lifecycle states returned by generic playlist import jobs. */
+export type ImportJobStatus =
+    | "pending"
+    | "resolving"
+    | "creating_playlist"
+    | "cancelling"
+    | "completed"
+    | "failed"
+    | "cancelled";
+
+export interface ImportJob {
+    id: string;
+    userId: string;
+    sourceType: string;
+    sourceId: string;
+    sourceUrl: string;
+    normalizedSource: string;
+    playlistName: string;
+    requestedPlaylistName: string | null;
+    status: ImportJobStatus;
+    progress: number;
+    summary: PlaylistImportSummary;
+    createdPlaylistId: string | null;
+    error: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface LibraryHealthRecord {
+    id: string;
+    trackId: string;
+    status: "MISSING_FROM_DISK" | "UNREADABLE_METADATA";
+    filePath: string;
+    detail: string | null;
+    detectedAt: string;
+    updatedAt: string;
+    track?: {
+        id: string;
+        title: string;
+        album?: { title: string; artist?: { name: string } };
+    };
+}
+
 // New Mood Bucket Types (simplified mood system)
 export type MoodType =
     | "happy"
@@ -1802,6 +1845,47 @@ class ApiClient {
         return this.post("/import/execute", input);
     }
 
+    async previewM3UImport(
+        content: string,
+        name?: string
+    ): Promise<PlaylistImportPreviewResponse> {
+        return this.request("/import/m3u/preview", {
+            method: "POST",
+            body: JSON.stringify({ content, name }),
+        });
+    }
+
+    async submitImportJob(url: string, name?: string) {
+        return this.request<{
+            deduped: boolean;
+            job: ImportJob;
+        }>("/import/jobs", {
+            method: "POST",
+            body: JSON.stringify({ url, name }),
+        });
+    }
+
+    async listImportJobs() {
+        return this.request<{ jobs: ImportJob[] }>("/import/jobs");
+    }
+
+    async getImportJob(jobId: string) {
+        return this.request<{ job: ImportJob }>(`/import/jobs/${jobId}`);
+    }
+
+    async reconnectImportJob(url: string) {
+        return this.request<{ job: ImportJob }>("/import/jobs/reconnect", {
+            method: "POST",
+            body: JSON.stringify({ url }),
+        });
+    }
+
+    async cancelImportJob(jobId: string) {
+        return this.request<{ job: ImportJob }>(`/import/jobs/${jobId}/cancel`, {
+            method: "POST",
+        });
+    }
+
     async deleteDownload(id: string) {
         return this.request<{ success: boolean }>(`/downloads/${id}`, {
             method: "DELETE",
@@ -2853,6 +2937,90 @@ class ApiClient {
             progress: number;
             isComplete: boolean;
         }>("/vibe/status");
+    }
+
+    async getVibeMap() {
+        return this.request<{
+            tracks: Array<{
+                id: string;
+                x: number;
+                y: number;
+                title: string;
+                artist: string;
+                artistId: string;
+                albumId: string;
+                coverUrl: string | null;
+                dominantMood: string;
+                moodScore: number;
+                moods: Record<string, number>;
+                energy: number | null;
+                valence: number | null;
+            }>;
+            trackCount: number;
+            computedAt: string;
+        }>("/vibe/map");
+    }
+
+    async getVibePath(fromId: string, toId: string, steps = 5) {
+        return this.request<{
+            from: string;
+            to: string;
+            steps: Array<{
+                id: string;
+                title: string;
+                distance: number;
+                similarity: number;
+                album: { id: string; title: string; coverUrl: string | null };
+                artist: { id: string; name: string };
+            }>;
+        }>(`/vibe/path?from=${fromId}&to=${toId}&steps=${steps}`);
+    }
+
+    async vibeAlchemy(trackIds: string[], weights?: number[], limit = 20) {
+        return this.request<{
+            ingredients: string[];
+            weights: number[];
+            tracks: Array<{
+                id: string;
+                title: string;
+                distance: number;
+                similarity: number;
+                album: { id: string; title: string; coverUrl: string | null };
+                artist: { id: string; name: string };
+            }>;
+        }>("/vibe/alchemy", {
+            method: "POST",
+            body: JSON.stringify({ trackIds, weights, limit }),
+        });
+    }
+
+    async refreshAllPodcasts() {
+        return this.request<{
+            success: boolean;
+            total: number;
+            totalNewEpisodes: number;
+            failed: number;
+            results: Array<{
+                podcastId: string;
+                success: boolean;
+                newEpisodesCount: number;
+                error?: string;
+            }>;
+        }>("/podcasts/refresh-all", { method: "POST" });
+    }
+
+    async getLibraryHealth() {
+        return this.request<{
+            records: LibraryHealthRecord[];
+            total: number;
+        }>("/admin/library-health");
+    }
+
+    async dismissLibraryHealthRecord(recordId: string) {
+        return this.request<{ success: boolean }>(
+            `/admin/library-health/${recordId}`,
+            { method: "DELETE" }
+        );
     }
 
     async getTrackAnalysis(trackId: string) {
