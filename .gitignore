@@ -146,6 +146,9 @@ frontend/test-*.tsx
 **/.serena/
 .opencode/
 **/.opencode/
+!.opencode/
+!.opencode/acm-broker/
+!.opencode/acm-broker/**
 .vibe/
 **/.vibe/
 .agent/

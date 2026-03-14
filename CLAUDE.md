@@ -20,6 +20,7 @@ Claude companion for soundspan. The primary contract is `AGENTS.md` — if this 
 - Do not claim success when `/acm-verify` failed or was skipped for code changes.
 - `/acm-review` is thin: use `{"run":true}` for runnable gates, manual fields for non-run mode.
 - If `/acm-review {"run":true}` reports zero scoped review files, the receipt scope is too narrow — re-run `/acm-context` or update `/acm-work`.
+- Reviewer provider and high-trust flag settings stay in `.acm/acm-workflows.yaml`; this repo uses the shared `--yolo` shortcut, which maps to native Codex yolo mode or Claude dangerous-permissions mode.
 - When changing rules, tags, tests, or workflows, run `acm sync --mode working_tree --insert-new-candidates` and `acm health --include-details` before `/acm-done`.
 - For historical discovery after compaction, use `acm history` then `acm fetch` the returned keys.
 - For runtime diagnostics, use `acm status`.

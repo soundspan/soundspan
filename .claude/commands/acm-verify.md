@@ -17,4 +17,5 @@ Constraints:
 - Use `verify` before `done` for code changes.
 - Do not invent `files_changed` paths or receipt context.
 - When receipt baseline detection is unavailable and changed-path selectors matter, pass files explicitly instead of assuming ACM can infer them.
+- In soundspan, backend verify is receipt-scoped and targeted; use `/acm-review` to trigger the promoted full backend `build` + `test:coverage` gate before `/acm-done`.
 - If selection is unexpectedly empty, inspect the repo's `.acm/acm-tests.yaml` selectors before forcing completion.

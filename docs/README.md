@@ -51,7 +51,7 @@ This index is the central navigation page for all project documentation under `d
 | [`ADVANCED_ANALYSIS_AND_GPU.md`](ADVANCED_ANALYSIS_AND_GPU.md) | Power users/operators | CLAP analysis service details and optional GPU acceleration |
 | [`KUBERNETES.md`](KUBERNETES.md) | Kubernetes operators | Helm and manual Kubernetes deployment guidance |
 | [`REVERSE_PROXY_AND_TUNNELS.md`](REVERSE_PROXY_AND_TUNNELS.md) | Operators/network admins | Reverse proxy and Cloudflare Tunnel routing guidance |
-| [`MIGRATING_FROM_LIDIFY.md`](MIGRATING_FROM_LIDIFY.md) | Operators/maintainers | Step-by-step migration runbook from kima-hub to soundspan |
+| [`MIGRATING_FROM_LIDIFY.md`](MIGRATING_FROM_LIDIFY.md) | Operators/maintainers | Step-by-step migration runbook for moving a Lidify deployment to soundspan |
 | [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md) | Operators | Segmented-streaming guidance (experimental feature) |
 
 ## For Contributors and Maintainers
@@ -88,8 +88,9 @@ This index is the central navigation page for all project documentation under `d
 
 Key ACM helper commands:
 - `acm context --project soundspan --task-text "<task>" --phase plan` starts scoped work.
-- `acm verify --project soundspan --phase review --file-changed <path>` runs repo-defined verification.
+- `acm verify --project soundspan --phase review --file-changed <path>` runs repo-defined verification; backend changes stay receipt-scoped and targeted here.
 - `acm review --run --project soundspan --receipt-id <receipt-id>` satisfies repo-defined workflow gates when `.acm/acm-workflows.yaml` selects the current task.
+- `acm review --run --project soundspan --receipt-id <receipt-id>` also promotes full backend `build` + `test:coverage` when the active receipt includes backend or shared media-contract changes.
 - `acm verify --project soundspan --receipt-id <receipt-id> --phase review --file-changed <path>` selects `acm-feature-plan-validate` for feature-relevant work and runs it with active receipt/plan context.
 - `python3 scripts/acm-feature-plan-validate.py` is the repo-local validator behind that verify check and can be run directly for debugging.
 - `acm health --project soundspan --include-details` checks ACM index/rules health.

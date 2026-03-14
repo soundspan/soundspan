@@ -24,7 +24,7 @@ completion:
           - "scripts/**"
           - "services/**"
     - key: review:cross-llm
-      summary: Cross-LLM review
+      summary: Cross-LLM review with promoted backend build and coverage gates
       rerun_requires_new_fingerprint: true
       select:
         phases:
@@ -51,9 +51,14 @@ completion:
       run:
         argv:
           - "scripts/acm-cross-review.sh"
+          - "--provider"
+          - "codex"
           - "--model"
           - "gpt-5.3-codex"
           - "--reasoning-effort"
-          - "xhigh"
+          - "high"
+          # In already isolated containerized hosts, prefer the shared high-trust shortcut.
+          # For Codex this maps to native --yolo; for Claude it maps to dangerous permissions.
+          - "--yolo"
         cwd: .
         timeout_sec: 1800

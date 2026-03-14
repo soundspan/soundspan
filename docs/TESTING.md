@@ -181,8 +181,8 @@ ACM repo-contract checks:
 Promoted ACM verify quality gates:
 
 - `bash scripts/acm-cross-review.sh --help` (when the ACM review gate surface changes)
-- `npm --prefix backend run build`
-- `npm --prefix backend run test:coverage`
+- `python3 scripts/test_acm_cross_review.py` (when the ACM review gate flag semantics change)
+- `bash scripts/acm-backend-targeted-verify.sh --help` (when the targeted backend verify surface changes)
 - `npm --prefix frontend run lint`
 - `npm --prefix frontend run build`
 - `npm --prefix frontend run test:coverage`
@@ -194,6 +194,13 @@ Recommended local ACM validation:
 acm verify --project soundspan --phase review --file-changed <path>
 acm health --project soundspan --include-details
 ```
+
+Backend note:
+
+- `acm verify` now keeps backend validation receipt-scoped and targeted via `scripts/acm-backend-targeted-verify.sh`.
+- Full backend `build` and `test:coverage` are promoted by `acm review --run` before completion when the active receipt includes backend or `packages/media-metadata-contract/` changes.
+- The runnable review gate stays provider-aware through `.acm/acm-workflows.yaml` `run.argv`, and `scripts/acm-cross-review.sh --yolo` is the shared high-trust shortcut: Codex gets native `--yolo`, while Claude maps it to `--dangerously-skip-permissions`.
+- `scripts/acm-cross-review.sh` now embeds an untrimmed scoped review packet, including the workflow context, unified diff, and changed-file snapshots, directly into the nested reviewer prompt so the default zero-tool review packet stays self-contained.
 
 When the active receipt matches a repo-defined review gate in `.acm/acm-workflows.yaml`, run this before `acm done`:
 

@@ -44,7 +44,7 @@ Repository contract for soundspan.
 - **Documentation coverage:** Exported TypeScript symbols, runtime Python modules, and implemented OpenAPI routes should remain fully documented when touched.
 - **Cross-LLM review:** For non-trivial implementation work, satisfy the repo review gate before final completion:
   - `acm review --run --project soundspan --receipt-id <receipt-id>`
-  - model and reasoning settings live in `.acm/acm-workflows.yaml`
+  - reviewer provider, model, reasoning, and shared `--yolo` settings live in `.acm/acm-workflows.yaml`
 - **Storage:** SQLite at `.acm/context.db` by default. Configure `ACM_PG_DSN` for multi-agent coordination.
 
 ## Verification Evidence Protocol

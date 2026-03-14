@@ -21,7 +21,6 @@ This policy applies to:
 
 Fork attribution remains required:
 
-- soundspan is a fork of `Chevron7Locked/kima-hub`.
 - Attribution and GPL obligations are preserved and must not be removed.
 
 ## Color Palette

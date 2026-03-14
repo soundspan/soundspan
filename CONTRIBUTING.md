@@ -180,6 +180,8 @@ acm verify --project soundspan --phase review --file-changed <path>
 acm health --project soundspan --include-details
 ```
 
+For backend or `packages/media-metadata-contract/` changes, `acm verify` remains receipt-scoped and targeted. The full backend `build` + `test:coverage` gate is promoted through the runnable review step below before `done`.
+
 When the active receipt matches a repo-defined review gate, also run:
 
 ```bash

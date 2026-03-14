@@ -15,7 +15,7 @@ The intended default story is the modular core loop: `context`, `work`, `verify`
 - `/acm-review <receipt_id-or-plan_key> [review-json]`
   - records a single review gate through the thin `review` surface, defaulting to `review:cross-llm`; use `{"run":true}` when the repo workflow defines a runnable review gate.
 - `/acm-verify <receipt_id-or-plan_key> [comma-separated files] [phase]`
-  - runs repo-defined executable verification and updates `verify:tests` when work context is available. Omit the file segment only when the receipt baseline or repo selectors make explicit files unnecessary.
+  - runs repo-defined executable verification and updates `verify:tests` when work context is available. Omit the file segment only when the receipt baseline or repo selectors make explicit files unnecessary. In soundspan, backend verify remains receipt-scoped and targeted; the runnable review gate carries the promoted full backend build and coverage pass before completion.
 - `/acm-done <receipt_id-or-plan_key> [comma-separated files] -- <outcome summary>`
   - runs completion reporting after verification is satisfied and applies effective-scope plus configured completion-gate semantics. Omit the file segment to rely on the baseline-derived delta; if that detected delta is empty, the closeout is effectively no-file.
 - `/acm-memory {"receipt_id":"...","category":"gotcha","subject":"...","content":"...","evidence_paths":["path/to/file.go"],"evidence_keys":["project:path#anchor"]}`

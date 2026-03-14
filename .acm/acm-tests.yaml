@@ -30,6 +30,7 @@ tests:
           "CONTRIBUTING.md",
           "docs/README.md",
           "docs/TESTING.md",
+          "scripts/acm-backend-targeted-verify.sh",
           ".github/workflows/pr-checks.yml",
           ".github/workflows/quality-visibility.yml",
           ".github/PULL_REQUEST_TEMPLATE.md",
@@ -45,6 +46,27 @@ tests:
     select:
       phases: ["execute", "review"]
       changed_paths_any: ["scripts/acm-cross-review.sh", ".acm/acm-workflows.yaml"]
+    expected:
+      exit_code: 0
+
+  - id: acm-cross-review-provider-flags
+    summary: Ensure the ACM cross-review gate script covers shared yolo and provider flags
+    command:
+      argv: ["python3", "scripts/test_acm_cross_review.py"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["scripts/acm-cross-review.sh", "scripts/test_acm_cross_review.py", ".acm/acm-workflows.yaml", ".acm/acm-tests.yaml"]
+    expected:
+      exit_code: 0
+
+  - id: acm-backend-targeted-verify-help
+    summary: Ensure the ACM targeted backend verify script parses and exposes help
+    command:
+      argv: ["bash", "scripts/acm-backend-targeted-verify.sh", "--help"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        ["scripts/acm-backend-targeted-verify.sh", ".acm/acm-tests.yaml", ".acm/acm-workflows.yaml"]
     expected:
       exit_code: 0
 
@@ -98,20 +120,10 @@ tests:
     expected:
       exit_code: 0
 
-  - id: backend-test-coverage
-    summary: Run the backend Jest coverage suite
+  - id: backend-targeted-tests
+    summary: Run receipt-scoped targeted backend Jest tests
     command:
-      argv: ["npm", "--prefix", "backend", "run", "test:coverage"]
-    select:
-      phases: ["execute", "review"]
-      changed_paths_any: ["backend/**", "packages/media-metadata-contract/**"]
-    expected:
-      exit_code: 0
-
-  - id: backend-build
-    summary: Run the backend TypeScript build checks
-    command:
-      argv: ["npm", "--prefix", "backend", "run", "build"]
+      argv: ["bash", "scripts/acm-backend-targeted-verify.sh"]
     select:
       phases: ["execute", "review"]
       changed_paths_any: ["backend/**", "packages/media-metadata-contract/**"]
