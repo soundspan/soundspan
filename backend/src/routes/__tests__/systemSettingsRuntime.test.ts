@@ -617,6 +617,21 @@ describe("systemSettings runtime routes", () => {
         expect(res.statusCode).toBe(400);
     });
 
+    it("rejects unsafe Lidarr test URLs before attempting a request", async () => {
+        const req = {
+            body: { url: "http://127.0.0.1:8686", apiKey: "key" },
+        } as any;
+        const res = createRes();
+
+        await testLidarrHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "URL must be a valid public HTTP(S) URL",
+        });
+        expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
     it("returns friendly message when Lidarr host is unresolved", async () => {
         mockAxiosGet.mockRejectedValueOnce({
             code: "ENOTFOUND",
@@ -905,6 +920,21 @@ describe("systemSettings runtime routes", () => {
         expect(absInvalidRes.body).toEqual({
             error: "Invalid Audiobookshelf API key",
         });
+    });
+
+    it("rejects unsafe Audiobookshelf test URLs before attempting a request", async () => {
+        const req = {
+            body: { url: "http://library.internal:13378", apiKey: "abs-key" },
+        } as any;
+        const res = createRes();
+
+        await testAudiobookshelfHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "URL must be a valid public HTTP(S) URL",
+        });
+        expect(mockAxiosGet).not.toHaveBeenCalled();
     });
 
     it("covers fanart success path and Last.fm unexpected payload failures", async () => {

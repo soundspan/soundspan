@@ -78,6 +78,7 @@ describe("lastFmService", () => {
 
         const service = lastFmService as any;
         service.client = { get: mockHttpGet };
+        service.envApiKey = "test-lastfm-key";
         service.apiKey = "test-lastfm-key";
         service.initialized = false;
 
@@ -414,7 +415,7 @@ describe("lastFmService", () => {
             },
         ]);
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "Last.fm configured (default app key)"
+            "Last.fm configured from env"
         );
     });
 
@@ -836,6 +837,7 @@ describe("lastFmService", () => {
 
     it("warns when initialized without any API key", async () => {
         const service = lastFmService as any;
+        service.envApiKey = "";
         service.apiKey = "";
         service.initialized = false;
         mockGetSystemSettings.mockResolvedValueOnce({
@@ -847,6 +849,23 @@ describe("lastFmService", () => {
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "Last.fm API key not available"
         );
+    });
+
+    it("skips outbound similar-artist requests when initialized without an API key", async () => {
+        const service = lastFmService as any;
+        service.initialized = true;
+        service.apiKey = "";
+        mockRedisGet.mockResolvedValueOnce(null);
+
+        const artists = await lastFmService.getSimilarArtists(
+            "missing-key-mbid",
+            "Missing Key Artist",
+            3
+        );
+
+        expect(artists).toEqual([]);
+        expect(mockRateLimiterExecute).not.toHaveBeenCalled();
+        expect(mockHttpGet).not.toHaveBeenCalled();
     });
 
     it("returns cached top albums by tag", async () => {
@@ -1686,7 +1705,7 @@ describe("lastFmService", () => {
             expect.any(Error)
         );
     });
-    it("falls back to the default app key when system settings have no Last.fm key during initialization", async () => {
+    it("falls back to the env key when system settings have no Last.fm key during initialization", async () => {
         mockGetSystemSettings.mockResolvedValueOnce({
             lastfmApiKey: null,
         });
@@ -1721,27 +1740,29 @@ describe("lastFmService", () => {
             },
         ]);
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "Last.fm configured (default app key)"
+            "Last.fm configured from env"
         );
     });
 
-    it("re-reads API key settings on refresh and stays on default app key when settings are empty", async () => {
+    it("re-reads API key settings on refresh and falls back to the env key when settings are empty", async () => {
         mockGetSystemSettings
             .mockResolvedValueOnce({ lastfmApiKey: null })
             .mockResolvedValueOnce({ lastfmApiKey: null });
 
         const service = lastFmService as any;
-        service.apiKey = "test-lastfm-key";
+        service.apiKey = "stale-settings-key";
         service.initialized = false;
 
         await (lastFmService as any).ensureInitialized();
+        expect(service.apiKey).toBe("test-lastfm-key");
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "Last.fm configured (default app key)"
+            "Last.fm configured from env"
         );
 
         await (lastFmService as any).refreshApiKey();
+        expect(service.apiKey).toBe("test-lastfm-key");
         expect(mockLoggerDebug).toHaveBeenCalledWith(
-            "Last.fm configured (default app key)"
+            "Last.fm configured from env"
         );
 
         mockRedisGet.mockResolvedValue(null);
@@ -1776,6 +1797,48 @@ describe("lastFmService", () => {
             })
         );
         expect(mockGetSystemSettings).toHaveBeenCalledTimes(2);
+    });
+
+    it("clears a stale in-memory key when neither settings nor env provide Last.fm credentials", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            lastfmApiKey: null,
+        });
+
+        const service = lastFmService as any;
+        service.envApiKey = "";
+        service.apiKey = "stale-settings-key";
+        service.initialized = false;
+
+        await service.ensureInitialized();
+
+        expect(service.apiKey).toBe("");
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Last.fm API key not available"
+        );
+    });
+
+    it("skips outbound Last.fm requests when no key is available", async () => {
+        mockGetSystemSettings.mockResolvedValueOnce({
+            lastfmApiKey: null,
+        });
+
+        const service = lastFmService as any;
+        service.envApiKey = "";
+        service.apiKey = "";
+        service.initialized = false;
+
+        const artists = await lastFmService.getSimilarArtists(
+            "artist-mbid-disabled",
+            "Disabled Artist",
+            3
+        );
+
+        expect(artists).toEqual([]);
+        expect(mockRateLimiterExecute).not.toHaveBeenCalled();
+        expect(mockHttpGet).not.toHaveBeenCalled();
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Last.fm API key not available"
+        );
     });
 
     it("continues returning results when redis get and set both fail", async () => {

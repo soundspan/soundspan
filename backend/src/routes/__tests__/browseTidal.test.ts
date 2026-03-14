@@ -1,4 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import request from "supertest";
 
 // ── Auth mock: header-gated so we can test 401 explicitly ───────
@@ -205,18 +208,27 @@ describe("browse tidal routes", () => {
         it("proxies images from resources.tidal.com (200)", async () => {
             const { fetchAndCacheBrowseImage } =
                 require("../../services/browseImageCache") as any;
+            const filePath = path.join(
+                os.tmpdir(),
+                `browse-tidal-test-${Date.now()}.img`
+            );
+            fs.writeFileSync(filePath, Buffer.from([0xff, 0xd8, 0xff]));
             fetchAndCacheBrowseImage.mockResolvedValueOnce({
-                filePath: "/tmp/test.img",
+                filePath,
                 contentType: "image/jpeg",
             });
 
-            const res = await request(app)
-                .get(
-                    "/api/browse/tidal/image?url=https://resources.tidal.com/images/abc.jpg"
-                )
-                .set(AUTH_HEADER, AUTH_VALUE);
+            try {
+                const res = await request(app)
+                    .get(
+                        "/api/browse/tidal/image?url=https://resources.tidal.com/images/abc.jpg"
+                    )
+                    .set(AUTH_HEADER, AUTH_VALUE);
 
-            expect(res.status).toBe(200);
+                expect(res.status).toBe(200);
+            } finally {
+                fs.rmSync(filePath, { force: true });
+            }
         });
 
         it("blocks disallowed hosts with 400", async () => {

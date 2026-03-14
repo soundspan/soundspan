@@ -127,7 +127,7 @@ Experimental feature note:
 | `LIDARR_ENABLED` | `backend`, `backend-worker` | Optional | `false` | Enables Lidarr integration logic from env fallback paths. |
 | `LIDARR_URL` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr base URL. |
 | `LIDARR_API_KEY` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr API key. |
-| `LASTFM_API_KEY` | `backend`, `backend-worker` | Optional | built-in app key | Last.fm metadata/recommendation API key override. |
+| `LASTFM_API_KEY` | `backend`, `backend-worker` | Optional | unset | Last.fm metadata/recommendation API key. When unset, Last.fm features stay disabled unless an encrypted system setting supplies a key. |
 | `OPENAI_API_KEY` | `backend`, `backend-worker` | Optional | unset | OpenAI key for AI-assisted recommendation features. |
 | `DEEZER_API_KEY` | `backend`, `backend-worker` | Optional | unset | Deezer API key override. |
 | `DISCOVERY_MODE` | `backend`, `backend-worker` | Optional | `recommendation` | Discovery mode (`recommendation` or `legacy`). |

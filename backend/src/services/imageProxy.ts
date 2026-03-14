@@ -1,35 +1,16 @@
 import crypto from "crypto";
 import { BRAND_USER_AGENT } from "../config/brand";
+import {
+    normalizeSafeOutboundRedirectTarget,
+    normalizeSafeOutboundUrl,
+} from "./outboundUrlSafety";
 
-export const normalizeExternalImageUrl = (rawUrl: string): string | null => {
-    try {
-        const parsedUrl = new URL(rawUrl);
-        const hostname = parsedUrl.hostname.toLowerCase();
-
-        if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-            return null;
-        }
-
-        if (
-            hostname === "localhost" ||
-            hostname === "127.0.0.1" ||
-            hostname === "::1" ||
-            hostname === "0.0.0.0" ||
-            hostname.startsWith("10.") ||
-            hostname.startsWith("192.168.") ||
-            hostname.startsWith("169.254.") ||
-            hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./) ||
-            hostname.endsWith(".local") ||
-            hostname.endsWith(".internal")
-        ) {
-            return null;
-        }
-
-        return parsedUrl.toString();
-    } catch {
-        return null;
-    }
-};
+/**
+ * Normalizes a remote image URL with the shared outbound safety policy.
+ */
+export const normalizeExternalImageUrl = (
+    rawUrl: string
+): string | null => normalizeSafeOutboundUrl(rawUrl);
 
 export type ExternalImageResult =
     | {
@@ -72,7 +53,10 @@ async function fetchWithSafeRedirects(options: {
         }
 
         const redirectedUrl = new URL(location, currentUrl).toString();
-        const normalizedRedirect = normalizeExternalImageUrl(redirectedUrl);
+        const normalizedRedirect = normalizeSafeOutboundRedirectTarget(
+            location,
+            currentUrl
+        );
         if (!normalizedRedirect) {
             return {
                 ok: false,

@@ -130,6 +130,7 @@ describe("config module", () => {
             ALLOWED_ORIGINS: undefined,
         });
         expect(prodModule.config.allowedOrigins).toEqual([]);
+        expect(prodModule.config.lastfm).toEqual({ apiKey: "" });
     });
 
     it("falls back for malformed numeric env values", async () => {

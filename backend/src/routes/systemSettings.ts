@@ -8,6 +8,7 @@ import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
+import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
 import {
     sendInternalRouteError,
     sendRouteError,
@@ -16,6 +17,14 @@ import {
 const router = Router();
 const WEBHOOK_NAME_ALIASES = [BRAND_NAME];
 const WEBHOOK_URL_ALIASES = [BRAND_SLUG];
+// Shared validation message for admin outbound connection-test URLs.
+const ADMIN_TEST_URL_ERROR = "URL must be a valid public HTTP(S) URL";
+
+function normalizeAdminTestUrl(url: string): string | null {
+    const normalizedUrl = normalizeSafeOutboundUrl(url);
+
+    return normalizedUrl ? normalizedUrl.replace(/\/+$/, "") : null;
+}
 
 /**
  * Safely decrypt a field, returning null if decryption fails
@@ -509,7 +518,7 @@ router.post("/", async (req, res) => {
  *       200:
  *         description: Lidarr connection successful
  *       400:
- *         description: URL and API key are required
+ *         description: URL and API key are required, and URL must be a valid public HTTP(S) URL
  *       401:
  *         description: Not authenticated
  *       403:
@@ -530,8 +539,10 @@ router.post("/test-lidarr", async (req, res) => {
                 .json({ error: "URL and API key are required" });
         }
 
-        // Normalize URL - remove trailing slash
-        const normalizedUrl = url.replace(/\/+$/, "");
+        const normalizedUrl = normalizeAdminTestUrl(url);
+        if (!normalizedUrl) {
+            return res.status(400).json({ error: ADMIN_TEST_URL_ERROR });
+        }
 
         const axios = require("axios");
         const response = await axios.get(
@@ -825,7 +836,7 @@ router.post("/test-lastfm", async (req, res) => {
  *       200:
  *         description: Audiobookshelf connection successful
  *       400:
- *         description: URL and API key are required
+ *         description: URL and API key are required, and URL must be a valid public HTTP(S) URL
  *       401:
  *         description: Not authenticated
  *       403:
@@ -844,9 +855,14 @@ router.post("/test-audiobookshelf", async (req, res) => {
                 .json({ error: "URL and API key are required" });
         }
 
+        const normalizedUrl = normalizeAdminTestUrl(url);
+        if (!normalizedUrl) {
+            return res.status(400).json({ error: ADMIN_TEST_URL_ERROR });
+        }
+
         const axios = require("axios");
 
-        const response = await axios.get(`${url}/api/libraries`, {
+        const response = await axios.get(`${normalizedUrl}/api/libraries`, {
             headers: {
                 Authorization: `Bearer ${apiKey}`,
             },
