@@ -9,6 +9,7 @@ import { NotificationsTab } from "@/components/activity/NotificationsTab";
 import { ActiveDownloadsTab } from "@/components/activity/ActiveDownloadsTab";
 import { HistoryTab } from "@/components/activity/HistoryTab";
 import { SocialTab } from "@/components/activity/SocialTab";
+import { ImportsTab } from "@/components/activity/ImportsTab";
 import { useSocialPresence } from "@/hooks/useSocialPresence";
 import { useAuth } from "@/lib/auth-context";
 import { useDownloadContext } from "@/lib/download-context";
@@ -22,6 +23,7 @@ import {
 import {
     Bell,
     Download,
+    FileInput,
     History,
     Users,
     ChevronLeft,
@@ -35,6 +37,7 @@ const TABS: { id: ActivityTab; label: string; icon: React.ElementType }[] = [
     { id: "notifications", label: "Notifications", icon: Bell },
     { id: "active", label: "Active", icon: Download },
     { id: "history", label: "History", icon: History },
+    { id: "imports", label: "Imports", icon: FileInput },
     { id: "social", label: "Social", icon: Users },
 ];
 const DESKTOP_PANEL_WIDTH = 380;
@@ -213,6 +216,7 @@ export function ActivityPanel({
                             />
                         )}
                         {effectiveActiveTab === "history" && <HistoryTab />}
+                        {effectiveActiveTab === "imports" && <ImportsTab />}
                         {effectiveActiveTab === "social" && (
                             <SocialTab
                                 users={socialUsers}

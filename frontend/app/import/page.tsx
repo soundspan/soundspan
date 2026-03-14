@@ -6,6 +6,8 @@ import {
     ArrowLeft,
     Check,
     ExternalLink,
+    FileUp,
+    Link,
     Loader2,
     Music4,
 } from "lucide-react";
@@ -22,6 +24,7 @@ import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { formatTime } from "@/utils/formatTime";
 
 type ImportStep = "input" | "preview" | "executing" | "complete";
+type ImportMode = "url" | "file";
 
 function tryParsePlaylistUrl(rawInput: string): URL | null {
     const trimmed = rawInput.trim();
@@ -197,6 +200,7 @@ function ImportPageContent() {
     const hasAutoFetched = useRef(false);
 
     const [step, setStep] = useState<ImportStep>("input");
+    const [importMode, setImportMode] = useState<ImportMode>("url");
     const [url, setUrl] = useState("");
     const [playlistName, setPlaylistName] = useState("");
     const [preview, setPreview] = useState<PlaylistImportPreviewResponse | null>(
@@ -207,6 +211,10 @@ function ImportPageContent() {
     );
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [isExecuting, setIsExecuting] = useState(false);
+    const [m3uFileName, setM3uFileName] = useState("");
+    const [m3uContent, setM3uContent] = useState("");
+    const [m3uPlaylistName, setM3uPlaylistName] = useState("");
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const fetchPreview = useCallback(
         async (nextUrl: string) => {
@@ -241,6 +249,51 @@ function ImportPageContent() {
         [toast]
     );
 
+    const handleM3uFileSelect = useCallback(
+        (event: React.ChangeEvent<HTMLInputElement>) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                const content = reader.result as string;
+                setM3uContent(content);
+                setM3uFileName(file.name);
+                const defaultName = file.name
+                    .replace(/\.(m3u8?|M3U8?)$/, "")
+                    .replace(/[_-]/g, " ");
+                setM3uPlaylistName(defaultName);
+            };
+            reader.onerror = () => {
+                toast.error("Failed to read file");
+            };
+            reader.readAsText(file);
+        },
+        [toast]
+    );
+
+    const fetchM3uPreview = useCallback(async () => {
+        if (!m3uContent) {
+            toast.error("Please select an M3U file");
+            return;
+        }
+
+        setIsPreviewLoading(true);
+        try {
+            const response = await api.previewM3UImport(
+                m3uContent,
+                m3uPlaylistName || undefined
+            );
+            setPreview(response);
+            setPlaylistName(response.playlistName);
+            setStep("preview");
+        } catch (error) {
+            toast.error(getErrorMessage(error, "Failed to preview M3U file"));
+        } finally {
+            setIsPreviewLoading(false);
+        }
+    }, [m3uContent, m3uPlaylistName, toast]);
+
     useEffect(() => {
         const urlParam = searchParams.get("url");
         if (!urlParam || hasAutoFetched.current) {
@@ -273,6 +326,22 @@ function ImportPageContent() {
         }
     };
 
+    const handleSubmitBackgroundJob = async () => {
+        if (!url) return;
+
+        try {
+            const result = await api.submitImportJob(url, playlistName || undefined);
+            if (result.deduped) {
+                toast.info("An import for this playlist is already in progress");
+            } else {
+                toast.success("Import job submitted — check the Imports tab in Activity");
+            }
+            resetFlow();
+        } catch (error) {
+            toast.error(getErrorMessage(error, "Failed to submit import job"));
+        }
+    };
+
     const resetFlow = () => {
         setStep("input");
         setUrl("");
@@ -280,6 +349,10 @@ function ImportPageContent() {
         setPreview(null);
         setResult(null);
         setIsExecuting(false);
+        setM3uContent("");
+        setM3uFileName("");
+        setM3uPlaylistName("");
+        if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
     const importableCount = preview
@@ -316,55 +389,147 @@ function ImportPageContent() {
                             Import Playlist
                         </h1>
                         <p className="text-sm text-gray-400">
-                            Import playlists from Spotify, Deezer, YouTube
-                            Music, or TIDAL
+                            Import playlists from streaming services or local M3U
+                            files
                         </p>
                     </div>
                 </div>
 
                 {step === "input" && (
                     <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">
-                                Playlist URL
-                            </label>
-                            <input
-                                type="text"
-                                value={url}
-                                onChange={(event) =>
-                                    setUrl(event.target.value)
-                                }
-                                placeholder="Paste a Spotify, Deezer, YouTube Music, or TIDAL playlist URL"
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/50 focus:border-[#3b82f6] transition-colors"
-                                onKeyDown={(event) =>
-                                    event.key === "Enter" &&
-                                    void fetchPreview(url)
-                                }
-                            />
-                            <p className="text-xs text-gray-500 mt-2">
-                                Paste a{" "}
-                                <span className="text-[#1DB954]">Spotify</span>,{" "}
-                                <span className="text-[#AD47FF]">Deezer</span>,{" "}
-                                <span className="text-red-400">YouTube Music</span>,{" "}
-                                or{" "}
-                                <span className="text-[#00BFFF]">TIDAL</span>{" "}
-                                playlist URL
-                            </p>
+                        <div className="flex gap-1 bg-white/5 rounded-lg p-1">
+                            <button
+                                onClick={() => setImportMode("url")}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    importMode === "url"
+                                        ? "bg-white/10 text-white"
+                                        : "text-gray-400 hover:text-gray-300"
+                                }`}
+                            >
+                                <Link className="w-4 h-4" />
+                                URL Import
+                            </button>
+                            <button
+                                onClick={() => setImportMode("file")}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    importMode === "file"
+                                        ? "bg-white/10 text-white"
+                                        : "text-gray-400 hover:text-gray-300"
+                                }`}
+                            >
+                                <FileUp className="w-4 h-4" />
+                                M3U File
+                            </button>
                         </div>
-                        <button
-                            onClick={() => void fetchPreview(url)}
-                            disabled={isPreviewLoading || !url.trim()}
-                            className="w-full py-3 rounded-full font-medium bg-[#3b82f6] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
-                        >
-                            {isPreviewLoading ? (
-                                <>
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Loading Preview...
-                                </>
-                            ) : (
-                                "Preview Import"
-                            )}
-                        </button>
+
+                        {importMode === "url" && (
+                            <>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                                        Playlist URL
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={url}
+                                        onChange={(event) =>
+                                            setUrl(event.target.value)
+                                        }
+                                        placeholder="Paste a Spotify, Deezer, YouTube Music, or TIDAL playlist URL"
+                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/50 focus:border-[#3b82f6] transition-colors"
+                                        onKeyDown={(event) =>
+                                            event.key === "Enter" &&
+                                            void fetchPreview(url)
+                                        }
+                                    />
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        Paste a{" "}
+                                        <span className="text-[#1DB954]">Spotify</span>,{" "}
+                                        <span className="text-[#AD47FF]">Deezer</span>,{" "}
+                                        <span className="text-red-400">YouTube Music</span>,{" "}
+                                        or{" "}
+                                        <span className="text-[#00BFFF]">TIDAL</span>{" "}
+                                        playlist URL
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => void fetchPreview(url)}
+                                    disabled={isPreviewLoading || !url.trim()}
+                                    className="w-full py-3 rounded-full font-medium bg-[#3b82f6] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                >
+                                    {isPreviewLoading ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            Loading Preview...
+                                        </>
+                                    ) : (
+                                        "Preview Import"
+                                    )}
+                                </button>
+                            </>
+                        )}
+
+                        {importMode === "file" && (
+                            <>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                                        M3U / M3U8 Playlist File
+                                    </label>
+                                    <div
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="w-full bg-white/5 border border-dashed border-white/20 rounded-lg px-4 py-8 text-center cursor-pointer hover:border-white/40 hover:bg-white/[0.07] transition-colors"
+                                    >
+                                        <FileUp className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+                                        {m3uFileName ? (
+                                            <p className="text-sm text-white">{m3uFileName}</p>
+                                        ) : (
+                                            <p className="text-sm text-gray-400">
+                                                Click to select an M3U or M3U8 file
+                                            </p>
+                                        )}
+                                    </div>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".m3u,.m3u8"
+                                        className="hidden"
+                                        onChange={handleM3uFileSelect}
+                                    />
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        Tracks are matched against your local library using file paths and metadata
+                                    </p>
+                                </div>
+                                {m3uContent && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                                            Playlist Name
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={m3uPlaylistName}
+                                            onChange={(event) =>
+                                                setM3uPlaylistName(event.target.value)
+                                            }
+                                            placeholder="Enter playlist name"
+                                            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/50 focus:border-[#3b82f6] transition-colors"
+                                        />
+                                    </div>
+                                )}
+                                <button
+                                    onClick={() => void fetchM3uPreview()}
+                                    disabled={isPreviewLoading || !m3uContent}
+                                    className="w-full py-3 rounded-full font-medium bg-[#3b82f6] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                >
+                                    {isPreviewLoading ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            Matching Tracks...
+                                        </>
+                                    ) : (
+                                        "Preview Import"
+                                    )}
+                                </button>
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -382,14 +547,16 @@ function ImportPageContent() {
                                     {preview.summary.total} songs found
                                 </p>
                             </div>
-                            <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-gray-400 hover:text-[#3b82f6] transition-colors"
-                            >
-                                <ExternalLink className="w-4 h-4" />
-                            </a>
+                            {url && (
+                                <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-gray-400 hover:text-[#3b82f6] transition-colors"
+                                >
+                                    <ExternalLink className="w-4 h-4" />
+                                </a>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -485,6 +652,15 @@ function ImportPageContent() {
                                 )}
                             </button>
                         </div>
+                        {url && importableCount > 0 && (
+                            <button
+                                onClick={() => void handleSubmitBackgroundJob()}
+                                disabled={isExecuting}
+                                className="w-full mt-2 py-2.5 rounded-full text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 border border-white/10 transition-colors"
+                            >
+                                Run in Background
+                            </button>
+                        )}
                     </div>
                 )}
 

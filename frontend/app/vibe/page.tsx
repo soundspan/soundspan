@@ -21,6 +21,8 @@ import {
     AudioWaveform,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { VibeMap } from "@/components/vibe/VibeMap";
+import { Map } from "lucide-react";
 
 interface TrackFeatures {
     energy: number;
@@ -77,6 +79,7 @@ interface VibePreset {
 }
 
 type ViewMode = "comparison" | "search-results";
+type VibeTab = "explore" | "map";
 
 function trackDataToTrack(track: TrackData) {
     return {
@@ -586,6 +589,7 @@ function VibePageContent() {
     const [error, setError] = useState<string | null>(null);
     const [vibeStatus, setVibeStatus] = useState<{ totalTracks: number; embeddedTracks: number } | null>(null);
     const [viewMode, setViewMode] = useState<ViewMode>("comparison");
+    const [vibeTab, setVibeTab] = useState<VibeTab>("explore");
     const [searchQuery, setSearchQuery] = useState<string | null>(null);
     const [inputValue, setInputValue] = useState("");
     const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -956,8 +960,36 @@ function VibePageContent() {
                         </p>
                     )}
 
-                    {/* Search */}
-                    <form onSubmit={handleSearch} className="relative max-w-lg mt-5">
+                    {/* Explore / Map tab bar */}
+                    <div className="flex gap-1 mt-4 bg-white/5 rounded-lg p-1 max-w-xs">
+                        <button
+                            onClick={() => setVibeTab("explore")}
+                            className={cn(
+                                "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors",
+                                vibeTab === "explore"
+                                    ? "bg-white/10 text-white"
+                                    : "text-gray-500 hover:text-gray-300"
+                            )}
+                        >
+                            <AudioWaveform className="w-4 h-4" />
+                            Explore
+                        </button>
+                        <button
+                            onClick={() => setVibeTab("map")}
+                            className={cn(
+                                "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors",
+                                vibeTab === "map"
+                                    ? "bg-white/10 text-white"
+                                    : "text-gray-500 hover:text-gray-300"
+                            )}
+                        >
+                            <Map className="w-4 h-4" />
+                            Map
+                        </button>
+                    </div>
+
+                    {/* Search — only visible in explore tab */}
+                    {vibeTab === "explore" && (<><form onSubmit={handleSearch} className="relative max-w-lg mt-5">
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#525252]" />
                         <input
                             type="text"
@@ -997,8 +1029,16 @@ function VibePageContent() {
                             </>
                         )}
                     </div>
+                </>)}
                 </div>
 
+                {vibeTab === "map" && (
+                    <div className="mt-4 h-[60vh] rounded-lg border border-white/5 overflow-hidden bg-[#0a0a0a]">
+                        <VibeMap />
+                    </div>
+                )}
+
+                {vibeTab === "explore" && <>
                 {/* Error */}
                 {error && (
                     <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-[#ef4444]/5 border border-[#ef4444]/20 rounded-lg">
@@ -1199,6 +1239,7 @@ function VibePageContent() {
                         )}
                     </div>
                 )}
+                </>}
             </div>
         </div>
     );
