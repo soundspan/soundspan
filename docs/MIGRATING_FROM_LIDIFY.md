@@ -15,7 +15,7 @@ It assumes both repositories are side-by-side on disk:
   - Compose defaults changed for PostgreSQL (from user/database `lidifydb/lidify` to `soundspan/soundspan`)
   - Compose defaults changed for network/container names (`lidify_*` -> `soundspan_*`)
   - Frontend local storage keys changed (`lidify_*` -> `soundspan_*`)
-  - Mobile direction is PWA-first; for native mobile clients, use OpenSubsonic-compatible apps against soundspan `/rest`
+  - For native desktop/mobile, use [soundspan-app](https://github.com/soundspan/soundspan-app); for third-party native clients, use OpenSubsonic-compatible apps against soundspan `/rest`
 
 Because of those required remaps, this is not a zero-touch migration.
 

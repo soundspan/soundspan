@@ -110,17 +110,19 @@ All integration endpoints below require soundspan auth (session or API key where
 
 ---
 
-## Mobile Support
+## Desktop & Mobile
+
+### soundspan-app (native)
+
+[soundspan-app](https://github.com/soundspan/soundspan-app) is the multi-platform native app for Windows, macOS, Linux, Android, and iOS. On platforms where Chromium's audio mixer caps output at 48 kHz, the app automatically switches to a high-fidelity Rust audio backend for true hi-res playback.
 
 ### Progressive Web App (PWA)
 
 Install soundspan as a PWA from your browser install flow for app-like behavior, background playback, media controls, and faster repeat loads.
 
-PWA is the only current first-party mobile direction. soundspan does not currently ship a native iOS/Android app.
-
 ### Subsonic-compatible apps
 
-For mobile native clients, use Subsonic-compatible apps through soundspan's OpenSubsonic `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
+For third-party native clients, use Subsonic-compatible apps through soundspan's OpenSubsonic `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
 
 ### Android TV
 
@@ -172,7 +174,6 @@ graph TD
 ## Roadmap
 
 - Offline playback mode
-- Standalone Windows-friendly distribution path
 
 ---
 
