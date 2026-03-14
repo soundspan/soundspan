@@ -5,6 +5,7 @@ import {
     EllipsisVertical,
     ListEnd,
     ListPlus,
+    Map,
     Plus,
     User,
     Disc3,
@@ -30,6 +31,7 @@ interface TrackOverflowMenuProps {
     showGoToArtist?: boolean;
     showGoToAlbum?: boolean;
     showMatchVibe?: boolean;
+    showVibeMap?: boolean;
     showStartRadio?: boolean;
     /** Extra menu items injected before/after the standard items */
     extraItemsBefore?: React.ReactNode;
@@ -68,6 +70,7 @@ export function TrackOverflowMenu({
     showGoToArtist = true,
     showGoToAlbum = true,
     showMatchVibe = true,
+    showVibeMap = true,
     showStartRadio = true,
     extraItemsBefore,
     extraItemsAfter,
@@ -83,6 +86,7 @@ export function TrackOverflowMenu({
     const isRemote = isRemoteTrack(track);
 
     const effectiveShowMatchVibe = showMatchVibe && !isRemote;
+    const effectiveShowVibeMap = showVibeMap && !isRemote;
 
     // Artist href
     const artistHref = track.artist
@@ -196,6 +200,15 @@ export function TrackOverflowMenu({
             }, 500);
         },
         [track, controls, closeMenu]
+    );
+
+    const handleShowVibeMap = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            closeMenu();
+            router.push(`/vibe?trackId=${encodeURIComponent(track.id)}`);
+        },
+        [track.id, router, closeMenu]
     );
 
     const handleStartRadio = useCallback(
@@ -317,6 +330,14 @@ export function TrackOverflowMenu({
                                 onClick={handleMatchVibe}
                                 icon={<AudioWaveform className="h-4 w-4" />}
                                 label="Match Vibe"
+                            />
+                        )}
+
+                        {effectiveShowVibeMap && track.id && (
+                            <MenuButton
+                                onClick={handleShowVibeMap}
+                                icon={<Map className="h-4 w-4" />}
+                                label="Show on Vibe Map"
                             />
                         )}
 

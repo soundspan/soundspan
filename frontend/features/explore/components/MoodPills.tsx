@@ -9,7 +9,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2 } from "lucide-react";
+import Link from "next/link";
+import { AudioWaveform, Loader2 } from "lucide-react";
 import { api, type MoodType, type MoodBucketPreset } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import type { Track } from "@/lib/audio-state-context";
@@ -139,6 +140,20 @@ export function MoodPills() {
                     </button>
                 );
             })}
+            <Link
+                href="/vibe"
+                title="Vibe Map"
+                className="
+                    px-4 py-2 rounded-full text-sm font-medium text-white
+                    bg-gradient-to-r from-violet-500 to-fuchsia-600
+                    transition-all duration-150
+                    hover:opacity-90 hover:scale-[1.03] active:scale-[0.97]
+                    flex items-center gap-1.5
+                "
+            >
+                <AudioWaveform className="w-3.5 h-3.5" />
+                Vibe Map
+            </Link>
         </div>
     );
 }
