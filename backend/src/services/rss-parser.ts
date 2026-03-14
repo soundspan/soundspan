@@ -1,5 +1,7 @@
 import Parser from "rss-parser";
+import axios from "axios";
 import { logger } from "../utils/logger";
+import { normalizeSafeOutboundUrl } from "./outboundUrlSafety";
 
 interface RSSPodcast {
     title: string;
@@ -28,13 +30,31 @@ interface RSSEpisode {
 interface ParsedPodcastFeed {
     podcast: RSSPodcast;
     episodes: RSSEpisode[];
+    feedMetadata: {
+        etag?: string;
+        lastModified?: string;
+    };
+}
+
+interface RSSFeedRequestOptions {
+    headers?: Record<string, string>;
+}
+
+export class RSSFeedNotModifiedError extends Error {
+    readonly etag?: string;
+    readonly lastModified?: string;
+
+    constructor(etag?: string, lastModified?: string) {
+        super("Feed not modified");
+        this.name = "RSSFeedNotModifiedError";
+        this.etag = etag;
+        this.lastModified = lastModified;
+    }
 }
 
 class RSSParserService {
-    private parser: Parser;
-
-    constructor() {
-        this.parser = new Parser({
+    private createParser(): Parser {
+        return new Parser({
             customFields: {
                 feed: [
                     ["itunes:author", "itunesAuthor"] as any,
@@ -54,13 +74,59 @@ class RSSParserService {
         });
     }
 
+    private getHeaderValue(
+        headers: Record<string, unknown>,
+        name: string
+    ): string | undefined {
+        const value = headers[name];
+        return typeof value === "string" && value.trim().length > 0
+            ? value.trim()
+            : undefined;
+    }
+
     /**
      * Parse an RSS podcast feed from a URL
      */
-    async parseFeed(feedUrl: string): Promise<ParsedPodcastFeed> {
+    async parseFeed(
+        feedUrl: string,
+        options: RSSFeedRequestOptions = {}
+    ): Promise<ParsedPodcastFeed> {
         try {
-            logger.debug(`\n [RSS PARSER] Fetching feed: ${feedUrl}`);
-            const feed = await this.parser.parseURL(feedUrl);
+            const safeFeedUrl = normalizeSafeOutboundUrl(feedUrl);
+            if (!safeFeedUrl) {
+                throw new Error("Invalid or private feed URL");
+            }
+
+            logger.debug(`\n [RSS PARSER] Fetching feed: ${safeFeedUrl}`);
+            const response = await axios.get<string>(safeFeedUrl, {
+                responseType: "text",
+                timeout: 60000,
+                headers: {
+                    Accept: "application/rss+xml",
+                    "User-Agent": "rss-parser",
+                    ...(options.headers ?? {}),
+                },
+                validateStatus: (status) =>
+                    (status >= 200 && status < 300) || status === 304,
+            });
+
+            const feedMetadata = {
+                etag: this.getHeaderValue(response.headers, "etag"),
+                lastModified: this.getHeaderValue(
+                    response.headers,
+                    "last-modified"
+                ),
+            };
+
+            if (response.status === 304) {
+                throw new RSSFeedNotModifiedError(
+                    feedMetadata.etag,
+                    feedMetadata.lastModified
+                );
+            }
+
+            const parser = this.createParser();
+            const feed = await parser.parseString(response.data);
 
             // Extract podcast metadata
             const podcast: RSSPodcast = {
@@ -133,13 +199,24 @@ class RSSParserService {
 
             logger.debug(`   Successfully parsed ${episodes.length} episodes`);
 
-            return { podcast, episodes };
-        } catch (error: any) {
+            return { podcast, episodes, feedMetadata };
+        } catch (error) {
+            if (error instanceof RSSFeedNotModifiedError) {
+                throw error;
+            }
+
+            const errorMessage =
+                axios.isAxiosError(error) && error.response
+                    ? `Status code ${error.response.status}`
+                    : error instanceof Error
+                      ? error.message
+                      : String(error);
+
             logger.error(
                 `\n [RSS PARSER] Failed to parse feed:`,
-                error.message
+                errorMessage
             );
-            throw new Error(`Failed to parse podcast feed: ${error.message}`);
+            throw new Error(`Failed to parse podcast feed: ${errorMessage}`);
         }
     }
 

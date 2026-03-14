@@ -1,4 +1,5 @@
 import {
+    matchM3UEntryAgainstLibrary,
     matchTrackAgainstLibrary,
     normalizeAlbumForMatching,
     normalizeApostrophes,
@@ -8,6 +9,7 @@ import {
     stripTrackSuffix,
     type LocalTrackCandidate,
 } from "../trackMatching";
+import type { M3UEntry } from "../../services/m3uParser";
 
 function makeCandidate(
     overrides: Partial<LocalTrackCandidate>
@@ -222,6 +224,52 @@ describe("trackMatching utilities", () => {
                     candidates
                 )
             ).toBeNull();
+        });
+    });
+
+    describe("matchM3UEntryAgainstLibrary", () => {
+        it("matches by normalized file path before metadata tiers", () => {
+            const entry: M3UEntry = {
+                filePath: "C:/Music/Artist/Album/01 - Track.flac",
+                artist: "Wrong Artist",
+                title: "Wrong Title",
+                durationSeconds: 240,
+            };
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "path-hit",
+                    filePath: "Artist/Album/01 - Track.flac",
+                    artistName: "Actual Artist",
+                    title: "Actual Title",
+                }),
+            ];
+
+            expect(matchM3UEntryAgainstLibrary(entry, candidates)).toEqual({
+                trackId: "path-hit",
+                matchType: "path",
+                matchConfidence: 100,
+            });
+        });
+
+        it("falls back to filename matching when the file path does not map directly", () => {
+            const entry: M3UEntry = {
+                filePath: "D:/Exports/Mixes/Filename Winner.mp3",
+                artist: null,
+                title: null,
+                durationSeconds: null,
+            };
+            const candidates: LocalTrackCandidate[] = [
+                makeCandidate({
+                    id: "filename-hit",
+                    filePath: "Library/Artist/Filename Winner.mp3",
+                }),
+            ];
+
+            expect(matchM3UEntryAgainstLibrary(entry, candidates)).toEqual({
+                trackId: "filename-hit",
+                matchType: "filename",
+                matchConfidence: 98,
+            });
         });
     });
 });

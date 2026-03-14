@@ -40,11 +40,13 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/fanart.ts` | Core |
 | `backend/src/services/featureDetection.ts` | Core |
 | `backend/src/services/fileValidator.ts` | Core |
+| `backend/src/services/genericImportJobRunner.ts` | Core |
 | `backend/src/services/hybridSimilarity.ts` | Core |
 | `backend/src/services/imageBackfill.ts` | Core |
 | `backend/src/services/imageProvider.ts` | Core |
 | `backend/src/services/imageProxy.ts` | Core |
 | `backend/src/services/imageStorage.ts` | Core |
+| `backend/src/services/importJobStore.ts` | Core |
 | `backend/src/services/itunes.ts` | Core |
 | `backend/src/services/lastfm.ts` | Core |
 | `backend/src/services/lidarr.ts` | Core |
@@ -55,11 +57,13 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/listenTogetherSocket.ts` | Core |
 | `backend/src/services/listenTogetherStateStore.ts` | Core |
 | `backend/src/services/lyrics.ts` | Core |
+| `backend/src/services/m3uParser.ts` | Core |
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |
 | `backend/src/services/musicScanner.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |
+| `backend/src/services/outboundUrlSafety.ts` | Core |
 | `backend/src/services/playlistImportService.ts` | Core |
 | `backend/src/services/playlistTrackResolution.ts` | Core |
 | `backend/src/services/podcastCache.ts` | Core |
@@ -90,6 +94,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/trackMappingService.ts` | Core |
 | `backend/src/services/trackPreference.ts` | Core |
 | `backend/src/services/trackReconciliation.ts` | Core |
+| `backend/src/services/umapProjection.ts` | Core |
 | `backend/src/services/unifiedTrackResponse.ts` | Core |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeVocabulary.ts` | Core |

@@ -74,6 +74,7 @@
         "speakeasy": "^2.0.0",
         "swagger-jsdoc": "^6.2.8",
         "swagger-ui-express": "^5.0.1",
+        "umap-js": "^1.4.0",
         "zod": "^3.22.4"
     },
     "devDependencies": {

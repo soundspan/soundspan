@@ -16,9 +16,11 @@ import { ytMusicService } from "./youtubeMusic";
 import { tidalStreamingService } from "./tidalStreaming";
 import { trackMappingService } from "./trackMappingService";
 import {
+    matchM3UEntryAgainstLibrary,
     matchTrackAgainstLibrary,
     type LocalTrackCandidate,
 } from "../utils/trackMatching";
+import { parseM3U } from "./m3uParser";
 
 const log = logger.child("PlaylistImportService");
 const MATCH_BATCH_SIZE = 25;
@@ -466,6 +468,60 @@ class PlaylistImportService {
         };
 
         return { playlistName: name, resolved, summary };
+    }
+
+    /**
+     * Preview import for a local M3U or M3U8 playlist file.
+     * Resolves only against the local library using deterministic tiered matching.
+     */
+    async previewM3UImport(
+        playlistName: string,
+        content: string
+    ): Promise<{
+        playlistName: string;
+        resolved: ResolvedTrack[];
+        summary: {
+            total: number;
+            local: number;
+            youtube: number;
+            tidal: number;
+            unresolved: number;
+        };
+    }> {
+        const entries = parseM3U(content);
+        const localCandidates = await this.getLocalLibraryCandidates();
+
+        const resolved = entries.map((entry, index) => {
+            const match = matchM3UEntryAgainstLibrary(entry, localCandidates);
+            return {
+                index,
+                artist: entry.artist || "",
+                title: entry.title || getFallbackTitleFromPath(entry.filePath),
+                ...(match ?
+                    {
+                        trackId: match.trackId,
+                        source: "local" as const,
+                        confidence: match.matchConfidence,
+                    }
+                :   {
+                        source: "unresolved" as const,
+                        confidence: 0,
+                    }),
+            };
+        });
+
+        return {
+            playlistName,
+            resolved,
+            summary: {
+                total: resolved.length,
+                local: resolved.filter((track) => track.source === "local").length,
+                youtube: 0,
+                tidal: 0,
+                unresolved: resolved.filter((track) => track.source === "unresolved")
+                    .length,
+            },
+        };
     }
 
     /**
@@ -1018,6 +1074,12 @@ class PlaylistImportService {
             return false;
         }
     }
+}
+
+function getFallbackTitleFromPath(filePath: string): string {
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    const filename = normalizedPath.split("/").pop() || filePath;
+    return filename.replace(/\.[^.]+$/, "");
 }
 
 export const playlistImportService = new PlaylistImportService();

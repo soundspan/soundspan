@@ -1296,6 +1296,117 @@ describe("PlaylistImportService", () => {
         });
     });
 
+    describe("previewM3UImport", () => {
+        it("resolves M3U entries through path, filename, exact metadata, and fuzzy metadata tiers", async () => {
+            mockPrisma.track.findMany.mockResolvedValueOnce([
+                {
+                    id: "track-path",
+                    title: "Actual Title",
+                    duration: 240,
+                    filePath: "Artist/Album/01 - Direct Hit.flac",
+                    album: {
+                        title: "Actual Album",
+                        artist: { name: "Actual Artist" },
+                    },
+                },
+                {
+                    id: "track-filename",
+                    title: "Filename Winner",
+                    duration: 200,
+                    filePath: "Library/Folder/Filename Winner.mp3",
+                    album: {
+                        title: "Filename Album",
+                        artist: { name: "Filename Artist" },
+                    },
+                },
+                {
+                    id: "track-exact",
+                    title: "Exact Match",
+                    duration: 213,
+                    filePath: "Library/Folder/not-the-same-file.mp3",
+                    album: {
+                        title: "Exact Album",
+                        artist: { name: "Exact Artist" },
+                    },
+                },
+                {
+                    id: "track-fuzzy",
+                    title: "Neon Light",
+                    duration: 180,
+                    filePath: "Library/Folder/other-file.mp3",
+                    album: {
+                        title: "Singles",
+                        artist: { name: "Echoes" },
+                    },
+                },
+            ]);
+
+            const result = await playlistImportService.previewM3UImport(
+                "Imported Playlist",
+                `#EXTM3U
+C:\\Music\\Artist\\Album\\01 - Direct Hit.flac
+D:\\Exports\\Mixes\\Filename Winner.mp3
+#EXTINF:213,Exact Artist - Exact Match
+/playlists/exact-match.m3u8
+#EXTINF:180,The Echoes - Neon Lights
+/playlists/fuzzy-match.m3u8
+#EXTINF:200,Missing Artist - Missing Song
+/playlists/missing-song.m3u8`
+            );
+
+            expect(result.playlistName).toBe("Imported Playlist");
+            expect(result.resolved).toEqual([
+                expect.objectContaining({
+                    index: 0,
+                    source: "local",
+                    trackId: "track-path",
+                    confidence: 100,
+                }),
+                expect.objectContaining({
+                    index: 1,
+                    source: "local",
+                    trackId: "track-filename",
+                    confidence: 98,
+                }),
+                expect.objectContaining({
+                    index: 2,
+                    source: "local",
+                    trackId: "track-exact",
+                    confidence: 100,
+                }),
+                expect.objectContaining({
+                    index: 3,
+                    source: "local",
+                    trackId: "track-fuzzy",
+                    confidence: 79,
+                }),
+                expect.objectContaining({
+                    index: 4,
+                    source: "unresolved",
+                    confidence: 0,
+                }),
+            ]);
+            expect(result.summary).toEqual({
+                total: 5,
+                local: 4,
+                youtube: 0,
+                tidal: 0,
+                unresolved: 1,
+            });
+            expect(mockYtMusicService.findMatchesForAlbum).not.toHaveBeenCalled();
+            expect(mockTidalStreamingService.findMatchesForAlbum).not.toHaveBeenCalled();
+        });
+
+        it("rejects malformed M3U content safely", async () => {
+            await expect(
+                playlistImportService.previewM3UImport(
+                    "Broken Playlist",
+                    "/music/track\x00.mp3"
+                )
+            ).rejects.toThrow("null bytes");
+        });
+    });
+
     describe("importPlaylist", () => {
         const previewData = {
             playlistName: "Imported",

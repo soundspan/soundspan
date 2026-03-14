@@ -40,6 +40,10 @@ const mockPrisma = {
         create: jest.fn(),
         upsert: jest.fn(),
     },
+    libraryHealthRecord: {
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+    },
 };
 
 const mockLogger = {
@@ -150,6 +154,8 @@ describe("MusicScannerService.scanLibrary", () => {
         mockPrisma.track.findMany.mockResolvedValue([]);
         mockPrisma.track.upsert.mockResolvedValue({});
         mockPrisma.track.deleteMany.mockResolvedValue({ count: 0 });
+        mockPrisma.libraryHealthRecord.upsert.mockResolvedValue({});
+        mockPrisma.libraryHealthRecord.deleteMany.mockResolvedValue({ count: 0 });
 
         mockPrisma.systemSettings.findFirst.mockResolvedValue({
             discNoBackfillDone: true,
@@ -321,7 +327,7 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockBackfillAllArtistCounts).toHaveBeenCalledTimes(1);
     });
 
-    it("removes missing tracks and cleans up orphan albums and artists", async () => {
+    it("marks missing tracks as unhealthy without deleting library context", async () => {
         const scanner = new MusicScannerService();
 
         jest.spyOn(
@@ -348,25 +354,27 @@ describe("MusicScannerService.scanLibrary", () => {
             expect.objectContaining({
                 tracksAdded: 0,
                 tracksUpdated: 0,
-                tracksRemoved: 1,
+                tracksRemoved: 0,
                 errors: [],
             })
         );
-        expect(mockPrisma.track.deleteMany).toHaveBeenCalledWith({
-            where: {
-                id: { in: ["track-missing-1"] },
+        expect(mockPrisma.track.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledWith({
+            where: { trackId: "track-missing-1" },
+            update: {
+                status: "MISSING_FROM_DISK",
+                filePath: "Missing/Track.mp3",
+                detail: null,
+            },
+            create: {
+                trackId: "track-missing-1",
+                status: "MISSING_FROM_DISK",
+                filePath: "Missing/Track.mp3",
+                detail: null,
             },
         });
-        expect(mockPrisma.album.deleteMany).toHaveBeenCalledWith({
-            where: {
-                id: { in: ["album-orphan-1"] },
-            },
-        });
-        expect(mockPrisma.artist.deleteMany).toHaveBeenCalledWith({
-            where: {
-                id: { in: ["artist-orphan-1"] },
-            },
-        });
+        expect(mockPrisma.album.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrisma.artist.deleteMany).not.toHaveBeenCalled();
         expect(mockParseFile).not.toHaveBeenCalled();
     });
 
@@ -390,6 +398,82 @@ describe("MusicScannerService.scanLibrary", () => {
         ]);
         expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
         expect(queueInstances[0].onIdle).toHaveBeenCalledTimes(1);
+    });
+
+    it("marks unreadable metadata for existing tracks when parseFile fails", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Broken/Bad.flac";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles"
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-existing-1",
+                filePath: "Broken/Bad.flac",
+                fileModified: new Date("2026-01-01T00:00:00.000Z"),
+            },
+        ]);
+        mockParseFile.mockRejectedValueOnce(new Error("metadata read failed"));
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                tracksUpdated: 1,
+                tracksRemoved: 0,
+                errors: [{ file: audioFile, error: "metadata read failed" }],
+            })
+        );
+        expect(mockPrisma.libraryHealthRecord.upsert).toHaveBeenCalledWith({
+            where: { trackId: "track-existing-1" },
+            update: {
+                status: "UNREADABLE_METADATA",
+                filePath: "Broken/Bad.flac",
+                detail: "metadata read failed",
+            },
+            create: {
+                trackId: "track-existing-1",
+                status: "UNREADABLE_METADATA",
+                filePath: "Broken/Bad.flac",
+                detail: "metadata read failed",
+            },
+        });
+        expect(mockPrisma.track.upsert).not.toHaveBeenCalled();
+    });
+
+    it("clears health records for existing tracks after successful processing", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/Track.mp3";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles"
+        ).mockResolvedValue([audioFile]);
+        mockPrisma.track.findMany.mockResolvedValue([
+            {
+                id: "track-existing-2",
+                filePath: "Artist/Track.mp3",
+                fileModified: new Date("2026-01-01T00:00:00.000Z"),
+            },
+        ]);
+        mockPrisma.track.upsert.mockResolvedValueOnce({ id: "track-existing-2" });
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                tracksAdded: 0,
+                tracksUpdated: 1,
+                tracksRemoved: 0,
+                errors: [],
+            })
+        );
+        expect(mockPrisma.libraryHealthRecord.deleteMany).toHaveBeenCalledWith({
+            where: { trackId: "track-existing-2" },
+        });
     });
 
     it("continues scan with deterministic progress and mixed file outcomes", async () => {

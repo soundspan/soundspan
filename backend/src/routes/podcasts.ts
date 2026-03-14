@@ -2,9 +2,10 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { prisma, Prisma } from "../utils/db";
-import { rssParserService } from "../services/rss-parser";
+import { rssParserService, RSSFeedNotModifiedError } from "../services/rss-parser";
 import { podcastCacheService } from "../services/podcastCache";
 import { parseRangeHeader } from "../utils/rangeParser";
+import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
 import axios from "axios";
 import fs from "fs";
 
@@ -74,6 +75,17 @@ function describeAxiosError(error: unknown): string {
     const message = error.message || "Unknown Axios error";
 
     return status ? `${code} (HTTP ${status}): ${message}` : `${code}: ${message}`;
+}
+
+function resolveParsedFeedMetadata(feedData: {
+    feedMetadata?: { etag?: string; lastModified?: string };
+    etag?: string;
+    lastModified?: string;
+}): { etag?: string; lastModified?: string } {
+    return feedData.feedMetadata ?? {
+        etag: feedData.etag,
+        lastModified: feedData.lastModified,
+    };
 }
 
 /**
@@ -839,6 +851,12 @@ router.post("/subscribe", async (req, res) => {
             logger.debug(`   Found feed URL: ${finalFeedUrl}`);
         }
 
+        const safeFeedUrl = normalizeSafeOutboundUrl(finalFeedUrl);
+        if (!safeFeedUrl) {
+            return res.status(400).json({ error: "Invalid or private feed URL" });
+        }
+        finalFeedUrl = safeFeedUrl;
+
         // Check if podcast already exists in database
         let podcast = await prisma.podcast.findUnique({
             where: { feedUrl: finalFeedUrl },
@@ -891,8 +909,9 @@ router.post("/subscribe", async (req, res) => {
 
         // Parse RSS feed to get podcast and episodes
         logger.debug(`   Parsing RSS feed...`);
-        const { podcast: podcastData, episodes } =
-            await rssParserService.parseFeed(finalFeedUrl);
+        const feedData = await rssParserService.parseFeed(finalFeedUrl);
+        const { podcast: podcastData, episodes } = feedData;
+        const feedMetadata = resolveParsedFeedMetadata(feedData);
 
         // Create podcast in database
         logger.debug(`    Saving podcast to database...`);
@@ -910,6 +929,8 @@ router.post("/subscribe", async (req, res) => {
                 language: podcastData.language,
                 explicit: podcastData.explicit || false,
                 episodeCount: episodes.length,
+                feedEtag: feedMetadata.etag ?? null,
+                feedLastModified: feedMetadata.lastModified ?? null,
             },
         });
 
@@ -2117,7 +2138,62 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
     );
     if (!podcast) throw new Error(`Podcast ${podcastId} not found`);
 
-    const { podcast: podcastData, episodes } = await rssParserService.parseFeed(podcast.feedUrl);
+    const requestHeaders: Record<string, string> = {};
+    if (podcast.feedEtag) {
+        requestHeaders["if-none-match"] = podcast.feedEtag;
+    }
+    if (podcast.feedLastModified) {
+        requestHeaders["if-modified-since"] = podcast.feedLastModified;
+    }
+
+    let feedData;
+    try {
+        feedData = await rssParserService.parseFeed(
+            podcast.feedUrl,
+            Object.keys(requestHeaders).length > 0
+                ? { headers: requestHeaders }
+                : {}
+        );
+    } catch (error) {
+        if (error instanceof RSSFeedNotModifiedError) {
+            await withPodcastPrismaRetry("refreshPodcastFeed.podcast.update", () =>
+                prisma.podcast.update({
+                    where: { id: podcastId },
+                    data: {
+                        feedEtag: error.etag ?? podcast.feedEtag ?? null,
+                        feedLastModified:
+                            error.lastModified ?? podcast.feedLastModified ?? null,
+                        lastRefreshed: new Date(),
+                    },
+                })
+            );
+
+            return {
+                newEpisodesCount: 0,
+                totalEpisodes: podcast.episodeCount,
+            };
+        }
+        throw error;
+    }
+
+    if ("notModified" in feedData && feedData.notModified) {
+        await withPodcastPrismaRetry("refreshPodcastFeed.podcast.update", () =>
+            prisma.podcast.update({
+                where: { id: podcastId },
+                data: {
+                    lastRefreshed: new Date(),
+                },
+            })
+        );
+
+        return {
+            newEpisodesCount: 0,
+            totalEpisodes: podcast.episodeCount,
+        };
+    }
+
+    const { podcast: podcastData, episodes } = feedData;
+    const feedMetadata = resolveParsedFeedMetadata(feedData);
 
     await withPodcastPrismaRetry("refreshPodcastFeed.podcast.update", () =>
         prisma.podcast.update({
@@ -2130,6 +2206,8 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
                 language: podcastData.language,
                 explicit: podcastData.explicit || false,
                 episodeCount: episodes.length,
+                feedEtag: feedMetadata.etag ?? null,
+                feedLastModified: feedMetadata.lastModified ?? null,
                 lastRefreshed: new Date(),
             },
         })
@@ -2163,5 +2241,93 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
 
     return { newEpisodesCount: createResult.count, totalEpisodes: episodes.length };
 }
+
+interface RefreshAllResult {
+    podcastId: string;
+    success: boolean;
+    newEpisodesCount: number;
+    error?: string;
+}
+
+/**
+ * Refresh all podcasts the user is subscribed to.
+ * Each feed is refreshed independently — a single feed failure does not abort
+ * the remaining feeds.
+ */
+export async function refreshAllPodcastFeeds(
+    userId: string
+): Promise<{ total: number; results: RefreshAllResult[] }> {
+    const subscriptions = await prisma.podcastSubscription.findMany({
+        where: { userId },
+        select: { podcastId: true },
+    });
+
+    if (subscriptions.length === 0) {
+        return { total: 0, results: [] };
+    }
+
+    const results: RefreshAllResult[] = [];
+
+    for (const sub of subscriptions) {
+        try {
+            const outcome = await refreshPodcastFeed(sub.podcastId);
+            results.push({
+                podcastId: sub.podcastId,
+                success: true,
+                newEpisodesCount: outcome.newEpisodesCount,
+            });
+        } catch (error: any) {
+            logger.error(
+                `[Podcast] Refresh-all failed for ${sub.podcastId}:`,
+                error
+            );
+            results.push({
+                podcastId: sub.podcastId,
+                success: false,
+                newEpisodesCount: 0,
+                error: error.message || "Unknown error",
+            });
+        }
+    }
+
+    return { total: subscriptions.length, results };
+}
+
+/**
+ * @openapi
+ * /api/podcasts/refresh-all:
+ *   post:
+ *     summary: Refresh all subscribed podcast feeds
+ *     description: Processes all feeds the user is subscribed to through the conditional-GET refresh path. Per-feed failures are reported individually.
+ *     tags: [Podcasts]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Per-feed refresh results
+ *       401:
+ *         description: Not authenticated
+ */
+router.post("/refresh-all", requireAuth, async (req, res) => {
+    try {
+        const result = await refreshAllPodcastFeeds(req.user!.id);
+        const totalNew = result.results.reduce(
+            (sum, r) => sum + r.newEpisodesCount,
+            0
+        );
+        const failed = result.results.filter((r) => !r.success).length;
+
+        res.json({
+            success: true,
+            total: result.total,
+            totalNewEpisodes: totalNew,
+            failed,
+            results: result.results,
+        });
+    } catch (error: any) {
+        logger.error("Error in refresh-all:", error);
+        res.status(500).json({ error: "Failed to refresh podcasts" });
+    }
+});
 
 export default router;

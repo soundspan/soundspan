@@ -457,6 +457,32 @@ function parseEntityIdOrNotFound(
     }
 }
 
+function parseBookmarkPositionOrError(
+    req: Request,
+    res: Response,
+    format: ResponseFormat,
+    callback?: string,
+): number | null {
+    const rawPosition = getRequiredQueryString(req, res, "position", format, callback);
+    if (!rawPosition) {
+        return null;
+    }
+
+    const positionMs = Number.parseInt(rawPosition, 10);
+    if (Number.isNaN(positionMs) || positionMs < 0) {
+        sendSubsonicError(
+            res,
+            SubsonicErrorCode.GENERIC,
+            "Invalid bookmark position",
+            format,
+            callback,
+        );
+        return null;
+    }
+
+    return positionMs / 1000;
+}
+
 function getFileSuffix(filePath: string): string | undefined {
     const extension = path.extname(filePath).toLowerCase();
     if (!extension.startsWith(".")) {
@@ -743,6 +769,32 @@ function formatSongForSubsonic(song: {
     }
 
     return formatted;
+}
+
+function formatBookmarkForSubsonic(
+    bookmark: {
+        positionSeconds: number;
+        comment?: string | null;
+        createdAt?: Date;
+        updatedAt: Date;
+        track: BookmarkTrackRecord;
+    },
+    username: string,
+): Record<string, unknown> {
+    const position = Math.round(bookmark.positionSeconds * 1000);
+    const createdAt = bookmark.createdAt ?? bookmark.updatedAt;
+
+    return {
+        position,
+        username,
+        comment: bookmark.comment ?? "",
+        created: createdAt.toISOString(),
+        changed: bookmark.updatedAt.toISOString(),
+        entry: {
+            ...formatSongForSubsonic(bookmark.track),
+            bookmarkPosition: position,
+        },
+    };
 }
 
 /**
@@ -1901,6 +1953,37 @@ const similarSongTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
 
 type SimilarSongTrackRecord = Prisma.TrackGetPayload<{
     select: typeof similarSongTrackSelect;
+}>;
+
+const bookmarkTrackSelect = Prisma.validator<Prisma.TrackSelect>()({
+    id: true,
+    title: true,
+    trackNo: true,
+    discNo: true,
+    duration: true,
+    fileSize: true,
+    mime: true,
+    filePath: true,
+    album: {
+        select: {
+            id: true,
+            title: true,
+            year: true,
+            coverUrl: true,
+            genres: true,
+            userGenres: true,
+            artist: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+        },
+    },
+});
+
+type BookmarkTrackRecord = Prisma.TrackGetPayload<{
+    select: typeof bookmarkTrackSelect;
 }>;
 
 function mergeUniqueTracks(
@@ -3864,17 +3947,44 @@ export async function handleSavePlayQueueByIndex(
  */
 export async function handleGetBookmarks(req: Request, res: Response): Promise<void> {
     const { format, callback } = getRequestContext(req);
-
-    sendSubsonicSuccess(
-        res,
-        {
-            bookmarks: {
-                bookmark: [],
+    try {
+        const bookmarks = await prisma.bookmark.findMany({
+            where: {
+                userId: req.user!.id,
             },
-        },
-        format,
-        callback,
-    );
+            select: {
+                positionSeconds: true,
+                comment: true,
+                createdAt: true,
+                updatedAt: true,
+                track: {
+                    select: bookmarkTrackSelect,
+                },
+            },
+            orderBy: [{ updatedAt: "desc" }, { trackId: "asc" }],
+        });
+
+        sendSubsonicSuccess(
+            res,
+            {
+                bookmarks: {
+                    bookmark: bookmarks.map((bookmark) =>
+                        formatBookmarkForSubsonic(bookmark, req.user!.username),
+                    ),
+                },
+            },
+            format,
+            callback,
+        );
+    } catch {
+        sendSubsonicError(
+            res,
+            SubsonicErrorCode.GENERIC,
+            "Failed to load bookmarks",
+            format,
+            callback,
+        );
+    }
 }
 
 /**
@@ -3882,10 +3992,77 @@ export async function handleGetBookmarks(req: Request, res: Response): Promise<v
  */
 export async function handleCreateBookmark(req: Request, res: Response): Promise<void> {
     const { format, callback } = getRequestContext(req);
+    const rawId = getRequiredQueryString(req, res, "id", format, callback);
+    if (!rawId) {
+        return;
+    }
 
-    // Bookmark persistence is currently not modeled in soundspan. Return a
-    // protocol-success no-op for compatibility clients that expect this endpoint.
-    sendSubsonicSuccess(res, {}, format, callback);
+    const trackId = parseEntityIdOrNotFound(
+        req,
+        res,
+        rawId,
+        "track",
+        "Song not found",
+        format,
+        callback,
+    );
+    if (!trackId) {
+        return;
+    }
+
+    const positionSeconds = parseBookmarkPositionOrError(req, res, format, callback);
+    if (positionSeconds === null) {
+        return;
+    }
+
+    try {
+        const track = await prisma.track.findUnique({
+            where: {
+                id: trackId,
+            },
+            select: {
+                id: true,
+            },
+        });
+
+        if (!track) {
+            sendSubsonicError(
+                res,
+                SubsonicErrorCode.NOT_FOUND,
+                "Song not found",
+                format,
+                callback,
+            );
+            return;
+        }
+
+        await prisma.bookmark.upsert({
+            where: {
+                userId_trackId: {
+                    userId: req.user!.id,
+                    trackId,
+                },
+            },
+            create: {
+                userId: req.user!.id,
+                trackId,
+                positionSeconds,
+            },
+            update: {
+                positionSeconds,
+            },
+        });
+
+        sendSubsonicSuccess(res, {}, format, callback);
+    } catch {
+        sendSubsonicError(
+            res,
+            SubsonicErrorCode.GENERIC,
+            "Failed to save bookmark",
+            format,
+            callback,
+        );
+    }
 }
 
 /**
@@ -3893,10 +4070,42 @@ export async function handleCreateBookmark(req: Request, res: Response): Promise
  */
 export async function handleDeleteBookmark(req: Request, res: Response): Promise<void> {
     const { format, callback } = getRequestContext(req);
+    const rawId = getRequiredQueryString(req, res, "id", format, callback);
+    if (!rawId) {
+        return;
+    }
 
-    // Bookmark persistence is currently not modeled in soundspan. Return a
-    // protocol-success no-op for compatibility clients that expect this endpoint.
-    sendSubsonicSuccess(res, {}, format, callback);
+    const trackId = parseEntityIdOrNotFound(
+        req,
+        res,
+        rawId,
+        "track",
+        "Song not found",
+        format,
+        callback,
+    );
+    if (!trackId) {
+        return;
+    }
+
+    try {
+        await prisma.bookmark.deleteMany({
+            where: {
+                userId: req.user!.id,
+                trackId,
+            },
+        });
+
+        sendSubsonicSuccess(res, {}, format, callback);
+    } catch {
+        sendSubsonicError(
+            res,
+            SubsonicErrorCode.GENERIC,
+            "Failed to delete bookmark",
+            format,
+            callback,
+        );
+    }
 }
 
 /**

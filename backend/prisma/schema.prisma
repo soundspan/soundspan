@@ -8,6 +8,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum LibraryHealthStatus {
+  MISSING_FROM_DISK
+  UNREADABLE_METADATA
+}
+
 model User {
   id                     String                @id @default(cuid())
   username               String                @unique
@@ -45,6 +50,8 @@ model User {
   podcastProgress        PodcastProgress[]
   podcastSubscriptions   PodcastSubscription[]
   spotifyImportJobs      SpotifyImportJob[]
+  importJobs             ImportJob[]
+  bookmarks              Bookmark[]
   unavailableAlbums      UnavailableAlbum[]
   syncGroupsHosted       SyncGroup[]           @relation("SyncGroupHost")
   syncGroupMemberships   SyncGroupMember[]
@@ -356,6 +363,8 @@ model Track {
   cachedBy        CachedTrack[]
   likedBy         LikedTrack[]
   mappings        TrackMapping[]
+  bookmarks       Bookmark[]
+  libraryHealthRecord LibraryHealthRecord?
   moodBuckets     MoodBucket[]
   plays           Play[]
   playlistItems   PlaylistItem[]
@@ -388,6 +397,34 @@ model Track {
   @@index([acousticness])
   @@index([instrumentalness])
   @@index([hasUserOverrides])
+}
+
+model Bookmark {
+  userId          String
+  trackId         String
+  positionSeconds Float
+  comment         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  track           Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, trackId])
+  @@index([userId, updatedAt])
+  @@index([trackId])
+}
+
+model LibraryHealthRecord {
+  id         String              @id @default(cuid())
+  trackId     String              @unique
+  status      LibraryHealthStatus
+  filePath    String
+  detail      String?
+  detectedAt  DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  track       Track               @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
 }
 
 model TranscodedFile {
@@ -522,6 +559,32 @@ model SpotifyImportJob {
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+}
+
+model ImportJob {
+  id                   String   @id @default(cuid())
+  userId               String
+  sourceType           String
+  sourceId             String
+  sourceUrl            String
+  normalizedSource     String
+  playlistName         String
+  requestedPlaylistName String?
+  status               String
+  progress             Int      @default(0)
+  summary              Json
+  resolvedTracks       Json?
+  createdPlaylistId    String?
+  error                String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([normalizedSource])
+  @@index([userId, normalizedSource, status])
 }
 
 model Genre {
@@ -794,6 +857,8 @@ model Podcast {
   language        String?
   explicit        Boolean                  @default(false)
   episodeCount    Int                      @default(0)
+  feedEtag        String?
+  feedLastModified String?
   lastRefreshed   DateTime                 @default(now())
   refreshInterval Int                      @default(3600)
   autoRefresh     Boolean                  @default(true)

@@ -45,6 +45,17 @@ jest.mock("../../services/hybridSimilarity", () => ({
     findSimilarTracks: jest.fn(),
 }));
 
+jest.mock("../../services/umapProjection", () => ({
+    computeMapProjection: jest.fn(),
+}));
+
+jest.mock("../../utils/embedding", () => ({
+    parseEmbedding: jest.fn((text: string) => {
+        const values = text.replace(/[\[\]]/g, "").split(",").map(Number);
+        return values;
+    }),
+}));
+
 jest.mock("../../services/vibeVocabulary", () => ({
     loadVocabulary: jest.fn(),
     getVocabulary: jest.fn(() => null),
@@ -60,6 +71,7 @@ import router from "../vibe";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { findSimilarTracks } from "../../services/hybridSimilarity";
+import { computeMapProjection } from "../../services/umapProjection";
 import {
     getVocabulary,
     expandQueryWithVocabulary,
@@ -75,6 +87,7 @@ const mockRedisXAdd = redisClient.xAdd as jest.Mock;
 const mockRedisBlPop = redisClient.blPop as jest.Mock;
 const mockRedisDel = redisClient.del as jest.Mock;
 const mockFindSimilarTracks = findSimilarTracks as jest.Mock;
+const mockComputeMapProjection = computeMapProjection as jest.Mock;
 const mockGetVocabulary = getVocabulary as jest.Mock;
 const mockExpandQueryWithVocabulary = expandQueryWithVocabulary as jest.Mock;
 const mockRerankWithFeatures = rerankWithFeatures as jest.Mock;
@@ -116,6 +129,7 @@ function createRes() {
 }
 
 describe("vibe search transport compatibility", () => {
+    const mapHandler = getGetHandler("/map");
     const similarHandler = getGetHandler("/similar/:trackId");
     const statusHandler = getGetHandler("/status");
     const searchHandler = getPostHandler("/search");
@@ -130,6 +144,11 @@ describe("vibe search transport compatibility", () => {
         mockLikedTrackFindMany.mockResolvedValue([]);
         mockDislikedEntityFindMany.mockResolvedValue([]);
         mockFindSimilarTracks.mockResolvedValue([]);
+        mockComputeMapProjection.mockResolvedValue({
+            tracks: [],
+            trackCount: 0,
+            computedAt: "2026-03-14T00:00:00.000Z",
+        });
         mockGetVocabulary.mockReturnValue(null);
         mockExpandQueryWithVocabulary.mockImplementation((embedding: number[]) => ({
             embedding,
@@ -137,6 +156,60 @@ describe("vibe search transport compatibility", () => {
             matchedTerms: [],
         }));
         mockRerankWithFeatures.mockImplementation((tracks: unknown[]) => tracks);
+    });
+
+    it("returns vibe map projection data and handles projection errors", async () => {
+        mockComputeMapProjection.mockResolvedValueOnce({
+            tracks: [
+                {
+                    id: "track-1",
+                    x: 0.25,
+                    y: 0.75,
+                    title: "Track One",
+                    artist: "Artist One",
+                    artistId: "artist-1",
+                    albumId: "album-1",
+                    coverUrl: null,
+                    dominantMood: "moodHappy",
+                    moodScore: 0.9,
+                    moods: { moodHappy: 0.9 },
+                    energy: 0.8,
+                    valence: 0.7,
+                },
+            ],
+            trackCount: 1,
+            computedAt: "2026-03-14T12:00:00.000Z",
+        });
+
+        const req = { user: { id: "user-1" } } as any;
+        const res = createRes();
+        await mapHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                trackCount: 1,
+                computedAt: "2026-03-14T12:00:00.000Z",
+                tracks: [
+                    expect.objectContaining({
+                        id: "track-1",
+                        x: 0.25,
+                        y: 0.75,
+                    }),
+                ],
+            })
+        );
+
+        mockComputeMapProjection.mockRejectedValueOnce(
+            new Error("projection failed")
+        );
+        const errRes = createRes();
+        await mapHandler(req, errRes);
+
+        expect(errRes.statusCode).toBe(500);
+        expect(errRes.body).toEqual({
+            error: "Failed to compute map projection",
+        });
     });
 
     it("handles similar-track route success, empty, and error branches", async () => {
@@ -538,5 +611,131 @@ describe("vibe search transport compatibility", () => {
         );
         expect(mockExpandQueryWithVocabulary).toHaveBeenCalled();
         expect(mockRerankWithFeatures).toHaveBeenCalled();
+    });
+
+    describe("song-path", () => {
+        const pathHandler = getGetHandler("/path");
+
+        it("returns interpolated tracks between two endpoints", async () => {
+            // Source and target embeddings
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // from
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]) // to
+                // Step 1 nearest
+                .mockResolvedValueOnce([
+                    { id: "mid-1", title: "Mid One", distance: 0.1, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
+                ])
+                // Step 2 nearest
+                .mockResolvedValueOnce([
+                    { id: "mid-2", title: "Mid Two", distance: 0.15, albumId: "a-2", albumTitle: "A2", albumCoverUrl: null, artistId: "ar-2", artistName: "Artist 2" },
+                ]);
+
+            const req = {
+                query: { from: "track-start", to: "track-end", steps: "2" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await pathHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.steps).toHaveLength(2);
+            expect(res.body.steps[0]).toEqual(
+                expect.objectContaining({ id: "mid-1" })
+            );
+        });
+
+        it("returns 400 when from or to track IDs are missing", async () => {
+            const req = { query: { from: "track-1" }, user: { id: "user-1" } } as any;
+            const res = createRes();
+            await pathHandler(req, res);
+
+            expect(res.statusCode).toBe(400);
+        });
+
+        it("returns 404 when an endpoint track has no embedding", async () => {
+            mockQueryRaw.mockResolvedValueOnce([]); // from embedding missing
+
+            const req = {
+                query: { from: "track-missing", to: "track-end", steps: "3" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await pathHandler(req, res);
+
+            expect(res.statusCode).toBe(404);
+        });
+    });
+
+    describe("alchemy", () => {
+        const alchemyHandler = getPostHandler("/alchemy");
+
+        it("blends multiple track embeddings and returns matching tracks", async () => {
+            // Embedding lookups for each ingredient
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
+                .mockResolvedValueOnce([{ embedding: "[0,1,0]" }])
+                // Nearest-neighbor search from blended embedding
+                .mockResolvedValueOnce([
+                    { id: "result-1", title: "Blended Hit", distance: 0.2, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
+                ]);
+
+            const req = {
+                body: { trackIds: ["track-a", "track-b"], limit: 10 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await alchemyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.tracks).toHaveLength(1);
+            expect(res.body.tracks[0]).toEqual(
+                expect.objectContaining({ id: "result-1" })
+            );
+        });
+
+        it("applies custom weights to ingredient embeddings", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
+                .mockResolvedValueOnce([{ embedding: "[0,1,0]" }])
+                .mockResolvedValueOnce([
+                    { id: "result-1", title: "Weighted", distance: 0.1, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
+                ]);
+
+            const req = {
+                body: { trackIds: ["track-a", "track-b"], weights: [0.8, 0.2], limit: 5 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await alchemyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.tracks).toHaveLength(1);
+        });
+
+        it("returns 400 when fewer than 2 track IDs are provided", async () => {
+            const req = {
+                body: { trackIds: ["track-only-one"] },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await alchemyHandler(req, res);
+
+            expect(res.statusCode).toBe(400);
+        });
+
+        it("returns 404 when an ingredient track has no embedding", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
+                .mockResolvedValueOnce([]); // second track missing
+
+            const req = {
+                body: { trackIds: ["track-a", "track-missing"], limit: 10 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await alchemyHandler(req, res);
+
+            expect(res.statusCode).toBe(404);
+        });
     });
 });

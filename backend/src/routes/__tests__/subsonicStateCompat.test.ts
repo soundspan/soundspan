@@ -21,7 +21,13 @@ jest.mock("../../utils/db", () => ({
             findUnique: jest.fn(),
             upsert: jest.fn(),
         },
+        bookmark: {
+            findMany: jest.fn(),
+            upsert: jest.fn(),
+            deleteMany: jest.fn(),
+        },
         track: {
+            findUnique: jest.fn(),
             findMany: jest.fn(),
         },
         album: {
@@ -96,8 +102,21 @@ function buildRes(): Response {
 }
 
 describe("subsonic state/admin compatibility handlers", () => {
+    const bookmarkModel = (
+        prisma as unknown as {
+            bookmark: {
+                findMany: jest.Mock;
+                upsert: jest.Mock;
+                deleteMany: jest.Mock;
+            };
+        }
+    ).bookmark;
     const mockPlaybackFindUnique = prisma.playbackState.findUnique as jest.Mock;
     const mockPlaybackUpsert = prisma.playbackState.upsert as jest.Mock;
+    const mockBookmarkFindMany = bookmarkModel.findMany as jest.Mock;
+    const mockBookmarkUpsert = bookmarkModel.upsert as jest.Mock;
+    const mockBookmarkDeleteMany = bookmarkModel.deleteMany as jest.Mock;
+    const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
     const mockTrackFindMany = prisma.track.findMany as jest.Mock;
     const mockAlbumFindMany = prisma.album.findMany as jest.Mock;
     const mockArtistFindMany = prisma.artist.findMany as jest.Mock;
@@ -113,6 +132,10 @@ describe("subsonic state/admin compatibility handlers", () => {
         jest.clearAllMocks();
         resetSubsonicScanStartCooldownForTests();
         mockPlaybackFindUnique.mockResolvedValue(null);
+        mockBookmarkFindMany.mockResolvedValue([]);
+        mockBookmarkUpsert.mockResolvedValue(null);
+        mockBookmarkDeleteMany.mockResolvedValue({ count: 0 });
+        mockTrackFindUnique.mockResolvedValue(null);
         mockTrackFindMany.mockResolvedValue([]);
         mockAlbumFindMany.mockResolvedValue([]);
         mockArtistFindMany.mockResolvedValue([]);
@@ -261,14 +284,60 @@ describe("subsonic state/admin compatibility handlers", () => {
         );
     });
 
-    it("returns empty bookmark payload for getBookmarks", async () => {
+    it("returns persisted bookmarks with song metadata", async () => {
+        mockBookmarkFindMany.mockResolvedValue([
+            {
+                positionSeconds: 12.345,
+                updatedAt: new Date("2026-03-01T12:00:00.000Z"),
+                track: {
+                    id: "track-1",
+                    title: "Song One",
+                    trackNo: 1,
+                    discNo: 1,
+                    duration: 180,
+                    fileSize: 1700,
+                    mime: "audio/mpeg",
+                    filePath: "Artist One/Album One/01 Song One.mp3",
+                    album: {
+                        id: "album-1",
+                        title: "Album One",
+                        year: 2023,
+                        coverUrl: null,
+                        genres: [],
+                        userGenres: [],
+                        artist: {
+                            id: "artist-1",
+                            name: "Artist One",
+                        },
+                    },
+                },
+            },
+        ]);
+
         await handleGetBookmarks(buildReq({}), buildRes());
 
+        expect(mockBookmarkFindMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    userId: "user-1",
+                },
+            }),
+        );
         expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
                 bookmarks: {
-                    bookmark: [],
+                    bookmark: [
+                        expect.objectContaining({
+                            position: 12345,
+                            entry: expect.objectContaining({
+                                id: "tr-track-1",
+                                title: "Song One",
+                                album: "Album One",
+                                artist: "Artist One",
+                            }),
+                        }),
+                    ],
                 },
             }),
             "json",
@@ -276,21 +345,68 @@ describe("subsonic state/admin compatibility handlers", () => {
         );
     });
 
-    it("accepts createBookmark and deleteBookmark as protocol-success no-ops", async () => {
-        await handleCreateBookmark(buildReq({ id: "tr-track-1", position: "12345" }), buildRes());
-        await handleDeleteBookmark(buildReq({ id: "tr-track-1" }), buildRes());
+    it("upserts bookmark state for an existing track", async () => {
+        mockTrackFindUnique.mockResolvedValue({
+            id: "track-1",
+        });
 
-        expect(mockSendSuccess).toHaveBeenNthCalledWith(
-            1,
+        await handleCreateBookmark(buildReq({ id: "tr-track-1", position: "12345" }), buildRes());
+
+        expect(mockTrackFindUnique).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    id: "track-1",
+                },
+            }),
+        );
+        expect(mockBookmarkUpsert).toHaveBeenCalledWith({
+            where: {
+                userId_trackId: {
+                    userId: "user-1",
+                    trackId: "track-1",
+                },
+            },
+            create: {
+                userId: "user-1",
+                trackId: "track-1",
+                positionSeconds: 12.345,
+            },
+            update: {
+                positionSeconds: 12.345,
+            },
+        });
+        expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             {},
             "json",
             undefined,
         );
-        expect(mockSendSuccess).toHaveBeenNthCalledWith(
-            2,
+    });
+
+    it("deletes bookmark state for the authenticated user", async () => {
+        await handleDeleteBookmark(buildReq({ id: "tr-track-1" }), buildRes());
+
+        expect(mockBookmarkDeleteMany).toHaveBeenCalledWith({
+            where: {
+                userId: "user-1",
+                trackId: "track-1",
+            },
+        });
+        expect(mockSendSuccess).toHaveBeenCalledWith(
             expect.anything(),
             {},
+            "json",
+            undefined,
+        );
+    });
+
+    it("returns not-found for bookmark requests when track does not exist", async () => {
+        await handleCreateBookmark(buildReq({ id: "tr-track-missing", position: "1000" }), buildRes());
+
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            70,
+            "Song not found",
             "json",
             undefined,
         );

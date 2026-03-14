@@ -37,7 +37,7 @@ Tier B mutation/readiness:
 - `getUser`, `getAvatar`
 - `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`
 - `getPlayQueue`, `savePlayQueue`, `getPlayQueueByIndex`, `savePlayQueueByIndex`
-- `getBookmarks`, `createBookmark`, `deleteBookmark` (compatibility no-op surface)
+- `getBookmarks`, `createBookmark`, `deleteBookmark`
 - `getScanStatus`, `startScan`
 - `scrobble`, `getNowPlaying`
 - `getStarred`, `getStarred2`, `star`, `unstar`, `setRating`
@@ -178,7 +178,7 @@ Promote a deferred gap to in-scope when at least one of these is true:
 - `getNowPlaying` currently reports only the authenticated user's active playback state, not global multi-user now-playing.
 - `getPlayQueue`/`savePlayQueue` currently use the legacy playback-state device bucket (`deviceId=legacy`) for compatibility clients.
 - `getPlayQueueByIndex`/`savePlayQueueByIndex` map index `0` to `deviceId=legacy` and index `N` to `deviceId=legacy-N`.
-- `getBookmarks` currently returns an empty bookmark list and `createBookmark`/`deleteBookmark` are protocol-success no-ops (bookmark persistence is not modeled yet).
+- `getBookmarks`/`createBookmark`/`deleteBookmark` now persist per-user bookmark state keyed by track id, with bookmark positions stored in seconds and returned in protocol milliseconds.
 - `startScan` is compatibility-throttled with a cooldown window; repeated requests during cooldown return current scan status and do not enqueue new scan jobs.
 - `getIndexes` now honors `musicFolderId` filtering and `ifModifiedSince` no-change semantics.
 - `getArtists` now honors `musicFolderId` filtering.

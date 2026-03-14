@@ -9,6 +9,7 @@ import {
     normalizeQuotes,
     normalizeFullwidth,
 } from "./stringNormalization";
+import type { M3UEntry } from "../services/m3uParser";
 
 // ── String normalization helpers ──────────────────────────────────
 
@@ -121,8 +122,23 @@ export interface LocalTrackCandidate {
 
 export interface TrackMatchResult {
     trackId: string;
-    matchType: "exact" | "fuzzy";
+    matchType: "path" | "filename" | "exact" | "fuzzy";
     matchConfidence: number;
+}
+
+function normalizePathForMatching(filePath: string): string {
+    return filePath
+        .replace(/\\/g, "/")
+        .replace(/\/+/g, "/")
+        .trim()
+        .toLowerCase();
+}
+
+function getFilenameStem(filePath: string): string {
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    const segments = normalizedPath.split("/");
+    const filename = segments[segments.length - 1] || "";
+    return filename.replace(/\.[^.]+$/, "");
 }
 
 /**
@@ -223,6 +239,90 @@ export function matchTrackAgainstLibrary(
             matchType: "fuzzy",
             matchConfidence: Math.round(bestScore),
         };
+    }
+
+    return null;
+}
+
+/**
+ * Match an M3U entry against the local library using the agreed tier order:
+ * 1. Normalized file path suffix match
+ * 2. Filename stem match
+ * 3. Exact metadata match
+ * 4. Fuzzy metadata match
+ */
+export function matchM3UEntryAgainstLibrary(
+    entry: M3UEntry,
+    candidates: LocalTrackCandidate[]
+): TrackMatchResult | null {
+    if (!candidates.length) return null;
+
+    const sortedCandidates = [...candidates].sort((a, b) => {
+        const pathCompare = (a.filePath || "").localeCompare(b.filePath || "");
+        if (pathCompare !== 0) return pathCompare;
+        return a.id.localeCompare(b.id);
+    });
+
+    const entryPath = normalizePathForMatching(entry.filePath);
+
+    for (const candidate of sortedCandidates) {
+        if (!candidate.filePath) continue;
+        const candidatePath = normalizePathForMatching(candidate.filePath);
+        if (
+            candidatePath === entryPath ||
+            entryPath.endsWith(`/${candidatePath}`) ||
+            candidatePath.endsWith(`/${entryPath}`)
+        ) {
+            return {
+                trackId: candidate.id,
+                matchType: "path",
+                matchConfidence: 100,
+            };
+        }
+    }
+
+    const entryFilename = normalizeTrackTitle(getFilenameStem(entry.filePath));
+    if (entryFilename.length > 0) {
+        for (const candidate of sortedCandidates) {
+            if (!candidate.filePath) continue;
+            const candidateFilename = normalizeTrackTitle(
+                getFilenameStem(candidate.filePath)
+            );
+            if (candidateFilename === entryFilename) {
+                return {
+                    trackId: candidate.id,
+                    matchType: "filename",
+                    matchConfidence: 98,
+                };
+            }
+        }
+    }
+
+    if (entry.artist && entry.title) {
+        const normalizedArtist = normalizeString(entry.artist);
+        const normalizedTitle = normalizeTrackTitle(entry.title);
+
+        for (const candidate of sortedCandidates) {
+            if (
+                normalizeString(candidate.artistName) === normalizedArtist &&
+                normalizeTrackTitle(candidate.title) === normalizedTitle
+            ) {
+                return {
+                    trackId: candidate.id,
+                    matchType: "exact",
+                    matchConfidence: 100,
+                };
+            }
+        }
+
+        return matchTrackAgainstLibrary(
+            {
+                artist: entry.artist,
+                title: entry.title,
+                duration: entry.durationSeconds ?? undefined,
+            },
+            sortedCandidates
+        );
     }
 
     return null;
