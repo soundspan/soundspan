@@ -362,7 +362,7 @@ export function FullPlayer() {
                                 <Link
                                     href={mediaLink}
                                     prefetch={false}
-                                    className="block w-fit hover:underline"
+                                    className="block min-w-0 hover:underline"
                                 >
                                     <h4 className="text-white font-semibold truncate text-sm">
                                         {title}
@@ -377,7 +377,7 @@ export function FullPlayer() {
                                 <Link
                                     href={artistLink}
                                     prefetch={false}
-                                    className="block w-fit hover:underline"
+                                    className="block min-w-0 hover:underline"
                                 >
                                     <p className="text-xs text-gray-400 truncate">
                                         {subtitle}
@@ -387,7 +387,7 @@ export function FullPlayer() {
                                 <Link
                                     href={mediaLink}
                                     prefetch={false}
-                                    className="block w-fit hover:underline"
+                                    className="block min-w-0 hover:underline"
                                 >
                                     <p className="text-xs text-gray-400 truncate">
                                         {subtitle}
