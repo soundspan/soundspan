@@ -13,6 +13,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | Route File | Mounted Prefixes |
 | --- | --- |
 | `backend/src/routes/analysis.ts` | `/api/analysis` |
+| `backend/src/routes/admin.ts` | `/api/admin` |
 | `backend/src/routes/apiKeys.ts` | `/api/api-keys` |
 | `backend/src/routes/artists.ts` | `/api/artists` |
 | `backend/src/routes/audiobooks.ts` | `/api/audiobooks` |

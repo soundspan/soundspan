@@ -37,6 +37,7 @@ graph TD
 | Source | Target | Protocol | Port | Auth | Purpose |
 |--------|--------|----------|------|------|---------|
 | frontend | backend | HTTP (Next.js rewrites `/api/*`) | 3006 | JWT cookie | All API requests |
+| frontend | backend | HTTP (Next.js rewrites `/api/admin/*`) | 3006 | Admin session | Admin-only operational surfaces such as Library Health and Bull Board |
 | frontend | backend | WebSocket (Socket.IO) | 3006 | JWT | Listen Together real-time sync |
 | backend | PostgreSQL | TCP (Prisma) | 5432 | Connection string | All persistent state |
 | backend | Redis | TCP | 6379 | None | Listen Together presence/state, cache, pub/sub, stream queues |
