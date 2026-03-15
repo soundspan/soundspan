@@ -141,14 +141,14 @@ const SyncBadge = memo(function SyncBadge({ compact = false }: SyncBadgeProps) {
 
             {/* Members popup */}
             <div
-                className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-3 backdrop-blur-xl z-[10002] transition-all duration-200 ${
+                className={`absolute bottom-full left-0 mb-2 w-64 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-3 backdrop-blur-xl z-[10002] transition-all duration-200 ${
                     isOpen
                         ? "opacity-100 scale-100 pointer-events-auto"
                         : "opacity-0 scale-95 pointer-events-none"
                 }`}
             >
                 {/* Pointer arrow */}
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#1a1a1a] border-r border-b border-white/10 rotate-45" />
+                <div className="absolute -bottom-1 left-4 w-2 h-2 bg-[#1a1a1a] border-r border-b border-white/10 rotate-45" />
 
                 {/* Title */}
                 <div className="flex items-center justify-between mb-2">
