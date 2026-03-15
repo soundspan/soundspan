@@ -330,6 +330,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
     const routeRecheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingReconnectAudioRecoveryRef = useRef(false);
     const reconnectAudioRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    /** Grace period before flipping the connection indicator to disconnected. */
+    const disconnectGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const controlsRef = useRef(controls);
     const audioStateRef = useRef(audioState);
     const trackAvailabilityRef = useRef<Map<number, AvailabilityItem>>(new Map());
@@ -367,6 +369,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             if (reconnectAudioRecoveryTimeoutRef.current) {
                 clearTimeout(reconnectAudioRecoveryTimeoutRef.current);
                 reconnectAudioRecoveryTimeoutRef.current = null;
+            }
+            if (disconnectGraceTimerRef.current) {
+                clearTimeout(disconnectGraceTimerRef.current);
+                disconnectGraceTimerRef.current = null;
             }
         };
     }, []);
@@ -1092,6 +1098,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 });
             },
             onGroupEnded: (_data) => {
+                if (disconnectGraceTimerRef.current) {
+                    clearTimeout(disconnectGraceTimerRef.current);
+                    disconnectGraceTimerRef.current = null;
+                }
                 activeGroupRef.current = null;
                 setActiveGroup(null);
                 setTrackAvailability(new Map());
@@ -1103,6 +1113,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 listenTogetherSocket.disconnect();
             },
             onConnect: () => {
+                if (disconnectGraceTimerRef.current) {
+                    clearTimeout(disconnectGraceTimerRef.current);
+                    disconnectGraceTimerRef.current = null;
+                }
                 setIsConnected(true);
                 setHasConnectedOnce(true);
                 setReconnectAttempt(0);
@@ -1111,6 +1125,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
                 awaitingInitialStateRef.current = true;
             },
             onReconnect: (_attempt) => {
+                if (disconnectGraceTimerRef.current) {
+                    clearTimeout(disconnectGraceTimerRef.current);
+                    disconnectGraceTimerRef.current = null;
+                }
                 setIsConnected(true);
                 setReconnectAttempt(0);
                 setSocketRouteStatus("ok");
@@ -1119,19 +1137,39 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
             },
             onReconnectAttempt: (attempt) => {
                 setReconnectAttempt(attempt);
-                setIsConnected(false);
-                setSocketRouteStatus("checking");
                 pendingReconnectAudioRecoveryRef.current = true;
+                // Defer the visual disconnect so brief reconnects don't flash grey.
+                // Only schedule the grace timer once; later attempts just bump the counter.
+                if (!disconnectGraceTimerRef.current) {
+                    disconnectGraceTimerRef.current = setTimeout(() => {
+                        disconnectGraceTimerRef.current = null;
+                        setIsConnected(false);
+                        setSocketRouteStatus("checking");
+                    }, 2000);
+                }
             },
             onReconnectError: (err) => {
                 sharedFrontendLogger.error("[ListenTogether] Reconnect error:", err.message);
             },
             onReconnectFailed: () => {
+                // Reconnection exhausted — show disconnected immediately.
+                if (disconnectGraceTimerRef.current) {
+                    clearTimeout(disconnectGraceTimerRef.current);
+                    disconnectGraceTimerRef.current = null;
+                }
+                setIsConnected(false);
                 setError("Listen Together reconnect failed. Check route/proxy health and try rejoining.");
                 void validateSocketRoute(true);
             },
             onDisconnect: (_reason) => {
-                setIsConnected(false);
+                // Defer the visual disconnect; if Socket.IO reconnects within
+                // the grace window the indicator stays green.
+                if (!disconnectGraceTimerRef.current) {
+                    disconnectGraceTimerRef.current = setTimeout(() => {
+                        disconnectGraceTimerRef.current = null;
+                        setIsConnected(false);
+                    }, 2000);
+                }
             },
             onError: (err) => {
                 sharedFrontendLogger.error("[ListenTogether] Socket error:", err.message);
@@ -1475,6 +1513,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
         setError(null);
         setListenTogetherMembershipPending(false);
+        if (disconnectGraceTimerRef.current) {
+            clearTimeout(disconnectGraceTimerRef.current);
+            disconnectGraceTimerRef.current = null;
+        }
         // Optimistic cleanup first so UI remains responsive even if backend is slow.
         listenTogetherSocket.disconnect();
         activeGroupRef.current = null;
