@@ -649,12 +649,12 @@ export function FullPlayer() {
                                 {/* Vertical volume slider popup */}
                                 <div
                                     className={cn(
-                                        "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-4 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl transition-all duration-200",
+                                        "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-3 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl transition-all duration-200 overflow-hidden",
                                         showVolumePopup ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"
                                     )}
                                 >
-                                    <div className="flex flex-col items-center gap-2 h-28">
-                                        <div className="relative h-full w-4 flex items-center justify-center">
+                                    <div className="flex flex-col items-center gap-3 h-28">
+                                        <div className="relative h-full w-3 flex items-center justify-center overflow-hidden">
                                             <input
                                                 type="range"
                                                 min="0"
@@ -669,10 +669,10 @@ export function FullPlayer() {
                                                 style={{
                                                     background: `linear-gradient(to right, #fff ${volume * 100}%, rgba(255,255,255,0.15) ${volume * 100}%)`
                                                 }}
-                                                className="absolute w-28 h-1 rounded-full appearance-none cursor-pointer -rotate-90 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30"
+                                                className="absolute w-24 h-1 rounded-full appearance-none cursor-pointer -rotate-90 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30"
                                             />
                                         </div>
-                                        <span className="text-[10px] text-gray-400 tabular-nums">
+                                        <span className="text-[10px] text-gray-400 tabular-nums mt-0.5">
                                             {Math.round(volume * 100)}
                                         </span>
                                     </div>
