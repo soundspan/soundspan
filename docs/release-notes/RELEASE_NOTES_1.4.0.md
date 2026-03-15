@@ -1,8 +1,8 @@
-# soundspan 1.3.5 Release Notes - 2026-03-15
+# soundspan 1.4.0 Release Notes - 2026-03-15
 
 ## Release Summary
 
-soundspan 1.3.5 is a major feature release introducing the native desktop and mobile app via Tauri 2 with hi-res audio support, an interactive vibe map for visual library exploration, M3U/M3U8 playlist import, background import jobs, podcast bulk refresh, OpenSubsonic bookmark persistence, and a sleep timer — alongside import UX improvements, security hardening, and a batch of bug fixes across the vibe map, admin library health, import jobs, Listen Together, and the player UI.
+soundspan 1.4.0 is a major feature release introducing the native desktop and mobile app via Tauri 2 with hi-res audio support, an interactive vibe map for visual library exploration, M3U/M3U8 playlist import, background import jobs, podcast bulk refresh, OpenSubsonic bookmark persistence, and a sleep timer — alongside import UX improvements, security hardening, and a batch of bug fixes across the vibe map, admin library health, import jobs, Listen Together, and the player UI.
 
 ## Fixed
 
@@ -54,7 +54,7 @@ soundspan 1.3.5 is a major feature release introducing the native desktop and mo
 ```bash
 helm repo add soundspan https://soundspan.github.io/soundspan
 helm repo update
-helm upgrade --install soundspan soundspan/soundspan --version 1.3.5
+helm upgrade --install soundspan soundspan/soundspan --version 1.4.0
 ```
 
 ## Breaking Changes
@@ -71,5 +71,5 @@ No migration steps required. This is a drop-in replacement for 1.3.4. Operators 
 
 ## Full Changelog
 
-- Compare changes: https://github.com/soundspan/soundspan/compare/v1.3.4...v1.3.5
+- Compare changes: https://github.com/soundspan/soundspan/compare/v1.3.4...v1.4.0
 - Full changelog: https://github.com/soundspan/soundspan/blob/main/CHANGELOG.md
