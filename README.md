@@ -22,7 +22,7 @@ soundspan is built for people who want streaming convenience without giving up o
 - Podcast search/subscribe via RSS with resume, played-state tracking, and mobile skip controls
 - Audiobookshelf integration with unified browsing/playback and progress sync
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
-- Synced lyrics, source/quality badges, and overhauled desktop/mobile/overlay player flows
+- Synced lyrics, source/quality badges, and overhauled browser/PWA/overlay player flows
 - Multiple users with isolated libraries, admin roles, optional 2FA, and Listen Together group sessions
 - Deezer previews plus Spotify/Deezer playlist import flows and provider track mapping APIs
 - OpenSubsonic-compatible `/rest` API surface for third-party client access
@@ -110,19 +110,13 @@ All integration endpoints below require soundspan auth (session or API key where
 
 ---
 
-## Desktop & Mobile
+## Web & PWA
 
-### soundspan-app (native)
+soundspan is browser-first. Use it from your desktop or mobile browser, or install it through your browser's PWA flow for app-like behavior, background playback, media controls, and faster repeat loads.
 
-[soundspan-app](https://github.com/soundspan/soundspan-app) is the multi-platform native app for Windows, macOS, Linux, Android, and iOS. On platforms where Chromium's audio mixer caps output at 48 kHz, the app automatically switches to a high-fidelity Rust audio backend for true hi-res playback.
+### OpenSubsonic clients
 
-### Progressive Web App (PWA)
-
-Install soundspan as a PWA from your browser install flow for app-like behavior, background playback, media controls, and faster repeat loads.
-
-### Subsonic-compatible apps
-
-For third-party native clients, use Subsonic-compatible apps through soundspan's OpenSubsonic `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
+For third-party clients, use OpenSubsonic-compatible apps through soundspan's `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
 
 ### Android TV
 

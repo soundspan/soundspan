@@ -2,7 +2,7 @@
 
 ## Release Summary
 
-soundspan 1.4.0 is a major feature release introducing the native desktop and mobile app via Tauri 2 with hi-res audio support, an interactive vibe map for visual library exploration, M3U/M3U8 playlist import, background import jobs, podcast bulk refresh, OpenSubsonic bookmark persistence, and a sleep timer — alongside import UX improvements, security hardening, and a batch of bug fixes across the vibe map, admin library health, import jobs, Listen Together, and the player UI.
+soundspan 1.4.0 is a major browser-first feature release adding exploratory alternate playback-backend work for environments where browser audio output is limited, an interactive vibe map for visual library exploration, M3U/M3U8 playlist import, background import jobs, podcast bulk refresh, OpenSubsonic bookmark persistence, and a sleep timer — alongside import UX improvements, security hardening, and a batch of bug fixes across the vibe map, admin library health, import jobs, Listen Together, and the player UI.
 
 ## Fixed
 
@@ -18,8 +18,8 @@ soundspan 1.4.0 is a major feature release introducing the native desktop and mo
 
 ## Added
 
-- Native desktop and mobile app via [soundspan-app](https://github.com/soundspan/soundspan-app): multi-platform Tauri 2 app for Windows, macOS, Linux, Android, and iOS. On platforms where Chromium's audio mixer caps output at 48 kHz (Windows, Android), the app automatically switches to a high-fidelity Rust audio backend for true hi-res playback at the system's native sample rate.
-- Audio engine factory that selects the best playback backend at runtime — Rust-based native audio via soundspan-app on platforms that need it, standard web audio everywhere else.
+- Exploratory alternate playback-backend work for environments where browser audio output is limited, including a Rust playback path for true hi-res output where Chromium caps audio at 48 kHz.
+- Audio engine factory that selects the best playback backend at runtime while keeping standard web audio as the default browser experience.
 - Vibe map page (`/vibe` Map tab) with an interactive 2D scatter plot of the library's CLAP embedding projections, color-coded by dominant mood, backed by a cached `/api/vibe/map` UMAP worker with a circular fallback for very small libraries.
 - Vibe discovery endpoints: song-path (`GET /api/vibe/path`) for interpolated musical journeys between two tracks, and alchemy (`POST /api/vibe/alchemy`) for blending multiple track embeddings into new vibe discoveries.
 - M3U and M3U8 file import with deterministic local-library matching (file path, filename, exact metadata, fuzzy metadata tiers) and a preview endpoint (`POST /api/import/m3u/preview`, 2 MB limit).
