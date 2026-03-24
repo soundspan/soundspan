@@ -76,18 +76,7 @@ tests:
       argv: ["python3", "scripts/acm-feature-plan-validate.py", "--help"]
     select:
       phases: ["execute", "review"]
-      changed_paths_any:
-        [
-          "AGENTS.md",
-          "CLAUDE.md",
-          ".acm/**",
-          ".claude/**",
-          "CONTRIBUTING.md",
-          "docs/ACM_FEATURE_PLANS.md",
-          "docs/README.md",
-          "docs/TESTING.md",
-          "scripts/acm-feature-plan-validate.py"
-        ]
+      changed_paths_any: ["scripts/acm-feature-plan-validate.py"]
     expected:
       exit_code: 0
 
@@ -99,23 +88,14 @@ tests:
       phases: ["execute", "review"]
       changed_paths_any:
         [
-          "AGENTS.md",
-          "CLAUDE.md",
-          ".acm/**",
-          ".claude/**",
-          "CONTRIBUTING.md",
           "backend/**",
           "charts/**",
           "docker-compose*.yml",
-          "docs/ACM_FEATURE_PLANS.md",
-          "docs/README.md",
-          "docs/TESTING.md",
           "frontend/**",
           "package-lock.json",
           "package.json",
           "packages/**",
-          "services/**",
-          "scripts/acm-feature-plan-validate.py"
+          "services/**"
         ]
     expected:
       exit_code: 0

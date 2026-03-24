@@ -15,6 +15,7 @@ STAGE_TASKS = {
     "stage:refined-spec": "refined_spec",
     "stage:implementation-plan": "implementation_plan",
 }
+SUPERSEDED_STATUSES = {"superseded"}
 LEAF_TASK_EXEMPT_KEYS = {"verify:tests", "review:cross-llm"}
 
 
@@ -141,6 +142,8 @@ def index_tasks(plan, errors):
             continue
         if task_key in tasks_by_key:
             errors.append(f"{plan['__plan_key']}: duplicate task key {task_key}")
+            continue
+        if trimmed(task.get("status")) in SUPERSEDED_STATUSES:
             continue
         tasks_by_key[task_key] = task
 
