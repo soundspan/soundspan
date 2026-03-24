@@ -9,17 +9,19 @@ Repository contract for soundspan.
 - `CLAUDE.md` and `.claude/acm-broker/**` are tool-specific companions. If they disagree with this file, this file wins.
 - ACM work storage is the source of truth for active and historical plan state. Use `acm work list/search --scope all` when you need archived or completed history.
 
-## ACM Task Loop
+## Task Loop
 
 For non-trivial work (multi-step, multi-file, or governed changes), follow this loop. Trivial single-file fixes can skip the ACM ceremony.
 
 1. Read this file and the human task.
-2. Run `acm context --project soundspan --task-text "<current task>" --phase <plan|execute|review>`.
+2. Run `acm context --task-text "<current task>" --phase <plan|execute|review>`.
 3. Read the returned hard rules and fetch only the keys needed for the current step.
-4. If the task spans multiple steps, multiple files, or likely handoff, create or update ACM work with `acm work --project soundspan ...`.
-5. For code, config, schema, or behavior changes, run `acm verify --project soundspan ...` before completion.
-6. If `.acm/acm-workflows.yaml` requires a review task such as `review:cross-llm`, satisfy it with `acm review --run --project soundspan --receipt-id <receipt-id>` when the task defines a `run` block; otherwise use manual review fields or `acm work`.
-7. Close the task with `acm done --project soundspan ...`. Changed files must stay within the active receipt scope.
+4. If the task spans multiple steps, multiple files, or likely handoff, create or update ACM work with `acm work ...`.
+5. For code, config, schema, or behavior changes, run `acm verify ...` before completion.
+6. If `.acm/acm-workflows.yaml` requires a review task such as `review:cross-llm`, satisfy it with `acm review --run --receipt-id <receipt-id>` when the task defines a `run` block; otherwise use manual review fields or `acm work`.
+7. Close the task with `acm done ...`. Changed files must stay within the active receipt scope.
+
+See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full ACM command reference (CLI and MCP).
 
 ## Working Rules
 

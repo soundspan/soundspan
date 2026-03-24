@@ -2,16 +2,19 @@
 
 Claude companion for soundspan. The primary contract is `AGENTS.md` — if this file conflicts, `AGENTS.md` wins.
 
-## Workflow
+## ACM Workflow
 
-For non-trivial work (multi-step, multi-file, or governed changes), follow this loop. Trivial single-file fixes can skip the ACM ceremony.
+See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full command reference. Claude slash-command equivalents:
 
-1. Run `/acm-context [phase] <task text>` before touching files.
-2. Follow returned hard rules as non-optional constraints.
-3. Use `/acm-work` when the task spans multiple steps or files.
-4. Run `/acm-verify` before `/acm-done` for code, config, schema, or behavior changes.
-5. Use `/acm-review <receipt_id-or-plan_key> {"run":true}` when `.acm/acm-workflows.yaml` requires a runnable review gate; otherwise use manual review JSON or `/acm-work`.
-6. Close with `/acm-done`; include changed files or let ACM derive the delta.
+| AGENTS.md step | Claude command |
+|---|---|
+| `acm context` | `/acm-context [phase] <task>` |
+| `acm work` | `/acm-work` |
+| `acm verify` | `/acm-verify` |
+| `acm review --run` | `/acm-review <id> {"run":true}` |
+| `acm done` | `/acm-done` |
+
+Direct CLI (`acm sync`, `acm health`, `acm history`, `acm status`) has no slash-command wrappers — call those directly.
 
 ## Memory (AMM)
 

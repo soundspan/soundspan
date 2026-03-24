@@ -5,19 +5,7 @@ Keep the real `AGENTS.md` at the repo root so OpenCode can inherit the project c
 
 ## Required Task Loop
 
-1. Read this file and the human task.
-2. Run `acm context` before opening or editing project files.
-3. Follow all hard rules returned in the receipt.
-4. Use `acm fetch` only for the plans, tasks, or pointers needed for the current step.
-5. When the task spans multiple steps, multiple files, or a likely handoff, create or update `acm work`.
-6. If code, config, schema, or other executable behavior changes, run `acm verify` before `acm done`.
-7. If `.acm/acm-workflows.yaml` requires review task keys such as `review:cross-llm`, prefer `acm review --run` when the task defines a `run` block; otherwise use manual `review` fields or `work` before `done`.
-8. End every task with `acm done`, including every changed file for file-backed work when you know them, or letting ACM derive the task delta from the receipt baseline. When that detected delta is empty, the closeout is effectively no-file.
-
-When the task changes rules, tags, tests, workflows, onboarding, or tool-surface behavior, refresh broker state with:
-
-- `acm sync --mode working_tree --insert-new-candidates`
-- `acm health --include-details`
+See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full ACM command reference (CLI and MCP).
 
 ## OpenCode usage notes
 
