@@ -16,7 +16,7 @@ See [acm-work-loop.md](acm-work-loop.md) for the full command reference.
 
 For non-trivial work (multi-step, multi-file, or governed changes), follow this loop. Trivial single-file fixes can skip the ACM ceremony.
 
-1. Read `AGENTS.md` (and `CLAUDE.md` if using Claude) and the human task.
+1. Read `AGENTS.md` and any tool-specific companion (e.g. `CLAUDE.md`) and the human task.
 2. Run `acm context --task-text "<current task>" --phase <plan|execute|review>`.
 3. Read the returned hard rules and fetch only the keys needed for the current step.
 4. If the task spans multiple steps, multiple files, or likely handoff, create or update ACM work with `acm work ...`.
@@ -70,3 +70,17 @@ When `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, `.acm/acm-tests.yaml`, or `.ac
 acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
 acm health --project soundspan --include-details
 ```
+
+## Skill Aliases
+
+Tools with the ACM skill pack installed expose these shorthand commands:
+
+| ACM CLI | Skill alias |
+|---|---|
+| `acm context` | `/acm-context [phase] <task>` |
+| `acm work` | `/acm-work` |
+| `acm verify` | `/acm-verify` |
+| `acm review --run` | `/acm-review <id> {"run":true}` |
+| `acm done` | `/acm-done` |
+
+Direct CLI (`acm sync`, `acm health`, `acm history`, `acm status`) has no skill aliases — call those directly.
