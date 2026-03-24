@@ -43,6 +43,13 @@ Every command has a CLI and MCP form — use whichever your runtime provides.
 
 For net-new features or large capability expansions, use the staged plan contract: root plan with `kind=feature`, `stage:*` tasks, and leaf tasks with `acceptance_criteria`. Use thinner plans for bugfixes and narrow maintenance. See [docs/feature-plans.md](docs/feature-plans.md) for the full contract.
 
+## Historical Work Lookup
+
+- Use `acm work search --scope all --query "<topic>"` to find archived, completed, deferred, or current work by topic.
+- Use `acm work list --scope all` when you need a broader inventory view.
+- Fetch the returned plan or receipt keys for details.
+- If you need receipts or runs in addition to plans, use `acm history search --entity all ...`, then fetch the returned `fetch_keys`.
+
 ## Ruleset Maintenance
 
 When `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, `.acm/acm-tests.yaml`, or `.acm/acm-workflows.yaml` changes, refresh broker state with `acm sync` or `acm health --apply`, then run `acm health`.
