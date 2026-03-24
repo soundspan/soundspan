@@ -36,12 +36,13 @@ These files are documentation only. They do not add hidden hooks or claim specia
 OpenCode can drive the same ACM workflow directly:
 
 1. `acm context`
-2. `acm fetch` only when you need to hydrate specific plan, task, memory, or pointer content
+2. `acm fetch` only when you need to hydrate specific plan, task, or pointer content
 3. `acm work` for multi-step tasks or when governed file scope expands through `plan.discovered_paths`
 4. `acm verify` for deterministic repo-defined checks
 5. `acm review` when a workflow gate needs one review record or runnable signoff gate
 6. `acm done`
-7. `acm memory`
+
+If the repo also uses [AMM](https://github.com/bonztm/agent-memory-manager), use AMM for durable memory.
 
 Quick walkthrough:
 
@@ -50,7 +51,6 @@ Quick walkthrough:
 3. Start real work with `acm context --project <id> --task-text "..." --phase plan|execute|review`.
 4. For multi-step work, persist plan/task state with `acm work` and declare `plan.discovered_paths` when governed scope expands.
 5. Before closing, run `acm verify`, then `acm review --run` when the workflow requires it, then `acm done`.
-6. Save durable decisions or recurring pitfalls with `acm memory`.
 
 Keep the command boundary explicit:
 

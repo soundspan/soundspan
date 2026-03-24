@@ -1,6 +1,7 @@
 #!/bin/bash
-# Stop hook: prevent Claude from ending the session while tracked edits
-# are still missing ACM completion reporting.
+# Stop hook: remind about ACM completion when a receipt-tracked session
+# has unreported edits. Only guards sessions that opted into ACM (have a
+# receipt). Trivial sessions without a receipt can stop freely.
 
 set -euo pipefail
 
@@ -14,23 +15,26 @@ if [ "$HOOK_EVENT" != "Stop" ] || [ -z "$SESSION_ID" ] || [ "$STOP_HOOK_ACTIVE" 
 fi
 
 STATE_DIR="/tmp/.acm-claude-soundspan-${SESSION_ID}"
+RECEIPT_MARKER="${STATE_DIR}/receipt"
+LEGACY_RECEIPT_MARKER="/tmp/.acm-receipt-soundspan-${SESSION_ID}"
 EDITED_MARKER="${STATE_DIR}/edited"
 REPORTED_MARKER="${STATE_DIR}/reported"
-WORK_MARKER="${STATE_DIR}/work"
-FILES_TRACKER="${STATE_DIR}/files.txt"
+
+# Only guard sessions that have an ACM receipt (opted into the ceremony)
+has_receipt=false
+if [ -f "$RECEIPT_MARKER" ] || [ -f "$LEGACY_RECEIPT_MARKER" ]; then
+  has_receipt=true
+fi
+
+if [ "$has_receipt" = false ]; then
+  exit 0
+fi
 
 if [ ! -f "$EDITED_MARKER" ] || [ -f "$REPORTED_MARKER" ]; then
   exit 0
 fi
 
-reason="Stop blocked: this session has file edits that have not been closed with acm done."
-if [ ! -f "$WORK_MARKER" ] && [ -f "$FILES_TRACKER" ]; then
-  line_count=$(grep -c '.' "$FILES_TRACKER" || true)
-  if [ "${line_count}" -gt 1 ]; then
-    reason="${reason} Create or update /acm-work before continuing multi-file work."
-  fi
-fi
-reason="${reason} Run /acm-verify for executable, config, contract, onboarding, or behavior changes, then finish with /acm-done before ending the task."
+reason="Stop blocked: this receipt-tracked session has file edits that have not been closed with acm done. Run /acm-verify for executable, config, contract, onboarding, or behavior changes, then finish with /acm-done before ending the task."
 
 jq -n --arg reason "$reason" '{
   hookSpecificOutput: {

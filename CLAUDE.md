@@ -4,17 +4,27 @@ Claude companion for soundspan. The primary contract is `AGENTS.md` — if this 
 
 ## Workflow
 
+For non-trivial work (multi-step, multi-file, or governed changes), follow this loop. Trivial single-file fixes can skip the ACM ceremony.
+
 1. Run `/acm-context [phase] <task text>` before touching files.
 2. Follow returned hard rules as non-optional constraints.
 3. Use `/acm-work` when the task spans multiple steps or files.
 4. Run `/acm-verify` before `/acm-done` for code, config, schema, or behavior changes.
 5. Use `/acm-review <receipt_id-or-plan_key> {"run":true}` when `.acm/acm-workflows.yaml` requires a runnable review gate; otherwise use manual review JSON or `/acm-work`.
 6. Close with `/acm-done`; include changed files or let ACM derive the delta.
-7. Capture durable decisions with `/acm-memory`.
+
+## Memory (AMM)
+
+AMM is available via MCP tools in this session. Query it early and often — see `AGENTS.md` § Memory for the full contract.
+
+- **At session start**, run `amm recall|amm_recall` with mode `ambient` to load relevant prior context.
+- **Before decisions or when uncertain**, query `amm recall|amm_recall` — don't guess when AMM might already know.
+- **After stable decisions or lessons learned**, commit them with `amm remember|amm_remember`.
+- Use `amm expand|amm_expand` to expand thin recall items when you need more detail.
 
 ## Claude-Specific Notes
 
-- Keep prompts specific so `context` loads the right rules, plans, and memories.
+- Keep prompts specific so `context` loads the right rules and plans.
 - If the receipt looks stale or narrow, re-run `/acm-context` with better task text instead of guessing.
 - If governed work expands beyond initial scope, declare new files through `/acm-work` before `/acm-review` or `/acm-done`.
 - Do not claim success when `/acm-verify` failed or was skipped for code changes.

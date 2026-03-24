@@ -1,6 +1,9 @@
 #!/bin/bash
-# PreToolUse hook: block edits until an ACM receipt exists and require
+# PreToolUse hook: nudge ACM context for multi-file work and require
 # /acm-work once the session has expanded into multi-file changes.
+#
+# Single-file edits are allowed without a receipt (trivial fixes).
+# Multi-file edits without a receipt are blocked.
 #
 # Receipt markers are created automatically by the PostToolUse Bash hook
 # (acm-receipt-mark.sh) when a successful acm context call is detected.
@@ -33,19 +36,34 @@ deny() {
   exit 0
 }
 
-if [ ! -f "$RECEIPT_MARKER" ] && [ ! -f "$LEGACY_RECEIPT_MARKER" ]; then
-  deny "Edit blocked: no ACM receipt for this session. Run /acm-context <phase> <task text> first."
+has_receipt=false
+if [ -f "$RECEIPT_MARKER" ] || [ -f "$LEGACY_RECEIPT_MARKER" ]; then
+  has_receipt=true
 fi
 
-if [ -f "$WORK_MARKER" ] || [ -z "$TARGET_FILE" ] || [ ! -f "$FILES_TRACKER" ]; then
+# If we have a receipt and work marker, allow everything
+if [ "$has_receipt" = true ] && [ -f "$WORK_MARKER" ]; then
   exit 0
 fi
 
-while IFS= read -r existing_file; do
-  [ -n "$existing_file" ] || continue
-  if [ "$existing_file" != "$TARGET_FILE" ]; then
-    deny "Edit blocked: this session is now multi-file. Run /acm-work <receipt_id-or-plan_key> <tasks-json> before continuing broad edits."
-  fi
-done < "$FILES_TRACKER"
+# If no receipt: allow single-file edits, block multi-file
+if [ "$has_receipt" = false ] && [ -f "$FILES_TRACKER" ] && [ -n "$TARGET_FILE" ]; then
+  while IFS= read -r existing_file; do
+    [ -n "$existing_file" ] || continue
+    if [ "$existing_file" != "$TARGET_FILE" ]; then
+      deny "Edit blocked: multi-file work needs an ACM receipt. Run /acm-context [phase] <task> first."
+    fi
+  done < "$FILES_TRACKER"
+fi
+
+# If we have a receipt but no work marker, check for multi-file expansion
+if [ "$has_receipt" = true ] && [ ! -f "$WORK_MARKER" ] && [ -f "$FILES_TRACKER" ] && [ -n "$TARGET_FILE" ]; then
+  while IFS= read -r existing_file; do
+    [ -n "$existing_file" ] || continue
+    if [ "$existing_file" != "$TARGET_FILE" ]; then
+      deny "Edit blocked: this session is now multi-file. Run /acm-work <receipt_id-or-plan_key> <tasks-json> before continuing broad edits."
+    fi
+  done < "$FILES_TRACKER"
+fi
 
 exit 0

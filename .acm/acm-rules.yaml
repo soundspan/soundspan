@@ -3,8 +3,8 @@ rules:
   # ── Core workflow ──────────────────────────────────────────────────
 
   - id: rule_start_with_context
-    summary: Start every task with ACM context.
-    content: Run `acm context --project soundspan ...` before opening or editing files, then follow the returned hard rules.
+    summary: Start non-trivial work with ACM context.
+    content: For multi-step, multi-file, or governed changes, run `acm context --project soundspan ...` before opening or editing files, then follow the returned hard rules. Trivial single-file fixes can skip the ACM ceremony.
     enforcement: hard
     tags: [acm, context, workflow]
 
@@ -132,10 +132,10 @@ rules:
   # ── Soft guidance ──────────────────────────────────────────────────
 
   - id: rule_capture_durable_memory
-    summary: Persist reusable decisions and gotchas with memory.
-    content: Record stable architectural decisions, recurring setup pitfalls, or operator preferences when future tasks would benefit from seeing them in later context calls.
+    summary: Persist reusable decisions and gotchas in durable memory.
+    content: Record stable architectural decisions, recurring setup pitfalls, or operator preferences when future tasks would benefit from seeing them in later sessions.
     enforcement: soft
-    tags: [memory, acm]
+    tags: [memory, workflow]
 
   - id: rule_xhigh_review
     summary: Run the repo-standard xhigh cross-LLM review for substantial implementation work.

@@ -9,7 +9,9 @@ Repository contract for soundspan.
 - `CLAUDE.md` and `.claude/acm-broker/**` are tool-specific companions. If they disagree with this file, this file wins.
 - ACM work storage is the source of truth for active and historical plan state. Use `acm work list/search --scope all` when you need archived or completed history.
 
-## Required Task Loop
+## ACM Task Loop
+
+For non-trivial work (multi-step, multi-file, or governed changes), follow this loop. Trivial single-file fixes can skip the ACM ceremony.
 
 1. Read this file and the human task.
 2. Run `acm context --project soundspan --task-text "<current task>" --phase <plan|execute|review>`.
@@ -18,7 +20,6 @@ Repository contract for soundspan.
 5. For code, config, schema, or behavior changes, run `acm verify --project soundspan ...` before completion.
 6. If `.acm/acm-workflows.yaml` requires a review task such as `review:cross-llm`, satisfy it with `acm review --run --project soundspan --receipt-id <receipt-id>` when the task defines a `run` block; otherwise use manual review fields or `acm work`.
 7. Close the task with `acm done --project soundspan ...`. Changed files must stay within the active receipt scope.
-8. Record reusable decisions and pitfalls with `acm memory --project soundspan ...`.
 
 ## Working Rules
 
@@ -103,7 +104,25 @@ For single review-gate updates, `acm review` is the thinner wrapper around `acm 
 - Use `acm work search --project soundspan --scope all --query "<topic>"` to find archived, completed, deferred, or current work by topic.
 - Use `acm work list --project soundspan --scope all` when you need a broader inventory view.
 - Fetch the returned plan or receipt keys for details.
-- If you need receipts, runs, or durable memories in addition to plans, use `acm history search --project soundspan --entity all ...` or `acm history search --project soundspan --entity memory ...`, then fetch the returned `fetch_keys`.
+- If you need receipts or runs in addition to plans, use `acm history search --project soundspan --entity all ...`, then fetch the returned `fetch_keys`.
+
+## Memory (AMM)
+
+This repo uses [AMM (Agent Memory Manager)](https://github.com/bonztm/agent-memory-manager) for durable memory. AMM is available via MCP tools (`amm_recall`, `amm_remember`, `amm_expand`) and CLI (`amm`).
+
+**When to query AMM:**
+- **Session start.** Run `amm recall|amm_recall` (mode `ambient`) at the beginning of every session to load relevant prior context about this project, the user, and past decisions.
+- **Before decisions.** When you encounter an architectural choice, a naming question, a pattern question, or anything where prior context might exist, query AMM before guessing.
+- **On uncertainty.** If you don't know something about the project, the user's preferences, or past work — ask AMM first.
+
+**When to write to AMM:**
+- **Stable decisions.** When a decision is made (architecture, naming, tooling choice), commit it with `amm remember|amm_remember`.
+- **User preferences.** When you learn how the user likes to work, record it.
+- **Gotchas and lessons.** When something surprising happens or a non-obvious fix is found, save it for next time.
+
+**When not to use AMM:**
+- Transient task state belongs in ACM `work` plans, not AMM.
+- Don't store information that's already in the code or git history.
 
 ## ACM Maintenance
 

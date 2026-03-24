@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Operator onboarding now routes durable agent memory through Agent Memory Manager (AMM) instead of removed ACM memory commands, and the repo now ships a repo-local Codex ACM companion path alongside Claude and OpenCode.
+
 ### Fixed
 
 ## [1.4.0] - 2026-03-15

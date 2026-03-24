@@ -46,13 +46,13 @@ MESSAGE=""
 
 if [ "$HOOK_EVENT" = "SessionStart" ]; then
   append_line "Repo contract reminder: read AGENTS.md first. CLAUDE.md only maps Claude onto that contract."
-  append_line "Start implementation work with /acm-context [phase] <task>, fetch only the next needed artifacts, and rerun /acm-context when the receipt is stale or the task changed materially."
+  append_line "For non-trivial work (multi-step, multi-file, or governed), start with /acm-context [phase] <task>. Trivial single-file fixes can skip the ACM ceremony."
   append_line "Once work becomes multi-step or multi-file, create or update /acm-work. Use /acm-review {\"run\":true} when the workflow gate defines a runnable review task."
-  append_line "Before ending executable, config, contract, onboarding, or behavior changes, run /acm-verify, then close the task with /acm-done. Capture durable decisions with /acm-memory."
+  append_line "Before ending executable, config, contract, onboarding, or behavior changes, run /acm-verify, then close the task with /acm-done."
 fi
 
 if [ "$has_receipt" = false ]; then
-  append_line "No ACM receipt is recorded for this session yet. Before repo-specific edits or implementation guidance, run /acm-context [phase] <task>."
+  append_line "No ACM receipt for this session. For non-trivial work, run /acm-context [phase] <task> first."
 fi
 
 if [ "$needs_work" = true ]; then
