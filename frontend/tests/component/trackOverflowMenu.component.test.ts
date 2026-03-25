@@ -29,6 +29,7 @@ mock.module("lucide-react", {
         ListEnd: trackOverflowIcon,
         ListPlus: trackOverflowIcon,
         Plus: trackOverflowIcon,
+        Share2: trackOverflowIcon,
         User: trackOverflowIcon,
         Disc3: trackOverflowIcon,
         AudioWaveform: trackOverflowIcon,
@@ -69,6 +70,12 @@ mock.module("@/lib/api", {
         api: {
             addTrackToPlaylist: async () => undefined,
         },
+    },
+});
+
+mock.module("@/components/ui/ShareLinkModal", {
+    namedExports: {
+        ShareLinkModal: () => null,
     },
 });
 

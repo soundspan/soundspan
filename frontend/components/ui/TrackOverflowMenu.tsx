@@ -5,8 +5,9 @@ import {
     EllipsisVertical,
     ListEnd,
     ListPlus,
-    Map,
+    Map as MapIcon,
     Plus,
+    Share2,
     User,
     Disc3,
     AudioWaveform,
@@ -16,11 +17,13 @@ import { cn } from "@/utils/cn";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import type { Track } from "@/lib/audio-state-context";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
 import { getArtistHref } from "@/utils/artistRoute";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { isRemoteTrack, toAddToPlaylistRef } from "@/lib/trackRef";
+import { canShareTrack } from "@/lib/shareLinks";
 
 interface TrackOverflowMenuProps {
     track: Track;
@@ -80,6 +83,7 @@ export function TrackOverflowMenu({
 }: TrackOverflowMenuProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const router = useRouter();
     const controls = useAudioControls();
@@ -87,6 +91,7 @@ export function TrackOverflowMenu({
 
     const effectiveShowMatchVibe = showMatchVibe && !isRemote;
     const effectiveShowVibeMap = showVibeMap && !isRemote;
+    const showShare = canShareTrack(track);
 
     // Artist href
     const artistHref = track.artist
@@ -151,6 +156,15 @@ export function TrackOverflowMenu({
             e.stopPropagation();
             closeMenu();
             setIsPlaylistSelectorOpen(true);
+        },
+        [closeMenu]
+    );
+
+    const handleShare = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            closeMenu();
+            setIsShareModalOpen(true);
         },
         [closeMenu]
     );
@@ -257,7 +271,6 @@ export function TrackOverflowMenu({
             <div
                 ref={menuRef}
                 className={cn("relative flex items-center justify-center", className)}
-                onClick={(e) => e.stopPropagation()}
             >
                 <button
                     type="button"
@@ -282,6 +295,7 @@ export function TrackOverflowMenu({
                         className={cn("absolute right-0 top-full z-30 mt-1 min-w-[180px] rounded-md border border-white/10 bg-[#111111] p-1 shadow-xl", menuClassName)}
                         role="menu"
                         onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
                     >
                         {extraItemsBefore}
 
@@ -306,6 +320,14 @@ export function TrackOverflowMenu({
                                 onClick={handleAddToPlaylist}
                                 icon={<Plus className="h-4 w-4" />}
                                 label="Add to playlist"
+                            />
+                        )}
+
+                        {showShare && (
+                            <MenuButton
+                                onClick={handleShare}
+                                icon={<Share2 className="h-4 w-4" />}
+                                label="Share"
                             />
                         )}
 
@@ -336,7 +358,7 @@ export function TrackOverflowMenu({
                         {effectiveShowVibeMap && track.id && (
                             <MenuButton
                                 onClick={handleShowVibeMap}
-                                icon={<Map className="h-4 w-4" />}
+                                icon={<MapIcon className="h-4 w-4" />}
                                 label="Show on Vibe Map"
                             />
                         )}
@@ -360,6 +382,13 @@ export function TrackOverflowMenu({
                 isOpen={isPlaylistSelectorOpen}
                 onClose={() => setIsPlaylistSelectorOpen(false)}
                 onSelectPlaylist={handleSelectPlaylist}
+            />
+            <ShareLinkModal
+                isOpen={isShareModalOpen}
+                onClose={() => setIsShareModalOpen(false)}
+                resourceType="track"
+                resourceId={track.id}
+                resourceName={track.title}
             />
         </>
     );

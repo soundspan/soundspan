@@ -6,6 +6,7 @@ import {
     Download,
     ListMusic,
     Plus,
+    Share2,
     Loader2,
     Search,
     Heart,
@@ -17,6 +18,7 @@ import type { ColorPalette } from "@/hooks/useImageColor";
 import { toast } from "sonner";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { ReleaseSelectionModal } from "@/components/ui/ReleaseSelectionModal";
+import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
 
 const BRAND_PLAY = "#60a5fa";
 
@@ -63,6 +65,7 @@ export function AlbumActionBar({
     isInListenTogetherGroup = false,
 }: AlbumActionBarProps) {
     const [showReleaseModal, setShowReleaseModal] = useState(false);
+    const [showShareModal, setShowShareModal] = useState(false);
     const isOwned = album.owned !== undefined ? album.owned : source === "library";
     const showDownload = downloadsEnabled && !isOwned && (album.mbid || album.rgMbid);
     const albumMbid = album.rgMbid || album.mbid || album.id;
@@ -72,17 +75,20 @@ export function AlbumActionBar({
     const canShowAddAllToQueue = Boolean(onAddAllToQueue);
     const canShowAddToPlaylist = isOwned;
     const canShowAlbumPreference = isOwned && Boolean(onToggleAlbumLike);
+    const canShareAlbum = Boolean(album.id);
     const hasActionControls =
         isInListenTogetherGroup
             ? hasLockedControls ||
                 canShowAddAllToQueue ||
                 canShowAddToPlaylist ||
-                canShowAlbumPreference
+                canShowAlbumPreference ||
+                canShareAlbum
             : isOwned ||
                 showDownload ||
                 canShowAddAllToQueue ||
                 canShowAddToPlaylist ||
-                canShowAlbumPreference;
+                canShowAlbumPreference ||
+                canShareAlbum;
     const { showSpinner: showPlaySpinner, trigger: triggerPlayFeedback } =
         usePlayButtonFeedback();
 
@@ -109,6 +115,7 @@ export function AlbumActionBar({
                                 {isOwned && (
                                     <>
                                         <button
+                                            type="button"
                                             onClick={handleLockedAction}
                                             className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm border border-white/15 bg-white/10 text-white/40"
                                             title={lockMessage}
@@ -122,6 +129,7 @@ export function AlbumActionBar({
                                         </button>
 
                                         <button
+                                            type="button"
                                             onClick={handleLockedAction}
                                             className="h-8 w-8 rounded-full border border-white/15 bg-white/10 flex items-center justify-center text-white/40"
                                             title={lockMessage}
@@ -134,6 +142,7 @@ export function AlbumActionBar({
                                 {showDownload && (
                                     <>
                                         <button
+                                            type="button"
                                             onClick={handleLockedAction}
                                             className={cn(
                                                 "flex items-center gap-2 px-5 py-2.5 rounded-full font-medium border border-white/15 bg-white/10 text-white/40",
@@ -147,6 +156,7 @@ export function AlbumActionBar({
                                             </span>
                                         </button>
                                         <button
+                                            type="button"
                                             onClick={handleLockedAction}
                                             className="flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2.5 font-medium text-white/40"
                                             title={lockMessage}
@@ -164,6 +174,7 @@ export function AlbumActionBar({
                     {isOwned && (
                         <>
                             <button
+                                type="button"
                                 onClick={handlePlayPauseClick}
                                 className="flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg font-semibold text-sm text-black transition-all hover:scale-105"
                                 style={{ backgroundColor: BRAND_PLAY }}
@@ -179,20 +190,33 @@ export function AlbumActionBar({
                             </button>
 
                             {/* Shuffle Button */}
-                            <button
-                                onClick={onShuffle}
-                                className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
-                                title="Shuffle play"
-                            >
-                                <Shuffle className="w-5 h-5" />
-                            </button>
-                        </>
-                    )}
+                             <button
+                                 type="button"
+                                 onClick={onShuffle}
+                                 className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                                 title="Shuffle play"
+                             >
+                                 <Shuffle className="w-5 h-5" />
+                             </button>
+
+                            {canShareAlbum && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowShareModal(true)}
+                                    className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                                    title="Share album"
+                                >
+                                    <Share2 className="w-5 h-5" />
+                                </button>
+                            )}
+                         </>
+                     )}
 
                     {/* Download Album Button - prominent for unowned */}
                     {showDownload && (
                         <div className="flex items-center gap-2">
                             <button
+                                type="button"
                                 onClick={onDownloadAlbum}
                                 disabled={isPendingDownload}
                                 className={cn(
@@ -209,6 +233,7 @@ export function AlbumActionBar({
                                 </span>
                             </button>
                             <button
+                                type="button"
                                 onClick={() => setShowReleaseModal(true)}
                                 disabled={isPendingDownload}
                                 className={cn(
@@ -228,19 +253,32 @@ export function AlbumActionBar({
                     )}
 
                     {/* Add to Queue Button */}
-                    {onAddAllToQueue && (
+                     {onAddAllToQueue && (
                         <button
+                            type="button"
                             onClick={onAddAllToQueue}
                             className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
                             title="Add all to queue"
                         >
                             <ListMusic className="w-5 h-5" />
+                         </button>
+                     )}
+
+                    {!isOwned && canShareAlbum && (
+                        <button
+                            type="button"
+                            onClick={() => setShowShareModal(true)}
+                            className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                            title="Share album"
+                        >
+                            <Share2 className="w-5 h-5" />
                         </button>
                     )}
 
                     {/* Add to Playlist Button */}
                     {isOwned && (
                         <button
+                            type="button"
                             onClick={onAddToPlaylist}
                             className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
                             title="Add to playlist"
@@ -253,6 +291,7 @@ export function AlbumActionBar({
                         <div className="flex items-center gap-1.5">
                             {onToggleAlbumLike && (
                                 <button
+                                    type="button"
                                     onClick={onToggleAlbumLike}
                                     disabled={isApplyingAlbumPreference}
                                     className={cn(
@@ -292,6 +331,14 @@ export function AlbumActionBar({
                     albumTitle={album.title}
                 />
             )}
+
+            <ShareLinkModal
+                isOpen={showShareModal}
+                onClose={() => setShowShareModal(false)}
+                resourceType="album"
+                resourceId={album.id}
+                resourceName={album.title}
+            />
         </div>
     );
 }

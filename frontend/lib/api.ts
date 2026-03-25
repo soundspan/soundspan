@@ -142,6 +142,20 @@ export interface LibraryHealthRecord {
     };
 }
 
+export interface ShareLinkRecord {
+    id: string;
+    token: string;
+    userId: string;
+    resourceType: "playlist" | "album" | "track";
+    resourceId: string;
+    expiresAt: string | null;
+    maxPlays: number | null;
+    playCount: number;
+    revoked: boolean;
+    createdAt: string;
+    accessPath: string;
+}
+
 // New Mood Bucket Types (simplified mood system)
 export type MoodType =
     | "happy"
@@ -1482,6 +1496,28 @@ class ApiClient {
 
     async deletePlaylist(id: string) {
         return this.request<void>(`/playlists/${id}`, {
+            method: "DELETE",
+        });
+    }
+
+    async createShareLink(input: {
+        resourceType: "playlist" | "album" | "track";
+        resourceId: string;
+        expiresAt?: string;
+        maxPlays?: number;
+    }) {
+        return this.request<ShareLinkRecord>("/share-links", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+    }
+
+    async listShareLinks() {
+        return this.request<ShareLinkRecord[]>("/share-links");
+    }
+
+    async revokeShareLink(id: string) {
+        return this.request<{ success: boolean }>(`/share-links/${id}`, {
             method: "DELETE",
         });
     }
