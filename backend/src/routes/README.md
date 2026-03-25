@@ -42,6 +42,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/releases.ts` | `/api/releases` |
 | `backend/src/routes/routeErrorResponse.ts` | (not found in `backend/src/index.ts` mounts) |
 | `backend/src/routes/search.ts` | `/api/search` |
+| `backend/src/routes/shareLinks.ts` | `/api/share-links` |
 | `backend/src/routes/settings.ts` | `/api/settings` |
 | `backend/src/routes/social.ts` | `/api/social` |
 | `backend/src/routes/soulseek.ts` | `/api/soulseek` |

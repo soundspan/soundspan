@@ -60,6 +60,7 @@ model User {
   settings               UserSettings?
   inviteCodesCreated     InviteCode[]          @relation("InviteCodesCreated")
   inviteCodeUsed         InviteCodeUsage?      @relation("InviteCodeUsed")
+  shareLinks             ShareLink[]
 }
 
 model UserSettings {
@@ -493,6 +494,25 @@ model HiddenPlaylist {
 
   @@unique([userId, playlistId])
   @@index([userId])
+}
+
+model ShareLink {
+  id           String   @id @default(cuid())
+  token        String   @unique
+  userId       String
+  /// What kind of resource is shared
+  resourceType String // "playlist" | "album" | "track"
+  resourceId   String
+  expiresAt    DateTime?
+  maxPlays     Int?
+  playCount    Int      @default(0)
+  revoked      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@index([resourceType, resourceId])
 }
 
 model PlaylistItem {

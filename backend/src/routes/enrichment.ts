@@ -14,12 +14,14 @@ import {
 import { enrichmentStateService } from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { musicBrainzService } from "../services/musicbrainz";
+import { coverArtService } from "../services/coverArt";
 import {
     getSystemSettings,
     invalidateSystemSettingsCache,
 } from "../utils/systemSettings";
 import { rateLimiter } from "../services/rateLimiter";
 import { redisClient } from "../utils/redis";
+import { prisma } from "../utils/db";
 
 const router = Router();
 
@@ -415,6 +417,52 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
          res.status(500).json({ error: "Failed to reset vibe embeddings" });
      }
  });
+
+/**
+ * @openapi
+ * /api/enrichment/repair-covers:
+ *   post:
+ *     summary: Repair missing cover art by clearing stale cache and re-triggering lookups
+ *     tags: [Enrichment]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Cover repair initiated
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
+ */
+router.post("/repair-covers", requireAdmin, async (req, res) => {
+    try {
+        const albumsMissingCovers = await prisma.album.findMany({
+            where: {
+                OR: [{ coverUrl: null }, { coverUrl: "" }],
+            },
+            select: { id: true, rgMbid: true },
+        });
+
+        let cacheCleared = 0;
+        for (const album of albumsMissingCovers) {
+            if (album.rgMbid) {
+                await coverArtService.clearNotFoundCache(album.rgMbid);
+                cacheCleared++;
+            }
+        }
+
+        res.json({
+            message: "Cover repair initiated",
+            description: `Found ${albumsMissingCovers.length} albums missing covers, cleared ${cacheCleared} stale cache entries. Covers will be re-fetched on next access.`,
+            albumsMissingCovers: albumsMissingCovers.length,
+            cacheEntriesCleared: cacheCleared,
+        });
+    } catch (error) {
+        logger.error("Cover repair error:", error);
+        res.status(500).json({ error: "Failed to repair covers" });
+    }
+});
 
 /**
  * @openapi

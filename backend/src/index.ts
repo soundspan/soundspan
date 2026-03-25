@@ -30,6 +30,7 @@ import listeningStateRoutes from "./routes/listeningState";
 import playbackStateRoutes from "./routes/playbackState";
 import offlineRoutes from "./routes/offline";
 import playlistsRoutes from "./routes/playlists";
+import shareLinkRoutes from "./routes/shareLinks";
 import searchRoutes from "./routes/search";
 import recommendationsRoutes from "./routes/recommendations";
 import downloadsRoutes from "./routes/downloads";
@@ -242,6 +243,7 @@ app.use("/api/listening-state", apiLimiter, listeningStateRoutes);
 app.use("/api/playback-state", playbackStateRoutes); // No rate limit - syncs frequently
 app.use("/api/offline", apiLimiter, offlineRoutes);
 app.use("/api/playlists", apiLimiter, playlistsRoutes);
+app.use("/api/share-links", apiLimiter, shareLinkRoutes);
 app.use("/api/search", apiLimiter, searchRoutes);
 app.use("/api/recommendations", apiLimiter, recommendationsRoutes);
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
@@ -276,6 +278,8 @@ function buildHealthPayload() {
     return {
         status: "ok",
         role: backendProcessRole,
+        version: process.env.npm_package_version || "unknown",
+        uptimeSeconds: Math.floor(process.uptime()),
         startupComplete: isStartupComplete,
         draining: getRuntimeDrainState(),
         dependencies: dependencyReadiness.getSnapshot(),

@@ -81,6 +81,20 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
+jest.mock("../../utils/db", () => ({
+    prisma: {
+        album: {
+            findMany: jest.fn(),
+        },
+    },
+}));
+
+jest.mock("../../services/coverArt", () => ({
+    coverArtService: {
+        clearNotFoundCache: jest.fn(),
+    },
+}));
+
 import router from "../enrichment";
 import { musicBrainzService } from "../../services/musicbrainz";
 

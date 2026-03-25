@@ -184,6 +184,13 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchArtistsFallback({ query, limit, offset });
+            }
+
             return results;
         } catch (error) {
             logger.error("Artist search error:", error);
@@ -297,6 +304,13 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchAlbumsFallback({ query, limit, offset });
+            }
+
             return results;
         } catch (error) {
             logger.error("Album search error:", error);
@@ -386,6 +400,13 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchTracksFallback({ query, limit, offset });
+            }
+
             return results;
         } catch (error) {
             logger.error("Track search error:", error);
@@ -426,6 +447,13 @@ export class SearchService {
         LIMIT ${limit}
         OFFSET ${offset}
       `;
+
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchPodcasts({ query, limit, offset });
+            }
 
             return results;
         } catch (error) {
@@ -525,6 +553,13 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchEpisodesFallback({ query, limit, offset });
+            }
+
             return results;
         } catch (error) {
             logger.error("Episode search error:", error);
@@ -575,6 +610,10 @@ export class SearchService {
                     coverUrl: r.coverUrl ? `/audiobooks/${r.id}/cover` : null,
                 }));
             }
+
+            logger.debug(
+                `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+            );
 
             return this.searchAudiobooksFallback({ query, limit, offset });
         } catch (error) {
