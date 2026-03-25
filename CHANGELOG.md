@@ -15,10 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Share-link UI: local tracks now expose a Share action from the shared 3-dot track menu across the app, albums now expose Share in the album header action bar, and both entry points open a reusable modal for generating/copying links.
 - Share-link modal now also lists active links for the current album/track and lets users revoke them inline without leaving the modal.
 
-### Changed
-
-- Operator onboarding now routes durable agent memory through Agent Memory Manager (AMM) instead of removed ACM memory commands, and the repo now ships a repo-local Codex ACM companion path alongside Claude and OpenCode.
-
 ### Fixed
 
 ## [1.4.0] - 2026-03-15
