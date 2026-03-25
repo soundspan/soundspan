@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Share links API for playlists, albums, and tracks: authenticated users can create/list/revoke tokenized links (`/api/share-links`), and anyone with a valid token can access shared resources through anonymous `/api/share-links/access/:token` with optional expiry and max-play limits.
+- Admin-only enrichment repair endpoint (`POST /api/enrichment/repair-covers`) that clears stale Cover Art Archive `NOT_FOUND` cache entries for albums missing covers and reports how many albums/cache entries were affected.
+- Full-text search stop-word fallback: queries containing only English stop words (like "the", "a") now automatically fall back to ILIKE matching instead of returning empty results.
+- Health endpoint payloads now include `version`, `uptimeSeconds`, and per-dependency `latencyMs` fields for easier operator diagnostics and Kubernetes troubleshooting.
+- Share-link UI: local tracks now expose a Share action from the shared 3-dot track menu across the app, albums now expose Share in the album header action bar, and both entry points open a reusable modal for generating/copying links.
+- Share-link modal now also lists active links for the current album/track and lets users revoke them inline without leaving the modal.
+
 ### Changed
 
 - Operator onboarding now routes durable agent memory through Agent Memory Manager (AMM) instead of removed ACM memory commands, and the repo now ships a repo-local Codex ACM companion path alongside Claude and OpenCode.
