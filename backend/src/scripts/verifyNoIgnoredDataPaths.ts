@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, statSync } from "fs";
-import { join, relative } from "path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 const SRC_ROOT = join(__dirname, "..");
 const FILE_EXTENSIONS = new Set([".ts", ".tsx"]);
@@ -13,7 +13,8 @@ interface Violation {
     snippet: string;
 }
 
-function collectFiles(dirPath: string): string[] {
+/** Recursively collects TypeScript source files from a directory tree. */
+export function collectFiles(dirPath: string): string[] {
     const entries = readdirSync(dirPath, { withFileTypes: true });
     const files: string[] = [];
 
@@ -33,11 +34,13 @@ function collectFiles(dirPath: string): string[] {
     return files;
 }
 
-function findLine(content: string, index: number): number {
+/** Resolves a 1-based line number for a character index within file content. */
+export function findLine(content: string, index: number): number {
     return content.slice(0, index).split(/\r?\n/).length;
 }
 
-function scanFile(filePath: string): Violation[] {
+/** Scans a source file for disallowed references to ignored /data/ paths. */
+export function scanFile(filePath: string): Violation[] {
     const content = readFileSync(filePath, "utf8");
     const violations: Violation[] = [];
     const patterns = [DISALLOWED_IMPORT, DISALLOWED_REQUIRE, DISALLOWED_JOIN_PATH];
@@ -58,7 +61,8 @@ function scanFile(filePath: string): Violation[] {
     return violations;
 }
 
-function main() {
+/** Scans backend source files and exits non-zero when violations are found. */
+export function main() {
     if (!statSync(SRC_ROOT).isDirectory()) {
         throw new Error(`Source root not found: ${SRC_ROOT}`);
     }
@@ -75,7 +79,9 @@ function main() {
     for (const violation of violations) {
         console.error(`- ${violation.filePath}:${violation.line} -> ${violation.snippet}`);
     }
-    process.exitCode = 1;
+    process.exit(1);
 }
 
-main();
+if (require.main === module) {
+    main();
+}

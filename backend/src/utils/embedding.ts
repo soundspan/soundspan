@@ -3,18 +3,28 @@
  * into a number array.
  */
 export function parseEmbedding(text: string): number[] {
-    if (!text || typeof text !== "string") {
+    if (typeof text !== "string" || text.trim() === "") {
         throw new Error("Invalid embedding: expected non-empty string");
     }
 
     const values = text
-        .replace(/[\[\]]/g, "")
+        .trim()
+        .split("[")
+        .join("")
+        .split("]")
+        .join("")
         .split(",")
-        .map((value) => Number(value.trim()));
+        .map((value: string) => value.trim());
 
-    if (values.length === 0 || values.some((value) => !Number.isFinite(value))) {
+    if (values.length === 0 || values.some((value: string) => value === "")) {
         throw new Error("Invalid embedding: contains non-numeric values");
     }
 
-    return values;
+    const numbers = values.map((value: string) => Number(value));
+
+    if (numbers.some((value: number) => !Number.isFinite(value))) {
+        throw new Error("Invalid embedding: contains non-numeric values");
+    }
+
+    return numbers;
 }

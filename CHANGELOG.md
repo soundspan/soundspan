@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Frontend unit tests no longer depend on `../backend/node_modules/tsx` — tsx is now a direct frontend devDependency so CI runs are self-contained.
 - Backend `apiEntrypointRuntime` test suite now mocks the `shareLinks` route module, fixing an ESM import failure (`p-queue`) that caused 16 test failures.
+- Admin library-health dismissals now return `404` when the requested record no longer exists, with integration coverage for admin middleware, success, and database-failure paths.
 
 ### Changed
 

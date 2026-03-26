@@ -7,6 +7,15 @@ const router = Router();
 
 router.use(requireAuth, requireAdmin);
 
+function isPrismaRecordNotFound(error: unknown): error is { code: string } {
+    return Boolean(
+        error &&
+            typeof error === "object" &&
+            "code" in error &&
+            error.code === "P2025"
+    );
+}
+
 /**
  * @openapi
  * /api/admin/library-health:
@@ -78,6 +87,8 @@ router.get("/library-health", async (_req, res) => {
  *     responses:
  *       200:
  *         description: Record dismissed successfully
+ *       404:
+ *         description: Library health record not found
  *       401:
  *         description: Not authenticated
  *       403:
@@ -93,6 +104,10 @@ router.delete("/library-health/:recordId", async (req, res) => {
 
         res.json({ success: true });
     } catch (error) {
+        if (isPrismaRecordNotFound(error)) {
+            return res.status(404).json({ error: "Library health record not found" });
+        }
+
         logger.error("Dismiss library health record error:", error);
         res.status(500).json({ error: "Failed to dismiss library health record" });
     }
