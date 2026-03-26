@@ -187,6 +187,7 @@ export function ShareLinkModal({
                                 value={expiresAt}
                                 onChange={(event) => setExpiresAt(event.target.value)}
                                 className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand/50"
+                                style={{ colorScheme: "dark" }}
                             />
                             <p className="mt-2 text-xs text-gray-500">
                                 Leave empty to keep the link active until you revoke it.

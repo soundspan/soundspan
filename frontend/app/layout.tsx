@@ -12,6 +12,7 @@ import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
 import { QueryProvider } from "@/lib/query-client";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import { GlobalErrorBoundary } from "@/components/providers/GlobalErrorBoundary";
+import { Toaster } from "sonner";
 import {
     BRAND_DESCRIPTION,
     BRAND_METADATA_TITLE,
@@ -92,6 +93,11 @@ export default function RootLayout({
                         </FeaturesProvider>
                     </AuthProvider>
                 </GlobalErrorBoundary>
+                <Toaster
+                    theme="dark"
+                    position="top-right"
+                    toastOptions={{ style: { zIndex: 10020 } }}
+                />
             </body>
         </html>
     );

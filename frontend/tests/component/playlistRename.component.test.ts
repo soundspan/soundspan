@@ -36,6 +36,7 @@ mock.module("lucide-react", {
         Globe: Icon,
         GlobeLock: Icon,
         Pencil: Icon,
+        Share2: Icon,
     },
 });
 
@@ -56,6 +57,12 @@ mock.module("next/image", {
 mock.module("@/components/ui/ConfirmDialog", {
     namedExports: {
         ConfirmDialog: () => null,
+    },
+});
+
+mock.module("@/components/ui/ShareLinkModal", {
+    namedExports: {
+        ShareLinkModal: () => null,
     },
 });
 

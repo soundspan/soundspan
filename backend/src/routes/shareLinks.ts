@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
+import path from "node:path";
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
+import { config } from "../config";
+import { AudioStreamingService } from "../services/audioStreaming";
+import { fetchExternalImage } from "../services/imageProxy";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
@@ -47,6 +51,38 @@ const shareTokenSchema = z.object({
 function isExpired(expiresAt: Date | null): boolean {
     if (!expiresAt) return false;
     return expiresAt.getTime() <= Date.now();
+}
+
+async function validateShareLink(token: string) {
+    const shareLink = await prisma.shareLink.findUnique({ where: { token } });
+    if (!shareLink) return null;
+    if (shareLink.revoked) return null;
+    if (isExpired(shareLink.expiresAt)) return null;
+    if (shareLink.maxPlays !== null && shareLink.playCount >= shareLink.maxPlays) return null;
+    return shareLink;
+}
+
+const trackStreamSelect = { id: true, title: true, filePath: true, fileModified: true } as const;
+
+async function resolveTrackOwnership(
+    shareLink: { resourceType: string; resourceId: string },
+    trackId: string
+) {
+    if (shareLink.resourceType === "track") {
+        if (shareLink.resourceId !== trackId) return null;
+        return prisma.track.findUnique({ where: { id: trackId }, select: trackStreamSelect });
+    }
+    if (shareLink.resourceType === "album") {
+        return prisma.track.findFirst({ where: { id: trackId, albumId: shareLink.resourceId }, select: trackStreamSelect });
+    }
+    if (shareLink.resourceType === "playlist") {
+        const item = await prisma.playlistItem.findFirst({
+            where: { playlistId: shareLink.resourceId, trackId },
+        });
+        if (!item) return null;
+        return prisma.track.findUnique({ where: { id: trackId }, select: trackStreamSelect });
+    }
+    return null;
 }
 
 async function resolveSharedResource(resourceType: string, resourceId: string) {
@@ -349,26 +385,8 @@ router.get("/access/:token", async (req, res) => {
         const { token } = shareTokenSchema.parse(req.params);
         const now = new Date();
 
-        const shareLink = await prisma.shareLink.findUnique({
-            where: { token },
-        });
-
+        const shareLink = await validateShareLink(token);
         if (!shareLink) {
-            return res.status(404).json({ error: "Share link not found" });
-        }
-
-        if (shareLink.revoked) {
-            return res.status(404).json({ error: "Share link not found" });
-        }
-
-        if (isExpired(shareLink.expiresAt)) {
-            return res.status(404).json({ error: "Share link not found" });
-        }
-
-        if (
-            shareLink.maxPlays !== null &&
-            shareLink.playCount >= shareLink.maxPlays
-        ) {
             return res.status(404).json({ error: "Share link not found" });
         }
 
@@ -416,6 +434,146 @@ router.get("/access/:token", async (req, res) => {
         }
         logger.error("Access share link error:", error);
         res.status(500).json({ error: "Failed to access share link" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/share-links/access/{token}/stream/{trackId}:
+ *   get:
+ *     tags: [Share Links]
+ *     summary: Stream a track via share link
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: trackId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: download
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Audio stream
+ *       404:
+ *         description: Share link or track not found
+ */
+router.get("/access/:token/stream/:trackId", async (req, res) => {
+    try {
+        const { token } = shareTokenSchema.parse({ token: req.params.token });
+        const trackId = z.string().trim().min(1).parse(req.params.trackId);
+
+        const shareLink = await validateShareLink(token);
+        if (!shareLink) {
+            return res.status(404).json({ error: "Share link not found" });
+        }
+
+        const track = await resolveTrackOwnership(shareLink, trackId);
+        if (!track) {
+            return res.status(404).json({ error: "Track not found" });
+        }
+
+        if (!track.filePath || !track.fileModified) {
+            return res.status(404).json({ error: "Track not available for streaming" });
+        }
+
+        const normalizedFilePath = track.filePath.replace(/\\/g, "/");
+        const absolutePath = path.join(config.music.musicPath, normalizedFilePath);
+
+        const streamingService = new AudioStreamingService(
+            config.music.musicPath,
+            config.music.transcodeCachePath,
+            config.music.transcodeCacheMaxGb
+        );
+
+        try {
+            const { filePath, mimeType } = await streamingService.getStreamFilePath(
+                track.id,
+                "original",
+                track.fileModified,
+                absolutePath
+            );
+
+            if (req.query.download === "true") {
+                res.setHeader(
+                    "Content-Disposition",
+                    `attachment; filename="${path.basename(filePath)}"`
+                );
+            }
+
+            await streamingService.streamFileWithRangeSupport(req, res, filePath, mimeType);
+        } finally {
+            streamingService.destroy();
+        }
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ error: "Invalid request", details: error.errors });
+        }
+        logger.error("Share stream error:", error);
+        res.status(500).json({ error: "Failed to stream shared track" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/share-links/access/{token}/cover:
+ *   get:
+ *     tags: [Share Links]
+ *     summary: Proxy cover art via share link
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: url
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Cover image
+ *       404:
+ *         description: Share link not found or image unavailable
+ */
+router.get("/access/:token/cover", async (req, res) => {
+    try {
+        const { token } = shareTokenSchema.parse({ token: req.params.token });
+
+        const shareLink = await validateShareLink(token);
+        if (!shareLink) {
+            return res.status(404).json({ error: "Share link not found" });
+        }
+
+        const url = req.query.url;
+        if (!url || typeof url !== "string") {
+            return res.status(400).json({ error: "Missing url parameter" });
+        }
+
+        const result = await fetchExternalImage({ url });
+        if (!result.ok) {
+            return res.status(404).json({ error: "Cover image not found" });
+        }
+
+        res.setHeader("Content-Type", result.contentType || "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        if (result.etag) {
+            res.setHeader("ETag", result.etag);
+        }
+        res.send(result.buffer);
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ error: "Invalid request", details: error.errors });
+        }
+        logger.error("Share cover proxy error:", error);
+        res.status(500).json({ error: "Failed to proxy cover image" });
     }
 });
 
