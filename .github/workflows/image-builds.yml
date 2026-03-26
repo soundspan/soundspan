@@ -15,10 +15,10 @@ jobs:
             release_tag: ${{ steps.release-meta.outputs.release_tag }}
         steps:
             - name: Checkout code
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Set up Node.js
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v5
               with:
                   node-version: "20"
 
@@ -174,11 +174,11 @@ jobs:
                   echo "GHCR_REPO=ghcr.io/${GITHUB_REPOSITORY@L}" >> "$GITHUB_ENV"
 
             - name: Checkout code
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Set up Node.js
               if: ${{ matrix.needs_node }}
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v5
               with:
                   node-version: "20"
 

@@ -23,10 +23,10 @@ jobs:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
@@ -64,7 +64,7 @@ jobs:
 
       - name: Upload backend coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: backend-coverage-${{ github.run_id }}
           path: |
@@ -79,10 +79,10 @@ jobs:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: "npm"
@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload frontend quality artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: frontend-quality-${{ github.run_id }}
           path: |
@@ -149,7 +149,7 @@ jobs:
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
