@@ -43,6 +43,7 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/lyrics",
         "../routes/listenTogether",
         "../routes/subsonic",
+        "../routes/shareLinks",
     ];
 
     const flushPromises = async (): Promise<void> => {

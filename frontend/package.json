@@ -17,13 +17,13 @@
     "prelint": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "lint": "eslint",
     "pretest:unit": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
-    "test:unit": "node --test --import ../backend/node_modules/tsx/dist/loader.mjs tests/unit/**/*.test.ts",
+    "test:unit": "node --test --import tsx tests/unit/**/*.test.ts",
     "test:coverage": "bash -lc 'npm run test:coverage:raw 2>&1 | node scripts/check-targeted-coverage.mjs'",
-    "test:coverage:raw": "node --test --import ../backend/node_modules/tsx/dist/loader.mjs --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=components/layout/activityPanelTabs.ts --test-coverage-include=components/layout/socialNavigation.ts --test-coverage-include=features/settings/components/sections/playbackHistoryConfig.ts tests/unit/**/*.test.ts",
-    "test:coverage:semantic": "node --test --import ../backend/node_modules/tsx/dist/loader.mjs tests/unit/activityPanelTabs.test.ts tests/unit/socialNavigation.test.ts tests/unit/playbackHistoryConfig.test.ts",
+    "test:coverage:raw": "node --test --import tsx --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include=components/layout/activityPanelTabs.ts --test-coverage-include=components/layout/socialNavigation.ts --test-coverage-include=features/settings/components/sections/playbackHistoryConfig.ts tests/unit/**/*.test.ts",
+    "test:coverage:semantic": "node --test --import tsx tests/unit/activityPanelTabs.test.ts tests/unit/socialNavigation.test.ts tests/unit/playbackHistoryConfig.test.ts",
     "pretest:component": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
-    "test:component": "node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs tests/component/*.test.ts",
-    "test:component:coverage": "node --test --experimental-test-module-mocks --import ../backend/node_modules/tsx/dist/loader.mjs --experimental-test-coverage --test-coverage-include=components/layout/ActivityPanel.tsx --test-coverage-include=components/layout/Sidebar.tsx --test-coverage-include=components/layout/MobileSidebar.tsx --test-coverage-include=features/settings/components/sections/PlaybackHistorySection.tsx tests/component/*.test.ts",
+    "test:component": "node --test --experimental-test-module-mocks --import tsx tests/component/*.test.ts",
+    "test:component:coverage": "node --test --experimental-test-module-mocks --import tsx --experimental-test-coverage --test-coverage-include=components/layout/ActivityPanel.tsx --test-coverage-include=components/layout/Sidebar.tsx --test-coverage-include=components/layout/MobileSidebar.tsx --test-coverage-include=features/settings/components/sections/PlaybackHistorySection.tsx tests/component/*.test.ts",
     "test:component:coverage:changed": "bash -lc 'set -o pipefail; npm run test:component:coverage 2>&1 | node scripts/check-social-changed-coverage.mjs'",
     "test:coverage:social": "npm run test:coverage && npm run test:component:coverage:changed",
     "test:e2e": "playwright test",
@@ -68,6 +68,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.7.0",
     "typescript": "^5"
   }
 }
