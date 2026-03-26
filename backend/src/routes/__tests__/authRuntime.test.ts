@@ -848,4 +848,530 @@ describe("auth routes runtime", () => {
             error: "Failed to delete Subsonic password",
         });
     });
-});
+
+    it("handles change-email validation, uniqueness, success, and failure paths", async () => {
+        const changeEmail = getHandler("/change-email", "post");
+
+        const invalidReq = { user: { id: "u1" }, body: { email: "not-an-email" } } as any;
+        const invalidRes = createRes();
+        await changeEmail(invalidReq, invalidRes);
+        expect(invalidRes.statusCode).toBe(400);
+        expect(invalidRes.body).toEqual({ error: "Invalid email address" });
+
+        prisma.user.findUnique.mockResolvedValueOnce({ id: "u2" });
+        const duplicateReq = {
+            user: { id: "u1" },
+            body: { email: "alice@example.com" },
+        } as any;
+        const duplicateRes = createRes();
+        await changeEmail(duplicateReq, duplicateRes);
+        expect(duplicateRes.statusCode).toBe(400);
+        expect(duplicateRes.body).toEqual({ error: "Email already in use" });
+
+        prisma.user.findUnique.mockResolvedValueOnce({ id: "u1" });
+        const okReq = {
+            user: { id: "u1" },
+            body: { email: "alice@example.com" },
+        } as any;
+        const okRes = createRes();
+        await changeEmail(okReq, okRes);
+        expect(okRes.statusCode).toBe(200);
+        expect(okRes.body).toEqual({
+            message: "Email updated",
+            email: "alice@example.com",
+        });
+
+        prisma.user.findUnique.mockRejectedValueOnce(new Error("db"));
+        const errorReq = {
+            user: { id: "u1" },
+            body: { email: "alice@example.com" },
+        } as any;
+        const errorRes = createRes();
+        await changeEmail(errorReq, errorRes);
+        expect(errorRes.statusCode).toBe(500);
+        expect(errorRes.body).toEqual({ error: "Failed to change email" });
+    });
+
+    it("covers patch /users/:id branches for validation, conflicts, and success", async () => {
+        const patchLayer = (router as any).stack.find(
+            (entry: any) =>
+                entry.route?.path === "/users/:id" && entry.route?.methods?.patch
+        );
+        const updateUser = patchLayer.route.stack[patchLayer.route.stack.length - 1]
+            .handle;
+
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        const missingReq = { params: { id: "u404" }, body: { username: "bob" } } as any;
+        const missingRes = createRes();
+        await updateUser(missingReq, missingRes);
+        expect(missingRes.statusCode).toBe(404);
+
+        prisma.user.findUnique
+            .mockResolvedValueOnce({ id: "u2", username: "bob", email: "b@example.com" })
+            .mockResolvedValueOnce({ id: "u3" });
+        const usernameTakenReq = {
+            params: { id: "u2" },
+            body: { username: "taken_name" },
+        } as any;
+        const usernameTakenRes = createRes();
+        await updateUser(usernameTakenReq, usernameTakenRes);
+        expect(usernameTakenRes.statusCode).toBe(400);
+        expect(usernameTakenRes.body).toEqual({ error: "Username already taken" });
+
+        prisma.user.findUnique
+            .mockResolvedValueOnce({ id: "u2", username: "bob", email: "b@example.com" })
+            .mockResolvedValueOnce({ id: "u4" });
+        const emailTakenReq = {
+            params: { id: "u2" },
+            body: { email: "taken@example.com" },
+        } as any;
+        const emailTakenRes = createRes();
+        await updateUser(emailTakenReq, emailTakenRes);
+        expect(emailTakenRes.statusCode).toBe(400);
+        expect(emailTakenRes.body).toEqual({ error: "Email already in use" });
+
+        prisma.user.findUnique.mockResolvedValueOnce({
+            id: "u2",
+            username: "bob",
+            email: "b@example.com",
+        });
+        const noFieldsReq = { params: { id: "u2" }, body: {} } as any;
+        const noFieldsRes = createRes();
+        await updateUser(noFieldsReq, noFieldsRes);
+        expect(noFieldsRes.statusCode).toBe(400);
+        expect(noFieldsRes.body).toEqual({ error: "No fields to update" });
+
+        const zodReq = { params: { id: "u2" }, body: { username: "a" } } as any;
+        const zodRes = createRes();
+        await updateUser(zodReq, zodRes);
+        expect(zodRes.statusCode).toBe(400);
+
+        prisma.user.findUnique
+            .mockResolvedValueOnce({ id: "u2", username: "bob", email: "b@example.com" })
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
+        prisma.user.update.mockResolvedValueOnce({
+            id: "u2",
+            username: "bob2",
+            email: "new@example.com",
+            role: "user",
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        });
+        const okReq = {
+            params: { id: "u2" },
+            body: {
+                username: "bob2",
+                email: "new@example.com",
+                password: "new-password",
+            },
+        } as any;
+        const okRes = createRes();
+        await updateUser(okReq, okRes);
+        expect(okRes.statusCode).toBe(200);
+        expect(prisma.user.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "u2" },
+                data: expect.objectContaining({
+                    username: "bob2",
+                    email: "new@example.com",
+                    passwordHash: "new-hash",
+                    tokenVersion: { increment: 1 },
+                }),
+            })
+        );
+
+        prisma.user.findUnique.mockResolvedValueOnce({
+            id: "u2",
+            username: "bob",
+            email: "b@example.com",
+        });
+        prisma.user.update.mockRejectedValueOnce(new Error("db"));
+        const errorReq = { params: { id: "u2" }, body: { email: null } } as any;
+        const errorRes = createRes();
+        await updateUser(errorReq, errorRes);
+        expect(errorRes.statusCode).toBe(500);
+        expect(errorRes.body).toEqual({ error: "Failed to update user" });
+    });
+
+    it("covers invite-code create/list/revoke routes", async () => {
+        (prisma as any).inviteCode = {
+            findUnique: jest.fn(),
+            create: jest.fn(),
+            findMany: jest.fn(),
+            update: jest.fn(),
+        };
+        const createInvite = getHandler("/invite-codes", "post");
+        const listInvites = getHandler("/invite-codes", "get");
+        const revokeInvite = getHandler("/invite-codes/:id", "delete");
+
+        const badReq = { user: { id: "admin-1" }, body: { ttl: "invalid" } } as any;
+        const badRes = createRes();
+        await createInvite(badReq, badRes);
+        expect(badRes.statusCode).toBe(400);
+
+        const randomSpy = jest
+            .spyOn(crypto, "randomBytes")
+            .mockReturnValue(Buffer.alloc(8, 0) as any);
+        (prisma as any).inviteCode.findUnique.mockResolvedValue({ id: "existing" });
+        const exhaustedReq = {
+            user: { id: "admin-1" },
+            body: { ttl: "1h", maxUses: 1 },
+        } as any;
+        const exhaustedRes = createRes();
+        await createInvite(exhaustedReq, exhaustedRes);
+        expect(exhaustedRes.statusCode).toBe(500);
+        expect(exhaustedRes.body).toEqual({ error: "Failed to generate unique code" });
+        randomSpy.mockRestore();
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce(null);
+        (prisma as any).inviteCode.create.mockResolvedValueOnce({
+            id: "ic-1",
+            code: "ABCDEFGH",
+            expiresAt: null,
+            maxUses: 3,
+            createdAt: new Date("2026-03-01T00:00:00.000Z"),
+        });
+        const okReq = {
+            user: { id: "admin-1" },
+            body: { ttl: "never", maxUses: 3 },
+        } as any;
+        const okRes = createRes();
+        await createInvite(okReq, okRes);
+        expect(okRes.statusCode).toBe(200);
+        expect(okRes.body.code).toBe("ABCDEFGH");
+
+        (prisma as any).inviteCode.findMany.mockResolvedValueOnce([
+            {
+                id: "1",
+                code: "AAAA1111",
+                revoked: true,
+                useCount: 0,
+                maxUses: 1,
+                expiresAt: null,
+                createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                creator: { username: "admin" },
+            },
+            {
+                id: "2",
+                code: "BBBB2222",
+                revoked: false,
+                useCount: 1,
+                maxUses: 1,
+                expiresAt: null,
+                createdAt: new Date("2026-01-02T00:00:00.000Z"),
+                creator: { username: "admin" },
+            },
+            {
+                id: "3",
+                code: "CCCC3333",
+                revoked: false,
+                useCount: 0,
+                maxUses: 2,
+                expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+                createdAt: new Date("2026-01-03T00:00:00.000Z"),
+                creator: { username: "admin" },
+            },
+            {
+                id: "4",
+                code: "DDDD4444",
+                revoked: false,
+                useCount: 0,
+                maxUses: 2,
+                expiresAt: null,
+                createdAt: new Date("2026-01-04T00:00:00.000Z"),
+                creator: { username: "admin" },
+            },
+        ]);
+        const listReq = {} as any;
+        const listRes = createRes();
+        await listInvites(listReq, listRes);
+        expect(listRes.statusCode).toBe(200);
+        expect(listRes.body.map((c: any) => c.status)).toEqual([
+            "revoked",
+            "exhausted",
+            "expired",
+            "active",
+        ]);
+
+        (prisma as any).inviteCode.findMany.mockRejectedValueOnce(new Error("db"));
+        const listErrRes = createRes();
+        await listInvites({} as any, listErrRes);
+        expect(listErrRes.statusCode).toBe(500);
+
+        (prisma as any).inviteCode.update.mockRejectedValueOnce({ code: "P2025" });
+        const revokeMissingReq = { params: { id: "missing" } } as any;
+        const revokeMissingRes = createRes();
+        await revokeInvite(revokeMissingReq, revokeMissingRes);
+        expect(revokeMissingRes.statusCode).toBe(404);
+
+        (prisma as any).inviteCode.update.mockResolvedValueOnce({});
+        const revokeReq = { params: { id: "ic-1" } } as any;
+        const revokeRes = createRes();
+        await revokeInvite(revokeReq, revokeRes);
+        expect(revokeRes.statusCode).toBe(200);
+        expect(revokeRes.body).toEqual({ message: "Invite code revoked" });
+
+        (prisma as any).inviteCode.update.mockRejectedValueOnce(new Error("db"));
+        const revokeErrRes = createRes();
+        await revokeInvite({ params: { id: "ic-2" } } as any, revokeErrRes);
+        expect(revokeErrRes.statusCode).toBe(500);
+        expect(revokeErrRes.body).toEqual({ error: "Failed to revoke invite code" });
+    });
+
+    it("covers register route branches including invite/user/email checks and transaction errors", async () => {
+        (prisma as any).inviteCode = {
+            findUnique: jest.fn(),
+            update: jest.fn(),
+        };
+        (prisma.user as any).findFirst = jest.fn();
+        (prisma as any).inviteCodeUsage = { create: jest.fn() };
+        const register = getHandler("/register", "post");
+
+        const mismatchReq = {
+            body: {
+                inviteCode: "abcd1234",
+                username: "new_user",
+                displayName: "New User",
+                password: "new-password",
+                confirmPassword: "different",
+                email: "new@example.com",
+            },
+        } as any;
+        const mismatchRes = createRes();
+        await register(mismatchReq, mismatchRes);
+        expect(mismatchRes.statusCode).toBe(400);
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce(null);
+        const badInviteReq = {
+            body: {
+                inviteCode: "abcd1234",
+                username: "new_user",
+                displayName: "New User",
+                password: "new-password",
+                confirmPassword: "new-password",
+                email: "new@example.com",
+            },
+        } as any;
+        const badInviteRes = createRes();
+        await register(badInviteReq, badInviteRes);
+        expect(badInviteRes.statusCode).toBe(400);
+        expect(badInviteRes.body).toEqual({ error: "Invalid invite code" });
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: true,
+            useCount: 0,
+            maxUses: 1,
+            expiresAt: null,
+        });
+        const revokedRes = createRes();
+        await register(badInviteReq, revokedRes);
+        expect(revokedRes.statusCode).toBe(400);
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: false,
+            useCount: 1,
+            maxUses: 1,
+            expiresAt: null,
+        });
+        const exhaustedRes = createRes();
+        await register(badInviteReq, exhaustedRes);
+        expect(exhaustedRes.statusCode).toBe(400);
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: false,
+            useCount: 0,
+            maxUses: 2,
+            expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+        });
+        const expiredRes = createRes();
+        await register(badInviteReq, expiredRes);
+        expect(expiredRes.statusCode).toBe(400);
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: false,
+            useCount: 0,
+            maxUses: 2,
+            expiresAt: null,
+        });
+        prisma.user.findUnique.mockResolvedValueOnce({ id: "u-existing" });
+        const usernameTakenRes = createRes();
+        await register(badInviteReq, usernameTakenRes);
+        expect(usernameTakenRes.statusCode).toBe(400);
+        expect(usernameTakenRes.body).toEqual({ error: "Username already taken" });
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: false,
+            useCount: 0,
+            maxUses: 2,
+            expiresAt: null,
+        });
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        (prisma.user as any).findFirst.mockResolvedValueOnce({ id: "u-email" });
+        const emailTakenRes = createRes();
+        await register(badInviteReq, emailTakenRes);
+        expect(emailTakenRes.statusCode).toBe(400);
+        expect(emailTakenRes.body).toEqual({ error: "Email already in use" });
+
+        const tx = {
+            user: {
+                create: jest.fn().mockResolvedValue({
+                    id: "u-new",
+                    username: "new_user",
+                    displayName: "New User",
+                    role: "user",
+                    tokenVersion: 1,
+                }),
+            },
+            userSettings: {
+                create: jest.fn().mockResolvedValue({}),
+            },
+            inviteCodeUsage: {
+                create: jest.fn().mockResolvedValue({}),
+            },
+            inviteCode: {
+                update: jest.fn().mockResolvedValue({}),
+            },
+        };
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: false,
+            useCount: 0,
+            maxUses: 2,
+            expiresAt: null,
+        });
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        (prisma.user as any).findFirst.mockResolvedValueOnce(null);
+        (prisma as any).$transaction = jest.fn(async (fn: any) => fn(tx));
+
+        const okRes = createRes();
+        await register(badInviteReq, okRes);
+        expect(okRes.statusCode).toBe(200);
+        expect(okRes.body).toEqual({
+            token: "jwt-access",
+            refreshToken: "jwt-refresh",
+            user: {
+                id: "u-new",
+                username: "new_user",
+                displayName: "New User",
+                role: "user",
+            },
+        });
+
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: false,
+            useCount: 0,
+            maxUses: 2,
+            expiresAt: null,
+        });
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        (prisma.user as any).findFirst.mockResolvedValueOnce(null);
+        (prisma as any).$transaction = jest.fn(async () => {
+            throw new Error("tx fail");
+        });
+        const txErrorRes = createRes();
+        await register(badInviteReq, txErrorRes);
+        expect(txErrorRes.statusCode).toBe(500);
+        expect(txErrorRes.body).toEqual({ error: "Registration failed" });
+    });
+
+    it("covers remaining login and 2FA disable edge branches", async () => {
+        prisma.user.findUnique.mockImplementationOnce(async ({ where }: any) => {
+            if (where.username === "alice@example.com") {
+                return null;
+            }
+            if (where.email === "alice@example.com") {
+                return {
+                    id: "u1",
+                    username: "alice",
+                    role: "user",
+                    passwordHash: "hash-1",
+                    tokenVersion: 1,
+                    twoFactorEnabled: false,
+                    twoFactorSecret: null,
+                    twoFactorRecoveryCodes: null,
+                };
+            }
+            return null;
+        });
+        mockBcryptCompare.mockResolvedValueOnce(true);
+        const emailLookupReq = {
+            body: { username: "alice@example.com", password: "pw" },
+        } as any;
+        const emailLookupRes = createRes();
+        await login(emailLookupReq, emailLookupRes);
+        expect(emailLookupRes.statusCode).toBe(200);
+
+        prisma.user.findUnique.mockResolvedValueOnce({
+            id: "u1",
+            username: "alice",
+            role: "user",
+            passwordHash: "hash-1",
+            tokenVersion: 1,
+            twoFactorEnabled: true,
+            twoFactorSecret: "enc(SECRET)",
+            twoFactorRecoveryCodes: "enc()",
+        });
+        const badRecoveryReq = {
+            body: { username: "alice", password: "pw", token: "AABBCCDD" },
+        } as any;
+        const badRecoveryRes = createRes();
+        await login(badRecoveryReq, badRecoveryRes);
+        expect(badRecoveryRes.statusCode).toBe(401);
+
+        prisma.user.findUnique.mockResolvedValueOnce({
+            id: "u1",
+            passwordHash: "hash-1",
+            twoFactorSecret: null,
+        });
+        mockBcryptCompare.mockResolvedValueOnce(true);
+        const disableNoSecretReq = {
+            user: { id: "u1" },
+            body: { password: "old", token: "123456" },
+        } as any;
+        const disableNoSecretRes = createRes();
+        await twoFaDisable(disableNoSecretReq, disableNoSecretRes);
+        expect(disableNoSecretRes.statusCode).toBe(200);
+        expect(mockSpeakeasyVerify).not.toHaveBeenCalled();
+    });
+
+    it("covers refresh invalid-token branch explicitly", async () => {
+        mockJwtVerify.mockImplementationOnce(() => {
+            throw new Error("expired");
+        });
+        const req = { body: { refreshToken: "expired-token" } } as any;
+        const res = createRes();
+        await refresh(req, res);
+        expect(res.statusCode).toBe(401);
+        expect(res.body).toEqual({ error: "Invalid refresh token" });
+    });
+
+    it("covers create-user default role branch", async () => {
+        prisma.user.findUnique.mockResolvedValue(null);
+        prisma.user.create.mockResolvedValueOnce({
+            id: "u-default",
+            username: "role-default",
+            role: "user",
+            createdAt: new Date("2026-03-01T00:00:00.000Z"),
+        });
+
+        const req = {
+            body: { username: "role-default", password: "123456" },
+        } as any;
+        const res = createRes();
+        await createUser(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(prisma.user.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ role: "user" }),
+            })
+        );
+    });
+    });
