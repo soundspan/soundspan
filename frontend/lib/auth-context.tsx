@@ -165,6 +165,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Listen for session-expired events from the API client (stale/invalid tokens)
     useEffect(() => {
         const handleSessionExpired = () => {
+            const current = window.location.pathname;
+            const isPublicRoute = publicPaths.includes(current) || publicPrefixes.some((prefix) => current.startsWith(prefix));
+            if (isPublicRoute) return;
+
             setIsAuthenticated(false);
             setUser(null);
             // Clear all cached query data so stale user data is not retained
