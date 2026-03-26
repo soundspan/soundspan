@@ -24,7 +24,7 @@ This command pack covers the ACM workflow loop only.
 
 For compact rediscovery of archived plans, receipts, runs, and durable results, use direct CLI `acm history`, setting `--entity work` when you need work-specific `--scope` or `--kind` filters, then `acm fetch` the returned `fetch_keys`. The default command pack does not add a dedicated `/acm-history` slash command.
 For runtime and setup diagnostics, use direct CLI `acm status`. It reports active project/backend state, loaded ACM files, integrations, missing setup, and an optional simple `context` preview.
-For rendered ACM artifacts, use the backend-only `export` surface through `acm run --in assets/requests/export.json` or `acm-mcp invoke --tool export --in assets/requests/mcp_export.json`; the slash-command pack intentionally does not add `/acm-export`. For quick human-facing CLI output, `context`, `fetch`, `history`, and `status` also support `--format json|markdown` with optional `--out-file` / `--force`, and those flags lower to the same backend export path.
+For rendered ACM artifacts, use the backend-only `export` surface through `acm run --in assets/requests/export.json`; the slash-command pack intentionally does not add `/acm-export`. For quick human-facing CLI output, `context`, `fetch`, `history`, and `status` also support `--format json|markdown` with optional `--out-file` / `--force`, and those flags lower to the same backend export path.
 When you change rules, tags, tests, workflows, onboarding, or tool-surface behavior, run direct CLI `acm sync --mode working_tree --insert-new-candidates` and `acm health --include-details` before `/acm-done`.
 
 ## Install into a project

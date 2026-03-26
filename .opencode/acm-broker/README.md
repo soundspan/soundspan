@@ -57,7 +57,7 @@ Keep the command boundary explicit:
 - `verify` answers "which repo-defined checks apply to this task and current diff?"
 - `review` answers "has this one named workflow gate been satisfied?"
 
-When a task specifically needs rendered ACM artifacts instead of normal envelopes, use the backend-only `export` surface through `acm run --in assets/requests/export.json` or `acm-mcp invoke --tool export --in assets/requests/mcp_export.json`. For quick human-facing CLI output, `context`, `fetch`, `history`, and `status` also support `--format json|markdown` with optional `--out-file` / `--force`; those flags lower to the same backend export path.
+When a task specifically needs rendered ACM artifacts instead of normal envelopes, use the backend-only `export` surface through `acm run --in assets/requests/export.json`. For quick human-facing CLI output, `context`, `fetch`, `history`, and `status` also support `--format json|markdown` with optional `--out-file` / `--force`; those flags lower to the same backend export path.
 
 Use the same maintenance loop as any other primary ACM operator when rules, tags, tests, workflows, onboarding, or tool-surface behavior change:
 

@@ -5,7 +5,7 @@
 # Fires after successful Bash tool calls. Tracks task-bearing
 # `acm context`, `acm work`, `acm verify`, and `acm done`
 # invocations across direct CLI, `acm run --in <request.json>`, and
-# `acm-mcp invoke --tool ...` forms.
+# `acm run --in <request.json>` forms, and JSON-RPC `tools/call` via `acm-mcp`.
 
 set -euo pipefail
 
@@ -78,8 +78,9 @@ request_declares_command() {
 is_mcp_tool_command() {
   local command="$1"
   local tool_name="$2"
-  echo "$command" | grep -qE '(^|[[:space:]])acm-mcp[[:space:]]+invoke([[:space:]]|$)' || return 1
-  echo "$command" | grep -qE "(^|[[:space:]])--tool(=|[[:space:]])${tool_name}([[:space:]]|$)"
+  # Detect JSON-RPC tools/call with the given tool name piped to acm-mcp
+  echo "$command" | grep -qE 'acm-mcp' || return 1
+  echo "$command" | grep -qE "\"name\"[[:space:]]*:[[:space:]]*\"${tool_name}\""
 }
 
 mark_receipt() {
