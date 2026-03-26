@@ -6,9 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Fixed
+
+- Frontend unit tests no longer depend on `../backend/node_modules/tsx` — tsx is now a direct frontend devDependency so CI runs are self-contained.
+- Backend `apiEntrypointRuntime` test suite now mocks the `shareLinks` route module, fixing an ESM import failure (`p-queue`) that caused 16 test failures.
+
+### Changed
+
+- Backend branch test coverage improved from 80 % to ~83 % with new/extended tests across browseImageCache, remoteTrackMetadataResolver, moodBucketService, auth, browse, library, subsonic, simpleDownloadManager, spotify, podcasts, deezer, enrichment, and youtubeMusic routes and services.
+
 ### Added
 
 - Share links API for playlists, albums, and tracks: authenticated users can create/list/revoke tokenized links (`/api/share-links`), and anyone with a valid token can access shared resources through anonymous `/api/share-links/access/:token` with optional expiry and max-play limits.
+- Shared-link pages now support cover-art proxy rendering, local-only playlist filtering, inline audio playback with queue controls, per-track and bulk downloads, and playlist export to JSON/M3U.
 - Admin-only enrichment repair endpoint (`POST /api/enrichment/repair-covers`) that clears stale Cover Art Archive `NOT_FOUND` cache entries for albums missing covers and reports how many albums/cache entries were affected.
 - Full-text search stop-word fallback: queries containing only English stop words (like "the", "a") now automatically fall back to ILIKE matching instead of returning empty results.
 - Health endpoint payloads now include `version`, `uptimeSeconds`, and per-dependency `latencyMs` fields for easier operator diagnostics and Kubernetes troubleshooting.
