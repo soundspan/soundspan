@@ -12,7 +12,7 @@ import { Modal } from "./Modal";
 interface ShareLinkModalProps {
     isOpen: boolean;
     onClose: () => void;
-    resourceType: Exclude<ShareResourceType, "playlist">;
+    resourceType: ShareResourceType;
     resourceId: string;
     resourceName: string;
 }
@@ -68,7 +68,12 @@ export function ShareLinkModal({
     }, [isOpen, loadExistingLinks]);
 
     const resourceLabel = useMemo(
-        () => (resourceType === "album" ? "album" : "track"),
+        () =>
+            resourceType === "album"
+                ? "album"
+                : resourceType === "playlist"
+                  ? "playlist"
+                  : "track",
         [resourceType]
     );
 
@@ -149,7 +154,7 @@ export function ShareLinkModal({
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            title={`Share ${resourceType === "album" ? "Album" : "Track"}`}
+            title={`Share ${resourceType === "album" ? "Album" : resourceType === "playlist" ? "Playlist" : "Track"}`}
             className="max-w-lg"
         >
             <div className="space-y-4">

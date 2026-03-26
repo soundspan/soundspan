@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+@theme {
+    --color-brand: #3b82f6;
+    --color-brand-hover: #60a5fa;
+    --color-brand-light: #93c5fd;
+    --color-brand-dark: #2563eb;
+}
+
 :root {
     /* soundspan Design System - Dark Theme Only */
 

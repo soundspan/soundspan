@@ -43,10 +43,12 @@ import {
     Globe,
     GlobeLock,
     Pencil,
+    Share2,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { useCollectionLikeAll } from "@/hooks/useCollectionLikeAll";
 import type { LikeableTrack } from "@/hooks/useCollectionLikeAll";
+import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
 
 interface Track {
     id: string;
@@ -162,6 +164,7 @@ export default function PlaylistDetailPage() {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [isHiding, setIsHiding] = useState(false);
     const [isTogglingShare, setIsTogglingShare] = useState(false);
+    const [showShareModal, setShowShareModal] = useState(false);
     const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(
         null
     );
@@ -789,6 +792,18 @@ export default function PlaylistDetailPage() {
                         </button>
                     )}
 
+                    {/* Share Link Button (owner only) */}
+                    {playlist.isOwner && (
+                        <button
+                            type="button"
+                            onClick={() => setShowShareModal(true)}
+                            className="h-8 w-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                            title="Create share link"
+                        >
+                            <Share2 className="w-5 h-5" />
+                        </button>
+                    )}
+
                     {/* Hide Button */}
                     <button
                         onClick={handleToggleHide}
@@ -1083,6 +1098,14 @@ export default function PlaylistDetailPage() {
                 confirmText="Delete"
                 cancelText="Cancel"
                 variant="danger"
+            />
+
+            <ShareLinkModal
+                isOpen={showShareModal}
+                onClose={() => setShowShareModal(false)}
+                resourceType="playlist"
+                resourceId={playlistId}
+                resourceName={playlist.name}
             />
         </div>
     );

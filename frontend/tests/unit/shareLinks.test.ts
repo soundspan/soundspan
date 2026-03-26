@@ -30,12 +30,12 @@ test("canShareTrack returns false for remote tracks", () => {
     );
 });
 
-test("buildAbsoluteShareUrl expands backend access paths", () => {
+test("buildAbsoluteShareUrl maps backend access path to frontend share route", () => {
     assert.equal(
         buildAbsoluteShareUrl(
             "/api/share-links/access/token-123",
             "https://soundspan.example"
         ),
-        "https://soundspan.example/api/share-links/access/token-123"
+        "https://soundspan.example/share/token-123"
     );
 });

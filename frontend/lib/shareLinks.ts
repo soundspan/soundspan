@@ -8,5 +8,6 @@ export function canShareTrack(track: Track): boolean {
 }
 
 export function buildAbsoluteShareUrl(accessPath: string, origin: string): string {
-    return new URL(accessPath, origin).toString();
+    const token = accessPath.split("/").pop() ?? accessPath;
+    return new URL(`/share/${token}`, origin).toString();
 }
