@@ -38,6 +38,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
+const publicPrefixes = ["/share/"];
 
 /**
  * Renders the AuthProvider component.
@@ -93,7 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
 
                 // If not on a public path, check if we need onboarding
-                if (!publicPaths.includes(pathname)) {
+                const isPublic = publicPaths.includes(pathname) || publicPrefixes.some((prefix) => pathname.startsWith(prefix));
+                if (!isPublic) {
                     // Check if any users exist in the system
                     try {
                         const status = await api.get<{ hasAccount: boolean }>(
