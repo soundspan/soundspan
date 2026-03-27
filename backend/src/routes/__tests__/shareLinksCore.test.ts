@@ -560,10 +560,7 @@ describe("share links routes integration", () => {
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: "Share link not found" });
         expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
-            where: { id: "share-1" },
-            data: { lastStreamedAt: expect.any(Date) },
-        });
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
     });
 
     it.each([
