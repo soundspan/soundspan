@@ -510,7 +510,7 @@ export default function SharePage() {
 		<>
 			<main className={cn("min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] text-white", currentTrack ? "pb-24" : undefined)}>
 				<div className="flex min-h-screen flex-col md:flex-row">
-					<div className="flex flex-col items-center justify-center px-8 py-12 md:w-1/2 md:sticky md:top-0 md:h-screen md:overflow-y-auto">
+					<div className="flex flex-col items-center justify-center px-8 py-12 md:w-1/2 md:sticky md:top-0 md:h-screen md:overflow-y-auto md:pl-12 md:pr-6">
 						{data.resourceType === "track" ? (
 							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
 								<Disc3 className="h-3 w-3" />
@@ -567,8 +567,8 @@ export default function SharePage() {
 
 					</div>
 
-					<div className="flex flex-col border-t border-white/[0.08] md:h-screen md:w-1/2 md:border-l md:border-t-0">
-						<div className="flex h-full flex-col bg-[#0b0d12]/60 backdrop-blur-xl">
+					<div className="flex flex-col md:h-screen md:w-1/2 md:py-8 md:pl-4 md:pr-8">
+						<div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b0d12]/95 backdrop-blur-xl">
 							<div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
 								<div className="flex items-center gap-2">
 									<ListMusic className="h-4 w-4 text-[#60a5fa]" />
