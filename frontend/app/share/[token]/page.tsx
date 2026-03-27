@@ -325,18 +325,6 @@ export default function SharePage() {
 		}
 	}, [currentTrackIndex, hasPrev, trackQueue]);
 
-	const handleSeek = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-		const audio = audioRef.current;
-		if (!audio || !duration) {
-			return;
-		}
-		const rect = event.currentTarget.getBoundingClientRect();
-		const clickX = event.clientX - rect.left;
-		const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-		const seekTime = ratio * duration;
-		audio.currentTime = seekTime;
-		setProgress(seekTime);
-	}, [duration]);
 
 	const handleVolumeChange = useCallback(
 		(event: React.ChangeEvent<HTMLInputElement>) => {
@@ -576,76 +564,7 @@ export default function SharePage() {
 							</p>
 						)}
 
-						<div className="mt-6 w-full max-w-sm mx-auto">
-							<div
-								className="relative h-1 cursor-pointer rounded-full bg-white/20 overflow-hidden"
-								onClick={handleSeek}
-								onKeyDown={(event) => {
-									const audio = audioRef.current;
-									if (!audio || !duration) {
-										return;
-									}
-									if (event.key === "ArrowLeft") {
-										event.preventDefault();
-										const seekTime = Math.max(0, audio.currentTime - 5);
-										audio.currentTime = seekTime;
-										setProgress(seekTime);
-									}
-									if (event.key === "ArrowRight") {
-										event.preventDefault();
-										const seekTime = Math.min(duration, audio.currentTime + 5);
-										audio.currentTime = seekTime;
-										setProgress(seekTime);
-									}
-								}}
-								role="slider"
-								aria-label="Playback progress"
-								aria-valuemin={0}
-								aria-valuemax={duration || currentTrack?.duration || 0}
-								aria-valuenow={progress}
-								aria-valuetext={`${formatTime(progress)} of ${formatTime(duration || currentTrack?.duration || 0)}`}
-								tabIndex={0}
-							>
-								<div
-									className="h-full bg-[#60a5fa] transition-none"
-									style={{ width: `${progressPercent}%` }}
-								/>
-							</div>
-							<div className="mt-2 flex justify-between text-xs tabular-nums text-gray-500">
-								<span>{formatTime(progress)}</span>
-								<span>{formatTime(duration || currentTrack?.duration || 0)}</span>
-							</div>
-						</div>
 
-						<div className="mt-4 flex items-center justify-center gap-6">
-							<button
-								type="button"
-								onClick={handlePrev}
-								disabled={!hasPrev && progress <= 3}
-								className="text-white/70 transition-all hover:scale-110 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
-								title="Previous"
-							>
-								<SkipBack className="h-7 w-7" />
-							</button>
-							<button
-								type="button"
-								onClick={currentTrack ? handlePlayPause : () => trackQueue[0] && playTrack(trackQueue[0])}
-								disabled={!currentTrack && !trackQueue[0]}
-								className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-xl shadow-white/20 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
-								title={isPlaying ? "Pause" : "Play"}
-							>
-								{isPlaying ? <Pause className="h-7 w-7" /> : <Play className="ml-1 h-7 w-7" />}
-							</button>
-							<button
-								type="button"
-								onClick={handleNext}
-								disabled={!hasNext}
-								className="text-white/70 transition-all hover:scale-110 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
-								title="Next"
-							>
-								<SkipForward className="h-7 w-7" />
-							</button>
-						</div>
 					</div>
 
 					<div className="flex flex-col border-t border-white/[0.08] md:h-screen md:w-1/2 md:border-l md:border-t-0">
