@@ -540,7 +540,7 @@ export default function SharePage() {
 							</span>
 						)}
 
-						<div className="relative w-full max-w-xs md:max-w-sm mx-auto mb-6">
+						<div className="relative mx-auto mb-6 w-full max-w-[min(92vw,52vh)] md:max-w-[min(40vw,calc(100vh-20rem))]">
 							<div className="absolute inset-0 rounded-2xl blur-2xl opacity-50 bg-gradient-to-br from-[#60a5fa]/20 via-transparent to-[#3b82f6]/20" />
 							<div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] shadow-2xl">
 								{leftPanelCoverUrl ? (
