@@ -469,20 +469,12 @@ describe("share links routes integration", () => {
 
             expect(res.status).toBe(200);
             expect(res.body).toEqual({ resourceType, resource });
-            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith({
-                where: expect.objectContaining({
-                    id: shareLink.id,
-                    revoked: false,
-                    OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
-                }),
-                data: { playCount: { increment: 1 } },
-            });
         }
     );
 
-    it("GET /api/share-links/access/:token includes the max-plays guard when incrementing playCount", async () => {
+    it("GET /api/share-links/access/:token does not increment playCount on metadata fetch", async () => {
         mockShareLinkFindUnique.mockResolvedValueOnce(
-            makeShareLink({ resourceType: "track", resourceId: "track-1", maxPlays: 2, playCount: 1 })
+            makeShareLink({ resourceType: "track", resourceId: "track-1" })
         );
         mockTrackFindUnique.mockResolvedValueOnce({
             id: "track-1",
@@ -493,15 +485,8 @@ describe("share links routes integration", () => {
         const res = await request(app).get(`/api/share-links/access/${TOKEN}`);
 
         expect(res.status).toBe(200);
-        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith({
-            where: {
-                id: "share-1",
-                revoked: false,
-                OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
-                playCount: { lt: 2 },
-            },
-            data: { playCount: { increment: 1 } },
-        });
+        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
     });
 
     it("GET /api/share-links/access/:token returns 404 when the shared resource no longer exists", async () => {
@@ -604,6 +589,125 @@ describe("share links routes integration", () => {
             expect(mockDestroy).toHaveBeenCalledTimes(1);
             expect(res.headers["content-disposition"]).toContain("attachment;");
             assertOwnership();
+        }
+    );
+
+    it("GET /api/share-links/access/:token/stream/:trackId increments playCount on first stream of a new session", async () => {
+        mockShareLinkFindUnique.mockResolvedValueOnce(
+            makeShareLink({ resourceType: "track", resourceId: "track-1", lastStreamedAt: null })
+        );
+        mockTrackFindUnique.mockResolvedValueOnce(makeStreamableTrack());
+
+        await request(app).get(`/api/share-links/access/${TOKEN}/stream/track-1`);
+
+        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ playCount: { increment: 1 } }),
+            })
+        );
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
+    });
+
+    it("GET /api/share-links/access/:token/stream/:trackId does not increment playCount within the session window", async () => {
+        const recentStream = new Date(Date.now() - 5 * 60 * 1000);
+        mockShareLinkFindUnique.mockResolvedValueOnce(
+            makeShareLink({ resourceType: "track", resourceId: "track-1", lastStreamedAt: recentStream })
+        );
+        mockTrackFindUnique.mockResolvedValueOnce(makeStreamableTrack());
+
+        await request(app).get(`/api/share-links/access/${TOKEN}/stream/track-1`);
+
+        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+        expect(mockShareLinkUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "share-1" },
+                data: expect.objectContaining({ lastStreamedAt: expect.any(Date) }),
+            })
+        );
+    });
+
+    it("GET /api/share-links/access/:token/stream/:trackId increments playCount after session window expires", async () => {
+        const oldStream = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        mockShareLinkFindUnique.mockResolvedValueOnce(
+            makeShareLink({ resourceType: "track", resourceId: "track-1", lastStreamedAt: oldStream })
+        );
+        mockTrackFindUnique.mockResolvedValueOnce(makeStreamableTrack());
+
+        await request(app).get(`/api/share-links/access/${TOKEN}/stream/track-1`);
+
+        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ playCount: { increment: 1 } }),
+            })
+        );
+    });
+
+    it("GET /api/share-links/access/:token/stream/:trackId rejects when maxPlays is reached", async () => {
+        mockShareLinkFindUnique.mockResolvedValueOnce(
+            makeShareLink({ resourceType: "track", resourceId: "track-1", maxPlays: 3, playCount: 3 })
+        );
+
+        const res = await request(app).get(`/api/share-links/access/${TOKEN}/stream/track-1`);
+
+        expect(res.status).toBe(404);
+        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
+    });
+
+    it("GET /api/share-links/access/:token returns playlist items without trackTidal or trackYtMusic fields", async () => {
+        mockShareLinkFindUnique.mockResolvedValueOnce(
+            makeShareLink({ resourceType: "playlist", resourceId: "playlist-1" })
+        );
+        mockPlaylistFindUnique.mockResolvedValueOnce({
+            id: "playlist-1",
+            name: "Shared Playlist",
+            user: { username: "owner" },
+            items: [
+                {
+                    id: "item-1",
+                    sort: 1,
+                    track: {
+                        id: "track-1",
+                        title: "Track One",
+                        duration: 180,
+                        album: {
+                            title: "Album One",
+                            coverArt: null,
+                            coverUrl: null,
+                            artist: { id: "artist-1", name: "Artist One" },
+                        },
+                    },
+                },
+            ],
+            pendingTracks: [],
+        });
+
+        const res = await request(app).get(`/api/share-links/access/${TOKEN}`);
+
+        expect(res.status).toBe(200);
+        const item = res.body.resource.items[0];
+        expect(item).not.toHaveProperty("trackTidal");
+        expect(item).not.toHaveProperty("trackYtMusic");
+    });
+
+    it.each([
+        "native:../../../etc/passwd",
+        "native:../../covers-other/evil.jpg",
+        "native:../covers/legitimate.jpg",
+    ])(
+        "GET /api/share-links/access/:token/cover rejects path traversal attempt: %s",
+        async (maliciousUrl) => {
+            mockShareLinkFindUnique.mockResolvedValueOnce(
+                makeShareLink({ resourceType: "album", resourceId: "album-1" })
+            );
+
+            const res = await request(app)
+                .get(`/api/share-links/access/${TOKEN}/cover`)
+                .query({ url: maliciousUrl });
+
+            expect(res.status).toBe(404);
+            expect(res.body).toEqual({ error: "Cover image not found" });
+            expect(mockFetchExternalImage).not.toHaveBeenCalled();
         }
     );
 

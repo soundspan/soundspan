@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
 import { z } from "zod";
@@ -8,6 +9,7 @@ import { AudioStreamingService } from "../services/audioStreaming";
 import { fetchExternalImage } from "../services/imageProxy";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { safeResolvePath } from "../utils/safeResolvePath";
 
 const router = Router();
 
@@ -27,8 +29,6 @@ const playlistItemInclude = {
             },
         },
     },
-    trackTidal: true,
-    trackYtMusic: true,
 } as const;
 
 const shareResourceTypeSchema = z.enum(["playlist", "album", "track"]);
@@ -63,6 +63,22 @@ async function validateShareLink(token: string) {
 }
 
 const trackStreamSelect = { id: true, title: true, filePath: true, fileModified: true } as const;
+
+function resolveNativeCoverPath(nativePath: string): string | null {
+    const trimmed = nativePath.replace(/^\/+/, "").trim();
+    const candidates = [trimmed];
+    if (trimmed.length > 0 && !trimmed.startsWith("albums/")) {
+        candidates.push(`albums/${trimmed}`);
+    }
+    const coversDir = path.resolve(config.music.transcodeCachePath, "../covers");
+    for (const candidate of candidates) {
+        const resolved = safeResolvePath(coversDir, candidate);
+        if (resolved && fs.existsSync(resolved)) {
+            return resolved;
+        }
+    }
+    return null;
+}
 
 async function resolveTrackOwnership(
     shareLink: { resourceType: string; resourceId: string },
@@ -383,7 +399,6 @@ router.delete("/:id", requireAuth, async (req, res) => {
 router.get("/access/:token", async (req, res) => {
     try {
         const { token } = shareTokenSchema.parse(req.params);
-        const now = new Date();
 
         const shareLink = await validateShareLink(token);
         if (!shareLink) {
@@ -395,30 +410,6 @@ router.get("/access/:token", async (req, res) => {
             shareLink.resourceId
         );
         if (!resource) {
-            return res.status(404).json({ error: "Share link not found" });
-        }
-
-        const incrementResult = await prisma.shareLink.updateMany({
-            where: {
-                id: shareLink.id,
-                revoked: false,
-                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-                ...(shareLink.maxPlays !== null
-                    ? {
-                          playCount: {
-                              lt: shareLink.maxPlays,
-                          },
-                      }
-                    : {}),
-            },
-            data: {
-                playCount: {
-                    increment: 1,
-                },
-            },
-        });
-
-        if (incrementResult.count === 0) {
             return res.status(404).json({ error: "Share link not found" });
         }
 
@@ -481,6 +472,38 @@ router.get("/access/:token/stream/:trackId", async (req, res) => {
 
         if (!track.filePath || !track.fileModified) {
             return res.status(404).json({ error: "Track not available for streaming" });
+        }
+
+        const sessionWindowMs = 60 * 60 * 1000;
+        const now = new Date();
+        const windowStart = new Date(now.getTime() - sessionWindowMs);
+        const isNewSession =
+            shareLink.lastStreamedAt === null ||
+            shareLink.lastStreamedAt < windowStart;
+
+        if (isNewSession) {
+            await prisma.shareLink.updateMany({
+                where: {
+                    id: shareLink.id,
+                    revoked: false,
+                    AND: [
+                        { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+                        { OR: [{ lastStreamedAt: null }, { lastStreamedAt: { lt: windowStart } }] },
+                        ...(shareLink.maxPlays !== null
+                            ? [{ playCount: { lt: shareLink.maxPlays } }]
+                            : []),
+                    ],
+                },
+                data: {
+                    playCount: { increment: 1 },
+                    lastStreamedAt: now,
+                },
+            });
+        } else {
+            await prisma.shareLink.update({
+                where: { id: shareLink.id },
+                data: { lastStreamedAt: now },
+            });
         }
 
         const normalizedFilePath = track.filePath.replace(/\\/g, "/");
@@ -555,6 +578,17 @@ router.get("/access/:token/cover", async (req, res) => {
         const url = req.query.url;
         if (!url || typeof url !== "string") {
             return res.status(400).json({ error: "Missing url parameter" });
+        }
+
+        if (url.startsWith("native:")) {
+            const nativePath = url.slice("native:".length);
+            const filePath = resolveNativeCoverPath(nativePath);
+            if (!filePath) {
+                return res.status(404).json({ error: "Cover image not found" });
+            }
+            res.setHeader("Content-Type", "image/jpeg");
+            res.setHeader("Cache-Control", "public, max-age=3600");
+            return res.sendFile(filePath);
         }
 
         const result = await fetchExternalImage({ url });
