@@ -472,26 +472,86 @@ describe("share links routes integration", () => {
         }
     );
 
-    it("GET /api/share-links/access/:token does not increment playCount on metadata fetch", async () => {
-        mockShareLinkFindUnique.mockResolvedValueOnce(
-            makeShareLink({ resourceType: "track", resourceId: "track-1" })
-        );
-        mockTrackFindUnique.mockResolvedValueOnce({
-            id: "track-1",
-            title: "Track One",
-            album: { id: "album-1", artist: { id: "artist-1", name: "Artist One" } },
+    describe("GET /api/share-links/access/:token — play count", () => {
+        it("increments playCount for a new session on page load", async () => {
+            mockShareLinkFindUnique.mockResolvedValueOnce(
+                makeShareLink({
+                    resourceType: "track",
+                    resourceId: "track-1",
+                    lastStreamedAt: null,
+                })
+            );
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "track-1",
+                title: "Track One",
+                album: { id: "album-1", artist: { id: "artist-1", name: "Artist One" } },
+            });
+
+            const res = await request(app).get(`/api/share-links/access/${TOKEN}`);
+
+            expect(res.status).toBe(200);
+            expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: expect.objectContaining({
+                        playCount: { increment: 1 },
+                        lastStreamedAt: expect.any(Date),
+                    }),
+                })
+            );
+            expect(mockShareLinkUpdate).not.toHaveBeenCalled();
         });
 
-        const res = await request(app).get(`/api/share-links/access/${TOKEN}`);
+        it("does not increment playCount for an existing session within the window", async () => {
+            const recentStream = new Date(Date.now() - 5 * 60 * 1000);
+            mockShareLinkFindUnique.mockResolvedValueOnce(
+                makeShareLink({
+                    resourceType: "track",
+                    resourceId: "track-1",
+                    lastStreamedAt: recentStream,
+                })
+            );
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "track-1",
+                title: "Track One",
+                album: { id: "album-1", artist: { id: "artist-1", name: "Artist One" } },
+            });
 
-        expect(res.status).toBe(200);
-        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
-        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
+            const res = await request(app).get(`/api/share-links/access/${TOKEN}`);
+
+            expect(res.status).toBe(200);
+            expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+            expect(mockShareLinkUpdate).toHaveBeenCalledWith({
+                where: { id: "share-1" },
+                data: { lastStreamedAt: expect.any(Date) },
+            });
+        });
+
+        it("returns 404 when maxPlays is exhausted before page load", async () => {
+            mockShareLinkFindUnique.mockResolvedValueOnce(
+                makeShareLink({
+                    resourceType: "track",
+                    resourceId: "track-1",
+                    maxPlays: 3,
+                    playCount: 3,
+                })
+            );
+
+            const res = await request(app).get(`/api/share-links/access/${TOKEN}`);
+
+            expect(res.status).toBe(404);
+            expect(res.body).toEqual({ error: "Share link not found" });
+            expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+            expect(mockShareLinkUpdate).not.toHaveBeenCalled();
+        });
     });
 
     it("GET /api/share-links/access/:token returns 404 when the shared resource no longer exists", async () => {
         mockShareLinkFindUnique.mockResolvedValueOnce(
-            makeShareLink({ resourceType: "album", resourceId: "album-missing" })
+            makeShareLink({
+                resourceType: "album",
+                resourceId: "album-missing",
+                lastStreamedAt: new Date(Date.now() - 5 * 60 * 1000),
+            })
         );
         mockAlbumFindUnique.mockResolvedValueOnce(null);
 
@@ -500,6 +560,10 @@ describe("share links routes integration", () => {
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: "Share link not found" });
         expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
+            where: { id: "share-1" },
+            data: { lastStreamedAt: expect.any(Date) },
+        });
     });
 
     it.each([
@@ -592,7 +656,7 @@ describe("share links routes integration", () => {
         }
     );
 
-    it("GET /api/share-links/access/:token/stream/:trackId increments playCount on first stream of a new session", async () => {
+    it("GET /api/share-links/access/:token/stream/:trackId on a new session only updates lastStreamedAt", async () => {
         mockShareLinkFindUnique.mockResolvedValueOnce(
             makeShareLink({ resourceType: "track", resourceId: "track-1", lastStreamedAt: null })
         );
@@ -600,15 +664,14 @@ describe("share links routes integration", () => {
 
         await request(app).get(`/api/share-links/access/${TOKEN}/stream/track-1`);
 
-        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({ playCount: { increment: 1 } }),
-            })
-        );
-        expect(mockShareLinkUpdate).not.toHaveBeenCalled();
+        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
+            where: { id: "share-1" },
+            data: { lastStreamedAt: expect.any(Date) },
+        });
     });
 
-    it("GET /api/share-links/access/:token/stream/:trackId does not increment playCount within the session window", async () => {
+    it("GET /api/share-links/access/:token/stream/:trackId on an existing session only updates lastStreamedAt", async () => {
         const recentStream = new Date(Date.now() - 5 * 60 * 1000);
         mockShareLinkFindUnique.mockResolvedValueOnce(
             makeShareLink({ resourceType: "track", resourceId: "track-1", lastStreamedAt: recentStream })
@@ -619,14 +682,14 @@ describe("share links routes integration", () => {
 
         expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
         expect(mockShareLinkUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({
+            {
                 where: { id: "share-1" },
-                data: expect.objectContaining({ lastStreamedAt: expect.any(Date) }),
-            })
+                data: { lastStreamedAt: expect.any(Date) },
+            }
         );
     });
 
-    it("GET /api/share-links/access/:token/stream/:trackId increments playCount after session window expires", async () => {
+    it("GET /api/share-links/access/:token/stream/:trackId after the session window still only updates lastStreamedAt", async () => {
         const oldStream = new Date(Date.now() - 2 * 60 * 60 * 1000);
         mockShareLinkFindUnique.mockResolvedValueOnce(
             makeShareLink({ resourceType: "track", resourceId: "track-1", lastStreamedAt: oldStream })
@@ -635,11 +698,11 @@ describe("share links routes integration", () => {
 
         await request(app).get(`/api/share-links/access/${TOKEN}/stream/track-1`);
 
-        expect(mockShareLinkUpdateMany).toHaveBeenCalledWith(
-            expect.objectContaining({
-                data: expect.objectContaining({ playCount: { increment: 1 } }),
-            })
-        );
+        expect(mockShareLinkUpdateMany).not.toHaveBeenCalled();
+        expect(mockShareLinkUpdate).toHaveBeenCalledWith({
+            where: { id: "share-1" },
+            data: { lastStreamedAt: expect.any(Date) },
+        });
     });
 
     it("GET /api/share-links/access/:token/stream/:trackId rejects when maxPlays is reached", async () => {
