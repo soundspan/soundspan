@@ -405,6 +405,14 @@ router.get("/access/:token", async (req, res) => {
             return res.status(404).json({ error: "Share link not found" });
         }
 
+        const resource = await resolveSharedResource(
+            shareLink.resourceType,
+            shareLink.resourceId
+        );
+        if (!resource) {
+            return res.status(404).json({ error: "Share link not found" });
+        }
+
         const sessionWindowMs = 60 * 60 * 1000;
         const now = new Date();
         const windowStart = new Date(now.getTime() - sessionWindowMs);
@@ -435,14 +443,6 @@ router.get("/access/:token", async (req, res) => {
                 where: { id: shareLink.id },
                 data: { lastStreamedAt: now },
             });
-        }
-
-        const resource = await resolveSharedResource(
-            shareLink.resourceType,
-            shareLink.resourceId
-        );
-        if (!resource) {
-            return res.status(404).json({ error: "Share link not found" });
         }
 
         res.json({
@@ -662,14 +662,27 @@ router.get("/access/:token/zip", async (req, res) => {
             res.destroy(err);
         });
 
+        archive.on("warning", (err) => {
+            if (err.code === "ENOENT") {
+                logger.warn("Zip archive: file not found, skipping:", err.message);
+            } else {
+                logger.error("Zip archive warning:", err);
+                res.destroy(err);
+            }
+        });
+
         archive.pipe(res);
 
         for (const track of streamableTracks) {
             const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-            const absolutePath = path.join(config.music.musicPath, normalizedFilePath);
-            const ext = path.extname(absolutePath) || ".mp3";
+            const resolvedPath = safeResolvePath(config.music.musicPath, normalizedFilePath);
+            if (!resolvedPath) {
+                logger.warn(`Zip: skipping track with unsafe path: ${track.id}`);
+                continue;
+            }
+            const ext = path.extname(resolvedPath) || ".mp3";
             const safeName = `${track.artistName} - ${track.title}`.replace(/[/\\?%*:|"<>]/g, "_");
-            archive.file(absolutePath, { name: `${safeName}${ext}` });
+            archive.file(resolvedPath, { name: `${safeName}${ext}` });
         }
 
         await archive.finalize();
