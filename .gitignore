@@ -127,16 +127,8 @@ frontend/test-*.tsx
 # AI Tools & Assistants
 .claude/
 **/.claude/
-!.claude/commands/
-!.claude/
-!.claude/commands/**
-!.claude/acm-broker/
-!.claude/acm-broker/**
-!.claude/hooks/
-!.claude/hooks/**
-!.claude/settings.json
-.claude/settings.local.json
-**/.claude/settings.local.json
+.codex/
+**/.codex/
 .cursor/
 **/.cursor/
 .roo/
@@ -146,9 +138,6 @@ frontend/test-*.tsx
 **/.serena/
 .opencode/
 **/.opencode/
-!.opencode/
-!.opencode/acm-broker/
-!.opencode/acm-broker/**
 .vibe/
 **/.vibe/
 .agent/
@@ -160,7 +149,6 @@ frontend/test-*.tsx
 .acm/context.db-shm
 .acm/context.db-wal
 .claudeignore
-!.claude/acm-broker/CLAUDE.md
 
 # Internal Documentation (public docs are in project root)
 docs/
