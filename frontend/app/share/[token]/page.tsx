@@ -189,6 +189,11 @@ export default function SharePage() {
 		[token],
 	);
 
+	const getZipUrl = useCallback(
+		(): string => `/api/share-links/access/${token}/zip`,
+		[token],
+	);
+
 	const playlistSortedItems = useMemo(() => {
 		if (!data || data.resourceType !== "playlist") {
 			return [] as PlaylistItemResource[];
@@ -356,19 +361,6 @@ export default function SharePage() {
 	const toggleMute = useCallback(() => {
 		setIsMuted((previous) => !previous);
 	}, []);
-
-	const handleDownloadAll = useCallback(() => {
-		for (const [index, track] of trackQueue.entries()) {
-			window.setTimeout(() => {
-				const link = document.createElement("a");
-				link.href = getDownloadUrl(track.id);
-				link.download = `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.mp3`;
-				document.body.appendChild(link);
-				link.click();
-				document.body.removeChild(link);
-			}, index * 500);
-		}
-	}, [getDownloadUrl, trackQueue]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -579,9 +571,9 @@ export default function SharePage() {
 								</div>
 								<div className="flex flex-wrap items-center gap-2">
 									{(data.resourceType === "album" || data.resourceType === "playlist") && (
-										<button type="button" onClick={handleDownloadAll} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">
-											<Download className="h-3.5 w-3.5" />Download All
-										</button>
+					<a href={getZipUrl()} download="soundspan-share.zip" className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">
+						<Download className="h-3.5 w-3.5" />Download All
+					</a>
 									)}
 									{data.resourceType === "track" && (
 										<a href={getDownloadUrl((data.resource as TrackResource).id)} download className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">
