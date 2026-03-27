@@ -4,29 +4,34 @@ All notable changes to soundspan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [Unreleased]
-
-### Fixed
-
-- Frontend unit tests no longer depend on `../backend/node_modules/tsx` — tsx is now a direct frontend devDependency so CI runs are self-contained.
-- Backend `apiEntrypointRuntime` test suite now mocks the `shareLinks` route module, fixing an ESM import failure (`p-queue`) that caused 16 test failures.
-- Admin library-health dismissals now return `404` when the requested record no longer exists, with integration coverage for admin middleware, success, and database-failure paths.
-
-### Changed
-
-- Backend branch test coverage improved from 80 % to ~83 % with new/extended tests across browseImageCache, remoteTrackMetadataResolver, moodBucketService, auth, browse, library, subsonic, simpleDownloadManager, spotify, podcasts, deezer, enrichment, and youtubeMusic routes and services.
+## [1.5.0] - 2026-03-27
 
 ### Added
 
-- Share links API for playlists, albums, and tracks: authenticated users can create/list/revoke tokenized links (`/api/share-links`), and anyone with a valid token can access shared resources through anonymous `/api/share-links/access/:token` with optional expiry and max-play limits.
-- Shared-link pages now support cover-art proxy rendering, local-only playlist filtering, inline audio playback with queue controls, per-track and bulk downloads, and playlist export to JSON/M3U.
-- Admin-only enrichment repair endpoint (`POST /api/enrichment/repair-covers`) that clears stale Cover Art Archive `NOT_FOUND` cache entries for albums missing covers and reports how many albums/cache entries were affected.
-- Full-text search stop-word fallback: queries containing only English stop words (like "the", "a") now automatically fall back to ILIKE matching instead of returning empty results.
-- Health endpoint payloads now include `version`, `uptimeSeconds`, and per-dependency `latencyMs` fields for easier operator diagnostics and Kubernetes troubleshooting.
-- Share-link UI: local tracks now expose a Share action from the shared 3-dot track menu across the app, albums now expose Share in the album header action bar, and both entry points open a reusable modal for generating/copying links.
-- Share-link modal now also lists active links for the current album/track and lets users revoke them inline without leaving the modal.
+- Share links for tracks, albums, and playlists: generate tokenized links from the 3-dot track menu or album header. Links support optional expiry dates and max-play limits. Anyone with the link can listen without an account.
+- Public share pages with a two-panel overlay-player layout — large album art on the left, live queue on the right — matching the authenticated player experience as closely as possible.
+- Share pages auto-load and play the first track immediately on open; the bottom mini-player is always visible.
+- Cover art and track title/artist in the share page left panel update as the queue advances, reflecting the currently playing track rather than static resource metadata.
+- Per-track download buttons and a "Download All" action that streams the entire share as a single ZIP archive (no staggered browser pop-ups).
+- Playlist shares additionally offer JSON and M3U export.
+- Share-link modal lists all active links for the current resource and lets users revoke them inline.
+- Admin enrichment repair endpoint (`POST /api/enrichment/repair-covers`) clears stale Cover Art Archive `NOT_FOUND` cache entries for albums with missing covers.
+- Full-text search stop-word fallback: queries made up entirely of common words (e.g. "the", "a") now fall back to partial matching instead of returning empty results.
+- Health endpoint now includes `version`, `uptimeSeconds`, and per-dependency `latencyMs` for operator diagnostics.
+
+### Changed
+
+- Share page play-count increments once per page load (per hour-window) rather than once per individual track stream, so albums and playlists no longer exhaust `maxPlays` limits N times faster than intended.
+- Backend branch coverage improved from ~80% to ~83% across a broad set of routes and services.
 
 ### Fixed
+
+- ZIP downloads from the share endpoint validate file paths against the music root, preventing path-traversal if a track row contains a malformed path.
+- Share page resource existence is verified before any play-count DB write, so broken or deleted shares no longer silently consume their remaining play budget.
+- Archiver warning events (e.g. missing files) are now handled explicitly — ENOENT files are skipped with a log warning rather than producing a silent partial archive.
+- Frontend unit tests no longer depend on the backend's `node_modules/tsx`; tsx is now a direct frontend devDependency.
+- Backend `apiEntrypointRuntime` test suite now correctly mocks the `shareLinks` module, fixing 16 ESM import failures.
+- Admin library-health dismissals return `404` when the target record no longer exists, with integration test coverage.
 
 ## [1.4.0] - 2026-03-15
 
