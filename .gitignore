@@ -125,6 +125,7 @@ frontend/android/
 frontend/test-*.tsx
 
 # AI Tools & Assistants
+.githooks/
 .claude/
 **/.claude/
 .codex/
