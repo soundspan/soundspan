@@ -57,6 +57,7 @@ import {
 } from "../utils/dateFilters";
 import { shuffleArray } from "../utils/shuffle";
 import { separateArtists } from "../utils/separateArtists";
+import { safeResolvePath } from "../utils/safeResolvePath";
 import {
     applyTrackPreferenceOrderBias,
     applyTrackPreferenceSimilarityBias,
@@ -801,8 +802,8 @@ const getAlbumIdFromNativeCoverPath = (nativePath: string): string | null => {
     return parsed.name || null;
 };
 
-const getNativeCoverCachePath = (nativePath: string): string =>
-    path.join(config.music.transcodeCachePath, "../covers", nativePath);
+const coversBaseDir = (): string =>
+    path.resolve(config.music.transcodeCachePath, "../covers");
 
 const getNativeCoverPathCandidates = (nativePath: string): string[] => {
     const trimmedNativePath = nativePath.replace(/^\/+/, "").trim();
@@ -821,13 +822,14 @@ const getNativeCoverPathCandidates = (nativePath: string): string[] => {
 const resolveNativeCoverCacheHit = (
     nativePath: string
 ): { resolvedNativePath: string; cachePath: string } | null => {
+    const coversDir = coversBaseDir();
     const candidates = getNativeCoverPathCandidates(nativePath);
     for (const candidate of candidates) {
-        const candidateCachePath = getNativeCoverCachePath(candidate);
-        if (fs.existsSync(candidateCachePath)) {
+        const resolved = safeResolvePath(coversDir, candidate);
+        if (resolved && fs.existsSync(resolved)) {
             return {
                 resolvedNativePath: candidate,
-                cachePath: candidateCachePath,
+                cachePath: resolved,
             };
         }
     }
@@ -4034,9 +4036,8 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
 
                 const nativeCacheHit = resolveNativeCoverCacheHit(nativePath);
                 if (!nativeCacheHit) {
-                    const missingCoverCachePath = getNativeCoverCachePath(nativePath);
                     logger.warn(
-                        `[COVER-ART] Native cover not found: ${missingCoverCachePath}, trying Deezer fallback`
+                        `[COVER-ART] Native cover not found: ${nativePath}, trying Deezer fallback`
                     );
                     try {
                         const deezerCover =
@@ -4159,9 +4160,8 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 }
 
                 // Native cover file missing - try to find album and fetch from Deezer
-                const missingCoverCachePath = getNativeCoverCachePath(nativePath);
                 logger.warn(
-                    `[COVER-ART] Native cover not found: ${missingCoverCachePath}, trying Deezer fallback`
+                    `[COVER-ART] Native cover not found: ${nativePath}, trying Deezer fallback`
                 );
 
                 try {

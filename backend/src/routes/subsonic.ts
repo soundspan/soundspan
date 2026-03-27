@@ -31,6 +31,7 @@ import {
     resolveTrackPathWithinRoot,
 } from "../utils/subsonicMedia";
 import { logger } from "../utils/logger";
+import { safeResolvePath } from "../utils/safeResolvePath";
 
 const router = Router();
 const SUBSONIC_TRACE_LOGS = process.env.SUBSONIC_TRACE_LOGS === "true";
@@ -592,16 +593,7 @@ async function maybeResizeCoverArt(
 
 function resolveNativeCoverPath(nativeCoverPath: string): string | null {
     const coverRoot = path.resolve(path.join(config.music.transcodeCachePath, "../covers"));
-    const resolvedPath = path.resolve(path.join(coverRoot, nativeCoverPath));
-
-    if (
-        resolvedPath !== coverRoot &&
-        !resolvedPath.startsWith(`${coverRoot}${path.sep}`)
-    ) {
-        return null;
-    }
-
-    return resolvedPath;
+    return safeResolvePath(coverRoot, nativeCoverPath);
 }
 
 function extractFirstGenreValue(rawGenres: unknown): string | undefined {
