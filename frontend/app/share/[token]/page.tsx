@@ -559,7 +559,7 @@ export default function SharePage() {
 
 					</div>
 
-					<div className="flex flex-col md:h-screen md:w-1/2 md:py-8 md:pl-4 md:pr-8">
+					<div className="flex flex-col px-4 py-4 md:h-screen md:w-1/2 md:px-0 md:py-8 md:pl-4 md:pr-8">
 						<div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b0d12]/95 backdrop-blur-xl">
 							<div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
 								<div className="flex items-center gap-2">
