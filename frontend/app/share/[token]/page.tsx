@@ -510,9 +510,9 @@ export default function SharePage() {
 
 	return (
 		<>
-			<main className="min-h-screen pb-24 bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] text-white">
-				<div className="flex min-h-screen flex-col md:flex-row">
-					<div className="flex flex-col items-center justify-center px-8 py-12 md:w-1/2 md:sticky md:top-0 md:h-screen md:overflow-y-auto md:pl-12 md:pr-6">
+		<main className="h-screen overflow-hidden bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] text-white">
+			<div className="flex h-full flex-col md:flex-row">
+					<div className="flex flex-col items-center justify-center overflow-y-auto px-8 py-12 md:h-full md:w-1/2 md:pl-12 md:pr-6">
 						{data.resourceType === "track" ? (
 							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
 								<Disc3 className="h-3 w-3" />
@@ -569,8 +569,8 @@ export default function SharePage() {
 
 					</div>
 
-					<div className="flex flex-col px-4 py-4 md:h-screen md:w-1/2 md:px-0 md:py-8 md:pl-4 md:pr-8">
-						<div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b0d12]/95 backdrop-blur-xl">
+				<div className="flex flex-col px-4 py-4 md:h-full md:w-1/2 md:px-0 md:py-8 md:pl-4 md:pr-8">
+					<div className="flex h-full flex-col overflow-hidden">
 							<div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
 								<div className="flex items-center gap-2">
 									<ListMusic className="h-4 w-4 text-[#60a5fa]" />
@@ -603,7 +603,7 @@ export default function SharePage() {
 								</div>
 							</div>
 
-							<div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+							<div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 pb-28">
 								{trackQueue.map((track, index) => {
 									const isCurrentTrack = currentTrack?.id === track.id;
 									return (
