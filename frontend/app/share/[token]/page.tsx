@@ -437,6 +437,14 @@ export default function SharePage() {
 		setDuration(0);
 	}, [currentTrack, trackQueue]);
 
+	useEffect(() => {
+		if (trackQueue.length > 0 && currentTrack === null) {
+			const first = trackQueue[0];
+			setCurrentTrack(first);
+			setDuration(first.duration);
+		}
+	}, [trackQueue, currentTrack]);
+
 	if (loading) {
 		return (
 			<main className="flex min-h-screen items-center justify-center bg-[#0a0a0a] px-4 text-white">
@@ -465,7 +473,7 @@ export default function SharePage() {
 		);
 	}
 
-	const leftPanelCoverUrl: string | null = (() => {
+	const leftPanelCoverUrl: string | null = currentTrack?.coverUrl ?? (() => {
 		if (data.resourceType === "album") {
 			return getCoverUrl(
 				(data.resource as AlbumResource).coverUrl ||
@@ -482,25 +490,27 @@ export default function SharePage() {
 		return firstTrack?.coverUrl ?? null;
 	})();
 
-	const leftPanelTitle =
+	const leftPanelTitle = currentTrack?.title ?? (
 		data.resourceType === "album"
 			? (data.resource as AlbumResource).title
 			: data.resourceType === "track"
 				? (data.resource as TrackResource).title
-				: (data.resource as PlaylistResource).name;
+				: (data.resource as PlaylistResource).name
+	);
 
-	const leftPanelSubtitle =
+	const leftPanelSubtitle = currentTrack?.artist ?? (
 		data.resourceType === "album"
 			? (data.resource as AlbumResource).artist.name
 			: data.resourceType === "track"
 				? (data.resource as TrackResource).album.artist.name
-				: `by ${(data.resource as PlaylistResource).user?.username ?? "Unknown user"}`;
+				: `by ${(data.resource as PlaylistResource).user?.username ?? "Unknown user"}`
+	);
 
 	const progressPercent = duration > 0 ? Math.min(100, (progress / duration) * 100) : 0;
 
 	return (
 		<>
-			<main className={cn("min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] text-white", currentTrack ? "pb-24" : undefined)}>
+			<main className="min-h-screen pb-24 bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] text-white">
 				<div className="flex min-h-screen flex-col md:flex-row">
 					<div className="flex flex-col items-center justify-center px-8 py-12 md:w-1/2 md:sticky md:top-0 md:h-screen md:overflow-y-auto md:pl-12 md:pr-6">
 						{data.resourceType === "track" ? (
@@ -539,10 +549,10 @@ export default function SharePage() {
 						<p className="mt-1 text-base text-gray-400 text-center truncate max-w-full">
 							{leftPanelSubtitle}
 						</p>
-						{data.resourceType === "album" && (
+						{!currentTrack && data.resourceType === "album" && (
 							<p className="mt-1 text-sm text-gray-500 text-center">{trackQueue.length} tracks</p>
 						)}
-						{data.resourceType === "playlist" && (
+						{!currentTrack && data.resourceType === "playlist" && (
 							<>
 								<p className="mt-1 text-sm text-gray-500 text-center">{trackQueue.length} items</p>
 								<p className="mt-0.5 text-sm text-gray-500 text-center">
@@ -550,7 +560,7 @@ export default function SharePage() {
 								</p>
 							</>
 						)}
-						{data.resourceType === "track" && (
+						{!currentTrack && data.resourceType === "track" && (
 							<p className="mt-0.5 text-sm text-gray-500 text-center">
 								{(data.resource as TrackResource).album.title}
 							</p>
@@ -602,7 +612,7 @@ export default function SharePage() {
 											className={cn(
 												"mb-1.5 flex items-center gap-2 rounded-md px-2 py-2 transition-colors cursor-pointer",
 												isCurrentTrack
-													? "border border-[#60a5fa]/35 bg-[#60a5fa]/10"
+													? "bg-[#60a5fa]/10"
 													: "hover:bg-white/[0.06]",
 											)}
 										>
@@ -625,8 +635,8 @@ export default function SharePage() {
 													<p className={cn("min-w-0 truncate text-sm", isCurrentTrack ? "text-[#60a5fa]" : "text-white")}>{track.title}</p>
 													<div className="mt-0.5 flex min-w-0 items-center gap-1.5">
 														<p className="min-w-0 truncate text-xs text-gray-400">{track.artist}</p>
-														{isCurrentTrack && isPlaying && (
-															<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#60a5fa]/40 bg-[#60a5fa]/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
+														{isCurrentTrack && (
+															<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#60a5fa]/40 bg-[#60a5fa]/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
 																<span className="inline-flex items-end gap-0.5">
 																	<span className="h-2 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.2s]" />
 																	<span className="h-2.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa]" />
