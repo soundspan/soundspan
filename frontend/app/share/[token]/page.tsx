@@ -2,7 +2,6 @@
 
 import {
 	AlertCircle,
-	Clock,
 	Disc3,
 	Download,
 	FileJson,
@@ -486,243 +485,269 @@ export default function SharePage() {
 		);
 	}
 
-	const renderCover = (cover: string | null) => (
-		<div className="h-40 w-40 shrink-0 overflow-hidden rounded-xl border border-[#262626] bg-[#0a0a0a]">
-			{cover ? (
-				<img src={cover} alt="Cover art" className="h-full w-full object-cover" />
-			) : (
-				<div className="flex h-full w-full items-center justify-center text-gray-500">
-					<Music className="h-14 w-14" />
-				</div>
-			)}
-		</div>
-	);
+	const leftPanelCoverUrl: string | null = (() => {
+		if (data.resourceType === "album") {
+			return getCoverUrl(
+				(data.resource as AlbumResource).coverUrl ||
+					(data.resource as AlbumResource).coverArt,
+			);
+		}
+		if (data.resourceType === "track") {
+			return getCoverUrl(
+				(data.resource as TrackResource).album.coverUrl ||
+					(data.resource as TrackResource).album.coverArt,
+			);
+		}
+		const firstTrack = trackQueue[0];
+		return firstTrack?.coverUrl ?? null;
+	})();
 
-	const renderTrackRow = (
-		track: PlayableTrack,
-		positionLabel: string,
-		index: number,
-		total: number,
-		showArtist: boolean,
-	) => {
-		const isActive = currentTrack?.id === track.id;
-		return (
-			<button
-				type="button"
-				key={track.id}
-				onClick={() => playTrack(track)}
-				className={cn(
-					"group relative grid w-full grid-cols-[40px_1fr_auto_auto] items-center gap-3 px-4 py-3 text-left transition-colors",
-					"cursor-pointer hover:bg-white/5",
-					index !== total - 1 && "border-b border-[#262626]",
-					isActive && "bg-white/5 border-l-2 border-l-[#3b82f6] pl-[14px]",
-				)}
-			>
-				<span className="text-sm tabular-nums text-gray-500">
-					{isActive ? <Play className="h-3.5 w-3.5 text-[#3b82f6]" /> : positionLabel}
-				</span>
-				<div className="min-w-0">
-					<p className="truncate text-sm text-gray-100">{track.title}</p>
-					{showArtist ? (
-						<p className="truncate text-xs text-gray-500">{track.artist}</p>
-					) : null}
-				</div>
-				<span className="text-sm tabular-nums text-gray-400">
-					{formatTime(track.duration)}
-				</span>
-				<a
-					href={getDownloadUrl(track.id)}
-					download
-					className="p-1 text-gray-500 transition-colors hover:text-white"
-					onClick={(event) => event.stopPropagation()}
-					title="Download track"
-				>
-					<Download className="h-4 w-4" />
-				</a>
-			</button>
-		);
-	};
+	const leftPanelTitle =
+		data.resourceType === "album"
+			? (data.resource as AlbumResource).title
+			: data.resourceType === "track"
+				? (data.resource as TrackResource).title
+				: (data.resource as PlaylistResource).name;
 
-	const renderAlbum = (album: AlbumResource) => {
-		const cover = getCoverUrl(album.coverUrl || album.coverArt);
-		return (
-			<section className="space-y-6">
-				<header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-					<div className="flex flex-col gap-5 sm:flex-row sm:items-end">
-						{renderCover(cover)}
-						<div>
-							<p className="text-xs uppercase tracking-wide text-[#3b82f6]">
-								Shared album
-							</p>
-							<h1 className="mt-2 text-3xl font-bold leading-tight">
-								{album.title}
-							</h1>
-							<p className="mt-2 text-gray-300">{album.artist.name}</p>
-							<p className="mt-2 text-sm text-gray-500">
-								{trackQueue.length} tracks
-							</p>
-						</div>
-					</div>
-					<div className="flex flex-wrap items-center gap-2">
-						<button
-							type="button"
-							onClick={handleDownloadAll}
-							className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-						>
-							<Download className="h-4 w-4" />
-							Download All
-						</button>
-					</div>
-				</header>
-				<div className="overflow-hidden rounded-xl border border-[#262626]">
-					{trackQueue.map((track, index) =>
-						renderTrackRow(track, String(album.tracks[index]?.trackNo ?? index + 1), index, trackQueue.length, false),
-					)}
-				</div>
-			</section>
-		);
-	};
-
-	const renderTrack = (track: TrackResource) => {
-		const playable = trackQueue[0] ?? null;
-		const cover = getCoverUrl(track.album.coverUrl || track.album.coverArt);
-		return (
-			<section className="space-y-6">
-				<header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-					<div className="flex flex-col gap-5 sm:flex-row sm:items-end">
-						{renderCover(cover)}
-						<div>
-							<p className="text-xs uppercase tracking-wide text-[#3b82f6]">
-								Shared track
-							</p>
-							<h1 className="mt-2 text-3xl font-bold leading-tight">{track.title}</h1>
-							<p className="mt-2 text-gray-300">{track.album.artist.name}</p>
-							<p className="mt-1 text-sm text-gray-500">{track.album.title}</p>
-							<div className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#262626] px-2.5 py-1 text-sm text-gray-300">
-								<Clock className="h-4 w-4 text-[#3b82f6]" />
-								{formatTime(track.duration)}
-							</div>
-						</div>
-					</div>
-					<div className="flex flex-wrap items-center gap-2">
-						{playable ? (
-							<button
-								type="button"
-								onClick={() => playTrack(playable)}
-								className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-							>
-								{currentTrack?.id === playable.id && isPlaying ? (
-									<Pause className="h-4 w-4" />
-								) : (
-									<Play className="h-4 w-4" />
-								)}
-								{currentTrack?.id === playable.id && isPlaying ? "Pause" : "Play"}
-							</button>
-						) : null}
-						<a
-							href={getDownloadUrl(track.id)}
-							download
-							className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-						>
-							<Download className="h-4 w-4" />
-							Download
-						</a>
-					</div>
-				</header>
-			</section>
-		);
-	};
-
-	const renderPlaylist = (playlist: PlaylistResource) => {
-		const exportName = sanitizeFilename(playlist.name);
-		return (
-			<section className="space-y-6">
-				<header className="space-y-4">
-					<div className="inline-flex items-center gap-2 rounded-md border border-[#262626] px-2.5 py-1 text-xs uppercase tracking-wide text-[#3b82f6]">
-						<ListMusic className="h-3.5 w-3.5" />
-						Shared playlist
-					</div>
-					<h1 className="text-3xl font-bold leading-tight">{playlist.name}</h1>
-					<p className="text-gray-300">by {playlist.user?.username || "Unknown user"}</p>
-					<p className="text-sm text-gray-500">
-						{trackQueue.length} items
-					</p>
-					<div className="flex flex-wrap items-center gap-2">
-						<button
-							type="button"
-							onClick={handleDownloadAll}
-							className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-						>
-							<Download className="h-4 w-4" />
-							Download All
-						</button>
-						<button
-							type="button"
-							onClick={() =>
-								downloadBlob(
-									buildJsonExport(playlist.name, trackQueue),
-									`${exportName}.json`,
-									"application/json",
-								)
-							}
-							className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-						>
-							<FileJson className="h-4 w-4" />
-							Export JSON
-						</button>
-						<button
-							type="button"
-							onClick={() =>
-								downloadBlob(
-									buildM3uExport(playlist.name, trackQueue),
-									`${exportName}.m3u`,
-									"audio/x-mpegurl",
-								)
-							}
-							className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-						>
-							<FileText className="h-4 w-4" />
-							Export M3U
-						</button>
-					</div>
-				</header>
-				<div className="overflow-hidden rounded-xl border border-[#262626]">
-					{playlistFilteredItems.map((_, index) => {
-						const track = trackQueue[index];
-						if (!track) {
-							return null;
-						}
-						return renderTrackRow(track, String(index + 1), index, trackQueue.length, true);
-					})}
-				</div>
-			</section>
-		);
-	};
+	const leftPanelSubtitle =
+		data.resourceType === "album"
+			? (data.resource as AlbumResource).artist.name
+			: data.resourceType === "track"
+				? (data.resource as TrackResource).album.artist.name
+				: `by ${(data.resource as PlaylistResource).user?.username ?? "Unknown user"}`;
 
 	const progressPercent = duration > 0 ? Math.min(100, (progress / duration) * 100) : 0;
 
 	return (
 		<>
-			<main
-				className={cn(
-					"min-h-screen bg-[#0a0a0a] px-4 py-10 text-white",
-					currentTrack ? "pb-24" : undefined,
-				)}
-			>
-				<div className="mx-auto w-full max-w-4xl rounded-xl border border-white/10 bg-[#111111]/60 p-6 sm:p-8">
-					{data.resourceType === "album" && renderAlbum(data.resource as AlbumResource)}
-					{data.resourceType === "track" && (
-						<div className="space-y-4">
-							<div className="inline-flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
-								<Disc3 className="h-3.5 w-3.5 text-[#3b82f6]" />
-								Track details
+			<main className={cn("min-h-screen bg-gradient-to-b from-[#1a1a2e] via-[#121218] to-[#000000] text-white", currentTrack ? "pb-24" : undefined)}>
+				<div className="flex min-h-screen flex-col md:flex-row">
+					<div className="flex flex-col items-center justify-center px-8 py-12 md:w-1/2 md:sticky md:top-0 md:h-screen md:overflow-y-auto">
+						{data.resourceType === "track" ? (
+							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
+								<Disc3 className="h-3 w-3" />
+								Shared Track
+							</span>
+						) : data.resourceType === "album" ? (
+							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
+								<Disc3 className="h-3 w-3" />
+								Shared Album
+							</span>
+						) : (
+							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
+								<ListMusic className="h-3 w-3" />
+								Shared Playlist
+							</span>
+						)}
+
+						<div className="relative w-full max-w-xs md:max-w-sm mx-auto mb-6">
+							<div className="absolute inset-0 rounded-2xl blur-2xl opacity-50 bg-gradient-to-br from-[#60a5fa]/20 via-transparent to-[#3b82f6]/20" />
+							<div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] shadow-2xl">
+								{leftPanelCoverUrl ? (
+									<img src={leftPanelCoverUrl} alt="Cover art" className="h-full w-full object-cover" />
+								) : (
+									<div className="flex h-full w-full items-center justify-center">
+										<Music className="h-24 w-24 text-gray-600" />
+									</div>
+								)}
 							</div>
-							{renderTrack(data.resource as TrackResource)}
 						</div>
-					)}
-					{data.resourceType === "playlist" &&
-						renderPlaylist(data.resource as PlaylistResource)}
-					<p className="mt-10 text-center text-xs text-gray-600">soundspan™</p>
+
+						<h1 className="text-xl font-bold text-white text-center truncate max-w-full">
+							{leftPanelTitle}
+						</h1>
+						<p className="mt-1 text-base text-gray-400 text-center truncate max-w-full">
+							{leftPanelSubtitle}
+						</p>
+						{data.resourceType === "album" && (
+							<p className="mt-1 text-sm text-gray-500 text-center">{trackQueue.length} tracks</p>
+						)}
+						{data.resourceType === "playlist" && (
+							<>
+								<p className="mt-1 text-sm text-gray-500 text-center">{trackQueue.length} items</p>
+								<p className="mt-0.5 text-sm text-gray-500 text-center">
+									by {(data.resource as PlaylistResource).user?.username ?? "Unknown user"}
+								</p>
+							</>
+						)}
+						{data.resourceType === "track" && (
+							<p className="mt-0.5 text-sm text-gray-500 text-center">
+								{(data.resource as TrackResource).album.title}
+							</p>
+						)}
+
+						<div className="mt-6 w-full max-w-sm mx-auto">
+							<div
+								className="relative h-1 cursor-pointer rounded-full bg-white/20 overflow-hidden"
+								onClick={handleSeek}
+								onKeyDown={(event) => {
+									const audio = audioRef.current;
+									if (!audio || !duration) {
+										return;
+									}
+									if (event.key === "ArrowLeft") {
+										event.preventDefault();
+										const seekTime = Math.max(0, audio.currentTime - 5);
+										audio.currentTime = seekTime;
+										setProgress(seekTime);
+									}
+									if (event.key === "ArrowRight") {
+										event.preventDefault();
+										const seekTime = Math.min(duration, audio.currentTime + 5);
+										audio.currentTime = seekTime;
+										setProgress(seekTime);
+									}
+								}}
+								role="slider"
+								aria-label="Playback progress"
+								aria-valuemin={0}
+								aria-valuemax={duration || currentTrack?.duration || 0}
+								aria-valuenow={progress}
+								aria-valuetext={`${formatTime(progress)} of ${formatTime(duration || currentTrack?.duration || 0)}`}
+								tabIndex={0}
+							>
+								<div
+									className="h-full bg-[#60a5fa] transition-none"
+									style={{ width: `${progressPercent}%` }}
+								/>
+							</div>
+							<div className="mt-2 flex justify-between text-xs tabular-nums text-gray-500">
+								<span>{formatTime(progress)}</span>
+								<span>{formatTime(duration || currentTrack?.duration || 0)}</span>
+							</div>
+						</div>
+
+						<div className="mt-4 flex items-center justify-center gap-6">
+							<button
+								type="button"
+								onClick={handlePrev}
+								disabled={!hasPrev && progress <= 3}
+								className="text-white/70 transition-all hover:scale-110 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
+								title="Previous"
+							>
+								<SkipBack className="h-7 w-7" />
+							</button>
+							<button
+								type="button"
+								onClick={currentTrack ? handlePlayPause : () => trackQueue[0] && playTrack(trackQueue[0])}
+								disabled={!currentTrack && !trackQueue[0]}
+								className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-xl shadow-white/20 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
+								title={isPlaying ? "Pause" : "Play"}
+							>
+								{isPlaying ? <Pause className="h-7 w-7" /> : <Play className="ml-1 h-7 w-7" />}
+							</button>
+							<button
+								type="button"
+								onClick={handleNext}
+								disabled={!hasNext}
+								className="text-white/70 transition-all hover:scale-110 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
+								title="Next"
+							>
+								<SkipForward className="h-7 w-7" />
+							</button>
+						</div>
+					</div>
+
+					<div className="flex flex-col border-t border-white/[0.08] md:h-screen md:w-1/2 md:border-l md:border-t-0">
+						<div className="flex h-full flex-col bg-[#0b0d12]/60 backdrop-blur-xl">
+							<div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
+								<div className="flex items-center gap-2">
+									<ListMusic className="h-4 w-4 text-[#60a5fa]" />
+									<h2 className="text-sm font-semibold text-white">Up Next</h2>
+									<span className="text-xs text-gray-500">
+										{trackQueue.length} {data.resourceType === "playlist" ? "items" : "tracks"}
+									</span>
+								</div>
+								<div className="flex flex-wrap items-center gap-2">
+									{(data.resourceType === "album" || data.resourceType === "playlist") && (
+										<button type="button" onClick={handleDownloadAll} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">
+											<Download className="h-3.5 w-3.5" />Download All
+										</button>
+									)}
+									{data.resourceType === "track" && (
+										<a href={getDownloadUrl((data.resource as TrackResource).id)} download className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">
+											<Download className="h-3.5 w-3.5" />Download
+										</a>
+									)}
+									{data.resourceType === "playlist" && (
+										<>
+											<button type="button" onClick={() => downloadBlob(buildJsonExport((data.resource as PlaylistResource).name, trackQueue), `${sanitizeFilename((data.resource as PlaylistResource).name)}.json`, "application/json")} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">
+												<FileJson className="h-3.5 w-3.5" />JSON
+											</button>
+											<button type="button" onClick={() => downloadBlob(buildM3uExport((data.resource as PlaylistResource).name, trackQueue), `${sanitizeFilename((data.resource as PlaylistResource).name)}.m3u`, "audio/x-mpegurl")} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">
+												<FileText className="h-3.5 w-3.5" />M3U
+											</button>
+										</>
+									)}
+								</div>
+							</div>
+
+							<div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+								{trackQueue.map((track, index) => {
+									const isCurrentTrack = currentTrack?.id === track.id;
+									return (
+										<div
+											key={track.id}
+											className={cn(
+												"mb-1.5 flex items-center gap-2 rounded-md px-2 py-2 transition-colors cursor-pointer",
+												isCurrentTrack
+													? "border border-[#60a5fa]/35 bg-[#60a5fa]/10"
+													: "hover:bg-white/[0.06]",
+											)}
+										>
+											<button type="button" onClick={() => playTrack(track)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+												<span className={cn("w-5 flex-shrink-0 text-center text-[11px] tabular-nums", isCurrentTrack ? "text-[#60a5fa]" : "text-gray-500")}>
+													{index + 1}
+												</span>
+
+												<div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-[#1a1a1a]">
+													{track.coverUrl ? (
+														<img src={track.coverUrl} alt={track.title} className="h-full w-full object-cover" />
+													) : (
+														<div className="flex h-full w-full items-center justify-center">
+															<Music className="h-4 w-4 text-gray-600" />
+														</div>
+													)}
+												</div>
+
+												<div className="min-w-0 flex-1">
+													<p className={cn("min-w-0 truncate text-sm", isCurrentTrack ? "text-[#60a5fa]" : "text-white")}>{track.title}</p>
+													<div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+														<p className="min-w-0 truncate text-xs text-gray-400">{track.artist}</p>
+														{isCurrentTrack && isPlaying && (
+															<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#60a5fa]/40 bg-[#60a5fa]/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
+																<span className="inline-flex items-end gap-0.5">
+																	<span className="h-2 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.2s]" />
+																	<span className="h-2.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa]" />
+																	<span className="h-1.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.35s]" />
+																</span>
+																Playing
+															</span>
+														)}
+													</div>
+												</div>
+
+												<span className={cn("text-[11px] tabular-nums", isCurrentTrack ? "text-[#60a5fa]" : "text-gray-500")}>
+													{formatTime(track.duration)}
+												</span>
+											</button>
+
+											<a
+												href={getDownloadUrl(track.id)}
+												download
+												className="ml-1 flex-shrink-0 p-1 text-gray-500 transition-colors hover:text-white"
+												onClick={(e) => e.stopPropagation()}
+												title="Download track"
+											>
+												<Download className="h-3.5 w-3.5" />
+											</a>
+										</div>
+									);
+								})}
+							</div>
+							<p className="flex-shrink-0 py-3 text-center text-xs text-gray-700">soundspan™</p>
+							</div>
+					</div>
 				</div>
 			</main>
 
@@ -775,7 +800,7 @@ export default function SharePage() {
 							</div>
 						</div>
 
-						<div className="flex items-center gap-6" role="group" aria-label="Playback controls">
+						<div className="flex items-center gap-6">
 							<button
 								type="button"
 								onClick={handlePrev}
@@ -832,12 +857,13 @@ export default function SharePage() {
 									)}
 								</button>
 
-								<div
-									className={cn(
-										"absolute bottom-full left-1/2 mb-2 -translate-x-1/2 overflow-hidden rounded-lg border border-white/10 bg-[#1a1a1a] px-1.5 py-3 shadow-xl transition-all duration-200",
-										showVolumePopup ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0",
-									)}
-								>
+						<div
+								ref={volumePopupRef}
+								className={cn(
+									"absolute bottom-full left-1/2 mb-2 -translate-x-1/2 overflow-hidden rounded-lg border border-white/10 bg-[#1a1a1a] px-1.5 py-3 shadow-xl transition-all duration-200",
+									showVolumePopup ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0",
+								)}
+							>
 									<div className="flex h-28 flex-col items-center gap-3">
 										<div className="relative flex h-full w-3 items-center justify-center overflow-hidden">
 											<input
