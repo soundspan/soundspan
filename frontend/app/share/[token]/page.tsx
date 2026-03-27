@@ -21,6 +21,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/utils/cn";
 import { formatTime } from "@/utils/formatTime";
+import { api } from "@/lib/api";
 
 interface AlbumTrackResource {
 	id: string;
@@ -83,8 +84,6 @@ interface PlaylistItemResource {
 			};
 		};
 	} | null;
-	trackTidal: unknown | null;
-	trackYtMusic: unknown | null;
 }
 
 interface PlaylistResource {
@@ -342,12 +341,30 @@ export default function SharePage() {
 
 	const handleVolumeChange = useCallback(
 		(event: React.ChangeEvent<HTMLInputElement>) => {
-			const nextVolume = Number(event.target.value);
+			const nextVolume = Number(event.target.value) / 100;
 			setVolume(nextVolume);
 			setIsMuted(nextVolume === 0);
 		},
 		[],
 	);
+
+	const [showVolumePopup, setShowVolumePopup] = useState(false);
+	const volumePopupRef = useRef<HTMLDivElement>(null);
+	const volumeHoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	const handleVolumeMouseEnter = useCallback(() => {
+		if (volumeHoverTimeoutRef.current) {
+			clearTimeout(volumeHoverTimeoutRef.current);
+			volumeHoverTimeoutRef.current = null;
+		}
+		setShowVolumePopup(true);
+	}, []);
+
+	const handleVolumeMouseLeave = useCallback(() => {
+		volumeHoverTimeoutRef.current = setTimeout(() => {
+			setShowVolumePopup(false);
+		}, 300);
+	}, []);
 
 	const toggleMute = useCallback(() => {
 		setIsMuted((previous) => !previous);
@@ -381,11 +398,7 @@ export default function SharePage() {
 			try {
 				setLoading(true);
 				setError(false);
-				const response = await fetch(`/api/share-links/access/${token}`);
-				if (!response.ok) {
-					throw new Error("Not found");
-				}
-				const json = (await response.json()) as ShareResponse;
+				const json = (await api.getSharedResource(token)) as ShareResponse;
 				if (!cancelled) {
 					setData(json);
 				}
@@ -693,7 +706,7 @@ export default function SharePage() {
 			<main
 				className={cn(
 					"min-h-screen bg-[#0a0a0a] px-4 py-10 text-white",
-					currentTrack ? "pb-28" : undefined,
+					currentTrack ? "pb-24" : undefined,
 				)}
 			>
 				<div className="mx-auto w-full max-w-4xl rounded-xl border border-white/10 bg-[#111111]/60 p-6 sm:p-8">
@@ -714,121 +727,141 @@ export default function SharePage() {
 			</main>
 
 			{currentTrack ? (
-				<div className="fixed inset-x-0 bottom-0 z-50 border-t border-[#262626] bg-[#111111]">
-					<div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-3">
-						<div className="flex min-w-0 flex-1 items-center gap-3">
-							<div className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-[#262626] bg-[#0a0a0a]">
-								{currentTrack.coverUrl ? (
-									<img
-										src={currentTrack.coverUrl}
-										alt={currentTrack.title}
-										className="h-full w-full object-cover"
-									/>
-								) : (
-									<div className="flex h-full w-full items-center justify-center text-gray-500">
-										<Music className="h-5 w-5" />
-									</div>
-								)}
+				<div className="fixed inset-x-0 bottom-0 z-50 h-24 border-t border-white/[0.08] bg-black">
+					<div className="absolute inset-x-0 top-0 h-1 bg-white/20">
+						<div
+							className="h-full bg-white/70 transition-none"
+							style={{ width: `${progressPercent}%` }}
+						/>
+						<input
+							type="range"
+							min={0}
+							max={Math.max(duration, currentTrack.duration) || 100}
+							step={0.1}
+							value={progress}
+							onChange={(event) => {
+								const audio = audioRef.current;
+								if (!audio) return;
+								const seekTime = Number(event.target.value);
+								audio.currentTime = seekTime;
+								setProgress(seekTime);
+							}}
+							aria-label="Playback progress"
+							className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+						/>
+					</div>
+
+					<div className="pointer-events-none absolute left-0 right-0 top-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+
+					<div className="grid h-full grid-cols-[1fr_auto_1fr] items-center px-6 pt-1">
+
+						<div className="flex min-w-0 items-center gap-3 mr-4">
+							<div className="relative h-14 w-14 shrink-0">
+								<div className="relative h-full w-full overflow-hidden rounded-lg bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] shadow-lg flex items-center justify-center">
+									{currentTrack.coverUrl ? (
+										<img
+											src={currentTrack.coverUrl}
+											alt={currentTrack.title}
+											className="h-full w-full object-cover"
+										/>
+									) : (
+										<Music className="h-6 w-6 text-gray-500" />
+									)}
+								</div>
 							</div>
-							<div className="min-w-0">
-								<p className="truncate text-sm font-medium text-white">{currentTrack.title}</p>
+							<div className="min-w-0 flex-1">
+								<p className="truncate text-sm font-semibold text-white">{currentTrack.title}</p>
 								<p className="truncate text-xs text-gray-400">{currentTrack.artist}</p>
 							</div>
 						</div>
 
-						<div className="flex shrink-0 items-center gap-2">
+						<div className="flex items-center gap-6" role="group" aria-label="Playback controls">
 							<button
 								type="button"
 								onClick={handlePrev}
 								disabled={!hasPrev && progress <= 3}
-								className="rounded-md p-2 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+								className="text-gray-400 transition-all duration-200 hover:scale-110 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
 								title="Previous"
 							>
-								<SkipBack className="h-4 w-4" />
+								<SkipBack className="h-6 w-6" />
 							</button>
 							<button
 								type="button"
 								onClick={handlePlayPause}
-								className="rounded-full bg-white p-2 text-black transition-opacity hover:opacity-90"
+								className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-black shadow-lg shadow-white/20 transition-all duration-200 hover:scale-110 hover:shadow-white/30"
 								title={isPlaying ? "Pause" : "Play"}
 							>
 								{isPlaying ? (
-									<Pause className="h-5 w-5" />
+									<Pause className="h-6 w-6" />
 								) : (
-									<Play className="h-5 w-5" />
+									<Play className="h-6 w-6 ml-0.5" />
 								)}
 							</button>
 							<button
 								type="button"
 								onClick={handleNext}
 								disabled={!hasNext}
-								className="rounded-md p-2 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+								className="text-gray-400 transition-all duration-200 hover:scale-110 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
 								title="Next"
 							>
-								<SkipForward className="h-4 w-4" />
+								<SkipForward className="h-6 w-6" />
 							</button>
 						</div>
 
-						<div className="flex min-w-0 flex-[1.4] items-center gap-3">
-						<div
-							role="slider"
-							aria-label="Playback progress"
-							tabIndex={0}
-							aria-valuemin={0}
-							aria-valuemax={Math.max(duration, currentTrack.duration)}
-							aria-valuenow={progress}
-							onClick={handleSeek}
-							onKeyDown={(event) => {
-								const audio = audioRef.current;
-								if (!audio) {
-									return;
-								}
-								if (event.key === "ArrowRight") {
-									event.preventDefault();
-									audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 5);
-									setProgress(audio.currentTime);
-								}
-								if (event.key === "ArrowLeft") {
-									event.preventDefault();
-									audio.currentTime = Math.max(0, audio.currentTime - 5);
-									setProgress(audio.currentTime);
-								}
-							}}
-							className="h-2 w-full cursor-pointer rounded-full bg-white/20"
-						>
-								<div
-									className="h-full rounded-full bg-[#3b82f6]"
-									style={{ width: `${progressPercent}%` }}
-								/>
-							</div>
-							<span className="whitespace-nowrap text-xs tabular-nums text-gray-400">
-								{formatTime(progress)} / {formatTime(duration || currentTrack.duration)}
+						<div className="flex items-center justify-end ml-4 gap-4">
+							<span className="whitespace-nowrap text-sm font-medium tabular-nums text-gray-300">
+								{formatTime(progress)}{" / "}{formatTime(duration || currentTrack.duration)}
 							</span>
-						</div>
 
-						<div className="flex shrink-0 items-center gap-2">
-							<button
-								type="button"
-								onClick={toggleMute}
-								className="rounded-md p-1.5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-								title={isMuted ? "Unmute" : "Mute"}
+							<div
+								className="relative z-10 flex items-center justify-center"
+								onMouseEnter={handleVolumeMouseEnter}
+								onMouseLeave={handleVolumeMouseLeave}
 							>
-								{isMuted || volume === 0 ? (
-									<VolumeX className="h-4 w-4" />
-								) : (
-									<Volume2 className="h-4 w-4" />
-								)}
-							</button>
-							<input
-								type="range"
-								min="0"
-								max="1"
-								step="0.01"
-								value={isMuted ? 0 : volume}
-								onChange={handleVolumeChange}
-								className="h-1.5 w-24 cursor-pointer accent-[#3b82f6]"
-								aria-label="Volume"
-							/>
+								<button
+									type="button"
+									onClick={toggleMute}
+									className="flex h-8 w-8 items-center justify-center text-gray-400 transition-all duration-200 hover:scale-110 hover:text-white"
+									aria-label={isMuted || volume === 0 ? "Unmute" : "Mute"}
+									title={isMuted || volume === 0 ? "Unmute" : "Mute"}
+								>
+									{isMuted || volume === 0 ? (
+										<VolumeX className="h-[18px] w-[18px]" />
+									) : (
+										<Volume2 className="h-[18px] w-[18px]" />
+									)}
+								</button>
+
+								<div
+									className={cn(
+										"absolute bottom-full left-1/2 mb-2 -translate-x-1/2 overflow-hidden rounded-lg border border-white/10 bg-[#1a1a1a] px-1.5 py-3 shadow-xl transition-all duration-200",
+										showVolumePopup ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0",
+									)}
+								>
+									<div className="flex h-28 flex-col items-center gap-3">
+										<div className="relative flex h-full w-3 items-center justify-center overflow-hidden">
+											<input
+												type="range"
+												min="0"
+												max="100"
+												value={isMuted ? 0 : Math.round(volume * 100)}
+												onChange={handleVolumeChange}
+												aria-label="Volume"
+												aria-valuemin={0}
+												aria-valuemax={100}
+												aria-valuenow={Math.round(volume * 100)}
+												style={{
+													background: `linear-gradient(to right, #fff ${isMuted ? 0 : volume * 100}%, rgba(255,255,255,0.15) ${isMuted ? 0 : volume * 100}%)`,
+												}}
+												className="absolute h-1 w-24 -rotate-90 cursor-pointer appearance-none rounded-full [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-white/30"
+											/>
+										</div>
+										<span className="mt-0.5 text-[10px] tabular-nums text-gray-400">
+											{Math.round(isMuted ? 0 : volume * 100)}
+										</span>
+									</div>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>

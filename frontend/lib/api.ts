@@ -1522,6 +1522,10 @@ class ApiClient {
         });
     }
 
+    async getSharedResource(token: string) {
+        return this.request<unknown>(`/share-links/access/${token}`);
+    }
+
     async addTrackToPlaylist(playlistId: string, trackRef: AddToPlaylistRef) {
         return this.request<ApiData>(`/playlists/${playlistId}/items`, {
             method: "POST",
