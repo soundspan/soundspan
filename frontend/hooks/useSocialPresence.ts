@@ -8,7 +8,12 @@ import { socialPresenceSocket } from "@/lib/social-presence-socket";
 import {
     resolveAdaptivePollingInterval,
     resolvePollingEnabled,
+    resolveVisibilityGatedPollingInterval,
 } from "@/hooks/pollingCadence";
+import {
+    useDocumentVisible,
+    useRefetchOnVisible,
+} from "@/hooks/useDocumentVisibility";
 
 const SOCIAL_POLL_ACTIVE_MS = 10_000;
 const SOCIAL_POLL_IDLE_MS = 30_000;
@@ -100,6 +105,7 @@ function useSocialPresencePushInvalidation(
  */
 export function useSocialPresence(options: SocialPresenceOptions = {}) {
     const enabled = resolvePollingEnabled(options.enabled);
+    const isDocumentVisible = useDocumentVisible();
     useSocialPresencePushInvalidation(enabled, SOCIAL_ONLINE_QUERY_KEY);
     const query = useQuery<SocialOnlineResponse>({
         queryKey: SOCIAL_ONLINE_QUERY_KEY,
@@ -110,14 +116,18 @@ export function useSocialPresence(options: SocialPresenceOptions = {}) {
         refetchOnReconnect: false,
         refetchInterval: (state) => {
             const users = state.state.data?.users;
-            return resolveAdaptivePollingInterval({
-                enabled,
-                hasActiveItems: (users?.length ?? 0) > 0,
-                activeIntervalMs: SOCIAL_POLL_ACTIVE_MS,
-                idleIntervalMs: SOCIAL_POLL_IDLE_MS,
-            });
+            return resolveVisibilityGatedPollingInterval(
+                resolveAdaptivePollingInterval({
+                    enabled,
+                    hasActiveItems: (users?.length ?? 0) > 0,
+                    activeIntervalMs: SOCIAL_POLL_ACTIVE_MS,
+                    idleIntervalMs: SOCIAL_POLL_IDLE_MS,
+                }),
+                isDocumentVisible
+            );
         },
     });
+    useRefetchOnVisible(enabled, query.refetch);
 
     return {
         ...query,
@@ -129,6 +139,7 @@ export function useSocialPresence(options: SocialPresenceOptions = {}) {
  * Executes useAdminConnectedUsers.
  */
 export function useAdminConnectedUsers(enabled: boolean) {
+    const isDocumentVisible = useDocumentVisible();
     useSocialPresencePushInvalidation(enabled, SOCIAL_CONNECTED_QUERY_KEY);
     const query = useQuery<ConnectedUsersResponse>({
         queryKey: SOCIAL_CONNECTED_QUERY_KEY,
@@ -139,14 +150,18 @@ export function useAdminConnectedUsers(enabled: boolean) {
         refetchOnReconnect: false,
         refetchInterval: (state) => {
             const users = state.state.data?.users;
-            return resolveAdaptivePollingInterval({
-                enabled,
-                hasActiveItems: (users?.length ?? 0) > 0,
-                activeIntervalMs: SOCIAL_POLL_ACTIVE_MS,
-                idleIntervalMs: SOCIAL_POLL_IDLE_MS,
-            });
+            return resolveVisibilityGatedPollingInterval(
+                resolveAdaptivePollingInterval({
+                    enabled,
+                    hasActiveItems: (users?.length ?? 0) > 0,
+                    activeIntervalMs: SOCIAL_POLL_ACTIVE_MS,
+                    idleIntervalMs: SOCIAL_POLL_IDLE_MS,
+                }),
+                isDocumentVisible
+            );
         },
     });
+    useRefetchOnVisible(enabled, query.refetch);
 
     return {
         ...query,
