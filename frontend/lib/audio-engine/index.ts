@@ -112,6 +112,15 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   private lastSource: AudioEngineSource | null = null;
   private lastLoadOptions: AudioEngineLoadOptions | null = null;
   private loadSequence = 0;
+  // Tracks the load that is waiting on the lazy video.js chunk so
+  // play()/pause() during the download can redirect intent to it instead
+  // of acting on the stale active engine. Non-null only while the most
+  // recent load() is deferred; autoplayOverride wins over the original
+  // load options when set.
+  private pendingLazyLoad: {
+    sequence: number;
+    autoplayOverride: boolean | null;
+  } | null = null;
   private isDestroyed = false;
   private outputVolume = DEFAULT_AUDIO_VOLUME;
   private outputMuted = false;
@@ -168,6 +177,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     this.lastSource = normalizedSource;
     this.lastLoadOptions = normalizedOptions;
     const sequence = ++this.loadSequence;
+    this.pendingLazyLoad = null;
 
     const preferredKind = this.resolvePreferredEngineKind(normalizedSource);
     if (preferredKind === "videojs" && !this.videoJsEngine) {
@@ -179,16 +189,33 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         activeEngine.stop();
       }
       // Video.js engine is lazy-loaded; finish this load once it arrives
-      // unless a newer load superseded it in the meantime.
+      // unless a newer load superseded it in the meantime. play()/pause()
+      // in the interim adjust autoplay via pendingLazyLoad rather than
+      // cancelling the load (see those methods).
+      const pendingLazyLoad: NonNullable<typeof this.pendingLazyLoad> = {
+        sequence,
+        autoplayOverride: null,
+      };
+      this.pendingLazyLoad = pendingLazyLoad;
       void this.ensureVideoJsEngine().then((videoJsEngine) => {
+        if (this.pendingLazyLoad === pendingLazyLoad) {
+          this.pendingLazyLoad = null;
+        }
         if (sequence !== this.loadSequence || this.isDestroyed) {
           return;
         }
+        const effectiveOptions =
+          pendingLazyLoad.autoplayOverride === null
+            ? normalizedOptions
+            : {
+                ...normalizedOptions,
+                autoplay: pendingLazyLoad.autoplayOverride,
+              };
         this.loadWithEngine(
           videoJsEngine ? "videojs" : "howler",
           videoJsEngine ?? this.howlerEngine,
           normalizedSource,
-          normalizedOptions,
+          effectiveOptions,
         );
       });
       return;
@@ -222,20 +249,38 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   }
 
   play(): void | Promise<void> {
+    const pendingLazyLoad = this.pendingLazyLoad;
+    if (pendingLazyLoad && pendingLazyLoad.sequence === this.loadSequence) {
+      // The queued track is still waiting on the lazy video.js chunk and
+      // the active engine only holds the previous (already halted)
+      // source; restarting it would play the wrong track from position 0.
+      // Record the play intent so the deferred load starts playback as
+      // soon as the engine arrives.
+      pendingLazyLoad.autoplayOverride = true;
+      return;
+    }
     return this.getActiveEngine().play();
   }
 
   pause(): void | Promise<void> {
-    // Invalidate any deferred lazy-engine load (see load()) so it cannot
-    // start playback after the user paused.
-    this.loadSequence += 1;
+    const pendingLazyLoad = this.pendingLazyLoad;
+    if (pendingLazyLoad && pendingLazyLoad.sequence === this.loadSequence) {
+      // Keep the deferred lazy-engine load (see load()) so the queued
+      // track still becomes ready (and the orchestrator's load listeners
+      // fire), but suppress autoplay so playback cannot start against the
+      // user's intent once the chunk arrives.
+      pendingLazyLoad.autoplayOverride = false;
+    }
     return this.getActiveEngine().pause();
   }
 
   stop(): void | Promise<void> {
     // Invalidate any deferred lazy-engine load (see load()) so it cannot
-    // start playback after the user stopped.
+    // start playback after the transport was stopped. No cancellation
+    // event is needed: every stop() caller either re-issues load() or
+    // clears its own load bookkeeping synchronously.
     this.loadSequence += 1;
+    this.pendingLazyLoad = null;
     return this.getActiveEngine().stop();
   }
 
@@ -417,6 +462,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   destroy(): void {
     this.isDestroyed = true;
     this.loadSequence += 1;
+    this.pendingLazyLoad = null;
     this.videoJsEnginePromise = null;
     this.unbindEngineEvents("howler", this.howlerEngine);
     if (this.videoJsEngine) {

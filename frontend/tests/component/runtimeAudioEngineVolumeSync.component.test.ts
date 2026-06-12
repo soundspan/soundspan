@@ -22,6 +22,7 @@ class FakeAudioEngine implements AudioEngine {
         cooldownMs: number;
     }> = [];
     public stopCalls = 0;
+    public playCalls = 0;
     public destroyCalls = 0;
     public clearRepresentationQuarantineCalls = 0;
     public quarantineRepresentationResult: AudioEngineRepresentationFailoverResult | null =
@@ -45,6 +46,7 @@ class FakeAudioEngine implements AudioEngine {
     }
 
     play() {
+        this.playCalls += 1;
         this.playing = true;
     }
 
@@ -212,7 +214,7 @@ test("cancels a pending lazy DASH engine load when the user stops playback", asy
     assert.equal(videoJsEngine.loadCalls.length, 0);
 });
 
-test("cancels a pending lazy DASH engine load when the user pauses", async () => {
+test("completes a pending lazy DASH engine load without autoplay when the user pauses", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
     let resolveEngine: ((engine: AudioEngine) => void) | null = null;
@@ -225,16 +227,89 @@ test("cancels a pending lazy DASH engine load when the user pauses", async () =>
         resolveMode: () => "videojs",
     });
 
-    runtimeEngine.load({
-        url: "https://example.test/stream.mpd",
-        protocol: "dash",
-        mimeType: "application/dash+xml",
-    });
+    runtimeEngine.load(
+        {
+            url: "https://example.test/stream.mpd",
+            protocol: "dash",
+            mimeType: "application/dash+xml",
+        },
+        { autoplay: true },
+    );
     runtimeEngine.pause();
     resolveEngine?.(videoJsEngine);
     await flushAsyncEngineInit();
 
-    assert.equal(videoJsEngine.loadCalls.length, 0);
+    // The queued track must still finish loading (so the UI's current
+    // track is ready and the orchestrator's load listeners fire) but with
+    // autoplay suppressed to honor the pause.
+    assert.equal(videoJsEngine.loadCalls.length, 1);
+    assert.equal(videoJsEngine.loadCalls[0]?.options?.autoplay, false);
+});
+
+test("play() during a pending lazy DASH load defers to the queued track instead of restarting the stale source", async () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
+    const enginePromise = new Promise<AudioEngine>((resolve) => {
+        resolveEngine = resolve;
+    });
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => enginePromise,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load("https://example.test/track.mp3", {
+        autoplay: false,
+    });
+    runtimeEngine.load(
+        {
+            url: "https://example.test/stream.mpd",
+            protocol: "dash",
+            mimeType: "application/dash+xml",
+        },
+        { autoplay: false },
+    );
+    runtimeEngine.play();
+    resolveEngine?.(videoJsEngine);
+    await flushAsyncEngineInit();
+
+    // play() must not restart the previous, already-halted howler source
+    // from position 0; instead the deferred load starts playback once the
+    // engine chunk arrives.
+    assert.equal(howlerEngine.playCalls, 0);
+    assert.equal(videoJsEngine.loadCalls.length, 1);
+    assert.equal(videoJsEngine.loadCalls[0]?.options?.autoplay, true);
+});
+
+test("re-arms autoplay when the user presses play after pausing a pending lazy DASH load", async () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
+    const enginePromise = new Promise<AudioEngine>((resolve) => {
+        resolveEngine = resolve;
+    });
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => enginePromise,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load(
+        {
+            url: "https://example.test/stream.mpd",
+            protocol: "dash",
+            mimeType: "application/dash+xml",
+        },
+        { autoplay: true },
+    );
+    runtimeEngine.pause();
+    runtimeEngine.play();
+    resolveEngine?.(videoJsEngine);
+    await flushAsyncEngineInit();
+
+    assert.equal(videoJsEngine.loadCalls.length, 1);
+    assert.equal(videoJsEngine.loadCalls[0]?.options?.autoplay, true);
 });
 
 test("stops in-progress playback before the lazy video.js import resolves", async () => {

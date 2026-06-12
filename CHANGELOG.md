@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Service-worker image cache keys no longer include the rotating auth token, so cached cover art survives the daily token rotation instead of being re-downloaded every 24 hours.
-- Stopping or pausing playback while the lazy-loaded Video.js engine chunk is still downloading now cancels the pending track load instead of starting playback against the user's intent; the previously playing track is also halted immediately when a segmented stream is selected.
+- Pausing playback while the lazy-loaded Video.js engine chunk is still downloading now completes the pending track load with autoplay suppressed (instead of silently dropping it), and pressing play during the download starts the queued track once ready rather than restarting the previous source from position 0; stopping still cancels the pending load, and the previously playing track is halted immediately when a segmented stream is selected.
 - The custom server's backend proxies (`/api`, `/rest`, Listen Together socket) now register their error handlers through the http-proxy-middleware v3 `on.error` API, restoring the structured 503 JSON response (`{ error, code }`) when the backend is unreachable — the previous v2-style `onError` option was silently ignored, so clients received hpm's plain-text default error instead.
 
 ## [1.5.0] - 2026-03-27
