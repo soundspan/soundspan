@@ -89,9 +89,11 @@ describe("discoverCron worker", () => {
         module.stopDiscoverWeeklyCron();
         await Promise.resolve();
         await Promise.resolve();
+        // Bull keys repeatable jobs by jobId; removal must pass the same
+        // jobId used at registration or the persisted schedule survives.
         expect(discoverQueue.removeRepeatable).toHaveBeenCalledWith(
             "discover-cron-tick",
-            { cron: "0 20 * * 0" }
+            { cron: "0 20 * * 0", jobId: "discover:cron:tick" }
         );
 
         discoverQueue.add.mockRejectedValueOnce(new Error("add-failed"));

@@ -100,7 +100,12 @@ export function startDiscoverWeeklyCron() {
  */
 export function stopDiscoverWeeklyCron() {
     void discoverQueue
-        .removeRepeatable("discover-cron-tick", { cron: DISCOVER_WEEKLY_CRON })
+        .removeRepeatable("discover-cron-tick", {
+            cron: DISCOVER_WEEKLY_CRON,
+            // Bull embeds the jobId in the repeat key; omitting it here would
+            // build a non-matching key and leave the schedule in Redis.
+            jobId: DISCOVER_CRON_REPEAT_JOB_ID,
+        })
         .then(() => {
             logger.debug("Discover Weekly repeatable scheduler removed");
         })
