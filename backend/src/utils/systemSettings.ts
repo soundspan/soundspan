@@ -10,6 +10,9 @@ let cacheExpiry = 0;
 // Re-export encryptField for backwards compatibility
 export { encryptField };
 
+/**
+ * Executes invalidateSystemSettingsCache.
+ */
 export function invalidateSystemSettingsCache() {
     cachedSettings = null;
     cacheExpiry = 0;
@@ -38,6 +41,9 @@ function safeDecrypt(value: string | null, fieldName?: string): string | null {
     }
 }
 
+/**
+ * Executes getSystemSettings.
+ */
 export async function getSystemSettings(forceRefresh = false) {
     const now = Date.now();
     if (!forceRefresh && cachedSettings && cacheExpiry > now) {

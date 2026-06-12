@@ -9,6 +9,9 @@ interface TVSearchInputProps {
     onSearch: (query: string) => void;
 }
 
+/**
+ * Renders the TVSearchInput component.
+ */
 export function TVSearchInput({ initialQuery = "", onSearch }: TVSearchInputProps) {
     const isTV = useIsTV();
     const inputRef = useRef<HTMLInputElement>(null);

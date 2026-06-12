@@ -14,6 +14,9 @@ interface ProfilePictureUploadProps {
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const MAX_FILE_SIZE_MB = 5;
 
+/**
+ * Renders the ProfilePictureUpload component.
+ */
 export function ProfilePictureUpload({
     hasProfilePicture: initialHasPicture,
     onChanged,

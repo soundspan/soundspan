@@ -21,6 +21,9 @@ interface SyncResult {
 
 const AUDIOBOOK_CACHE_STALE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Represents the AudiobookCacheService class.
+ */
 export class AudiobookCacheService {
     private coverCacheDir: string;
     private coverCacheAvailable: boolean = false;

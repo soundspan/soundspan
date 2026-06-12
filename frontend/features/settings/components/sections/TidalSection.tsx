@@ -23,6 +23,9 @@ const QUALITY_OPTIONS = [
     { value: "HI_RES_LOSSLESS", label: "Max / Hi-Res (FLAC up to 24-bit / 192 kHz)" },
 ];
 
+/**
+ * Renders the TidalCard component.
+ */
 export function TidalCard({ settings, onUpdate, onTest, isTesting }: TidalCardProps) {
     const [testStatus, setTestStatus] = useState<StatusType>("idle");
     const [testMessage, setTestMessage] = useState("");

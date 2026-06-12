@@ -1,11 +1,16 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { lastFmService } from "../services/lastfm";
 import { musicBrainzService } from "../services/musicbrainz";
 import { fanartService } from "../services/fanart";
 import { deezerService } from "../services/deezer";
+import { ytMusicService } from "../services/youtubeMusic";
 import { redisClient } from "../utils/redis";
 import { normalizeToArray } from "../utils/normalize";
+import { requireAuthOrToken } from "../middleware/auth";
+import { ytMusicStreamLimiter } from "../middleware/rateLimiter";
+import { getSystemSettings } from "../utils/systemSettings";
+import { prisma } from "../utils/db";
 
 const router = Router();
 
@@ -47,7 +52,7 @@ const parseBooleanQueryParam = (
  * @openapi
  * /api/artists/preview/{artistName}/{trackTitle}:
  *   get:
- *     summary: Get Deezer preview URL for a track
+ *     summary: Search YouTube Music for a track and return its videoId
  *     tags: [Artists]
  *     parameters:
  *       - in: path
@@ -64,28 +69,55 @@ const parseBooleanQueryParam = (
  *         description: URL-encoded track title
  *     responses:
  *       200:
- *         description: Deezer preview URL
+ *         description: YouTube Music videoId for the track
  *       404:
- *         description: Preview not found
+ *         description: No matching track found
  */
-// GET /artists/preview/:artistName/:trackTitle - Get Deezer preview URL for a track
+// GET /artists/preview/:artistName/:trackTitle - Find a YouTube Music videoId for a track
 router.get("/preview/:artistName/:trackTitle", async (req, res) => {
     try {
         const { artistName, trackTitle } = req.params;
         const decodedArtist = decodeURIComponent(artistName);
         const decodedTrack = decodeURIComponent(trackTitle);
 
+        const settings = await getSystemSettings();
+        if (!settings.ytMusicEnabled) {
+            return res.status(404).json({ error: "Preview not found" });
+        }
+
+        const cacheKey = `yt-preview:${decodedArtist.toLowerCase()}:${decodedTrack.toLowerCase()}`;
+        const cached = redisClient ? await redisClient.get(cacheKey) : null;
+
+        if (cached) {
+            if (cached === "null") {
+                return res.status(404).json({ error: "Preview not found" });
+            }
+            return res.json({ videoId: cached });
+        }
+
         logger.debug(
-            `Getting preview for "${decodedTrack}" by ${decodedArtist}`
+            `Searching YT Music preview for "${decodedTrack}" by ${decodedArtist}`
         );
 
-        const previewUrl = await deezerService.getTrackPreview(
-            decodedArtist,
-            decodedTrack
+        const result = await ytMusicService.search(
+            "__public__",
+            `${decodedArtist} ${decodedTrack}`,
+            "songs"
         );
+        const firstResult = result?.results?.[0];
+        const videoId =
+            typeof firstResult?.videoId === "string"
+                ? firstResult.videoId
+                : null;
 
-        if (previewUrl) {
-            res.json({ previewUrl });
+        if (redisClient) {
+            await redisClient.set(cacheKey, videoId || "null", {
+                EX: DISCOVERY_CACHE_TTL,
+            });
+        }
+
+        if (videoId) {
+            res.json({ videoId });
         } else {
             res.status(404).json({ error: "Preview not found" });
         }
@@ -93,10 +125,137 @@ router.get("/preview/:artistName/:trackTitle", async (req, res) => {
         logger.error("Preview fetch error:", error);
         res.status(500).json({
             error: "Failed to fetch preview",
-            message: error.message,
         });
     }
 });
+
+/**
+ * @openapi
+ * /api/artists/preview-stream/{videoId}:
+ *   get:
+ *     summary: Proxy a YouTube Music audio stream for preview playback
+ *     tags: [Artists]
+ *     security:
+ *       - bearerAuth: []
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: YouTube Music video ID
+ *     responses:
+ *       200:
+ *         description: Audio stream
+ *       503:
+ *         description: YouTube Music not available
+ */
+router.get(
+    "/preview-stream/:videoId",
+    requireAuthOrToken,
+    ytMusicStreamLimiter,
+    async (req: Request, res: Response) => {
+        try {
+            const { videoId } = req.params;
+            const rangeHeader = req.headers.range;
+
+            const settings = await getSystemSettings();
+            if (!settings.ytMusicEnabled) {
+                return res
+                    .status(503)
+                    .json({ error: "YouTube Music not available" });
+            }
+
+            // Use the user's YT OAuth if connected, otherwise public
+            let effectiveUserId = "__public__";
+            if (req.user?.id) {
+                const userSettings = await prisma.userSettings.findUnique({
+                    where: { userId: req.user.id },
+                    select: { ytMusicOAuthJson: true },
+                });
+                if (userSettings?.ytMusicOAuthJson) {
+                    effectiveUserId = req.user.id;
+                }
+            }
+
+            const proxyRes = await ytMusicService.getStreamProxy(
+                effectiveUserId,
+                videoId,
+                "high",
+                rangeHeader
+            );
+
+            res.status(proxyRes.status);
+            const forwardHeaders = [
+                "content-type",
+                "content-length",
+                "content-range",
+                "accept-ranges",
+            ];
+            for (const header of forwardHeaders) {
+                const value = proxyRes.headers[header];
+                if (value) res.setHeader(header, value);
+            }
+
+            proxyRes.data.on("error", (streamErr: Error) => {
+                logger.warn(
+                    `Preview stream error for ${videoId}: ${streamErr.message}`
+                );
+                if (!res.headersSent) {
+                    res.status(502).json({ error: "Stream failed" });
+                } else {
+                    res.end();
+                }
+            });
+            proxyRes.data.pipe(res);
+        } catch (error: any) {
+            // If user's OAuth failed, retry with public
+            if (error?.response?.status === 401 && req.user?.id) {
+                try {
+                    const proxyRes = await ytMusicService.getStreamProxy(
+                        "__public__",
+                        req.params.videoId,
+                        "high",
+                        req.headers.range
+                    );
+                    res.status(proxyRes.status);
+                    for (const h of [
+                        "content-type",
+                        "content-length",
+                        "content-range",
+                        "accept-ranges",
+                    ]) {
+                        const v = proxyRes.headers[h];
+                        if (v) res.setHeader(h, v);
+                    }
+                    proxyRes.data.on("error", (streamErr: Error) => {
+                        logger.warn(
+                            `Preview fallback stream error for ${req.params.videoId}: ${streamErr.message}`
+                        );
+                        if (!res.headersSent) {
+                            res.status(502).json({
+                                error: "Stream failed",
+                            });
+                        } else {
+                            res.end();
+                        }
+                    });
+                    proxyRes.data.pipe(res);
+                    return;
+                } catch {
+                    // fall through to error handler
+                }
+            }
+            logger.error("Preview stream error:", error);
+            if (!res.headersSent) {
+                res.status(500).json({ error: "Failed to stream preview" });
+            } else {
+                res.end();
+            }
+        }
+    }
+);
 
 /**
  * @openapi
@@ -508,7 +667,6 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
         logger.error("Artist discovery error:", error);
         res.status(500).json({
             error: "Failed to fetch artist details",
-            message: error.message,
         });
     }
 });
@@ -764,7 +922,6 @@ router.get("/album/:mbid", async (req, res) => {
         logger.error("Album discovery error:", error);
         res.status(500).json({
             error: "Failed to fetch album details",
-            message: error.message,
         });
     }
 });

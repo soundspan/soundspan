@@ -98,6 +98,9 @@ function applyArtistDiversityCap(
     ).slice(0, limit);
 }
 
+/**
+ * Executes findSimilarTracks.
+ */
 export async function findSimilarTracks(
     trackId: string,
     limit: number = 20

@@ -36,10 +36,10 @@ describe("listen together state store contract", () => {
 
     it("persists and deletes snapshots through callbacks and shutdown", () => {
         expect(socketSource).toContain(
-            "void listenTogetherStateStore.setSnapshot(groupId, snapshot)"
+            "await listenTogetherStateStore.setSnapshot(groupId, resolvedSnapshot)"
         );
         expect(socketSource).toContain(
-            "void listenTogetherStateStore.deleteSnapshot(groupId)"
+            "await listenTogetherStateStore.deleteSnapshot(groupId)"
         );
         expect(socketSource).toContain("listenTogetherStateStore.stop();");
     });
@@ -65,4 +65,3 @@ describe("listen together state store contract", () => {
         );
     });
 });
-

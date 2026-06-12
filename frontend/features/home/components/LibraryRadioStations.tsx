@@ -1,46 +1,20 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { shuffleArray } from "@/utils/shuffle";
-import {
-    Radio,
-    Play,
-    Loader2,
-    Shuffle,
-    ChevronLeft,
-    ChevronRight,
-} from "lucide-react";
+import { Shuffle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { Track } from "@/lib/audio-state-context";
 import { toast } from "sonner";
-import { cn } from "@/utils/cn";
-import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
-import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { RadioStationCard, RadioStationCardStation } from "@/components/ui/RadioStationCard";
+import {
+    GenreCount,
+    selectFeaturedRadioGenres,
+} from "./libraryRadioStationsGenreSelection";
 
-interface RadioStation {
-    id: string;
-    name: string;
-    description: string;
-    color: string;
-    filter: {
-        type:
-            | "genre"
-            | "decade"
-            | "discovery"
-            | "favorites"
-            | "all"
-            | "workout";
-        value?: string;
-    };
-    minTracks?: number;
-}
-
-interface GenreCount {
-    genre: string;
-    count: number;
-}
+type RadioStation = RadioStationCardStation;
 
 // Static radio stations (always shown if tracks exist)
 const STATIC_STATIONS: RadioStation[] = [
@@ -186,16 +160,17 @@ function diversifyTracksByArtist(tracks: Track[]): Track[] {
     return selected;
 }
 
-export function LibraryRadioStations() {
-    const { playTracks } = useAudioControls();
-    const [loadingStation, setLoadingStation] = useState<string | null>(null);
-    const { showSpinner, triggerPlayFeedback } = usePlayButtonFeedback();
-    const [playFeedbackStationId, setPlayFeedbackStationId] = useState<string | null>(null);
+/**
+ * Fetches library genre and decade data, then builds three station lists:
+ * quickStart (static stations), genres, and decades.
+ */
+export function useLibraryRadioData(skip = false) {
     const [genres, setGenres] = useState<GenreCount[]>([]);
     const [decades, setDecades] = useState<DecadeCount[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(!skip);
 
     useEffect(() => {
+        if (skip) return;
         const fetchData = async () => {
             try {
                 const [genresRes, decadesRes] = await Promise.all([
@@ -203,9 +178,9 @@ export function LibraryRadioStations() {
                     api.get<{ decades: DecadeCount[] }>("/library/decades"),
                 ]);
 
-                const validGenres = (genresRes.genres || [])
-                    .filter((g) => g.count >= 15)
-                    .slice(0, 6);
+                const validGenres = selectFeaturedRadioGenres(
+                    genresRes.genres || []
+                );
                 setGenres(validGenres);
                 setDecades((decadesRes.decades || []).slice(0, 4));
             } catch (error) {
@@ -216,13 +191,65 @@ export function LibraryRadioStations() {
         };
 
         fetchData();
-    }, []);
+    }, [skip]);
 
-    useEffect(() => {
-        if (!showSpinner) {
-            setPlayFeedbackStationId(null);
-        }
-    }, [showSpinner]);
+    const genreStations: RadioStation[] = useMemo(
+        () =>
+            genres.map((g) => ({
+                id: `genre-${g.genre}`,
+                name: g.genre,
+                description: `${g.count} tracks`,
+                color: getGenreColor(g.genre),
+                filter: { type: "genre" as const, value: g.genre },
+                minTracks: 15,
+            })),
+        [genres]
+    );
+
+    const decadeStations: RadioStation[] = useMemo(
+        () =>
+            decades.map((d) => ({
+                id: `decade-${d.decade}`,
+                name: getDecadeName(d.decade),
+                description: `${d.count} tracks`,
+                color: getDecadeColor(d.decade),
+                filter: { type: "decade" as const, value: d.decade.toString() },
+                minTracks: 15,
+            })),
+        [decades]
+    );
+
+    return {
+        quickStartStations: STATIC_STATIONS,
+        genreStations,
+        decadeStations,
+        allStations: useMemo(
+            () => [...STATIC_STATIONS, ...genreStations, ...decadeStations],
+            [genreStations, decadeStations]
+        ),
+        isLoading,
+    };
+}
+
+interface LibraryRadioStationsProps {
+    /** When provided, renders only these stations. Otherwise fetches its own data. */
+    stations?: RadioStation[];
+    /** External loading state (only used when stations prop is provided). */
+    externalLoading?: boolean;
+}
+
+/**
+ * Renders the LibraryRadioStations component as a responsive grid of
+ * full-size square radio station cards with mosaic cover art.
+ */
+export function LibraryRadioStations({ stations: stationsProp, externalLoading }: LibraryRadioStationsProps = {}) {
+    const { playTracks } = useAudioControls();
+    const [loadingStation, setLoadingStation] = useState<string | null>(null);
+
+    // When no stations prop, fetch internally (backward compat for home page)
+    const internalData = useLibraryRadioData(!!stationsProp);
+    const allStations = stationsProp ?? internalData.allStations;
+    const isLoading = stationsProp ? (externalLoading ?? false) : internalData.isLoading;
 
     const startRadio = async (station: RadioStation) => {
         setLoadingStation(station.id);
@@ -268,300 +295,30 @@ export function LibraryRadioStations() {
         }
     };
 
-    const allStations = useMemo(() => {
-        const genreStations: RadioStation[] = genres.map((g) => ({
-            id: `genre-${g.genre}`,
-            name: g.genre,
-            description: `${g.count} tracks`,
-            color: getGenreColor(g.genre),
-            filter: { type: "genre" as const, value: g.genre },
-            minTracks: 15,
-        }));
-
-        const decadeStations: RadioStation[] = decades.map((d) => ({
-            id: `decade-${d.decade}`,
-            name: getDecadeName(d.decade),
-            description: `${d.count} tracks`,
-            color: getDecadeColor(d.decade),
-            filter: { type: "decade" as const, value: d.decade.toString() },
-            minTracks: 15,
-        }));
-
-        return [...STATIC_STATIONS, ...genreStations, ...decadeStations];
-    }, [genres, decades]);
-
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const [canScrollLeft, setCanScrollLeft] = useState(false);
-    const [canScrollRight, setCanScrollRight] = useState(false);
-    const [currentPage, setCurrentPage] = useState(0);
-    const isMobile = useIsMobile();
-    const isTablet = useIsTablet();
-    const isMobileOrTablet = isMobile || isTablet;
-
-    // Group stations into pages of 6 (2x3 grid) for mobile only
-    const stationPages = useMemo(() => {
-        const pages: RadioStation[][] = [];
-        for (let i = 0; i < allStations.length; i += 6) {
-            pages.push(allStations.slice(i, i + 6));
-        }
-        return pages;
-    }, [allStations]);
-
-    const checkScroll = useCallback(() => {
-        const el = scrollRef.current;
-        if (!el) return;
-        setCanScrollLeft(el.scrollLeft > 0);
-        setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
-
-        // Update current page for mobile
-        if (isMobileOrTablet) {
-            const pageWidth = el.clientWidth;
-            const newPage = Math.round(el.scrollLeft / pageWidth);
-            setCurrentPage(newPage);
-        }
-    }, [isMobileOrTablet]);
-
-    useEffect(() => {
-        checkScroll();
-        const el = scrollRef.current;
-        if (el) {
-            el.addEventListener("scroll", checkScroll);
-            window.addEventListener("resize", checkScroll);
-        }
-        return () => {
-            if (el) el.removeEventListener("scroll", checkScroll);
-            window.removeEventListener("resize", checkScroll);
-        };
-    }, [stationPages, isMobileOrTablet, checkScroll]);
-
-    const scroll = (direction: "left" | "right") => {
-        const el = scrollRef.current;
-        if (!el) return;
-        const scrollAmount = isMobileOrTablet
-            ? el.clientWidth
-            : el.clientWidth * 0.8;
-        el.scrollBy({
-            left: direction === "left" ? -scrollAmount : scrollAmount,
-            behavior: "smooth",
-        });
-    };
-
-    // Desktop: Compact horizontal card
-    const renderDesktopCard = (station: RadioStation) => {
-        const showStationSpinner =
-            loadingStation === station.id ||
-            (showSpinner && playFeedbackStationId === station.id);
-
+    if (isLoading) {
         return (
-            <button
-                key={station.id}
-                onClick={() => {
-                    setPlayFeedbackStationId(station.id);
-                    triggerPlayFeedback();
-                    void startRadio(station);
-                }}
-                disabled={loadingStation !== null}
-                className={cn(
-                    "flex-shrink-0 snap-start",
-                    "w-[160px] h-[72px] rounded-lg overflow-hidden",
-                    `bg-gradient-to-br ${station.color}`,
-                    "border border-white/10 hover:border-white/20",
-                    "transition-all duration-200",
-                    "hover:scale-[1.02] active:scale-[0.98]",
-                    "disabled:opacity-50 disabled:cursor-not-allowed",
-                    "group relative"
-                )}
-            >
-                <div className="absolute inset-0 p-3 flex flex-col justify-between">
-                    <div className="flex items-center gap-1">
-                        <Radio className="w-3 h-3 text-white/70" />
-                        <span className="text-[8px] text-white/70 font-semibold uppercase tracking-wider">
-                            Radio
-                        </span>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="p-3">
+                        <div className="aspect-square rounded-lg bg-white/5 animate-pulse" />
+                        <div className="h-3 w-2/3 bg-white/5 rounded mt-3 animate-pulse" />
+                        <div className="h-2 w-1/2 bg-white/5 rounded mt-1.5 animate-pulse" />
                     </div>
-                    <div>
-                        <h3 className="text-sm font-bold text-white truncate leading-tight">
-                            {station.name}
-                        </h3>
-                        <p className="text-[10px] text-white/60 truncate">
-                            {station.description}
-                        </p>
-                    </div>
-                </div>
-
-                {showStationSpinner && (
-                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                        <Loader2 className="w-5 h-5 text-white animate-spin" />
-                    </div>
-                )}
-
-                {/* Play button on hover */}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <div className="w-8 h-8 rounded-full bg-[#60a5fa] flex items-center justify-center shadow-lg transform scale-90 group-hover:scale-100 transition-transform">
-                        {showStationSpinner ? (
-                            <Loader2 className="w-4 h-4 text-black animate-spin" />
-                        ) : (
-                            <Play
-                                className="w-4 h-4 text-black ml-0.5"
-                                fill="currentColor"
-                            />
-                        )}
-                    </div>
-                </div>
-            </button>
-        );
-    };
-
-    // Mobile: Card for 2x3 grid
-    const renderMobileCard = (station: RadioStation) => (
-        <button
-            key={station.id}
-            onClick={() => {
-                setPlayFeedbackStationId(station.id);
-                triggerPlayFeedback();
-                void startRadio(station);
-            }}
-            disabled={loadingStation !== null}
-            className={cn(
-                "relative group w-full",
-                "aspect-[5/3] rounded-lg overflow-hidden",
-                `bg-gradient-to-br ${station.color}`,
-                "border border-white/10",
-                "transition-all duration-200",
-                "active:scale-[0.98]",
-                "disabled:opacity-50 disabled:cursor-not-allowed"
-            )}
-        >
-            <div className="absolute inset-0 p-2 flex flex-col justify-between">
-                <div className="flex items-center gap-1">
-                    <Radio className="w-2.5 h-2.5 text-white/70" />
-                    <span className="text-[7px] text-white/70 font-semibold uppercase tracking-wider">
-                        Radio
-                    </span>
-                </div>
-                <div>
-                    <h3 className="text-[11px] font-bold text-white truncate leading-tight">
-                        {station.name}
-                    </h3>
-                    <p className="text-[9px] text-white/60 truncate">
-                        {station.description}
-                    </p>
-                </div>
-            </div>
-
-            {(loadingStation === station.id ||
-                (showSpinner && playFeedbackStationId === station.id)) && (
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                    <Loader2 className="w-4 h-4 text-white animate-spin" />
-                </div>
-            )}
-        </button>
-    );
-
-    // Desktop layout: single row horizontal carousel
-    if (!isMobileOrTablet) {
-        return (
-            <div className="relative group/carousel">
-                {canScrollLeft && (
-                    <button
-                        onClick={() => scroll("left")}
-                        className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/80  flex items-center justify-center opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black hover:scale-105 border border-white/10 shadow-lg -translate-x-1/2"
-                        aria-label="Scroll left"
-                    >
-                        <ChevronLeft className="w-5 h-5 text-white" />
-                    </button>
-                )}
-
-                <div
-                    ref={scrollRef}
-                    className="flex overflow-x-auto scrollbar-hide scroll-smooth snap-x snap-mandatory gap-3 px-1"
-                >
-                    {allStations.map((station) => renderDesktopCard(station))}
-
-                    {isLoading &&
-                        Array.from({ length: 6 }).map((_, i) => (
-                            <div
-                                key={i}
-                                className="flex-shrink-0 w-[160px] h-[72px] rounded-lg bg-white/5 animate-pulse"
-                            />
-                        ))}
-                </div>
-
-                {canScrollRight && (
-                    <button
-                        onClick={() => scroll("right")}
-                        className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/80  flex items-center justify-center opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black hover:scale-105 border border-white/10 shadow-lg translate-x-1/2"
-                        aria-label="Scroll right"
-                    >
-                        <ChevronRight className="w-5 h-5 text-white" />
-                    </button>
-                )}
+                ))}
             </div>
         );
     }
 
-    // Mobile/Tablet layout: 2x3 grid pages
     return (
-        <div className="relative">
-            <div
-                ref={scrollRef}
-                className="flex overflow-x-auto scrollbar-hide scroll-smooth snap-x snap-mandatory gap-3"
-            >
-                {stationPages.map((page, pageIndex) => (
-                    <div
-                        key={pageIndex}
-                        className="flex-shrink-0 snap-start w-full grid grid-cols-3 grid-rows-2 gap-2"
-                    >
-                        {page.map((station) => renderMobileCard(station))}
-                        {page.length < 6 &&
-                            Array.from({ length: 6 - page.length }).map(
-                                (_, i) => (
-                                    <div
-                                        key={`empty-${i}`}
-                                        className="aspect-[5/3]"
-                                    />
-                                )
-                            )}
-                    </div>
-                ))}
-
-                {isLoading && (
-                    <div className="flex-shrink-0 snap-start w-full grid grid-cols-3 grid-rows-2 gap-2">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                            <div
-                                key={i}
-                                className="aspect-[5/3] rounded-lg bg-white/5 animate-pulse"
-                            />
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {stationPages.length > 1 && (
-                <div className="flex justify-center gap-1.5 mt-3">
-                    {stationPages.map((_, index) => (
-                        <button
-                            key={index}
-                            onClick={() => {
-                                const el = scrollRef.current;
-                                if (el) {
-                                    el.scrollTo({
-                                        left: index * el.clientWidth,
-                                        behavior: "smooth",
-                                    });
-                                }
-                            }}
-                            className={cn(
-                                "w-1.5 h-1.5 rounded-full transition-colors",
-                                index === currentPage
-                                    ? "bg-white"
-                                    : "bg-white/30 hover:bg-white/50"
-                            )}
-                            aria-label={`Go to page ${index + 1}`}
-                        />
-                    ))}
-                </div>
-            )}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            {allStations.map((station) => (
+                <RadioStationCard
+                    key={station.id}
+                    station={station}
+                    onPlay={() => startRadio(station)}
+                    isLoading={loadingStation === station.id}
+                />
+            ))}
         </div>
     );
 }

@@ -6,6 +6,9 @@ interface ArtistPopularPageProps {
     }>;
 }
 
+/**
+ * Renders the ArtistPopularPage component.
+ */
 export default async function ArtistPopularPage({
     params,
 }: ArtistPopularPageProps) {

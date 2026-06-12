@@ -9,8 +9,8 @@ import {
     resolveBufferingRecoveryAction,
     resolveTrustedTrackPositionSec,
     shouldRetrySegmentedStartupTimeout,
-} from "../../lib/audio-engine/segmentedPlaybackRegressionPolicy.ts";
-import { resolveProactiveSegmentedHandoffEligibility } from "../../lib/audio-engine/segmentedStartupPolicy.ts";
+} from "../../lib/audio-engine/segmentedPlaybackRegressionPolicy";
+import { resolveProactiveSegmentedHandoffEligibility } from "../../lib/audio-engine/segmentedStartupPolicy";
 
 test("direct->segmented handoff eligibility remains deterministic", () => {
     const result = resolveProactiveSegmentedHandoffEligibility({

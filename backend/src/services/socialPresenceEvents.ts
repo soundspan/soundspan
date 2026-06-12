@@ -16,6 +16,9 @@ type SocialPresenceListener = (event: SocialPresenceUpdatedEvent) => void;
 
 const listeners = new Set<SocialPresenceListener>();
 
+/**
+ * Executes subscribeSocialPresenceUpdates.
+ */
 export function subscribeSocialPresenceUpdates(
     listener: SocialPresenceListener
 ): () => void {
@@ -25,6 +28,9 @@ export function subscribeSocialPresenceUpdates(
     };
 }
 
+/**
+ * Executes publishSocialPresenceUpdate.
+ */
 export function publishSocialPresenceUpdate(
     event: SocialPresenceUpdatedEvent
 ): void {

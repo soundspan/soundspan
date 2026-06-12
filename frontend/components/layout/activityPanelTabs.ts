@@ -1,9 +1,10 @@
-export type ActivityTab = "notifications" | "active" | "history" | "social";
+export type ActivityTab = "notifications" | "active" | "history" | "imports" | "social";
 
 const ALL_ACTIVITY_TAB_IDS: ActivityTab[] = [
     "notifications",
     "active",
     "history",
+    "imports",
     "social",
 ];
 
@@ -14,19 +15,17 @@ export interface ActivityPanelBadgeState {
     hasActivity: boolean;
 }
 
-interface ActivityPanelBadgeInput {
-    unreadCount: number;
-    activeDownloadCount: number;
-    socialUserCount: number;
-    isAdmin: boolean;
-}
-
 export function getActivityPanelBadgeState({
     unreadCount,
     activeDownloadCount,
     socialUserCount,
     isAdmin,
-}: ActivityPanelBadgeInput): ActivityPanelBadgeState {
+}: {
+    unreadCount: number;
+    activeDownloadCount: number;
+    socialUserCount: number;
+    isAdmin: boolean;
+}): ActivityPanelBadgeState {
     const notificationBadge = unreadCount > 0 ? unreadCount : null;
     const activeBadge =
         isAdmin && activeDownloadCount > 0 ? activeDownloadCount : null;
@@ -43,6 +42,9 @@ export function getActivityPanelBadgeState({
     };
 }
 
+/**
+ * Executes getActivityTabBadge.
+ */
 export function getActivityTabBadge(
     tab: ActivityTab,
     badgeState: ActivityPanelBadgeState
@@ -62,6 +64,9 @@ export function getActivityTabBadge(
     return null;
 }
 
+/**
+ * Executes isActivityTabVisible.
+ */
 export function isActivityTabVisible(
     tab: ActivityTab,
     isAdmin: boolean
@@ -70,13 +75,19 @@ export function isActivityTabVisible(
         return true;
     }
 
-    return tab !== "active" && tab !== "history";
+    return tab !== "active" && tab !== "history" && tab !== "imports";
 }
 
+/**
+ * Executes getVisibleActivityTabIds.
+ */
 export function getVisibleActivityTabIds(isAdmin: boolean): ActivityTab[] {
     return ALL_ACTIVITY_TAB_IDS.filter((tab) => isActivityTabVisible(tab, isAdmin));
 }
 
+/**
+ * Executes resolveActivityTab.
+ */
 export function resolveActivityTab(
     requestedTab: ActivityTab,
     visibleTabs: readonly ActivityTab[],

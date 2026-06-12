@@ -144,6 +144,9 @@ router.get("/for-you", async (req, res) => {
             { artist: any; count: number }
         >();
         for (const play of recentPlays) {
+            if (!play.track) {
+                continue;
+            }
             const artist = play.track.album.artist;
             const existing = artistPlayCounts.get(artist.id);
             if (existing) {

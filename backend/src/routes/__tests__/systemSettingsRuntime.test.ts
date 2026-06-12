@@ -617,6 +617,21 @@ describe("systemSettings runtime routes", () => {
         expect(res.statusCode).toBe(400);
     });
 
+    it("rejects unsafe Lidarr test URLs before attempting a request", async () => {
+        const req = {
+            body: { url: "http://127.0.0.1:8686", apiKey: "key" },
+        } as any;
+        const res = createRes();
+
+        await testLidarrHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "URL must be a valid public HTTP(S) URL",
+        });
+        expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
     it("returns friendly message when Lidarr host is unresolved", async () => {
         mockAxiosGet.mockRejectedValueOnce({
             code: "ENOTFOUND",
@@ -664,7 +679,7 @@ describe("systemSettings runtime routes", () => {
         await testLidarrHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body.details).toBe("service unavailable");
+        expect(res.body.details).toBe("Connection test failed");
     });
 
     it("validates Soulseek credentials and returns success/failure states", async () => {
@@ -840,8 +855,9 @@ describe("systemSettings runtime routes", () => {
         await testOpenAiHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body.error).toBe("Failed to connect to OpenAI");
-        expect(res.body.details).toBe("quota exceeded");
+        expect(res.body).toEqual({
+            error: "Failed to connect to OpenAI",
+        });
     });
 
     it("maps Fanart, Last.fm, and Audiobookshelf generic failures to 500", async () => {
@@ -853,7 +869,9 @@ describe("systemSettings runtime routes", () => {
         const fanartRes = createRes();
         await testFanartHandler(fanartReq, fanartRes);
         expect(fanartRes.statusCode).toBe(500);
-        expect(fanartRes.body.error).toBe("Failed to connect to Fanart.tv");
+        expect(fanartRes.body).toEqual({
+            error: "Failed to connect to Fanart.tv",
+        });
 
         mockAxiosGet.mockRejectedValueOnce({
             message: "lastfm-down",
@@ -863,7 +881,9 @@ describe("systemSettings runtime routes", () => {
         const lastfmRes = createRes();
         await testLastfmHandler(lastfmReq, lastfmRes);
         expect(lastfmRes.statusCode).toBe(500);
-        expect(lastfmRes.body.error).toBe("Failed to connect to Last.fm");
+        expect(lastfmRes.body).toEqual({
+            error: "Failed to connect to Last.fm",
+        });
 
         mockAxiosGet.mockRejectedValueOnce({
             response: { status: 403, data: { error: 10 } },
@@ -873,7 +893,9 @@ describe("systemSettings runtime routes", () => {
         const lastfmInvalidRes = createRes();
         await testLastfmHandler(lastfmInvalidReq, lastfmInvalidRes);
         expect(lastfmInvalidRes.statusCode).toBe(401);
-        expect(lastfmInvalidRes.body.error).toBe("Invalid Last.fm API key");
+        expect(lastfmInvalidRes.body).toEqual({
+            error: "Invalid Last.fm API key",
+        });
 
         mockAxiosGet.mockRejectedValueOnce({
             message: "abs-down",
@@ -883,7 +905,9 @@ describe("systemSettings runtime routes", () => {
         const absRes = createRes();
         await testAudiobookshelfHandler(absReq, absRes);
         expect(absRes.statusCode).toBe(500);
-        expect(absRes.body.error).toBe("Failed to connect to Audiobookshelf");
+        expect(absRes.body).toEqual({
+            error: "Failed to connect to Audiobookshelf",
+        });
 
         mockAxiosGet.mockRejectedValueOnce({
             response: { status: 401 },
@@ -893,7 +917,24 @@ describe("systemSettings runtime routes", () => {
         const absInvalidRes = createRes();
         await testAudiobookshelfHandler(absInvalidReq, absInvalidRes);
         expect(absInvalidRes.statusCode).toBe(401);
-        expect(absInvalidRes.body.error).toBe("Invalid Audiobookshelf API key");
+        expect(absInvalidRes.body).toEqual({
+            error: "Invalid Audiobookshelf API key",
+        });
+    });
+
+    it("rejects unsafe Audiobookshelf test URLs before attempting a request", async () => {
+        const req = {
+            body: { url: "http://library.internal:13378", apiKey: "abs-key" },
+        } as any;
+        const res = createRes();
+
+        await testAudiobookshelfHandler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "URL must be a valid public HTTP(S) URL",
+        });
+        expect(mockAxiosGet).not.toHaveBeenCalled();
     });
 
     it("covers fanart success path and Last.fm unexpected payload failures", async () => {
@@ -921,7 +962,9 @@ describe("systemSettings runtime routes", () => {
         const res = createRes();
         await testSpotifyHandler(req, res);
         expect(res.statusCode).toBe(401);
-        expect(res.body.error).toBe("Invalid Spotify credentials");
+        expect(res.body).toEqual({
+            error: "Invalid Spotify credentials",
+        });
     });
 
     it("tests TIDAL connection and device auth/token flow", async () => {
@@ -1014,8 +1057,9 @@ describe("systemSettings runtime routes", () => {
         await testSoulseekHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body.error).toBe("Failed to test Soulseek connection");
-        expect(res.body.details).toBe("Soulseek service mock import failure");
+        expect(res.body).toEqual({
+            error: "Failed to test Soulseek connection",
+        });
     });
 
     it("uses Spotify token error fallback details", async () => {
@@ -1032,8 +1076,9 @@ describe("systemSettings runtime routes", () => {
         await testSpotifyHandler(req, res);
 
         expect(res.statusCode).toBe(401);
-        expect(res.body.error).toBe("Invalid Spotify credentials");
-        expect(res.body.details).toBe("rate limited");
+        expect(res.body).toEqual({
+            error: "Invalid Spotify credentials",
+        });
     });
 
     it("maps Spotify unexpected runtime errors to 500", async () => {
@@ -1048,8 +1093,9 @@ describe("systemSettings runtime routes", () => {
         await testSpotifyHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body.error).toBe("Failed to test Spotify credentials");
-        expect(res.body.details).toBe("spotify runtime failure");
+        expect(res.body).toEqual({
+            error: "Failed to test Spotify credentials",
+        });
     });
 
     it("manages queue cleaner and clears cache keys while preserving sessions", async () => {

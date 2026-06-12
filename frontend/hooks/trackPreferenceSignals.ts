@@ -1,5 +1,8 @@
 import type { TrackPreferenceSignal } from "@/lib/api";
 
+/**
+ * Executes getNextTrackPreferenceSignal.
+ */
 export function getNextTrackPreferenceSignal(
     currentSignal: TrackPreferenceSignal
 ): TrackPreferenceSignal {

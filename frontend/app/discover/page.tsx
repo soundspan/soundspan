@@ -19,11 +19,15 @@ import { TrackList } from "@/features/discover/components/TrackList";
 import { UnavailableAlbums } from "@/features/discover/components/UnavailableAlbums";
 import { HowItWorks } from "@/features/discover/components/HowItWorks";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { toAddToPlaylistRef } from "@/lib/trackRef";
 
 const DISCOVER_RECENT_GENERATION_WINDOW_MS = 45 * 60 * 1000;
 const DISCOVER_RECOVERY_MAX_ATTEMPTS = 4;
 const DISCOVER_RECOVERY_RETRY_DELAY_MS = 2500;
 
+/**
+ * Renders the DiscoverWeeklyPage component.
+ */
 export default function DiscoverWeeklyPage() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
@@ -56,6 +60,7 @@ export default function DiscoverWeeklyPage() {
         handleShufflePlaylist,
         handlePlayTrack,
         handleTogglePlay,
+        handleAddAllToQueue,
     } = useDiscoverActions(
         displayPlaylist,
         isGenerating,
@@ -119,7 +124,7 @@ export default function DiscoverWeeklyPage() {
         setIsAddingToPlaylist(true);
         try {
             for (const track of displayPlaylist.tracks) {
-                await api.addTrackToPlaylist(playlistId, track.id);
+                await api.addTrackToPlaylist(playlistId, toAddToPlaylistRef(track));
             }
             toast.success(`Added ${displayPlaylist.tracks.length} tracks to playlist`);
             setShowPlaylistSelector(false);
@@ -153,6 +158,7 @@ export default function DiscoverWeeklyPage() {
                 onToggleSettings={() => setShowSettings(!showSettings)}
                 onAddToPlaylist={handleAddAllToPlaylist}
                 onShuffle={handleShufflePlaylist}
+                onAddAllToQueue={handleAddAllToQueue}
                 isGenerating={isGenerating}
                 batchStatus={batchStatus}
             />

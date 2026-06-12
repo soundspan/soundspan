@@ -30,6 +30,10 @@ class CoverArtService {
             // Temporary IDs are local placeholders, not real MusicBrainz IDs.
             return null;
         }
+        if (normalizedMbid.toLowerCase().startsWith("remote:")) {
+            // Synthetic IDs for remote-only albums — not real MusicBrainz IDs.
+            return null;
+        }
         const cacheKey = `caa:${normalizedMbid}`;
 
         try {

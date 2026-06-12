@@ -8,6 +8,7 @@ import {
     shouldPreemptInFlightAudioLoad,
 } from "@/lib/audio-load-preemption";
 import { api, type SegmentedStreamingSessionResponse } from "@/lib/api";
+import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import { resolveStreamingEngineMode } from "@/lib/audio-engine/engineMode";
 import type {
@@ -17,6 +18,12 @@ import type {
     AudioEngineVhsResponsePayload,
 } from "@/lib/audio-engine/types";
 import { resolveLocalAuthoritativeRecovery } from "@/lib/audio-engine/recoveryPolicy";
+import { createConsecutiveErrorBreaker } from "@/lib/audio-engine/consecutiveErrorBreaker";
+import {
+    resolveForegroundRecoveryDecision,
+    shouldThrottleForegroundRecovery,
+} from "@/lib/audio-engine/foregroundRecoveryPolicy";
+import { resolveNextTrackPreloadDecision } from "@/lib/audio-engine/nextTrackPreloadPolicy";
 import {
     resolveSegmentedPrewarmMaxRetries,
 } from "@/lib/audio-engine/segmentedStartupPolicy";
@@ -40,11 +47,14 @@ import {
     enqueueLatestListenTogetherHostTrackOperation,
     getListenTogetherSessionSnapshot,
     isListenTogetherActiveOrPending,
+    resolveListenTogetherFollowerGroupId,
     requestListenTogetherGroupResync,
 } from "@/lib/listen-together-session";
 import { shouldAutoMatchVibeAtQueueEnd } from "./autoMatchVibePlayback";
 import {
     createEmptySegmentedStartupRecoveryStageAttempts,
+    resolvePlaybackDuration,
+    resolveRemoteStreamFormat,
     resolveSegmentedStartupRecoveryDecision,
     type SegmentedStartupRecoveryStage,
     type SegmentedStartupRecoveryStageLimits,
@@ -334,6 +344,7 @@ const TRACK_ERROR_SKIP_DELAY_MS = 1200;
 const TRANSIENT_TRACK_ERROR_RECOVERY_DELAY_MS = 450;
 const TRANSIENT_TRACK_ERROR_RECOVERY_WINDOW_MS = 15_000;
 const TRANSIENT_TRACK_ERROR_RECOVERY_MAX_ATTEMPTS = 4;
+const LISTEN_TOGETHER_FOLLOWER_RECOVERY_COOLDOWN_MS = 1_500;
 const STARTUP_PLAYBACK_RECOVERY_DELAY_MS = 1400;
 const STARTUP_PLAYBACK_RECOVERY_RECHECK_DELAY_MS = 900;
 const STARTUP_PLAYBACK_RECOVERY_MAX_RECHECKS = 2;
@@ -661,6 +672,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const segmentedPrewarmValidatedSessionIdsRef = useRef<Set<string>>(new Set());
     const pendingTrackErrorSkipRef = useRef<NodeJS.Timeout | null>(null);
     const pendingTrackErrorTrackIdRef = useRef<string | null>(null);
+    const consecutiveErrorBreakerRef = useRef(createConsecutiveErrorBreaker());
+    // Snapshot of whether the audio engine was playing at the moment the page
+    // went hidden (visibilitychange → "hidden"). Used by foreground recovery
+    // to decide if playback should be retried on return to visible.
+    // This prevents spurious recovery on desktop when a user pauses then
+    // switches tabs (the old hadPlayIntent ref was never cleared on pause).
+    const wasPlayingWhenHiddenRef = useRef(false);
     const currentTrackRef = useRef(currentTrack);
     const currentTimeSnapshotRef = useRef<number>(currentTime);
     const currentTimeSnapshotTrackIdRef = useRef<string | null>(
@@ -668,6 +686,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     );
     const queueLengthRef = useRef(queue.length);
     const playbackTypeRef = useRef(playbackType);
+    const lastLoggedRemotePlayKeyRef = useRef<string | null>(null);
     const activeEngineTrackIdRef = useRef<string | null>(null);
     const startupRecoveryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const startupRecoveryLoadListenerRef = useRef<(() => void) | null>(null);
@@ -685,6 +704,9 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const autoMatchVibePromiseRef = useRef<Promise<boolean> | null>(null);
     const autoMatchVibeTrackIdRef = useRef<string | null>(null);
     const autoMatchVibeLastAttemptAtRef = useRef<number>(0);
+    // YouTube Music: prefer authenticated stream when user has OAuth,
+    // fall back to public stream otherwise.
+    const ytMusicAuthenticatedRef = useRef<boolean>(false);
     const activeSegmentedSessionRef =
         useRef<ActiveSegmentedSessionSnapshot | null>(null);
     const activeSegmentedPlaybackTrackIdRef = useRef<string | null>(null);
@@ -793,6 +815,15 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const segmentedHeartbeatConsecutiveFailureCountRef = useRef<number>(0);
     const segmentedHeartbeatLastGuardedRefreshAtMsRef = useRef<number>(0);
     const segmentedHeartbeatSessionIdRef = useRef<string | null>(null);
+    const listenTogetherFollowerRecoveryRef = useRef<{
+        groupId: string | null;
+        inFlight: boolean;
+        lastRequestedAtMs: number;
+    }>({
+        groupId: null,
+        inFlight: false,
+        lastRequestedAtMs: 0,
+    });
     const segmentedHandoffListenerCleanupRef = useRef<(() => void) | null>(null);
     const segmentedHandoffListenerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const segmentedHandoffListenerContextRef =
@@ -1993,12 +2024,94 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         [hasStartupChunkResponseForTrack, scheduleStartupPlaybackRecovery],
     );
 
+    const requestListenTogetherFollowerRecovery = useCallback(
+        (reason: string): boolean => {
+            const listenTogetherGroupId = resolveListenTogetherFollowerGroupId(
+                getListenTogetherSessionSnapshot(),
+            );
+            if (!listenTogetherGroupId) {
+                return false;
+            }
+
+            playbackStateMachine.forceTransition("LOADING");
+            setIsBuffering(true);
+
+            const recoveryState = listenTogetherFollowerRecoveryRef.current;
+            const now = Date.now();
+            if (
+                recoveryState.groupId === listenTogetherGroupId &&
+                (recoveryState.inFlight ||
+                    now - recoveryState.lastRequestedAtMs <
+                        LISTEN_TOGETHER_FOLLOWER_RECOVERY_COOLDOWN_MS)
+            ) {
+                return true;
+            }
+
+            recoveryState.groupId = listenTogetherGroupId;
+            recoveryState.inFlight = true;
+            recoveryState.lastRequestedAtMs = now;
+
+            sharedFrontendLogger.warn(
+                "[AudioPlaybackOrchestrator] Delegating follower recovery to Listen Together resync",
+                {
+                    groupId: listenTogetherGroupId,
+                    reason,
+                    trackId: currentTrackRef.current?.id ?? null,
+                    sessionId: activeSegmentedSessionRef.current?.sessionId ?? null,
+                },
+            );
+
+            void requestListenTogetherGroupResync(listenTogetherGroupId)
+                .catch((error) => {
+                    sharedFrontendLogger.warn(
+                        "[AudioPlaybackOrchestrator] Listen Together follower resync failed",
+                        {
+                            groupId: listenTogetherGroupId,
+                            reason,
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                        },
+                    );
+                })
+                .finally(() => {
+                    const currentRecoveryState =
+                        listenTogetherFollowerRecoveryRef.current;
+                    if (currentRecoveryState.groupId === listenTogetherGroupId) {
+                        currentRecoveryState.inFlight = false;
+                    }
+                });
+
+            return true;
+        },
+        [setIsBuffering],
+    );
+
     const scheduleTrackErrorSkip = useCallback(
         (failedTrackId: string | null) => {
             if (
                 pendingTrackErrorSkipRef.current &&
                 pendingTrackErrorTrackIdRef.current === failedTrackId
             ) {
+                return;
+            }
+
+            // Record the error in the circuit breaker. If it trips (3 consecutive
+            // errors without a successful play), halt auto-advance to prevent
+            // infinite rapid error loops.
+            const justTripped = consecutiveErrorBreakerRef.current.recordError();
+            if (consecutiveErrorBreakerRef.current.isTripped()) {
+                if (justTripped) {
+                    sharedFrontendLogger.warn(
+                        "[AudioPlaybackOrchestrator] Consecutive error circuit breaker tripped — stopping auto-advance",
+                        { consecutiveErrors: consecutiveErrorBreakerRef.current.getErrorCount() },
+                    );
+                    toast.error(
+                        "Playback stopped — multiple tracks failed in a row. Check your connection or try again.",
+                        { duration: 6000 },
+                    );
+                }
                 return;
             }
 
@@ -2040,6 +2153,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         (failedTrackId: string | null, error: unknown): boolean => {
             if (playbackTypeRef.current !== "track") return false;
             if (!failedTrackId) return false;
+            if (
+                requestListenTogetherFollowerRecovery(
+                    "transient_track_error",
+                )
+            ) {
+                return true;
+            }
             if (!lastPlayingStateRef.current) return false;
             if (!isLikelyTransientStreamError(error)) return false;
 
@@ -2126,6 +2246,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             return true;
         },
         [
+            requestListenTogetherFollowerRecovery,
             clearPendingTrackErrorSkip,
             clearTransientTrackRecovery,
             resolveStartupSafeTrackPositionSec,
@@ -2446,6 +2567,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             },
         ): Promise<boolean> => {
             if (playbackTypeRef.current !== "track") return false;
+            if (
+                requestListenTogetherFollowerRecovery(
+                    "segmented_handoff_recovery",
+                )
+            ) {
+                return true;
+            }
 
             const currentTrackSnapshot = currentTrackRef.current;
             const segmentedTrackContext =
@@ -2956,6 +3084,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         },
         [
             isPlaying,
+            requestListenTogetherFollowerRecovery,
             resolveStartupSafeTrackPositionSec,
             resolveHandoffLocalPositionSec,
             setCurrentTime,
@@ -2974,6 +3103,28 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             registerSegmentedHandoffLoadListeners,
         ]
     );
+
+    // Fetch YouTube Music auth status on mount and whenever the user
+    // connects/disconnects their YT Music account via settings.
+    useEffect(() => {
+        const refreshYtAuth = () => {
+            api.getYtMusicStatus()
+                .then((status) => {
+                    ytMusicAuthenticatedRef.current =
+                        !!status.enabled && !!status.available && !!status.authenticated;
+                })
+                .catch(() => {
+                    ytMusicAuthenticatedRef.current = false;
+                });
+        };
+        refreshYtAuth();
+        if (typeof window !== "undefined") {
+            window.addEventListener("ytmusic-auth-changed", refreshYtAuth);
+            return () => {
+                window.removeEventListener("ytmusic-auth-changed", refreshYtAuth);
+            };
+        }
+    }, []);
 
     useEffect(() => {
         currentTimeSnapshotRef.current = currentTime;
@@ -3163,6 +3314,61 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         clearSegmentedHandoffLoadListeners,
         setStreamProfile,
         resetSegmentedHandoffCircuit,
+    ]);
+
+    useEffect(() => {
+        if (playbackType !== "track" || !currentTrack) {
+            lastLoggedRemotePlayKeyRef.current = null;
+            return;
+        }
+        if (
+            currentTrack.streamSource !== "tidal" &&
+            currentTrack.streamSource !== "youtube"
+        ) {
+            lastLoggedRemotePlayKeyRef.current = null;
+            return;
+        }
+        if (!isPlaying || isBuffering) {
+            return;
+        }
+
+        try {
+            const playRef = toAddToPlaylistRef(currentTrack);
+            const playKey = JSON.stringify(playRef);
+            if (playKey === lastLoggedRemotePlayKeyRef.current) {
+                return;
+            }
+            lastLoggedRemotePlayKeyRef.current = playKey;
+            void api.logPlay(playRef).catch((error) => {
+                sharedFrontendLogger.warn(
+                    "[AudioPlaybackOrchestrator] remote play logging failed",
+                    {
+                        trackId: currentTrack.id,
+                        streamSource: currentTrack.streamSource,
+                        error:
+                            error instanceof Error ? error.message : String(error),
+                    }
+                );
+            });
+        } catch (error) {
+            sharedFrontendLogger.warn(
+                "[AudioPlaybackOrchestrator] remote play logging payload failed",
+                {
+                    trackId: currentTrack.id,
+                    streamSource: currentTrack.streamSource,
+                    error: error instanceof Error ? error.message : String(error),
+                }
+            );
+        }
+    }, [
+        currentTrack,
+        currentTrack?.id,
+        currentTrack?.streamSource,
+        currentTrack?.tidalTrackId,
+        currentTrack?.youtubeVideoId,
+        isPlaying,
+        isBuffering,
+        playbackType,
     ]);
 
     useEffect(() => {
@@ -3971,12 +4177,21 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 typeof data.durationSec === "number"
                     ? data.durationSec
                     : data.duration ?? 0;
-            const fallbackDuration =
+            const metadataDuration =
                 currentTrack?.duration ||
                 currentAudiobook?.duration ||
                 currentPodcast?.duration ||
                 0;
-            setDuration(loadedDuration || fallbackDuration);
+            const isRemote =
+                currentTrack?.streamSource === "tidal" ||
+                currentTrack?.streamSource === "youtube";
+            setDuration(
+                resolvePlaybackDuration({
+                    loadedDurationSec: loadedDuration,
+                    metadataDurationSec: metadataDuration,
+                    isRemoteStream: isRemote,
+                }),
+            );
             clearTransientTrackRecovery(true);
 
             // Transition state machine - load complete
@@ -4081,10 +4296,50 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             } else if (playbackType === "audiobook") {
                 pause();
             } else if (playbackType === "track") {
-                if (repeatMode === "one") {
+                if (repeatMode === "one" && !isListenTogether) {
                     audioEngine.seek(0);
                     audioEngine.play();
                 } else {
+                    // Eagerly preload the next track's audio before the React
+                    // state update cycle to eliminate the silence gap on iOS
+                    // where the OS reclaims the audio session between tracks.
+                    // Uses preload() (not load()) so the subsequent track-change
+                    // effect's load() call promotes the preloaded instance
+                    // instantly instead of creating a redundant new one.
+                    const preloadDecision = resolveNextTrackPreloadDecision({
+                        playbackType,
+                        repeatMode,
+                        isListenTogether,
+                        isLoading: isLoadingRef.current,
+                    });
+                    if (preloadDecision.shouldPreload) {
+                        const nextTrack = getNextTrackInfo(
+                            queue, currentIndex, isShuffle, shuffleIndices, repeatMode,
+                        );
+                        if (nextTrack) {
+                            let preloadUrl: string;
+                            let preloadFormat: string | undefined = "mp3";
+                            if (nextTrack.streamSource === "tidal" && nextTrack.tidalTrackId) {
+                                preloadUrl = api.getTidalStreamUrl(nextTrack.tidalTrackId);
+                                preloadFormat = resolveRemoteStreamFormat("tidal");
+                            } else if (nextTrack.streamSource === "youtube" && nextTrack.youtubeVideoId) {
+                                preloadUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId, undefined, !ytMusicAuthenticatedRef.current);
+                                preloadFormat = resolveRemoteStreamFormat("youtube");
+                            } else if (nextTrack.streamSource === "youtube-direct" && nextTrack.youtubeVideoId) {
+                                preloadUrl = api.getYouTubeStreamUrl(nextTrack.youtubeVideoId);
+                                preloadFormat = nextTrack.youtubeAudioFormat === "webm" ? "webm" : "mp4";
+                            } else {
+                                preloadUrl = api.getStreamUrl(nextTrack.id);
+                                const ext = (nextTrack.filePath || "").split(".").pop()?.toLowerCase();
+                                if (ext === "flac") preloadFormat = "flac";
+                                else if (ext === "m4a" || ext === "aac") preloadFormat = "mp4";
+                                else if (ext === "ogg" || ext === "opus") preloadFormat = "webm";
+                                else if (ext === "wav") preloadFormat = "wav";
+                            }
+                            audioEngine.preload(preloadUrl, { format: preloadFormat });
+                        }
+                    }
+
                     const shouldAutoMatchVibe = shouldAutoMatchVibeAtQueueEnd({
                         playbackType,
                         queueLength: queue.length,
@@ -4249,10 +4504,22 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     scheduleTrackErrorSkip(failedTrackId);
                 } else {
                     clearPendingTrackErrorSkip();
-                    lastTrackIdRef.current = null;
-                    isLoadingRef.current = false;
-                    setCurrentTrack(null);
-                    setPlaybackType(null);
+                    // Preserve the current track on network errors so iOS
+                    // foreground recovery can retry playback when the user
+                    // returns to the app (MEDIA_ERR_NETWORK = code 2).
+                    // AudioEngineErrorPayload.code is always string (adapters
+                    // convert numeric MediaError codes to strings).
+                    const errorPayload = data as { error: unknown; code?: string };
+                    const isNetworkError =
+                        errorMessage.includes("network") ||
+                        errorMessage.includes("MEDIA_ERR_NETWORK") ||
+                        errorPayload.code === "2";
+                    if (!isNetworkError) {
+                        lastTrackIdRef.current = null;
+                        isLoadingRef.current = false;
+                        setCurrentTrack(null);
+                        setPlaybackType(null);
+                    }
                 }
             } else if (playbackType === "audiobook") {
                 clearPendingTrackErrorSkip();
@@ -4426,6 +4693,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         const handlePlay = () => {
             // Transition state machine to PLAYING
             playbackStateMachine.transition("PLAYING");
+            consecutiveErrorBreakerRef.current.recordSuccess();
             clearUnexpectedPauseRecoveryCheck();
             clearPendingTrackErrorSkip();
             clearStartupPlaybackRecovery();
@@ -4467,11 +4735,18 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 lastPlayingStateRef.current;
             const isNonUserPause = !isUserInitiatedRef.current;
 
+            // In a listen-together session as a follower, the host heartbeat
+            // mechanism handles playback recovery. Independent pause recovery
+            // would race with it and cause overlapping audio.
+            const ltSession = getListenTogetherSessionSnapshot();
+            const isListenTogetherFollower = Boolean(ltSession?.groupId && !ltSession.isHost);
+
             const shouldAttemptUnexpectedPauseRecovery =
                 playbackType === "track" &&
                 isNonUserPause &&
                 hasPlayIntent &&
-                !nearTrackEnd;
+                !nearTrackEnd &&
+                !isListenTogetherFollower;
 
             if (shouldAttemptUnexpectedPauseRecovery) {
                 const pauseObservedAtMs = Date.now();
@@ -4711,6 +4986,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         setIsBuffering,
         queue,
         currentIndex,
+        isShuffle,
+        shuffleIndices,
         requestAutoMatchVibe,
         setCurrentTrack,
         setCurrentAudiobook,
@@ -4737,6 +5014,96 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         noteSegmentedStartupVhsResponse,
     ]);
 
+    // Foreground recovery: when the page returns from background and
+    // audio was playing when it went hidden but the engine is no longer
+    // playing (OS reclaimed the audio session, or track ended while
+    // backgrounded), either advance to the next track or retry playback.
+    // The playing state is snapshotted at the "hidden" transition — not from
+    // a persistent "ever played" flag — to prevent spurious recovery on
+    // desktop when a user pauses then switches tabs.
+    useEffect(() => {
+        if (typeof document === "undefined") return;
+
+        let recoveryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        const handleVisibilityChange = () => {
+            // On hidden: snapshot whether the engine is currently playing.
+            // This snapshot is used on the subsequent visible transition to
+            // decide if recovery is needed.
+            if (document.visibilityState === "hidden") {
+                wasPlayingWhenHiddenRef.current = audioEngine.isPlaying();
+                return;
+            }
+
+            const decision = resolveForegroundRecoveryDecision({
+                isVisible: true,
+                wasPlayingWhenHidden: wasPlayingWhenHiddenRef.current,
+                engineIsPlaying: audioEngine.isPlaying(),
+                machineState: playbackStateMachine.getState(),
+            });
+
+            if (!decision.shouldRecover) return;
+
+            const currentMediaId =
+                currentTrackRef.current?.id ??
+                currentAudiobook?.id ??
+                currentPodcast?.id ??
+                null;
+            if (!currentMediaId) return;
+
+            // Detect whether the track finished while backgrounded.
+            // This check runs before the throttle gate so that a
+            // completed track is never suppressed by cooldown timing.
+            if (playbackType === "track") {
+                const trackEnded =
+                    typeof audioEngine.hasTrackEnded === "function"
+                        ? audioEngine.hasTrackEnded()
+                        : (() => {
+                              const d = audioEngine.getDuration();
+                              const p = audioEngine.getCurrentTime();
+                              return d > 0 && p >= d - 0.1;
+                          })();
+                if (trackEnded) {
+                    sharedFrontendLogger.info(
+                        "[AudioPlaybackOrchestrator] Foreground recovery: track ended while backgrounded, synthesizing end event",
+                        { trackId: currentMediaId },
+                    );
+                    audioEngine.notifyTrackEnded();
+                    return;
+                }
+            }
+
+            if (shouldThrottleForegroundRecovery()) return;
+
+            sharedFrontendLogger.info(
+                "[AudioPlaybackOrchestrator] Foreground recovery: retrying playback after app resume",
+                { reason: decision.reason, trackId: currentMediaId },
+            );
+
+            playbackStateMachine.forceTransition("RECOVERING");
+            setIsBuffering(true);
+
+            // Small delay to let the audio session re-establish.
+            // Guarded by machine state: if something else transitions the
+            // machine during the delay (user pause, media clear), recovery
+            // is aborted.
+            recoveryTimeoutId = setTimeout(() => {
+                recoveryTimeoutId = null;
+                if (playbackStateMachine.getState() !== "RECOVERING") return;
+                playbackStateMachine.forceTransition("LOADING");
+                audioEngine.play();
+            }, 300);
+        };
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () => {
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+            if (recoveryTimeoutId !== null) {
+                clearTimeout(recoveryTimeoutId);
+            }
+        };
+    }, [currentAudiobook?.id, currentPodcast?.id, setIsBuffering]);
+
     // Load and play audio when track changes
     useEffect(() => {
         // Keep queue-triggered loads aligned with the latest UI output state,
@@ -4750,6 +5117,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             null;
 
         if (!currentMediaId) {
+            wasPlayingWhenHiddenRef.current = false;
             markSegmentedStartupRampWindow(null, "media_cleared");
             setStreamProfile(null);
             segmentedStartupTimelineRef.current = null;
@@ -4886,7 +5254,8 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             if (currentTrack.streamSource === "tidal" && currentTrack.tidalTrackId) {
                 streamUrl = api.getTidalStreamUrl(currentTrack.tidalTrackId);
             } else if (currentTrack.streamSource === "youtube" && currentTrack.youtubeVideoId) {
-                streamUrl = api.getYtMusicStreamUrl(currentTrack.youtubeVideoId);
+                // Prefer authenticated endpoint when user has YT Music OAuth, else public
+                streamUrl = api.getYtMusicStreamUrl(currentTrack.youtubeVideoId, undefined, !ytMusicAuthenticatedRef.current);
             } else if (currentTrack.streamSource === "youtube-direct" && currentTrack.youtubeVideoId) {
                 streamUrl = api.getYouTubeStreamUrl(currentTrack.youtubeVideoId);
             } else {
@@ -4958,15 +5327,14 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 0;
             setDuration(fallbackDuration);
 
-            let format = "mp3";
+            let format: string | undefined = "mp3";
             if (currentTrack?.streamSource === "youtube-direct") {
                 // Direct YouTube audio is opus-in-webm or AAC-in-mp4
                 // depending on the source video; /api/youtube/info reports
                 // the container as audioFormat.
                 format = currentTrack.youtubeAudioFormat === "webm" ? "webm" : "mp4";
             } else if (currentTrack?.streamSource === "tidal" || currentTrack?.streamSource === "youtube") {
-                // TIDAL and YouTube Music streams are AAC in MP4 container
-                format = "mp4";
+                format = resolveRemoteStreamFormat(currentTrack.streamSource);
             } else {
                 const filePath = currentTrack?.filePath || "";
                 if (filePath) {
@@ -4982,7 +5350,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 setStreamProfile({
                     mode: "direct",
                     sourceType: resolveDirectTrackSourceType(currentTrack),
-                    codec: FORMAT_TO_CODEC[format] ?? null,
+                    codec: (format ? FORMAT_TO_CODEC[format] : null) ?? null,
                     bitrateKbps: null,
                 });
             } else {
@@ -5982,17 +6350,17 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         }
 
         let streamUrl: string;
-        let format = "mp3";
+        let format: string | undefined = "mp3";
 
         if (nextTrack.streamSource === "tidal" && nextTrack.tidalTrackId) {
             streamUrl = api.getTidalStreamUrl(nextTrack.tidalTrackId);
-            format = "mp4";
+            format = resolveRemoteStreamFormat("tidal");
         } else if (
             nextTrack.streamSource === "youtube" &&
             nextTrack.youtubeVideoId
         ) {
-            streamUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId);
-            format = "mp4";
+            streamUrl = api.getYtMusicStreamUrl(nextTrack.youtubeVideoId, undefined, !ytMusicAuthenticatedRef.current);
+            format = resolveRemoteStreamFormat("youtube");
         } else if (
             nextTrack.streamSource === "youtube-direct" &&
             nextTrack.youtubeVideoId

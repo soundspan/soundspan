@@ -19,6 +19,7 @@ const mockPrisma = {
         delete: jest.fn(),
         update: jest.fn(),
         create: jest.fn(),
+        upsert: jest.fn(),
         findMany: jest.fn(),
     },
 };
@@ -223,6 +224,7 @@ describe("AudioStreamingService", () => {
         mockPrisma.transcodedFile.delete.mockResolvedValue(undefined);
         mockPrisma.transcodedFile.update.mockResolvedValue(undefined);
         mockPrisma.transcodedFile.create.mockResolvedValue(undefined);
+        mockPrisma.transcodedFile.upsert.mockResolvedValue(undefined);
         mockPrisma.transcodedFile.findMany.mockResolvedValue([]);
 
         mockParseFile.mockResolvedValue({ format: { bitrate: 500000 } });
@@ -426,11 +428,22 @@ describe("AudioStreamingService", () => {
             );
             expect(ffmpegControl.lastCommand.format).toHaveBeenCalledWith("mp3");
             expect(ffmpegControl.lastCommand.save).toHaveBeenCalledWith(expectedPath);
-            expect(mockPrisma.transcodedFile.create).toHaveBeenCalledWith({
-                data: {
+            expect(mockPrisma.transcodedFile.upsert).toHaveBeenCalledWith({
+                where: {
+                    trackId_quality: {
+                        trackId: "track-success",
+                        quality: "high",
+                    },
+                },
+                create: {
                     trackId: "track-success",
                     quality: "high",
                     cachePath: expectedFileName,
+                    cacheSize: 4 * 1024 * 1024,
+                    sourceModified,
+                    lastAccessed: expect.any(Date),
+                },
+                update: {
                     cacheSize: 4 * 1024 * 1024,
                     sourceModified,
                     lastAccessed: expect.any(Date),
@@ -479,7 +492,7 @@ describe("AudioStreamingService", () => {
         it("throws recoverable DB error when cache record persistence fails", async () => {
             const service = createService();
             mockFsStat.mockResolvedValueOnce({ size: 100 });
-            mockPrisma.transcodedFile.create.mockRejectedValueOnce(
+            mockPrisma.transcodedFile.upsert.mockRejectedValueOnce(
                 new Error("db write failed")
             );
 
@@ -545,6 +558,64 @@ describe("AudioStreamingService", () => {
                     new Date("2025-01-10T00:00:00.000Z")
                 )
             ).rejects.toBeInstanceOf(AppError);
+        });
+
+        it("deduplicates concurrent transcodes for the same track+quality", async () => {
+            const service = createService();
+            const sourceModified = new Date("2025-01-10T00:00:00.000Z");
+
+            mockFsStat.mockResolvedValue({ size: 2 * 1024 * 1024 });
+
+            const p1 = (service as any).transcodeToCache(
+                "track-dedup",
+                "high",
+                "/music/source.flac",
+                sourceModified
+            );
+            const p2 = (service as any).transcodeToCache(
+                "track-dedup",
+                "high",
+                "/music/source.flac",
+                sourceModified
+            );
+
+            const [r1, r2] = await Promise.all([p1, p2]);
+
+            expect(r1).toBe(r2);
+            // ffmpeg should only be invoked once for the deduplicated pair
+            const ffmpegCallsForDedup = mockFfmpeg.mock.calls.filter(
+                (call: any[]) => call[0] === "/music/source.flac"
+            );
+            expect(ffmpegCallsForDedup).toHaveLength(1);
+            expect(mockPrisma.transcodedFile.upsert).toHaveBeenCalledTimes(1);
+        });
+
+        it("removes inflight entry after transcode failure so retries work", async () => {
+            const service = createService();
+            ffmpegControl.mode = "error";
+            ffmpegControl.errorMessage = "encoding failed";
+
+            await expect(
+                (service as any).transcodeToCache(
+                    "track-retry",
+                    "high",
+                    "/music/source.flac",
+                    new Date("2025-01-10T00:00:00.000Z")
+                )
+            ).rejects.toMatchObject({ name: "AppError" });
+
+            // After failure, inflight map should be cleared so a retry can proceed
+            ffmpegControl.mode = "success";
+            mockFsStat.mockResolvedValueOnce({ size: 1024 });
+
+            const result = await (service as any).transcodeToCache(
+                "track-retry",
+                "high",
+                "/music/source.flac",
+                new Date("2025-01-10T00:00:00.000Z")
+            );
+
+            expect(result).toBeDefined();
         });
     });
 

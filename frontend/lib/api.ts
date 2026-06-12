@@ -1,5 +1,6 @@
 import { resolveApiBaseUrl } from "./api-base-url";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { isRemoteTrack, type AddToPlaylistRef } from "./trackRef";
 import type {
     CanonicalMediaSearchResult,
     SegmentedStreamingSourceType,
@@ -10,6 +11,7 @@ const REFRESH_TOKEN_KEY = "refresh_token";
 const PLAYBACK_DEVICE_ID_KEY = "soundspan_playback_device_id";
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const AUTH_REFRESH_TIMEOUT_MS = 10_000;
+const IMPORT_PREVIEW_TIMEOUT_MS = 60_000;
 const DEFAULT_TIMEOUT_RETRY_BACKOFF_MS = 350;
 const MAX_TIMEOUT_RETRIES = 1;
 
@@ -57,6 +59,101 @@ export interface AlbumRelease {
     approved: boolean;
     rejected: boolean;
     rejections: string[];
+}
+
+export type ImportResolutionSource =
+    | "local"
+    | "youtube"
+    | "tidal"
+    | "unresolved";
+
+export interface PlaylistImportResolvedTrack {
+    index: number;
+    artist: string;
+    title: string;
+    album?: string;
+    trackId?: string;
+    trackYtMusicId?: string;
+    trackTidalId?: string;
+    source: ImportResolutionSource;
+    confidence: number;
+    duration?: number;
+}
+
+export interface PlaylistImportSummary {
+    total: number;
+    local: number;
+    youtube: number;
+    tidal: number;
+    unresolved: number;
+}
+
+export interface PlaylistImportPreviewResponse {
+    playlistName: string;
+    resolved: PlaylistImportResolvedTrack[];
+    summary: PlaylistImportSummary;
+}
+
+export interface PlaylistImportExecuteResponse {
+    playlistId: string;
+    summary: PlaylistImportSummary;
+}
+
+/** Lifecycle states returned by generic playlist import jobs. */
+export type ImportJobStatus =
+    | "pending"
+    | "resolving"
+    | "creating_playlist"
+    | "cancelling"
+    | "completed"
+    | "failed"
+    | "cancelled";
+
+export interface ImportJob {
+    id: string;
+    userId: string;
+    sourceType: string;
+    sourceId: string;
+    sourceUrl: string;
+    normalizedSource: string;
+    playlistName: string;
+    requestedPlaylistName: string | null;
+    status: ImportJobStatus;
+    progress: number;
+    summary: PlaylistImportSummary;
+    createdPlaylistId: string | null;
+    error: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface LibraryHealthRecord {
+    id: string;
+    trackId: string;
+    status: "MISSING_FROM_DISK" | "UNREADABLE_METADATA";
+    filePath: string;
+    detail: string | null;
+    detectedAt: string;
+    updatedAt: string;
+    track?: {
+        id: string;
+        title: string;
+        album?: { title: string; artist?: { name: string } };
+    };
+}
+
+export interface ShareLinkRecord {
+    id: string;
+    token: string;
+    userId: string;
+    resourceType: "playlist" | "album" | "track";
+    resourceId: string;
+    expiresAt: string | null;
+    maxPlays: number | null;
+    playCount: number;
+    revoked: boolean;
+    createdAt: string;
+    accessPath: string;
 }
 
 // New Mood Bucket Types (simplified mood system)
@@ -161,12 +258,23 @@ export interface LikedPlaylistTrack {
     trackNo: number | null;
     filePath: string | null;
     likedAt: string;
+    source?: "local" | "tidal" | "youtube";
+    provider?: {
+        tidalTrackId: number | null;
+        youtubeVideoId: string | null;
+    };
+    /** Present on remote (YouTube/Tidal) liked tracks */
+    streamSource?: "youtube" | "tidal";
+    /** YouTube video ID — present when streamSource is "youtube" */
+    youtubeVideoId?: string;
+    /** Tidal track ID — present when streamSource is "tidal" */
+    tidalTrackId?: number | string | null;
     artist: {
-        id: string;
+        id: string | null;
         name: string;
     };
     album: {
-        id: string;
+        id: string | null;
         title: string;
         coverArt: string | null;
     };
@@ -1019,17 +1127,21 @@ class ApiClient {
     }
 
     async getTrackPreference(trackId: string) {
+        const isRemote = isRemoteTrack({ id: trackId });
+        const basePath = isRemote ? "/library/remote-tracks" : "/library/tracks";
         return this.request<TrackPreferenceResponse>(
-            `/library/tracks/${encodeURIComponent(trackId)}/preference`
+            `${basePath}/${encodeURIComponent(trackId)}/preference`
         );
     }
 
-    async setTrackPreference(trackId: string, signal: TrackPreferenceSignal) {
+    async setTrackPreference(trackId: string, signal: TrackPreferenceSignal, metadata?: { title?: string; artist?: string; album?: string; thumbnailUrl?: string; duration?: number }) {
+        const isRemote = isRemoteTrack({ id: trackId });
+        const basePath = isRemote ? "/library/remote-tracks" : "/library/tracks";
         return this.request<TrackPreferenceResponse>(
-            `/library/tracks/${encodeURIComponent(trackId)}/preference`,
+            `${basePath}/${encodeURIComponent(trackId)}/preference`,
             {
                 method: "POST",
-                body: JSON.stringify({ signal }),
+                body: JSON.stringify({ signal, ...(metadata ? { metadata } : {}) }),
             }
         );
     }
@@ -1310,6 +1422,24 @@ class ApiClient {
         }`;
     }
 
+    /**
+     * Get the proxied URL for a YouTube Music browse thumbnail.
+     * @param externalUrl - The original external thumbnail URL
+     */
+    getBrowseImageUrl(externalUrl: string): string {
+        const baseUrl = this.getBaseUrl();
+        const token = this.getCurrentToken();
+        const params = new URLSearchParams({ url: externalUrl });
+        if (token) params.append("token", token);
+        return `${baseUrl}/api/browse/ytmusic/image?${params.toString()}`;
+    }
+
+    async getYtMusicMixes(): Promise<{
+        mixes: Array<{ playlistId: string; title: string; description: string; thumbnails: Array<{ url: string; width: number }>; count: string | null }>;
+    }> {
+        return this.get("/browse/ytmusic/mixes");
+    }
+
     // Recommendations
     async getRecommendationsForYou(limit = 10) {
         return this.request<{ artists: ApiData[] }>(
@@ -1370,17 +1500,47 @@ class ApiClient {
         });
     }
 
-    async addTrackToPlaylist(playlistId: string, trackId: string) {
-        return this.request<ApiData>(`/playlists/${playlistId}/items`, {
+    async createShareLink(input: {
+        resourceType: "playlist" | "album" | "track";
+        resourceId: string;
+        expiresAt?: string;
+        maxPlays?: number;
+    }) {
+        return this.request<ShareLinkRecord>("/share-links", {
             method: "POST",
-            body: JSON.stringify({ trackId }),
+            body: JSON.stringify(input),
         });
     }
 
-    async removeTrackFromPlaylist(playlistId: string, trackId: string) {
-        return this.request<void>(`/playlists/${playlistId}/items/${trackId}`, {
+    async listShareLinks() {
+        return this.request<ShareLinkRecord[]>("/share-links");
+    }
+
+    async revokeShareLink(id: string) {
+        return this.request<{ success: boolean }>(`/share-links/${id}`, {
             method: "DELETE",
         });
+    }
+
+    async getSharedResource(token: string) {
+        return this.request<unknown>(`/share-links/access/${token}`);
+    }
+
+    async addTrackToPlaylist(playlistId: string, trackRef: AddToPlaylistRef) {
+        return this.request<ApiData>(`/playlists/${playlistId}/items`, {
+            method: "POST",
+            body: JSON.stringify(trackRef),
+        });
+    }
+
+    async removeItemFromPlaylist(playlistId: string, itemId: string) {
+        return this.request<void>(`/playlists/${playlistId}/items/${itemId}`, {
+            method: "DELETE",
+        });
+    }
+
+    async removeTrackFromPlaylist(playlistId: string, itemId: string) {
+        return this.removeItemFromPlaylist(playlistId, itemId);
     }
 
     async hidePlaylist(playlistId: string) {
@@ -1430,10 +1590,10 @@ class ApiClient {
     }
 
     // Play tracking
-    async logPlay(trackId: string) {
+    async logPlay(trackRef: AddToPlaylistRef) {
         return this.request<ApiData>("/plays", {
             method: "POST",
-            body: JSON.stringify({ trackId }),
+            body: JSON.stringify(trackRef),
         });
     }
 
@@ -1708,6 +1868,64 @@ class ApiClient {
         }>("/downloads/availability");
     }
 
+    async previewPlaylistImport(
+        url: string
+    ): Promise<PlaylistImportPreviewResponse> {
+        return this.request("/import/preview", {
+            method: "POST",
+            body: JSON.stringify({ url }),
+            timeoutMs: IMPORT_PREVIEW_TIMEOUT_MS,
+        });
+    }
+
+    async executePlaylistImport(input: {
+        previewData: PlaylistImportPreviewResponse;
+        name?: string;
+    }): Promise<PlaylistImportExecuteResponse> {
+        return this.post("/import/execute", input);
+    }
+
+    async previewM3UImport(
+        content: string,
+        name?: string
+    ): Promise<PlaylistImportPreviewResponse> {
+        return this.request("/import/m3u/preview", {
+            method: "POST",
+            body: JSON.stringify({ content, name }),
+        });
+    }
+
+    async submitImportJob(url: string, name?: string) {
+        return this.request<{
+            deduped: boolean;
+            job: ImportJob;
+        }>("/import/jobs", {
+            method: "POST",
+            body: JSON.stringify({ url, name }),
+        });
+    }
+
+    async listImportJobs() {
+        return this.request<{ jobs: ImportJob[] }>("/import/jobs");
+    }
+
+    async getImportJob(jobId: string) {
+        return this.request<{ job: ImportJob }>(`/import/jobs/${jobId}`);
+    }
+
+    async reconnectImportJob(url: string) {
+        return this.request<{ job: ImportJob }>("/import/jobs/reconnect", {
+            method: "POST",
+            body: JSON.stringify({ url }),
+        });
+    }
+
+    async cancelImportJob(jobId: string) {
+        return this.request<{ job: ImportJob }>(`/import/jobs/${jobId}/cancel`, {
+            method: "POST",
+        });
+    }
+
     async deleteDownload(id: string) {
         return this.request<{ success: boolean }>(`/downloads/${id}`, {
             method: "DELETE",
@@ -1915,11 +2133,20 @@ class ApiClient {
     }
 
     async getTrackPreview(artistName: string, trackTitle: string) {
-        return this.request<{ previewUrl: string }>(
+        return this.request<{ videoId: string }>(
             `/artists/preview/${encodeURIComponent(
                 artistName
             )}/${encodeURIComponent(trackTitle)}`
         );
+    }
+
+    getPreviewStreamUrl(videoId: string): string {
+        const baseUrl = `${this.getBaseUrl()}/api/artists/preview-stream/${encodeURIComponent(videoId)}`;
+        const token = this.getCurrentToken();
+        if (token) {
+            return `${baseUrl}?token=${encodeURIComponent(token)}`;
+        }
+        return baseUrl;
     }
 
     async testDeezer(apiKey?: string) {
@@ -2752,6 +2979,90 @@ class ApiClient {
         }>("/vibe/status");
     }
 
+    async getVibeMap() {
+        return this.request<{
+            tracks: Array<{
+                id: string;
+                x: number;
+                y: number;
+                title: string;
+                artist: string;
+                artistId: string;
+                albumId: string;
+                coverUrl: string | null;
+                dominantMood: string;
+                moodScore: number;
+                moods: Record<string, number>;
+                energy: number | null;
+                valence: number | null;
+            }>;
+            trackCount: number;
+            computedAt: string;
+        }>("/vibe/map");
+    }
+
+    async getVibePath(fromId: string, toId: string, steps = 5) {
+        return this.request<{
+            from: string;
+            to: string;
+            steps: Array<{
+                id: string;
+                title: string;
+                distance: number;
+                similarity: number;
+                album: { id: string; title: string; coverUrl: string | null };
+                artist: { id: string; name: string };
+            }>;
+        }>(`/vibe/path?from=${fromId}&to=${toId}&steps=${steps}`);
+    }
+
+    async vibeAlchemy(trackIds: string[], weights?: number[], limit = 20) {
+        return this.request<{
+            ingredients: string[];
+            weights: number[];
+            tracks: Array<{
+                id: string;
+                title: string;
+                distance: number;
+                similarity: number;
+                album: { id: string; title: string; coverUrl: string | null };
+                artist: { id: string; name: string };
+            }>;
+        }>("/vibe/alchemy", {
+            method: "POST",
+            body: JSON.stringify({ trackIds, weights, limit }),
+        });
+    }
+
+    async refreshAllPodcasts() {
+        return this.request<{
+            success: boolean;
+            total: number;
+            totalNewEpisodes: number;
+            failed: number;
+            results: Array<{
+                podcastId: string;
+                success: boolean;
+                newEpisodesCount: number;
+                error?: string;
+            }>;
+        }>("/podcasts/refresh-all", { method: "POST" });
+    }
+
+    async getLibraryHealth() {
+        return this.request<{
+            records: LibraryHealthRecord[];
+            total: number;
+        }>("/admin/library-health");
+    }
+
+    async dismissLibraryHealthRecord(recordId: string) {
+        return this.request<{ success: boolean }>(
+            `/admin/library-health/${recordId}`,
+            { method: "DELETE" }
+        );
+    }
+
     async getTrackAnalysis(trackId: string) {
         return this.request<{
             id: string;
@@ -2897,8 +3208,9 @@ class ApiClient {
      * Like getStreamUrl(), this returns a synchronous URL string
      * that the audio engine can load directly.
      */
-    getYtMusicStreamUrl(videoId: string, quality?: string): string {
-        let url = `${this.getBaseUrl()}/api/ytmusic/stream/${videoId}`;
+    getYtMusicStreamUrl(videoId: string, quality?: string, usePublic?: boolean): string {
+        const endpoint = usePublic ? "stream-public" : "stream";
+        let url = `${this.getBaseUrl()}/api/ytmusic/${endpoint}/${videoId}`;
         const params = new URLSearchParams();
         if (quality) params.set("quality", quality);
         const token = this.getCurrentToken();
@@ -2926,7 +3238,9 @@ class ApiClient {
         if (quality) params.set("quality", quality);
         const qs = params.toString();
         const suffix = qs ? `?${qs}` : "";
-        return this.get(`/ytmusic/stream-info/${videoId}${suffix}`);
+        // Use the public endpoint (no per-user YT Music OAuth required) —
+        // consistent with stream-public used for playback.
+        return this.get(`/ytmusic/stream-info-public/${videoId}${suffix}`);
     }
 
     // ── YouTube (regular, non-Music) ─────────────────────────────
@@ -3128,6 +3442,75 @@ class ApiClient {
         return this.get(`/tidal-streaming/stream-info/${trackId}${suffix}`);
     }
 
+    // ── TIDAL Browse ──────────────────────────────────────────────
+
+    getTidalBrowseImageUrl(externalUrl: string): string {
+        const baseUrl = this.getBaseUrl();
+        const token = this.getCurrentToken();
+        const params = new URLSearchParams({ url: externalUrl });
+        if (token) params.append("token", token);
+        return `${baseUrl}/api/browse/tidal/image?${params.toString()}`;
+    }
+
+    async getTidalHomeShelves(): Promise<{
+        shelves: Array<{ title: string; contents: Array<{ type: string; playlistId?: string; mixId?: string; albumId?: string; title: string; thumbnailUrl: string | null; subtitle?: string }> }>;
+    }> {
+        return this.get("/browse/tidal/home");
+    }
+
+    async getTidalExploreShelves(): Promise<{
+        shelves: Array<{ title: string; contents: Array<{ type: string; playlistId?: string; mixId?: string; albumId?: string; title: string; thumbnailUrl: string | null; subtitle?: string }> }>;
+    }> {
+        return this.get("/browse/tidal/explore");
+    }
+
+    async getTidalGenres(): Promise<{
+        genres: Array<{ name: string; path: string; hasPlaylists: boolean; imageUrl: string | null }>;
+    }> {
+        return this.get("/browse/tidal/genres");
+    }
+
+    async getTidalMoods(): Promise<{
+        moods: Array<{ name: string; path: string; hasPlaylists: boolean; imageUrl: string | null }>;
+    }> {
+        return this.get("/browse/tidal/moods");
+    }
+
+    async getTidalMixes(): Promise<{
+        mixes: Array<{ mixId: string; title: string; subTitle: string; thumbnailUrl: string | null }>;
+    }> {
+        return this.get("/browse/tidal/mixes");
+    }
+
+    async getTidalGenrePlaylists(path: string): Promise<{
+        playlists: Array<{ playlistId: string; title: string; thumbnailUrl: string | null; numTracks: number }>;
+    }> {
+        return this.get(`/browse/tidal/genre-playlists?path=${encodeURIComponent(path)}`);
+    }
+
+    async getTidalBrowsePlaylist(id: string, limit?: number): Promise<{
+        id: string;
+        title: string;
+        trackCount: number;
+        thumbnailUrl: string | null;
+        tracks: Array<{ trackId: number; title: string; artist: string; artists: string[]; album: string; duration: number; isrc: string | null; thumbnailUrl: string | null }>;
+    }> {
+        const params = new URLSearchParams();
+        if (limit) params.set("limit", String(limit));
+        const qs = params.toString();
+        return this.get(`/browse/tidal/playlist/${encodeURIComponent(id)}${qs ? `?${qs}` : ""}`);
+    }
+
+    async getTidalBrowseMix(id: string): Promise<{
+        id: string;
+        title: string;
+        trackCount: number;
+        thumbnailUrl: string | null;
+        tracks: Array<{ trackId: number; title: string; artist: string; artists: string[]; album: string; duration: number; isrc: string | null; thumbnailUrl: string | null }>;
+    }> {
+        return this.get(`/browse/tidal/mix/${encodeURIComponent(id)}`);
+    }
+
     // ── Local Track Quality ────────────────────────────────────────
 
     /**
@@ -3167,6 +3550,17 @@ class ApiClient {
         name?: string;
         visibility?: "public" | "private";
         queueTrackIds?: string[];
+        queueTracks?: Array<{
+            trackId?: string;
+            tidalTrackId?: number;
+            youtubeVideoId?: string;
+            title?: string;
+            artist?: string;
+            album?: string;
+            duration?: number;
+            thumbnailUrl?: string;
+            isrc?: string;
+        }>;
         currentTrackId?: string;
         currentTimeMs?: number;
         isPlaying?: boolean;
@@ -3196,6 +3590,43 @@ class ApiClient {
 
     async endListenGroup(groupId: string): Promise<ApiData> {
         return this.post(`/listen-together/${groupId}/end`);
+    }
+
+    // -----------------------------------------------------------------------
+    // Track Mappings (persisted gap-fill / provider resolution)
+    // -----------------------------------------------------------------------
+
+    async getAlbumMappings(albumId: string): Promise<{
+        mappings: Array<{
+            id: string;
+            trackId: string | null;
+            trackTidalId: string | null;
+            trackYtMusicId: string | null;
+            confidence: number;
+            source: string;
+            stale: boolean;
+            trackTidal: {
+                id: string;
+                tidalId: number;
+                title: string;
+                artist: string;
+                album: string;
+                duration: number;
+                isrc?: string;
+                quality?: string;
+            } | null;
+            trackYtMusic: {
+                id: string;
+                videoId: string;
+                title: string;
+                artist: string;
+                album: string;
+                duration: number;
+                thumbnailUrl?: string;
+            } | null;
+        }>;
+    }> {
+        return this.get(`/track-mappings/album/${albumId}`);
     }
 }
 

@@ -2,6 +2,9 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 
+/**
+ * Executes normalizeCacheQuery.
+ */
 export function normalizeCacheQuery(query: string): string {
     return query.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -93,6 +96,9 @@ export interface SearchResults {
     episodes: EpisodeSearchResult[];
 }
 
+/**
+ * Represents the SearchService class.
+ */
 export class SearchService {
     /**
      * Convert user query to PostgreSQL tsquery format
@@ -123,9 +129,10 @@ export class SearchService {
                     contains: query,
                     mode: "insensitive",
                 },
-                albums: {
-                    some: {},
-                },
+                OR: [
+                    { albums: { some: {} } },
+                    { remoteTrackCount: { gt: 0 } },
+                ],
             },
             select: {
                 id: true,
@@ -168,11 +175,21 @@ export class SearchService {
           ts_rank(a."searchVector", to_tsquery('english', ${tsquery})) AS rank
         FROM "Artist" a
         WHERE a."searchVector" @@ to_tsquery('english', ${tsquery})
-          AND EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+          AND (
+            EXISTS (SELECT 1 FROM "Album" alb WHERE alb."artistId" = a.id)
+            OR a."remoteTrackCount" > 0
+          )
         ORDER BY rank DESC, a.name ASC
         LIMIT ${limit}
         OFFSET ${offset}
       `;
+
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchArtistsFallback({ query, limit, offset });
+            }
 
             return results;
         } catch (error) {
@@ -287,6 +304,13 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchAlbumsFallback({ query, limit, offset });
+            }
+
             return results;
         } catch (error) {
             logger.error("Album search error:", error);
@@ -376,6 +400,13 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchTracksFallback({ query, limit, offset });
+            }
+
             return results;
         } catch (error) {
             logger.error("Track search error:", error);
@@ -416,6 +447,13 @@ export class SearchService {
         LIMIT ${limit}
         OFFSET ${offset}
       `;
+
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchPodcasts({ query, limit, offset });
+            }
 
             return results;
         } catch (error) {
@@ -515,6 +553,13 @@ export class SearchService {
         OFFSET ${offset}
       `;
 
+            if (results.length === 0) {
+                logger.debug(
+                    `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+                );
+                return this.searchEpisodesFallback({ query, limit, offset });
+            }
+
             return results;
         } catch (error) {
             logger.error("Episode search error:", error);
@@ -565,6 +610,10 @@ export class SearchService {
                     coverUrl: r.coverUrl ? `/audiobooks/${r.id}/cover` : null,
                 }));
             }
+
+            logger.debug(
+                `[SEARCH] FTS returned 0 results for "${query}", falling back to ILIKE`
+            );
 
             return this.searchAudiobooksFallback({ query, limit, offset });
         } catch (error) {

@@ -489,6 +489,9 @@ async function waitForActiveCycleToStop(maxWaitMs = ENRICHMENT_STOP_MAX_WAIT_MS)
     }
 }
 
+/**
+ * Executes stopUnifiedEnrichmentWorker.
+ */
 export async function stopUnifiedEnrichmentWorker() {
     isPaused = true;
     isStopping = true;
@@ -1042,11 +1045,21 @@ async function enrichArtistsBatch(): Promise<number> {
 
     const artists = await prisma.artist.findMany({
         where: {
-            OR: [
-                { enrichmentStatus: "pending" },
-                { enrichmentStatus: "failed" },
+            AND: [
+                {
+                    OR: [
+                        { enrichmentStatus: "pending" },
+                        { enrichmentStatus: "failed" },
+                    ],
+                },
+                {
+                    OR: [
+                        { albums: { some: {} } },
+                        { tracksTidal: { some: {} } },
+                        { tracksYtMusic: { some: {} } },
+                    ],
+                },
             ],
-            albums: { some: {} },
         },
         orderBy: { name: "asc" },
         take: ARTIST_BATCH_SIZE,

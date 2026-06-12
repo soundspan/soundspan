@@ -13,6 +13,9 @@ export interface BatchLogEntry {
     message: string;
 }
 
+/**
+ * Represents the DiscoveryBatchLogger class.
+ */
 export class DiscoveryBatchLogger {
     private readonly MAX_LOG_ENTRIES = 100;
 

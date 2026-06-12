@@ -13,6 +13,9 @@ export interface ValidationJobResult {
   duration: number;
 }
 
+/**
+ * Executes processValidation.
+ */
 export async function processValidation(job: Job<ValidationJobData>): Promise<ValidationJobResult> {
   logger.debug(`[ValidationJob ${job.id}] Starting file validation`);
 

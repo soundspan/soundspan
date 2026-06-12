@@ -6,6 +6,9 @@ import { useAudiobookQuery } from "@/hooks/useQueries";
 import { api } from "@/lib/api";
 import { subscribeQueryEvent } from "@/lib/query-events";
 
+/**
+ * Executes useAudiobookData.
+ */
 export function useAudiobookData() {
   const params = useParams();
   const audiobookId = params.id as string;

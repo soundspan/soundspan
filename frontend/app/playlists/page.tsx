@@ -2,19 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { usePlaylistsQuery } from "@/hooks/useQueries";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/hooks/useQueries";
 import { useAuth } from "@/lib/auth-context";
 import { useAudioControls } from "@/lib/audio-context";
-import { Play, Music, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Play, Music, Eye, EyeOff, Loader2, Heart, Download } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { api } from "@/lib/api";
 import { cn } from "@/utils/cn";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { CoverMosaic } from "@/components/ui/CoverMosaic";
+import { createMosaicCandidates, selectMosaicCovers } from "@/utils/mosaicCoverSelection";
+import { useLikedPlaylistQuery } from "@/hooks/useQueries";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // soundspan brand blue for play buttons
@@ -41,7 +43,6 @@ interface Playlist {
     };
 }
 
-// Generate mosaic cover from playlist tracks
 function PlaylistMosaic({
     items,
     size = 4,
@@ -53,76 +54,29 @@ function PlaylistMosaic({
 }) {
     const coverUrls = useMemo(() => {
         if (!items || items.length === 0) return [];
-
-        const tracksWithCovers = items.filter(
-            (item) => item.track?.album?.coverArt
-        );
-        if (tracksWithCovers.length === 0) return [];
-
-        // Get unique cover arts (up to 4)
-        const uniqueCovers = Array.from(
-            new Set(tracksWithCovers.map((item) => item.track.album!.coverArt))
-        ).slice(0, size);
-
-        return uniqueCovers.map((cover) => api.getCoverArtUrl(cover!, 200));
+        const candidates = createMosaicCandidates(items, {
+            getId: (item) => item.id,
+            getCoverUrl: (item) => item.track?.album?.coverArt,
+        });
+        return selectMosaicCovers(candidates, { count: size })
+            .map((r) => api.getCoverArtUrl(r.coverUrl, 200));
     }, [items, size]);
 
-    if (coverUrls.length === 0) {
-        return (
-            <div
-                className={cn(
+    return (
+        <CoverMosaic
+            coverUrls={coverUrls}
+            greyed={greyed}
+            imageSizes="200px"
+            showEmptyCellIcon
+            emptyState={
+                <div className={cn(
                     "w-full h-full flex items-center justify-center bg-gradient-to-br from-[#282828] to-[#181818]",
                     greyed && "opacity-50"
-                )}
-            >
-                <Music className="w-10 h-10 text-gray-600" />
-            </div>
-        );
-    }
-
-    if (coverUrls.length === 1) {
-        return (
-            <Image
-                src={coverUrls[0]}
-                alt=""
-                fill
-                className={cn("object-cover", greyed && "opacity-50 grayscale")}
-                sizes="200px"
-                unoptimized
-            />
-        );
-    }
-
-    return (
-        <div
-            className={cn(
-                "grid grid-cols-2 w-full h-full",
-                greyed && "opacity-50 grayscale"
-            )}
-        >
-            {coverUrls.slice(0, 4).map((url, index) => (
-                <div key={index} className="relative">
-                    <Image
-                        src={url}
-                        alt=""
-                        fill
-                        className="object-cover"
-                        sizes="100px"
-                        unoptimized
-                    />
+                )}>
+                    <Music className="w-10 h-10 text-gray-600" />
                 </div>
-            ))}
-            {Array.from({ length: Math.max(0, 4 - coverUrls.length) }).map(
-                (_, index) => (
-                    <div
-                        key={`empty-${index}`}
-                        className="relative bg-[#282828] flex items-center justify-center"
-                    >
-                        <Music className="w-5 h-5 text-gray-600" />
-                    </div>
-                )
-            )}
-        </div>
+            }
+        />
     );
 }
 
@@ -249,12 +203,17 @@ function PlaylistCard({
     );
 }
 
+/**
+ * Renders the PlaylistsPage component.
+ */
 export default function PlaylistsPage() {
     useRouter();
     useAuth();
     const { playTracks } = useAudioControls();
     const queryClient = useQueryClient();
     const [showHiddenTab, setShowHiddenTab] = useState(false);
+    const likedQuery = useLikedPlaylistQuery(1);
+    const likedTotal = likedQuery.data?.total ?? 0;
 
     // Use React Query hook for playlists
     const { data: playlists = [], isLoading } = usePlaylistsQuery();
@@ -369,10 +328,17 @@ export default function PlaylistsPage() {
                     actions={
                         <>
                             <Link
-                                href="/browse/playlists"
+                                href="/import"
+                                className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-white/10 text-white hover:bg-white/20 transition-all"
+                            >
+                                <Download className="w-3.5 h-3.5" />
+                                Import
+                            </Link>
+                            <Link
+                                href="/explore"
                                 className="px-4 py-2 rounded-full text-sm font-medium bg-[#3b82f6] text-black hover:brightness-110 transition-all"
                             >
-                                Browse Playlists
+                                Explore Playlists
                             </Link>
 
                             {hiddenPlaylists.length > 0 && (
@@ -407,17 +373,38 @@ export default function PlaylistsPage() {
                     </div>
                 )}
 
-                {displayedPlaylists.length > 0 ? (
+                {displayedPlaylists.length > 0 || (!showHiddenTab && likedTotal > 0) ? (
                     <div
                         data-tv-section="playlists"
                         className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2"
                     >
+                        {/* Pinned: My Liked */}
+                        {!showHiddenTab && likedTotal > 0 && (
+                            <Link href="/playlist/my-liked">
+                                <div
+                                    className="group cursor-pointer p-3 rounded-md transition-colors hover:bg-white/5"
+                                    data-tv-card
+                                    data-tv-card-index={0}
+                                    tabIndex={0}
+                                >
+                                    <div className="relative aspect-square mb-3 rounded-md overflow-hidden shadow-lg bg-gradient-to-br from-[#3b82f6] to-[#1d4ed8] flex items-center justify-center">
+                                        <Heart className="w-12 h-12 text-white fill-white/80" />
+                                    </div>
+                                    <h3 className="text-sm font-semibold truncate text-white">
+                                        My Liked
+                                    </h3>
+                                    <p className="text-xs text-gray-400 mt-0.5 truncate">
+                                        {likedTotal} {likedTotal === 1 ? "song" : "songs"}
+                                    </p>
+                                </div>
+                            </Link>
+                        )}
                         {displayedPlaylists.map(
                             (playlist: Playlist, index: number) => (
                                 <PlaylistCard
                                     key={playlist.id}
                                     playlist={playlist}
-                                    index={index}
+                                    index={!showHiddenTab && likedTotal > 0 ? index + 1 : index}
                                     onPlay={handlePlayPlaylist}
                                     onToggleHide={handleToggleHide}
                                     isHiddenView={showHiddenTab}
@@ -442,10 +429,10 @@ export default function PlaylistsPage() {
                         </p>
                         {!showHiddenTab && (
                             <Link
-                                href="/browse/playlists"
+                                href="/explore"
                                 className="mt-6 px-5 py-2.5 rounded-full text-sm font-medium bg-[#3b82f6] text-black hover:brightness-110 transition-all"
                             >
-                                Browse Playlists
+                                Explore Playlists
                             </Link>
                         )}
                     </div>

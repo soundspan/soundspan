@@ -1,7 +1,5 @@
-import React from "react";
-import { Play, Pause, Volume2, Music, ListPlus } from "lucide-react";
-import { cn } from "@/utils/cn";
-import Image from "next/image";
+import React, { useCallback, useState } from "react";
+import { Play, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Track, Artist } from "../types";
@@ -10,10 +8,14 @@ import { formatTime } from "@/utils/formatTime";
 import { formatNumber } from "@/utils/formatNumber";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
-import { toast } from "sonner";
-import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
+import { TrackList, LoadingBadge } from "@/components/track";
+import type { TrackRowItem, TrackRowSlots, RowState } from "@/components/track";
 import { TrackOverflowMenu } from "@/components/ui/TrackOverflowMenu";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
+
+/** Default number of popular tracks shown in collapsed state. */
+export const POPULAR_COLLAPSED_COUNT = 5;
 
 interface PopularTracksProps {
     tracks: Track[];
@@ -21,34 +23,113 @@ interface PopularTracksProps {
     currentTrackId: string | undefined;
     colors: ColorPalette | null;
     onPlayTrack: (track: Track) => void;
-    previewTrack: string | null;
-    previewPlaying: boolean;
-    onPreview: (track: Track, e: React.MouseEvent) => void;
-    isInListenTogetherGroup?: boolean;
     isProviderMatching?: boolean;
     popularHref?: string;
-    onAddAllToQueue?: () => void;
+    onAddAllToQueue?: (visibleTracks: Track[]) => void;
+}
+
+function toRowItem(track: Track): TrackRowItem {
+    return {
+        id: track.id,
+        title: track.title,
+        displayTitle: track.displayTitle,
+        artistName: track.artist?.name ?? "",
+        duration: track.duration,
+        coverArtUrl: track.album?.coverArt ? api.getCoverArtUrl(track.album.coverArt, 80) : null,
+    };
 }
 
 export const PopularTracks: React.FC<PopularTracksProps> = ({
     tracks,
     artist,
-    currentTrackId,
+    currentTrackId: _currentTrackId,
     colors: _colors,
     onPlayTrack,
-    previewTrack,
-    previewPlaying,
-    onPreview,
-    isInListenTogetherGroup = false,
     isProviderMatching = false,
     popularHref,
     onAddAllToQueue,
 }) => {
-    const queuedTrackIds = useQueuedTrackIds();
+    const [expanded, setExpanded] = useState(false);
+    const canExpand = tracks.length > POPULAR_COLLAPSED_COUNT;
+    const visibleTracks = expanded ? tracks : tracks.slice(0, POPULAR_COLLAPSED_COUNT);
+
+    const handlePlay = useCallback(
+        (track: Track) => {
+            const isYtMusic = track.streamSource === "youtube" && !!track.youtubeVideoId;
+            const isTidalTrack = track.streamSource === "tidal" && !!track.tidalTrackId;
+            const hasLocalFile = typeof track.filePath === "string" && track.filePath.trim().length > 0;
+            const isPlayable = hasLocalFile || isTidalTrack || isYtMusic;
+
+            if (!isPlayable) return;
+            onPlayTrack(track);
+        },
+        [onPlayTrack],
+    );
+
+    const rowSlots = useCallback(
+        (track: Track, _index: number, _state: RowState): TrackRowSlots => {
+            const isYtMusic = track.streamSource === "youtube" && !!track.youtubeVideoId;
+            const isTidalTrack = track.streamSource === "tidal" && !!track.tidalTrackId;
+            const hasLocalFile = typeof track.filePath === "string" && track.filePath.trim().length > 0;
+            const isPlayable = hasLocalFile || isTidalTrack || isYtMusic;
+            const isUnowned = !track.album?.id || !track.album?.title || track.album.title === "Unknown Album";
+            const isAwaitingProviderMatch = isProviderMatching && isUnowned && !hasLocalFile && !isTidalTrack && !isYtMusic;
+
+            return {
+                titleBadges: (
+                    <>
+                        {isTidalTrack && <TidalBadge />}
+                        {isYtMusic && <YouTubeBadge />}
+                        {isAwaitingProviderMatch && <LoadingBadge />}
+                    </>
+                ),
+                middleColumns: (
+                    <div className="hidden md:flex items-center text-sm text-gray-400">
+                        {track.playCount !== undefined && track.playCount > 0 && (
+                            <span className="flex items-center gap-1">
+                                <Play className="w-3 h-3" />
+                                {formatNumber(track.playCount)}
+                            </span>
+                        )}
+                    </div>
+                ),
+                trailingActions: (
+                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                        {track.duration > 0 && (
+                            <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                {formatTime(track.duration)}
+                            </span>
+                        )}
+                        <TrackPreferenceButtons
+                            trackId={track.id}
+                            mode="both"
+                            buttonSizeClassName="h-8 w-8"
+                            iconSizeClassName="h-4 w-4"
+                            metadata={buildPreferenceMetadata(track)}
+                        />
+                        {isPlayable && (
+                            <TrackOverflowMenu
+                                track={{
+                                    id: track.id,
+                                    title: track.displayTitle ?? track.title,
+                                    artist: { name: track.artist?.name ?? artist.name, id: track.artist?.id ?? artist.id },
+                                    album: track.album ? { title: track.album.title ?? "", id: track.album.id, coverArt: track.album.coverArt } : { title: "" },
+                                    duration: track.duration,
+                                    streamSource: track.streamSource === "tidal" || track.streamSource === "youtube" ? track.streamSource : undefined,
+                                }}
+                            />
+                        )}
+                    </div>
+                ),
+                rowClassName: !isPlayable && !isAwaitingProviderMatch ? "opacity-50" : undefined,
+            };
+        },
+        [artist, isProviderMatching],
+    );
 
     return (
         <section id="popular" className="scroll-mt-28">
-            <div className="mb-4 flex flex-wrap items-center gap-3 justify-between">
+            <div className="mb-4 flex items-center gap-2">
                 <h2 className="text-xl font-bold">
                     {popularHref ? (
                         <Link
@@ -61,220 +142,43 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                         "Popular"
                     )}
                 </h2>
-                {isInListenTogetherGroup && onAddAllToQueue && (
+                {onAddAllToQueue && (
                     <button
-                        onClick={onAddAllToQueue}
-                        className="inline-flex items-center gap-2 rounded-full bg-[#60a5fa] hover:bg-[#3b82f6] px-3 py-1.5 text-xs font-semibold text-black transition-colors"
-                        title="Add all visible popular tracks to shared queue"
+                        onClick={() => onAddAllToQueue(visibleTracks)}
+                        className="h-7 w-7 rounded-full hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors"
+                        title="Add visible popular tracks to queue"
                     >
-                        <ListPlus className="w-3.5 h-3.5" />
-                        <span>Add All to Queue</span>
+                        <Plus className="w-4 h-4" />
                     </button>
                 )}
             </div>
-            <div data-tv-section="tracks">
-                {tracks.slice(0, 5).map((track, index) => {
-                    const isPlaying = currentTrackId === track.id;
-                    const isInQueue = queuedTrackIds.has(track.id);
-                    const isPreviewPlaying =
-                        previewTrack === track.id && previewPlaying;
-                    const isUnowned =
-                        !track.album?.id ||
-                        !track.album?.title ||
-                        track.album.title === "Unknown Album";
-                    const isYtMusic =
-                        track.streamSource === "youtube" &&
-                        !!track.youtubeVideoId;
-                    const isTidalTrack = track.streamSource === "tidal" && !!track.tidalTrackId;
-                    const hasLocalFile =
-                        typeof track.filePath === "string" &&
-                        track.filePath.trim().length > 0;
-                    const isAwaitingProviderMatch =
-                        isProviderMatching &&
-                        isUnowned &&
-                        !hasLocalFile &&
-                        !isTidalTrack &&
-                        !isYtMusic;
-                    const isPreviewOnly =
-                        isUnowned &&
-                        !isTidalTrack &&
-                        !isYtMusic &&
-                        !isAwaitingProviderMatch;
-                    const isLocalLibraryTrack =
-                        !isTidalTrack &&
-                        !isYtMusic &&
-                        (hasLocalFile || Boolean(track.album?.id));
-                    const blockedByListenTogether = isInListenTogetherGroup && !isLocalLibraryTrack;
-                    const coverUrl = track.album?.coverArt
-                        ? api.getCoverArtUrl(track.album.coverArt, 80)
-                        : null;
-
-                    return (
-                        <div
-                            key={track.id}
-                            data-track-row
-                            data-tv-card
-                            data-tv-card-index={index}
-                            tabIndex={0}
-                            className={cn(
-                                "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(80px,1fr)_80px] gap-4 py-2 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
-                                isPlaying && "bg-white/10",
-                                isInQueue &&
-                                    !isPlaying &&
-                                    !blockedByListenTogether &&
-                                    "bg-[#3b82f6]/[0.06]",
-                                blockedByListenTogether && "border border-red-500/30 bg-red-500/5"
-                            )}
-                            onClick={(e) => {
-                                if (blockedByListenTogether) {
-                                    e.preventDefault();
-                                    toast.error("Listen Together only supports local library tracks");
-                                    return;
-                                }
-                                if (isAwaitingProviderMatch) {
-                                    return;
-                                }
-                                if (isPreviewOnly) {
-                                    onPreview(track, e);
-                                } else {
-                                    onPlayTrack(track);
-                                }
-                            }}
-                        >
-                            {/* Track Number / Play Icon */}
-                            <div className="flex items-center justify-center">
-                                <span
-                                    className={cn(
-                                        "text-sm group-hover:hidden",
-                                        isPlaying
-                                            ? "text-[#3b82f6]"
-                                            : "text-gray-400"
-                                    )}
-                                >
-                                    {isPlaying ? (
-                                        <Music className="w-4 h-4 text-[#3b82f6] animate-pulse" />
-                                    ) : (
-                                        index + 1
-                                    )}
-                                </span>
-                                <Play className="w-4 h-4 text-white hidden group-hover:block" />
-                            </div>
-
-                            {/* Title + Album Art */}
-                            <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
-                                    {coverUrl ? (
-                                        <Image
-                                            src={coverUrl}
-                                            alt={track.title}
-                                            width={40}
-                                            height={40}
-                                            sizes="40px"
-                                            className="object-cover"
-                                            unoptimized
-                                        />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center">
-                                            <Music className="w-5 h-5 text-gray-600" />
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="min-w-0">
-                                    <div
-                                        className={cn(
-                                            "text-sm font-medium truncate flex items-center gap-2",
-                                            isPlaying
-                                                ? "text-[#3b82f6]"
-                                                : "text-white"
-                                        )}
-                                    >
-                                        <span className="truncate">
-                                            {track.displayTitle ?? track.title}
-                                        </span>
-                                        {isTidalTrack && <TidalBadge />}
-                                        {isYtMusic && <YouTubeBadge />}
-                                        {isAwaitingProviderMatch && (
-                                            <span className="shrink-0 text-[10px] bg-gray-500/20 text-gray-300 px-1.5 py-0.5 rounded font-medium border border-gray-500/30 animate-pulse">
-                                                LOADING
-                                            </span>
-                                        )}
-                                        {isPreviewOnly && (
-                                            <span className="shrink-0 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">
-                                                PREVIEW
-                                            </span>
-                                        )}
-                                        {blockedByListenTogether && (
-                                            <span className="shrink-0 text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded font-medium border border-red-500/30">
-                                                LOCAL ONLY
-                                            </span>
-                                        )}
-                                        {isInQueue && (
-                                            <span className="shrink-0 text-[10px] bg-[#3b82f6]/15 text-[#93c5fd] px-1.5 py-0.5 rounded font-medium border border-[#3b82f6]/30">
-                                                IN QUEUE
-                                            </span>
-                                        )}
-                                    </div>
-                                    <p className="text-xs text-gray-400 truncate">
-                                        {artist.name}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Play Count (hidden on mobile) */}
-                            <div className="hidden md:flex items-center text-sm text-gray-400">
-                                {track.playCount !== undefined &&
-                                    track.playCount > 0 && (
-                                        <span className="flex items-center gap-1">
-                                            <Play className="w-3 h-3" />
-                                            {formatNumber(track.playCount)}
-                                        </span>
-                                    )}
-                            </div>
-
-                            {/* Duration + Preview + Overflow */}
-                            <div className="flex items-center justify-end gap-1">
-                                {isPreviewOnly && !blockedByListenTogether && (
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onPreview(track, e);
-                                        }}
-                                        className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-400 hover:text-white transition-all"
-                                    >
-                                        {isPreviewPlaying ? (
-                                            <Pause className="w-4 h-4" />
-                                        ) : (
-                                            <Volume2 className="w-4 h-4" />
-                                        )}
-                                    </button>
-                                )}
-                                {track.duration > 0 && (
-                                    <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
-                                        {formatTime(track.duration)}
-                                    </span>
-                                )}
-                                <TrackPreferenceButtons
-                                    trackId={track.id}
-                                    mode="both"
-                                    buttonSizeClassName="h-8 w-8"
-                                    iconSizeClassName="h-4 w-4"
-                                />
-                                <TrackOverflowMenu
-                                    track={{
-                                        id: track.id,
-                                        title: track.displayTitle ?? track.title,
-                                        artist: { name: track.artist?.name ?? artist.name, id: track.artist?.id ?? artist.id },
-                                        album: track.album ? { title: track.album.title ?? "", id: track.album.id, coverArt: track.album.coverArt } : { title: "" },
-                                        duration: track.duration,
-                                        streamSource: track.streamSource === "tidal" || track.streamSource === "youtube" ? track.streamSource : undefined,
-                                    }}
-                                    isInListenTogetherGroup={isInListenTogetherGroup}
-                                />
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
+            <TrackList
+                items={visibleTracks}
+                toRowItem={toRowItem}
+                onPlay={handlePlay}
+                rowSlots={rowSlots}
+                rowClassName="grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(200px,4fr)_minmax(80px,1fr)_auto]"
+                preferenceMode="both"
+                tvSection="tracks"
+            />
+            {canExpand && (
+                <button
+                    onClick={() => setExpanded((prev) => !prev)}
+                    className="mt-2 flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                    {expanded ? (
+                        <>
+                            <ChevronUp className="w-4 h-4" />
+                            Show less
+                        </>
+                    ) : (
+                        <>
+                            <ChevronDown className="w-4 h-4" />
+                            See more
+                        </>
+                    )}
+                </button>
+            )}
         </section>
     );
 };

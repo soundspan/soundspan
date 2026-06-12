@@ -308,6 +308,9 @@ async function findTracksByGenrePatterns(
     return merged.slice(0, limit) as TrackWithAlbumCover[];
 }
 
+/**
+ * Represents the ProgrammaticPlaylistService class.
+ */
 export class ProgrammaticPlaylistService {
     private readonly TRACK_LIMIT = 20;
     private readonly DAILY_MIX_COUNT = 5;
@@ -977,7 +980,12 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const trackIds = playStats.map((p) => p.trackId);
+        const trackIds = playStats
+            .map((play) => play.trackId)
+            .filter((trackId): trackId is string => typeof trackId === "string");
+        if (trackIds.length < 5) {
+            return null;
+        }
         const tracks = await prisma.track.findMany({
             where: { id: { in: trackIds } },
             include: {
@@ -993,7 +1001,7 @@ export class ProgrammaticPlaylistService {
         // Preserve play count order
         const orderedTracks = trackIds
             .map((id) => tracks.find((t) => t.id === id))
-            .filter((t) => t !== undefined);
+            .filter((track): track is (typeof tracks)[number] => Boolean(track));
 
         // Keep ranked top tracks first with a strict cap before any fallback fill.
         const strictTopTracks = separateArtists(
@@ -1147,6 +1155,9 @@ export class ProgrammaticPlaylistService {
         // Count plays by artist
         const artistPlayCounts = new Map<string, number>();
         recentPlays.forEach((play) => {
+            if (!play.track) {
+                return;
+            }
             const artistId = play.track.album.artistId;
             artistPlayCounts.set(
                 artistId,

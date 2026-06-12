@@ -14,6 +14,9 @@ const getProxiedImageUrl = (imageUrl: string | undefined): string | null => {
     return api.getCoverArtUrl(imageUrl, 200);
 };
 
+/**
+ * Renders the DiscoverPodcastsGrid component.
+ */
 export function DiscoverPodcastsGrid({
     podcasts,
     limit = 6,

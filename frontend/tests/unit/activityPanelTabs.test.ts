@@ -7,7 +7,7 @@ import {
     isActivityTabVisible,
     resolveActivityTab,
     type ActivityTab,
-} from "../../components/layout/activityPanelTabs.ts";
+} from "../../components/layout/activityPanelTabs";
 
 test("admin sees every activity tab", () => {
     const visibleTabs = getVisibleActivityTabIds(true);
@@ -15,6 +15,7 @@ test("admin sees every activity tab", () => {
         "notifications",
         "active",
         "history",
+        "imports",
         "social",
     ]);
     assert.equal(isActivityTabVisible("active", true), true);
@@ -28,6 +29,20 @@ test("non-admin hides active/history tabs", () => {
     assert.equal(isActivityTabVisible("social", false), true);
     assert.equal(isActivityTabVisible("active", false), false);
     assert.equal(isActivityTabVisible("history", false), false);
+    assert.equal(isActivityTabVisible("imports", false), false);
+});
+
+test("admin keeps imports visible and imports tab has no badge", () => {
+    assert.equal(isActivityTabVisible("imports", true), true);
+
+    const badgeState = getActivityPanelBadgeState({
+        unreadCount: 1,
+        activeDownloadCount: 1,
+        socialUserCount: 1,
+        isAdmin: true,
+    });
+
+    assert.equal(getActivityTabBadge("imports", badgeState), null);
 });
 
 test("resolveActivityTab keeps requested tab when visible", () => {
@@ -101,6 +116,74 @@ test("getActivityPanelBadgeState counts social-only activity for non-admin users
     );
 });
 
+test("getActivityPanelBadgeState clears admin active badge when there are no active downloads", () => {
+    assert.deepEqual(
+        getActivityPanelBadgeState({
+            unreadCount: 1,
+            activeDownloadCount: 0,
+            socialUserCount: 0,
+            isAdmin: true,
+        }),
+        {
+            notificationBadge: 1,
+            activeBadge: null,
+            socialBadge: null,
+            hasActivity: true,
+        }
+    );
+});
+
+test("getActivityPanelBadgeState keeps notification badges for non-admin users", () => {
+    assert.deepEqual(
+        getActivityPanelBadgeState({
+            unreadCount: 2,
+            activeDownloadCount: 3,
+            socialUserCount: 0,
+            isAdmin: false,
+        }),
+        {
+            notificationBadge: 2,
+            activeBadge: null,
+            socialBadge: null,
+            hasActivity: true,
+        }
+    );
+});
+
+test("getActivityPanelBadgeState keeps active badge when admin activity is the only signal", () => {
+    assert.deepEqual(
+        getActivityPanelBadgeState({
+            unreadCount: 0,
+            activeDownloadCount: 3,
+            socialUserCount: 0,
+            isAdmin: true,
+        }),
+        {
+            notificationBadge: null,
+            activeBadge: 3,
+            socialBadge: null,
+            hasActivity: true,
+        }
+    );
+});
+
+test("getActivityPanelBadgeState reports no activity when every badge is empty", () => {
+    assert.deepEqual(
+        getActivityPanelBadgeState({
+            unreadCount: 0,
+            activeDownloadCount: 0,
+            socialUserCount: 0,
+            isAdmin: true,
+        }),
+        {
+            notificationBadge: null,
+            activeBadge: null,
+            socialBadge: null,
+            hasActivity: false,
+        }
+    );
+});
+
 test("getActivityTabBadge returns the right badge for each tab branch", () => {
     const badgeState = getActivityPanelBadgeState({
         unreadCount: 9,
@@ -113,4 +196,8 @@ test("getActivityTabBadge returns the right badge for each tab branch", () => {
     assert.equal(getActivityTabBadge("active", badgeState), 7);
     assert.equal(getActivityTabBadge("social", badgeState), 6);
     assert.equal(getActivityTabBadge("history", badgeState), null);
+});
+
+test("resolveActivityTab uses notifications as the default fallback", () => {
+    assert.equal(resolveActivityTab("history", []), "notifications");
 });

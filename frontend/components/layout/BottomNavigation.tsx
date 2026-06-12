@@ -33,6 +33,9 @@ const navigationItems = [
     },
 ];
 
+/**
+ * Renders the BottomNavigation component.
+ */
 export function BottomNavigation() {
     const pathname = usePathname();
     const isMobile = useIsMobile();

@@ -13,6 +13,9 @@ interface SettingsSidebarProps {
     isAdmin: boolean;
 }
 
+/**
+ * Renders the SettingsSidebar component.
+ */
 export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin }: SettingsSidebarProps) {
     const filteredItems = items.filter(item => !item.adminOnly || isAdmin);
     

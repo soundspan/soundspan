@@ -33,6 +33,9 @@ export const lyricsQueryKeys = {
         ] as const,
 };
 
+/**
+ * Executes fetchLyrics.
+ */
 export async function fetchLyrics(
     trackId: string,
     metadata?: LyricsLookupMetadata

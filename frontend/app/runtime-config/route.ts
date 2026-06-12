@@ -3,6 +3,9 @@ import { buildRuntimeConfigPayload } from "../../lib/runtime-config/normalizatio
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Executes GET.
+ */
 export function GET() {
     const payload = buildRuntimeConfigPayload(process.env);
 

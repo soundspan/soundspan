@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { separateArtists } from "../../lib/separate-artists.ts";
+import { separateArtists } from "../../lib/separate-artists";
 
 type QueueItem = {
     id: string;

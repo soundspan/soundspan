@@ -125,9 +125,11 @@ frontend/android/
 frontend/test-*.tsx
 
 # AI Tools & Assistants
+.githooks/
 .claude/
 **/.claude/
-!.claude/commands/
+.codex/
+**/.codex/
 .cursor/
 **/.cursor/
 .roo/
@@ -144,8 +146,10 @@ frontend/test-*.tsx
 .agents
 .agents/
 .agents/**
+.acm/context.db
+.acm/context.db-shm
+.acm/context.db-wal
 .claudeignore
-CLAUDE.md
 
 # Internal Documentation (public docs are in project root)
 docs/

@@ -1,0 +1,304 @@
+{
+  "metadata": {
+    "id": "soundspan-feature-index",
+    "version": "2026-03-11.01",
+    "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
+    "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
+  },
+  "sources": {
+    "frontendFeatureRoot": "frontend/features",
+    "frontendRouteRoot": "frontend/app",
+    "backendRouteRoot": "backend/src/routes",
+    "backendServiceRoot": "backend/src/services",
+    "backendTestRoot": "backend/src",
+    "frontendTestRoot": "frontend/tests"
+  },
+  "coverage": {
+    "frontend_feature_dirs": [
+      "album",
+      "artist",
+      "audiobook",
+      "discover",
+      "explore",
+      "home",
+      "library",
+      "podcast",
+      "search",
+      "settings"
+    ]
+  },
+  "features": [
+    {
+      "id": "library",
+      "name": "Music Library",
+      "description": "Local file-backed music library with scanning, browsing, and playback",
+      "frontend": {
+        "feature_dirs": ["library"],
+        "routes": ["/library"]
+      },
+      "backend": {
+        "routes": ["library.ts", "streaming.ts"],
+        "services": ["musicScanner.ts", "audioStreaming.ts", "coverArt.ts", "coverArtExtractor.ts", "fileValidator.ts"]
+      },
+      "tests": {
+        "backend_route": ["libraryRuntime.test.ts", "libraryArtistLookupCompat.test.ts", "libraryCoverArtCompat.test.ts", "libraryRemotePreference.test.ts", "streamingRuntime.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "artists",
+      "name": "Artists & Albums",
+      "description": "Universal artist/album entities with MusicBrainz enrichment and cross-provider resolution",
+      "frontend": {
+        "feature_dirs": ["artist", "album"],
+        "routes": ["/artist/[id]", "/album/[id]"]
+      },
+      "backend": {
+        "routes": ["artists.ts"],
+        "services": ["artistResolutionService.ts", "albumResolutionService.ts", "artistCountsService.ts", "enrichment.ts", "enrichmentState.ts", "enrichmentFailureService.ts", "musicbrainz.ts", "lastfm.ts", "fanart.ts", "wikidata.ts", "imageProvider.ts", "imageProxy.ts", "imageStorage.ts", "imageBackfill.ts"]
+      },
+      "tests": {
+        "backend_route": ["artistsRuntime.test.ts", "artistsPreviewYtMusic.test.ts"],
+        "backend_contract": ["artistEnrichmentMbidConflict.test.ts", "enrichmentCycleClaimContract.test.ts", "enrichmentStateRedisRetryContract.test.ts"]
+      }
+    },
+    {
+      "id": "explore-browse",
+      "name": "Explore & Browse",
+      "description": "YT Music shelves/charts/moods/genres, TIDAL spotlight, homepage sections",
+      "frontend": {
+        "feature_dirs": ["explore", "home"],
+        "routes": ["/explore", "/", "/browse/playlists"]
+      },
+      "backend": {
+        "routes": ["browse.ts", "homepage.ts"],
+        "services": ["browseImageCache.ts", "youtubeMusic.ts", "tidal.ts"]
+      },
+      "tests": {
+        "backend_route": ["browseRuntime.test.ts", "browseTidal.test.ts", "browseUrlParse.test.ts", "browseYtMusicRoutes.integration.test.ts", "homepageRuntime.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "search",
+      "name": "Search",
+      "description": "Unified search across local library, artists, albums, podcasts",
+      "frontend": {
+        "feature_dirs": ["search"],
+        "routes": ["/search"]
+      },
+      "backend": {
+        "routes": ["search.ts"],
+        "services": ["search.ts"]
+      },
+      "tests": {
+        "backend_route": ["searchRuntime.test.ts", "searchDiscoverCompat.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "discover",
+      "name": "Weekly Discovery",
+      "description": "Automated weekly album discovery with download and seeding pipeline",
+      "frontend": {
+        "feature_dirs": ["discover"],
+        "routes": ["/discover", "/mix"]
+      },
+      "backend": {
+        "routes": ["discover.ts", "mixes.ts"],
+        "services": ["discoverWeekly.ts", "discovery/index.ts", "discovery/discoveryAlbumLifecycle.ts", "discovery/discoveryBatchLogger.ts", "discovery/discoveryRecommendations.ts", "discovery/discoverySeeding.ts", "programmaticPlaylists.ts", "programmaticPlaylistArtistCap.ts", "moodBucketService.ts", "radioVibeEngine.ts"]
+      },
+      "tests": {
+        "backend_route": ["discoverRuntime.test.ts", "discoverLegacyRuntime.test.ts", "discoverRecommendationCompat.test.ts", "mixesRuntime.test.ts"],
+        "backend_contract": ["discoverProcessorIdempotencyContract.test.ts", "discoverQueueHandlerContract.test.ts", "moodBucketPrismaRetryContract.test.ts", "moodBucketWorkerReconciliationContract.test.ts"]
+      }
+    },
+    {
+      "id": "listen-together",
+      "name": "Listen Together",
+      "description": "Real-time synchronized playback sessions via Socket.IO and Redis",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["listenTogether.ts"],
+        "services": ["listenTogether.ts", "listenTogetherManager.ts", "listenTogetherSocket.ts", "listenTogetherClusterSync.ts", "listenTogetherResolution.ts", "listenTogetherStateStore.ts", "socialPresenceEvents.ts"]
+      },
+      "tests": {
+        "backend_route": ["listenTogetherRuntime.test.ts"],
+        "backend_contract": ["listenTogetherExternalSnapshotFreshness.test.ts", "listenTogetherMultiPodContinuity.test.ts", "listenTogetherMutationLockContract.test.ts", "listenTogetherObservabilityContract.test.ts", "listenTogetherReconnectSloContract.test.ts", "listenTogetherSocketRedisAdapterContract.test.ts", "listenTogetherStateStoreContract.test.ts", "listenTogetherStateSyncContract.test.ts"]
+      }
+    },
+    {
+      "id": "playlists",
+      "name": "Playlists",
+      "description": "User playlists with mixed local/remote track support and playlist import",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["playlists.ts", "playlistImport.ts"],
+        "services": ["playlistImportService.ts", "playlistTrackResolution.ts", "spotify.ts", "spotifyImport.ts"]
+      },
+      "tests": {
+        "backend_route": ["playlistsRuntime.test.ts", "importRoutes.integration.test.ts", "spotifyRuntime.test.ts"],
+        "backend_contract": ["programmaticPlaylistArtistCap.test.ts"]
+      }
+    },
+    {
+      "id": "tidal-streaming",
+      "name": "TIDAL Streaming",
+      "description": "Per-user TIDAL gap-fill streaming via device-code OAuth and tidal-downloader sidecar",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["tidalStreaming.ts"],
+        "services": ["tidalStreaming.ts", "tidal.ts"]
+      },
+      "tests": {
+        "backend_route": ["tidalStreamingRuntime.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "ytmusic-streaming",
+      "name": "YouTube Music Streaming",
+      "description": "YT Music gap-fill streaming via ytmusic-streamer sidecar with unauthenticated search",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["youtubeMusic.ts"],
+        "services": ["youtubeMusic.ts"]
+      },
+      "tests": {
+        "backend_route": ["youtubeMusicRuntime.test.ts", "youtubeMusicPublicRoutes.integration.test.ts", "youtubeMusicPublicStream.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "track-mapping",
+      "name": "Track Mapping & Resolution",
+      "description": "Cross-provider track identity mapping and playback resolution chain",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["trackMappings.ts"],
+        "services": ["trackMappingService.ts", "trackReconciliation.ts", "unifiedTrackResponse.ts", "trackPreference.ts", "remoteTrackBackfillService.ts", "remoteTrackMetadataRefresh.ts"]
+      },
+      "tests": {
+        "backend_route": ["trackMappingsRuntime.test.ts", "trackMappingsRoutes.integration.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "podcasts",
+      "name": "Podcasts",
+      "description": "RSS-based podcast catalog with streaming, downloads, and discovery",
+      "frontend": {
+        "feature_dirs": ["podcast"],
+        "routes": ["/podcasts"]
+      },
+      "backend": {
+        "routes": ["podcasts.ts"],
+        "services": ["podcastCache.ts", "podcastDownload.ts", "rss-parser.ts", "itunes.ts"]
+      },
+      "tests": {
+        "backend_route": ["podcastsCoreRuntime.test.ts", "podcastsDiscoveryRuntime.test.ts", "podcastsStreamingRuntime.test.ts", "podcastsDiscoverTopCompat.test.ts", "podcastsRefreshPrismaRetryCompat.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "audiobooks",
+      "name": "Audiobooks",
+      "description": "Audiobookshelf-synced audiobook library with progress tracking",
+      "frontend": {
+        "feature_dirs": ["audiobook"],
+        "routes": ["/audiobooks/series/[name]"]
+      },
+      "backend": {
+        "routes": ["audiobooks.ts"],
+        "services": ["audiobookshelf.ts", "audiobookCache.ts"]
+      },
+      "tests": {
+        "backend_route": ["audiobooksRuntime.test.ts", "audiobooksAdvancedRuntime.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "subsonic",
+      "name": "Subsonic API Compatibility",
+      "description": "OpenSubsonic /rest endpoint compatibility layer",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["subsonic.ts"],
+        "services": []
+      },
+      "tests": {
+        "backend_route": ["subsonicCoreCompat.test.ts", "subsonicBrowseCompat.test.ts", "subsonicCollectionsCompat.test.ts", "subsonicEntityCompat.test.ts", "subsonicLegacyCompat.test.ts", "subsonicMediaCompat.test.ts", "subsonicMetadataCompat.test.ts", "subsonicProfileCompat.test.ts", "subsonicRuntimeFocused.test.ts", "subsonicStateCompat.test.ts", "subsonicStreamCoverArtHandlers.test.ts", "subsonicTierB.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "audio-analysis",
+      "name": "Audio Analysis",
+      "description": "BPM/key/mood analysis (Essentia/MusiCNN) and CLAP embeddings for vibe similarity",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["analysis.ts", "vibe.ts"],
+        "services": ["hybridSimilarity.ts", "vibeVocabulary.ts", "vibeAnalysisCleanup.ts", "audioAnalysisCleanup.ts"]
+      },
+      "tests": {
+        "backend_route": ["analysisRuntime.test.ts", "vibeSearchCompat.test.ts"],
+        "backend_contract": ["audioAnalyzerClassColumnContract.test.ts", "audioAnalyzerFailureResolutionContract.test.ts", "audioAnalyzerPoolRecoveryContract.test.ts", "audioAnalyzerQueueContract.test.ts", "clapTextEmbedRecoveryContract.test.ts"]
+      }
+    },
+    {
+      "id": "settings",
+      "name": "Settings & Admin",
+      "description": "User settings, system settings, auth, notifications, and admin controls",
+      "frontend": {
+        "feature_dirs": ["settings"],
+        "routes": ["/settings", "/device"]
+      },
+      "backend": {
+        "routes": ["settings.ts", "systemSettings.ts", "auth.ts", "system.ts", "notifications.ts", "onboarding.ts", "apiKeys.ts", "deviceLink.ts"],
+        "services": ["featureDetection.ts", "rateLimiter.ts", "notificationService.ts", "notificationPolicyService.ts"]
+      },
+      "tests": {
+        "backend_route": ["settingsDisplayNameCompat.test.ts", "systemSettingsRuntime.test.ts", "authRuntime.test.ts", "systemRuntime.test.ts", "notificationsRuntime.test.ts", "onboardingRuntime.test.ts", "apiKeysRuntime.test.ts", "deviceLinkRuntime.test.ts"],
+        "backend_contract": ["config.test.ts", "healthEndpointContract.test.ts"]
+      }
+    },
+    {
+      "id": "downloads",
+      "name": "Downloads & Acquisition",
+      "description": "Soulseek/TIDAL/Lidarr download pipeline and library acquisition",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": ["downloads.ts", "soulseek.ts", "webhooks.ts", "releases.ts"],
+        "services": ["acquisitionService.ts", "downloadQueue.ts", "simpleDownloadManager.ts", "soulseek.ts", "lidarr.ts", "staleJobCleanup.ts", "releaseContracts.ts"]
+      },
+      "tests": {
+        "backend_route": ["downloadsRuntime.test.ts", "downloadsInteractiveCompat.test.ts", "downloadsReleasesCompat.test.ts", "soulseekRuntime.test.ts", "webhooksRuntime.test.ts"],
+        "backend_contract": []
+      }
+    }
+  ]
+}

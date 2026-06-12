@@ -152,6 +152,9 @@ interface TrackWithAnalysis {
     moodTags: string[];
 }
 
+/**
+ * Represents the MoodBucketService class.
+ */
 export class MoodBucketService {
     private readonly MAX_TRACKS_PER_ARTIST = 2;
     private readonly MAX_RELAXED_TRACKS_PER_ARTIST = 4;

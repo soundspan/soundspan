@@ -3,6 +3,9 @@ import type {
     TrackPreferenceSignal,
 } from "../lib/api";
 
+/**
+ * Executes buildOptimisticTrackPreferenceResponse.
+ */
 export function buildOptimisticTrackPreferenceResponse(
     trackId: string,
     signal: TrackPreferenceSignal
@@ -36,6 +39,9 @@ export interface TrackPreferenceOptimisticQueryClient {
     ) => void;
 }
 
+/**
+ * Executes applyOptimisticTrackPreferenceMutation.
+ */
 export function applyOptimisticTrackPreferenceMutation(
     queryClient: TrackPreferenceOptimisticQueryClient,
     trackId: string,

@@ -190,16 +190,6 @@ mock.module("@/hooks/useImageColor", {
     },
 });
 
-mock.module("@/hooks/useTrackPreview", {
-    namedExports: {
-        useTrackPreview: () => ({
-            previewTrack: null,
-            previewPlaying: false,
-            handlePreview: () => undefined,
-        }),
-    },
-});
-
 mock.module("@/lib/api", {
     namedExports: {
         api: {
@@ -291,6 +281,7 @@ mock.module("@/features/album/hooks/useAlbumActions", {
             setAlbumPreference: async () => undefined,
             isApplyingAlbumPreference: false,
         }),
+        useAlbumLikedState: () => false,
     },
 });
 
@@ -632,7 +623,7 @@ function resolvedParams(id: string) {
 test("album route shows loading screen while album data is loading", async () => {
     albumState.loading = true;
 
-    const AlbumPage = (await import("../../app/album/[id]/page.tsx")).default;
+    const AlbumPage = (await import("../../app/album/[id]/page")).default;
     const html = renderToStaticMarkup(
         React.createElement(AlbumPage, { params: resolvedParams("album-1") })
     );
@@ -643,7 +634,7 @@ test("album route shows loading screen while album data is loading", async () =>
 test("album route shows error state when album payload is missing", async () => {
     albumState.album = null;
 
-    const AlbumPage = (await import("../../app/album/[id]/page.tsx")).default;
+    const AlbumPage = (await import("../../app/album/[id]/page")).default;
     const html = renderToStaticMarkup(
         React.createElement(AlbumPage, { params: resolvedParams("album-404") })
     );
@@ -663,7 +654,7 @@ test("album route renders placeholders while details are loading without tracks"
     };
     albumState.detailsLoading = true;
 
-    const AlbumPage = (await import("../../app/album/[id]/page.tsx")).default;
+    const AlbumPage = (await import("../../app/album/[id]/page")).default;
     const html = renderToStaticMarkup(
         React.createElement(AlbumPage, { params: resolvedParams("album-1") })
     );
@@ -684,7 +675,7 @@ test("album route forwards provider matching and discovery fallback source to ch
     };
     albumState.tidalGapFill.isStatusResolved = false;
 
-    const AlbumPage = (await import("../../app/album/[id]/page.tsx")).default;
+    const AlbumPage = (await import("../../app/album/[id]/page")).default;
     const html = renderToStaticMarkup(
         React.createElement(AlbumPage, { params: resolvedParams("album-1") })
     );
@@ -699,7 +690,7 @@ test("album route forwards provider matching and discovery fallback source to ch
 test("artist route shows loading state for initial artist request", async () => {
     artistState.loading = true;
 
-    const ArtistPage = (await import("../../app/artist/[id]/page.tsx")).default;
+    const ArtistPage = (await import("../../app/artist/[id]/page")).default;
     const html = renderToStaticMarkup(React.createElement(ArtistPage));
 
     assert.match(html, /loading-screen/);
@@ -710,7 +701,7 @@ test("artist route shows not-found fallback when data fails", async () => {
     artistState.error = new Error("not found");
     artistState.artist = null;
 
-    const ArtistPage = (await import("../../app/artist/[id]/page.tsx")).default;
+    const ArtistPage = (await import("../../app/artist/[id]/page")).default;
     const html = renderToStaticMarkup(React.createElement(ArtistPage));
 
     assert.match(html, /Artist Not Found/);
@@ -728,7 +719,7 @@ test("artist route shows progressive placeholders for library artist with detail
     };
     artistState.albums = [{ id: "owned-1", title: "Owned Album", owned: true }];
 
-    const ArtistPage = (await import("../../app/artist/[id]/page.tsx")).default;
+    const ArtistPage = (await import("../../app/artist/[id]/page")).default;
     const html = renderToStaticMarkup(React.createElement(ArtistPage));
 
     assert.match(html, /Popular/);
@@ -758,7 +749,7 @@ test("artist route renders popular tracks and provider matching metadata", async
     ];
     artistState.ytTopTracks.isStatusResolved = false;
 
-    const ArtistPage = (await import("../../app/artist/[id]/page.tsx")).default;
+    const ArtistPage = (await import("../../app/artist/[id]/page")).default;
     const html = renderToStaticMarkup(React.createElement(ArtistPage));
 
     assert.match(html, /popular-tracks/);
@@ -772,7 +763,7 @@ test("artist route renders popular tracks and provider matching metadata", async
 test("discover route shows spinner while loading", async () => {
     discoverState.loading = true;
 
-    const DiscoverPage = (await import("../../app/discover/page.tsx")).default;
+    const DiscoverPage = (await import("../../app/discover/page")).default;
     const html = renderToStaticMarkup(React.createElement(DiscoverPage));
 
     assert.match(html, /gradient-spinner/);
@@ -785,7 +776,7 @@ test("discover route renders source mix and track list when playlist has tracks"
         youtube: 3,
     };
 
-    const DiscoverPage = (await import("../../app/discover/page.tsx")).default;
+    const DiscoverPage = (await import("../../app/discover/page")).default;
     const html = renderToStaticMarkup(React.createElement(DiscoverPage));
 
     assert.match(html, /Source mix: 1 local/);
@@ -806,7 +797,7 @@ test("discover route keeps unavailable albums visible while tracks are still res
     };
     discoverState.providerTracks = [];
 
-    const DiscoverPage = (await import("../../app/discover/page.tsx")).default;
+    const DiscoverPage = (await import("../../app/discover/page")).default;
     const html = renderToStaticMarkup(React.createElement(DiscoverPage));
 
     assert.match(html, /still finishing this week&#x27;s track list/);
@@ -825,7 +816,7 @@ test("discover route shows resolving state when generation is recent but playlis
     discoverState.providerTracks = [];
     discoverState.config.lastGeneratedAt = new Date().toISOString();
 
-    const DiscoverPage = (await import("../../app/discover/page.tsx")).default;
+    const DiscoverPage = (await import("../../app/discover/page")).default;
     const html = renderToStaticMarkup(React.createElement(DiscoverPage));
 
     assert.match(html, /Loading your latest Discover Weekly/);
@@ -843,7 +834,7 @@ test("discover route shows empty-call-to-action when no playlist exists yet", as
     discoverState.providerTracks = [];
     discoverState.config.lastGeneratedAt = "2026-01-01T00:00:00.000Z";
 
-    const DiscoverPage = (await import("../../app/discover/page.tsx")).default;
+    const DiscoverPage = (await import("../../app/discover/page")).default;
     const html = renderToStaticMarkup(React.createElement(DiscoverPage));
 
     assert.match(html, /No Discover Weekly Yet/);

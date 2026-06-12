@@ -31,6 +31,9 @@ export interface ReleaseRadarItem {
     canDownload: boolean;
 }
 
+/**
+ * Executes formatBytes.
+ */
 export function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {
         return "0 B";
@@ -47,6 +50,9 @@ export function formatBytes(bytes: number): string {
     return `${rounded} ${units[power]}`;
 }
 
+/**
+ * Executes mapInteractiveRelease.
+ */
 export function mapInteractiveRelease(
     release: LidarrRelease & { infoUrl?: string | null }
 ): InteractiveReleaseResponseItem {
@@ -68,6 +74,9 @@ export function mapInteractiveRelease(
     };
 }
 
+/**
+ * Executes mapCalendarReleaseToRadarItem.
+ */
 export function mapCalendarReleaseToRadarItem(
     release: CalendarRelease,
     now: Date,

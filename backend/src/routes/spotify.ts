@@ -84,7 +84,8 @@ router.post("/parse", async (req, res) => {
         if (error.name === "ZodError") {
             return res.status(400).json({ error: "Invalid request body" });
         }
-        res.status(500).json({ error: error.message || "Failed to parse URL" });
+        logger.error("Spotify parse error (500):", error.message);
+        res.status(500).json({ error: "Failed to parse URL" });
     }
 });
 
@@ -172,7 +173,7 @@ router.post("/preview", async (req, res) => {
             return res.status(400).json({ error: "Invalid request body" });
         }
         res.status(500).json({
-            error: error.message || "Failed to generate preview",
+            error: "Failed to generate preview",
         });
     }
 });
@@ -257,14 +258,14 @@ router.post("/import", async (req, res) => {
             `[Spotify Import] Starting import for user ${userId}: ${playlistName}`
         );
         logger.debug(
-            `[Spotify Import] Downloading ${albumMbidsToDownload.length} albums`
+            `[Spotify Import] Resolution-only import: ignoring ${albumMbidsToDownload.length} selected download album(s)`
         );
 
         const job = await spotifyImportService.startImport(
             userId,
             spotifyPlaylistId,
             playlistName,
-            albumMbidsToDownload,
+            [],
             preview
         );
 
@@ -279,7 +280,7 @@ router.post("/import", async (req, res) => {
             return res.status(400).json({ error: "Invalid request body" });
         }
         res.status(500).json({
-            error: error.message || "Failed to start import",
+            error: "Failed to start import",
         });
     }
 });
@@ -337,7 +338,7 @@ router.get("/import/:jobId/status", async (req, res) => {
     } catch (error: any) {
         logger.error("Spotify job status error:", error);
         res.status(500).json({
-            error: error.message || "Failed to get job status",
+            error: "Failed to get job status",
         });
     }
 });
@@ -372,7 +373,7 @@ router.get("/imports", async (req, res) => {
     } catch (error: any) {
         logger.error("Spotify imports error:", error);
         res.status(500).json({
-            error: error.message || "Failed to get imports",
+            error: "Failed to get imports",
         });
     }
 });
@@ -437,7 +438,7 @@ router.post("/import/:jobId/refresh", async (req, res) => {
     } catch (error: any) {
         logger.error("Spotify refresh error:", error);
         res.status(500).json({
-            error: error.message || "Failed to refresh tracks",
+            error: "Failed to refresh tracks",
         });
     }
 });
@@ -500,7 +501,7 @@ router.post("/import/:jobId/cancel", async (req, res) => {
     } catch (error: any) {
         logger.error("Spotify cancel error:", error);
         res.status(500).json({
-            error: error.message || "Failed to cancel import",
+            error: "Failed to cancel import",
         });
     }
 });
@@ -536,7 +537,7 @@ router.get("/import/session-log", async (req, res) => {
     } catch (error: any) {
         logger.error("Session log error:", error);
         res.status(500).json({
-            error: error.message || "Failed to read session log",
+            error: "Failed to read session log",
         });
     }
 });

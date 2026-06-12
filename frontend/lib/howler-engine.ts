@@ -9,10 +9,6 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { Howl, HowlOptions, Howler } from "howler";
 import { DEFAULT_AUDIO_VOLUME, clampAudioVolume } from "@/lib/audio-volume";
 
-const SOUNDSPAN_RUNTIME_CONFIG_KEY = "__SOUNDSPAN_RUNTIME_CONFIG__";
-const HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_KEY =
-    "HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED";
-
 interface ExtendedHowlOptions extends HowlOptions {
     xhr?: {
         method?: string;
@@ -55,44 +51,6 @@ interface NavigatorAudioSession {
     type?: string;
 }
 
-const readRuntimeConfigValue = (key: string): unknown => {
-    if (typeof window === "undefined") {
-        return undefined;
-    }
-
-    const runtimeConfig = (
-        window as Window & {
-            [SOUNDSPAN_RUNTIME_CONFIG_KEY]?: Record<string, unknown>;
-        }
-    )[SOUNDSPAN_RUNTIME_CONFIG_KEY];
-    return runtimeConfig?.[key];
-};
-
-const resolveRuntimeConfigBoolean = (key: string): boolean => {
-    const runtimeValue = readRuntimeConfigValue(key);
-    if (typeof runtimeValue === "boolean") {
-        return runtimeValue;
-    }
-
-    return String(runtimeValue ?? "").trim().toLowerCase() === "true";
-};
-
-const isHowlerIosLockscreenWorkaroundsEnabled = (): boolean =>
-    resolveRuntimeConfigBoolean(HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED_KEY);
-
-const isIosDevice = (): boolean => {
-    if (typeof navigator === "undefined") {
-        return false;
-    }
-
-    const userAgent = navigator.userAgent || "";
-    const platform = navigator.platform || "";
-    return (
-        /iPad|iPhone|iPod/i.test(userAgent) ||
-        (platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
-    );
-};
-
 class HowlerEngine {
     private howl: Howl | null = null;
     private timeUpdateInterval: NodeJS.Timeout | null = null;
@@ -120,7 +78,8 @@ class HowlerEngine {
     private cleanupTimeoutId: NodeJS.Timeout | null = null; // Track cleanup timeout to prevent race conditions
     private playRetryTimeoutId: NodeJS.Timeout | null = null; // Delayed retry for play/start failures
     private pendingCleanupHowls: Set<Howl> = new Set(); // Track Howls being cleaned up
-    private iosAudioSessionConfigured: boolean = false;
+    private audioSessionConfigured: boolean = false;
+    private nativeEndedCleanup: (() => void) | null = null; // Cleanup for native <audio> ended listener
 
     // Seek state management - prevents stale timeupdate events during seeks
     private isSeeking: boolean = false;
@@ -354,6 +313,9 @@ class HowlerEngine {
                 this.emit("stop");
             },
             onend: () => {
+                // Guard: the native HTML5 'ended' fallback may have
+                // already handled this end event. Skip the duplicate.
+                if (!this.state.isPlaying) return;
                 this.state.isPlaying = false;
                 this.stopTimeUpdates();
                 this.emit("end");
@@ -365,6 +327,13 @@ class HowlerEngine {
                 }
             },
         });
+
+        // Bind the native HTML5 <audio> 'ended' event as a fallback.
+        // Howler's onend relies on a JS timer poll which browsers throttle
+        // when the page is hidden (locked screen / background tab), so the
+        // Howler callback may never fire. The native event is driven by the
+        // media pipeline and fires reliably even when JS timers are frozen.
+        this.bindNativeEndedEvent(this.howl);
     }
 
     /**
@@ -390,12 +359,17 @@ class HowlerEngine {
         // Some browsers keep WebAudio suspended on first interaction in edge cases.
         // Attempt a best-effort resume before/around play().
         this.resumeAudioContextIfNeeded();
-        this.configureIosAudioSessionForPlayback();
+        this.configureAudioSessionForPlayback();
 
         // Ensure volume is set correctly before playing
         const targetVolume = this.state.isMuted ? 0 : this.state.volume;
         this.howl.volume(targetVolume);
         this.howl.play();
+
+        // Re-arm the native ended fallback for repeat-one replays where
+        // the same Howl is reused via seek(0) + play(). The previous
+        // listener was registered with { once: true } and may have fired.
+        this.bindNativeEndedEvent(this.howl);
     }
 
     /**
@@ -682,6 +656,40 @@ class HowlerEngine {
     }
 
     /**
+     * Check whether the underlying HTML5 audio element has reached its end.
+     * Uses the native `ended` property which is set by the browser's media
+     * pipeline regardless of JS timer throttling.
+     */
+    hasTrackEnded(): boolean {
+        if (!this.howl) return false;
+        try {
+            const sounds = (this.howl as unknown as { _sounds?: Array<{ _node?: HTMLAudioElement }> })._sounds;
+            const node = sounds?.[0]?._node;
+            if (node && node instanceof HTMLMediaElement) {
+                return node.ended;
+            }
+        } catch {
+            // Fallback below
+        }
+        // For Web Audio or inaccessible nodes, use time heuristic
+        const duration = this.getDuration();
+        const position = this.getActualCurrentTime();
+        return duration > 0 && position >= duration - 0.1;
+    }
+
+    /**
+     * Synthesize a track-end event. Used by foreground recovery when
+     * the track finished while the page was hidden and neither Howler's
+     * timer-polled onend nor the native fallback fired.
+     */
+    notifyTrackEnded(): void {
+        if (!this.state.isPlaying) return;
+        this.state.isPlaying = false;
+        this.stopTimeUpdates();
+        this.emit("end");
+    }
+
+    /**
      * Emit event to all listeners
      */
     private emit(event: HowlerEventType, data?: unknown): void {
@@ -772,6 +780,7 @@ class HowlerEngine {
         });
 
         this.howl.on("end", () => {
+            if (!this.state.isPlaying) return;
             this.state.isPlaying = false;
             this.stopTimeUpdates();
             this.emit("end");
@@ -787,6 +796,47 @@ class HowlerEngine {
         this.howl.on("playerror", (id, error) => {
             this.handlePlayError(error);
         });
+
+        this.bindNativeEndedEvent(this.howl);
+    }
+
+    /**
+     * Bind the native HTML5 <audio> element's 'ended' event as a fallback
+     * for Howler's timer-polled end detection. Browsers throttle JS timers
+     * when the page is hidden (Android lock screen, background tabs), so
+     * Howler's onend may never fire. The native event is driven by the
+     * media pipeline and fires reliably even when timers are frozen.
+     */
+    private bindNativeEndedEvent(howl: Howl): void {
+        // Remove any previous native ended listener (e.g. from a prior load)
+        this.removeNativeEndedListener();
+
+        const sounds = (howl as unknown as { _sounds?: Array<{ _node?: HTMLAudioElement }> })._sounds;
+        const node = sounds?.[0]?._node;
+        if (!node || !(node instanceof HTMLMediaElement)) return;
+
+        const handler = () => {
+            this.nativeEndedCleanup = null;
+            // Only emit if Howler hasn't already handled it
+            if (this.howl !== howl) return;
+            if (this.state.isPlaying) {
+                this.state.isPlaying = false;
+                this.stopTimeUpdates();
+                this.emit("end");
+            }
+        };
+
+        node.addEventListener("ended", handler, { once: true });
+        this.nativeEndedCleanup = () => {
+            node.removeEventListener("ended", handler);
+            this.nativeEndedCleanup = null;
+        };
+    }
+
+    private removeNativeEndedListener(): void {
+        if (this.nativeEndedCleanup) {
+            this.nativeEndedCleanup();
+        }
     }
 
     private handlePlayError(error: unknown): void {
@@ -812,9 +862,7 @@ class HowlerEngine {
     }
 
     private scheduleUnlockRetry(source: string): void {
-        if (!this.howl || !this.isIosLockscreenWorkaroundEnabled()) {
-            return;
-        }
+        if (!this.howl) return;
 
         const howlAtError = this.howl;
         howlAtError.once("unlock", () => {
@@ -824,7 +872,7 @@ class HowlerEngine {
 
             this.applyHowlerGlobalPlaybackConfig();
             this.resumeAudioContextIfNeeded();
-            this.configureIosAudioSessionForPlayback();
+            this.configureAudioSessionForPlayback();
             const targetVolume = this.state.isMuted ? 0 : this.state.volume;
             this.howl.volume(targetVolume);
             this.howl.play();
@@ -844,7 +892,7 @@ class HowlerEngine {
 
             this.applyHowlerGlobalPlaybackConfig();
             this.resumeAudioContextIfNeeded();
-            this.configureIosAudioSessionForPlayback();
+            this.configureAudioSessionForPlayback();
             const targetVolume = this.state.isMuted ? 0 : this.state.volume;
             this.howl.volume(targetVolume);
             this.howl.play();
@@ -870,24 +918,13 @@ class HowlerEngine {
         });
     }
 
-    private isIosLockscreenWorkaroundEnabled(): boolean {
-        return isIosDevice() && isHowlerIosLockscreenWorkaroundsEnabled();
-    }
-
     private applyHowlerGlobalPlaybackConfig(): void {
-        if (!this.isIosLockscreenWorkaroundEnabled()) {
-            return;
-        }
-
         Howler.autoUnlock = true;
         Howler.autoSuspend = false;
     }
 
-    private configureIosAudioSessionForPlayback(): void {
-        if (!this.isIosLockscreenWorkaroundEnabled()) {
-            return;
-        }
-        if (this.iosAudioSessionConfigured || typeof navigator === "undefined") {
+    private configureAudioSessionForPlayback(): void {
+        if (this.audioSessionConfigured || typeof navigator === "undefined") {
             return;
         }
 
@@ -900,7 +937,7 @@ class HowlerEngine {
 
         try {
             audioSession.type = "playback";
-            this.iosAudioSessionConfigured = true;
+            this.audioSessionConfigured = true;
         } catch (err) {
             sharedFrontendLogger.warn(
                 "[HowlerEngine] Failed to set navigator.audioSession.type=playback:",
@@ -952,6 +989,7 @@ class HowlerEngine {
      */
     private cleanup(immediate: boolean = false): void {
         this.cancelPreload();
+        this.removeNativeEndedListener();
         this.stopTimeUpdates();
         this.clearPlayRetryTimeout();
         this.playRetryCount = 0;

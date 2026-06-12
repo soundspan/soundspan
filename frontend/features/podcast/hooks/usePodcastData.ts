@@ -9,6 +9,9 @@ import { Podcast, PodcastPreview, SimilarPodcast, Episode } from "../types";
 import { subscribeQueryEvent } from "@/lib/query-events";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Executes usePodcastData.
+ */
 export function usePodcastData() {
   const params = useParams();
   const router = useRouter();

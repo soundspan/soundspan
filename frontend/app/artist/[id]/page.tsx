@@ -14,6 +14,7 @@ import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useListenTogether } from "@/lib/listen-together-context";
+import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 
 // Hooks
 import { useArtistData } from "@/features/artist/hooks/useArtistData";
@@ -22,7 +23,6 @@ import { useDownloadActions } from "@/features/artist/hooks/useDownloadActions";
 import { useYtMusicTopTracks } from "@/features/artist/hooks/useYtMusicTopTracks";
 import { useTidalTopTracks } from "@/features/artist/hooks/useTidalTopTracks";
 import type { Track, Album } from "@/features/artist/types";
-import { useTrackPreview } from "@/hooks/useTrackPreview";
 
 // Components
 import { ArtistHero } from "@/features/artist/components/ArtistHero";
@@ -71,12 +71,15 @@ function GridSectionSkeleton({
     );
 }
 
+/**
+ * Renders the ArtistPage component.
+ */
 export default function ArtistPage() {
     const router = useRouter();
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();
-    const { playTracks, playNow, pause } = useAudioControls();
+    const { playTracks, playNow, pause, addTracksToQueue } = useAudioControls();
     const { isPendingByMbid, downloadsEnabled } = useDownloadContext();
     const { isInGroup } = useListenTogether();
 
@@ -94,9 +97,13 @@ export default function ArtistPage() {
     } = useArtistData();
 
     // Action hooks
-    const { playAll, shufflePlay, addAllToQueue } = useArtistActions();
+    const { playAll, shufflePlay, addAllToQueue, likeAllTracks, addAllToPlaylist } = useArtistActions();
     const { downloadArtist, downloadAlbum } = useDownloadActions();
-    const { previewTrack, previewPlaying, handlePreview } = useTrackPreview();
+
+    // Playlist selector state
+    const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
+    const [isAddingToPlaylist, setIsAddingToPlaylist] = useState(false);
+    const [isLikingAll, setIsLikingAll] = useState(false);
 
     // Enrich unowned top tracks with TIDAL streaming, then YT Music for remaining gaps
     const artistWithTopTracks = artist?.topTracks?.length ? artist : null;
@@ -199,13 +206,13 @@ export default function ArtistPage() {
         playNow(formatTrackForPlayback(track));
     }
 
-    function handleAddAllPopularToQueue() {
-        const topTracks = (enrichedTopTracks || artist?.topTracks) || [];
-        if (!topTracks.length) return;
-
-        const visiblePopularTracks = topTracks.slice(0, 5);
-        const formattedTracks = visiblePopularTracks.map(formatTrackForPlayback);
-        playTracks(formattedTracks, 0);
+    function handleAddAllPopularToQueue(visibleTracks: Track[]) {
+        const playable = visibleTracks.filter(
+            (t) => t.filePath || (t.streamSource === "tidal" && t.tidalTrackId) || (t.streamSource === "youtube" && t.youtubeVideoId)
+        );
+        if (!playable.length) return;
+        const formattedTracks = playable.map(formatTrackForPlayback);
+        addTracksToQueue(formattedTracks);
     }
 
     // Download album handler
@@ -218,6 +225,31 @@ export default function ArtistPage() {
         e.preventDefault();
         e.stopPropagation();
         setSearchAlbum(album);
+    }
+
+    // Like all artist tracks (one-way action with spinner)
+    async function handleLikeAll() {
+        if (!artist) return;
+        setIsLikingAll(true);
+        try {
+            await likeAllTracks(artist, albums);
+        } finally {
+            setIsLikingAll(false);
+        }
+    }
+
+    // Add all to playlist handler — keeps modal open on failure
+    async function handlePlaylistSelected(playlistId: string) {
+        if (!artist) return;
+        setIsAddingToPlaylist(true);
+        try {
+            await addAllToPlaylist(artist, albums, playlistId);
+            setShowPlaylistSelector(false);
+        } catch {
+            // Modal stays open so the user can retry or dismiss
+        } finally {
+            setIsAddingToPlaylist(false);
+        }
     }
 
     // Start artist radio handler
@@ -308,6 +340,9 @@ export default function ArtistPage() {
                     onShuffle={() => shufflePlay(artist, albums)}
                     onDownloadAll={() => downloadArtist(artist)}
                     onStartRadio={handleStartRadio}
+                    onAddToPlaylist={source === "library" ? () => setShowPlaylistSelector(true) : undefined}
+                    onLikeAll={source === "library" ? handleLikeAll : undefined}
+                    isLikingAll={isLikingAll}
                     isPendingDownload={isPendingByMbid(artist.mbid || "")}
                     isPlaying={isPlaying}
                     isPlayingThisArtist={
@@ -348,12 +383,6 @@ export default function ArtistPage() {
                             currentTrackId={currentTrack?.id}
                             colors={colors}
                             onPlayTrack={handlePlayTrack}
-                            previewTrack={previewTrack}
-                            previewPlaying={previewPlaying}
-                            onPreview={(track: Track, e: React.MouseEvent) =>
-                                handlePreview(track, artist.name, e)
-                            }
-                            isInListenTogetherGroup={isInGroup}
                             isProviderMatching={isProviderMatching}
                             popularHref={`/artist/${artist.id}/popular`}
                             onAddAllToQueue={handleAddAllPopularToQueue}
@@ -371,7 +400,6 @@ export default function ArtistPage() {
                         onPlayAlbum={handlePlayAlbum}
                         sortBy={sortBy}
                         onSortChange={setSortBy}
-                        isInListenTogetherGroup={isInGroup}
                     />
 
                     {/* Available Albums to Download */}
@@ -417,6 +445,14 @@ export default function ArtistPage() {
                     albumTitle={searchAlbum.title}
                 />
             )}
+
+            <PlaylistSelector
+                isOpen={showPlaylistSelector}
+                onClose={() => setShowPlaylistSelector(false)}
+                onSelectPlaylist={handlePlaylistSelected}
+                isLoading={isAddingToPlaylist}
+                loadingMessage="Adding tracks..."
+            />
         </div>
     );
 }

@@ -1,10 +1,20 @@
-const mockParseURL = jest.fn();
+const mockParseString = jest.fn();
+const mockAxiosGet = jest.fn();
 
 jest.mock("rss-parser", () =>
     jest.fn().mockImplementation(() => ({
-        parseURL: mockParseURL,
+        parseString: mockParseString,
     }))
 );
+
+jest.mock("axios", () => ({
+    __esModule: true,
+    default: {
+        get: (...args: unknown[]) => mockAxiosGet(...args),
+        isAxiosError: (error: unknown) =>
+            Boolean((error as { isAxiosError?: boolean })?.isAxiosError),
+    },
+}));
 
 const mockLogger = {
     debug: jest.fn(),
@@ -16,18 +26,32 @@ jest.mock("../../utils/logger", () => ({
     logger: mockLogger,
 }));
 
-import { rssParserService } from "../rss-parser";
+import { rssParserService, RSSFeedNotModifiedError } from "../rss-parser";
+
+function mockFeedResponse(
+    feed: Record<string, unknown>,
+    headers: Record<string, string> = {}
+) {
+    mockAxiosGet.mockResolvedValueOnce({
+        status: 200,
+        headers,
+        data: "<rss />",
+    });
+    mockParseString.mockResolvedValueOnce(feed);
+}
 
 describe("rssParserService", () => {
     beforeEach(() => {
-        mockParseURL.mockReset();
+        mockParseString.mockReset();
+        mockAxiosGet.mockReset();
         mockLogger.debug.mockReset();
         mockLogger.warn.mockReset();
         mockLogger.error.mockReset();
     });
 
     it("parses feed metadata and episode fields for success cases", async () => {
-        mockParseURL.mockResolvedValueOnce({
+        mockFeedResponse(
+            {
             title: "Tech Talks",
             author: "Feed Author",
             description: "Weekly tech interviews",
@@ -88,13 +112,28 @@ describe("rssParserService", () => {
                     },
                 },
             ],
-        });
+            },
+            {
+                etag: "etag-tech-talks",
+                "last-modified": "Sat, 01 Mar 2025 10:00:00 GMT",
+            }
+        );
 
         const result = await rssParserService.parseFeed(
             "https://example.com/feed.xml"
         );
 
-        expect(mockParseURL).toHaveBeenCalledWith("https://example.com/feed.xml");
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            "https://example.com/feed.xml",
+            expect.objectContaining({
+                responseType: "text",
+                headers: expect.objectContaining({
+                    Accept: "application/rss+xml",
+                    "User-Agent": "rss-parser",
+                }),
+            })
+        );
+        expect(mockParseString).toHaveBeenCalledWith("<rss />");
         expect(result.podcast).toEqual({
             title: "Tech Talks",
             author: "iTunes Author",
@@ -103,6 +142,10 @@ describe("rssParserService", () => {
             language: "en-US",
             explicit: true,
             itunesId: "123456789",
+        });
+        expect(result.feedMetadata).toEqual({
+            etag: "etag-tech-talks",
+            lastModified: "Sat, 01 Mar 2025 10:00:00 GMT",
         });
 
         expect(result.episodes).toHaveLength(5);
@@ -142,7 +185,7 @@ describe("rssParserService", () => {
     });
 
     it("filters items without valid audio enclosures and supports mime-type fallback checks", async () => {
-        mockParseURL.mockResolvedValueOnce({
+        mockFeedResponse({
             title: "Feed With Mixed Enclosures",
             author: "Feed Author",
             link: "https://example.com/no-itunes-id",
@@ -223,7 +266,7 @@ describe("rssParserService", () => {
     });
 
     it("extracts image urls from feed and item variants and falls back to podcast image", async () => {
-        mockParseURL.mockResolvedValueOnce({
+        mockFeedResponse({
             title: "Image Variant Podcast",
             itunesAuthor: "Image Tester",
             itunesImage: {
@@ -310,8 +353,7 @@ describe("rssParserService", () => {
     });
 
     it("supports feed image variants for itunes href objects and plain image strings", async () => {
-        mockParseURL
-            .mockResolvedValueOnce({
+        mockFeedResponse({
                 title: "Feed iTunes href",
                 itunesImage: {
                     href: "https://img.example.com/feed-from-href.jpg",
@@ -324,10 +366,10 @@ describe("rssParserService", () => {
                             url: "https://cdn.example.com/a.mp3",
                             type: "audio/mpeg",
                         },
-                    },
-                ],
-            })
-            .mockResolvedValueOnce({
+                        },
+                    ],
+            });
+        mockFeedResponse({
                 title: "Feed image string",
                 image: "https://img.example.com/feed-from-string.jpg",
                 items: [
@@ -337,8 +379,8 @@ describe("rssParserService", () => {
                             url: "https://cdn.example.com/b.mp3",
                             type: "audio/mpeg",
                         },
-                    },
-                ],
+                        },
+                    ],
             });
 
         const hrefImageFeed = await rssParserService.parseFeed(
@@ -381,7 +423,7 @@ describe("rssParserService", () => {
             },
         });
 
-        mockParseURL.mockResolvedValueOnce({
+        mockFeedResponse({
             title: "Partial Failures Podcast",
             image: "https://img.example.com/podcast-fallback.jpg",
             items: [
@@ -408,8 +450,79 @@ describe("rssParserService", () => {
         );
     });
 
-    it("wraps and rethrows top-level parseURL failures", async () => {
-        mockParseURL.mockRejectedValueOnce(new Error("request timed out"));
+    it("captures cache validators and forwards conditional headers", async () => {
+        mockFeedResponse(
+            {
+                title: "Conditional Feed",
+                items: [
+                    {
+                        title: "Conditional Episode",
+                        enclosure: {
+                            url: "https://cdn.example.com/conditional.mp3",
+                            type: "audio/mpeg",
+                        },
+                    },
+                ],
+            },
+            {
+                etag: "etag-conditional",
+                "last-modified": "Mon, 02 Mar 2026 00:00:00 GMT",
+            }
+        );
+
+        const result = await rssParserService.parseFeed(
+            "https://example.com/conditional.xml",
+            {
+                headers: {
+                    "If-None-Match": "etag-old",
+                    "If-Modified-Since": "Sun, 01 Mar 2026 00:00:00 GMT",
+                },
+            }
+        );
+
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            "https://example.com/conditional.xml",
+            expect.objectContaining({
+                headers: expect.objectContaining({
+                    "If-None-Match": "etag-old",
+                    "If-Modified-Since": "Sun, 01 Mar 2026 00:00:00 GMT",
+                }),
+            })
+        );
+        expect(result.feedMetadata).toEqual({
+            etag: "etag-conditional",
+            lastModified: "Mon, 02 Mar 2026 00:00:00 GMT",
+        });
+    });
+
+    it("throws a not-modified error for conditional 304 responses", async () => {
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 304,
+            headers: {
+                etag: "etag-304",
+                "last-modified": "Tue, 03 Mar 2026 00:00:00 GMT",
+            },
+            data: "",
+        });
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/not-modified.xml", {
+                headers: {
+                    "If-None-Match": "etag-304",
+                },
+            })
+        ).rejects.toEqual(
+            expect.objectContaining({
+                name: "RSSFeedNotModifiedError",
+                etag: "etag-304",
+                lastModified: "Tue, 03 Mar 2026 00:00:00 GMT",
+            })
+        );
+        expect(mockParseString).not.toHaveBeenCalled();
+    });
+
+    it("wraps and rethrows top-level request failures", async () => {
+        mockAxiosGet.mockRejectedValueOnce(new Error("request timed out"));
 
         await expect(
             rssParserService.parseFeed("https://example.com/unreachable.xml")
@@ -419,5 +532,13 @@ describe("rssParserService", () => {
             expect.stringContaining("[RSS PARSER] Failed to parse feed:"),
             "request timed out"
         );
+    });
+
+    it("rejects unsafe feed urls before parseURL is called", async () => {
+        await expect(
+            rssParserService.parseFeed("http://127.0.0.1/private-feed.xml")
+        ).rejects.toThrow("Failed to parse podcast feed: Invalid or private feed URL");
+
+        expect(mockAxiosGet).not.toHaveBeenCalled();
     });
 });

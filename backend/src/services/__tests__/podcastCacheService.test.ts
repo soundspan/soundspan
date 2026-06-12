@@ -44,6 +44,14 @@ jest.mock("../../config", () => ({
     },
 }));
 
+const mockNormalizeExternalImageUrl = jest.fn(
+    (url: string) => (url.includes("localhost") || url.includes("127.0.0.1") || url.includes("192.168.") ? null : url),
+);
+
+jest.mock("../imageProxy", () => ({
+    normalizeExternalImageUrl: (url: string) => mockNormalizeExternalImageUrl(url),
+}));
+
 import { PodcastCacheService } from "../podcastCache";
 
 function okResponse(size = 8) {
@@ -245,6 +253,53 @@ describe("PodcastCacheService", () => {
         expect(logger.error).toHaveBeenCalledWith(
             "Failed to download cover for podcast pod-net:",
             "network error"
+        );
+    });
+
+    it("downloadCover rejects private/localhost URLs (SSRF protection)", async () => {
+        const service = new PodcastCacheService();
+
+        const localPath = await (service as any).downloadCover(
+            "pod-ssrf",
+            "http://127.0.0.1:9200/internal",
+            "podcast"
+        );
+
+        expect(localPath).toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalledWith(
+            expect.stringContaining("SSRF-blocked"),
+            expect.stringContaining("127.0.0.1")
+        );
+    });
+
+    it("downloadCover rejects private network URLs (SSRF protection)", async () => {
+        const service = new PodcastCacheService();
+
+        const localPath = await (service as any).downloadCover(
+            "pod-priv",
+            "http://192.168.1.1/admin",
+            "podcast"
+        );
+
+        expect(localPath).toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("downloadCover allows valid external URLs", async () => {
+        const service = new PodcastCacheService();
+        fetchMock.mockResolvedValueOnce(okResponse());
+
+        const localPath = await (service as any).downloadCover(
+            "pod-ext",
+            "https://cdn.podcast.example/cover.jpg",
+            "podcast"
+        );
+
+        expect(localPath).not.toBeNull();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(mockNormalizeExternalImageUrl).toHaveBeenCalledWith(
+            "https://cdn.podcast.example/cover.jpg"
         );
     });
 

@@ -4,7 +4,7 @@ import {
     createLatestAsyncOperationState,
     type LatestAsyncOperationState,
     enqueueLatestAsyncOperation,
-} from "../../lib/latest-async-operation.ts";
+} from "../../lib/latest-async-operation";
 
 async function waitForDrain<TArg>(
     state: LatestAsyncOperationState<TArg>,

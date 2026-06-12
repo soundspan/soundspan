@@ -1,0 +1,64 @@
+version: acm.workflows.v1
+
+completion:
+  required_tasks:
+    - key: verify:tests
+      select:
+        changed_paths_any:
+          - ".acm/**"
+          - ".claude/**"
+          - ".githooks/**"
+          - ".github/**"
+          - "AGENTS.md"
+          - "CLAUDE.md"
+          - "CHANGELOG.md"
+          - "CONTRIBUTING.md"
+          - "backend/**"
+          - "charts/**"
+          - "docker-compose*.yml"
+          - "docs/**"
+          - "frontend/**"
+          - "package-lock.json"
+          - "package.json"
+          - "packages/**"
+          - "scripts/**"
+          - "services/**"
+    - key: review:cross-llm
+      summary: Cross-LLM review with promoted backend build and coverage gates
+      rerun_requires_new_fingerprint: true
+      select:
+        phases:
+          - review
+        changed_paths_any:
+          - ".acm/**"
+          - ".claude/**"
+          - ".githooks/**"
+          - ".github/**"
+          - "AGENTS.md"
+          - "CLAUDE.md"
+          - "CHANGELOG.md"
+          - "CONTRIBUTING.md"
+          - "backend/**"
+          - "charts/**"
+          - "docker-compose*.yml"
+          - "docs/**"
+          - "frontend/**"
+          - "package-lock.json"
+          - "package.json"
+          - "packages/**"
+          - "scripts/**"
+          - "services/**"
+      run:
+        argv:
+          - "scripts/acm-cross-review.sh"
+          - "--provider"
+          - "codex"
+          - "--model"
+          - "gpt-5.3-codex"
+          - "--reasoning-effort"
+          - "high"
+          # In already isolated containerized hosts, prefer the shared high-trust shortcut.
+          # For Codex this maps to native --yolo; for Claude it maps to dangerous permissions.
+          - "--yolo"
+        cwd: .
+        timeout_sec: 1800

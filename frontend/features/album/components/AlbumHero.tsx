@@ -21,6 +21,9 @@ interface AlbumHeroProps {
     children?: ReactNode;
 }
 
+/**
+ * Renders the AlbumHero component.
+ */
 export function AlbumHero({
     album,
     source,

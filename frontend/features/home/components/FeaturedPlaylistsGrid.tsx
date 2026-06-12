@@ -4,40 +4,25 @@ import { Music2, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
 import { memo, useCallback } from "react";
-import Image from "next/image";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import type { PlaylistPreview } from "@/hooks/useQueries";
 
-interface PlaylistPreview {
-    id: string;
-    source: string;
-    type: string;
-    title: string;
-    description: string | null;
-    creator: string;
-    imageUrl: string | null;
-    trackCount: number;
-    url: string;
-}
+export type { PlaylistPreview };
 
 interface FeaturedPlaylistsGridProps {
     playlists: PlaylistPreview[];
 }
 
-// Deezer icon
-const DeezerIcon = ({ className }: { className?: string }) => (
-    <svg viewBox="0 0 24 24" className={className} fill="currentColor">
-        <path d="M18.81 4.16v3.03H24V4.16h-5.19zM6.27 8.38v3.027h5.189V8.38h-5.19zm12.54 0v3.027H24V8.38h-5.19zM6.27 12.595v3.027h5.189v-3.027h-5.19zm6.27 0v3.027h5.19v-3.027h-5.19zm6.27 0v3.027H24v-3.027h-5.19zM0 16.81v3.029h5.19v-3.03H0zm6.27 0v3.029h5.189v-3.03h-5.19zm6.27 0v3.029h5.19v-3.03h-5.19zm6.27 0v3.029H24v-3.03h-5.19z" />
-    </svg>
-);
-
 interface PlaylistCardProps {
     playlist: PlaylistPreview;
+    index: number;
     onClick: (playlistId: string) => void;
 }
 
-const PlaylistCard = memo(function PlaylistCard({ 
-    playlist, 
-    onClick 
+const PlaylistCard = memo(function PlaylistCard({
+    playlist,
+    index,
+    onClick
 }: PlaylistCardProps) {
     const { showSpinner, triggerPlayFeedback } = usePlayButtonFeedback();
 
@@ -50,16 +35,17 @@ const PlaylistCard = memo(function PlaylistCard({
         <CarouselItem>
             <div
                 onClick={handleClick}
+                data-tv-card
+                data-tv-card-index={index}
+                tabIndex={0}
                 className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors"
             >
                 <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-[#282828] shadow-lg">
                     {playlist.imageUrl ? (
-                        <Image
+                        <img
                             src={playlist.imageUrl}
                             alt={playlist.title}
-                            fill
-                            className="object-cover group-hover:scale-105 transition-transform duration-300"
-                            unoptimized
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#AD47FF]/30 to-[#AD47FF]/10">
@@ -78,29 +64,30 @@ const PlaylistCard = memo(function PlaylistCard({
                             )}
                         </div>
                     </div>
-                    {/* Deezer badge */}
-                    <div className="absolute top-2 left-2">
-                        <DeezerIcon className="w-4 h-4 text-[#AD47FF] drop-shadow-lg" />
-                    </div>
                 </div>
                 <h3 className="text-sm font-semibold text-white truncate">
                     {playlist.title}
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                    {playlist.trackCount} songs
+                    {playlist.trackCount != null
+                        ? `${playlist.trackCount} songs`
+                        : playlist.description ?? ""}
                 </p>
             </div>
         </CarouselItem>
     );
 });
 
+/**
+ * Renders a horizontal carousel of playlist preview cards.
+ */
 export const FeaturedPlaylistsGrid = memo(function FeaturedPlaylistsGrid({
     playlists
 }: FeaturedPlaylistsGridProps) {
     const router = useRouter();
 
     const handlePlaylistClick = useCallback((playlistId: string) => {
-        router.push(`/browse/playlists/${playlistId}`);
+        router.push(`/explore/yt-playlist/${playlistId}`);
     }, [router]);
 
     if (!playlists || playlists.length === 0) {
@@ -113,6 +100,7 @@ export const FeaturedPlaylistsGrid = memo(function FeaturedPlaylistsGrid({
                 <PlaylistCard
                     key={`home-playlist-${playlist.id}-${index}`}
                     playlist={playlist}
+                    index={index}
                     onClick={handlePlaylistClick}
                 />
             ))}

@@ -1,4 +1,5 @@
 import rateLimit from "express-rate-limit";
+import { logger } from "../utils/logger";
 
 // Trust proxy validation is disabled because this is a self-hosted app
 // running behind a reverse proxy (nginx/traefik in Docker). The app.set("trust proxy", true)
@@ -15,6 +16,10 @@ export const apiLimiter = rateLimit({
     message: "Too many requests from this IP, please try again later.",
     standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    handler: (req, res, next, options) => {
+        logger.warn(`API rate limit exceeded: ${req.ip} on ${req.method} ${req.path}`);
+        res.status(options.statusCode).send(options.message);
+    },
     skip: (req) => {
         // Never rate limit streaming, status polling, or health endpoints
         // Use precise path matching to prevent bypass via path manipulation
@@ -44,6 +49,10 @@ export const authLimiter = rateLimit({
     message: "Too many login attempts, please try again in 15 minutes.",
     standardHeaders: true,
     legacyHeaders: false,
+    handler: (req, res, next, options) => {
+        logger.warn(`Auth rate limit exceeded: ${req.ip}`);
+        res.status(options.statusCode).send(options.message);
+    },
     ...trustProxyValidation,
 });
 

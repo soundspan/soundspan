@@ -76,11 +76,14 @@ function findActiveLine(lines: LyricLine[], currentTimeMs: number): number {
     return result;
 }
 
+/**
+ * Renders the SyncedLyrics component.
+ */
 export function SyncedLyrics({
     syncedLyrics,
     plainLyrics,
     currentTime,
-    isPlaying,
+    isPlaying: _isPlaying,
     onSeek,
     className,
 }: SyncedLyricsProps) {

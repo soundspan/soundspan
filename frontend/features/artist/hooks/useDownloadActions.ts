@@ -5,6 +5,9 @@ import { useDownloadContext } from '@/lib/download-context';
 import { Artist, Album } from '../types';
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Executes useDownloadActions.
+ */
 export function useDownloadActions() {
   const { addPendingDownload, isPendingByMbid } = useDownloadContext();
 

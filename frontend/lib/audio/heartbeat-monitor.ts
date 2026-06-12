@@ -39,6 +39,9 @@ const DEFAULT_CONFIG: HeartbeatConfig = {
   bufferTimeout: 10000,
 };
 
+/**
+ * Represents the HeartbeatMonitor class.
+ */
 export class HeartbeatMonitor {
   private config: HeartbeatConfig;
   private callbacks: HeartbeatCallbacks;

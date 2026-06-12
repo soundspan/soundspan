@@ -130,16 +130,17 @@ describe("config module", () => {
             ALLOWED_ORIGINS: undefined,
         });
         expect(prodModule.config.allowedOrigins).toEqual([]);
+        expect(prodModule.config.lastfm).toEqual({ apiKey: "" });
     });
 
-    it("preserves malformed numeric env coercion behavior", async () => {
+    it("falls back for malformed numeric env values", async () => {
         const { config } = await loadConfigModule({
             PORT: "not-a-number",
             TRANSCODE_CACHE_MAX_GB: "invalid-size",
         });
 
-        expect(Number.isNaN(config.port)).toBe(true);
-        expect(Number.isNaN(config.music.transcodeCacheMaxGb)).toBe(true);
+        expect(config.port).toBe(3006);
+        expect(config.music.transcodeCacheMaxGb).toBe(10);
     });
 
     it("treats only literal true as an enabled feature flag", async () => {

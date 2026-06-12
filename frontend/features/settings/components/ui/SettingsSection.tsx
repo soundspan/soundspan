@@ -9,6 +9,9 @@ interface SettingsSectionProps {
     showSeparator?: boolean;
 }
 
+/**
+ * Renders the SettingsSection component.
+ */
 export function SettingsSection({
     id,
     title,

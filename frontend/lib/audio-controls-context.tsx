@@ -19,7 +19,10 @@ import {
 import { useAudioPlayback } from "./audio-playback-context";
 import { api } from "@/lib/api";
 import { audioSeekEmitter } from "./audio-seek-emitter";
-import { listenTogetherSocket } from "./listen-together-socket";
+import {
+    listenTogetherSocket,
+    type QueueTrackInput,
+} from "./listen-together-socket";
 import {
     enqueueLatestListenTogetherHostTrackOperation,
     getListenTogetherOptimisticTrackSelectionPolicy,
@@ -37,6 +40,7 @@ import {
 } from "@/lib/audio-playback-normalization";
 import { resetPersistedTrackStartPosition } from "@/lib/persisted-playback-position";
 import { resolveListenTogetherNavigationIndex } from "@/lib/listen-together-navigation";
+import { toAddToPlaylistRef } from "@/lib/trackRef";
 import {
     createMigratingStorageKey,
     writeMigratingStorageItem,
@@ -70,15 +74,52 @@ function queueDebugLog(message: string, data?: Record<string, unknown>) {
     sharedFrontendLogger.info(`[QueueDebug] ${message}`, data || {});
 }
 
-function isListenTogetherLocalTrack(track: Track | null | undefined): track is Track {
-    if (!track?.id) return false;
-    if (track.streamSource === "tidal" || track.streamSource === "youtube") {
-        return false;
+function toListenTogetherQueueTrack(
+    track: Track | null | undefined
+): QueueTrackInput | null {
+    if (!track) return null;
+    try {
+        return toAddToPlaylistRef(track);
+    } catch {
+        return null;
     }
-    if (typeof track.filePath === "string" && track.filePath.trim().length > 0) {
-        return true;
+}
+
+function showListenTogetherQueueMutationToasts(
+    result: { acceptedCount: number; skippedCount: number; truncated: boolean },
+    messages: {
+        singleAccepted: string;
+        multiAccepted: (acceptedCount: number) => string;
+        noneAccepted?: string;
     }
-    return Boolean(track.album?.id);
+): void {
+    if (result.acceptedCount > 0) {
+        toast.success(
+            result.acceptedCount === 1
+                ? messages.singleAccepted
+                : messages.multiAccepted(result.acceptedCount)
+        );
+    } else {
+        toast.info(
+            messages.noneAccepted ??
+                "Group queue is already at the 500-track cap"
+        );
+    }
+
+    if (result.truncated && result.skippedCount > 0) {
+        toast.info(
+            result.acceptedCount > 0
+                ? `${result.skippedCount} track${result.skippedCount === 1 ? " was" : "s were"} skipped because Listen Together queues keep only the first 500 tracks`
+                : "Listen Together queues keep only the first 500 tracks. The group queue is already full."
+        );
+        return;
+    }
+
+    if (result.skippedCount > 0) {
+        toast.info(
+            `Skipped ${result.skippedCount} track${result.skippedCount === 1 ? "" : "s"} while updating the group queue`
+        );
+    }
 }
 
 export type QueueNavigationAction = "next" | "previous";
@@ -92,6 +133,9 @@ export interface ResolveQueueNavigationIndexInput {
     repeatMode: "off" | "one" | "all";
 }
 
+/**
+ * Executes resolveQueueNavigationIndex.
+ */
 export function resolveQueueNavigationIndex(
     input: ResolveQueueNavigationIndexInput,
 ): number | null {
@@ -148,6 +192,9 @@ export interface ResolveActiveListenTogetherSessionInput {
     nowMs?: number;
 }
 
+/**
+ * Executes resolveActiveListenTogetherSession.
+ */
 export function resolveActiveListenTogetherSession(
     input: ResolveActiveListenTogetherSessionInput,
 ): ListenTogetherSessionSnapshot | null {
@@ -168,6 +215,9 @@ export interface GenerateSeparatedShuffleIndicesInput {
     random?: () => number;
 }
 
+/**
+ * Executes generateSeparatedShuffleIndices.
+ */
 export function generateSeparatedShuffleIndices(
     input: GenerateSeparatedShuffleIndicesInput,
 ): number[] {
@@ -252,6 +302,9 @@ const AudioControlsContext = createContext<
     AudioControlsContextType | undefined
 >(undefined);
 
+/**
+ * Renders the AudioControlsProvider component.
+ */
 export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const state = useAudioState();
     const playback = useAudioPlayback();
@@ -404,14 +457,23 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             const playbackState = playbackRef.current;
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
-                if (!isListenTogetherLocalTrack(track)) {
-                    toast.error("Listen Together only supports local library tracks");
+                const queueTrack = toListenTogetherQueueTrack(track);
+                if (!queueTrack) {
+                    toast.error("Failed to prepare track for Listen Together");
                     return;
                 }
 
                 void listenTogetherSocket
-                    .addToQueue([track.id])
-                    .then(() => toast.success(`Added "${track.title}" to group queue`))
+                    .addToQueue([queueTrack])
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                acceptedCount === 1
+                                    ? `Added "${track.title}" to group queue`
+                                    : `Added ${acceptedCount} tracks to group queue`,
+                        });
+                    })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
                     });
@@ -452,28 +514,35 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             if (ltSession) {
                 const safeStartIndex = Math.min(Math.max(startIndex, 0), tracks.length - 1);
                 const selectedSlice = tracks.slice(safeStartIndex);
-                const eligibleTracks = selectedSlice.filter(isListenTogetherLocalTrack);
-                const rejectedCount = selectedSlice.length - eligibleTracks.length;
+                const queueTracks = selectedSlice
+                    .map((track) => ({
+                        track,
+                        queueTrack: toListenTogetherQueueTrack(track),
+                    }))
+                    .filter(
+                        (entry): entry is { track: Track; queueTrack: QueueTrackInput } =>
+                            entry.queueTrack !== null
+                    );
+                const rejectedCount = selectedSlice.length - queueTracks.length;
 
-                if (eligibleTracks.length === 0) {
-                    toast.error("No local library tracks to add to Listen Together queue");
+                if (queueTracks.length === 0) {
+                    toast.error("No valid tracks to add to Listen Together queue");
                     return;
                 }
 
                 if (rejectedCount > 0) {
-                    toast.error("Some tracks were skipped: only local library tracks can be queued in Listen Together");
+                    toast.error("Some tracks were skipped while preparing group queue items");
                 }
 
-                const trackIds = eligibleTracks.map((track) => track.id);
+                const trackPayloads = queueTracks.map((entry) => entry.queueTrack);
                 void listenTogetherSocket
-                    .addToQueue(trackIds)
-                    .then(() => {
-                        const count = trackIds.length;
-                        toast.success(
-                            count === 1
-                                ? `Added "${eligibleTracks[0].title}" to group queue`
-                                : `Added ${count} tracks to group queue`
-                        );
+                    .addToQueue(trackPayloads)
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${queueTracks[0].track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                `Added ${acceptedCount} tracks to group queue`,
+                        });
                     })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add tracks to Listen Together queue");
@@ -830,27 +899,35 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
-                const eligibleTracks = validTracks.filter(isListenTogetherLocalTrack);
-                const rejectedCount = validTracks.length - eligibleTracks.length;
+                const queueTracks = validTracks
+                    .map((track) => ({
+                        track,
+                        queueTrack: toListenTogetherQueueTrack(track),
+                    }))
+                    .filter(
+                        (entry): entry is { track: Track; queueTrack: QueueTrackInput } =>
+                            entry.queueTrack !== null
+                    );
+                const rejectedCount = validTracks.length - queueTracks.length;
 
-                if (eligibleTracks.length === 0) {
-                    toast.error("Listen Together only supports local library tracks");
+                if (queueTracks.length === 0) {
+                    toast.error("Failed to prepare tracks for Listen Together");
                     return;
                 }
                 if (rejectedCount > 0) {
-                    toast.error("Some tracks were skipped: only local library tracks can be queued in Listen Together");
+                    toast.error("Some tracks were skipped while preparing group queue items");
                 }
 
-                const trackIds = eligibleTracks.map((track) => track.id);
+                const trackPayloads = queueTracks.map((entry) => entry.queueTrack);
                 listenTogetherSocket
-                    .addToQueue(trackIds)
-                    .then(() => {
+                    .addToQueue(trackPayloads)
+                    .then((result) => {
                         if (!shouldToastSuccess) return;
-                        if (eligibleTracks.length === 1) {
-                            toast.success(`Added "${eligibleTracks[0].title}" to group queue`);
-                        } else {
-                            toast.success(`Added ${eligibleTracks.length} tracks to group queue`);
-                        }
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${queueTracks[0].track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                `Added ${acceptedCount} tracks to group queue`,
+                        });
                     })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
@@ -965,13 +1042,22 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
-                if (!isListenTogetherLocalTrack(track)) {
-                    toast.error("Listen Together only supports local library tracks");
+                const queueTrack = toListenTogetherQueueTrack(track);
+                if (!queueTrack) {
+                    toast.error("Failed to prepare track for Listen Together");
                     return;
                 }
                 void listenTogetherSocket
-                    .insertNext([track.id])
-                    .then(() => toast.success(`Playing "${track.title}" next in group queue`))
+                    .insertNext([queueTrack])
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Playing "${track.title}" next in group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                acceptedCount === 1
+                                    ? `Playing "${track.title}" next in group queue`
+                                    : `Added ${acceptedCount} tracks to group queue`,
+                        });
+                    })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
                     });
@@ -1043,13 +1129,22 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
             // Listen Together: add only this single track to the shared queue
             if (ltSession) {
-                if (!isListenTogetherLocalTrack(track)) {
-                    toast.error("Listen Together only supports local library tracks");
+                const queueTrack = toListenTogetherQueueTrack(track);
+                if (!queueTrack) {
+                    toast.error("Failed to prepare track for Listen Together");
                     return;
                 }
                 void listenTogetherSocket
-                    .addToQueue([track.id])
-                    .then(() => toast.success(`Added "${track.title}" to group queue`))
+                    .addToQueue([queueTrack])
+                    .then((result) => {
+                        showListenTogetherQueueMutationToasts(result, {
+                            singleAccepted: `Added "${track.title}" to group queue`,
+                            multiAccepted: (acceptedCount) =>
+                                acceptedCount === 1
+                                    ? `Added "${track.title}" to group queue`
+                                    : `Added ${acceptedCount} tracks to group queue`,
+                        });
+                    })
                     .catch((err) => {
                         toast.error(err?.message || "Failed to add track to Listen Together queue");
                     });
@@ -1467,13 +1562,18 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     }
                 }
 
-                await listenTogetherSocket.addToQueue(uniqueQueueIds);
-                toast.success(
-                    uniqueQueueIds.length === 1
-                        ? "Added 1 track to group queue"
-                        : `Added ${uniqueQueueIds.length} tracks to group queue`
+                const queueResult = await listenTogetherSocket.addToQueue(
+                    uniqueQueueIds
                 );
-                return { success: true, trackCount: uniqueQueueIds.length };
+                showListenTogetherQueueMutationToasts(queueResult, {
+                    singleAccepted: "Added 1 track to group queue",
+                    multiAccepted: (acceptedCount) =>
+                        `Added ${acceptedCount} tracks to group queue`,
+                });
+                return {
+                    success: queueResult.acceptedCount > 0,
+                    trackCount: queueResult.acceptedCount,
+                };
             }
 
             // Disable shuffle when vibe mode starts - vibe queue is sorted by similarity
@@ -1607,6 +1707,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useAudioControls.
+ */
 export function useAudioControls() {
     const context = useContext(AudioControlsContext);
     if (!context) {

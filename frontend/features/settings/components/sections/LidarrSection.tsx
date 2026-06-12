@@ -13,6 +13,9 @@ interface LidarrCardProps {
     isTesting: boolean;
 }
 
+/**
+ * Renders the LidarrCard component.
+ */
 export function LidarrCard({ settings, onUpdate, onTest, isTesting }: LidarrCardProps) {
     const [testStatus, setTestStatus] = useState<StatusType>("idle");
     const [testMessage, setTestMessage] = useState("");

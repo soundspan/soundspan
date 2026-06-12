@@ -8,6 +8,7 @@
  * - libraryAlbumCount: Albums with location=LIBRARY that have tracks
  * - discoveryAlbumCount: Albums with location=DISCOVER that have tracks
  * - totalTrackCount: Total tracks across all albums
+ * - remoteTrackCount: TrackTidal + TrackYtMusic linked to this artist
  */
 
 import { prisma } from "../utils/db";
@@ -20,6 +21,7 @@ interface ArtistCounts {
   libraryAlbumCount: number;
   discoveryAlbumCount: number;
   totalTrackCount: number;
+  remoteTrackCount: number;
 }
 
 /**
@@ -28,32 +30,40 @@ interface ArtistCounts {
 export async function calculateArtistCounts(
   artistId: string
 ): Promise<ArtistCounts> {
-  const [libraryAlbums, discoveryAlbums, trackCount] = await Promise.all([
-    prisma.album.count({
-      where: {
-        artistId,
-        location: "LIBRARY",
-        tracks: { some: {} },
-      },
-    }),
-    prisma.album.count({
-      where: {
-        artistId,
-        location: "DISCOVER",
-        tracks: { some: {} },
-      },
-    }),
-    prisma.track.count({
-      where: {
-        album: { artistId },
-      },
-    }),
-  ]);
+  const [libraryAlbums, discoveryAlbums, trackCount, tidalCount, ytMusicCount] =
+    await Promise.all([
+      prisma.album.count({
+        where: {
+          artistId,
+          location: "LIBRARY",
+          tracks: { some: {} },
+        },
+      }),
+      prisma.album.count({
+        where: {
+          artistId,
+          location: "DISCOVER",
+          tracks: { some: {} },
+        },
+      }),
+      prisma.track.count({
+        where: {
+          album: { artistId },
+        },
+      }),
+      prisma.trackTidal.count({
+        where: { artistId },
+      }),
+      prisma.trackYtMusic.count({
+        where: { artistId },
+      }),
+    ]);
 
   return {
     libraryAlbumCount: libraryAlbums,
     discoveryAlbumCount: discoveryAlbums,
     totalTrackCount: trackCount,
+    remoteTrackCount: tidalCount + ytMusicCount,
   };
 }
 

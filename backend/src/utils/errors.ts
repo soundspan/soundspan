@@ -64,6 +64,30 @@ export class AppError extends Error {
 }
 
 /**
+ * Send a safe 500-class error response to the client.
+ *
+ * Logs the full error details server-side via the provided logger, then
+ * returns a generic message to the client to prevent leaking internal
+ * exception messages, stack traces, or database details.
+ *
+ * For 4xx errors, use explicit `res.status(4xx).json(...)` with
+ * user-facing messages instead — those are intentional.
+ */
+export function safeError(
+    res: { status: (code: number) => { json: (body: unknown) => void } },
+    error: unknown,
+    log: { error: (...args: unknown[]) => void },
+    context: string,
+    statusCode: number = 500,
+): void {
+    log.error(`${context}:`, error instanceof Error ? error.message : String(error));
+    if (error instanceof Error && error.stack) {
+        log.error(`${context} stack:`, error.stack);
+    }
+    res.status(statusCode).json({ error: "Internal server error" });
+}
+
+/**
  * Check if an error is recoverable
  */
 export function isRecoverable(error: any): boolean {

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "./api";
+import { getQueryClient } from "@/lib/query-client";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface User {
@@ -37,7 +38,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
+const publicPrefixes = ["/share/"];
 
+/**
+ * Renders the AuthProvider component.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [user, setUser] = useState<User | null>(null);
@@ -89,7 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
 
                 // If not on a public path, check if we need onboarding
-                if (!publicPaths.includes(pathname)) {
+                const isPublic = publicPaths.includes(pathname) || publicPrefixes.some((prefix) => pathname.startsWith(prefix));
+                if (!isPublic) {
                     // Check if any users exist in the system
                     try {
                         const status = await api.get<{ hasAccount: boolean }>(
@@ -149,14 +155,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await api.logout();
         setIsAuthenticated(false);
         setUser(null);
+        // Clear all cached query data so the next user session starts fresh
+        if (typeof window !== "undefined") {
+            getQueryClient().clear();
+        }
         router.push("/login");
     }, [router]);
 
     // Listen for session-expired events from the API client (stale/invalid tokens)
     useEffect(() => {
         const handleSessionExpired = () => {
+            const current = window.location.pathname;
+            const isPublicRoute = publicPaths.includes(current) || publicPrefixes.some((prefix) => current.startsWith(prefix));
+            if (isPublicRoute) return;
+
             setIsAuthenticated(false);
             setUser(null);
+            // Clear all cached query data so stale user data is not retained
+            getQueryClient().clear();
             router.push("/login");
         };
         window.addEventListener("auth:session-expired", handleSessionExpired);
@@ -179,6 +195,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useAuth.
+ */
 export function useAuth() {
     const context = useContext(AuthContext);
     if (context === undefined) {

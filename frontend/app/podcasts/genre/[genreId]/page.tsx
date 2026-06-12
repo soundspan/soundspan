@@ -30,6 +30,9 @@ const GENRE_MAP: { [key: string]: { name: string; searchTerm: string } } = {
     "1502": { name: "Leisure", searchTerm: "gaming hobbies podcast" },
 };
 
+/**
+ * Renders the GenrePage component.
+ */
 export default function GenrePage() {
     const params = useParams();
     const router = useRouter();

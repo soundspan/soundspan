@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import type { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import * as path from "path";
 import { parseFile } from "music-metadata";
@@ -14,6 +15,19 @@ import {
     parseArtistFromPath,
 } from "../utils/artistNormalization";
 import { backfillAllArtistCounts } from "./artistCountsService";
+
+type LibraryHealthRecordDelegate = {
+    upsert(args: Prisma.LibraryHealthRecordUpsertArgs): Promise<unknown>;
+    deleteMany(args: Prisma.LibraryHealthRecordDeleteManyArgs): Promise<unknown>;
+};
+
+function getLibraryHealthRecordDelegate(): LibraryHealthRecordDelegate {
+    return (
+        prisma as typeof prisma & {
+            libraryHealthRecord: LibraryHealthRecordDelegate;
+        }
+    ).libraryHealthRecord;
+}
 
 // Supported audio formats
 const AUDIO_EXTENSIONS = new Set([
@@ -44,6 +58,9 @@ interface ScanResult {
     duration: number;
 }
 
+/**
+ * Represents the MusicScannerService class.
+ */
 export class MusicScannerService {
     private scanQueue = new PQueue({ concurrency: 10 });
     private progressCallback?: (progress: ScanProgress) => void;
@@ -57,6 +74,34 @@ export class MusicScannerService {
         if (coverCachePath) {
             this.coverArtExtractor = new CoverArtExtractor(coverCachePath);
         }
+    }
+
+    private async markTrackHealthIssue(
+        trackId: string,
+        status: "MISSING_FROM_DISK" | "UNREADABLE_METADATA",
+        filePath: string,
+        detail?: string
+    ): Promise<void> {
+        await getLibraryHealthRecordDelegate().upsert({
+            where: { trackId },
+            update: {
+                status,
+                filePath,
+                detail: detail ?? null,
+            },
+            create: {
+                trackId,
+                status,
+                filePath,
+                detail: detail ?? null,
+            },
+        });
+    }
+
+    private async clearTrackHealthIssue(trackId: string): Promise<void> {
+        await getLibraryHealthRecordDelegate().deleteMany({
+            where: { trackId },
+        });
     }
 
     /**
@@ -148,6 +193,16 @@ export class MusicScannerService {
                         musicPath
                     );
                 } catch (err: any) {
+                    const relativePath = path.relative(musicPath, audioFile);
+                    const existingTrack = tracksByPath.get(relativePath);
+                    if (existingTrack) {
+                        await this.markTrackHealthIssue(
+                            existingTrack.id,
+                            "UNREADABLE_METADATA",
+                            existingTrack.filePath,
+                            err.message || String(err)
+                        );
+                    }
                     const error = {
                         file: audioFile,
                         error: err.message || String(err),
@@ -165,7 +220,7 @@ export class MusicScannerService {
 
         await this.scanQueue.onIdle();
 
-        // Step 4: Remove tracks for files that no longer exist
+        // Step 4: Record health issues for tracked files that no longer exist
         const scannedPaths = new Set(
             audioFiles.map((f) => path.relative(musicPath, f))
         );
@@ -174,13 +229,18 @@ export class MusicScannerService {
         );
 
         if (tracksToRemove.length > 0) {
-            await prisma.track.deleteMany({
-                where: {
-                    id: { in: tracksToRemove.map((t) => t.id) },
-                },
-            });
-            result.tracksRemoved = tracksToRemove.length;
-            logger.debug(`Removed ${tracksToRemove.length} missing tracks`);
+            await Promise.all(
+                tracksToRemove.map((track) =>
+                    this.markTrackHealthIssue(
+                        track.id,
+                        "MISSING_FROM_DISK",
+                        track.filePath
+                    )
+                )
+            );
+            logger.debug(
+                `Recorded ${tracksToRemove.length} missing tracks in library health`
+            );
         }
 
         // Step 5: Clean up orphaned albums (albums with no tracks)
@@ -191,7 +251,7 @@ export class MusicScannerService {
             select: { id: true, title: true },
         });
 
-        if (orphanedAlbums.length > 0) {
+        if (tracksToRemove.length === 0 && orphanedAlbums.length > 0) {
             logger.debug(`Removing ${orphanedAlbums.length} orphaned albums...`);
             await prisma.album.deleteMany({
                 where: {
@@ -208,7 +268,7 @@ export class MusicScannerService {
             select: { id: true, name: true },
         });
 
-        if (orphanedArtists.length > 0) {
+        if (tracksToRemove.length === 0 && orphanedArtists.length > 0) {
             logger.debug(
                 `Removing ${
                     orphanedArtists.length
@@ -727,6 +787,42 @@ export class MusicScannerService {
             }
         }
 
+        const albumMbid = metadata.common.musicbrainz_releasegroupid;
+
+        const isDiscoveryByPath = this.isDiscoveryPath(relativePath);
+        const isDiscoveryByJob = await this.isDiscoveryDownload(
+            artistName,
+            albumTitle
+        );
+
+        let isDiscoveryArtist = false;
+        if (!isDiscoveryByPath && !isDiscoveryByJob) {
+            const artistAlbums = await prisma.album.findMany({
+                where: { artistId: artist.id },
+                select: { location: true },
+            });
+
+            // Artist is discovery-only only when they already have discovery
+            // albums and still have no owned library albums.
+            if (artistAlbums.length > 0) {
+                const hasLibraryAlbums = artistAlbums.some(
+                    (candidateAlbum) => candidateAlbum.location === "LIBRARY"
+                );
+                const hasDiscoveryAlbums = artistAlbums.some(
+                    (candidateAlbum) => candidateAlbum.location === "DISCOVER"
+                );
+                isDiscoveryArtist = hasDiscoveryAlbums && !hasLibraryAlbums;
+                if (isDiscoveryArtist) {
+                    logger.debug(
+                        `[Scanner] Discovery-only artist detected: ${artistName}`
+                    );
+                }
+            }
+        }
+
+        const isDiscoveryAlbum =
+            isDiscoveryByPath || isDiscoveryByJob || isDiscoveryArtist;
+
         // Get or create album
         let album = await prisma.album.findFirst({
             where: {
@@ -737,7 +833,6 @@ export class MusicScannerService {
 
         if (!album) {
             // Try to find by release group MBID if available
-            const albumMbid = metadata.common.musicbrainz_releasegroupid;
             if (albumMbid) {
                 album = await prisma.album.findUnique({
                     where: { rgMbid: albumMbid },
@@ -749,42 +844,6 @@ export class MusicScannerService {
                 const rgMbid =
                     albumMbid || `temp-${Date.now()}-${Math.random()}`;
 
-                // Determine if this is a discovery album:
-                // 1. Check file path (legacy: /music/discovery/ folder)
-                // 2. Check if artist+album matches a discovery download job
-                // 3. Check if artist is a discovery-only artist (has DISCOVER albums but no LIBRARY albums)
-                const isDiscoveryByPath = this.isDiscoveryPath(relativePath);
-                const isDiscoveryByJob = await this.isDiscoveryDownload(
-                    artistName,
-                    albumTitle
-                );
-
-                // Check if this artist is discovery-only (has no LIBRARY albums)
-                // If so, any new albums from them should also be DISCOVER
-                let isDiscoveryArtist = false;
-                if (!isDiscoveryByPath && !isDiscoveryByJob) {
-                    const artistAlbums = await prisma.album.findMany({
-                        where: { artistId: artist.id },
-                        select: { location: true },
-                    });
-
-                    // Artist is discovery-only if they have albums but NONE are LIBRARY
-                    if (artistAlbums.length > 0) {
-                        const hasLibraryAlbums = artistAlbums.some(
-                            (a) => a.location === "LIBRARY"
-                        );
-                        isDiscoveryArtist = !hasLibraryAlbums;
-                        if (isDiscoveryArtist) {
-                            logger.debug(
-                                `[Scanner] Discovery-only artist detected: ${artistName}`
-                            );
-                        }
-                    }
-                }
-
-                const isDiscoveryAlbum =
-                    isDiscoveryByPath || isDiscoveryByJob || isDiscoveryArtist;
-
                 album = await prisma.album.create({
                     data: {
                         title: albumTitle,
@@ -795,18 +854,6 @@ export class MusicScannerService {
                         location: isDiscoveryAlbum ? "DISCOVER" : "LIBRARY",
                     },
                 });
-
-                // Only create OwnedAlbum record for library albums (not discovery)
-                // Discovery albums are temporary and should not appear in the user's library
-                if (!isDiscoveryAlbum) {
-                    await prisma.ownedAlbum.create({
-                        data: {
-                            rgMbid,
-                            artistId: artist.id,
-                            source: "native_scan",
-                        },
-                    });
-                }
             }
 
             // Extract cover art if we have an extractor
@@ -868,8 +915,37 @@ export class MusicScannerService {
             }
         }
 
+        if (!isDiscoveryAlbum) {
+            if (album.location !== "LIBRARY") {
+                logger.info(
+                    `[Scanner] Promoting album "${album.title}" (${album.id}) from ${album.location} to LIBRARY after local scan`
+                );
+                album = await prisma.album.update({
+                    where: { id: album.id },
+                    data: { location: "LIBRARY" },
+                });
+            }
+
+            await prisma.ownedAlbum.upsert({
+                where: {
+                    artistId_rgMbid: {
+                        artistId: artist.id,
+                        rgMbid: album.rgMbid,
+                    },
+                },
+                update: {
+                    source: "native_scan",
+                },
+                create: {
+                    rgMbid: album.rgMbid,
+                    artistId: artist.id,
+                    source: "native_scan",
+                },
+            });
+        }
+
         // Upsert track
-        await prisma.track.upsert({
+        const track = await prisma.track.upsert({
             where: { filePath: relativePath },
             create: {
                 albumId: album.id,
@@ -893,5 +969,7 @@ export class MusicScannerService {
                 fileSize: stats.size,
             },
         });
+
+        await this.clearTrackHealthIssue(track.id);
     }
 }

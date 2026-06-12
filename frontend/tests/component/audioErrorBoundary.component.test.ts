@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
-import { AudioErrorBoundary } from "../../components/providers/AudioErrorBoundary.tsx";
+import { AudioErrorBoundary } from "../../components/providers/AudioErrorBoundary";
 
 type BoundaryState = {
     hasError: boolean;

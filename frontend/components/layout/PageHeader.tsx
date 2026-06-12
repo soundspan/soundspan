@@ -14,6 +14,9 @@ interface PageHeaderProps {
     actions?: ReactNode;
 }
 
+/**
+ * Renders the PageHeader component.
+ */
 export function PageHeader({
     title,
     subtitle,

@@ -1,6 +1,9 @@
 import { Music2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 
+/**
+ * Renders the LibraryHeader component.
+ */
 export function LibraryHeader() {
   return (
     <div className="relative">

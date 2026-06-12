@@ -15,6 +15,7 @@ describe("listen together socket runtime behavior", () => {
             on: jest.fn(),
             emit: jest.fn(),
             to: jest.fn(() => ({ emit: jest.fn() })),
+            in: jest.fn(() => ({ fetchSockets: jest.fn(async () => []) })),
         };
         const logger: any = {
             debug: jest.fn(),
@@ -93,6 +94,7 @@ describe("listen together socket runtime behavior", () => {
             setCallbacks: jest.fn(),
             applyExternalSnapshot: jest.fn(),
             snapshotById: jest.fn(() => null),
+            setUnavailableIndices: jest.fn(),
             removeSocket: jest.fn(),
             socketCount: jest.fn(() => 0),
             addSocket: jest.fn(),
@@ -102,7 +104,12 @@ describe("listen together socket runtime behavior", () => {
             next: jest.fn(),
             previous: jest.fn(),
             setTrack: jest.fn(),
-            modifyQueue: jest.fn(),
+            modifyQueue: jest.fn(() => ({
+                queue: [{ id: "track-1" }],
+                currentIndex: 0,
+                trackId: "track-1",
+                stateVersion: 1,
+            })),
             reportReady: jest.fn(),
         };
         const joinGroupById = jest.fn(async () => ({
@@ -113,7 +120,11 @@ describe("listen together socket runtime behavior", () => {
             playback: { status: "paused", index: 0, positionMs: 0 },
         }));
         const leaveGroup = jest.fn(async () => undefined);
-        const validateLocalTracks = jest.fn(async () => [{ id: "track-1" }]);
+        const validateQueueTracks = jest.fn(async () => [{ id: "track-1" }]);
+        const resolveQueueForUser = jest.fn(async () => new Map());
+        const trackMappingService = {
+            markStale: jest.fn(async () => undefined),
+        };
         class MockGroupError extends Error {
             constructor(
                 public code: string,
@@ -153,11 +164,18 @@ describe("listen together socket runtime behavior", () => {
         jest.doMock("../listenTogetherManager", () => ({
             groupManager,
             GroupError: MockGroupError,
+            MAX_QUEUE_SIZE: 500,
         }));
         jest.doMock("../listenTogether", () => ({
             joinGroupById,
             leaveGroup,
-            validateLocalTracks,
+            validateQueueTracks,
+        }));
+        jest.doMock("../listenTogetherResolution", () => ({
+            resolveQueueForUser,
+        }));
+        jest.doMock("../trackMappingService", () => ({
+            trackMappingService,
         }));
         jest.doMock(
             "@socket.io/redis-adapter",
@@ -184,7 +202,9 @@ describe("listen together socket runtime behavior", () => {
             groupManager,
             joinGroupById,
             leaveGroup,
-            validateLocalTracks,
+            validateQueueTracks,
+            resolveQueueForUser,
+            trackMappingService,
             logger,
             jwtVerify,
             prismaUserFindUnique,
@@ -332,17 +352,17 @@ describe("listen together socket runtime behavior", () => {
             error: "trackIds required",
         });
 
-        mocks.validateLocalTracks.mockResolvedValueOnce([]);
+        mocks.validateQueueTracks.mockResolvedValueOnce([]);
         const queueNoTracksAck = jest.fn();
         await eventHandlers["queue"](
             { action: "add", trackIds: ["bad-track"] },
             queueNoTracksAck
         );
         expect(queueNoTracksAck).toHaveBeenCalledWith({
-            error: "No valid local tracks found",
+            error: "No valid tracks found",
         });
 
-        mocks.validateLocalTracks.mockResolvedValueOnce([{ id: "track-1" }]);
+        mocks.validateQueueTracks.mockResolvedValueOnce([{ id: "track-1" }]);
         const queueAddAck = jest.fn();
         await eventHandlers["queue"](
             { action: "add", trackIds: ["track-1"] },
@@ -353,7 +373,43 @@ describe("listen together socket runtime behavior", () => {
             "user-1",
             { action: "add", items: [{ id: "track-1" }] }
         );
-        expect(queueAddAck).toHaveBeenCalledWith({ ok: true });
+        expect(queueAddAck).toHaveBeenCalledWith({
+            ok: true,
+            acceptedCount: 1,
+            skippedCount: 0,
+            truncated: false,
+        });
+
+        mocks.groupManager.snapshotById.mockReturnValue({
+            playback: {
+                queue: Array.from({ length: 499 }, (_, index) => ({
+                    id: `existing-${index}`,
+                })),
+            },
+        });
+        mocks.validateQueueTracks.mockResolvedValueOnce([{ id: "track-a" }]);
+        mocks.groupManager.modifyQueue.mockReturnValueOnce({
+            queue: Array.from({ length: 500 }, (_, index) => ({
+                id: index === 499 ? "track-a" : `existing-${index}`,
+            })),
+            currentIndex: 0,
+            trackId: "track-a",
+            stateVersion: 2,
+        });
+        const queueTruncateAck = jest.fn();
+        await eventHandlers["queue"](
+            { action: "add", trackIds: ["track-a", "track-b"] },
+            queueTruncateAck
+        );
+        expect(mocks.validateQueueTracks).toHaveBeenLastCalledWith([
+            { trackId: "track-a" },
+        ]);
+        expect(queueTruncateAck).toHaveBeenCalledWith({
+            ok: true,
+            acceptedCount: 1,
+            skippedCount: 1,
+            truncated: true,
+        });
 
         const readyAck = jest.fn();
         await eventHandlers["ready"](readyAck);
@@ -377,6 +433,80 @@ describe("listen together socket runtime behavior", () => {
         expect(leaveAck).toHaveBeenCalledWith({ ok: true });
 
         socketService.shutdownListenTogetherSocket();
+    });
+
+    it("re-emits refreshed group state and clears pending disconnect cleanup on same-room reconnect", async () => {
+        jest.useFakeTimers();
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+            LISTEN_TOGETHER_STATE_SYNC_ENABLED: "false",
+        };
+        const mocks = setupListenTogetherSocketMocks();
+        const { socketService, eventHandlers, socket } =
+            bootstrapConnectedSocket(mocks);
+
+        const initialSnapshot: {
+            groupId: string;
+            hostUserId: string;
+            members: unknown[];
+            queue: Array<{ id: string }>;
+            playback: { status: string; index: number; positionMs: number };
+        } = {
+            groupId: "group-1",
+            hostUserId: "user-1",
+            members: [],
+            queue: [],
+            playback: { status: "paused", index: 0, positionMs: 12_000 },
+        };
+        const refreshedSnapshot: typeof initialSnapshot = {
+            groupId: "group-1",
+            hostUserId: "user-1",
+            members: [],
+            queue: [{ id: "track-2" }],
+            playback: { status: "playing", index: 1, positionMs: 48_500 },
+        };
+        mocks.joinGroupById
+            .mockResolvedValueOnce(initialSnapshot as any)
+            .mockResolvedValueOnce(refreshedSnapshot as any);
+
+        const initialJoinAck = jest.fn();
+        await eventHandlers["join-group"]({ groupId: "group-1" }, initialJoinAck);
+        expect(initialJoinAck).toHaveBeenCalledWith({ ok: true });
+        expect(socket.emit).toHaveBeenNthCalledWith(
+            1,
+            "group:state",
+            initialSnapshot
+        );
+
+        mocks.groupManager.socketCount.mockReturnValueOnce(0);
+        await eventHandlers["disconnect"]("transport close");
+        expect(socket.leave).toHaveBeenCalledTimes(1);
+        expect(socket.leave).toHaveBeenCalledWith("group-1");
+
+        await jest.advanceTimersByTimeAsync(20);
+        const reconnectJoinAck = jest.fn();
+        await eventHandlers["join-group"]({ groupId: "group-1" }, reconnectJoinAck);
+        expect(reconnectJoinAck).toHaveBeenCalledWith({ ok: true });
+        expect(mocks.joinGroupById).toHaveBeenNthCalledWith(
+            2,
+            "user-1",
+            "User One",
+            "group-1"
+        );
+        expect(mocks.leaveGroup).not.toHaveBeenCalled();
+        expect(socket.emit).toHaveBeenNthCalledWith(
+            2,
+            "group:state",
+            refreshedSnapshot
+        );
+        expect(socket.join).toHaveBeenNthCalledWith(2, "group-1");
+
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect(mocks.leaveGroup).not.toHaveBeenCalled();
+
+        socketService.shutdownListenTogetherSocket();
+        jest.useRealTimers();
     });
 
     it("fails module initialization when JWT_SECRET and SESSION_SECRET are missing", () => {
@@ -1000,6 +1130,69 @@ describe("listen together socket runtime behavior", () => {
 
         socketService.shutdownListenTogetherSocket();
         jest.useRealTimers();
+    });
+
+    it("re-emits current group state when the same member rejoins the active group", async () => {
+        process.env = {
+            ...originalEnv,
+            JWT_SECRET: "test-secret",
+        };
+        const mocks = setupListenTogetherSocketMocks();
+        const { socketService, eventHandlers, socket } =
+            bootstrapConnectedSocket(mocks);
+
+        const initialSnapshot: {
+            groupId: string;
+            hostUserId: string;
+            members: unknown[];
+            queue: Array<{ id: string }>;
+            playback: { status: string; index: number; positionMs: number };
+        } = {
+            groupId: "group-1",
+            hostUserId: "user-1",
+            members: [],
+            queue: [],
+            playback: { status: "paused", index: 0, positionMs: 0 },
+        };
+        const refreshedSnapshot: typeof initialSnapshot = {
+            groupId: "group-1",
+            hostUserId: "user-1",
+            members: [],
+            queue: [{ id: "track-2" }],
+            playback: { status: "playing", index: 1, positionMs: 48_000 },
+        };
+
+        mocks.joinGroupById
+            .mockResolvedValueOnce(initialSnapshot as any)
+            .mockResolvedValueOnce(refreshedSnapshot as any);
+
+        const firstJoinAck = jest.fn();
+        await eventHandlers["join-group"]({ groupId: "group-1" }, firstJoinAck);
+        expect(firstJoinAck).toHaveBeenCalledWith({ ok: true });
+        expect(socket.emit).toHaveBeenNthCalledWith(
+            1,
+            "group:state",
+            initialSnapshot
+        );
+        expect(mocks.leaveGroup).not.toHaveBeenCalled();
+
+        const secondJoinAck = jest.fn();
+        await eventHandlers["join-group"]({ groupId: "group-1" }, secondJoinAck);
+        expect(secondJoinAck).toHaveBeenCalledWith({ ok: true });
+        expect(mocks.joinGroupById).toHaveBeenNthCalledWith(
+            2,
+            "user-1",
+            "User One",
+            "group-1"
+        );
+        expect(socket.emit).toHaveBeenNthCalledWith(
+            2,
+            "group:state",
+            refreshedSnapshot
+        );
+        expect(mocks.leaveGroup).not.toHaveBeenCalled();
+
+        socketService.shutdownListenTogetherSocket();
     });
 
     it("covers playback and queue success branches plus join-room handoff", async () => {

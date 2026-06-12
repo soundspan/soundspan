@@ -5,7 +5,9 @@ import {
     EllipsisVertical,
     ListEnd,
     ListPlus,
+    Map as MapIcon,
     Plus,
+    Share2,
     User,
     Disc3,
     AudioWaveform,
@@ -13,12 +15,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useAudioControls } from "@/lib/audio-controls-context";
-import { useAudioState, Track } from "@/lib/audio-state-context";
+import type { Track } from "@/lib/audio-state-context";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
+import { ShareLinkModal } from "@/components/ui/ShareLinkModal";
 import { getArtistHref } from "@/utils/artistRoute";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { isRemoteTrack, toAddToPlaylistRef } from "@/lib/trackRef";
+import { canShareTrack } from "@/lib/shareLinks";
 
 interface TrackOverflowMenuProps {
     track: Track;
@@ -29,6 +34,7 @@ interface TrackOverflowMenuProps {
     showGoToArtist?: boolean;
     showGoToAlbum?: boolean;
     showMatchVibe?: boolean;
+    showVibeMap?: boolean;
     showStartRadio?: boolean;
     /** Extra menu items injected before/after the standard items */
     extraItemsBefore?: React.ReactNode;
@@ -37,10 +43,28 @@ interface TrackOverflowMenuProps {
     className?: string;
     triggerClassName?: string;
     menuClassName?: string;
-    /** Listen Together guard */
-    isInListenTogetherGroup?: boolean;
 }
 
+function isPlayableTrack(value: unknown): value is Track {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<Track> & {
+        artist?: { name?: unknown };
+        album?: { title?: unknown };
+    };
+    return (
+        typeof candidate.id === "string" &&
+        typeof candidate.title === "string" &&
+        typeof candidate.duration === "number" &&
+        Boolean(candidate.artist) &&
+        typeof candidate.artist?.name === "string" &&
+        Boolean(candidate.album) &&
+        typeof candidate.album?.title === "string"
+    );
+}
+
+/**
+ * Renders the TrackOverflowMenu component.
+ */
 export function TrackOverflowMenu({
     track,
     showPlayNext = true,
@@ -49,24 +73,25 @@ export function TrackOverflowMenu({
     showGoToArtist = true,
     showGoToAlbum = true,
     showMatchVibe = true,
+    showVibeMap = true,
     showStartRadio = true,
     extraItemsBefore,
     extraItemsAfter,
     className,
     triggerClassName,
     menuClassName,
-    isInListenTogetherGroup = false,
 }: TrackOverflowMenuProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isPlaylistSelectorOpen, setIsPlaylistSelectorOpen] = useState(false);
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const router = useRouter();
     const controls = useAudioControls();
-    const { playbackType } = useAudioState();
+    const isRemote = isRemoteTrack(track);
 
-    // Determine if track is local (for Listen Together guard)
-    const isStreamOnly = track.streamSource === "tidal" || track.streamSource === "youtube";
-    const blockedByListenTogether = isInListenTogetherGroup && isStreamOnly;
+    const effectiveShowMatchVibe = showMatchVibe && !isRemote;
+    const effectiveShowVibeMap = showVibeMap && !isRemote;
+    const showShare = canShareTrack(track);
 
     // Artist href
     const artistHref = track.artist
@@ -111,29 +136,19 @@ export function TrackOverflowMenu({
     const handlePlayNext = useCallback(
         (e: React.MouseEvent) => {
             e.stopPropagation();
-            if (blockedByListenTogether) {
-                toast.error("Listen Together only supports local library tracks");
-                closeMenu();
-                return;
-            }
             controls.playNext(track);
             closeMenu();
         },
-        [track, controls, blockedByListenTogether, closeMenu]
+        [track, controls, closeMenu]
     );
 
     const handleAddToQueue = useCallback(
         (e: React.MouseEvent) => {
             e.stopPropagation();
-            if (blockedByListenTogether) {
-                toast.error("Listen Together only supports local library tracks");
-                closeMenu();
-                return;
-            }
             controls.addToQueue(track);
             closeMenu();
         },
-        [track, controls, blockedByListenTogether, closeMenu]
+        [track, controls, closeMenu]
     );
 
     const handleAddToPlaylist = useCallback(
@@ -145,9 +160,18 @@ export function TrackOverflowMenu({
         [closeMenu]
     );
 
+    const handleShare = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            closeMenu();
+            setIsShareModalOpen(true);
+        },
+        [closeMenu]
+    );
+
     const handleSelectPlaylist = useCallback(
         async (playlistId: string) => {
-            await api.addTrackToPlaylist(playlistId, track.id);
+            await api.addTrackToPlaylist(playlistId, toAddToPlaylistRef(track));
             toast.success(`Added "${track.title}" to playlist`);
         },
         [track]
@@ -192,17 +216,41 @@ export function TrackOverflowMenu({
         [track, controls, closeMenu]
     );
 
+    const handleShowVibeMap = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            closeMenu();
+            router.push(`/vibe?trackId=${encodeURIComponent(track.id)}`);
+        },
+        [track.id, router, closeMenu]
+    );
+
     const handleStartRadio = useCallback(
         async (e: React.MouseEvent) => {
             e.stopPropagation();
             closeMenu();
-            const artistId = track.artist?.id;
-            if (!artistId) return;
             try {
-                const response = await api.getRadioTracks("artist", artistId);
+                let response:
+                    | { tracks: unknown[] }
+                    | null = null;
+
+                if (isRemote && track.artist?.name) {
+                    response = await api.getRadioTracks(
+                        "artist-name",
+                        track.artist.name
+                    );
+                } else if (track.artist?.id) {
+                    response = await api.getRadioTracks("artist", track.artist.id);
+                }
+
+                if (!response) {
+                    toast.error("Artist information is required to start radio");
+                    return;
+                }
+
                 if (response.tracks && response.tracks.length > 0) {
                     const filtered = response.tracks.filter(
-                        (t: { id: string }) => t.id !== track.id
+                        (t): t is Track => isPlayableTrack(t) && t.id !== track.id
                     );
                     controls.playTracks([track, ...filtered], 0);
                     toast.success(
@@ -215,7 +263,7 @@ export function TrackOverflowMenu({
                 toast.error("Failed to start artist radio");
             }
         },
-        [track, controls, closeMenu]
+        [track, controls, closeMenu, isRemote]
     );
 
     return (
@@ -223,7 +271,6 @@ export function TrackOverflowMenu({
             <div
                 ref={menuRef}
                 className={cn("relative flex items-center justify-center", className)}
-                onClick={(e) => e.stopPropagation()}
             >
                 <button
                     type="button"
@@ -248,26 +295,23 @@ export function TrackOverflowMenu({
                         className={cn("absolute right-0 top-full z-30 mt-1 min-w-[180px] rounded-md border border-white/10 bg-[#111111] p-1 shadow-xl", menuClassName)}
                         role="menu"
                         onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
                     >
                         {extraItemsBefore}
 
                         {showPlayNext && (
                             <MenuButton
                                 onClick={handlePlayNext}
-                                disabled={blockedByListenTogether}
                                 icon={<ListEnd className="h-4 w-4" />}
                                 label="Play next"
-                                disabledTitle="Listen Together requires local tracks"
                             />
                         )}
 
                         {showAddToQueue && (
                             <MenuButton
                                 onClick={handleAddToQueue}
-                                disabled={blockedByListenTogether}
                                 icon={<ListPlus className="h-4 w-4" />}
                                 label="Add to queue"
-                                disabledTitle="Listen Together requires local tracks"
                             />
                         )}
 
@@ -276,6 +320,14 @@ export function TrackOverflowMenu({
                                 onClick={handleAddToPlaylist}
                                 icon={<Plus className="h-4 w-4" />}
                                 label="Add to playlist"
+                            />
+                        )}
+
+                        {showShare && (
+                            <MenuButton
+                                onClick={handleShare}
+                                icon={<Share2 className="h-4 w-4" />}
+                                label="Share"
                             />
                         )}
 
@@ -295,7 +347,7 @@ export function TrackOverflowMenu({
                             />
                         )}
 
-                        {showMatchVibe && track.id && (
+                        {effectiveShowMatchVibe && track.id && (
                             <MenuButton
                                 onClick={handleMatchVibe}
                                 icon={<AudioWaveform className="h-4 w-4" />}
@@ -303,13 +355,23 @@ export function TrackOverflowMenu({
                             />
                         )}
 
-                        {showStartRadio && track.artist?.id && (
+                        {effectiveShowVibeMap && track.id && (
+                            <MenuButton
+                                onClick={handleShowVibeMap}
+                                icon={<MapIcon className="h-4 w-4" />}
+                                label="Show on Vibe Map"
+                            />
+                        )}
+
+                        {showStartRadio &&
+                            ((isRemote && track.artist?.name) ||
+                                (!isRemote && track.artist?.id)) && (
                             <MenuButton
                                 onClick={handleStartRadio}
                                 icon={<Radio className="h-4 w-4" />}
                                 label="Start Radio"
                             />
-                        )}
+                            )}
 
                         {extraItemsAfter}
                     </div>
@@ -320,6 +382,13 @@ export function TrackOverflowMenu({
                 isOpen={isPlaylistSelectorOpen}
                 onClose={() => setIsPlaylistSelectorOpen(false)}
                 onSelectPlaylist={handleSelectPlaylist}
+            />
+            <ShareLinkModal
+                isOpen={isShareModalOpen}
+                onClose={() => setIsShareModalOpen(false)}
+                resourceType="track"
+                resourceId={track.id}
+                resourceName={track.title}
             />
         </>
     );

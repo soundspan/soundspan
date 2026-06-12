@@ -10,6 +10,9 @@ import { mkdir } from "fs/promises";
 import PQueue from "p-queue";
 import { getSystemSettings } from "../utils/systemSettings";
 import { sessionLog } from "../utils/playlistLogger";
+import { logger } from "../utils/logger";
+
+const log = logger.child("Soulseek");
 
 // slsk-client types
 interface SlskClient {
@@ -137,6 +140,7 @@ class SoulseekService {
             throw new Error("Soulseek credentials not configured");
         }
 
+        log.info(`Connecting to Soulseek as ${settings.soulseekUsername}`);
         sessionLog("SOULSEEK", `Connecting as ${settings.soulseekUsername}...`);
 
         return new Promise((resolve, reject) => {
@@ -169,6 +173,7 @@ class SoulseekService {
                     }
                     this.connectedAt = new Date();
                     this.consecutiveEmptySearches = 0;
+                    log.info("Connected to Soulseek network");
                     sessionLog("SOULSEEK", "Connected to Soulseek network");
                     resolve();
                 }

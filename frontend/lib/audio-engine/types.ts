@@ -2,7 +2,8 @@ import type { AudioEngineSourceType } from "@soundspan/media-metadata-contract";
 
 export type StreamingEngineMode =
   | "videojs"
-  | "howler";
+  | "howler"
+  | "tauri-native";
 
 export const DEFAULT_STREAMING_ENGINE_MODE: StreamingEngineMode = "howler";
 
@@ -150,6 +151,8 @@ export interface AudioEngine {
   ): AudioEngineRepresentationFailoverResult | null;
   clearRepresentationQuarantine?(): void;
   getActualCurrentTime?(): number;
+  hasTrackEnded?(): boolean;
+  notifyTrackEnded?(): void;
   isCurrentlySeeking?(): boolean;
   getSeekTarget?(): number | null;
 }

@@ -30,6 +30,7 @@ import listeningStateRoutes from "./routes/listeningState";
 import playbackStateRoutes from "./routes/playbackState";
 import offlineRoutes from "./routes/offline";
 import playlistsRoutes from "./routes/playlists";
+import shareLinkRoutes from "./routes/shareLinks";
 import searchRoutes from "./routes/search";
 import recommendationsRoutes from "./routes/recommendations";
 import downloadsRoutes from "./routes/downloads";
@@ -48,12 +49,15 @@ import spotifyRoutes from "./routes/spotify";
 import notificationsRoutes from "./routes/notifications";
 import browseRoutes from "./routes/browse";
 import analysisRoutes from "./routes/analysis";
+import adminRoutes from "./routes/admin";
 import releasesRoutes from "./routes/releases";
 import vibeRoutes from "./routes/vibe";
 import systemRoutes from "./routes/system";
 import ytMusicRoutes from "./routes/youtubeMusic";
 import youtubeRoutes from "./routes/youtube";
 import tidalStreamingRoutes from "./routes/tidalStreaming";
+import trackMappingsRoutes from "./routes/trackMappings";
+import playlistImportRoutes from "./routes/playlistImport";
 import streamingRoutes from "./routes/streaming";
 import lyricsRoutes from "./routes/lyrics";
 import listenTogetherRoutes from "./routes/listenTogether";
@@ -240,6 +244,7 @@ app.use("/api/listening-state", apiLimiter, listeningStateRoutes);
 app.use("/api/playback-state", playbackStateRoutes); // No rate limit - syncs frequently
 app.use("/api/offline", apiLimiter, offlineRoutes);
 app.use("/api/playlists", apiLimiter, playlistsRoutes);
+app.use("/api/share-links", apiLimiter, shareLinkRoutes);
 app.use("/api/search", apiLimiter, searchRoutes);
 app.use("/api/recommendations", apiLimiter, recommendationsRoutes);
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
@@ -257,12 +262,15 @@ app.use("/api/homepage", apiLimiter, homepageRoutes);
 app.use("/api/spotify", apiLimiter, spotifyRoutes);
 app.use("/api/browse", apiLimiter, browseRoutes);
 app.use("/api/analysis", apiLimiter, analysisRoutes);
+app.use("/api/admin", apiLimiter, adminRoutes);
 app.use("/api/releases", apiLimiter, releasesRoutes);
 app.use("/api/vibe", apiLimiter, vibeRoutes);
 app.use("/api/system", apiLimiter, systemRoutes);
 app.use("/api/ytmusic", apiLimiter, ytMusicRoutes);
 app.use("/api/youtube", apiLimiter, youtubeRoutes);
 app.use("/api/tidal-streaming", apiLimiter, tidalStreamingRoutes);
+app.use("/api/track-mappings", apiLimiter, trackMappingsRoutes);
+app.use("/api/import", apiLimiter, playlistImportRoutes);
 app.use("/api/streaming", apiLimiter, streamingRoutes);
 app.use("/api/lyrics", lyricsLimiter, lyricsRoutes);
 app.use("/api/listen-together", apiLimiter, listenTogetherRoutes);
@@ -272,6 +280,8 @@ function buildHealthPayload() {
     return {
         status: "ok",
         role: backendProcessRole,
+        version: process.env.npm_package_version || "unknown",
+        uptimeSeconds: Math.floor(process.uptime()),
         startupComplete: isStartupComplete,
         draining: getRuntimeDrainState(),
         dependencies: dependencyReadiness.getSnapshot(),

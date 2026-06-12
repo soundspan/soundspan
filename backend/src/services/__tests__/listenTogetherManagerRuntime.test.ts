@@ -1,6 +1,7 @@
 import {
     GroupError,
     groupManager,
+    MAX_QUEUE_SIZE,
     type GroupSnapshot,
     type ManagerCallbacks,
     type SyncQueueItem,
@@ -289,6 +290,40 @@ describe("listenTogetherManager runtime behavior", () => {
         groupManager.setTrack("g-ready", "host", 0, true);
         await jest.advanceTimersByTimeAsync(8_000);
         expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
+    });
+
+    it("auto-readies unavailable members during waiting gates", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+        groupManager.create("g-unavailable-ready", {
+            name: "Unavailable Ready",
+            joinCode: "UNRDY",
+            groupType: "host-follower",
+            visibility: "private",
+            hostUserId: "host",
+            hostUsername: "Host",
+            queue: [track("1"), track("2")],
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-unavailable-ready", "guest", "Guest");
+        groupManager.addSocket("g-unavailable-ready", "host", "host-socket");
+        groupManager.addSocket("g-unavailable-ready", "guest", "guest-socket");
+
+        const waiting = groupManager.setTrack(
+            "g-unavailable-ready",
+            "host",
+            1,
+            true
+        );
+        expect(waiting.waiting).toBe(true);
+
+        expect(groupManager.reportReady("g-unavailable-ready", "host")).toBe(false);
+        groupManager.setUnavailableIndices("g-unavailable-ready", "guest", [1]);
+
+        expect(callbacks.onPlayAt).toHaveBeenCalledTimes(1);
+        expect(groupManager.snapshotById("g-unavailable-ready")?.syncState).toBe(
+            "playing"
+        );
     });
 
     it("treats play/pause/seek as no-ops while waiting and keeps track-change conflicts", () => {
@@ -1071,5 +1106,156 @@ describe("listenTogetherManager runtime behavior", () => {
         expect(groupManager.removeMember("g-report-ready", "unknown-user")).toEqual({
             ended: false,
         });
+    });
+
+    it("truncates add and insert-next operations to MAX_QUEUE_SIZE", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        const initialTracks = Array.from({ length: MAX_QUEUE_SIZE - 1 }, (_, i) =>
+            track(`init-${i}`)
+        );
+        groupManager.create("g-cap", {
+            name: "Cap Test",
+            joinCode: "CAP1",
+            groupType: "collaborative",
+            visibility: "public",
+            hostUserId: "u1",
+            hostUsername: "User 1",
+            queue: initialTracks,
+            currentIndex: 0,
+            currentTimeMs: 0,
+            isPlaying: false,
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-cap", "u1", "User 1");
+
+        const partialAdd = groupManager.modifyQueue("g-cap", "u1", {
+            action: "add",
+            items: [track("fill"), track("overflow")],
+        });
+        expect(partialAdd.queue).toHaveLength(MAX_QUEUE_SIZE);
+        expect(partialAdd.queue.at(-1)?.id).toBe("fill");
+        expect(partialAdd.queue.some((item) => item.id === "overflow")).toBe(false);
+
+        const noOpAdd = groupManager.modifyQueue("g-cap", "u1", {
+            action: "add",
+            items: [track("overflow-2")],
+        });
+        expect(noOpAdd.queue).toHaveLength(MAX_QUEUE_SIZE);
+        expect(noOpAdd.stateVersion).toBe(partialAdd.stateVersion);
+
+        const insertTracks = Array.from({ length: MAX_QUEUE_SIZE - 1 }, (_, i) =>
+            track(`insert-${i}`)
+        );
+        groupManager.create("g-cap-insert", {
+            name: "Cap Insert Test",
+            joinCode: "CAP2",
+            groupType: "collaborative",
+            visibility: "public",
+            hostUserId: "u2",
+            hostUsername: "User 2",
+            queue: insertTracks,
+            currentIndex: 0,
+            currentTimeMs: 0,
+            isPlaying: false,
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-cap-insert", "u2", "User 2");
+
+        const partialInsert = groupManager.modifyQueue("g-cap-insert", "u2", {
+            action: "insert-next",
+            items: [track("inserted"), track("dropped")],
+        });
+        expect(partialInsert.queue).toHaveLength(MAX_QUEUE_SIZE);
+        expect(partialInsert.queue[1]?.id).toBe("inserted");
+        expect(partialInsert.queue.some((item) => item.id === "dropped")).toBe(false);
+    });
+
+    it("truncates oversized queue on hydrate", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        const oversizedQueue = Array.from({ length: MAX_QUEUE_SIZE + 50 }, (_, i) =>
+            track(`hydrate-${i}`)
+        );
+        const group = groupManager.hydrate("g-hydrate-cap", {
+            name: "Hydrate Cap",
+            joinCode: "HYD1",
+            groupType: "host-follower",
+            visibility: "public",
+            hostUserId: "h1",
+            queue: oversizedQueue,
+            currentIndex: 0,
+            isPlaying: false,
+            currentTimeMs: 0,
+            stateVersion: 1,
+            createdAt: new Date(),
+            members: [{ userId: "h1", username: "Host", isHost: true, joinedAt: new Date() }],
+        });
+
+        expect(group.playback.queue).toHaveLength(MAX_QUEUE_SIZE);
+    });
+
+    it("truncates oversized queue on applyExternalSnapshot", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        const oversizedQueue = Array.from({ length: MAX_QUEUE_SIZE + 100 }, (_, i) =>
+            track(`ext-${i}`)
+        );
+        groupManager.applyExternalSnapshot({
+            id: "g-ext-cap",
+            name: "External Cap",
+            joinCode: "EXT1",
+            groupType: "host-follower",
+            visibility: "public",
+            isActive: true,
+            hostUserId: "h1",
+            syncState: "paused",
+            playback: {
+                queue: oversizedQueue,
+                currentIndex: 0,
+                isPlaying: false,
+                positionMs: 0,
+                serverTime: Date.now(),
+                stateVersion: 1,
+                trackId: oversizedQueue[0].id,
+            },
+            members: [
+                { userId: "h1", username: "Host", isHost: true, joinedAt: new Date().toISOString(), isConnected: false },
+            ],
+        });
+
+        const snapshot = groupManager.snapshotById("g-ext-cap");
+        expect(snapshot).toBeDefined();
+        expect(snapshot!.playback.queue).toHaveLength(MAX_QUEUE_SIZE);
+    });
+
+    it("allows add when items fit within remaining capacity", () => {
+        const callbacks = createCallbacks();
+        groupManager.setCallbacks(callbacks);
+
+        groupManager.create("g-cap2", {
+            name: "Cap Test 2",
+            joinCode: "CAP2",
+            groupType: "collaborative",
+            visibility: "public",
+            hostUserId: "u1",
+            hostUsername: "User 1",
+            queue: [track("1")],
+            currentIndex: 0,
+            currentTimeMs: 0,
+            isPlaying: false,
+            createdAt: new Date(),
+        });
+        groupManager.addMember("g-cap2", "u1", "User 1");
+
+        const batch = Array.from({ length: 10 }, (_, i) => track(`batch-${i}`));
+        const delta = groupManager.modifyQueue("g-cap2", "u1", {
+            action: "add",
+            items: batch,
+        });
+        expect(delta.queue).toHaveLength(11);
     });
 });

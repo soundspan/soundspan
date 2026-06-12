@@ -11,6 +11,9 @@ interface SimilarAlbumsProps {
   onNavigate: (albumId: string) => void;
 }
 
+/**
+ * Renders the SimilarAlbums component.
+ */
 export function SimilarAlbums({ similarAlbums, colors, onNavigate }: SimilarAlbumsProps) {
   return (
     <section>

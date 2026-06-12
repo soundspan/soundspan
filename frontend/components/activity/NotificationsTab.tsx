@@ -30,6 +30,9 @@ interface NotificationsTabProps {
     queryEnabled?: boolean;
 }
 
+/**
+ * Renders the NotificationsTab component.
+ */
 export function NotificationsTab({
     notifications: notificationsProp,
     loading: loadingProp,

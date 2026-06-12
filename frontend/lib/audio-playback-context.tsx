@@ -98,6 +98,9 @@ function readStorage(key: MigratingStorageKey): string | null {
 // ActivePlaybackSelection and PlaybackPersistenceSnapshot are imported from
 // @/lib/audio-playback-persistence-guards
 
+/**
+ * Renders the AudioPlaybackProvider component.
+ */
 export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const [isPlaying, setIsPlaying] = useState(() => {
         if (typeof window === "undefined") return false;
@@ -464,9 +467,16 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         trackPersistenceEpoch,
     ]);
 
+    // Ref for reading audio state inside the stable savePlaybackProgressToServer callback.
+    const audioStateRef = useRef(state);
+    useEffect(() => { audioStateRef.current = state; }, [state]);
+    const progressSaveInFlightRef = useRef(false);
+
     const savePlaybackProgressToServer = useCallback(
         async (force = false) => {
             if (!isHydrated || !state.playbackType) return;
+            if (progressSaveInFlightRef.current) return;
+
             const invocationSnapshot: PlaybackPersistenceSnapshot = {
                 playbackType: state.playbackType,
                 trackId: state.currentTrack?.id ?? null,
@@ -494,12 +504,15 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            const limitedQueue = state.queue?.slice(0, 100) || [];
+            // Read queue/currentIndex/isShuffle from ref for stable callback identity
+            const currentAudioState = audioStateRef.current;
+            const limitedQueue = currentAudioState.queue?.slice(0, 100) || [];
             const adjustedIndex = Math.min(
-                state.currentIndex,
+                currentAudioState.currentIndex,
                 limitedQueue.length > 0 ? limitedQueue.length - 1 : 0
             );
 
+            progressSaveInFlightRef.current = true;
             try {
                 if (!isPersistenceSnapshotActive(invocationSnapshot)) return;
                 await api.savePlaybackState({
@@ -509,7 +522,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                     podcastId: invocationSnapshot.podcastId ?? undefined,
                     queue: limitedQueue,
                     currentIndex: adjustedIndex,
-                    isShuffle: state.isShuffle,
+                    isShuffle: currentAudioState.isShuffle,
                     isPlaying,
                     currentTime: clampNonNegativePlaybackTime(
                         currentTimeRef.current
@@ -526,6 +539,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                 if (err instanceof Error && err.message !== "Not authenticated") {
                     sharedFrontendLogger.warn("[AudioPlayback] Failed to save playback progress:", err);
                 }
+            } finally {
+                progressSaveInFlightRef.current = false;
             }
         },
         [
@@ -534,9 +549,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             state.currentTrack?.id,
             state.currentAudiobook?.id,
             state.currentPodcast?.id,
-            state.queue,
-            state.currentIndex,
-            state.isShuffle,
             isPlaying,
             trackPersistenceEpoch,
             isPersistenceSnapshotActive,
@@ -626,6 +638,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useAudioPlayback.
+ */
 export function useAudioPlayback() {
     const context = useContext(AudioPlaybackContext);
     if (!context) {

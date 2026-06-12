@@ -12,6 +12,9 @@ import type {
     CanonicalMediaProviderIdentity,
     CanonicalMediaSource,
 } from "@soundspan/media-metadata-contract";
+import { logger } from "../utils/logger";
+
+const log = logger.child("ListenTogetherManager");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +33,11 @@ export interface SyncQueueItem {
     youtubeVideoId?: string;
     /** Audio container hint for "youtube-direct" streams (webm for opus, mp4 for AAC). */
     youtubeAudioFormat?: "mp4" | "webm";
+    localTrackId?: string;
+    trackTidalId?: string;
+    trackYtMusicId?: string;
+    trackMappingId?: string;
+    originSource?: "local" | "tidal" | "youtube";
 }
 
 export interface GroupMember {
@@ -39,6 +47,7 @@ export interface GroupMember {
     joinedAt: Date;
     socketIds: Set<string>;
     isReady: boolean;
+    unavailableIndices?: Set<number>;
     lastSeen: number; // Date.now()
 }
 
@@ -134,6 +143,9 @@ export type QueueAction =
 // Errors
 // ---------------------------------------------------------------------------
 
+/**
+ * Represents the GroupError class.
+ */
 export class GroupError extends Error {
     constructor(
         public readonly code:
@@ -160,6 +172,14 @@ function clamp(value: number, min: number, max: number): number {
 function clampIndex(index: number, length: number): number {
     if (length <= 0) return 0;
     return clamp(index, 0, length - 1);
+}
+
+function truncateQueueItemsToAvailableCapacity(
+    queueLength: number,
+    items: SyncQueueItem[]
+): SyncQueueItem[] {
+    const remainingCapacity = Math.max(0, MAX_QUEUE_SIZE - queueLength);
+    return remainingCapacity > 0 ? items.slice(0, remainingCapacity) : [];
 }
 
 /** Compute the "live" position in ms, accounting for elapsed time. */
@@ -194,6 +214,9 @@ function shouldApplyIncomingPlayback(
 
     return incomingServerTime >= existing.playback.lastPositionUpdate;
 }
+
+/** Hard cap on queue size to keep Socket.IO snapshots within 1 MB. */
+export const MAX_QUEUE_SIZE = 500;
 
 /** Max time to wait for all members to report ready (ms). */
 const READY_GATE_TIMEOUT_MS = 8_000;
@@ -250,7 +273,10 @@ class GroupManager {
             members: Array<{ userId: string; username: string; isHost: boolean; joinedAt: Date }>;
         },
     ): GroupState {
-        const safeIndex = clampIndex(opts.currentIndex, opts.queue.length);
+        const queue = opts.queue.length > MAX_QUEUE_SIZE
+            ? opts.queue.slice(0, MAX_QUEUE_SIZE)
+            : opts.queue;
+        const safeIndex = clampIndex(opts.currentIndex, queue.length);
         const now = Date.now();
 
         const members = new Map<string, GroupMember>();
@@ -262,6 +288,7 @@ class GroupManager {
                 joinedAt: m.joinedAt,
                 socketIds: new Set(),
                 isReady: false,
+                unavailableIndices: new Set(),
                 lastSeen: now,
             });
         }
@@ -273,9 +300,9 @@ class GroupManager {
             groupType: opts.groupType,
             visibility: opts.visibility,
             hostUserId: opts.hostUserId,
-            syncState: opts.isPlaying ? "playing" : opts.queue.length > 0 ? "paused" : "idle",
+            syncState: opts.isPlaying ? "playing" : queue.length > 0 ? "paused" : "idle",
             playback: {
-                queue: opts.queue,
+                queue,
                 currentIndex: safeIndex,
                 isPlaying: false, // Always start paused after hydration (no one is connected yet)
                 positionMs: opts.currentTimeMs,
@@ -292,6 +319,7 @@ class GroupManager {
         };
 
         this.groups.set(id, group);
+        log.debug(`Hydrated group ${id} with ${opts.members.length} members, queue=${queue.length}`);
         return group;
     }
 
@@ -327,6 +355,7 @@ class GroupManager {
             joinedAt: opts.createdAt,
             socketIds: new Set(),
             isReady: false,
+            unavailableIndices: new Set(),
             lastSeen: now,
         });
 
@@ -361,6 +390,7 @@ class GroupManager {
         };
 
         this.groups.set(id, group);
+        log.info(`Created group ${id} "${opts.name}" hosted by ${opts.hostUsername}`);
         return group;
     }
 
@@ -377,6 +407,7 @@ class GroupManager {
         const group = this.groups.get(groupId);
         if (group) this.clearReadyGateTimer(group);
         this.groups.delete(groupId);
+        log.debug(`Removed group ${groupId} from memory`);
     }
 
     /** Get all in-memory group IDs (for persist loop). */
@@ -474,12 +505,14 @@ class GroupManager {
             joinedAt: new Date(),
             socketIds: new Set(),
             isReady: false,
+            unavailableIndices: new Set(),
             lastSeen: Date.now(),
         });
 
         group.lastActivity = Date.now();
         group.dirty = true;
 
+        log.info(`Member ${username} (${userId}) joined group ${groupId}`);
         this.callbacks?.onMemberJoined(groupId, { userId, username });
         this.broadcastState(group);
         return this.snapshot(group);
@@ -500,7 +533,7 @@ class GroupManager {
         group.readyUserIds.delete(userId);
 
         if (group.members.size === 0) {
-            // Auto-disband
+            log.info(`Group ${groupId} auto-disbanded: all members left`);
             this.endGroupInternal(group, "All members left");
             return { ended: true };
         }
@@ -526,6 +559,7 @@ class GroupManager {
                 group.hostUserId = nextHost.userId;
                 newHostUserId = nextHost.userId;
                 newHostUsername = nextHost.username;
+                log.info(`Host transferred in group ${groupId}: ${username} -> ${nextHost.username}`);
             }
         }
 
@@ -698,6 +732,24 @@ class GroupManager {
         return this.checkReadyGate(group);
     }
 
+    setUnavailableIndices(
+        groupId: string,
+        userId: string,
+        unavailableIndices: Iterable<number>
+    ): void {
+        const group = this.groups.get(groupId);
+        if (!group) return;
+        const member = group.members.get(userId);
+        if (!member) return;
+
+        member.unavailableIndices = new Set(unavailableIndices);
+        member.lastSeen = Date.now();
+
+        if (group.syncState === "waiting") {
+            this.checkReadyGate(group);
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Queue operations
     // -----------------------------------------------------------------------
@@ -707,25 +759,42 @@ class GroupManager {
         this.requireQueueEdit(group, userId);
 
         const pb = group.playback;
+        let queueChanged = false;
 
         switch (action.action) {
             case "add": {
-                pb.queue.push(...action.items);
+                const acceptedItems = truncateQueueItemsToAvailableCapacity(
+                    pb.queue.length,
+                    action.items
+                );
+                if (acceptedItems.length === 0) {
+                    return this.queueDelta(group);
+                }
+                pb.queue.push(...acceptedItems);
                 // If queue was empty and we just added tracks, set up the first track
-                if (pb.queue.length === action.items.length) {
+                if (pb.queue.length === acceptedItems.length) {
                     pb.currentIndex = 0;
                     group.syncState = "paused";
                 }
+                queueChanged = true;
                 break;
             }
             case "insert-next": {
+                const acceptedItems = truncateQueueItemsToAvailableCapacity(
+                    pb.queue.length,
+                    action.items
+                );
+                if (acceptedItems.length === 0) {
+                    return this.queueDelta(group);
+                }
                 const insertAt = pb.currentIndex + 1;
-                pb.queue.splice(insertAt, 0, ...action.items);
+                pb.queue.splice(insertAt, 0, ...acceptedItems);
                 // If queue was empty before, set up the first track
-                if (pb.queue.length === action.items.length) {
+                if (pb.queue.length === acceptedItems.length) {
                     pb.currentIndex = 0;
                     group.syncState = "paused";
                 }
+                queueChanged = true;
                 break;
             }
             case "remove": {
@@ -749,6 +818,7 @@ class GroupManager {
                     pb.positionMs = 0;
                     pb.lastPositionUpdate = Date.now();
                 }
+                queueChanged = true;
                 break;
             }
             case "reorder": {
@@ -761,21 +831,20 @@ class GroupManager {
                 pb.positionMs = 0;
                 pb.lastPositionUpdate = Date.now();
                 group.syncState = "idle";
+                queueChanged = true;
                 break;
             }
+        }
+
+        if (!queueChanged) {
+            return this.queueDelta(group);
         }
 
         pb.stateVersion++;
         group.lastActivity = Date.now();
         group.dirty = true;
 
-        const delta: QueueDelta = {
-            queue: pb.queue,
-            currentIndex: pb.currentIndex,
-            trackId: currentTrackId(pb),
-            stateVersion: pb.stateVersion,
-        };
-
+        const delta = this.queueDelta(group);
         this.callbacks?.onQueueDelta(groupId, delta);
         return delta;
     }
@@ -860,9 +929,12 @@ class GroupManager {
             this.clearReadyGateTimer(existing);
         }
 
-        const incomingQueue = Array.isArray(snapshot.playback?.queue)
+        const rawQueue = Array.isArray(snapshot.playback?.queue)
             ? snapshot.playback.queue
             : [];
+        const incomingQueue = rawQueue.length > MAX_QUEUE_SIZE
+            ? rawQueue.slice(0, MAX_QUEUE_SIZE)
+            : rawQueue;
         const incomingIndex = clampIndex(
             snapshot.playback?.currentIndex ?? 0,
             incomingQueue.length
@@ -893,6 +965,7 @@ class GroupManager {
                 // Preserve local socket presence for users connected to this pod.
                 socketIds: existingMember?.socketIds ?? new Set<string>(),
                 isReady: false,
+                unavailableIndices: new Set(),
                 lastSeen: now,
             });
         }
@@ -993,6 +1066,16 @@ class GroupManager {
         };
     }
 
+    private queueDelta(group: GroupState): QueueDelta {
+        const pb = group.playback;
+        return {
+            queue: pb.queue,
+            currentIndex: pb.currentIndex,
+            trackId: currentTrackId(pb),
+            stateVersion: pb.stateVersion,
+        };
+    }
+
     private broadcastState(group: GroupState): void {
         this.callbacks?.onGroupState(group.id, this.snapshot(group));
     }
@@ -1008,10 +1091,17 @@ class GroupManager {
 
         // Check if all connected members are ready
         for (const uid of connectedUserIds) {
+            const member = group.members.get(uid);
+            const currentIndex = group.playback.currentIndex;
+            if (member?.unavailableIndices?.has(currentIndex)) {
+                group.readyUserIds.add(uid);
+                continue;
+            }
             if (!group.readyUserIds.has(uid)) return false;
         }
 
         // All ready — start playback!
+        log.debug(`Ready gate passed for group ${group.id}: all ${connectedUserIds.size} members ready`);
         this.forcePlay(group);
         return true;
     }
@@ -1112,6 +1202,7 @@ class GroupManager {
         group.playback.isPlaying = false;
         group.syncState = "idle";
 
+        log.info(`Group ${group.id} ended: ${reason}`);
         this.callbacks?.onGroupEnded(group.id, reason);
         // Don't remove from memory yet — the service layer handles DB cleanup
         // and then calls manager.remove()
@@ -1135,6 +1226,9 @@ class GroupManager {
             }
         }
 
+        if (stale.length > 0) {
+            log.debug(`Cleaning up ${stale.length} stale members from group ${groupId}`);
+        }
         for (const userId of stale) {
             this.removeMember(groupId, userId);
         }

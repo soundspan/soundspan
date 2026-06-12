@@ -30,6 +30,9 @@ interface UnavailableAlbumsProps {
     onTogglePreview: (albumId: string, previewUrl: string) => void;
 }
 
+/**
+ * Renders the UnavailableAlbums component.
+ */
 export function UnavailableAlbums({
     unavailable,
     currentPreview,

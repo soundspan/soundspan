@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HybridRuntimeAudioEngine } from "../../lib/audio-engine/index.ts";
+import { HybridRuntimeAudioEngine } from "../../lib/audio-engine/index";
 import type {
     AudioEngine,
     AudioEngineEventHandler,
@@ -8,7 +8,7 @@ import type {
     AudioEngineLoadOptions,
     AudioEngineRepresentationFailoverResult,
     AudioEngineSource,
-} from "../../lib/audio-engine/types.ts";
+} from "../../lib/audio-engine/types";
 
 class FakeAudioEngine implements AudioEngine {
     public readonly loadCalls: Array<{

@@ -35,6 +35,9 @@ interface PlaybackQualityBadgeProps {
     showTitle?: boolean;
 }
 
+/**
+ * Renders the PlaybackQualityBadge component.
+ */
 export function PlaybackQualityBadge({
     badge,
     size,

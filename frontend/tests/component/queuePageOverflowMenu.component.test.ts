@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
     installTrackOverflowHarness,
     trackOverflowIcon,
-} from "../trackOverflowHarness.ts";
+} from "../trackOverflowHarness";
 
 /**
  * Component tests for Queue page overflow menu adoption.
@@ -122,6 +122,7 @@ mock.module("@/lib/listen-together-context", {
             isInGroup: state.isInGroup,
             isHost: state.isHost,
             syncSetTrack: () => undefined,
+            trackAvailability: new Map(),
         }),
     },
 });
@@ -176,6 +177,12 @@ mock.module("@/components/layout/PageHeader", {
     },
 });
 
+mock.module("@/components/player/TrackPreferenceButtons", {
+    namedExports: {
+        TrackPreferenceButtons: () => null,
+    },
+});
+
 beforeEach(() => {
     state.isAuthenticated = true;
     state.currentTrack = {
@@ -215,7 +222,7 @@ beforeEach(() => {
 });
 
 test("Queue page Next Up tracks render TrackOverflowMenu trigger", async () => {
-    const mod = await import("../../app/queue/page.tsx");
+    const mod = await import("../../app/queue/page");
     const QueuePage = mod.default;
 
     const html = renderToStaticMarkup(React.createElement(QueuePage));
@@ -227,7 +234,7 @@ test("Queue page Next Up tracks render TrackOverflowMenu trigger", async () => {
 });
 
 test("Queue page replaces standalone Remove button with overflow menu", async () => {
-    const mod = await import("../../app/queue/page.tsx");
+    const mod = await import("../../app/queue/page");
     const QueuePage = mod.default;
 
     const html = renderToStaticMarkup(React.createElement(QueuePage));
@@ -240,7 +247,7 @@ test("Queue page replaces standalone Remove button with overflow menu", async ()
 });
 
 test("Queue page keeps Move Up/Down and Play buttons alongside overflow menu", async () => {
-    const mod = await import("../../app/queue/page.tsx");
+    const mod = await import("../../app/queue/page");
     const QueuePage = mod.default;
 
     const html = renderToStaticMarkup(React.createElement(QueuePage));
@@ -256,7 +263,7 @@ test("Queue page keeps Move Up/Down and Play buttons alongside overflow menu", a
 // ─── 5.1 Save Queue as Playlist ───────────────────────────────────────
 
 test("Queue page renders Save as Playlist button when queue has tracks", async () => {
-    const mod = await import("../../app/queue/page.tsx");
+    const mod = await import("../../app/queue/page");
     const QueuePage = mod.default;
 
     const html = renderToStaticMarkup(React.createElement(QueuePage));
@@ -269,7 +276,7 @@ test("Queue page does not render Save as Playlist when queue is empty", async ()
     state.queue = [];
     state.currentTrack = null;
 
-    const mod = await import("../../app/queue/page.tsx");
+    const mod = await import("../../app/queue/page");
     const QueuePage = mod.default;
 
     const html = renderToStaticMarkup(React.createElement(QueuePage));

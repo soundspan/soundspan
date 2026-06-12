@@ -51,6 +51,9 @@ async function getTidalAvailable(): Promise<boolean> {
 // ── Global match cache for artist top tracks ──────────────────────
 const _artistMatchCache = new Map<string, Record<string, TidalMatch>>();
 
+/**
+ * Executes useTidalTopTracks.
+ */
 export function useTidalTopTracks(artist: Artist | null | undefined) {
     const [matches, setMatches] = useState<Record<string, TidalMatch>>({});
     const [loading, setLoading] = useState(false);
@@ -64,6 +67,7 @@ export function useTidalTopTracks(artist: Artist | null | undefined) {
 
     // Discovery artists only have mbid, not id — use either as a stable key.
     const artistKey = artist?.id || artist?.mbid || null;
+    const topTracks = artist?.topTracks;
 
     // Check TIDAL availability (uses global cache)
     useEffect(() => {
@@ -81,32 +85,42 @@ export function useTidalTopTracks(artist: Artist | null | undefined) {
 
     // Identify unowned tracks that need matching
     const unownedTracks = useMemo(() => {
-        if (!tidalAvailable || !artist?.topTracks) return [];
+        if (!tidalAvailable || !topTracks) return [];
 
-        return artist.topTracks.filter(
+        return topTracks.filter(
             (t) =>
                 !t.album?.id ||
                 !t.album?.title ||
                 t.album.title === "Unknown Album"
         );
-    }, [artist?.topTracks, artistKey, tidalAvailable]);
+    }, [topTracks, tidalAvailable]);
 
     // Match unowned tracks against TIDAL (single batch call)
     useEffect(() => {
         if (!unownedTracks.length || !artistKey) return;
         if (matchedArtistIdRef.current === artistKey) return;
 
+        let cancelled = false;
         // Check global cache first — instant on revisit
         const cached = _artistMatchCache.get(artistKey);
         if (cached) {
             matchedArtistIdRef.current = artistKey;
-            setMatches(cached);
-            return;
+            queueMicrotask(() => {
+                if (!cancelled) {
+                    setMatches(cached);
+                }
+            });
+            return () => {
+                cancelled = true;
+            };
         }
 
-        let cancelled = false;
         matchedArtistIdRef.current = artistKey;
-        setLoading(true);
+        queueMicrotask(() => {
+            if (!cancelled) {
+                setLoading(true);
+            }
+        });
 
         const matchTracks = async () => {
             const trackPayload = unownedTracks.map((track) => ({
@@ -155,10 +169,10 @@ export function useTidalTopTracks(artist: Artist | null | undefined) {
 
     // Produce enriched top-tracks with streamSource + tidalTrackId
     const enrichedTopTracks = useMemo((): Track[] | undefined => {
-        if (!artist?.topTracks) return undefined;
-        if (Object.keys(matches).length === 0) return artist.topTracks;
+        if (!topTracks) return undefined;
+        if (Object.keys(matches).length === 0) return topTracks;
 
-        return artist.topTracks.map((track) => {
+        return topTracks.map((track) => {
             const match = matches[track.id];
             if (match) {
                 return {
@@ -170,7 +184,7 @@ export function useTidalTopTracks(artist: Artist | null | undefined) {
             }
             return track;
         });
-    }, [artist?.topTracks, matches]);
+    }, [topTracks, matches]);
 
     const hasQueuedMatchWork =
         !!artistKey &&

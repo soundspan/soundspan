@@ -7,6 +7,9 @@ interface AboutSectionProps {
     description: string;
 }
 
+/**
+ * Renders the AboutSection component.
+ */
 export function AboutSection({ description }: AboutSectionProps) {
     // Skip if description is just narrator info
     if (description.match(/^(Read by|Narrated by):/i)) {

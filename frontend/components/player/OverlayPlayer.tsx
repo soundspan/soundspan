@@ -47,9 +47,12 @@ import {
     writeMigratingStorageItem,
 } from "@/lib/storage-migration";
 import { TrackPreferenceButtons } from "./TrackPreferenceButtons";
+import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { TrackOverflowMenu, TrackMenuButton } from "@/components/ui/TrackOverflowMenu";
 import { PlaylistSelector } from "@/components/ui/PlaylistSelector";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { toAddToPlaylistRef } from "@/lib/trackRef";
+import type { Track } from "@/lib/audio-state-context";
 
 const OVERLAY_ACTIVE_TAB_KEY = OVERLAY_ACTIVE_TAB_STORAGE_KEY;
 
@@ -97,6 +100,26 @@ interface RelatedStreamMatch {
     duration?: number;
 }
 
+function isPlayableTrack(value: unknown): value is Track {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<Track> & {
+        artist?: { name?: unknown };
+        album?: { title?: unknown };
+    };
+    return (
+        typeof candidate.id === "string" &&
+        typeof candidate.title === "string" &&
+        typeof candidate.duration === "number" &&
+        Boolean(candidate.artist) &&
+        typeof candidate.artist?.name === "string" &&
+        Boolean(candidate.album) &&
+        typeof candidate.album?.title === "string"
+    );
+}
+
+/**
+ * Renders the OverlayPlayer component.
+ */
 export function OverlayPlayer() {
     const {
         currentTrack,
@@ -975,13 +998,34 @@ export function OverlayPlayer() {
     };
 
     const handleStartRadio = async () => {
-        if (!currentTrack?.artist?.id) return;
+        if (!currentTrack?.artist) return;
         setIsRadioLoading(true);
-        try {
-            const response = await api.getRadioTracks("artist", currentTrack.artist.id);
+            try {
+                let response:
+                    | { tracks: unknown[] }
+                    | null = null;
+            const isRemote =
+                currentTrack.streamSource === "tidal" ||
+                currentTrack.streamSource === "youtube";
+            if (isRemote && currentTrack.artist.name) {
+                response = await api.getRadioTracks(
+                    "artist-name",
+                    currentTrack.artist.name
+                );
+            } else if (currentTrack.artist.id) {
+                response = await api.getRadioTracks(
+                    "artist",
+                    currentTrack.artist.id
+                );
+            }
+            if (!response) {
+                toast.error("Artist information is required to start radio");
+                return;
+            }
             if (response.tracks && response.tracks.length > 0) {
                 const filtered = response.tracks.filter(
-                    (t: { id: string }) => t.id !== currentTrack.id
+                    (t): t is Track =>
+                        isPlayableTrack(t) && t.id !== currentTrack.id
                 );
                 setUpcoming(filtered);
                 toast.success(
@@ -1000,7 +1044,7 @@ export function OverlayPlayer() {
     const handleAddToPlaylist = useCallback(
         async (playlistId: string) => {
             if (!currentTrack?.id) return;
-            await api.addTrackToPlaylist(playlistId, currentTrack.id);
+            await api.addTrackToPlaylist(playlistId, toAddToPlaylistRef(currentTrack));
             toast.success(`Added "${currentTrack.displayTitle || currentTrack.title}" to playlist`);
         },
         [currentTrack]
@@ -1246,6 +1290,7 @@ export function OverlayPlayer() {
                                             trackId={preferenceTrackId}
                                             buttonSizeClassName="h-11 w-11"
                                             iconSizeClassName="h-6 w-6"
+                                            metadata={buildPreferenceMetadata(currentTrack)}
                                         />
 
                                         <button
@@ -1552,10 +1597,10 @@ export function OverlayPlayer() {
                                                         {subtitle}
                                                     </p>
                                                     {currentTrackQualityBadge?.variant === "tidal" && (
-                                                        <TidalBadge className="text-[9px] px-1 py-0.5 leading-none" />
+                                                        <TidalBadge />
                                                     )}
                                                     {currentTrackQualityBadge?.variant === "youtube" && (
-                                                        <YouTubeBadge className="text-[9px] px-1 py-0.5 leading-none" />
+                                                        <YouTubeBadge />
                                                     )}
                                                 </div>
                                             </div>
@@ -1804,12 +1849,10 @@ export function OverlayPlayer() {
                                                                                     {track.displayTitle ?? track.title}
                                                                                 </p>
                                                                                 {queueTrackQualityBadge?.variant === "tidal" && (
-                                                                                    <TidalBadge className="text-[9px] px-1 py-0.5 leading-none" />
+                                                                                    <TidalBadge />
                                                                                 )}
                                                                                 {queueTrackQualityBadge?.variant === "youtube" && (
-                                                                                    <YouTubeBadge
-                                                                                        className="text-[9px] px-1 py-0.5 leading-none"
-                                                                                    />
+                                                                                    <YouTubeBadge />
                                                                                 )}
                                                                             </div>
                                                                             <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
@@ -1852,6 +1895,7 @@ export function OverlayPlayer() {
                                                                             mode="up-only"
                                                                             buttonSizeClassName="h-10 w-10"
                                                                             iconSizeClassName="h-5 w-5"
+                                                                            metadata={buildPreferenceMetadata(track)}
                                                                         />
                                                                         <TrackOverflowMenu
                                                                             track={track}
@@ -2010,9 +2054,9 @@ export function OverlayPlayer() {
                                                                                 Matching
                                                                             </span>
                                                                         ) : streamMatch?.streamSource === "tidal" ? (
-                                                                            <TidalBadge className="text-[9px] px-1 py-0.5 leading-none" />
+                                                                            <TidalBadge />
                                                                         ) : streamMatch?.streamSource === "youtube" ? (
-                                                                            <YouTubeBadge className="text-[9px] px-1 py-0.5 leading-none" />
+                                                                            <YouTubeBadge />
                                                                         ) : track.lastFmUrl ? (
                                                                             <span className="rounded-full border border-white/20 bg-white/[0.04] px-2 py-0.5 text-[10px] text-gray-300">
                                                                                 Info
@@ -2030,6 +2074,7 @@ export function OverlayPlayer() {
                                                                                     mode="up-only"
                                                                                     buttonSizeClassName="h-8 w-8"
                                                                                     iconSizeClassName="h-4 w-4"
+                                                                                    metadata={buildPreferenceMetadata(track)}
                                                                                 />
                                                                             </div>
                                                                         )}

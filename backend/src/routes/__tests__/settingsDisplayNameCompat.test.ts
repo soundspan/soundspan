@@ -20,6 +20,12 @@ jest.mock("../../services/staleJobCleanup", () => ({
     },
 }));
 
+jest.mock("../../services/tidalStreaming", () => ({
+    tidalStreamingService: {
+        clearUserQualityCache: jest.fn(),
+    },
+}));
+
 jest.mock("../../utils/db", () => ({
     prisma: {
         userSettings: {
@@ -31,6 +37,7 @@ jest.mock("../../utils/db", () => ({
             findUnique: jest.fn(),
             update: jest.fn(),
         },
+        $queryRaw: jest.fn(),
     },
 }));
 
@@ -43,6 +50,7 @@ const mockUserSettingsCreate = prisma.userSettings.create as jest.Mock;
 const mockUserSettingsUpsert = prisma.userSettings.upsert as jest.Mock;
 const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
 const mockUserUpdate = prisma.user.update as jest.Mock;
+const mockPrismaQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockStaleJobCleanup = staleJobCleanupService.cleanupAll as jest.Mock;
 
 function getGetHandler(path: string) {
@@ -84,6 +92,7 @@ describe("settings displayName compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPrismaQueryRaw.mockResolvedValue([{ count: BigInt(0) }]);
     });
 
     it("returns displayName alongside user settings", async () => {
@@ -142,6 +151,8 @@ describe("settings displayName compatibility", () => {
                 wifiOnly: false,
                 offlineEnabled: false,
                 maxCacheSizeMb: 5120,
+                showYtMusicExplore: true,
+                showTidalExplore: true,
             },
         });
         expect(res.statusCode).toBe(200);
@@ -388,6 +399,43 @@ describe("settings displayName compatibility", () => {
             },
             totalCleaned: 10,
         });
+    });
+
+    it("persists showTidalExplore via upsert", async () => {
+        mockUserSettingsUpsert.mockResolvedValue({
+            userId: "user-1",
+            playbackQuality: "original",
+            shareOnlinePresence: false,
+            shareListeningStatus: false,
+            wifiOnly: false,
+            offlineEnabled: false,
+            maxCacheSizeMb: 5120,
+            showYtMusicExplore: true,
+            showTidalExplore: false,
+            ytMusicQuality: "HIGH",
+            tidalStreamingQuality: "HIGH",
+        });
+        mockUserFindUnique.mockResolvedValue({ displayName: "Jane Doe" });
+
+        const req = {
+            user: { id: "user-1" },
+            body: { showTidalExplore: false },
+        } as any;
+        const res = createRes();
+
+        await updateSettingsHandler(req, res);
+
+        expect(mockUserSettingsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({ showTidalExplore: false }),
+            })
+        );
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(
+            expect.objectContaining({
+                showTidalExplore: false,
+            })
+        );
     });
 
     it("returns 500 when cleanup-stale-jobs fails", async () => {

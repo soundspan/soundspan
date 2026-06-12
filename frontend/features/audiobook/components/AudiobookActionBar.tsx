@@ -15,6 +15,9 @@ interface AudiobookActionBarProps {
   formatTime?: (seconds: number) => string;
 }
 
+/**
+ * Renders the AudiobookActionBar component.
+ */
 export function AudiobookActionBar({
   audiobook,
   isThisBookPlaying = false,

@@ -283,6 +283,7 @@ describe("youtube music route runtime behavior", () => {
             available: false,
             authenticated: false,
             credentialsConfigured: true,
+            oauthConfigured: true,
         });
 
         ytMusicService.getAuthStatus

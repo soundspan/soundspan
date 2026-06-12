@@ -3,8 +3,10 @@ import { randomUUID } from "crypto";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
+import { parseEmbedding } from "../utils/embedding";
 import { requireAuth } from "../middleware/auth";
 import { findSimilarTracks } from "../services/hybridSimilarity";
+import { computeMapProjection } from "../services/umapProjection";
 import {
     applyTrackPreferenceOrderBias,
     applyTrackPreferenceSimilarityBias,
@@ -116,6 +118,321 @@ async function buildTrackPreferenceScoreMapForUser(
 
     return scoreMap;
 }
+
+/**
+ * @openapi
+ * /api/vibe/map:
+ *   get:
+ *     summary: Get vibe map projection data
+ *     description: Returns cached or computed 2D projection data for tracks with CLAP embeddings.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: 2D vibe map projection payload
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/map", requireAuth, async (_req, res) => {
+    try {
+        const mapData = await computeMapProjection();
+        res.json(mapData);
+    } catch (error: any) {
+        logger.error("Vibe map error:", error);
+        res.status(500).json({ error: "Failed to compute map projection" });
+    }
+});
+
+/**
+ * Fetch a single track's CLAP embedding from pgvector.
+ */
+async function fetchTrackEmbedding(trackId: string): Promise<number[] | null> {
+    const rows = await prisma.$queryRaw<{ embedding: string }[]>`
+        SELECT embedding::text FROM track_embeddings WHERE track_id = ${trackId} LIMIT 1
+    `;
+    if (!rows.length) return null;
+    return parseEmbedding(rows[0].embedding);
+}
+
+/**
+ * Linearly interpolate between two embedding vectors.
+ */
+function lerpEmbedding(a: number[], b: number[], t: number): number[] {
+    return a.map((v, i) => v * (1 - t) + b[i] * t);
+}
+
+/**
+ * Weighted average of multiple embeddings.
+ */
+function blendEmbeddings(
+    embeddings: number[][],
+    weights: number[]
+): number[] {
+    const dim = embeddings[0].length;
+    const totalWeight = weights.reduce((s, w) => s + w, 0);
+    const result = new Array<number>(dim).fill(0);
+    for (let i = 0; i < embeddings.length; i++) {
+        const w = weights[i] / totalWeight;
+        for (let d = 0; d < dim; d++) {
+            result[d] += embeddings[i][d] * w;
+        }
+    }
+    return result;
+}
+
+interface NearestTrackRow {
+    id: string;
+    title: string;
+    distance: number;
+    albumId: string;
+    albumTitle: string;
+    albumCoverUrl: string | null;
+    artistId: string;
+    artistName: string;
+}
+
+async function findNearestToEmbedding(
+    embedding: number[],
+    limit: number,
+    excludeIds: string[] = []
+): Promise<NearestTrackRow[]> {
+    if (excludeIds.length > 0) {
+        return prisma.$queryRaw<NearestTrackRow[]>`
+            SELECT
+                t.id, t.title,
+                te.embedding <=> ${embedding}::vector AS distance,
+                a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
+                ar.id AS "artistId", ar.name AS "artistName"
+            FROM track_embeddings te
+            JOIN "Track" t ON te.track_id = t.id
+            JOIN "Album" a ON t."albumId" = a.id
+            JOIN "Artist" ar ON a."artistId" = ar.id
+            WHERE te.track_id != ALL(${excludeIds}::text[])
+            ORDER BY te.embedding <=> ${embedding}::vector
+            LIMIT ${limit}
+        `;
+    }
+    return prisma.$queryRaw<NearestTrackRow[]>`
+        SELECT
+            t.id, t.title,
+            te.embedding <=> ${embedding}::vector AS distance,
+            a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
+            ar.id AS "artistId", ar.name AS "artistName"
+        FROM track_embeddings te
+        JOIN "Track" t ON te.track_id = t.id
+        JOIN "Album" a ON t."albumId" = a.id
+        JOIN "Artist" ar ON a."artistId" = ar.id
+        ORDER BY te.embedding <=> ${embedding}::vector
+        LIMIT ${limit}
+    `;
+}
+
+function formatNearestTrack(row: NearestTrackRow) {
+    return {
+        id: row.id,
+        title: row.title,
+        distance: row.distance,
+        similarity: Math.max(0, 1 - row.distance / 2),
+        album: { id: row.albumId, title: row.albumTitle, coverUrl: row.albumCoverUrl },
+        artist: { id: row.artistId, name: row.artistName },
+    };
+}
+
+/**
+ * @openapi
+ * /api/vibe/path:
+ *   get:
+ *     summary: Find a musical path between two tracks
+ *     description: Interpolates through CLAP embedding space to find intermediate tracks forming a smooth journey from one track to another.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: from
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Starting track ID
+ *       - in: query
+ *         name: to
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Ending track ID
+ *       - in: query
+ *         name: steps
+ *         schema:
+ *           type: integer
+ *           default: 5
+ *           minimum: 1
+ *           maximum: 20
+ *         description: Number of intermediate steps
+ *     responses:
+ *       200:
+ *         description: Ordered list of intermediate tracks
+ *       400:
+ *         description: Missing from or to track IDs
+ *       404:
+ *         description: One or both tracks lack embeddings
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/path", requireAuth, async (req, res) => {
+    try {
+        const fromId = req.query.from as string;
+        const toId = req.query.to as string;
+
+        if (!fromId || !toId) {
+            return res
+                .status(400)
+                .json({ error: "Both 'from' and 'to' track IDs are required" });
+        }
+
+        const steps = Math.min(
+            Math.max(1, parseInt(req.query.steps as string) || 5),
+            20
+        );
+
+        const [fromEmbed, toEmbed] = await Promise.all([
+            fetchTrackEmbedding(fromId),
+            fetchTrackEmbedding(toId),
+        ]);
+
+        if (!fromEmbed) {
+            return res
+                .status(404)
+                .json({ error: "Starting track has no embedding" });
+        }
+        if (!toEmbed) {
+            return res
+                .status(404)
+                .json({ error: "Ending track has no embedding" });
+        }
+
+        const usedIds = new Set([fromId, toId]);
+        const stepResults = [];
+
+        for (let i = 1; i <= steps; i++) {
+            const t = i / (steps + 1);
+            const interpolated = lerpEmbedding(fromEmbed, toEmbed, t);
+            const nearest = await findNearestToEmbedding(
+                interpolated,
+                5,
+                Array.from(usedIds)
+            );
+            if (nearest.length > 0) {
+                const pick = nearest[0];
+                usedIds.add(pick.id);
+                stepResults.push(formatNearestTrack(pick));
+            }
+        }
+
+        res.json({ from: fromId, to: toId, steps: stepResults });
+    } catch (error: any) {
+        logger.error("Vibe path error:", error);
+        res.status(500).json({ error: "Failed to compute song path" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/vibe/alchemy:
+ *   post:
+ *     summary: Blend multiple tracks to discover new vibes
+ *     description: Combines CLAP embeddings from multiple ingredient tracks with optional weights to find tracks matching the blended vibe.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - trackIds
+ *             properties:
+ *               trackIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 minItems: 2
+ *                 maxItems: 10
+ *                 description: Track IDs to blend
+ *               weights:
+ *                 type: array
+ *                 items:
+ *                   type: number
+ *                 description: Optional per-track weights (defaults to equal)
+ *               limit:
+ *                 type: integer
+ *                 default: 20
+ *                 minimum: 1
+ *                 maximum: 100
+ *     responses:
+ *       200:
+ *         description: Tracks matching the blended vibe
+ *       400:
+ *         description: Fewer than 2 track IDs provided
+ *       404:
+ *         description: One or more ingredient tracks lack embeddings
+ *       401:
+ *         description: Not authenticated
+ */
+router.post("/alchemy", requireAuth, async (req, res) => {
+    try {
+        const { trackIds, weights, limit: requestedLimit } = req.body;
+
+        if (!Array.isArray(trackIds) || trackIds.length < 2) {
+            return res
+                .status(400)
+                .json({ error: "At least 2 track IDs are required for alchemy" });
+        }
+
+        if (trackIds.length > 10) {
+            return res
+                .status(400)
+                .json({ error: "Maximum 10 ingredient tracks allowed" });
+        }
+
+        const limit = Math.min(
+            Math.max(1, requestedLimit || 20),
+            100
+        );
+
+        const embeddings: number[][] = [];
+        for (const tid of trackIds) {
+            const emb = await fetchTrackEmbedding(tid);
+            if (!emb) {
+                return res
+                    .status(404)
+                    .json({ error: `Track ${tid} has no embedding` });
+            }
+            embeddings.push(emb);
+        }
+
+        const effectiveWeights = Array.isArray(weights) && weights.length === trackIds.length
+            ? weights.map((w: number) => Math.max(0, w))
+            : trackIds.map(() => 1);
+
+        const blended = blendEmbeddings(embeddings, effectiveWeights);
+        const nearest = await findNearestToEmbedding(blended, limit, trackIds);
+
+        res.json({
+            ingredients: trackIds,
+            weights: effectiveWeights,
+            tracks: nearest.map(formatNearestTrack),
+        });
+    } catch (error: any) {
+        logger.error("Vibe alchemy error:", error);
+        res.status(500).json({ error: "Failed to compute alchemy blend" });
+    }
+});
 
 /**
  * @openapi

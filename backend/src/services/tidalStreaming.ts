@@ -53,6 +53,77 @@ interface TidalMatchInput {
     isrc?: string;
 }
 
+export interface TidalTrackDetail {
+    id: number;
+    title: string;
+    artist: string;
+    artists: string[];
+    duration: number;
+    isrc: string | null;
+    explicit: boolean;
+    album: {
+        id: number;
+        title: string;
+    };
+}
+
+// ── Browse types ──────────────────────────────────────────────────
+
+export interface TidalBrowseShelfItem {
+    type: string;
+    playlistId?: string;
+    mixId?: string;
+    albumId?: string;
+    title: string;
+    thumbnailUrl: string | null;
+    subtitle?: string;
+}
+
+export interface TidalBrowseShelf {
+    title: string;
+    contents: TidalBrowseShelfItem[];
+}
+
+export interface TidalGenre {
+    name: string;
+    path: string;
+    hasPlaylists: boolean;
+    imageUrl: string | null;
+}
+
+export interface TidalMixPreview {
+    mixId: string;
+    title: string;
+    subTitle: string;
+    thumbnailUrl: string | null;
+}
+
+export interface TidalPlaylistPreview {
+    playlistId: string;
+    title: string;
+    thumbnailUrl: string | null;
+    numTracks: number;
+}
+
+export interface TidalBrowseTrack {
+    trackId: number;
+    title: string;
+    artist: string;
+    artists: string[];
+    album: string;
+    duration: number;
+    isrc: string | null;
+    thumbnailUrl: string | null;
+}
+
+export interface TidalPlaylistDetail {
+    id: string;
+    title: string;
+    trackCount: number;
+    thumbnailUrl: string | null;
+    tracks: TidalBrowseTrack[];
+}
+
 // ── Service ────────────────────────────────────────────────────────
 
 class TidalStreamingService {
@@ -380,6 +451,29 @@ class TidalStreamingService {
         };
     }
 
+    // ── Track detail ─────────────────────────────────────────────
+
+    /**
+     * Fetch track metadata from the TIDAL sidecar for a single track.
+     */
+    async getTrack(
+        userId: string,
+        trackId: number
+    ): Promise<TidalTrackDetail | null> {
+        try {
+            const res = await this.client.get(
+                `/user/track/${trackId}?user_id=${encodeURIComponent(userId)}`
+            );
+            return res.data;
+        } catch (err: any) {
+            logger.debug(
+                `[TIDAL-STREAM] getTrack failed for trackId=${trackId}:`,
+                err.response?.data || err.message
+            );
+            return null;
+        }
+    }
+
     // ── Match helpers ──────────────────────────────────────────────
 
     /**
@@ -639,6 +733,177 @@ class TidalStreamingService {
             logger.error("[TIDAL-STREAM] Batch match failed:", err);
             return tracks.map(() => null);
         }
+    }
+
+    // ── User quality preference ────────────────────────────────────
+
+    private qualityCache = new Map<string, { quality: string; expiresAt: number }>();
+    private static readonly QUALITY_CACHE_TTL_MS =
+        process.env.NODE_ENV === "test" ? 0 : 60_000;
+
+    async getUserPreferredQuality(userId: string): Promise<string> {
+        if (TidalStreamingService.QUALITY_CACHE_TTL_MS > 0) {
+            const cached = this.qualityCache.get(userId);
+            if (cached && cached.expiresAt > Date.now()) {
+                return cached.quality;
+            }
+        }
+        try {
+            const userSettings = await prisma.userSettings.findUnique({
+                where: { userId },
+                select: { tidalStreamingQuality: true },
+            });
+            const quality = userSettings?.tidalStreamingQuality || "HIGH";
+            if (TidalStreamingService.QUALITY_CACHE_TTL_MS > 0) {
+                this.qualityCache.set(userId, {
+                    quality,
+                    expiresAt: Date.now() + TidalStreamingService.QUALITY_CACHE_TTL_MS,
+                });
+            }
+            return quality;
+        } catch {
+            return "HIGH";
+        }
+    }
+
+    /**
+     * Clear the cached quality preference for a user (e.g. after settings update).
+     */
+    clearUserQualityCache(userId: string): void {
+        this.qualityCache.delete(userId);
+    }
+
+    // ── Browse (proxy to sidecar tidalapi endpoints) ─────────────
+
+    private browseParams(userId: string, quality: string, extra?: Record<string, string>): string {
+        const params = new URLSearchParams({ user_id: userId, quality });
+        if (extra) {
+            for (const [k, v] of Object.entries(extra)) params.set(k, v);
+        }
+        return params.toString();
+    }
+
+    /**
+     * Get personalized home page shelves.
+     */
+    async getHomeShelves(userId: string, quality: string): Promise<TidalBrowseShelf[]> {
+        const res = await this.client.get(
+            `/user/browse/home?${this.browseParams(userId, quality)}`,
+            { timeout: 15000 }
+        );
+        return res.data?.shelves ?? [];
+    }
+
+    /**
+     * Get editorial/explore shelves.
+     */
+    async getExploreShelves(userId: string, quality: string): Promise<TidalBrowseShelf[]> {
+        const res = await this.client.get(
+            `/user/browse/explore?${this.browseParams(userId, quality)}`,
+            { timeout: 15000 }
+        );
+        return res.data?.shelves ?? [];
+    }
+
+    /**
+     * Get genre categories.
+     */
+    async getGenres(userId: string, quality: string): Promise<TidalGenre[]> {
+        const res = await this.client.get(
+            `/user/browse/genres?${this.browseParams(userId, quality)}`,
+            { timeout: 15000 }
+        );
+        return res.data?.genres ?? [];
+    }
+
+    /**
+     * Get mood categories.
+     */
+    async getMoods(userId: string, quality: string): Promise<TidalGenre[]> {
+        const res = await this.client.get(
+            `/user/browse/moods?${this.browseParams(userId, quality)}`,
+            { timeout: 15000 }
+        );
+        return res.data?.moods ?? [];
+    }
+
+    /**
+     * Get personal mixes (daily discovery, etc.).
+     */
+    async getMixes(userId: string, quality: string): Promise<TidalMixPreview[]> {
+        const res = await this.client.get(
+            `/user/browse/mixes?${this.browseParams(userId, quality)}`,
+            { timeout: 15000 }
+        );
+        return res.data?.mixes ?? [];
+    }
+
+    /**
+     * Get playlists for a specific genre/mood path.
+     */
+    async getGenrePlaylists(
+        userId: string,
+        path: string,
+        quality: string
+    ): Promise<TidalPlaylistPreview[]> {
+        const res = await this.client.get(
+            `/user/browse/genre-playlists?${this.browseParams(userId, quality, { path })}`,
+            { timeout: 15000 }
+        );
+        return res.data?.playlists ?? [];
+    }
+
+    /**
+     * Get a browse playlist with tracks.
+     */
+    async getBrowsePlaylist(
+        userId: string,
+        playlistId: string,
+        quality: string,
+        limit?: number
+    ): Promise<TidalPlaylistDetail> {
+        const extra: Record<string, string> = {};
+        if (limit !== undefined) extra.limit = String(limit);
+        const res = await this.client.get(
+            `/user/browse/playlist/${encodeURIComponent(playlistId)}?${this.browseParams(userId, quality, extra)}`,
+            { timeout: 15000 }
+        );
+        return res.data;
+    }
+
+    /**
+     * Get a public browse playlist with tracks (no user auth required).
+     */
+    async getPublicBrowsePlaylist(
+        playlistId: string,
+        quality: string,
+        limit?: number
+    ): Promise<TidalPlaylistDetail> {
+        const params = new URLSearchParams();
+        params.set("quality", quality);
+        if (limit !== undefined) {
+            params.set("limit", String(limit));
+        }
+        const res = await this.client.get(
+            `/browse/playlist/${encodeURIComponent(playlistId)}?${params.toString()}`,
+            { timeout: 15000 }
+        );
+        return res.data;
+    }
+
+    /**
+     * Get a browse mix with tracks.
+     */
+    async getBrowseMix(
+        userId: string,
+        mixId: string,
+        quality: string
+    ): Promise<TidalPlaylistDetail> {
+        const res = await this.client.get(
+            `/user/browse/mix/${encodeURIComponent(mixId)}?${this.browseParams(userId, quality)}`,
+            { timeout: 15000 }
+        );
+        return res.data;
     }
 }
 

@@ -4,7 +4,7 @@ import {
     clampNonNegativePlaybackTime,
     clampPlaybackTimeToUpperBound,
     resolvePlaybackTimeUpperBound,
-} from "../../lib/audio-playback-normalization.ts";
+} from "../../lib/audio-playback-normalization";
 
 test("clampNonNegativePlaybackTime clamps values below zero", () => {
     assert.equal(clampNonNegativePlaybackTime(-12), 0);

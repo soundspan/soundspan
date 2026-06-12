@@ -48,6 +48,9 @@ function toQueueTrackIds(queue: readonly QueueTrackIdentity[] | null | undefined
     return ids;
 }
 
+/**
+ * Executes queuesMatchByTrackId.
+ */
 export function queuesMatchByTrackId(
     localQueue: readonly QueueTrackIdentity[] | null | undefined,
     serverQueue: readonly QueueTrackIdentity[] | null | undefined
@@ -68,6 +71,9 @@ export function queuesMatchByTrackId(
     return true;
 }
 
+/**
+ * Executes isServerQueueTruncatedPrefix.
+ */
 export function isServerQueueTruncatedPrefix(
     localQueue: readonly QueueTrackIdentity[] | null | undefined,
     serverQueue: readonly QueueTrackIdentity[] | null | undefined
@@ -92,6 +98,9 @@ export function isServerQueueTruncatedPrefix(
     return true;
 }
 
+/**
+ * Executes normalizeQueueIndex.
+ */
 export function normalizeQueueIndex(
     index: unknown,
     queueLength: number
@@ -113,6 +122,9 @@ export function normalizeQueueIndex(
     return Math.min(Math.max(0, safeIndex), safeQueueLength - 1);
 }
 
+/**
+ * Executes resolveServerPlaybackPollDecision.
+ */
 export function resolveServerPlaybackPollDecision(
     input: ServerPlaybackPollDecisionInput
 ): ServerPlaybackPollDecision {

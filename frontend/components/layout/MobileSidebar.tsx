@@ -5,7 +5,9 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
     Compass,
+    Download,
     Heart,
+    Home,
     LogOut,
     Radio,
     RefreshCw,
@@ -17,7 +19,6 @@ import {
 import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { useActiveListenSessions } from "@/hooks/useActiveListenSessions";
 import { useToast } from "@/lib/toast-context";
 import { EqBars } from "@/components/ui/EqBars";
 import Image from "next/image";
@@ -28,13 +29,16 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 interface MobileSidebarProps {
     isOpen: boolean;
     onClose: () => void;
+    hasActiveSessions: boolean;
 }
 
-export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
+/**
+ * Renders the MobileSidebar component.
+ */
+export function MobileSidebar({ isOpen, onClose, hasActiveSessions }: MobileSidebarProps) {
     const pathname = usePathname();
     const { user, logout } = useAuth();
     const { toast } = useToast();
-    const hasActiveSessions = useActiveListenSessions();
     const [isSyncing, setIsSyncing] = useState(false);
 
     // Close on route change
@@ -74,12 +78,15 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
 
     if (!isOpen) return null;
 
-    const quickLinkIcons = {
+    const quickLinkIcons: Record<string, typeof Compass> = {
+        "/": Home,
+        "/explore": Compass,
         "/discover": Compass,
+        "/import": Download,
         "/playlist/my-liked": Heart,
         "/radio": Radio,
         "/listen-together": Users,
-    } as const;
+    };
 
     return (
         <>
@@ -137,7 +144,7 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
                             Quick Links
                         </div>
                         {MOBILE_QUICK_LINKS.map((link) => {
-                            const Icon = quickLinkIcons[link.href];
+                            const Icon = quickLinkIcons[link.href] ?? Compass;
                             return (
                                 <Link
                                     key={link.href}

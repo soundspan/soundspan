@@ -61,6 +61,9 @@ const isAudiobookshelfConfigStatus = (
     return Boolean(value) && typeof value === "object" && "configured" in value;
 };
 
+/**
+ * Renders the AudiobooksPage component.
+ */
 export default function AudiobooksPage() {
     const router = useRouter();
     useAuth();

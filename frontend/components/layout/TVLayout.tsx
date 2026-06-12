@@ -24,6 +24,9 @@ const tvNavigation = [
     { name: "Playlists", href: "/playlists" },
 ];
 
+/**
+ * Renders the TVLayout component.
+ */
 export function TVLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();

@@ -36,6 +36,9 @@ interface MusicBrainzLookupProps {
     onSelect: (mbid: string) => void;
 }
 
+/**
+ * Renders the MusicBrainzLookup component.
+ */
 export function MusicBrainzLookup({
     type,
     currentValue,

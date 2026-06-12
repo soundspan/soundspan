@@ -8,6 +8,9 @@ import { api } from "@/lib/api";
 import type { Audiobook } from "../types";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Executes useAudiobookActions.
+ */
 export function useAudiobookActions(
   audiobookId: string,
   audiobook: Audiobook | null,

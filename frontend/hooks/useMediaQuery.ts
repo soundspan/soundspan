@@ -28,8 +28,23 @@ export function useMediaQuery(query: string): boolean {
 }
 
 // Common breakpoints
+/**
+ * Implements useIsMobile.
+ */
 export const useIsMobile = () => useMediaQuery("(max-width: 768px)");
+/**
+ * Implements useIsTablet.
+ */
 export const useIsTablet = () => useMediaQuery("(min-width: 769px) and (max-width: 1024px)");
+/**
+ * Implements useIsDesktop.
+ */
 export const useIsDesktop = () => useMediaQuery("(min-width: 1025px)");
+/**
+ * Implements useIsTV.
+ */
 export const useIsTV = () => useMediaQuery("(min-width: 1920px)");
+/**
+ * Implements useIsLargeTV.
+ */
 export const useIsLargeTV = () => useMediaQuery("(min-width: 2560px)");

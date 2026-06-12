@@ -4,7 +4,7 @@ import {
     DEFAULT_AUDIO_VOLUME,
     clampAudioVolume,
     resolveInitialAudioVolume,
-} from "../../lib/audio-volume.ts";
+} from "../../lib/audio-volume";
 
 test("clampAudioVolume bounds values to 0..1 with safe fallback", () => {
     assert.equal(clampAudioVolume(0.4), 0.4);

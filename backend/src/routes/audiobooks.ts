@@ -76,7 +76,6 @@ router.get(
             logger.error("Error fetching continue listening:", error);
             res.status(500).json({
                 error: "Failed to fetch continue listening",
-                message: error.message,
             });
         }
     }
@@ -144,7 +143,6 @@ router.post("/sync", requireAuthOrToken, apiLimiter, async (req, res) => {
         logger.error("Audiobook sync failed:", error);
         res.status(500).json({
             error: "Sync failed",
-            message: error.message,
         });
     }
 });
@@ -230,7 +228,7 @@ router.get("/debug-series", requireAuthOrToken, async (req, res) => {
         });
     } catch (error: any) {
         logger.error("[Audiobooks] Debug series error:", error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
@@ -284,7 +282,6 @@ router.get("/search", requireAuthOrToken, apiLimiter, async (req, res) => {
         logger.error("Error searching audiobooks:", error);
         res.status(500).json({
             error: "Failed to search audiobooks",
-            message: error.message,
         });
     }
 });
@@ -410,7 +407,6 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
         logger.error("Error fetching audiobooks:", error);
         res.status(500).json({
             error: "Failed to fetch audiobooks",
-            message: error.message,
         });
     }
 });
@@ -530,7 +526,6 @@ router.get(
             logger.error("Error fetching series:", error);
             res.status(500).json({
                 error: "Failed to fetch series",
-                message: error.message,
             });
         }
     }
@@ -680,7 +675,6 @@ router.get("/:id/cover", async (req, res) => {
         logger.error("Error serving cover:", error);
         res.status(500).json({
             error: "Failed to serve cover",
-            message: error.message,
         });
     }
 });
@@ -801,7 +795,6 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
         logger.error("Error fetching audiobook__", error);
         res.status(500).json({
             error: "Failed to fetch audiobook",
-            message: error.message,
         });
     }
 });
@@ -917,7 +910,6 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
             if (!res.headersSent) {
                 res.status(500).json({
                     error: "Failed to stream audiobook",
-                    message: error.message,
                 });
             } else {
                 res.end();
@@ -927,7 +919,6 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
         logger.error("[Audiobook Stream] Error:", error.message);
         res.status(500).json({
             error: "Failed to stream audiobook",
-            message: error.message,
         });
     }
 });
@@ -1139,7 +1130,6 @@ router.post(
             logger.error("Error updating progress:", error);
             res.status(500).json({
                 error: "Failed to update progress",
-                message: error.message,
             });
         }
     }
@@ -1226,7 +1216,6 @@ router.delete(
             logger.error("Error removing progress:", error);
             res.status(500).json({
                 error: "Failed to remove progress",
-                message: error.message,
             });
         }
     }

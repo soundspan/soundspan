@@ -1,3 +1,60 @@
+/**
+ * Resolves the playback duration to display, choosing between the audio
+ * engine's reported duration and the known metadata duration.
+ *
+ * For remote streams delivered as fragmented MP4 (e.g. TIDAL HI_RES_LOSSLESS),
+ * the `<audio>` element may report only a single fragment's duration (~4 s)
+ * instead of the full track length.  When the loaded duration is less than
+ * half the metadata duration for a remote stream, the metadata value is more
+ * trustworthy.
+ */
+export function resolvePlaybackDuration(input: {
+    loadedDurationSec: number;
+    metadataDurationSec: number;
+    isRemoteStream: boolean;
+}): number {
+    const loaded = input.loadedDurationSec;
+    const metadata = Math.max(0, input.metadataDurationSec);
+
+    // Invalid loaded values → use metadata
+    if (typeof loaded !== "number" || !Number.isFinite(loaded) || loaded <= 0) {
+        return metadata;
+    }
+
+    // For remote streams, if the audio element reports less than half the
+    // metadata duration it's likely reading a single fMP4 fragment.
+    if (input.isRemoteStream && metadata > 0 && loaded < metadata * 0.5) {
+        return metadata;
+    }
+
+    return loaded || metadata;
+}
+
+/**
+ * Resolves the Howler format hint for a remote stream source.
+ *
+ * Howler requires a format hint (or file extension in the URL) to pass its
+ * internal codec compatibility check before loading. Remote stream URLs are
+ * extensionless, so we must provide an explicit hint.
+ *
+ * The hint only gates Howler's `codecs()` check — it does NOT affect the
+ * browser's actual decoding. In HTML5 mode the browser reads Content-Type
+ * from the response; in Web Audio mode `decodeAudioData` decodes based on
+ * binary content. So "mp4" safely passes the gate for both AAC and FLAC
+ * content.
+ */
+export function resolveRemoteStreamFormat(
+    streamSource: "local" | "tidal" | "youtube" | string | undefined | null,
+): string | undefined {
+    if (streamSource === "tidal" || streamSource === "youtube") {
+        return "mp4";
+    }
+    return undefined;
+}
+
+/**
+ * Executes shouldAttemptSegmentedRecoveryOnUnexpectedPause.
+ */
 export function shouldAttemptSegmentedRecoveryOnUnexpectedPause(
     bufferedAheadSec: number | null,
     maxBufferedAheadSec: number,
@@ -27,6 +84,9 @@ export interface SegmentedHandoffRecoveryStartupEligibility {
     minimumStablePlaybackMs: number;
 }
 
+/**
+ * Executes resolveSegmentedHandoffRecoveryStartupEligibility.
+ */
 export function resolveSegmentedHandoffRecoveryStartupEligibility(
     input: SegmentedHandoffRecoveryStartupEligibilityInput,
 ): SegmentedHandoffRecoveryStartupEligibility {
@@ -78,8 +138,8 @@ export interface SegmentedStartupRecoveryStageAttempts {
     engine_load: number;
 }
 
-export interface SegmentedStartupRecoveryStageLimits
-    extends SegmentedStartupRecoveryStageAttempts {}
+export type SegmentedStartupRecoveryStageLimits =
+    SegmentedStartupRecoveryStageAttempts;
 
 export interface SegmentedStartupRecoveryBackoffInput {
     attempt: number;
@@ -115,6 +175,9 @@ export interface SegmentedStartupRecoveryDecision {
     delayMs: number | null;
 }
 
+/**
+ * Executes createEmptySegmentedStartupRecoveryStageAttempts.
+ */
 export function createEmptySegmentedStartupRecoveryStageAttempts(): SegmentedStartupRecoveryStageAttempts {
     return {
         session_create: 0,
@@ -123,6 +186,9 @@ export function createEmptySegmentedStartupRecoveryStageAttempts(): SegmentedSta
     };
 }
 
+/**
+ * Executes resolveSegmentedStartupRecoveryBackoffDelayMs.
+ */
 export function resolveSegmentedStartupRecoveryBackoffDelayMs(
     input: SegmentedStartupRecoveryBackoffInput,
 ): number {
@@ -142,6 +208,9 @@ export function resolveSegmentedStartupRecoveryBackoffDelayMs(
     return Math.round(backoffDelayMs + jitterMs);
 }
 
+/**
+ * Executes resolveSegmentedStartupRecoveryDecision.
+ */
 export function resolveSegmentedStartupRecoveryDecision(
     input: SegmentedStartupRecoveryDecisionInput,
 ): SegmentedStartupRecoveryDecision {

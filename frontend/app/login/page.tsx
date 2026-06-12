@@ -40,6 +40,9 @@ function LoginErrorHandler({
     return null;
 }
 
+/**
+ * Renders the LoginPage component.
+ */
 export default function LoginPage() {
     const { login } = useAuth();
     const router = useRouter();

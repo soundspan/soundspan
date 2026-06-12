@@ -6,6 +6,9 @@ interface LibraryAudiobooksGridProps {
     audiobooks: Audiobook[];
 }
 
+/**
+ * Renders the LibraryAudiobooksGrid component.
+ */
 export function LibraryAudiobooksGrid({
     audiobooks,
 }: LibraryAudiobooksGridProps) {

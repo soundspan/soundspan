@@ -17,6 +17,9 @@ interface PodcastHeroProps {
     children?: ReactNode;
 }
 
+/**
+ * Renders the PodcastHero component.
+ */
 export function PodcastHero({
     title,
     author,

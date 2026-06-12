@@ -1,0 +1,205 @@
+version: acm.tests.v1
+defaults:
+  cwd: .
+  timeout_sec: 900
+tests:
+  - id: context-smoke
+    summary: Ensure ACM can return scoped context for soundspan
+    command:
+      argv: ["acm", "context", "--project", "soundspan", "--task-text", "soundspan ACM smoke test", "--phase", "plan"]
+    select:
+      always_run: true
+    expected:
+      exit_code: 0
+
+  - id: acm-health
+    summary: Ensure the ACM repo contract and workflow gates remain healthy
+    command:
+      argv: ["acm", "health", "--project", "soundspan", "--include-details"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        [
+          "AGENTS.md",
+          "CLAUDE.md",
+          ".acm/**",
+          ".claude/**",
+          ".githooks/**",
+          ".gitignore",
+          ".env.example",
+          "CONTRIBUTING.md",
+          "docs/README.md",
+          "docs/TESTING.md",
+          "scripts/acm-backend-targeted-verify.sh",
+          ".github/workflows/pr-checks.yml",
+          ".github/workflows/quality-visibility.yml",
+          ".github/PULL_REQUEST_TEMPLATE.md",
+          "scripts/acm-cross-review.sh"
+        ]
+    expected:
+      exit_code: 0
+
+  - id: acm-cross-review-help
+    summary: Ensure the ACM cross-review gate script parses and exposes help
+    command:
+      argv: ["bash", "scripts/acm-cross-review.sh", "--help"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["scripts/acm-cross-review.sh", ".acm/acm-workflows.yaml"]
+    expected:
+      exit_code: 0
+
+  - id: acm-cross-review-provider-flags
+    summary: Ensure the ACM cross-review gate script covers shared yolo and provider flags
+    command:
+      argv: ["python3", "scripts/test_acm_cross_review.py"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["scripts/acm-cross-review.sh", "scripts/test_acm_cross_review.py", ".acm/acm-workflows.yaml", ".acm/acm-tests.yaml"]
+    expected:
+      exit_code: 0
+
+  - id: acm-backend-targeted-verify-help
+    summary: Ensure the ACM targeted backend verify script parses and exposes help
+    command:
+      argv: ["bash", "scripts/acm-backend-targeted-verify.sh", "--help"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        ["scripts/acm-backend-targeted-verify.sh", ".acm/acm-tests.yaml", ".acm/acm-workflows.yaml"]
+    expected:
+      exit_code: 0
+
+  - id: acm-feature-plan-help
+    summary: Ensure the ACM feature-plan validator exposes help
+    command:
+      argv: ["python3", "scripts/acm-feature-plan-validate.py", "--help"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["scripts/acm-feature-plan-validate.py"]
+    expected:
+      exit_code: 0
+
+  - id: acm-feature-plan-validate
+    summary: Validate the repo-local ACM feature plan schema for active feature work
+    command:
+      argv: ["python3", "scripts/acm-feature-plan-validate.py"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        [
+          "backend/**",
+          "charts/**",
+          "docker-compose*.yml",
+          "frontend/**",
+          "package-lock.json",
+          "package.json",
+          "packages/**",
+          "services/**"
+        ]
+    expected:
+      exit_code: 0
+
+  - id: backend-targeted-tests
+    summary: Run receipt-scoped targeted backend Jest tests
+    command:
+      argv: ["bash", "scripts/acm-backend-targeted-verify.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: frontend-lint
+    summary: Run frontend ESLint checks
+    command:
+      argv: ["npm", "--prefix", "frontend", "run", "lint"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: frontend-build
+    summary: Run the frontend production build
+    command:
+      argv: ["npm", "--prefix", "frontend", "run", "build"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: frontend-targeted-coverage
+    summary: Run targeted frontend coverage checks
+    command:
+      argv: ["npm", "--prefix", "frontend", "run", "test:coverage"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/**", "packages/media-metadata-contract/**"]
+    expected:
+      exit_code: 0
+
+  - id: helm-chart-render-check
+    summary: Lint and render the Helm chart contract
+    command:
+      argv: ["./scripts/helm-chart-render-check.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        ["charts/**", "scripts/helm-chart-render-check.sh", ".github/workflows/helm-chart-release.yml"]
+    expected:
+      exit_code: 0
+
+  # ── Knowledge-layer drift checks ──────────────────────────────────
+
+  - id: architecture-freshness
+    summary: Check ARCHITECTURE.md is reviewed after topology changes
+    command:
+      argv: ["bash", "scripts/docs/check-architecture-freshness.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        ["docker-compose.yml", "docker-compose.*.yml", "backend/src/routes/**", "backend/src/services/**"]
+    expected:
+      exit_code: 0
+
+  - id: data-model-drift
+    summary: Check DATA_MODEL.md is reviewed after schema changes
+    command:
+      argv: ["bash", "scripts/docs/check-data-model-drift.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/prisma/schema.prisma"]
+    expected:
+      exit_code: 0
+
+  - id: feature-index-coverage
+    summary: All frontend feature dirs are mapped in FEATURE_INDEX.json
+    command:
+      argv: ["bash", "scripts/docs/check-feature-index.sh"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["frontend/features/**", "docs/FEATURE_INDEX.json"]
+    expected:
+      exit_code: 0
+
+  - id: routes-readme-drift
+    summary: Routes README lists all route modules
+    command:
+      argv: ["bash", "scripts/docs/check-domain-readmes.sh", "routes"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/src/routes/**"]
+    expected:
+      exit_code: 0
+
+  - id: services-readme-drift
+    summary: Services README lists all service modules
+    command:
+      argv: ["bash", "scripts/docs/check-domain-readmes.sh", "services"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["backend/src/services/**"]
+    expected:
+      exit_code: 0

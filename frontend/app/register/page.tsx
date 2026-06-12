@@ -30,6 +30,9 @@ function InviteCodePrefill({
     return null;
 }
 
+/**
+ * Renders the RegisterPage component.
+ */
 export default function RegisterPage() {
     const router = useRouter();
     const [inviteCode, setInviteCode] = useState("");

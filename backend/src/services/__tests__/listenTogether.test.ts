@@ -98,6 +98,7 @@ describe("listenTogether service", () => {
         jest.doMock("../listenTogetherManager", () => ({
             groupManager,
             GroupError: MockGroupError,
+            MAX_QUEUE_SIZE: 500,
         }));
         jest.doMock("../listenTogetherStateStore", () => ({
             listenTogetherStateStore,
@@ -1157,6 +1158,39 @@ describe("listenTogether service", () => {
 
         expect(prisma.syncGroup.update).not.toHaveBeenCalled();
         jest.useRealTimers();
+    });
+
+    it("truncates queue inputs to MAX_QUEUE_SIZE before validation on create", async () => {
+        const { listenTogether, prisma, groupManager, listenTogetherStateStore } =
+            loadService();
+
+        prisma.syncGroupMember.findFirst.mockResolvedValueOnce(null);
+        prisma.syncGroup.findUnique.mockResolvedValueOnce(null);
+        // Return empty — we only care about the input length passed to findMany
+        prisma.track.findMany.mockResolvedValueOnce([]);
+
+        const tx = {
+            syncGroup: {
+                create: jest.fn(async () => ({
+                    id: "group-trunc",
+                    name: "Trunc Group",
+                    joinCode: "TRUNC1",
+                })),
+            },
+            syncGroupMember: { create: jest.fn(async () => ({})) },
+        };
+        prisma.$transaction.mockImplementationOnce(async (fn: any) => fn(tx));
+
+        const trackIds = Array.from({ length: 700 }, (_, i) => `t-${i}`);
+
+        await listenTogether.createGroup("host-1", "Host", {
+            queueTrackIds: trackIds,
+        });
+
+        // validateQueueTracks should have received at most 500 inputs,
+        // so findMany is called with at most 500 unique IDs
+        const findManyCall = prisma.track.findMany.mock.calls[0]?.[0];
+        expect(findManyCall?.where?.id?.in?.length).toBeLessThanOrEqual(500);
     });
 
     it("creates groups with empty validated queue and non-finite time coercion", async () => {

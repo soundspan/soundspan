@@ -6,12 +6,12 @@ import crypto from "crypto";
 
 const router = Router();
 
-// Generate a random 6-character alphanumeric code
+// Generate a random 6-character alphanumeric code using crypto.randomInt()
 function generateLinkCode(): string {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude similar looking chars
     let code = "";
     for (let i = 0; i < 6; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
+        code += chars.charAt(crypto.randomInt(0, chars.length));
     }
     return code;
 }

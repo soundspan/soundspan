@@ -64,6 +64,25 @@ class SpotifyService {
     private anonymousToken: string | null = null;
     private tokenExpiry: number = 0;
     private tokenRefreshPromise: Promise<string | null> | null = null;
+    private lastTokenEndpointFailureLogAt: number = 0;
+    private static readonly TOKEN_FAILURE_LOG_WINDOW_MS = 5 * 60 * 1000;
+
+    private logTokenEndpointFailure(): void {
+        const now = Date.now();
+        if (
+            now - this.lastTokenEndpointFailureLogAt >
+            SpotifyService.TOKEN_FAILURE_LOG_WINDOW_MS
+        ) {
+            logger.warn(
+                "Spotify: All token endpoints failed; API browsing unavailable, continuing with fallback providers."
+            );
+        } else {
+            logger.debug(
+                "Spotify: Token endpoints still unavailable; fallback providers remain active."
+            );
+        }
+        this.lastTokenEndpointFailureLogAt = now;
+    }
 
     /**
      * Get anonymous access token from Spotify web player
@@ -136,7 +155,7 @@ class SpotifyService {
             }
         }
 
-        logger.error("Spotify: All token endpoints failed - API browsing unavailable");
+        this.logTokenEndpointFailure();
         return null;
     }
 
@@ -531,6 +550,129 @@ class SpotifyService {
         return albumMap;
     }
 
+    private decodeHtmlEntities(value: string): string {
+        return value
+            .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex: string) =>
+                String.fromCharCode(parseInt(hex, 16))
+            )
+            .replace(/&#(\d+);/g, (_match, dec: string) =>
+                String.fromCharCode(parseInt(dec, 10))
+            )
+            .replace(/&amp;/g, "&")
+            .replace(/&quot;/g, "\"")
+            .replace(/&apos;/g, "'")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&nbsp;/g, " ");
+    }
+
+    private stripHtmlContent(value: string): string {
+        const withoutTags = value.replace(/<[^>]+>/g, " ");
+        return this.decodeHtmlEntities(withoutTags).replace(/\s+/g, " ").trim();
+    }
+
+    private parseDurationLabelToMs(label: string): number {
+        const parts = label
+            .trim()
+            .split(":")
+            .map((part) => Number.parseInt(part, 10));
+        if (parts.some((part) => Number.isNaN(part) || part < 0)) {
+            return 0;
+        }
+
+        if (parts.length === 2) {
+            return (parts[0] * 60 + parts[1]) * 1000;
+        }
+        if (parts.length === 3) {
+            return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+        }
+        return 0;
+    }
+
+    private parseEmbedTrackRows(
+        playlistId: string,
+        html: string
+    ): SpotifyPlaylist | null {
+        const tracks: SpotifyTrack[] = [];
+        const rowPattern =
+            /<li[^>]*data-testid="tracklist-row-\d+"[^>]*>([\s\S]*?)<\/li>/g;
+        let rowMatch: RegExpExecArray | null;
+
+        while ((rowMatch = rowPattern.exec(html)) !== null) {
+            const rowContent = rowMatch[1];
+            const titleMatch = rowContent.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+            const artistMatch = rowContent.match(/<h4[^>]*>([\s\S]*?)<\/h4>/i);
+            if (!titleMatch || !artistMatch) {
+                continue;
+            }
+
+            const title = this.stripHtmlContent(titleMatch[1]);
+            const artistContent = artistMatch[1].replace(
+                /^\s*<span[^>]*>[\s\S]*?<\/span>\s*/i,
+                ""
+            );
+            const artist = this.stripHtmlContent(artistContent);
+            if (!title || !artist) {
+                continue;
+            }
+
+            const durationMatch = rowContent.match(
+                /data-testid="duration-cell"[^>]*>([^<]+)</i
+            );
+            const durationMs = durationMatch
+                ? this.parseDurationLabelToMs(
+                      this.decodeHtmlEntities(durationMatch[1])
+                  )
+                : 0;
+
+            const index = tracks.length;
+            tracks.push({
+                spotifyId: `${playlistId}:${index}`,
+                title,
+                artist,
+                artistId: "",
+                album: "Unknown Album",
+                albumId: "",
+                isrc: null,
+                durationMs,
+                trackNumber: index + 1,
+                previewUrl: null,
+                coverUrl: null,
+            });
+        }
+
+        if (tracks.length === 0) {
+            return null;
+        }
+
+        const metadataMatch = html.match(
+            /<span[^>]*>([^<]+)<\/span>\s*<span[^>]*>\s*(?:·|&middot;|&#183;)\s*<\/span>\s*<span[^>]*>([^<]+)<\/span>/i
+        );
+        const playlistName = metadataMatch
+            ? this.stripHtmlContent(metadataMatch[1])
+            : "Unknown Playlist";
+        const playlistOwner = metadataMatch
+            ? this.stripHtmlContent(metadataMatch[2])
+            : "Unknown";
+        const imageMatch = html.match(
+            /--image-src:url\((?:&#x27;|&#39;|["'])?([^"')]+)(?:&#x27;|&#39;|["'])?\)/i
+        );
+        const imageUrl = imageMatch
+            ? this.decodeHtmlEntities(imageMatch[1])
+            : null;
+
+        return {
+            id: playlistId,
+            name: playlistName || "Unknown Playlist",
+            description: null,
+            owner: playlistOwner || "Unknown",
+            imageUrl,
+            trackCount: tracks.length,
+            tracks,
+            isPublic: true,
+        };
+    }
+
     /**
      * Fetch playlist via anonymous token
      */
@@ -695,23 +837,32 @@ class SpotifyService {
                 }
             );
 
-            const html = response.data;
+            const html =
+                typeof response.data === "string"
+                    ? response.data
+                    : String(response.data ?? "");
             const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
-            
+
             if (!match) {
                 logger.error("Spotify: Could not find __NEXT_DATA__ in embed HTML");
-                return null;
+                return this.parseEmbedTrackRows(playlistId, html);
             }
 
-            const data = JSON.parse(match[1]);
-            
+            let data: any;
+            try {
+                data = JSON.parse(match[1]);
+            } catch {
+                logger.error("Spotify: Failed to parse __NEXT_DATA__ payload");
+                return this.parseEmbedTrackRows(playlistId, html);
+            }
+
             const playlistData = data.props?.pageProps?.state?.data?.entity 
                 || data.props?.pageProps?.state?.data 
                 || data.props?.pageProps;
 
             if (!playlistData) {
                 logger.error("Spotify: Could not find playlist data in embed JSON");
-                return null;
+                return this.parseEmbedTrackRows(playlistId, html);
             }
 
             const tracks: SpotifyTrack[] = [];

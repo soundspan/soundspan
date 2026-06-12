@@ -473,7 +473,6 @@ describe("podcasts discovery runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to preview podcast",
-            message: "itunes unavailable",
         });
     });
 });

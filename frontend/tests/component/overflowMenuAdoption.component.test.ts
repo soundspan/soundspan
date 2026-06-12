@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
     installTrackOverflowHarness,
     trackOverflowIcon,
-} from "../trackOverflowHarness.ts";
+} from "../trackOverflowHarness";
 
 /**
  * Component tests verifying TrackOverflowMenu adoption across priority views.
@@ -28,7 +28,6 @@ const state = {
     currentTrack: null as { id: string } | null,
     isPlaying: false,
     routerPushPath: null as string | null,
-    isInListenTogetherGroup: false,
     queuedTrackIds: new Set<string>(),
 };
 
@@ -305,7 +304,6 @@ beforeEach(() => {
     state.currentTrack = null;
     state.isPlaying = false;
     state.routerPushPath = null;
-    state.isInListenTogetherGroup = false;
     state.queuedTrackIds = new Set();
 });
 
@@ -313,7 +311,7 @@ beforeEach(() => {
 
 test("Library TracksList renders TrackOverflowMenu trigger on each row", async () => {
     const { TracksList } = await import(
-        "../../features/library/components/TracksList.tsx"
+        "../../features/library/components/TracksList"
     );
 
     const tracks = [
@@ -335,8 +333,6 @@ test("Library TracksList renders TrackOverflowMenu trigger on each row", async (
         React.createElement(TracksList, {
             tracks,
             onPlay: () => undefined,
-            onAddToQueue: () => undefined,
-            onAddToPlaylist: () => undefined,
             onDelete: () => undefined,
             canDelete: true,
         })
@@ -353,7 +349,7 @@ test("Library TracksList renders TrackOverflowMenu trigger on each row", async (
 
 test("Library TracksList no longer renders inline Add to Queue / Add to Playlist buttons", async () => {
     const { TracksList } = await import(
-        "../../features/library/components/TracksList.tsx"
+        "../../features/library/components/TracksList"
     );
 
     const tracks = [
@@ -369,8 +365,6 @@ test("Library TracksList no longer renders inline Add to Queue / Add to Playlist
         React.createElement(TracksList, {
             tracks,
             onPlay: () => undefined,
-            onAddToQueue: () => undefined,
-            onAddToPlaylist: () => undefined,
             onDelete: () => undefined,
             canDelete: false,
         })
@@ -386,7 +380,7 @@ test("Library TracksList no longer renders inline Add to Queue / Add to Playlist
 
 test("Discover TrackList renders TrackOverflowMenu trigger on each row", async () => {
     const { TrackList } = await import(
-        "../../features/discover/components/TrackList.tsx"
+        "../../features/discover/components/TrackList"
     );
 
     const tracks = [
@@ -409,6 +403,7 @@ test("Discover TrackList renders TrackOverflowMenu trigger on each row", async (
     const html = renderToStaticMarkup(
         React.createElement(TrackList, {
             tracks,
+            isMatching: false,
             currentTrack: null,
             isPlaying: false,
             onPlayTrack: () => undefined,
@@ -425,7 +420,7 @@ test("Discover TrackList renders TrackOverflowMenu trigger on each row", async (
 
 test("Album TrackList renders TrackOverflowMenu trigger instead of inline menu", async () => {
     const { TrackList } = await import(
-        "../../features/album/components/TrackList.tsx"
+        "../../features/album/components/TrackList"
     );
 
     const album = {
@@ -455,12 +450,9 @@ test("Album TrackList renders TrackOverflowMenu trigger instead of inline menu",
             currentTrackId: undefined,
             colors: null,
             onPlayTrack: () => undefined,
-            onAddToQueue: () => undefined,
-            onAddToPlaylist: () => undefined,
             previewTrack: null,
             previewPlaying: false,
             onPreview: () => undefined,
-            isInListenTogetherGroup: false,
         })
     );
 

@@ -85,6 +85,9 @@ function getRelaxedArtistCapForTarget(targetCount: number): number {
     return Math.max(strictCap + 1, Math.ceil(targetCount / 6));
 }
 
+/**
+ * Represents the DiscoveryRecommendationsService class.
+ */
 export class DiscoveryRecommendationsService {
     private async getOrCreateUserConfig(userId: string) {
         const existing = await prisma.userDiscoverConfig.findUnique({
@@ -306,7 +309,9 @@ export class DiscoveryRecommendationsService {
             select: { trackId: true },
             take: 5000,
         });
-        const recentTrackIds = recentPlays.map((play) => play.trackId);
+        const recentTrackIds = recentPlays
+            .map((play) => play.trackId)
+            .filter((trackId): trackId is string => typeof trackId === "string");
 
         const activeExclusions = await prisma.discoverExclusion.findMany({
             where: {

@@ -6,6 +6,9 @@ import { useDownloadContext } from "@/lib/download-context";
 import { ArtistSource } from "../types";
 import { useMemo, useEffect, useRef, useState, useCallback } from "react";
 
+/**
+ * Executes useArtistData.
+ */
 export function useArtistData() {
     const params = useParams();
     const id = params.id as string;

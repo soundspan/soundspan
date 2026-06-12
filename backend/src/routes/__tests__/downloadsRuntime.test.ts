@@ -1970,7 +1970,6 @@ describe("downloads routes runtime", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to delete download job",
-            details: "delete exploded",
         });
     });
 

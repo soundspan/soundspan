@@ -10,7 +10,7 @@ soundspan is built for people who want streaming convenience without giving up o
 
 > Gratitude: soundspan began from the foundation created by [`Chevron7Locked/kima-hub`](https://github.com/Chevron7Locked/kima-hub). Thank you for the original project and momentum!
 
-<a href="assets/screenshots/desktop-home.png"><img src="assets/screenshots/desktop-home.png" width="750"/></a>
+<a href="assets/screenshots/web-home.png"><img src="assets/screenshots/web-home.png" width="750"/></a>
 
 ---
 
@@ -22,16 +22,16 @@ soundspan is built for people who want streaming convenience without giving up o
 - Podcast search/subscribe via RSS with resume, played-state tracking, and mobile skip controls
 - Audiobookshelf integration with unified browsing/playback and progress sync
 - Programmatic playlist generation, artist-diversity balancing, and library radio stations
-- Synced lyrics, source/quality badges, and overhauled desktop/mobile/overlay player flows
+- Synced lyrics, source/quality badges, and overhauled browser/PWA/overlay player flows
 - Multiple users with isolated libraries, admin roles, optional 2FA, and Listen Together group sessions
-- Deezer previews plus Spotify/Deezer playlist import flows
+- Deezer previews plus Spotify/Deezer playlist import flows and provider track mapping APIs
 - OpenSubsonic-compatible `/rest` API surface for third-party client access
 
-<a href="assets/screenshots/desktop-library.png"><img src="assets/screenshots/desktop-library.png" width="750" alt="Library view"/></a>
+<a href="assets/screenshots/web-library.png"><img src="assets/screenshots/web-library.png" width="750" alt="Library view"/></a>
 
-<a href="assets/screenshots/desktop-mood-mixer.png"><img src="assets/screenshots/desktop-mood-mixer.png" width="750" alt="Mood mixer"/></a>
+<a href="assets/screenshots/web-explore.png"><img src="assets/screenshots/web-explore.png" width="750" alt="Explore!"/></a>
 
-<a href="assets/screenshots/desktop-player-lyrics.png"><img src="assets/screenshots/desktop-player-lyrics.png" width="750" alt="Player overlay with lyrics and quality badges"/></a>
+<a href="assets/screenshots/web-player-lyrics.png"><img src="assets/screenshots/web-player-lyrics.png" width="750" alt="Player overlay with lyrics and quality badges"/></a>
 
 For the full feature list and release notes, see [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -97,23 +97,26 @@ soundspan supports optional integrations for discovery, downloads, and client co
 
 Full setup guides are documented in [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
+### Integration API quick reference
+
+All integration endpoints below require soundspan auth (session or API key where supported) and admin-enabled integrations.
+
+| Area | Endpoints |
+| --- | --- |
+| YouTube Music browse (OAuth-free) | `GET /api/browse/ytmusic/charts`, `GET /api/browse/ytmusic/categories`, `GET /api/browse/ytmusic/playlist/:id` |
+| YouTube Music public stream (OAuth-free) | `GET /api/ytmusic/stream-info-public/:videoId`, `GET /api/ytmusic/stream-public/:videoId` |
+| YouTube Music search/match (OAuth-free sidecar clients) | `POST /api/ytmusic/search`, `POST /api/ytmusic/match`, `POST /api/ytmusic/match-batch` |
+| Mapping/import APIs | `POST /api/browse/playlists/parse`, `GET /api/track-mappings/album/:albumId`, `POST /api/track-mappings/batch`, `POST /api/import/preview`, `POST /api/import/execute` |
+
 ---
 
-## Mobile Support
+## Web & PWA
 
-### Progressive Web App (PWA)
+soundspan is browser-first. Use it from your desktop or mobile browser, or install it through your browser's PWA flow for app-like behavior, background playback, media controls, and faster repeat loads.
 
-Install soundspan as a PWA from your browser install flow for app-like behavior, background playback, media controls, and faster repeat loads.
+### OpenSubsonic clients
 
-PWA is the only current first-party mobile direction. soundspan does not currently ship a native iOS/Android app.
-
-#### Known issues
-
-iOS PWA users may experience playback stopping or failing to resume after the device lock screen activates. Set `HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED=true` on your frontend container to enable iOS-specific audio-session workarounds. See [`docs/ENVIRONMENT_VARIABLES.md`](docs/ENVIRONMENT_VARIABLES.md) for details.
-
-### Subsonic-compatible apps
-
-For mobile native clients, use Subsonic-compatible apps through soundspan's OpenSubsonic `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
+For third-party clients, use OpenSubsonic-compatible apps through soundspan's `/rest` interface (see [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md)).
 
 ### Android TV
 
@@ -125,38 +128,28 @@ soundspan includes a TV-optimized browser interface with D-pad/remote navigation
 
 soundspan consists of several cooperating services:
 
-```
-                                   ┌─────────────────┐
-                                   │   Your Browser  │
-                                   └────────┬────────┘
-                                            │
-                                            ▼
-                                 ┌─────────────────────┐
-                                 │     Frontend        │
-                                 │   (Next.js :3030)   │
-                                 └──────────┬──────────┘
-                                            │
-                                            ▼
-┌─────────────────┐              ┌─────────────────────┐              ┌─────────────────┐
-│  Music Library  │◄────────────►│      Backend        │◄────────────►│  YT Music       │
-│   (Your Files)  │              │  (Express.js :3006) │              │ :8586 (Opt.)    │
-└─────────────────┘              └──────────┬──────────┘              └─────────────────┘
-┌─────────────────┐                         │                         ┌─────────────────┐
-│    Lidarr       │◄────────────────────────┤                         │  TIDAL Sidecar  │
-│   (Optional)    │                         ├────────────────────────►│ :8585 (Opt.)    │
-└─────────────────┘                         │                         └─────────────────┘
-┌─────────────────┐                         │
-│ Audiobookshelf  │◄────────────────────────┘
-│   (Optional)    │                         |
-└─────────────────┘                         |
-                                 ┌──────────┴──────────┐
-                                 │  ┌───────────────┐  │
-                                 │  │  PostgreSQL   │  │
-                                 │  └───────────────┘  │
-                                 │  ┌───────────────┐  │
-                                 │  │     Redis     │  │
-                                 │  └───────────────┘  │
-                                 └─────────────────────┘
+```mermaid
+graph TD
+    Browser["Your Browser"]
+    FE["Frontend<br/>(Next.js :3030)"]
+    BE["Backend<br/>(Express.js :3006)"]
+    Music["Music Library<br/>(Your Files)"]
+    PG["PostgreSQL"]
+    RD["Redis"]
+    YT["YT Music<br/>:8586 (Opt.)"]
+    TD["TIDAL Sidecar<br/>:8585 (Opt.)"]
+    Lidarr["Lidarr<br/>(Optional)"]
+    ABS["Audiobookshelf<br/>(Optional)"]
+
+    Browser --> FE
+    FE --> BE
+    Music <--> BE
+    BE <--> YT
+    BE <--> TD
+    BE <--> Lidarr
+    BE <--> ABS
+    BE --> PG
+    BE --> RD
 ```
 
 | Component | Purpose | Default Port |
@@ -175,7 +168,6 @@ soundspan consists of several cooperating services:
 ## Roadmap
 
 - Offline playback mode
-- Standalone Windows-friendly distribution path
 
 ---
 

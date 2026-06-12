@@ -15,6 +15,8 @@ export interface UserSettings {
     offlineEnabled: boolean;
     maxCacheSizeMb: number;
     // YouTube Music (per-user)
+    showYtMusicExplore: boolean;
+    showTidalExplore: boolean;
     ytMusicOAuthJson?: string;
     ytMusicQuality: "LOW" | "MEDIUM" | "HIGH" | "LOSSLESS";
     // Per-user TIDAL streaming

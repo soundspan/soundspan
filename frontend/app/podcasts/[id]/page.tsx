@@ -15,6 +15,9 @@ import { EpisodeList } from "@/features/podcast/components/EpisodeList";
 import { PreviewEpisodes } from "@/features/podcast/components/PreviewEpisodes";
 import { SimilarPodcasts } from "@/features/podcast/components/SimilarPodcasts";
 
+/**
+ * Renders the PodcastDetailPage component.
+ */
 export default function PodcastDetailPage() {
     // Data hook
     const {

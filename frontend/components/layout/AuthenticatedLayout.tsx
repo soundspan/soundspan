@@ -22,7 +22,11 @@ import { useActivityPanel } from "@/hooks/useActivityPanel";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 
 const publicPaths = ["/login", "/register", "/onboarding", "/sync"];
+const publicPrefixes = ["/share/"];
 
+/**
+ * Renders the AuthenticatedLayout component.
+ */
 export function AuthenticatedLayout({ children }: { children: ReactNode }) {
     const { isAuthenticated, isLoading } = useAuth();
     const pathname = usePathname();
@@ -64,7 +68,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
         };
     }, [activityPanel]);
 
-    const isPublicPage = publicPaths.includes(pathname);
+    const isPublicPage = publicPaths.includes(pathname) || publicPrefixes.some((prefix) => pathname.startsWith(prefix));
 
     // Show loading state only on protected pages
     if (!isPublicPage && isLoading) {

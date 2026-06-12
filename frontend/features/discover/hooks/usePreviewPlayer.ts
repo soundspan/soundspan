@@ -4,6 +4,9 @@ import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 
 const playbackEngine = createRuntimeAudioEngine();
 
+/**
+ * Executes usePreviewPlayer.
+ */
 export function usePreviewPlayer() {
     const [currentPreview, setCurrentPreview] = useState<string | null>(null);
     const [previewAudios, setPreviewAudios] = useState<

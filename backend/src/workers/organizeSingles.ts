@@ -33,7 +33,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         try {
             fs.writeFileSync(migrationMarker, new Date().toISOString());
         } catch (e) {
-            // Ignore write errors
+            logger.debug("Failed to write migration marker (no soulseek dir)", e);
         }
         return;
     }
@@ -59,7 +59,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
                 }
             }
         } catch (e) {
-            // Ignore read errors
+            logger.warn(`Failed to read directory ${dir}`, e);
         }
         return files;
     }
@@ -71,7 +71,7 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
         try {
             fs.writeFileSync(migrationMarker, new Date().toISOString());
         } catch (e) {
-            // Ignore
+            logger.debug("Failed to write migration marker (no audio files)", e);
         }
         return;
     }
@@ -160,14 +160,14 @@ async function migrateExistingSoulseekFiles(musicPath: string): Promise<void> {
             sessionLog('ORGANIZE', 'Removed empty Soulseek folder');
         }
     } catch (e) {
-        // Ignore cleanup errors
+        logger.warn("Failed to clean up empty Soulseek directories", e);
     }
 
     // Mark migration as complete
     try {
         fs.writeFileSync(migrationMarker, new Date().toISOString());
     } catch (e) {
-        // Ignore
+        logger.warn("Failed to write migration complete marker", e);
     }
 
     sessionLog('ORGANIZE', `Migration complete: ${migrated}/${audioFiles.length} files moved to Singles`);
@@ -230,7 +230,7 @@ export async function organizeSingles(): Promise<void> {
                 musicPath = match[1].trim().replace(/^["']|["']$/g, "");
             }
         } catch (error) {
-            // .env file doesn't exist or can't be read
+            logger.debug("Could not read .env file for MUSIC_PATH", error);
         }
     }
 

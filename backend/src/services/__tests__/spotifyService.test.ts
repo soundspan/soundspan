@@ -1,6 +1,7 @@
 import axios from "axios";
 import { spotifyService } from "../spotify";
 import { deezerService } from "../deezer";
+import { logger } from "../../utils/logger";
 
 jest.mock("axios");
 
@@ -27,6 +28,8 @@ jest.mock("../rateLimiter", () => ({
 
 const mockAxiosGet = axios.get as jest.Mock;
 const mockDeezerTrackAlbum = deezerService.getTrackAlbum as jest.Mock;
+const mockLoggerWarn = logger.warn as jest.Mock;
+const mockLoggerDebug = logger.debug as jest.Mock;
 
 function makeTokenResponse(token: string) {
     return {
@@ -43,6 +46,7 @@ describe("spotifyService", () => {
         svc.anonymousToken = null;
         svc.tokenExpiry = 0;
         svc.tokenRefreshPromise = null;
+        svc.lastTokenEndpointFailureLogAt = 0;
     });
 
     it("coalesces concurrent anonymous token refreshes", async () => {
@@ -101,6 +105,22 @@ describe("spotifyService", () => {
 
         expect(mockAxiosGet).toHaveBeenCalledTimes(2);
         expect(token).toBeNull();
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            "Spotify: All token endpoints failed; API browsing unavailable, continuing with fallback providers."
+        );
+    });
+
+    it("throttles repeated token-endpoint failure logs", async () => {
+        const svc = spotifyService as any;
+        mockAxiosGet.mockRejectedValue(new Error("all down"));
+
+        await svc.performTokenRefresh();
+        await svc.performTokenRefresh();
+
+        expect(mockLoggerWarn).toHaveBeenCalledTimes(1);
+        expect(mockLoggerDebug).toHaveBeenCalledWith(
+            "Spotify: Token endpoints still unavailable; fallback providers remain active."
+        );
     });
 
     it("refreshes a token when the cached token is inside the safety window", async () => {
@@ -799,6 +819,74 @@ describe("spotifyService", () => {
             "embed-missing"
         );
         expect(playlist).toBeNull();
+    });
+
+    it("parses embed track rows when NEXT_DATA is unavailable", async () => {
+        mockAxiosGet.mockResolvedValueOnce({
+            data: `
+                <html>
+                    <div class="CondensedMetadata_condensedMetadataContainer__egWwQ">
+                        <span>Row Fallback Playlist</span>
+                        <span>·</span>
+                        <span>Spotify</span>
+                    </div>
+                    <ol>
+                        <li data-testid="tracklist-row-0">
+                            <h3>First Song</h3>
+                            <h4>First Artist</h4>
+                            <div data-testid="duration-cell">03:24</div>
+                        </li>
+                        <li data-testid="tracklist-row-1">
+                            <h3>Second Song</h3>
+                            <h4><span>E</span>Second Artist</h4>
+                            <div data-testid="duration-cell">01:05:07</div>
+                        </li>
+                    </ol>
+                </html>
+            `,
+        });
+
+        const playlist = await (spotifyService as any).fetchPlaylistViaEmbedHtml(
+            "embed-row-fallback"
+        );
+
+        expect(playlist).toEqual({
+            id: "embed-row-fallback",
+            name: "Row Fallback Playlist",
+            description: null,
+            owner: "Spotify",
+            imageUrl: null,
+            trackCount: 2,
+            tracks: [
+                {
+                    spotifyId: "embed-row-fallback:0",
+                    title: "First Song",
+                    artist: "First Artist",
+                    artistId: "",
+                    album: "Unknown Album",
+                    albumId: "",
+                    isrc: null,
+                    durationMs: 204000,
+                    trackNumber: 1,
+                    previewUrl: null,
+                    coverUrl: null,
+                },
+                {
+                    spotifyId: "embed-row-fallback:1",
+                    title: "Second Song",
+                    artist: "Second Artist",
+                    artistId: "",
+                    album: "Unknown Album",
+                    albumId: "",
+                    isrc: null,
+                    durationMs: 3907000,
+                    trackNumber: 2,
+                    previewUrl: null,
+                    coverUrl: null,
+                },
+            ],
+            isPublic: true,
+        });
     });
 
     it("returns empty arrays when token acquisition fails for browse APIs", async () => {

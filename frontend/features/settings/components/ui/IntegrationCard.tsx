@@ -22,6 +22,9 @@ interface IntegrationCardProps {
     children?: ReactNode;
 }
 
+/**
+ * Renders the IntegrationCard component.
+ */
 export function IntegrationCard({
     icon,
     title,

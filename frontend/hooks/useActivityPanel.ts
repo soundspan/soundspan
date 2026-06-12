@@ -5,7 +5,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 const ACTIVITY_PANEL_KEY = "soundspan_activity_panel_open";
 
-export type ActivityPanelTab = "notifications" | "active" | "history" | "social";
+export type ActivityPanelTab = "notifications" | "active" | "history" | "imports" | "social";
 
 export interface UseActivityPanelReturn {
     isOpen: boolean;
@@ -16,6 +16,9 @@ export interface UseActivityPanelReturn {
     close: () => void;
 }
 
+/**
+ * Executes useActivityPanel.
+ */
 export function useActivityPanel(): UseActivityPanelReturn {
     const [isOpen, setIsOpen] = useState(() => {
         if (typeof window === "undefined") return false;

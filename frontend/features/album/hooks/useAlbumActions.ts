@@ -1,15 +1,17 @@
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { TrackPreferenceSignal } from "@/lib/api";
+import type { TrackPreferenceResponse, TrackPreferenceSignal } from "@/lib/api";
 import { useAudioControls } from "@/lib/audio-context";
-import { useListenTogether } from "@/lib/listen-together-context";
 import { useDownloadContext } from "@/lib/download-context";
 import { buildOptimisticTrackPreferenceResponse } from "@/hooks/trackPreferenceOptimistic";
 import { shuffleArray } from "@/utils/shuffle";
 import { toast } from "sonner";
 import { Album, Track } from "../types";
 
+/**
+ * Executes useAlbumActions.
+ */
 export function useAlbumActions() {
     const queryClient = useQueryClient();
     const [isApplyingAlbumPreference, setIsApplyingAlbumPreference] =
@@ -22,7 +24,6 @@ export function useAlbumActions() {
         addToQueue: addToQueueAudio,
         addTracksToQueue: addTracksToQueueAudio,
     } = useAudioControls();
-    const { isInGroup } = useListenTogether();
     const { addPendingDownload, isPendingByMbid } = useDownloadContext();
 
     const toPlaybackTrack = (track: Track, album: Album) => ({
@@ -128,18 +129,7 @@ export function useAlbumActions() {
             return;
         }
 
-        if (isInGroup) {
-            playTracks(formattedTracks, 0);
-            return;
-        }
-
-        addTracksToQueueAudio(formattedTracks, { silent: true });
-
-        toast.success(
-            formattedTracks.length === 1
-                ? "Added 1 track to queue"
-                : `Added ${formattedTracks.length} tracks to queue`
-        );
+        addTracksToQueueAudio(formattedTracks);
     };
 
     const downloadAlbum = async (album: Album | null, e?: React.MouseEvent) => {
@@ -225,6 +215,9 @@ export function useAlbumActions() {
                 );
             }
 
+            // Refresh the liked-playlist sidebar count
+            queryClient.invalidateQueries({ queryKey: ["library", "liked-playlist"] });
+
             if (signal === "thumbs_up") {
                 toast.success(
                     trackIds.length === 1 ?
@@ -262,4 +255,37 @@ export function useAlbumActions() {
         setAlbumPreference,
         isApplyingAlbumPreference,
     };
+}
+
+/**
+ * Derives whether every track on an album is liked (thumbs_up) by reading
+ * each track's preference from the React Query cache.  Subscribes to cache
+ * updates so the heart fills/unfills reactively.
+ */
+export function useAlbumLikedState(album: Album | null) {
+    const trackIds = useMemo(
+        () =>
+            (album?.tracks || [])
+                .map((t) => t.id)
+                .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
+        [album?.tracks]
+    );
+
+    const prefQueries = useQueries({
+        queries: trackIds.map((trackId) => ({
+            queryKey: ["track-preference", trackId] as const,
+            queryFn: () => api.getTrackPreference(trackId),
+            staleTime: 120_000,
+            enabled: trackIds.length > 0,
+        })),
+    });
+
+    const isAlbumLiked = useMemo(() => {
+        if (trackIds.length === 0) return false;
+        return prefQueries.every(
+            (q) => (q.data as TrackPreferenceResponse | undefined)?.signal === "thumbs_up"
+        );
+    }, [trackIds.length, prefQueries]);
+
+    return isAlbumLiked;
 }

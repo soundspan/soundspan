@@ -19,12 +19,13 @@ interface SimilarArtist {
 
 class LastFmService {
     private client: AxiosInstance;
+    private readonly envApiKey: string;
     private apiKey: string;
     private initialized = false;
 
     constructor() {
-        // Initial value from .env (for backwards compatibility)
-        this.apiKey = config.lastfm.apiKey;
+        this.envApiKey = config.lastfm.apiKey;
+        this.apiKey = this.envApiKey;
         this.client = axios.create({
             baseURL: "https://ws.audioscrobbler.com/2.0/",
             timeout: 10000,
@@ -34,7 +35,8 @@ class LastFmService {
     private async ensureInitialized() {
         if (this.initialized) return;
 
-        // Priority: 1) User settings from DB, 2) env var, 3) default app key
+        // Priority: 1) User settings from DB, 2) env var, 3) disabled
+        this.apiKey = this.envApiKey;
         try {
             const { getSystemSettings } = await import(
                 "../utils/systemSettings"
@@ -44,12 +46,12 @@ class LastFmService {
                 this.apiKey = settings.lastfmApiKey;
                 logger.debug("Last.fm configured from user settings");
             } else if (this.apiKey) {
-                logger.debug("Last.fm configured (default app key)");
+                logger.debug("Last.fm configured from env");
             }
         } catch (err) {
-            // DB not ready yet, use default/env key
+            // DB not ready yet, use env key when provided
             if (this.apiKey) {
-                logger.debug("Last.fm configured (default app key)");
+                logger.debug("Last.fm configured from env");
             }
         }
 
@@ -72,6 +74,9 @@ class LastFmService {
 
     private async request<T = any>(params: Record<string, any>) {
         await this.ensureInitialized();
+        if (!this.apiKey) {
+            throw new Error("Last.fm API key not available");
+        }
         const response = await rateLimiter.execute("lastfm", () =>
             this.client.get<T>("/", { params })
         );

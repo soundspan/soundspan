@@ -22,6 +22,7 @@ const sidebarItems: SidebarItem[] = [
     { id: "ai-services", label: "Artwork" },
     { id: "storage", label: "Storage" },
     { id: "library-safety", label: "Library Safety" },
+    { id: "library-health", label: "Library Health" },
     { id: "cache", label: "Cache & Automation" },
     { id: "users", label: "Users" },
 ];
@@ -90,6 +91,14 @@ const LibrarySafetySection = dynamic(
     { loading: renderSectionFallback }
 );
 
+const LibraryHealthSection = dynamic(
+    () =>
+        import("@/features/settings/components/sections/LibraryHealthSection").then(
+            (mod) => mod.LibraryHealthSection
+        ),
+    { loading: renderSectionFallback }
+);
+
 const CacheSection = dynamic(
     () =>
         import("@/features/settings/components/sections/CacheSection").then(
@@ -108,6 +117,9 @@ const UserManagementSection = dynamic(
 
 const logger = createFrontendLogger("Admin.Page");
 
+/**
+ * Renders the AdminPage component.
+ */
 export default function AdminPage() {
     const { isAuthenticated, isLoading: authLoading, user } = useAuth();
     const router = useRouter();
@@ -261,6 +273,8 @@ export default function AdminPage() {
                     settings={systemSettings}
                     onUpdate={updateSystemSettings}
                 />
+
+                <LibraryHealthSection />
 
                 <CacheSection
                     settings={systemSettings}

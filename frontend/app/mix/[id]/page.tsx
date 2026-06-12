@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { api } from "@/lib/api";
 import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { CoverMosaic } from "@/components/ui/CoverMosaic";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { Play, Pause, Music, Shuffle, Save, ListPlus, Loader2 } from "lucide-react";
 import { cn } from "@/utils/cn";
@@ -31,6 +32,9 @@ interface MixTrack {
     };
 }
 
+/**
+ * Renders the MixPage component.
+ */
 export default function MixPage() {
     const params = useParams();
     const router = useRouter();
@@ -199,34 +203,11 @@ export default function MixPage() {
                 <div className="flex items-end gap-6">
                         {/* Cover Art Mosaic */}
                         <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
-                            {mix.coverUrls && mix.coverUrls.length > 0 ? (
-                                <div className="grid grid-cols-2 gap-0 w-full h-full">
-                                    {mix.coverUrls.slice(0, 4).map((url: string, index: number) => {
-                                        const proxiedUrl = api.getCoverArtUrl(url, 200);
-                                        return (
-                                            <div key={index} className="relative bg-[#181818]">
-                                                <Image
-                                                    src={proxiedUrl}
-                                                    alt=""
-                                                    fill
-                                                    className="object-cover"
-                                                    sizes="96px"
-                                                    unoptimized
-                                                />
-                                            </div>
-                                        );
-                                    })}
-                                    {Array.from({
-                                        length: Math.max(0, 4 - (mix.coverUrls?.length || 0)),
-                                    }).map((_, index) => (
-                                        <div key={`empty-${index}`} className="relative bg-[#282828]" />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <Music className="w-16 h-16 text-gray-600" />
-                                </div>
-                            )}
+                            <CoverMosaic
+                                coverUrls={(mix.coverUrls || []).slice(0, 4).map((url: string) => api.getCoverArtUrl(url, 200))}
+                                imageSizes="96px"
+                                emptyState={<Music className="w-16 h-16 text-gray-600" />}
+                            />
                         </div>
 
                         {/* Mix Info - Bottom Aligned */}

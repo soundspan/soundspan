@@ -9,6 +9,16 @@ First off, thanks for taking the time to contribute! 🎉
 3. Set up the development environment (see README.md)
 4. Create a new branch from `main` for your changes
 
+## Git Hooks
+
+After cloning, activate the repo's pre-commit hook:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This runs `acm verify` on staged code files before each commit.
+
 ## Branch Strategy
 
 All development happens on the `main` branch:
@@ -151,19 +161,34 @@ Recommended rollout:
 3. Make visibility workflow blocking.
 4. Add required status checks in branch protection for release branches/tags.
 
-## Policy as Code (Fail-Fast Governance)
+## ACM Repo Contract
 
-Agent/process governance is validated by executable checks, not prose alone.
+Repository workflow and verification now run through ACM rather than the legacy agents-template toolchain.
 
-- Policy manifest: `.agents-config/policies/agent-governance.json`
-- Runner: `.agents-config/scripts/enforce-agent-policies.mjs`
-- PR gate: `.github/workflows/pr-checks.yml` (`policy-as-code` job)
+- Repo contract: `AGENTS.md`
+- ACM rules: `.acm/acm-rules.yaml`
+- ACM tests: `.acm/acm-tests.yaml`
+- ACM workflow gates: `.acm/acm-workflows.yaml`
+- ACM feature plan schema: `docs/ACM_FEATURE_PLANS.md`
+- PR gate: `.github/workflows/pr-checks.yml` (`acm-health` job)
 
 Run locally before pushing:
 
 ```bash
-npm run policy:check
+acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
+acm verify --project soundspan --phase review --file-changed <path>
+acm health --project soundspan --include-details
 ```
+
+For backend or `packages/media-metadata-contract/` changes, `acm verify` remains receipt-scoped and targeted. The full backend `build` + `test:coverage` gate is promoted through the runnable review step below before `done`.
+
+When the active receipt matches a repo-defined review gate, also run:
+
+```bash
+acm review --run --project soundspan --receipt-id <receipt-id>
+```
+
+For net-new feature work, use the repo-local ACM feature plan schema from `docs/ACM_FEATURE_PLANS.md`: root plans use `kind=feature`, split execution streams use `kind=feature_stream`, and `acm verify` enforces the required hierarchy and metadata through `scripts/acm-feature-plan-validate.py`.
 
 ## Pull Request Process
 

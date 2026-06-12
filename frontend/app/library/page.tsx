@@ -25,6 +25,9 @@ import { useListenTogether } from "@/lib/listen-together-context";
 import { useAuth } from "@/lib/auth-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Renders the LibraryPage component.
+ */
 export default function LibraryPage() {
     const router = useRouter();
     const searchParams = useSearchParams();

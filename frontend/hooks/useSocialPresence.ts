@@ -95,6 +95,9 @@ function useSocialPresencePushInvalidation(
     }, [enabled, isAuthenticated, queryClient, queryKey]);
 }
 
+/**
+ * Executes useSocialPresence.
+ */
 export function useSocialPresence(options: SocialPresenceOptions = {}) {
     const enabled = resolvePollingEnabled(options.enabled);
     useSocialPresencePushInvalidation(enabled, SOCIAL_ONLINE_QUERY_KEY);
@@ -122,6 +125,9 @@ export function useSocialPresence(options: SocialPresenceOptions = {}) {
     };
 }
 
+/**
+ * Executes useAdminConnectedUsers.
+ */
 export function useAdminConnectedUsers(enabled: boolean) {
     useSocialPresencePushInvalidation(enabled, SOCIAL_CONNECTED_QUERY_KEY);
     const query = useQuery<ConnectedUsersResponse>({

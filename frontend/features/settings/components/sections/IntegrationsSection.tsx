@@ -10,6 +10,9 @@ interface IntegrationsSectionProps {
     onUpdate: (updates: Partial<UserSettings>) => void;
 }
 
+/**
+ * Renders the IntegrationsSection component.
+ */
 export function IntegrationsSection({ settings, onUpdate }: IntegrationsSectionProps) {
     return (
         <SettingsSection

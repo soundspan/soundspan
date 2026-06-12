@@ -5,7 +5,7 @@ import {
     HISTORY_RANGE_OPTIONS,
     MY_HISTORY_ROUTE,
     type PlayHistorySummary,
-} from "../../features/settings/components/sections/playbackHistoryConfig.ts";
+} from "../../features/settings/components/sections/playbackHistoryConfig";
 
 const summary: PlayHistorySummary = {
     allTime: 1000,
@@ -31,4 +31,42 @@ test("getImpactedHistoryCount returns expected counts for each range", () => {
     assert.equal(getImpactedHistoryCount(summary, "30d"), 140);
     assert.equal(getImpactedHistoryCount(summary, "365d"), 730);
     assert.equal(getImpactedHistoryCount(summary, "all"), 1000);
+});
+
+test("getImpactedHistoryCount returns the past-week count", () => {
+    assert.equal(getImpactedHistoryCount(summary, "7d"), 40);
+});
+
+test("getImpactedHistoryCount returns the all-time count", () => {
+    assert.equal(getImpactedHistoryCount(summary, "all"), 1000);
+});
+
+test("getImpactedHistoryCount preserves zero-valued ranges", () => {
+    assert.equal(
+        getImpactedHistoryCount(
+            {
+                allTime: 0,
+                last7Days: 0,
+                last30Days: 0,
+                last365Days: 0,
+            },
+            "all"
+        ),
+        0
+    );
+});
+
+test("getImpactedHistoryCount preserves zero-valued weekly ranges", () => {
+    assert.equal(
+        getImpactedHistoryCount(
+            {
+                allTime: 10,
+                last7Days: 0,
+                last30Days: 5,
+                last365Days: 8,
+            },
+            "7d"
+        ),
+        0
+    );
 });

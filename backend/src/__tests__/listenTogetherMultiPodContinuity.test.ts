@@ -180,8 +180,11 @@ describe("listen together multi-pod continuity", () => {
 
         groupManager.play(groupId, hostUserId);
         const afterResume = groupManager.snapshotById(groupId);
-        expect(afterResume?.playback.isPlaying).toBe(true);
-        expect(afterResume?.playback.stateVersion).toBeGreaterThan(
+        expect(afterResume?.playback.isPlaying).toBe(false);
+        groupManager.reportReady(groupId, hostUserId);
+        const afterReady = groupManager.snapshotById(groupId);
+        expect(afterReady?.playback.isPlaying).toBe(true);
+        expect(afterReady?.playback.stateVersion).toBeGreaterThan(
             podBSnapshot!.playback.stateVersion
         );
     });

@@ -16,6 +16,9 @@ const getProxiedImageUrl = (imageUrl: string | undefined): string | null => {
     return api.getCoverArtUrl(imageUrl, 300);
 };
 
+/**
+ * Renders the SimilarPodcasts component.
+ */
 export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
     const router = useRouter();
 

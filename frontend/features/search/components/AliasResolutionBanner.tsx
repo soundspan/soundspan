@@ -4,6 +4,9 @@ interface AliasResolutionBannerProps {
     aliasInfo: AliasInfo;
 }
 
+/**
+ * Renders the AliasResolutionBanner component.
+ */
 export function AliasResolutionBanner({ aliasInfo }: AliasResolutionBannerProps) {
     return (
         <div className="text-sm text-[#b3b3b3] mb-4">

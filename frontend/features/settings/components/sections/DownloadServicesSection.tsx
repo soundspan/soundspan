@@ -13,6 +13,9 @@ interface DownloadServicesSectionProps {
     testingServices: Record<string, boolean>;
 }
 
+/**
+ * Renders the DownloadServicesSection component.
+ */
 export function DownloadServicesSection({
     settings,
     onUpdate,

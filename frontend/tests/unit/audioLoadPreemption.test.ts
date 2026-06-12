@@ -3,7 +3,7 @@ import test from "node:test";
 import {
     shouldAllowInitialPersistedTrackResume,
     shouldPreemptInFlightAudioLoad,
-} from "../../lib/audio-load-preemption.ts";
+} from "../../lib/audio-load-preemption";
 
 test("preempts when a different media selection arrives during loading", () => {
     assert.equal(

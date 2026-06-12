@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getNextTrackPreferenceSignal } from "../../hooks/trackPreferenceSignals.ts";
+import { getNextTrackPreferenceSignal } from "../../hooks/trackPreferenceSignals";
 
 test("like toggle sets thumbs_up for clear or thumbs_down state", () => {
     assert.equal(getNextTrackPreferenceSignal("clear"), "thumbs_up");

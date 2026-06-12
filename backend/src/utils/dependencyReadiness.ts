@@ -33,6 +33,7 @@ const READINESS_REQUIRE_DEPENDENCIES =
 interface DependencyStatus {
     ok: boolean;
     error: string | null;
+    latencyMs: number | null;
 }
 
 export interface DependencyReadinessSnapshot {
@@ -49,6 +50,7 @@ function initialSnapshot(): DependencyReadinessSnapshot {
     const defaultStatus: DependencyStatus = {
         ok: !READINESS_REQUIRE_DEPENDENCIES,
         error: READINESS_REQUIRE_DEPENDENCIES ? "not-checked" : null,
+        latencyMs: null,
     };
 
     return {
@@ -81,13 +83,19 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 }
 
 async function probePostgres(timeoutMs: number): Promise<DependencyStatus> {
+    const startedAt = Date.now();
     try {
         await withTimeout(prisma.$queryRaw`SELECT 1`, timeoutMs);
-        return { ok: true, error: null };
+        return {
+            ok: true,
+            error: null,
+            latencyMs: Date.now() - startedAt,
+        };
     } catch (error) {
         return {
             ok: false,
             error: error instanceof Error ? error.message : String(error),
+            latencyMs: null,
         };
     }
 }
@@ -97,20 +105,30 @@ async function probeRedis(timeoutMs: number): Promise<DependencyStatus> {
         return {
             ok: false,
             error: "Redis client is not ready",
+            latencyMs: null,
         };
     }
 
+    const startedAt = Date.now();
     try {
         await withTimeout(redisClient.ping(), timeoutMs);
-        return { ok: true, error: null };
+        return {
+            ok: true,
+            error: null,
+            latencyMs: Date.now() - startedAt,
+        };
     } catch (error) {
         return {
             ok: false,
             error: error instanceof Error ? error.message : String(error),
+            latencyMs: null,
         };
     }
 }
 
+/**
+ * Represents the DependencyReadinessTracker class.
+ */
 export class DependencyReadinessTracker {
     private snapshot: DependencyReadinessSnapshot = initialSnapshot();
     private inFlightProbe: Promise<DependencyReadinessSnapshot> | null = null;
@@ -132,8 +150,8 @@ export class DependencyReadinessTracker {
                 required: false,
                 overallHealthy: true,
                 lastCheckedAt: Date.now(),
-                postgres: { ok: true, error: null },
-                redis: { ok: true, error: null },
+                postgres: { ok: true, error: null, latencyMs: null },
+                redis: { ok: true, error: null, latencyMs: null },
             };
             return this.getSnapshot();
         }
@@ -189,6 +207,9 @@ export class DependencyReadinessTracker {
     }
 }
 
+/**
+ * Executes createDependencyReadinessTracker.
+ */
 export function createDependencyReadinessTracker(
     label: string
 ): DependencyReadinessTracker {

@@ -44,6 +44,9 @@ interface Audiobook {
     } | null;
 }
 
+/**
+ * Renders the SeriesDetailPage component.
+ */
 export default function SeriesDetailPage() {
     const params = useParams();
     const router = useRouter();

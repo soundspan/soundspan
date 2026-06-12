@@ -18,6 +18,9 @@ interface AccountSectionProps {
 
 const displayNamePattern = /^[A-Za-z0-9 .-]+$/;
 
+/**
+ * Renders the AccountSection component.
+ */
 export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
     const { user } = useAuth();
     

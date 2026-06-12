@@ -13,6 +13,9 @@ interface ConfirmDialogProps {
     variant?: "danger" | "warning" | "info";
 }
 
+/**
+ * Renders the ConfirmDialog component.
+ */
 export function ConfirmDialog({
     isOpen,
     onClose,

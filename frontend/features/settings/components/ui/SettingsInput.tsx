@@ -11,6 +11,9 @@ interface SettingsInputProps {
     className?: string;
 }
 
+/**
+ * Renders the SettingsInput component.
+ */
 export function SettingsInput({ 
     id, 
     type = "text", 

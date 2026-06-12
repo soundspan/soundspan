@@ -17,6 +17,14 @@ jest.mock("../../services/featureDetection", () => ({
     },
 }));
 
+jest.mock("../../utils/db", () => ({
+    prisma: {
+        systemSettings: {
+            findUnique: jest.fn(),
+        },
+    },
+}));
+
 import router from "../system";
 import { featureDetection } from "../../services/featureDetection";
 

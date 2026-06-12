@@ -13,6 +13,9 @@ export interface MediaInfo {
     hasMedia: boolean;
 }
 
+/**
+ * Executes useMediaInfo.
+ */
 export function useMediaInfo(coverSize: number = 100): MediaInfo {
     const {
         currentTrack,

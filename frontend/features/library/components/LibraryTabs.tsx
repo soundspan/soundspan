@@ -6,6 +6,9 @@ interface LibraryTabsProps {
   onTabChange: (tab: Tab) => void;
 }
 
+/**
+ * Renders the LibraryTabs component.
+ */
 export function LibraryTabs({ activeTab, onTabChange }: LibraryTabsProps) {
   return (
     <div data-tv-section="library-tabs" className="flex gap-2 mb-4">

@@ -4,6 +4,9 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { parseFile } from "music-metadata";
 
+/**
+ * Represents the CoverArtExtractor class.
+ */
 export class CoverArtExtractor {
     private coverCachePath: string;
 

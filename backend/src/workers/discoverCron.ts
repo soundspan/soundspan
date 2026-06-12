@@ -20,6 +20,9 @@ function getDiscoverCronJobId(userId: string, now: Date = new Date()): string {
     return `discover:cron:${weekKey}:${userId}`;
 }
 
+/**
+ * Executes processDiscoverCronTick.
+ */
 export async function processDiscoverCronTick(): Promise<void> {
     logger.debug(`\n === Discover Weekly Cron Tick Triggered ===`);
     logger.debug(`   Time: ${new Date().toLocaleString()}`);
@@ -60,6 +63,9 @@ export async function processDiscoverCronTick(): Promise<void> {
     logger.debug(`   Queued ${configs.length} Discover Weekly jobs`);
 }
 
+/**
+ * Executes startDiscoverWeeklyCron.
+ */
 export function startDiscoverWeeklyCron() {
     logger.debug(
         `Scheduling Discover Weekly via repeatable queue: ${DISCOVER_WEEKLY_CRON} (Sundays at 8 PM, mode=${config.discover.mode})`
@@ -89,6 +95,9 @@ export function startDiscoverWeeklyCron() {
         });
 }
 
+/**
+ * Executes stopDiscoverWeeklyCron.
+ */
 export function stopDiscoverWeeklyCron() {
     void discoverQueue
         .removeRepeatable("discover-cron-tick", { cron: DISCOVER_WEEKLY_CRON })

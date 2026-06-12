@@ -18,6 +18,14 @@ import {
     normalizeFullwidth,
     normalizeQuotes,
 } from "../utils/stringNormalization";
+import {
+    normalizeString,
+    normalizeTrackTitle,
+    normalizeAlbumForMatching,
+    stringSimilarity,
+    stripTrackSuffix,
+    normalizeApostrophes,
+} from "../utils/trackMatching";
 
 // Store loggers for each job
 const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
@@ -376,110 +384,7 @@ async function getImportJob(importJobId: string): Promise<ImportJob | null> {
     return job;
 }
 
-/**
- * Normalize a string for fuzzy matching
- * Handles: special characters, punctuation, remaster suffixes, etc.
- */
-function normalizeString(str: string): string {
-    const normalizedInput = normalizeFullwidth(normalizeQuotes(str));
-
-    return (
-        normalizedInput
-            .toLowerCase()
-            // Normalize special characters (ö→o, é→e, etc.)
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            // Remove punctuation but keep spaces
-            .replace(/[^\w\s]/g, "")
-            .replace(/\s+/g, " ")
-            .trim()
-    );
-}
-
-/**
- * Normalize apostrophes and quotes to ASCII versions
- * Handles: ' ' ` ′ ʼ → '
- */
-function normalizeApostrophes(str: string): string {
-    return normalizeQuotes(normalizeFullwidth(str));
-}
-
-/**
- * Strip remaster/version suffixes but KEEP punctuation
- * "Ain't Gonna Rain Anymore - 2011 Remaster" → "Ain't Gonna Rain Anymore"
- * Used for database searches where we need to match punctuation
- */
-function stripTrackSuffix(str: string): string {
-    return (
-        normalizeApostrophes(str)
-            // Remove " - YEAR Remaster", " - Remastered YEAR", " - Radio Edit", etc.
-            // Note: remaster(ed)? matches "remaster" or "remastered"
-            .replace(
-                /\s*-\s*(\d{4}\s+)?(remaster(ed)?|deluxe|bonus|single|radio edit|remix|acoustic|live|mono|stereo|version|edition|mix)(\s+\d{4})?(\s+(version|edition|mix))?.*$/i,
-                ""
-            )
-            // Remove " - YEAR" at end
-            .replace(/\s*-\s*\d{4}\s*$/, "")
-            // Remove "(Live at...)", "(Live from...)", "(Recorded at...)" parenthetical content
-            .replace(
-                /\s*\([^)]*(?:live at|live from|recorded at|performed at)[^)]*\)\s*/gi,
-                " "
-            )
-            // Remove parenthetical content like "(Remastered)" or "(2011 Remastered Version)"
-            .replace(/\s*\([^)]*remaster[^)]*\)\s*/gi, " ")
-            .replace(/\s*\([^)]*version[^)]*\)\s*/gi, " ")
-            .replace(/\s*\([^)]*edition[^)]*\)\s*/gi, " ")
-            // Remove general "(Live)" or "(Live 2021)" etc
-            .replace(/\s*\(\s*live\s*(\d{4})?\s*\)\s*/gi, " ")
-            // Remove bracketed content like "[Deluxe Edition]"
-            .replace(/\s*\[[^\]]*\]\s*/g, " ")
-            .replace(/\s+/g, " ")
-            .trim()
-    );
-}
-
-/**
- * Normalize track title - removes remaster/version suffixes AND punctuation
- * "Ain't Gonna Rain Anymore - 2011 Remaster" → "aint gonna rain anymore"
- * Used for similarity comparisons
- */
-function normalizeTrackTitle(str: string): string {
-    return normalizeString(stripTrackSuffix(str));
-}
-
-/**
- * Normalize album title for matching - strips common suffixes
- * "In A Time Lapse (Deluxe Edition)" → "In A Time Lapse"
- * Used for flexible album matching
- */
-function normalizeAlbumForMatching(str: string): string {
-    return stripTrackSuffix(str).trim();
-}
-
-/**
- * Calculate similarity between two strings (0-100)
- */
-function stringSimilarity(a: string, b: string): number {
-    const s1 = normalizeString(a);
-    const s2 = normalizeString(b);
-
-    if (s1 === s2) return 100;
-
-    // Check if one contains the other
-    if (s1.includes(s2) || s2.includes(s1)) {
-        const longer = Math.max(s1.length, s2.length);
-        const shorter = Math.min(s1.length, s2.length);
-        return Math.round((shorter / longer) * 100);
-    }
-
-    // Simple word overlap similarity
-    const words1 = new Set(s1.split(" "));
-    const words2 = new Set(s2.split(" "));
-    const intersection = [...words1].filter((w) => words2.has(w)).length;
-    const union = new Set([...words1, ...words2]).size;
-
-    return Math.round((intersection / union) * 100);
-}
+// String normalization and matching functions are imported from ../utils/trackMatching
 
 class SpotifyImportService {
     /**
@@ -1404,13 +1309,14 @@ class SpotifyImportService {
 
         jobLogger.logJobStart(playlistName, preview.summary.total, userId);
         jobLogger?.info(`Playlist ID: ${spotifyPlaylistId}`);
-        jobLogger?.info(`Albums to download: ${albumMbidsToDownload.length}`);
+        jobLogger?.info(
+            `Albums selected by client (ignored in resolution-only mode): ${albumMbidsToDownload.length}`
+        );
         jobLogger?.info(`Tracks already in library: ${preview.summary.inLibrary}`);
 
-        // Calculate tracks that will come from downloads
-        const tracksFromDownloads = preview.albumsToDownload
-            .filter((a) => albumMbidsToDownload.includes(a.albumMbid!))
-            .reduce((sum, a) => sum + a.tracksNeeded.length, 0);
+        // Spotify import is now resolution-only. Keep route compatibility but do
+        // not execute downloader/indexer acquisition from this flow.
+        const effectiveAlbumSelections: string[] = [];
 
         // Extract the track info we need to match after downloads
         // Include ALL tracks, both matched and unmatched
@@ -1494,11 +1400,11 @@ class SpotifyImportService {
             playlistName,
             status: "pending",
             progress: 0,
-            albumsTotal: albumMbidsToDownload.length,
+            albumsTotal: 0,
             albumsCompleted: 0,
             tracksMatched: preview.summary.inLibrary,
             tracksTotal: preview.summary.total,
-            tracksDownloadable: tracksFromDownloads,
+            tracksDownloadable: 0,
             createdPlaylistId: null,
             error: null,
             createdAt: new Date(),
@@ -1510,7 +1416,7 @@ class SpotifyImportService {
         await saveImportJob(job);
 
         // Start processing in background
-        this.processImport(job, albumMbidsToDownload, preview).catch(
+        this.processImport(job, effectiveAlbumSelections, preview).catch(
             async (error) => {
                 job.status = "failed";
                 job.error = error.message;

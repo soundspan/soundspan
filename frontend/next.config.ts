@@ -84,7 +84,30 @@ const nextConfig: NextConfig = {
         // disk cache writes (including image cache) to prevent EACCES spam.
         isrFlushToDisk: false,
     },
+    // Disable Next.js's automatic trailing-slash redirect so /api/docs/ is not
+    // bounced back to /api/docs (which express.static redirects back → loop).
+    // Middleware re-implements trailing-slash removal for non-API page routes.
+    skipTrailingSlashRedirect: true,
     reactStrictMode: true,
+    async redirects() {
+        return [
+            {
+                source: "/browse/playlists/:id",
+                destination: "/explore/yt-playlist/:id",
+                permanent: true,
+            },
+            {
+                source: "/browse/playlists",
+                destination: "/explore",
+                permanent: true,
+            },
+            {
+                source: "/browse/:path*",
+                destination: "/explore",
+                permanent: true,
+            },
+        ];
+    },
     async headers() {
         return [
             {

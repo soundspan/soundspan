@@ -31,6 +31,9 @@ interface ReleaseRadarData {
     similarArtistCount: number;
 }
 
+/**
+ * Renders the ReleasesPage component.
+ */
 export default function ReleasesPage() {
     const [data, setData] = useState<ReleaseRadarData | null>(null);
     const [loading, setLoading] = useState(true);

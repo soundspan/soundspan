@@ -9,6 +9,9 @@ import { useFeatures } from "@/lib/features-context";
 import { useAuth } from "@/lib/auth-context";
 import { BRAND_MARKETING_TAGLINE, BRAND_NAME } from "@/lib/brand";
 
+/**
+ * Renders the OnboardingPage component.
+ */
 export default function OnboardingPage() {
     const router = useRouter();
     const { user, isLoading: authLoading } = useAuth();

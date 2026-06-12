@@ -9,6 +9,9 @@ interface LibraryAlbumsGridProps {
     limit?: number | null;
 }
 
+/**
+ * Renders the LibraryAlbumsGrid component.
+ */
 export function LibraryAlbumsGrid({ albums, limit = 6 }: LibraryAlbumsGridProps) {
     const visibleAlbums =
         typeof limit === "number" ? albums.slice(0, limit) : albums;

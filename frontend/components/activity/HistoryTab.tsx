@@ -19,6 +19,9 @@ interface DownloadHistory {
     completedAt?: string;
 }
 
+/**
+ * Renders the HistoryTab component.
+ */
 export function HistoryTab() {
     const [history, setHistory] = useState<DownloadHistory[]>([]);
     const [loading, setLoading] = useState(true);

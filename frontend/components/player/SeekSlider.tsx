@@ -32,6 +32,9 @@ interface SeekSliderProps {
     hitZoneClassName?: string;
 }
 
+/**
+ * Renders the SeekSlider component.
+ */
 export function SeekSlider({
     progress,
     duration,

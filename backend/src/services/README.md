@@ -5,19 +5,22 @@ Start-here guide for business logic modules in `backend/src/services`.
 ## Start Here
 
 1. API call entrypoints: `backend/src/routes/*.ts`.
-2. Endpoint-to-handler map: `.agents-config/docs/ROUTE_MAP.md`.
-3. Feature-targeted verification commands: `.agents-config/docs/TEST_MATRIX.md`.
+2. Service-focused tests: `backend/src/services/__tests__/` and nested `__tests__/` directories under service domains.
+3. Shared runtime helpers: `backend/src/utils/`, `backend/src/lib/`, and adjacent service modules.
 
 ## Service Modules
 
 | Service File | Area |
 | --- | --- |
 | `backend/src/services/acquisitionService.ts` | Core |
+| `backend/src/services/albumResolutionService.ts` | Core |
 | `backend/src/services/artistCountsService.ts` | Core |
+| `backend/src/services/artistResolutionService.ts` | Core |
 | `backend/src/services/audioAnalysisCleanup.ts` | Core |
 | `backend/src/services/audiobookCache.ts` | Core |
 | `backend/src/services/audiobookshelf.ts` | Core |
 | `backend/src/services/audioStreaming.ts` | Core |
+| `backend/src/services/browseImageCache.ts` | Core |
 | `backend/src/services/cacheHelpers.ts` | Core |
 | `backend/src/services/coverArt.ts` | Core |
 | `backend/src/services/coverArtExtractor.ts` | Core |
@@ -37,31 +40,42 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/fanart.ts` | Core |
 | `backend/src/services/featureDetection.ts` | Core |
 | `backend/src/services/fileValidator.ts` | Core |
+| `backend/src/services/genericImportJobRunner.ts` | Core |
 | `backend/src/services/hybridSimilarity.ts` | Core |
 | `backend/src/services/imageBackfill.ts` | Core |
 | `backend/src/services/imageProvider.ts` | Core |
 | `backend/src/services/imageProxy.ts` | Core |
 | `backend/src/services/imageStorage.ts` | Core |
+| `backend/src/services/importJobStore.ts` | Core |
 | `backend/src/services/itunes.ts` | Core |
 | `backend/src/services/lastfm.ts` | Core |
 | `backend/src/services/lidarr.ts` | Core |
 | `backend/src/services/listenTogether.ts` | Core |
 | `backend/src/services/listenTogetherClusterSync.ts` | Core |
 | `backend/src/services/listenTogetherManager.ts` | Core |
+| `backend/src/services/listenTogetherResolution.ts` | Core |
 | `backend/src/services/listenTogetherSocket.ts` | Core |
 | `backend/src/services/listenTogetherStateStore.ts` | Core |
 | `backend/src/services/lyrics.ts` | Core |
+| `backend/src/services/m3uParser.ts` | Core |
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |
 | `backend/src/services/musicScanner.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |
+| `backend/src/services/outboundUrlSafety.ts` | Core |
+| `backend/src/services/playlistImportService.ts` | Core |
+| `backend/src/services/playlistTrackResolution.ts` | Core |
 | `backend/src/services/podcastCache.ts` | Core |
 | `backend/src/services/podcastDownload.ts` | Core |
 | `backend/src/services/programmaticPlaylistArtistCap.ts` | Core |
 | `backend/src/services/programmaticPlaylists.ts` | Core |
+| `backend/src/services/radioVibeEngine.ts` | Core |
 | `backend/src/services/rateLimiter.ts` | Core |
 | `backend/src/services/releaseContracts.ts` | Core |
+| `backend/src/services/remoteTrackBackfillService.ts` | Core |
+| `backend/src/services/remoteTrackMetadataRefresh.ts` | Core |
+| `backend/src/services/remoteTrackMetadataResolver.ts` | Core |
 | `backend/src/services/rss-parser.ts` | Core |
 | `backend/src/services/search.ts` | Core |
 | `backend/src/services/segmented-streaming/cacheService.ts` | Segmented Streaming |
@@ -77,7 +91,11 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/staleJobCleanup.ts` | Core |
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
+| `backend/src/services/trackMappingService.ts` | Core |
 | `backend/src/services/trackPreference.ts` | Core |
+| `backend/src/services/trackReconciliation.ts` | Core |
+| `backend/src/services/umapProjection.ts` | Core |
+| `backend/src/services/unifiedTrackResponse.ts` | Core |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeVocabulary.ts` | Core |
 | `backend/src/services/wikidata.ts` | Core |

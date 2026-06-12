@@ -11,6 +11,12 @@ describe("artistCountsService", () => {
                 count: jest.fn(),
                 findUnique: jest.fn(),
             },
+            trackTidal: {
+                count: jest.fn().mockResolvedValue(0),
+            },
+            trackYtMusic: {
+                count: jest.fn().mockResolvedValue(0),
+            },
             artist: {
                 update: jest.fn(),
                 count: jest.fn(),
@@ -47,6 +53,7 @@ describe("artistCountsService", () => {
             libraryAlbumCount: 3,
             discoveryAlbumCount: 2,
             totalTrackCount: 11,
+            remoteTrackCount: 0,
         });
 
         expect(prisma.album.count).toHaveBeenNthCalledWith(1, {

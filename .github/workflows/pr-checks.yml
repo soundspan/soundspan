@@ -6,39 +6,71 @@ on:
     branches: [main]
 
 jobs:
-  policy-as-code:
-    name: Policy as Code
+  acm-health:
+    name: ACM Health
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          node-version: '20'
+          go-version: '1.26.0'
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Enforce agent policies (CI profile)
-        run: npm run policy:check:ci
-
-      - name: Check managed workflow drift
-        run: npm run agent:managed -- --mode check
-
-      - name: Verify repository index readiness
+      - name: Install ACM
         run: |
-          npm run index:build
-          npm run index:verify
+          go install github.com/bonztm/agent-context-manager/cmd/acm@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Verify release runtime contract
-        run: npm run release:contract:check
+      - name: Init ACM
+        run: acm init --project soundspan --project-root .
 
-      - name: Enforce template-impact declaration
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: npm run agent:template-impact:check -- --base-ref origin/${{ github.base_ref }}
+      - name: Sync ACM
+        run: acm sync --project soundspan --mode working_tree --insert-new-candidates --project-root .
+
+      - name: Collect changed files for ACM verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            range="${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+          elif [[ -n "${{ github.event.before }}" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+            range="${{ github.event.before }}...${{ github.sha }}"
+          else
+            range="$(git rev-list --max-parents=0 HEAD | tail -n 1)...${{ github.sha }}"
+          fi
+
+          git diff --name-only "$range" | sed '/^$/d' > /tmp/acm-changed-files.txt
+          if [[ ! -s /tmp/acm-changed-files.txt ]]; then
+            printf '%s\n' \
+              AGENTS.md \
+              .acm/acm-rules.yaml \
+              .acm/acm-tests.yaml \
+              .acm/acm-workflows.yaml \
+              .github/workflows/pr-checks.yml > /tmp/acm-changed-files.txt
+          fi
+
+          cat /tmp/acm-changed-files.txt
+
+      - name: Verify ACM Surface And Selected Quality Gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r path; do
+            args+=(--file-changed "$path")
+          done < /tmp/acm-changed-files.txt
+
+          acm verify \
+            --project soundspan \
+            --phase review \
+            "${args[@]}"
+
+      - name: ACM Health
+        run: acm health --project soundspan --include-details
+
+      - name: ACM Context Smoke
+        run: acm context --project soundspan --task-text "CI ACM smoke check" --phase plan > /tmp/acm-context.json

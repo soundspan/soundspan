@@ -2,14 +2,25 @@ jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
 
-jest.mock("../../utils/logger", () => ({
-    logger: {
+jest.mock("../../utils/logger", () => {
+    const childLogger = {
         debug: jest.fn(),
         info: jest.fn(),
         warn: jest.fn(),
         error: jest.fn(),
-    },
-}));
+        child: jest.fn(),
+    };
+    childLogger.child.mockReturnValue(childLogger);
+    return {
+        logger: {
+            debug: jest.fn(),
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+            child: jest.fn().mockReturnValue(childLogger),
+        },
+    };
+});
 
 jest.mock("../../services/listenTogether", () => ({
     createGroup: jest.fn(),
@@ -223,7 +234,7 @@ describe("listenTogether routes runtime", () => {
     it("returns 400 with zod details when create payload is invalid", async () => {
         const req = {
             user: { id: "u1", username: "alice" },
-            body: { currentTimeMs: -1, queueTrackIds: Array.from({ length: 501 }, () => "t") },
+            body: { currentTimeMs: -1 },
         } as any;
         const res = createRes();
 

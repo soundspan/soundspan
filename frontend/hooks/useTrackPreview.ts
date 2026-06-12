@@ -37,7 +37,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
     const showNoPreviewToast = (trackId: string) => {
         if (toastShownForNoPreviewRef.current.has(trackId)) return;
         toastShownForNoPreviewRef.current.add(trackId);
-        toast("No Deezer preview available", { duration: 1500 });
+        toast("No YouTube preview available", { duration: 1500 });
     };
 
     const handlePreview = async (
@@ -85,7 +85,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             const response = await api.getTrackPreview(artistName, track.title);
             if (requestId !== previewRequestIdRef.current) return;
 
-            if (!response.previewUrl) {
+            if (!response.videoId) {
                 noPreviewTrackIdsRef.current.add(track.id);
                 showNoPreviewToast(track.id);
                 return;
@@ -96,7 +96,8 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 mainPlayerWasPausedRef.current = true;
             }
 
-            const audio = new Audio(response.previewUrl);
+            const streamUrl = api.getPreviewStreamUrl(response.videoId);
+            const audio = new Audio(streamUrl);
             previewAudioRef.current = audio;
 
             audio.onended = () => {

@@ -7,6 +7,9 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     rightIcon?: ReactNode;
 }
 
+/**
+ * Renders the Input component.
+ */
 export function Input({
     label,
     error,

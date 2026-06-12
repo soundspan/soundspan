@@ -14,6 +14,9 @@ interface PreviewEpisodesProps {
     onSubscribe: () => void;
 }
 
+/**
+ * Renders the PreviewEpisodes component.
+ */
 export function PreviewEpisodes({
     previewData,
     isSubscribing,

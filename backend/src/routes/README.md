@@ -5,14 +5,15 @@ Start-here guide for API route handlers in `backend/src/routes`.
 ## Start Here
 
 1. Mount points and middleware chain: `backend/src/index.ts`.
-2. Canonical endpoint map: `.agents-config/docs/ROUTE_MAP.md`.
-3. Targeted verification commands: `.agents-config/docs/TEST_MATRIX.md`.
+2. Route runtime tests: `backend/src/routes/__tests__/`.
+3. Shared business logic called by routes: `backend/src/services/`.
 
 ## Mounted Route Modules
 
 | Route File | Mounted Prefixes |
 | --- | --- |
 | `backend/src/routes/analysis.ts` | `/api/analysis` |
+| `backend/src/routes/admin.ts` | `/api/admin` |
 | `backend/src/routes/apiKeys.ts` | `/api/api-keys` |
 | `backend/src/routes/artists.ts` | `/api/artists` |
 | `backend/src/routes/audiobooks.ts` | `/api/audiobooks` |
@@ -31,7 +32,9 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/notifications.ts` | `/api/notifications` |
 | `backend/src/routes/offline.ts` | `/api/offline` |
 | `backend/src/routes/onboarding.ts` | `/api/onboarding` |
+| `backend/src/routes/openapiSupplement.ts` | (not found in `backend/src/index.ts` mounts) |
 | `backend/src/routes/playbackState.ts` | `/api/playback-state` |
+| `backend/src/routes/playlistImport.ts` | `/api/import` |
 | `backend/src/routes/playlists.ts` | `/api/playlists` |
 | `backend/src/routes/plays.ts` | `/api/plays` |
 | `backend/src/routes/podcasts.ts` | `/api/podcasts` |
@@ -39,6 +42,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/releases.ts` | `/api/releases` |
 | `backend/src/routes/routeErrorResponse.ts` | (not found in `backend/src/index.ts` mounts) |
 | `backend/src/routes/search.ts` | `/api/search` |
+| `backend/src/routes/shareLinks.ts` | `/api/share-links` |
 | `backend/src/routes/settings.ts` | `/api/settings` |
 | `backend/src/routes/social.ts` | `/api/social` |
 | `backend/src/routes/soulseek.ts` | `/api/soulseek` |
@@ -48,6 +52,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/system.ts` | `/api/system` |
 | `backend/src/routes/systemSettings.ts` | `/api/system-settings` |
 | `backend/src/routes/tidalStreaming.ts` | `/api/tidal-streaming` |
+| `backend/src/routes/trackMappings.ts` | `/api/track-mappings` |
 | `backend/src/routes/vibe.ts` | `/api/vibe` |
 | `backend/src/routes/webhooks.ts` | `/api/webhooks` |
 | `backend/src/routes/youtube.ts` | `/api/youtube` |
@@ -55,4 +60,4 @@ Start-here guide for API route handlers in `backend/src/routes`.
 
 ## Update Rule
 
-- When adding, removing, or changing endpoints in this directory, regenerate `.agents-config/docs/ROUTE_MAP.md` and verify impacted targeted commands in `.agents-config/docs/TEST_MATRIX.md`.
+- When adding, removing, or changing endpoints in this directory, update this README if the entrypoint or test-navigation guidance changes and keep impacted route tests current in the same change set.

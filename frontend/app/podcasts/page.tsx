@@ -32,6 +32,9 @@ interface SearchResult {
     itunesId?: number;
 }
 
+/**
+ * Renders the PodcastsPage component.
+ */
 export default function PodcastsPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [rssUrl, setRssUrl] = useState("");

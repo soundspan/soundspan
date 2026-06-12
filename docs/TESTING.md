@@ -158,6 +158,7 @@ Current behavior:
 
 - backend Jest tests + coverage summary/artifacts,
 - frontend lint/build + targeted unit coverage and E2E inventory visibility,
+- Helm chart lint/render visibility,
 - non-blocking by default (configurable to blocking via repo vars).
 
 Backend coverage artifacts include:
@@ -167,11 +168,63 @@ Backend coverage artifacts include:
 - `backend/coverage/jest-results.json`
 - generated markdown summary (`backend/coverage/coverage-summary.md`)
 
-Policy and governance checks:
+ACM repo-contract checks:
 
-- `.github/workflows/pr-checks.yml` (`policy-as-code` job)
-- `.agents-config/scripts/enforce-agent-policies.mjs`
-- `.agents-config/policies/agent-governance.json`
+- `.github/workflows/pr-checks.yml` (`acm-health` job)
+- `AGENTS.md`
+- `.acm/acm-rules.yaml`
+- `.acm/acm-tests.yaml`
+- `.acm/acm-workflows.yaml`
+- `scripts/acm-cross-review.sh`
+- `scripts/acm-feature-plan-validate.py`
+
+Promoted ACM verify quality gates:
+
+- `bash scripts/acm-cross-review.sh --help` (when the ACM review gate surface changes)
+- `python3 scripts/test_acm_cross_review.py` (when the ACM review gate flag semantics change)
+- `bash scripts/acm-backend-targeted-verify.sh --help` (when the targeted backend verify surface changes)
+- `npm --prefix frontend run lint`
+- `npm --prefix frontend run build`
+- `npm --prefix frontend run test:coverage`
+- `./scripts/helm-chart-render-check.sh`
+
+Recommended local ACM validation:
+
+```bash
+acm verify --project soundspan --phase review --file-changed <path>
+acm health --project soundspan --include-details
+```
+
+Backend note:
+
+- `acm verify` now keeps backend validation receipt-scoped and targeted via `scripts/acm-backend-targeted-verify.sh`.
+- Full backend `build` and `test:coverage` are promoted by `acm review --run` before completion when the active receipt includes backend or `packages/media-metadata-contract/` changes.
+- The runnable review gate stays provider-aware through `.acm/acm-workflows.yaml` `run.argv`, and `scripts/acm-cross-review.sh --yolo` is the shared high-trust shortcut: Codex gets native `--yolo`, while Claude maps it to `--dangerously-skip-permissions`.
+- `scripts/acm-cross-review.sh` now embeds an untrimmed scoped review packet, including the workflow context, unified diff, and changed-file snapshots, directly into the nested reviewer prompt so the default zero-tool review packet stays self-contained.
+
+When the active receipt matches a repo-defined review gate in `.acm/acm-workflows.yaml`, run this before `acm done`:
+
+```bash
+acm review --run --project soundspan --receipt-id <receipt-id>
+```
+
+When the active plan is a repo-local feature plan, keep the plan itself in the ACM `kind=feature` / `kind=feature_stream` schema described in `docs/ACM_FEATURE_PLANS.md`, then run `acm verify` with the active receipt and changed files so the validator is selected:
+
+```bash
+acm verify --project soundspan --receipt-id <receipt-id> --phase review --file-changed backend/src/routes/social.ts
+```
+
+That verify check executes `scripts/acm-feature-plan-validate.py` with the active receipt and plan context before completion.
+
+Examples:
+
+```bash
+acm verify --project soundspan --phase review --file-changed backend/src/routes/social.ts
+acm verify --project soundspan --phase review --file-changed frontend/app/page.tsx
+acm verify --project soundspan --phase review --file-changed charts/soundspan/Chart.yaml
+```
+
+Release helpers remain maintainer-invoked workflows outside `acm verify`; use `scripts/release/*.mjs` when you are preparing an actual release rather than validating ordinary code changes.
 
 ## Sidecar Test Standard
 

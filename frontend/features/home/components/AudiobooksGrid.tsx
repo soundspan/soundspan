@@ -56,6 +56,9 @@ const AudiobookCard = memo(function AudiobookCard({
     );
 });
 
+/**
+ * Renders the AudiobooksGrid component.
+ */
 export function AudiobooksGrid({ audiobooks }: AudiobooksGridProps) {
     return (
         <HorizontalCarousel>

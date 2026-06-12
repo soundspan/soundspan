@@ -29,6 +29,11 @@ export interface SyncQueueItem {
     youtubeVideoId?: string;
     /** Audio container hint for "youtube-direct" streams (webm for opus, mp4 for AAC). */
     youtubeAudioFormat?: "mp4" | "webm";
+    localTrackId?: string;
+    trackTidalId?: string;
+    trackYtMusicId?: string;
+    trackMappingId?: string;
+    originSource?: "local" | "tidal" | "youtube";
 }
 
 export interface GroupSnapshot {
@@ -74,6 +79,38 @@ export interface QueueDelta {
     stateVersion: number;
 }
 
+export interface QueueTrackInput {
+    trackId?: string;
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    title?: string;
+    artist?: string;
+    album?: string;
+    duration?: number;
+    thumbnailUrl?: string;
+    isrc?: string;
+}
+
+export interface AvailabilityItem {
+    queueIndex: number;
+    available: boolean;
+    source?: "local" | "tidal" | "youtube";
+    localTrackId?: string;
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    reason?:
+        | "no-provider"
+        | "no-mapping"
+        | "duration-mismatch"
+        | "low-confidence"
+        | "stale";
+}
+
+export interface GroupAvailabilityEvent {
+    availability: AvailabilityItem[];
+    stateVersion: number;
+}
+
 export interface WaitingEvent {
     trackId: string | null;
     currentIndex: number;
@@ -114,6 +151,7 @@ export interface ListenTogetherSocketCallbacks {
     onGroupState: (snapshot: GroupSnapshot) => void;
     onPlaybackDelta: (delta: PlaybackDelta) => void;
     onQueueDelta: (delta: QueueDelta) => void;
+    onAvailability?: (data: GroupAvailabilityEvent) => void;
     onWaiting: (data: WaitingEvent) => void;
     onPlayAt: (data: PlayAtEvent) => void;
     onMemberJoined: (data: MemberEvent) => void;
@@ -159,6 +197,9 @@ interface ListenTogetherAckResponse {
     transient?: boolean;
     retryable?: boolean;
     retryAfterMs?: number;
+    acceptedCount?: number;
+    skippedCount?: number;
+    truncated?: boolean;
 }
 
 interface EmitRetryPolicy {
@@ -175,6 +216,9 @@ const TRANSIENT_CONFLICT_RETRY_POLICY: EmitRetryPolicy = {
     jitterFactor: TRANSIENT_CONFLICT_JITTER_FACTOR,
 };
 
+/**
+ * Represents the ListenTogetherSocket class.
+ */
 export class ListenTogetherSocket {
     private socket: Socket | null = null;
     private callbacks: ListenTogetherSocketCallbacks | null = null;
@@ -283,6 +327,10 @@ export class ListenTogetherSocket {
 
         this.socket.on("group:queue-delta", (delta: QueueDelta) => {
             this.callbacks?.onQueueDelta(delta);
+        });
+
+        this.socket.on("group:availability", (data: GroupAvailabilityEvent) => {
+            this.callbacks?.onAvailability?.(data);
         });
 
         this.socket.on("group:waiting", (data: WaitingEvent) => {
@@ -515,12 +563,24 @@ export class ListenTogetherSocket {
         return this.emit("playback", { action: "set-track", index }, TRANSIENT_CONFLICT_RETRY_POLICY);
     }
 
-    addToQueue(trackIds: string[]): Promise<void> {
-        return this.emit("queue", { action: "add", trackIds });
+    async addToQueue(
+        tracks: string[] | QueueTrackInput[]
+    ): Promise<{ acceptedCount: number; skippedCount: number; truncated: boolean }> {
+        const response = await this.emitWithResponse(
+            "queue",
+            this.buildQueuePayload("add", tracks)
+        );
+        return this.resolveQueueMutationResult(response, tracks.length);
     }
 
-    insertNext(trackIds: string[]): Promise<void> {
-        return this.emit("queue", { action: "insert-next", trackIds });
+    async insertNext(
+        tracks: string[] | QueueTrackInput[]
+    ): Promise<{ acceptedCount: number; skippedCount: number; truncated: boolean }> {
+        const response = await this.emitWithResponse(
+            "queue",
+            this.buildQueuePayload("insert-next", tracks)
+        );
+        return this.resolveQueueMutationResult(response, tracks.length);
     }
 
     removeFromQueue(index: number): Promise<void> {
@@ -537,6 +597,14 @@ export class ListenTogetherSocket {
 
     reportReady(): Promise<void> {
         return this.emit("ready", undefined, TRANSIENT_CONFLICT_RETRY_POLICY);
+    }
+
+    reportPlaybackFailed(queueIndex: number): Promise<void> {
+        return this.emit(
+            "track:playback-failed",
+            { queueIndex },
+            TRANSIENT_CONFLICT_RETRY_POLICY
+        );
     }
 
     /** Measure round-trip time. Returns server's Date.now(). */
@@ -562,12 +630,22 @@ export class ListenTogetherSocket {
         data?: unknown,
         retryPolicy?: EmitRetryPolicy
     ): Promise<void> {
+        await this.emitWithResponse(event, data, retryPolicy);
+    }
+
+    private async emitWithResponse<
+        TResponse extends ListenTogetherAckResponse = ListenTogetherAckResponse,
+    >(
+        event: string,
+        data?: unknown,
+        retryPolicy?: EmitRetryPolicy
+    ): Promise<TResponse> {
         let retries = 0;
 
         while (true) {
             const response = await this.emitOnce(event, data);
             if (!response?.error) {
-                return;
+                return response as TResponse;
             }
 
             if (
@@ -601,6 +679,40 @@ export class ListenTogetherSocket {
                 this.socket.emit(event, data, onAck);
             }
         });
+    }
+
+    private buildQueuePayload(
+        action: "add" | "insert-next",
+        tracks: string[] | QueueTrackInput[]
+    ): { action: "add" | "insert-next"; trackIds?: string[]; tracks?: QueueTrackInput[] } {
+        if (tracks.length === 0) {
+            return { action, trackIds: [] };
+        }
+
+        const first = tracks[0];
+        if (typeof first === "string") {
+            return { action, trackIds: tracks as string[] };
+        }
+        return { action, tracks: tracks as QueueTrackInput[] };
+    }
+
+    private resolveQueueMutationResult(
+        response: ListenTogetherAckResponse,
+        requestedCount: number
+    ): { acceptedCount: number; skippedCount: number; truncated: boolean } {
+        const acceptedCount =
+            typeof response.acceptedCount === "number" && Number.isFinite(response.acceptedCount)
+                ? Math.max(0, Math.trunc(response.acceptedCount))
+                : requestedCount;
+        const skippedCount =
+            typeof response.skippedCount === "number" && Number.isFinite(response.skippedCount)
+                ? Math.max(0, Math.trunc(response.skippedCount))
+                : Math.max(0, requestedCount - acceptedCount);
+        return {
+            acceptedCount,
+            skippedCount,
+            truncated: response.truncated === true,
+        };
     }
 
     private isTransientConflictAck(response: ListenTogetherAckResponse): boolean {

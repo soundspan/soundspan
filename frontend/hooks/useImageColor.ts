@@ -285,6 +285,9 @@ function resolveSync(url: string | null | undefined): { colors: ColorPalette | n
     return { colors: null, needsAsync: true };
 }
 
+/**
+ * Executes useImageColor.
+ */
 export function useImageColor(imageUrl: string | null | undefined) {
     const resolved = resolveSync(imageUrl);
     const [asyncState, setAsyncState] = useState<{

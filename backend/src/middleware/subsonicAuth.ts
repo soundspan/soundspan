@@ -1,9 +1,12 @@
 import { NextFunction, Request, Response } from "express";
 import { createHash } from "crypto";
 import bcrypt from "bcrypt";
+import { timingSafeCompare } from "../utils/timingSafe";
+import { runDummyBcrypt } from "../utils/dummyCredential";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { prisma } from "../utils/db";
 import { decrypt, encrypt } from "../utils/encryption";
+import { logger } from "../utils/logger";
 import {
     getResponseFormat,
     sendSubsonicError,
@@ -148,7 +151,7 @@ export async function requireSubsonicAuth(
                 where: { id: apiKeyRecord.id },
                 data: { lastUsed: new Date() },
             })
-            .catch(() => undefined);
+            .catch((err) => { logger.debug("Failed to update API key lastUsed (subsonic)", err); });
 
         req.user = {
             id: apiKeyRecord.user.id,
@@ -173,6 +176,9 @@ export async function requireSubsonicAuth(
     });
 
     if (!user) {
+        // Run dummy bcrypt to equalize response timing with the valid-user
+        // path, preventing username enumeration via timing side-channel.
+        await runDummyBcrypt();
         sendSubsonicError(
             res,
             SubsonicErrorCode.WRONG_CREDENTIALS,
@@ -191,17 +197,19 @@ export async function requireSubsonicAuth(
             const expectedToken = createHash("md5")
                 .update(subsonicSecret + salt)
                 .digest("hex");
-            if (expectedToken.toLowerCase() === token.toLowerCase()) {
+            if (timingSafeCompare(expectedToken.toLowerCase(), token.toLowerCase())) {
                 authenticated = true;
             }
-        } catch {
-            // Fall through to alternate auth path.
+        } catch (err) {
+            logger.debug("Subsonic token auth failed, trying password auth", err);
         }
     }
 
     if (!authenticated && hasPasswordAuth) {
         const decodedPassword = decodeSubsonicPassword(password);
         if (decodedPassword === null) {
+            // Equalize timing with the bcrypt path below.
+            await runDummyBcrypt();
             sendSubsonicError(
                 res,
                 SubsonicErrorCode.WRONG_CREDENTIALS,
@@ -229,6 +237,11 @@ export async function requireSubsonicAuth(
     }
 
     if (!authenticated) {
+        // If the auth path taken didn't involve bcrypt (token-only),
+        // run a dummy comparison to equalize timing with the password path.
+        if (!hasPasswordAuth) {
+            await runDummyBcrypt();
+        }
         sendSubsonicError(
             res,
             SubsonicErrorCode.WRONG_CREDENTIALS,

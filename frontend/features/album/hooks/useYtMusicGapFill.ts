@@ -44,7 +44,7 @@ async function getYtMusicAvailable(): Promise<boolean> {
     const loadStatus = async () => {
         try {
             const status = await api.getYtMusicStatus();
-            const available = status.enabled && status.available && status.authenticated;
+            const available = status.enabled && status.available;
             _ytStatusCache = createProviderStatusCacheEntry(available);
             return available;
         } catch {
@@ -75,6 +75,9 @@ export function invalidateYtMusicStatusCache() {
 // Keyed by albumId → track matches.
 const _matchCache = new Map<string, Record<string, YtMusicMatch>>();
 
+/**
+ * Executes useYtMusicGapFill.
+ */
 export function useYtMusicGapFill(
     album: Album | null | undefined,
     source: AlbumSource | null
@@ -89,6 +92,7 @@ export function useYtMusicGapFill(
     const [isStatusResolved, setIsStatusResolved] = useState(
         _ytStatusCache !== null
     );
+    const albumTracks = album?.tracks;
 
     // Check YTMusic status once (uses global cache)
     useEffect(() => {
@@ -107,21 +111,21 @@ export function useYtMusicGapFill(
     // Find unowned tracks that need matching
     // Skip any tracks already enriched by TIDAL (TIDAL takes priority)
     const unownedTracks = useMemo(() => {
-        if (!album?.tracks || !ytMusicAvailable) return [];
+        if (!albumTracks || !ytMusicAvailable) return [];
 
         // For discovery albums, ALL tracks need matching (minus TIDAL-enriched ones)
         if (source === "discovery") {
-            return album.tracks.filter((t) => t.streamSource !== "tidal");
+            return albumTracks.filter((t) => t.streamSource !== "tidal");
         }
 
         // For library albums, only tracks without a local file need matching
         // (also skip any already enriched by TIDAL — TIDAL takes priority)
-        return album.tracks.filter(
+        return albumTracks.filter(
             (t) =>
                 t.streamSource !== "tidal" &&
                 !t.filePath
         );
-    }, [album?.tracks, album?.id, source, ytMusicAvailable]);
+    }, [albumTracks, source, ytMusicAvailable]);
 
     // Match unowned tracks against YTMusic (single batch call)
     useEffect(() => {
@@ -129,56 +133,90 @@ export function useYtMusicGapFill(
         // Don't re-match if we already matched this album
         if (matchedAlbumIdRef.current === album.id) return;
 
+        let cancelled = false;
         // Check global cache first — instant on revisit
         const cached = _matchCache.get(album.id);
         if (cached) {
             matchedAlbumIdRef.current = album.id;
-            setMatches(cached);
-            return;
+            queueMicrotask(() => {
+                if (!cancelled) {
+                    setMatches(cached);
+                }
+            });
+            return () => {
+                cancelled = true;
+            };
         }
 
-        let cancelled = false;
         matchedAlbumIdRef.current = album.id;
-        setLoading(true);
+        queueMicrotask(() => {
+            if (!cancelled) {
+                setLoading(true);
+            }
+        });
 
         const matchTracks = async () => {
-            // Build batch request — one entry per unowned track
-            const trackPayload = unownedTracks.map((track) => ({
-                artist: track.artist?.name || album?.artist?.name || "",
-                title: track.title,
-                albumTitle: album?.title,
-                duration:
-                    typeof track.duration === "number" && track.duration > 0
-                        ? track.duration
-                        : undefined,
-                isrc: track.isrc || undefined,
-            }));
+            const newMatches: Record<string, YtMusicMatch> = {};
 
+            // Step 1: Check persisted mappings (covers all users, survives refresh)
             try {
-                // Single batch call — sidecar runs all searches concurrently
-                const { matches: batchMatches } = await api.matchYtMusicBatch(trackPayload);
-
+                const { mappings } = await api.getAlbumMappings(album.id);
                 if (cancelled) return;
 
-                const newMatches: Record<string, YtMusicMatch> = {};
-                batchMatches.forEach((match, idx) => {
-                    if (match && unownedTracks[idx]) {
-                        newMatches[unownedTracks[idx].id] = match;
+                for (const mapping of mappings) {
+                    if (mapping.trackYtMusic && mapping.trackId) {
+                        newMatches[mapping.trackId] = {
+                            videoId: mapping.trackYtMusic.videoId,
+                            title: mapping.trackYtMusic.title,
+                            duration: mapping.trackYtMusic.duration,
+                        };
                     }
-                });
+                }
+            } catch {
+                // Persisted mappings unavailable — fall through to API call
+            }
 
-                // Store in global cache for instant revisits
-                _matchCache.set(album.id, newMatches);
-                setMatches(newMatches);
-            } catch (err) {
-                sharedFrontendLogger.error("[YTMusic Gap-Fill] Batch match failed:", err);
-                if (!cancelled) {
-                    _matchCache.set(album.id, {});
-                    setMatches({});
+            if (cancelled) return;
+
+            // Step 2: Find tracks still unmatched after persisted lookup
+            const unmatchedTracks = unownedTracks.filter(
+                (t) => !newMatches[t.id]
+            );
+
+            // Step 3: Call match-batch only for tracks without persisted mappings
+            if (unmatchedTracks.length > 0) {
+                const trackPayload = unmatchedTracks.map((track) => ({
+                    artist: track.artist?.name || album?.artist?.name || "",
+                    title: track.title,
+                    albumTitle: album?.title,
+                    duration:
+                        typeof track.duration === "number" && track.duration > 0
+                            ? track.duration
+                            : undefined,
+                    isrc: track.isrc || undefined,
+                }));
+
+                try {
+                    const { matches: batchMatches } = await api.matchYtMusicBatch(trackPayload);
+
+                    if (cancelled) return;
+
+                    batchMatches.forEach((match, idx) => {
+                        if (match && unmatchedTracks[idx]) {
+                            newMatches[unmatchedTracks[idx].id] = match;
+                        }
+                    });
+                } catch (err) {
+                    sharedFrontendLogger.error("[YTMusic Gap-Fill] Batch match failed:", err);
                 }
             }
 
-            if (!cancelled) setLoading(false);
+            if (!cancelled) {
+                // Store in global cache for instant revisits
+                _matchCache.set(album.id, newMatches);
+                setMatches(newMatches);
+                setLoading(false);
+            }
         };
 
         matchTracks();
@@ -191,10 +229,10 @@ export function useYtMusicGapFill(
     // Produce enriched tracks with streamSource + youtubeVideoId
     // Preserve any existing TIDAL enrichment — don't overwrite
     const enrichedTracks = useMemo((): Track[] | undefined => {
-        if (!album?.tracks) return undefined;
-        if (Object.keys(matches).length === 0) return album.tracks;
+        if (!albumTracks) return undefined;
+        if (Object.keys(matches).length === 0) return albumTracks;
 
-        return album.tracks.map((track) => {
+        return albumTracks.map((track) => {
             // Don't overwrite TIDAL-enriched tracks
             if (track.streamSource === "tidal") return track;
             const match = matches[track.id];
@@ -209,7 +247,7 @@ export function useYtMusicGapFill(
             }
             return track;
         });
-    }, [album?.tracks, matches]);
+    }, [albumTracks, matches]);
 
     // Reset when album changes
     const reset = useCallback(() => {

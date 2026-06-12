@@ -7,6 +7,9 @@ interface InfoTooltipProps {
     text: string;
 }
 
+/**
+ * Renders the InfoTooltip component.
+ */
 export function InfoTooltip({ text }: InfoTooltipProps) {
     const [showTooltip, setShowTooltip] = useState(false);
 

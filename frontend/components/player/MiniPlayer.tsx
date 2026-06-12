@@ -18,8 +18,12 @@ import { cn } from "@/utils/cn";
 import { clampTime } from "@/utils/formatTime";
 import { SyncBadge } from "@/components/player/SyncBadge";
 import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { PlaybackQualityBadgeWithStats } from "@/components/player/PlaybackQualityBadgeWithStats";
 
+/**
+ * Renders the MiniPlayer component.
+ */
 export function MiniPlayer() {
     const {
         currentTrack,
@@ -167,6 +171,7 @@ export function MiniPlayer() {
                                 mode="up-only"
                                 buttonSizeClassName="h-8 w-8"
                                 iconSizeClassName="h-4 w-4"
+                                metadata={buildPreferenceMetadata(currentTrack)}
                             />
                         </div>
                     )}

@@ -12,6 +12,9 @@ interface ConnectionCardProps {
     isLoading?: boolean;
 }
 
+/**
+ * Renders the ConnectionCard component.
+ */
 export function ConnectionCard({
     icon,
     title,

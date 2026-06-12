@@ -423,9 +423,13 @@ const preemptChecks: Array<{
 }> = [];
 
 const toastErrors: string[] = [];
+const listenTogetherResyncCalls: string[] = [];
 
 let runtimeEngineMode: "howler" | "videojs" = "howler";
-let listenTogetherSnapshot: { groupId?: string } | null = null;
+let listenTogetherSnapshot: {
+    groupId?: string;
+    isHost?: boolean;
+} | null = null;
 let podcastCacheStatus = {
     cached: true,
     downloading: false,
@@ -480,6 +484,7 @@ const makeSegmentedSession = (
 const resetHarnessState = (): void => {
     engine.reset();
     hookRuntime.unmount();
+    heartbeatInstances.length = 0;
 
     audioState.currentTrack = makeTrack("track-1");
     audioState.currentAudiobook = null;
@@ -516,6 +521,7 @@ const resetHarnessState = (): void => {
     }
     preemptChecks.length = 0;
     toastErrors.length = 0;
+    listenTogetherResyncCalls.length = 0;
 
     runtimeEngineMode = "howler";
     listenTogetherSnapshot = null;
@@ -757,15 +763,16 @@ mock.module("@/lib/api", {
                 const next = handoffSessionQueue.shift();
                 if (next instanceof Error) throw next;
                 const resolved = next ?? makeSegmentedSession("default-handoff");
+                const resolvedAny = resolved as Record<string, unknown>;
                 return {
                     ...resolved,
                     resumeAtSec:
-                        typeof resolved.resumeAtSec === "number"
-                            ? resolved.resumeAtSec
+                        typeof resolvedAny.resumeAtSec === "number"
+                            ? resolvedAny.resumeAtSec
                             : 0,
                     shouldPlay:
-                        typeof resolved.shouldPlay === "boolean"
-                            ? resolved.shouldPlay
+                        typeof resolvedAny.shouldPlay === "boolean"
+                            ? resolvedAny.shouldPlay
                             : false,
                 };
             },
@@ -797,6 +804,11 @@ mock.module("@/lib/api", {
             reportPlaybackClientMetric: async (payload: Record<string, unknown>) => {
                 apiCalls.reportPlaybackClientMetric.push(payload);
             },
+            getYtMusicStatus: async () => ({
+                enabled: false,
+                available: false,
+                authenticated: false,
+            }),
         },
     },
 });
@@ -918,7 +930,17 @@ mock.module("@/lib/listen-together-session", {
         enqueueLatestListenTogetherHostTrackOperation: async () => undefined,
         getListenTogetherSessionSnapshot: () => listenTogetherSnapshot,
         isListenTogetherActiveOrPending: () => false,
-        requestListenTogetherGroupResync: () => undefined,
+        resolveListenTogetherFollowerGroupId: (
+            snapshot: { groupId?: string; isHost?: boolean } | null,
+        ) =>
+            snapshot?.groupId && snapshot.isHost !== true
+                ? snapshot.groupId
+                : null,
+        requestListenTogetherGroupResync: async (groupId?: string) => {
+            if (typeof groupId === "string" && groupId.length > 0) {
+                listenTogetherResyncCalls.push(groupId);
+            }
+        },
     },
 });
 
@@ -931,6 +953,7 @@ mock.module("@/lib/storage-migration", {
 });
 
 const playbackMachine = { state: "IDLE" as string };
+const heartbeatInstances: MockHeartbeatMonitor[] = [];
 
 class MockHeartbeatMonitor {
     public monitoring = false;
@@ -945,6 +968,7 @@ class MockHeartbeatMonitor {
     ) {
         this.callbacks = callbacks;
         this.options = options;
+        heartbeatInstances.push(this);
     }
 
     start(): void {
@@ -978,6 +1002,14 @@ class MockHeartbeatMonitor {
     }
 
     notifyProgress(_time: number): void {}
+
+    triggerUnexpectedStop(): void {
+        this.callbacks.onUnexpectedStop?.();
+    }
+
+    triggerBufferTimeout(): void {
+        this.callbacks.onBufferTimeout?.();
+    }
 
     destroy(): void {
         this.clearBufferTimeout();
@@ -1080,10 +1112,11 @@ mock.module("@soundspan/media-metadata-contract", {
 let orchestratorComponent: (() => null) | null = null;
 
 before(async () => {
-    const module = await import(
-        "../../components/player/AudioPlaybackOrchestrator.tsx"
+    const orchestratorModule = await import(
+        "../../components/player/AudioPlaybackOrchestrator"
     );
-    orchestratorComponent = module.AudioPlaybackOrchestrator as unknown as () => null;
+    orchestratorComponent =
+        orchestratorModule.AudioPlaybackOrchestrator as unknown as () => null;
 });
 
 beforeEach(() => {
@@ -1118,8 +1151,10 @@ const flushAsync = async (ticks = 6): Promise<void> => {
 };
 
 const enableWindowMetrics = (runtimeConfig: Record<string, unknown> = {}): void => {
-    (globalThis as { window?: Record<string, unknown> }).window = {
+    (globalThis as unknown as { window?: Record<string, unknown> }).window = {
         __SOUNDSPAN_RUNTIME_CONFIG__: runtimeConfig,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
     };
 };
 
@@ -1550,6 +1585,81 @@ test("clears handoff listeners on track change while handoff load is pending", a
                 metric.activeTrackId === "handoff-track-b",
         ),
     );
+});
+
+test("listen-together followers resync on buffer timeout instead of starting local handoff recovery", async () => {
+    enableWindowMetrics();
+    runtimeEngineMode = "videojs";
+    playbackState.isPlaying = true;
+    listenTogetherSnapshot = {
+        groupId: "lt-group-1",
+        isHost: false,
+    };
+
+    const track = makeTrack("lt-follower-track");
+    audioState.currentTrack = track;
+    audioState.queue = [track];
+    segmentedSessionQueue.push(makeSegmentedSession("lt-follower-session"));
+
+    renderOrchestrator();
+    await flushAsync(14);
+
+    assert.equal(heartbeatInstances.length, 1);
+
+    heartbeatInstances[0].triggerBufferTimeout();
+    await flushAsync(10);
+
+    assert.deepEqual(listenTogetherResyncCalls, ["lt-group-1"]);
+    assert.equal(apiCalls.handoffSegmentedStreamingSession.length, 0);
+    assert.equal(engine.reloadCalls, 0);
+    assert.ok(playbackCalls.setIsBuffering.includes(true));
+});
+
+test("listen-together followers resync on unexpected stop instead of starting local handoff recovery", async () => {
+    mock.timers.enable();
+
+    enableWindowMetrics({
+        SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: 1500,
+    });
+    runtimeEngineMode = "videojs";
+    playbackState.isPlaying = true;
+    listenTogetherSnapshot = {
+        groupId: "lt-group-stop",
+        isHost: false,
+    };
+
+    const track = makeTrack("lt-follower-stop-track");
+    audioState.currentTrack = track;
+    audioState.queue = [track];
+    segmentedSessionQueue.push(makeSegmentedSession("lt-follower-stop-session"));
+
+    renderOrchestrator();
+    await flushAsync(14);
+
+    assert.equal(heartbeatInstances.length, 1);
+
+    engine.emit("load", { durationSec: 210 });
+    await flushAsync(8);
+
+    engine.currentTime = 0.3;
+    engine.actualCurrentTime = 0.3;
+    engine.emit("timeupdate", {
+        timeSec: 0.3,
+    });
+    await flushAsync(8);
+
+    mock.timers.tick(8_001);
+    await flushAsync(8);
+
+    const reloadCallsBeforeStop = engine.reloadCalls;
+    engine.playing = false;
+    heartbeatInstances[0].triggerUnexpectedStop();
+    await flushAsync(10);
+
+    assert.deepEqual(listenTogetherResyncCalls, ["lt-group-stop"]);
+    assert.equal(apiCalls.handoffSegmentedStreamingSession.length, 0);
+    assert.equal(engine.reloadCalls, reloadCallsBeforeStop);
+    assert.ok(playbackCalls.setIsBuffering.includes(true));
 });
 
 test("routes segmented load errors into startup recovery before first chunk response", async () => {

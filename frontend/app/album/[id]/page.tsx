@@ -13,11 +13,12 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 // Custom hooks
 import { useAlbumData } from "@/features/album/hooks/useAlbumData";
-import { useAlbumActions } from "@/features/album/hooks/useAlbumActions";
+import { useAlbumActions, useAlbumLikedState } from "@/features/album/hooks/useAlbumActions";
 import { useYtMusicGapFill } from "@/features/album/hooks/useYtMusicGapFill";
 import { useTidalGapFill } from "@/features/album/hooks/useTidalGapFill";
 import { useTrackPreview } from "@/hooks/useTrackPreview";
 import type { Track as AlbumTrack } from "@/features/album/types";
+import { toAddToPlaylistRef, type AddToPlaylistRef } from "@/lib/trackRef";
 
 // Components
 import { AlbumHero } from "@/features/album/components/AlbumHero";
@@ -48,6 +49,9 @@ function AlbumTracksSkeleton() {
     );
 }
 
+/**
+ * Renders the AlbumPage component.
+ */
 export default function AlbumPage({ params }: AlbumPageProps) {
     const { id } = use(params);
     const router = useRouter();
@@ -59,7 +63,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
 
     // State
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
-    const [pendingTrackIds, setPendingTrackIds] = useState<string[]>([]);
+    const [pendingTrackRefs, setPendingTrackRefs] = useState<AddToPlaylistRef[]>([]);
     const [, setIsBulkAdd] = useState(false);
     const [, setIsAddingToPlaylist] = useState(false);
 
@@ -96,6 +100,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
 
     // Use enriched tracks (with TIDAL + YT Music gap-fill) when available
     const album = rawAlbum ? { ...rawAlbum, tracks: enrichedTracks || rawAlbum.tracks } : rawAlbum;
+    const isAlbumLiked = useAlbumLikedState(album);
     const isProviderMatching =
         !isTidalStatusResolved ||
         !isYtStatusResolved ||
@@ -150,30 +155,28 @@ export default function AlbumPage({ params }: AlbumPageProps) {
         playTrackNow(track, album);
     };
 
-    const openPlaylistSelector = (trackIds: string[], bulk = false) => {
-        if (!trackIds.length) return;
-        setPendingTrackIds(trackIds);
+    const openPlaylistSelector = (trackRefs: AddToPlaylistRef[], bulk = false) => {
+        if (!trackRefs.length) return;
+        setPendingTrackRefs(trackRefs);
         setIsBulkAdd(bulk);
         setShowPlaylistSelector(true);
     };
 
     const handleAddAlbumToPlaylist = () => {
         if (!album?.tracks?.length) return;
-        const trackIds = album.tracks
-            .map((track: AlbumTrack) => track.id)
-            .filter(Boolean);
-        openPlaylistSelector(trackIds, true);
+        const trackRefs = album.tracks.map((track: AlbumTrack) => toAddToPlaylistRef(track));
+        openPlaylistSelector(trackRefs, true);
     };
 
     const handlePlaylistSelected = async (playlistId: string) => {
-        if (!pendingTrackIds.length) return;
+        if (!pendingTrackRefs.length) return;
 
         try {
             setIsAddingToPlaylist(true);
-            for (const trackId of pendingTrackIds) {
-                await api.addTrackToPlaylist(playlistId, trackId);
+            for (const trackRef of pendingTrackRefs) {
+                await api.addTrackToPlaylist(playlistId, trackRef);
             }
-            setPendingTrackIds([]);
+            setPendingTrackRefs([]);
             setIsBulkAdd(false);
             setShowPlaylistSelector(false);
         } catch (error) {
@@ -210,10 +213,11 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                     }}
                     onDownloadAlbum={() => downloadAlbum(album)}
                     onAddToPlaylist={handleAddAlbumToPlaylist}
-                    onThumbsUpAlbum={() => {
+                    onToggleAlbumLike={() => {
                         if (!hasTracks) return;
-                        void setAlbumPreference(album, "thumbs_up");
+                        void setAlbumPreference(album, isAlbumLiked ? "clear" : "thumbs_up");
                     }}
+                    isAlbumLiked={isAlbumLiked}
                     isPendingDownload={isPendingByMbid(
                         album?.mbid || album?.rgMbid || ""
                     )}
@@ -266,7 +270,6 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                                     e
                                 )
                             }
-                            isInListenTogetherGroup={isInGroup}
                             isProviderMatching={isProviderMatching}
                         />
                     )}
@@ -286,7 +289,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
                 isOpen={showPlaylistSelector}
                 onClose={() => {
                     setShowPlaylistSelector(false);
-                    setPendingTrackIds([]);
+                    setPendingTrackRefs([]);
                     setIsBulkAdd(false);
                 }}
                 onSelectPlaylist={handlePlaylistSelected}

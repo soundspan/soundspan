@@ -18,6 +18,9 @@ interface UseTVNavigationResult {
     handleKeyDown: (e: KeyboardEvent) => void;
 }
 
+/**
+ * Executes useTVNavigation.
+ */
 export function useTVNavigation(options: UseTVNavigationOptions = {}): UseTVNavigationResult {
     const { onBack, onSelect, enabled = true } = options;
     const isTV = useIsTV();

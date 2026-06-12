@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { Smartphone, QrCode, ArrowRight } from "lucide-react";
 
+/**
+ * Renders the LinkDeviceSection component.
+ */
 export function LinkDeviceSection() {
     return (
         <div

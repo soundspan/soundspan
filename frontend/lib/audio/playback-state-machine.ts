@@ -39,6 +39,9 @@ const VALID_TRANSITIONS: Record<PlaybackState, PlaybackState[]> = {
 
 export type StateListener = (context: StateContext) => void;
 
+/**
+ * Represents the PlaybackStateMachine class.
+ */
 export class PlaybackStateMachine {
   private context: StateContext = {
     state: 'IDLE',

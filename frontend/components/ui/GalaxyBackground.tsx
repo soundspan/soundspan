@@ -14,6 +14,9 @@ interface GalaxyBackgroundProps {
     secondaryColor?: string;
 }
 
+/**
+ * Renders the GalaxyBackground component.
+ */
 export function GalaxyBackground({ primaryColor }: GalaxyBackgroundProps = {}) {
     // Convert hex color to RGB values for opacity control
     const hexToRgb = (hex: string) => {

@@ -118,7 +118,6 @@ Experimental feature note:
 | `NEXT_PUBLIC_BUILD_TYPE` | `frontend` (build-time) | Optional (build-time only) | `nightly` (compose build arg) | Marks build channel (nightly/release semantics). |
 | `NEXT_PUBLIC_APP_VERSION` | `frontend` (build-time) | Optional (build-time only) | `frontend/package.json` version | Explicit app version override in UI. |
 | `ANALYZE` | `frontend` (build-time) | Optional (build-time only) | unset (`false`) | Enables Next.js bundle analyzer when `true`. |
-| `HOWLER_IOS_LOCKSCREEN_WORKAROUNDS_ENABLED` | `frontend` (runtime) | Optional | `false` | Enables iOS-only Howler lock-screen workarounds (audio-session playback mode, unlock-based retry, and disabled auto-suspend). Applies to the standard `howler` playback engine; not related to segmented streaming. |
 
 ## Integration and Feature Variables
 
@@ -128,7 +127,7 @@ Experimental feature note:
 | `LIDARR_ENABLED` | `backend`, `backend-worker` | Optional | `false` | Enables Lidarr integration logic from env fallback paths. |
 | `LIDARR_URL` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr base URL. |
 | `LIDARR_API_KEY` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr API key. |
-| `LASTFM_API_KEY` | `backend`, `backend-worker` | Optional | built-in app key | Last.fm metadata/recommendation API key override. |
+| `LASTFM_API_KEY` | `backend`, `backend-worker` | Optional | unset | Last.fm metadata/recommendation API key. When unset, Last.fm features stay disabled unless an encrypted system setting supplies a key. |
 | `OPENAI_API_KEY` | `backend`, `backend-worker` | Optional | unset | OpenAI key for AI-assisted recommendation features. |
 | `DEEZER_API_KEY` | `backend`, `backend-worker` | Optional | unset | Deezer API key override. |
 | `DISCOVERY_MODE` | `backend`, `backend-worker` | Optional | `recommendation` | Discovery mode (`recommendation` or `legacy`). |

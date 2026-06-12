@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveListenTogetherNavigationIndex } from "../../lib/listen-together-navigation.ts";
+import { resolveListenTogetherNavigationIndex } from "../../lib/listen-together-navigation";
 
 test("next wraps to index 0 at queue end", () => {
     const index = resolveListenTogetherNavigationIndex({

@@ -34,10 +34,8 @@ const resolveLogLevel = (): FrontendLogLevel => {
     return "silent";
 };
 
-const currentLevel = resolveLogLevel();
-
 function shouldLog(level: FrontendLogLevel): boolean {
-    return LOG_LEVELS[level] >= LOG_LEVELS[currentLevel];
+    return LOG_LEVELS[level] >= LOG_LEVELS[resolveLogLevel()];
 }
 
 function isContextCandidate(value: unknown): value is FrontendLogContext {
@@ -122,6 +120,9 @@ function emit(
     method(prefix, ...passthrough);
 }
 
+/**
+ * Executes createFrontendLogger.
+ */
 export function createFrontendLogger(scope?: string): FrontendLogger {
     const scoped = scope?.trim() || null;
 

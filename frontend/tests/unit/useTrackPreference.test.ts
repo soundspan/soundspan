@@ -3,7 +3,8 @@ import test from "node:test";
 import {
     applyOptimisticTrackPreferenceMutation,
     buildOptimisticTrackPreferenceResponse,
-} from "../../hooks/trackPreferenceOptimistic.ts";
+} from "../../hooks/trackPreferenceOptimistic";
+import { buildPreferenceMetadata } from "../../hooks/useTrackPreference";
 
 test("buildOptimisticTrackPreferenceResponse maps signal to expected score", () => {
     const thumbsUp = buildOptimisticTrackPreferenceResponse(
@@ -91,4 +92,70 @@ test("applyOptimisticTrackPreferenceMutation updates cache without waiting for c
     assert.equal(optimisticPayload.likedAt, null);
     assert.ok(optimisticPayload.dislikedAt);
     assert.ok(optimisticPayload.updatedAt);
+});
+
+test("buildPreferenceMetadata returns metadata for remote yt: track", () => {
+    const result = buildPreferenceMetadata({
+        id: "yt:dQw4w9WgXcQ",
+        title: "Never Gonna Give You Up",
+        artist: { name: "Rick Astley" },
+        album: { title: "Whenever You Need Somebody" },
+        duration: 213,
+        thumbnailUrl: "https://example.com/thumb.jpg",
+    });
+    assert.deepEqual(result, {
+        title: "Never Gonna Give You Up",
+        artist: "Rick Astley",
+        album: "Whenever You Need Somebody",
+        duration: 213,
+        thumbnailUrl: "https://example.com/thumb.jpg",
+    });
+});
+
+test("buildPreferenceMetadata returns metadata for remote tidal: track", () => {
+    const result = buildPreferenceMetadata({
+        id: "tidal:12345",
+        title: "Some Song",
+        artist: "Some Artist",
+        album: "Some Album",
+        duration: 300,
+    });
+    assert.deepEqual(result, {
+        title: "Some Song",
+        artist: "Some Artist",
+        album: "Some Album",
+        duration: 300,
+        thumbnailUrl: undefined,
+    });
+});
+
+test("buildPreferenceMetadata returns undefined for local track", () => {
+    const result = buildPreferenceMetadata({
+        id: "cuid-local-track-id",
+        title: "Local Song",
+        artist: { name: "Local Artist" },
+        album: { title: "Local Album" },
+        duration: 200,
+    });
+    assert.equal(result, undefined);
+});
+
+test("buildPreferenceMetadata returns undefined for null/undefined input", () => {
+    assert.equal(buildPreferenceMetadata(null), undefined);
+    assert.equal(buildPreferenceMetadata(undefined), undefined);
+});
+
+test("buildPreferenceMetadata handles missing artist/album gracefully", () => {
+    const result = buildPreferenceMetadata({
+        id: "yt:abc123",
+        title: "Partial Track",
+        duration: 180,
+    });
+    assert.deepEqual(result, {
+        title: "Partial Track",
+        artist: undefined,
+        album: undefined,
+        duration: 180,
+        thumbnailUrl: undefined,
+    });
 });

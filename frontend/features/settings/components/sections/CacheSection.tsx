@@ -144,6 +144,9 @@ function EnrichmentStage({
     );
 }
 
+/**
+ * Renders the CacheSection component.
+ */
 export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
     const { musicCNN, vibeEmbeddings, loading: featuresLoading } = useFeatures();
     const [syncing, setSyncing] = useState(false);

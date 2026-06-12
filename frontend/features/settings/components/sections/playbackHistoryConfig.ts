@@ -15,7 +15,16 @@ export const HISTORY_RANGE_OPTIONS: Array<{ value: HistoryRange; label: string }
     { value: "365d", label: "Past year" },
     { value: "all", label: "All time" },
 ];
+const HISTORY_RANGE_SUMMARY_KEYS: Record<HistoryRange, keyof PlayHistorySummary> = {
+    "7d": "last7Days",
+    "30d": "last30Days",
+    "365d": "last365Days",
+    all: "allTime",
+};
 
+/**
+ * Executes getImpactedHistoryCount.
+ */
 export function getImpactedHistoryCount(
     summary: PlayHistorySummary | null,
     selectedRange: HistoryRange
@@ -24,17 +33,5 @@ export function getImpactedHistoryCount(
         return null;
     }
 
-    if (selectedRange === "7d") {
-        return summary.last7Days;
-    }
-
-    if (selectedRange === "30d") {
-        return summary.last30Days;
-    }
-
-    if (selectedRange === "365d") {
-        return summary.last365Days;
-    }
-
-    return summary.allTime;
+    return summary[HISTORY_RANGE_SUMMARY_KEYS[selectedRange]];
 }

@@ -279,11 +279,17 @@ class PlaylistLogger {
 }
 
 // Factory function to create loggers
+/**
+ * Executes createPlaylistLogger.
+ */
 export function createPlaylistLogger(jobId: string): PlaylistLogger {
     return new PlaylistLogger(jobId);
 }
 
 // Quick console+file log for one-off messages
+/**
+ * Executes logPlaylistEvent.
+ */
 export function logPlaylistEvent(message: string): void {
     ensureLogsDir();
     const line = formatLogLine('INFO', message);

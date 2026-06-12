@@ -20,6 +20,9 @@ interface ActiveDownloadsTabProps {
     queryEnabled?: boolean;
 }
 
+/**
+ * Renders the ActiveDownloadsTab component.
+ */
 export function ActiveDownloadsTab({
     downloads: downloadsProp,
     loading: loadingProp,

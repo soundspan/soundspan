@@ -11,6 +11,7 @@ import type {
   AudioEngineSource,
 } from "@/lib/audio-engine/types";
 import { VideoJsSegmentedEngine } from "@/lib/audio-engine/videoJsSegmentedEngine";
+import { createAudioEngine } from "@/lib/audio-engine/engineFactory";
 import {
   DEFAULT_AUDIO_VOLUME,
   clampAudioVolume,
@@ -70,6 +71,7 @@ interface RuntimeAudioEngine extends AudioEngine {
   ): AudioEngineRepresentationFailoverResult | null;
   clearRepresentationQuarantine(): void;
   getActualCurrentTime(): number;
+  hasTrackEnded(): boolean;
   isCurrentlySeeking(): boolean;
   getSeekTarget(): number | null;
 }
@@ -86,7 +88,7 @@ interface HybridRuntimeAudioEngineOptions {
  * - Uses Video.js for DASH manifests when segmented mode is active
  */
 export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
-  private readonly howlerEngine: AudioEngine;
+  private howlerEngine: AudioEngine;
   private videoJsEngine: AudioEngine | null = null;
   private readonly createVideoJsEngine: () => AudioEngine;
   private readonly resolveMode: () => ReturnType<typeof resolveStreamingEngineMode>;
@@ -107,6 +109,30 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     this.createVideoJsEngine =
       options.createVideoJsEngine ?? (() => new VideoJsSegmentedEngine());
     this.resolveMode = options.resolveMode ?? resolveStreamingEngineMode;
+    this.bindEngineEvents("howler", this.howlerEngine);
+    this.applyOutputState(this.howlerEngine);
+  }
+
+  /**
+   * Hot-swap the direct-playback engine (the "howler" slot) with a
+   * platform-specific engine such as TauriNativeEngineAdapter.
+   *
+   * Safe to call while idle or during playback — volume/mute state is
+   * re-applied and event forwarding is re-wired automatically.
+   * Only takes effect when the howler slot is the active engine.
+   */
+  upgradeHowlerEngine(engine: AudioEngine): void {
+    if (engine === this.howlerEngine) {
+      return;
+    }
+
+    this.unbindEngineEvents("howler", this.howlerEngine);
+
+    if (typeof this.howlerEngine.destroy === "function") {
+      this.howlerEngine.destroy();
+    }
+
+    this.howlerEngine = engine;
     this.bindEngineEvents("howler", this.howlerEngine);
     this.applyOutputState(this.howlerEngine);
   }
@@ -281,6 +307,27 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     return activeEngine.getCurrentTime();
   }
 
+  hasTrackEnded(): boolean {
+    const activeEngine = this.getActiveEngine();
+    if (typeof activeEngine.hasTrackEnded === "function") {
+      return activeEngine.hasTrackEnded();
+    }
+    const duration = activeEngine.getDuration();
+    const position = activeEngine.getCurrentTime();
+    return duration > 0 && position >= duration - 0.1;
+  }
+
+  notifyTrackEnded(): void {
+    const activeEngine = this.getActiveEngine();
+    if (typeof activeEngine.notifyTrackEnded === "function") {
+      activeEngine.notifyTrackEnded();
+    } else {
+      // Engine doesn't implement notifyTrackEnded — emit end directly
+      // so foreground recovery can still advance tracks.
+      this.emit("end", undefined);
+    }
+  }
+
   isCurrentlySeeking(): boolean {
     const activeEngine = this.getActiveEngine();
     if (typeof activeEngine.isCurrentlySeeking === "function") {
@@ -398,10 +445,30 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 }
 
 let sharedRuntimeAudioEngine: HybridRuntimeAudioEngine | null = null;
+let engineUpgradeInitiated = false;
 
 export const createRuntimeAudioEngine = (): RuntimeAudioEngine => {
   if (!sharedRuntimeAudioEngine) {
+    // Start with HowlerEngineAdapter synchronously so playback is available immediately.
     sharedRuntimeAudioEngine = new HybridRuntimeAudioEngine();
+
+    // Kick off async platform detection; if a native engine is needed,
+    // replace the inner howler engine transparently.
+    if (!engineUpgradeInitiated) {
+      engineUpgradeInitiated = true;
+      createAudioEngine()
+        .then((engine) => {
+          if (!(engine instanceof HowlerEngineAdapter) && sharedRuntimeAudioEngine) {
+            sharedRuntimeAudioEngine.upgradeHowlerEngine(engine);
+          }
+        })
+        .catch((err) => {
+          sharedFrontendLogger.error(
+            "[AudioEngine] Platform engine detection failed; continuing with Howler engine.",
+            err,
+          );
+        });
+    }
   }
   return sharedRuntimeAudioEngine;
 };

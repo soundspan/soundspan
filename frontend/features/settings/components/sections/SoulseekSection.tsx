@@ -13,6 +13,9 @@ interface SoulseekCardProps {
     isTesting: boolean;
 }
 
+/**
+ * Renders the SoulseekCard component.
+ */
 export function SoulseekCard({ settings, onUpdate, onTest, isTesting }: SoulseekCardProps) {
     const [testStatus, setTestStatus] = useState<StatusType>("idle");
     const [testMessage, setTestMessage] = useState("");

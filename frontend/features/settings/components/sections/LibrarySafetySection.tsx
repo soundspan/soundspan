@@ -6,6 +6,9 @@ interface LibrarySafetySectionProps {
     onUpdate: (updates: Partial<SystemSettings>) => void;
 }
 
+/**
+ * Renders the LibrarySafetySection component.
+ */
 export function LibrarySafetySection({
     settings,
     onUpdate,

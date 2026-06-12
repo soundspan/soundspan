@@ -9,6 +9,9 @@ interface TopResultProps {
     discoveryArtist?: DiscoverResult;
 }
 
+/**
+ * Renders the TopResult component.
+ */
 export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
     // Prefer library artist over discovery
     if (!libraryArtist && !discoveryArtist) {

@@ -16,6 +16,9 @@ export const formatFileSize = (bytes: number): string => {
 };
 
 // Helper function to get quality badge
+/**
+ * Implements getQualityBadge.
+ */
 export const getQualityBadge = (result: SoulseekResult) => {
     if (result.format === "flac") {
         return (
@@ -64,6 +67,9 @@ export const parseFilename = (
     return { artist: "Unknown", title: filename };
 };
 
+/**
+ * Renders the SoulseekSongsList component.
+ */
 export function SoulseekSongsList({
     soulseekResults,
     downloadingFiles,

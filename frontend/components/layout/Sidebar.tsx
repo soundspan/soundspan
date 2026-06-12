@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { Plus, RefreshCw, ArrowUpDown } from "lucide-react";
+import { Plus, RefreshCw, ArrowUpDown, Heart } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -16,6 +16,7 @@ import Image from "next/image";
 import { MobileSidebar } from "./MobileSidebar";
 import { SIDEBAR_NAVIGATION } from "./socialNavigation";
 import { BRAND_NAME } from "@/lib/brand";
+import { useLikedPlaylistQuery } from "@/hooks/useQueries";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface Playlist {
@@ -32,6 +33,9 @@ interface Playlist {
 type PlaylistSort = "created" | "updated" | "alphabetical";
 type PlaylistFilter = "all" | "mine" | "others";
 
+/**
+ * Renders the Sidebar component.
+ */
 export function Sidebar() {
     const pathname = usePathname();
     const { isAuthenticated } = useAuth();
@@ -39,6 +43,8 @@ export function Sidebar() {
     const { currentTrack, currentAudiobook, currentPodcast, playbackType } =
         useAudioState();
     const hasActiveSessions = useActiveListenSessions();
+    const likedQuery = useLikedPlaylistQuery(1);
+    const likedTotal = likedQuery.data?.total ?? 0;
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
@@ -276,7 +282,7 @@ export function Sidebar() {
             {/* Navigation */}
             <nav
                 className={cn(
-                    isMobileOrTablet ? "pt-4 space-y-1 px-6" : "pt-3 space-y-1 px-3",
+                    isMobileOrTablet ? "pt-4 space-y-1 px-6" : "pt-6 space-y-1 px-3",
                 )}
                 role="navigation"
                 aria-label="Main navigation"
@@ -293,7 +299,7 @@ export function Sidebar() {
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
                                 "block rounded-lg transition-all duration-200 group relative overflow-hidden",
-                                isMobileOrTablet ? "px-4 py-3.5" : "px-3 py-2",
+                                isMobileOrTablet ? "px-4 py-3.5" : "px-4 py-3",
                                 isActive ?
                                     "bg-white/10 text-white"
                                 :   "text-gray-400 hover:text-white hover:bg-white/5 active:bg-white/[0.07]",
@@ -443,6 +449,45 @@ export function Sidebar() {
                         isMobileOrTablet ? "px-6" : "px-3",
                     )}
                 >
+                    {/* Pinned: My Liked */}
+                    {likedTotal > 0 && (() => {
+                        const isLikedActive = pathname === "/playlist/my-liked";
+                        return (
+                            <Link
+                                href="/playlist/my-liked"
+                                prefetch={false}
+                                className={cn(
+                                    "block px-3 py-2.5 rounded-lg transition-all duration-300 group relative overflow-hidden",
+                                    isLikedActive
+                                        ? "bg-gradient-to-r from-[#2323FF]/10 to-transparent text-white border-l-2 border-[#2323FF] shadow-md shadow-[#2323FF]/5"
+                                        : "text-gray-400 hover:text-white hover:bg-white/[0.05] border-l-2 border-transparent hover:border-l-2 hover:border-[#2323FF]/30",
+                                )}
+                            >
+                                {!isLikedActive && (
+                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2323FF]/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+                                )}
+                                <div className="flex items-center gap-1.5">
+                                    <Heart className="w-3.5 h-3.5 shrink-0 text-[#3b82f6] fill-[#3b82f6] relative z-10" />
+                                    <div
+                                        className={cn(
+                                            "text-sm font-medium truncate relative z-10 transition-all duration-200 flex-1",
+                                            isLikedActive ? "font-semibold" : "group-hover:translate-x-0.5",
+                                        )}
+                                    >
+                                        My Liked
+                                    </div>
+                                </div>
+                                <div
+                                    className={cn(
+                                        "text-xs truncate relative z-10 mt-0.5 transition-colors duration-200",
+                                        isLikedActive ? "text-gray-400" : "text-gray-500 group-hover:text-gray-400",
+                                    )}
+                                >
+                                    Playlist &bull; {likedTotal} track{likedTotal !== 1 ? "s" : ""}
+                                </div>
+                            </Link>
+                        );
+                    })()}
                     {isLoadingPlaylists ?
                         // Loading skeleton with shimmer
                         <>
@@ -551,6 +596,7 @@ export function Sidebar() {
                 <MobileSidebar
                     isOpen={isMobileMenuOpen}
                     onClose={() => setIsMobileMenuOpen(false)}
+                    hasActiveSessions={hasActiveSessions}
                 />
             )}
 

@@ -84,6 +84,7 @@ Never commit `.env` files or credentials.
 | `TIDAL_SIDECAR_URL` | TIDAL sidecar URL | If using TIDAL |
 
 Soulseek credentials are configured via System Settings and stored encrypted in the database.
+Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM_API_KEY` in the environment or store a key in System Settings when you want Last.fm-backed recommendations and metadata; otherwise those lookups remain unavailable.
 
 ## Authentication and Session Security
 

@@ -6,7 +6,7 @@ import {
     shouldAcceptEngineTimeUpdate,
     type ActivePlaybackSelection,
     type PlaybackPersistenceSnapshot,
-} from "../../lib/audio-playback-persistence-guards.ts";
+} from "../../lib/audio-playback-persistence-guards";
 
 describe("isPlaybackSelectionMatch", () => {
     test("returns false when playbackType differs", () => {

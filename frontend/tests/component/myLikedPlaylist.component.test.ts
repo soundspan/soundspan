@@ -18,6 +18,11 @@ type MockLikedTrack = {
         title: string;
         coverArt: string | null;
     };
+    streamSource?: "tidal" | "youtube";
+    tidalTrackId?: number;
+    youtubeVideoId?: string;
+    source?: string;
+    provider?: Record<string, unknown>;
 };
 
 type MockLikedPlaylistData = {
@@ -48,18 +53,56 @@ const icon =
 
 mock.module("lucide-react", {
     namedExports: {
+        AudioLines: icon("audio-lines"),
         Heart: icon("heart"),
+        ListMusic: icon("list-music"),
         Loader2: icon("loader-2"),
         Music: icon("music"),
         Pause: icon("pause"),
         Play: icon("play"),
+        Plus: icon("plus"),
+        Radio: icon("radio"),
         Shuffle: icon("shuffle"),
+    },
+});
+
+mock.module("@/components/ui/CachedImage", {
+    namedExports: {
+        CachedImage: (props: Record<string, unknown>) =>
+            React.createElement("img", { src: props.src as string, alt: props.alt as string }),
+    },
+});
+
+mock.module("next/navigation", {
+    namedExports: {
+        useRouter: () => ({
+            push: () => undefined,
+            replace: () => undefined,
+            back: () => undefined,
+            prefetch: () => undefined,
+        }),
+        usePathname: () => "/playlist/my-liked",
+        useSearchParams: () => new URLSearchParams(),
     },
 });
 
 mock.module("next/image", {
     defaultExport: (props: Record<string, unknown>) =>
         React.createElement("img", { src: props.src as string, alt: props.alt as string }),
+});
+
+mock.module("@/lib/audio-state-context", {
+    namedExports: {
+        useAudioState: () => ({
+            currentTrack: state.currentTrack,
+        }),
+    },
+});
+
+mock.module("@/hooks/useQueuedTrackIds", {
+    namedExports: {
+        useQueuedTrackIds: () => new Set<string>(),
+    },
 });
 
 mock.module("@/lib/audio-context", {
@@ -75,7 +118,40 @@ mock.module("@/lib/audio-context", {
             playNow: () => undefined,
             pause: () => undefined,
             resume: () => undefined,
+            addTracksToQueue: () => undefined,
         }),
+    },
+});
+
+mock.module("@/hooks/usePlayButtonFeedback", {
+    namedExports: {
+        usePlayButtonFeedback: () => ({
+            showSpinner: false,
+            trigger: () => undefined,
+        }),
+    },
+});
+
+mock.module("@/components/ui/PlaylistSelector", {
+    namedExports: {
+        PlaylistSelector: () => null,
+    },
+});
+
+mock.module("@/lib/trackRef", {
+    namedExports: {
+        toAddToPlaylistRef: (track: Record<string, unknown>) => track,
+    },
+});
+
+mock.module("@/lib/logger", {
+    namedExports: {
+        frontendLogger: {
+            info: () => undefined,
+            warn: () => undefined,
+            error: () => undefined,
+            debug: () => undefined,
+        },
     },
 });
 
@@ -83,6 +159,8 @@ mock.module("@/lib/api", {
     namedExports: {
         api: {
             getCoverArtUrl: (url: string) => url,
+            getBrowseImageUrl: (url: string) => url,
+            getTidalBrowseImageUrl: (url: string) => `tidal:${url}`,
             setTrackPreference: async () => ({ trackId: "track-1", signal: "clear" }),
         },
     },
@@ -141,6 +219,24 @@ mock.module("@/components/player/TrackPreferenceButtons", {
                 "data-resolve-from-query": String(props.resolveFromQuery),
                 "data-button-size": props.buttonSizeClassName,
                 "data-icon-size": props.iconSizeClassName,
+            }),
+    },
+});
+
+mock.module("@/components/ui/TrackOverflowMenu", {
+    namedExports: {
+        TrackOverflowMenu: (props: {
+            track?: { id?: string };
+            showGoToArtist?: boolean;
+            showGoToAlbum?: boolean;
+            showMatchVibe?: boolean;
+            showStartRadio?: boolean;
+        }) =>
+            React.createElement("div", {
+                "data-testid": "overflow-menu",
+                "data-track-id": props.track?.id,
+                "data-show-go-to-artist": String(props.showGoToArtist ?? true),
+                "data-show-start-radio": String(props.showStartRadio ?? true),
             }),
     },
 });
@@ -214,27 +310,37 @@ beforeEach(() => {
     state.currentTrack = null;
 });
 
-test("renders empty-state copy and disables Play All and Shuffle when there are no tracks", async () => {
-    const mod = await import("../../app/playlist/my-liked/page.tsx");
+test("renders empty-state copy and hides action buttons when there are no tracks", async () => {
+    const mod = await import("../../app/playlist/my-liked/page");
     const MyLikedPlaylistPage = mod.default;
 
     const html = renderWithQueryClient(MyLikedPlaylistPage);
 
     assert.match(html, /No liked tracks yet/);
     assert.match(html, /Tap the heart on any song to add it here\./);
-    assert.match(html, /<span>Play All<\/span>/);
 
-    const disabledButtons = html.match(/<button[^>]*\bdisabled\b[^>]*>/g) ?? [];
-    assert.equal(
-        disabledButtons.length,
-        2,
-        "expected Play All and Shuffle controls to be disabled"
-    );
-    assert.match(
-        html,
-        /<button(?=[^>]*title="Shuffle")(?=[^>]*\bdisabled\b)[^>]*>/,
-        "expected disabled Shuffle control"
-    );
+    // Action buttons should be hidden when there are no tracks
+    assert.doesNotMatch(html, /<span>Play All<\/span>/);
+    assert.doesNotMatch(html, /title="Shuffle/);
+    assert.doesNotMatch(html, /title="Add all to queue/);
+});
+
+test("renders consolidated action bar buttons when tracks exist", async () => {
+    state.likedData = {
+        playlist: { id: "my-liked", name: "My Liked" },
+        tracks: [makeTrack("track-1", "First"), makeTrack("track-2", "Second")],
+        total: 2,
+    };
+
+    const mod = await import("../../app/playlist/my-liked/page");
+    const html = renderWithQueryClient(mod.default);
+
+    // Canonical order: Play, Shuffle, Add to Queue, Add to Playlist, Radio
+    assert.match(html, /<span>Play All<\/span>/);
+    assert.match(html, /title="Shuffle play"/);
+    assert.match(html, /title="Add all to queue"/);
+    assert.match(html, /title="Add all to playlist"/);
+    assert.match(html, /title="Start playlist radio"/);
 });
 
 test("shows Pause primary action and active like controls when a liked track is currently playing", async () => {
@@ -249,7 +355,7 @@ test("shows Pause primary action and active like controls when a liked track is 
     state.currentTrack = { id: "track-2" };
     state.isPlaying = true;
 
-    const mod = await import("../../app/playlist/my-liked/page.tsx");
+    const mod = await import("../../app/playlist/my-liked/page");
     const MyLikedPlaylistPage = mod.default;
     const html = renderWithQueryClient(MyLikedPlaylistPage);
 
@@ -267,4 +373,73 @@ test("shows Pause primary action and active like controls when a liked track is 
     assert.match(html, /data-icon-size="h-4 w-4"/);
 
     assert.doesNotMatch(html, /Delete Playlist/i);
+});
+
+test("overflow menu for remote liked tracks enables Go to Artist and Start Radio", async () => {
+    const remoteTidalTrack: MockLikedTrack = {
+        id: "tidal:991",
+        title: "Remote Tidal Song",
+        duration: 200,
+        filePath: null,
+        artist: { id: "remote-artist-cuid", name: "Tidal Artist" },
+        album: { id: "remote-album-cuid", title: "Tidal Album", coverArt: null },
+        streamSource: "tidal",
+        tidalTrackId: 991,
+    };
+    state.likedData = {
+        playlist: { id: "my-liked", name: "My Liked" },
+        tracks: [makeTrack("track-1", "Local Song"), remoteTidalTrack],
+        total: 2,
+    };
+
+    const mod = await import("../../app/playlist/my-liked/page");
+    const html = renderWithQueryClient(mod.default);
+
+    // Both tracks should have overflow menus
+    const menus = html.match(/data-testid="overflow-menu"/g) ?? [];
+    assert.equal(menus.length, 2, "Expected 2 overflow menus (local + remote)");
+
+    // The remote track's overflow menu should have showGoToArtist=true
+    assert.match(
+        html,
+        /data-track-id="tidal:991"[^>]*data-show-go-to-artist="true"/,
+        "Remote track overflow menu should enable Go to Artist"
+    );
+    assert.match(
+        html,
+        /data-track-id="tidal:991"[^>]*data-show-start-radio="true"/,
+        "Remote track overflow menu should enable Start Radio"
+    );
+});
+
+test("resolveLikedTrackCoverUrl uses provider-specific proxies for remote sources", async () => {
+    const { resolveLikedTrackCoverUrl } = await import("../../app/playlist/my-liked/page");
+
+    const tidalTrack = {
+        ...makeTrack("tidal-track", "Tidal Track"),
+        streamSource: "tidal" as const,
+        album: { id: "a1", title: "Album", coverArt: "https://img.tidal.com/cover.jpg" },
+    };
+    const ytTrack = {
+        ...makeTrack("yt-track", "YT Track"),
+        streamSource: "youtube" as const,
+        album: { id: "a2", title: "Album", coverArt: "https://i.ytimg.com/cover.jpg" },
+    };
+    const localTrack = {
+        ...makeTrack("local-track", "Local Track"),
+        album: { id: "a3", title: "Album", coverArt: "/cover/local.jpg" },
+    };
+
+    assert.equal(
+        resolveLikedTrackCoverUrl(tidalTrack as any, 200),
+        "tidal:https://img.tidal.com/cover.jpg"
+    );
+    assert.equal(
+        resolveLikedTrackCoverUrl(ytTrack as any, 200),
+        "https://i.ytimg.com/cover.jpg"
+    );
+    assert.equal(
+        resolveLikedTrackCoverUrl(localTrack as any, 200),
+        "/cover/local.jpg"
+    );
 });

@@ -23,6 +23,14 @@ export function resolveFixedPollingInterval(
 }
 
 /**
+ * Returns a random jitter value between 0 (inclusive) and maxJitterMs (exclusive).
+ * Used to stagger polling intervals and prevent simultaneous network bursts.
+ */
+export function resolvePollingJitter(maxJitterMs: number): number {
+    return Math.floor(Math.random() * maxJitterMs);
+}
+
+/**
  * Resolves adaptive polling intervals, switching between active/idle cadences.
  */
 export function resolveAdaptivePollingInterval(

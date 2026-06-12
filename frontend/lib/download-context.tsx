@@ -46,6 +46,9 @@ const DownloadContext = createContext<DownloadContextType | undefined>(
     undefined
 );
 
+/**
+ * Renders the DownloadProvider component.
+ */
 export function DownloadProvider({ children }: { children: ReactNode }) {
     const [pendingDownloads, setPendingDownloads] = useState<PendingDownload[]>(
         []
@@ -209,6 +212,9 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     );
 }
 
+/**
+ * Executes useDownloadContext.
+ */
 export function useDownloadContext() {
     const context = useContext(DownloadContext);
     if (!context) {
