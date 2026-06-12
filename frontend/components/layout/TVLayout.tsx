@@ -166,7 +166,10 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
                 focusFirstCard();
             } else if (e.key === DPAD_KEYS.CENTER) {
                 e.preventDefault();
-                router.push(tvNavigation[focusedTabIndex].href);
+                const focusedTab = tvNavigation[focusedTabIndex];
+                if (focusedTab) {
+                    router.push(focusedTab.href);
+                }
             }
         } else {
             // Delegate to content navigation hook
@@ -196,6 +199,14 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
             setFocusedTabIndex(currentIndex);
         }
     }, [pathname, tvNavigation]);
+
+    // Clamp focus when the nav list shrinks (e.g. Discovery hidden after the
+    // features fetch resolves with the discovery flag off).
+    useEffect(() => {
+        setFocusedTabIndex(prev =>
+            Math.min(prev, Math.max(0, tvNavigation.length - 1))
+        );
+    }, [tvNavigation]);
 
     return (
         <>
