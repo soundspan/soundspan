@@ -34,7 +34,11 @@ import {
     computePlayNowInsertion,
     computePodcastContextPlacement,
 } from "./queue-utils";
-import { resolveEpisodeResumeSeek } from "./audio/episode-resume";
+import {
+    resolveEpisodeProgressSaveOnSwitch,
+    resolveEpisodeStartPosition,
+} from "./audio/episode-resume";
+import { dispatchQueryEvent } from "./query-events";
 import {
     buildEpisodeQueueItem,
     episodeQueueItemFromPodcast,
@@ -69,6 +73,12 @@ const LAST_PLAYBACK_STATE_SAVE_AT_KEY = createMigratingStorageKey(
 const QUEUE_CLEARED_AT_KEY = createMigratingStorageKey(
     QUEUE_CLEARED_AT_KEY_SUFFIX
 );
+
+// How long queue dispatch waits for an episode's saved-progress lookup
+// before starting the episode from the beginning. The lookup result is
+// baked into the media state before the audio load, so resume positions
+// are applied deterministically instead of racing a post-load seek.
+const EPISODE_PROGRESS_LOOKUP_TIMEOUT_MS = 2000;
 
 function queueDebugEnabled(): boolean {
     try {
@@ -668,6 +678,44 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         [state, getActiveListenTogetherSession]
     );
 
+    // Persists the playing episode's listening position before the player
+    // switches to other media. The orchestrator only saves podcast progress
+    // on pause, natural end, and a 30s interval, so without this save every
+    // manual skip away from an episode would silently lose up to ~30s of
+    // position (and later resumes would restart from the stale point).
+    const persistEpisodeProgressBeforeSwitch = useCallback(
+        (nextMediaId: string | null) => {
+            const playbackState = playbackRef.current;
+            const save = resolveEpisodeProgressSaveOnSwitch({
+                playbackType: state.playbackType,
+                currentPodcastId: state.currentPodcast?.id ?? null,
+                nextMediaId,
+                currentTime: playbackState.currentTime,
+                engineDuration: playbackState.duration,
+                episodeDuration: state.currentPodcast?.duration ?? 0,
+            });
+            if (!save) return;
+            void api
+                .updatePodcastProgress(
+                    save.podcastId,
+                    save.episodeId,
+                    save.currentTime,
+                    save.duration,
+                    false
+                )
+                .then(() => {
+                    dispatchQueryEvent("podcast-progress-updated");
+                })
+                .catch((err) => {
+                    sharedFrontendLogger.error(
+                        "[AudioControls] Failed to save episode progress before media switch:",
+                        err
+                    );
+                });
+        },
+        [state]
+    );
+
     const playPodcast = useCallback(
         (
             podcast: Podcast,
@@ -678,6 +726,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 toast.error("Podcasts are not supported in Listen Together");
                 return;
             }
+
+            // Selecting an episode from the podcast page replaces the playing
+            // media; keep the outgoing episode's position first.
+            persistEpisodeProgressBeforeSwitch(podcast.id);
 
             const playbackState = playbackRef.current;
             const episodeItem = episodeQueueItemFromPodcast(podcast);
@@ -735,7 +787,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 playbackState.setCurrentTime(0);
             }
         },
-        [state, generateShuffleIndices, getActiveListenTogetherSession]
+        [
+            state,
+            generateShuffleIndices,
+            getActiveListenTogetherSession,
+            persistEpisodeProgressBeforeSwitch,
+        ]
     );
 
     const pause = useCallback((options?: { suppressListenTogetherBroadcast?: boolean }) => {
@@ -752,59 +809,81 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const startQueueItemAtIndex = useCallback(
         (index: number, item: QueueItem) => {
             const playbackState = playbackRef.current;
+            // Skipping away from a playing episode must keep its position.
+            persistEpisodeProgressBeforeSwitch(item.id);
             // Record the new active media synchronously so any in-flight
-            // progress fetch from a previous episode resolves as stale.
+            // progress lookup from a previous episode resolves as stale.
             activeQueueMediaIdRef.current = item.id;
             state.setRepeatOneCount(0);
 
             if (isEpisodeQueueItem(item)) {
-                state.setCurrentIndex(index);
-                state.setCurrentTrack(null);
-                state.setCurrentAudiobook(null);
-                state.setPlaybackType("podcast");
-                state.setCurrentPodcast({
-                    id: item.id,
-                    title: item.title,
-                    podcastTitle: item.podcastTitle,
-                    coverUrl: item.coverUrl,
-                    duration: item.duration,
-                    progress: null,
-                });
-                playbackState.setCurrentTime(0);
-                playbackState.setIsPlaying(true);
+                // Stop the audible source right away, then flip the media
+                // state only once the episode's saved progress is known (or
+                // the lookup timed out). The progress is baked into
+                // currentPodcast BEFORE the audio load, so the load effect
+                // starts the stream at the resume position deterministically
+                // instead of racing a post-load seek whose lock expires.
+                playbackState.setIsPlaying(false);
 
-                // Resume saved progress via the existing podcast lookup path.
+                let started = false;
+                let lookupTimeoutId: ReturnType<typeof setTimeout> | null =
+                    null;
+                const startEpisode = (
+                    progress: Episode["progress"] | null
+                ) => {
+                    if (started) return;
+                    started = true;
+                    if (lookupTimeoutId !== null) {
+                        clearTimeout(lookupTimeoutId);
+                        lookupTimeoutId = null;
+                    }
+                    // The lookup may settle after the user skipped to other
+                    // media; never (re)start an episode the player has
+                    // already moved away from.
+                    const start = resolveEpisodeStartPosition({
+                        itemId: item.id,
+                        activeMediaId: activeQueueMediaIdRef.current,
+                        progress: progress ?? null,
+                        duration: item.duration,
+                    });
+                    if (!start) return;
+                    const currentPlayback = playbackRef.current;
+                    state.setCurrentIndex(index);
+                    state.setCurrentTrack(null);
+                    state.setCurrentAudiobook(null);
+                    state.setPlaybackType("podcast");
+                    state.setCurrentPodcast({
+                        id: item.id,
+                        title: item.title,
+                        podcastTitle: item.podcastTitle,
+                        coverUrl: item.coverUrl,
+                        duration: item.duration,
+                        progress:
+                            progress && start.startAt > 0
+                                ? { ...progress, currentTime: start.startAt }
+                                : null,
+                    });
+                    currentPlayback.setCurrentTime(start.startAt);
+                    currentPlayback.setIsPlaying(true);
+                };
+
+                // Resume saved progress via the existing podcast lookup
+                // path, bounded so playback never stalls on a slow fetch.
+                lookupTimeoutId = setTimeout(
+                    () => startEpisode(null),
+                    EPISODE_PROGRESS_LOOKUP_TIMEOUT_MS
+                );
                 void api
                     .getPodcast(item.podcastId)
                     .then((podcast: { episodes?: Episode[] }) => {
                         const episode = podcast.episodes?.find(
                             (ep: Episode) => ep.id === item.episodeId
                         );
-                        const progress = episode?.progress;
-                        if (!progress || progress.isFinished) return;
-                        state.setCurrentPodcast((prev) =>
-                            prev && prev.id === item.id
-                                ? { ...prev, progress }
-                                : prev
-                        );
-                        // The fetch may resolve after the user skipped to
-                        // other media; never seek (or seek-lock) the
-                        // now-playing item to this episode's saved position.
-                        const resume = resolveEpisodeResumeSeek({
-                            itemId: item.id,
-                            activeMediaId: activeQueueMediaIdRef.current,
-                            progress,
-                            duration: item.duration,
-                        });
-                        if (resume) {
-                            const currentPlayback = playbackRef.current;
-                            currentPlayback.lockSeek(resume.resumeAt);
-                            currentPlayback.setCurrentTime(resume.resumeAt);
-                            audioSeekEmitter.emit(resume.resumeAt);
-                        }
+                        startEpisode(episode?.progress ?? null);
                     })
                     .catch(() => {
                         // Progress lookup is best-effort; play from start.
+                        startEpisode(null);
                     });
                 return;
             }
@@ -818,7 +897,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playbackState.setCurrentTime(0);
             playbackState.setIsPlaying(true);
         },
-        [state]
+        [state, persistEpisodeProgressBeforeSwitch]
     );
 
     const resume = useCallback((options?: {
@@ -1326,6 +1405,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setVibeQueueIds([]);
             }
 
+            // Play-now over a playing episode must keep its position.
+            persistEpisodeProgressBeforeSwitch(track.id);
+
             // Empty queue or audiobook playback: start fresh with just this track.
             // With a non-empty mixed queue (including podcast playback) the
             // track is inserted after the current item instead, so the rest
@@ -1377,7 +1459,12 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playbackState.setCurrentTime(0);
             playbackState.setIsPlaying(true);
         },
-        [state, generateShuffleIndices, getActiveListenTogetherSession]
+        [
+            state,
+            generateShuffleIndices,
+            getActiveListenTogetherSession,
+            persistEpisodeProgressBeforeSwitch,
+        ]
     );
 
     // Builds an episode queue entry from podcast-page data.

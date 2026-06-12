@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Playing an episode from the podcast page while a queue is active now merges the episode (plus its not-yet-queued newer episodes) into the queue after the current item instead of replacing the whole queue, so queued music survives.
 - Skipping away from an episode before its saved-progress lookup finishes no longer seeks (and seek-locks) the newly playing item to that episode's resume position.
+- Skipping away from a playing episode (next/previous, play-now, queue jump, or picking another episode) now saves its listening position first, so manual skips no longer silently lose up to ~30s of podcast progress.
+- Advancing the queue into a partially-listened episode now waits for the saved-progress lookup (bounded by a 2s budget) and starts the stream at the resume position, instead of starting at 0:00 and racing a post-load seek that could be dropped.
 
 ## [1.5.0] - 2026-03-27
 
