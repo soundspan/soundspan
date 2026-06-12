@@ -22,7 +22,7 @@ export type AddToPlaylistRef =
         thumbnailUrl?: string;
     };
 
-type ProviderSource = "local" | "tidal" | "youtube";
+type ProviderSource = "local" | "tidal" | "youtube" | "youtube-direct";
 
 type TrackRefInput = {
     id?: string | null;
@@ -187,7 +187,11 @@ export function isRemoteTrack(input: TrackRefInput | TrackRef): boolean {
         return true;
     }
 
-    return streamSource === "youtube" || streamSource === "tidal";
+    return (
+        streamSource === "youtube" ||
+        streamSource === "youtube-direct" ||
+        streamSource === "tidal"
+    );
 }
 
 /**
@@ -205,7 +209,7 @@ export function toTrackRef(input: TrackRefInput): TrackRef {
         throw new Error("Local track reference is missing track id");
     }
 
-    if (source === "youtube") {
+    if (source === "youtube" || source === "youtube-direct") {
         const youtubeVideoId = resolveYouTubeVideoId(input);
         if (!youtubeVideoId) {
             throw new Error("Remote YouTube track is missing youtubeVideoId");
