@@ -33,6 +33,8 @@ import { resolvePollingJitter } from "@/hooks/pollingCadence";
 import { clampNonNegativePlaybackTime } from "@/lib/audio-playback-normalization";
 import { resolveInitialAudioVolume } from "@/lib/audio-volume";
 import {
+    findRemoteQueueTrackForRestore,
+    isNonLibraryTrackId,
     normalizeQueueIndex,
     queuesMatchByTrackId,
     resolveServerPlaybackPollDecision,
@@ -447,23 +449,42 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverPlaybackType === "track" &&
                     serverState.trackId
                 ) {
-                    api.getTrack(serverState.trackId)
-                        .then((track) => {
-                            setCurrentTrack(track);
-                            setPlaybackType("track");
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                        })
-                        .catch(() => {
-                            // Fire-and-forget: clearing stale server state, failure is non-critical
-                            api.clearPlaybackState().catch(() => {});
-                            setCurrentTrack(null);
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                            setPlaybackType(null);
-                            setQueue([]);
-                            setCurrentIndex(0);
-                        });
+                    const remoteQueueTrack = findRemoteQueueTrackForRestore(
+                        serverState.trackId,
+                        serverQueue
+                    );
+                    if (remoteQueueTrack) {
+                        // Remote (yt:/tidal:/youtube-direct) tracks are not
+                        // in the library — materialize the current track from
+                        // the persisted queue snapshot instead of the library
+                        // lookup, which 404s for provider ids.
+                        setCurrentTrack(remoteQueueTrack);
+                        setPlaybackType("track");
+                        setCurrentAudiobook(null);
+                        setCurrentPodcast(null);
+                    } else if (isNonLibraryTrackId(serverState.trackId)) {
+                        // Non-library track missing from the queue snapshot:
+                        // skip adoption, but never clear persisted state over
+                        // a library 404 for a provider/synthetic id.
+                    } else {
+                        api.getTrack(serverState.trackId)
+                            .then((track) => {
+                                setCurrentTrack(track);
+                                setPlaybackType("track");
+                                setCurrentAudiobook(null);
+                                setCurrentPodcast(null);
+                            })
+                            .catch(() => {
+                                // Fire-and-forget: clearing stale server state, failure is non-critical
+                                api.clearPlaybackState().catch(() => {});
+                                setCurrentTrack(null);
+                                setCurrentAudiobook(null);
+                                setCurrentPodcast(null);
+                                setPlaybackType(null);
+                                setQueue([]);
+                                setCurrentIndex(0);
+                            });
+                    }
                 } else if (
                     serverPlaybackType === "audiobook" &&
                     serverState.audiobookId
@@ -790,12 +811,17 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                         serverPlaybackType === "track" &&
                         serverState.trackId
                     ) {
-                        try {
-                            const track = await api.getTrack(
-                                serverState.trackId
+                        const remoteQueueTrack =
+                            findRemoteQueueTrackForRestore(
+                                serverState.trackId,
+                                serverQueue
                             );
-                            if (!mounted) return;
-                            setCurrentTrack(track);
+                        if (remoteQueueTrack) {
+                            // Remote (yt:/tidal:/youtube-direct) tracks are
+                            // not in the library — materialize from the
+                            // persisted queue snapshot instead of the library
+                            // lookup, which 404s for provider ids.
+                            setCurrentTrack(remoteQueueTrack);
                             setPlaybackType("track");
                             setCurrentAudiobook(null);
                             setCurrentPodcast(null);
@@ -811,16 +837,48 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                                 );
                                 setIsShuffle(Boolean(serverState.isShuffle));
                             }
-                        } catch {
-                            if (!mounted) return;
-                            await api.clearPlaybackState().catch(() => {});
-                            setCurrentTrack(null);
-                            setCurrentAudiobook(null);
-                            setCurrentPodcast(null);
-                            setPlaybackType(null);
-                            setQueue([]);
-                            setCurrentIndex(0);
+                        } else if (
+                            isNonLibraryTrackId(serverState.trackId)
+                        ) {
+                            // Non-library track missing from the queue
+                            // snapshot: skip adoption, but never clear
+                            // persisted state over a library 404 for a
+                            // provider/synthetic id.
+                            setLastServerSync(serverUpdatedAt);
                             return;
+                        } else {
+                            try {
+                                const track = await api.getTrack(
+                                    serverState.trackId
+                                );
+                                if (!mounted) return;
+                                setCurrentTrack(track);
+                                setPlaybackType("track");
+                                setCurrentAudiobook(null);
+                                setCurrentPodcast(null);
+                                if (serverQueue && serverQueue.length > 0) {
+                                    if (!queuesMatchByTrackId(localQueue, serverQueue)) {
+                                        setQueue(serverQueue);
+                                    }
+                                    setCurrentIndex(
+                                        normalizeQueueIndex(
+                                            serverState.currentIndex,
+                                            serverQueue.length
+                                        )
+                                    );
+                                    setIsShuffle(Boolean(serverState.isShuffle));
+                                }
+                            } catch {
+                                if (!mounted) return;
+                                await api.clearPlaybackState().catch(() => {});
+                                setCurrentTrack(null);
+                                setCurrentAudiobook(null);
+                                setCurrentPodcast(null);
+                                setPlaybackType(null);
+                                setQueue([]);
+                                setCurrentIndex(0);
+                                return;
+                            }
                         }
                     } else if (
                         serverPlaybackType === "audiobook" &&

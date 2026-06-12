@@ -4,6 +4,68 @@ export interface QueueTrackIdentity {
     id?: string | null;
 }
 
+/**
+ * Queue item shape carrying enough provider identity to decide whether a
+ * persisted current track can be restored straight from the queue snapshot.
+ */
+export interface RestorableQueueTrack extends QueueTrackIdentity {
+    streamSource?: string | null;
+    youtubeVideoId?: string | null;
+    tidalTrackId?: number | string | null;
+}
+
+// Track-id shapes that the library track lookup can never resolve:
+// "yt:<videoId>" / "tidal:<id>" provider composites and the synthetic
+// "yt-<videoId>" ids of pasted youtube-direct tracks.
+const NON_LIBRARY_TRACK_ID_PREFIXES = ["yt:", "yt-", "tidal:"];
+
+/**
+ * Returns whether a persisted current-track id refers to a non-library
+ * (provider/synthetic) track that GET /api/library/tracks/:id cannot
+ * resolve. Restore paths must never clear persisted playback state over a
+ * 404 for such ids — the track exists, just not in the local library.
+ */
+export function isNonLibraryTrackId(
+    trackId: string | null | undefined
+): boolean {
+    if (typeof trackId !== "string") return false;
+    return NON_LIBRARY_TRACK_ID_PREFIXES.some((prefix) =>
+        trackId.startsWith(prefix)
+    );
+}
+
+/**
+ * Find the persisted server-queue item for a remote (non-library) current
+ * track so restore paths can materialize it directly instead of calling the
+ * library track lookup. Returns null for library tracks (which must keep
+ * using the library lookup) and when the track id is absent from the queue.
+ */
+export function findRemoteQueueTrackForRestore<T extends RestorableQueueTrack>(
+    trackId: string | null | undefined,
+    serverQueue: readonly T[] | null | undefined
+): T | null {
+    if (typeof trackId !== "string" || !trackId.trim()) return null;
+    if (!Array.isArray(serverQueue) || serverQueue.length === 0) return null;
+
+    const normalizedId = trackId.trim();
+    for (const item of serverQueue) {
+        const itemId = item?.id;
+        if (itemId === null || itemId === undefined) continue;
+        if (String(itemId).trim() !== normalizedId) continue;
+
+        const streamSource = item.streamSource;
+        const isRemote =
+            isNonLibraryTrackId(normalizedId) ||
+            streamSource === "tidal" ||
+            streamSource === "youtube" ||
+            streamSource === "youtube-direct" ||
+            Boolean(item.youtubeVideoId) ||
+            (item.tidalTrackId !== null && item.tidalTrackId !== undefined);
+        return isRemote ? item : null;
+    }
+    return null;
+}
+
 export interface ServerPlaybackPollDecisionInput {
     localPlaybackType: PlaybackSnapshotType;
     localMediaId: string | null;

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    findRemoteQueueTrackForRestore,
+    isNonLibraryTrackId,
     isServerQueueTruncatedPrefix,
     normalizeQueueIndex,
     queuesMatchByTrackId,
@@ -240,4 +242,83 @@ test("resolveServerPlaybackPollDecision adopts server state when local playback 
 
     assert.equal(decision.shouldApplyServerSnapshot, true);
     assert.equal(decision.reason, "adopt_server");
+});
+
+test("isNonLibraryTrackId flags provider and synthetic ids only", () => {
+    assert.equal(isNonLibraryTrackId("yt-dQw4w9WgXcQ"), true);
+    assert.equal(isNonLibraryTrackId("yt:dQw4w9WgXcQ"), true);
+    assert.equal(isNonLibraryTrackId("tidal:123456"), true);
+    assert.equal(isNonLibraryTrackId("clx0abc123def"), false);
+    assert.equal(isNonLibraryTrackId(""), false);
+    assert.equal(isNonLibraryTrackId(null), false);
+    assert.equal(isNonLibraryTrackId(undefined), false);
+});
+
+test("findRemoteQueueTrackForRestore materializes a pasted youtube-direct track from the queue", () => {
+    const serverQueue = [
+        { id: "track-1", title: "Library track" },
+        {
+            id: "yt-dQw4w9WgXcQ",
+            title: "Pasted DJ set",
+            streamSource: "youtube-direct",
+            youtubeVideoId: "dQw4w9WgXcQ",
+        },
+    ];
+
+    const restored = findRemoteQueueTrackForRestore(
+        "yt-dQw4w9WgXcQ",
+        serverQueue
+    );
+
+    assert.equal(restored, serverQueue[1]);
+});
+
+test("findRemoteQueueTrackForRestore materializes yt:-prefixed YouTube Music queue items", () => {
+    const serverQueue = [
+        { id: "yt:abcdefghijk", title: "YTM track", streamSource: "youtube" },
+    ];
+
+    const restored = findRemoteQueueTrackForRestore(
+        "yt:abcdefghijk",
+        serverQueue
+    );
+
+    assert.equal(restored, serverQueue[0]);
+});
+
+test("findRemoteQueueTrackForRestore matches remote queue items by stream source without an id prefix", () => {
+    const serverQueue = [
+        {
+            id: "direct-no-prefix",
+            streamSource: "youtube-direct",
+            youtubeVideoId: "dQw4w9WgXcQ",
+        },
+    ];
+
+    const restored = findRemoteQueueTrackForRestore(
+        "direct-no-prefix",
+        serverQueue
+    );
+
+    assert.equal(restored, serverQueue[0]);
+});
+
+test("findRemoteQueueTrackForRestore leaves library tracks to the library lookup", () => {
+    const serverQueue = [{ id: "clx0abc123def", title: "Library track" }];
+
+    assert.equal(
+        findRemoteQueueTrackForRestore("clx0abc123def", serverQueue),
+        null
+    );
+});
+
+test("findRemoteQueueTrackForRestore returns null when the track is not in the queue", () => {
+    assert.equal(
+        findRemoteQueueTrackForRestore("yt-dQw4w9WgXcQ", [
+            { id: "track-1" },
+        ]),
+        null
+    );
+    assert.equal(findRemoteQueueTrackForRestore("yt-dQw4w9WgXcQ", null), null);
+    assert.equal(findRemoteQueueTrackForRestore(null, [{ id: "x" }]), null);
 });
