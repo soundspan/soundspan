@@ -1,4 +1,8 @@
-import { Router, type Response as ExpressResponse } from "express";
+import {
+    Router,
+    type Request as ExpressRequest,
+    type Response as ExpressResponse,
+} from "express";
 import { requireAdmin, requireAuth, requireAuthOrToken } from "../middleware/auth";
 import { imageLimiter, apiLimiter } from "../middleware/rateLimiter";
 import { lastFmService } from "../services/lastfm";
@@ -29,6 +33,11 @@ import {
     fetchExternalImage,
     normalizeExternalImageUrl,
 } from "../services/imageProxy";
+import {
+    negotiateCoverArtFormat,
+    resizeCoverArt,
+    snapCoverArtSize,
+} from "../services/coverArtResize";
 import { downloadAndStoreImage } from "../services/imageStorage";
 import { dataCacheService } from "../services/dataCache";
 import {
@@ -795,6 +804,60 @@ const applyCoverArtCorsHeaders = (res: ExpressResponse, origin?: string) => {
         res.setHeader("Access-Control-Allow-Origin", "*");
     }
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+};
+
+/**
+ * Serves a native cover file resized to the requested `size` query param.
+ * Returns true when a response was sent; false when the caller should
+ * fall back to sending the original file from disk.
+ */
+const trySendResizedNativeCover = async (
+    req: ExpressRequest,
+    res: ExpressResponse,
+    cachePath: string
+): Promise<boolean> => {
+    const requestedSize = snapCoverArtSize(req.query.size);
+    if (!requestedSize) {
+        return false;
+    }
+
+    try {
+        const fileBuffer = await fs.promises.readFile(cachePath);
+        const resizeResult = await resizeCoverArt({
+            buffer: fileBuffer,
+            contentType: "image/jpeg",
+            size: requestedSize,
+            format: negotiateCoverArtFormat(req.headers.accept),
+        });
+        if (!resizeResult.resized) {
+            return false;
+        }
+
+        const etag = crypto
+            .createHash("md5")
+            .update(resizeResult.buffer)
+            .digest("hex");
+        if (req.headers["if-none-match"] === etag) {
+            res.status(304).end();
+            return true;
+        }
+
+        if (resizeResult.contentType) {
+            res.setHeader("Content-Type", resizeResult.contentType);
+        }
+        applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
+        res.setHeader("Cache-Control", COVER_ART_IMAGE_CACHE_CONTROL);
+        res.setHeader("Vary", "Accept");
+        res.setHeader("ETag", etag);
+        res.send(resizeResult.buffer);
+        return true;
+    } catch (error) {
+        logger.warn(
+            `[COVER-ART] Native cover resize failed for ${cachePath}:`,
+            error
+        );
+        return false;
+    }
 };
 
 const getAlbumIdFromNativeCoverPath = (nativePath: string): string | null => {
@@ -3936,7 +3999,12 @@ router.get("/tracks/shuffle", async (req, res) => {
  *         name: size
  *         schema:
  *           type: string
- *         description: Requested image size
+ *         description: >
+ *           Requested image size in pixels. Snapped to the allowlist
+ *           (64, 128, 192, 320, 512, 768); images are downscaled
+ *           server-side (never upscaled) and served as webp when the
+ *           Accept header includes image/webp. Omit to receive the
+ *           original image.
  *     responses:
  *       200:
  *         description: Cover art image binary
@@ -4080,6 +4148,16 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     `[COVER-ART] Serving native cover: ${nativeCacheHit.cachePath}`
                 );
 
+                if (
+                    await trySendResizedNativeCover(
+                        req,
+                        res,
+                        nativeCacheHit.cachePath
+                    )
+                ) {
+                    return;
+                }
+
                 // Serve the file directly
                 const requestOrigin = req.headers.origin;
                 const headers: Record<string, string> = {
@@ -4138,6 +4216,16 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                         logger.debug(
                             `[COVER-ART] Resolved legacy native cover path ${nativePath} -> ${canonicalNativePath}`
                         );
+                    }
+
+                    if (
+                        await trySendResizedNativeCover(
+                            req,
+                            res,
+                            nativeCacheHit.cachePath
+                        )
+                    ) {
+                        return;
                     }
 
                     // Serve the file directly
@@ -4326,10 +4414,20 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         }
         coverUrl = normalizedCoverUrl;
 
-        // Create cache key from URL + size
+        // Snap the requested size to the allowlist and negotiate the
+        // output format (webp when the client supports it). Without a
+        // size the original bytes are served untouched.
+        const requestedSize = snapCoverArtSize(size);
+        const imageFormat = requestedSize
+            ? negotiateCoverArtFormat(req.headers.accept)
+            : "original";
+
+        // Create cache key from URL + snapped size + negotiated format
         const cacheKey = `cover-art:${crypto
             .createHash("md5")
-            .update(`${coverUrl}-${size || "original"}`)
+            .update(
+                `${coverUrl}-${requestedSize || "original"}-${imageFormat}`
+            )
             .digest("hex")}`;
 
         // Try to get from Redis cache first
@@ -4374,6 +4472,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                     "Cache-Control",
                     COVER_ART_IMAGE_CACHE_CONTROL
                 );
+                res.setHeader("Vary", "Accept");
                 res.setHeader("ETag", cachedData.etag);
                 return res.send(imageBuffer);
             } else {
@@ -4428,8 +4527,20 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         }
 
         logger.debug(`[COVER-ART] Successfully fetched, caching...`);
-        const imageBuffer = imageResult.buffer;
-        const etag = imageResult.etag;
+
+        // Resize/convert before caching so the cached variant matches
+        // the requested size + negotiated format
+        const resizeResult = await resizeCoverArt({
+            buffer: imageResult.buffer,
+            contentType: imageResult.contentType,
+            size: requestedSize,
+            format: imageFormat,
+        });
+        const imageBuffer = resizeResult.buffer;
+        const responseContentType = resizeResult.contentType;
+        const etag = resizeResult.resized
+            ? crypto.createHash("md5").update(imageBuffer).digest("hex")
+            : imageResult.etag;
 
         // Cache in Redis for 7 days
         try {
@@ -4438,7 +4549,7 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
                 COVER_ART_IMAGE_CACHE_TTL_SECONDS,
                 JSON.stringify({
                     etag,
-                    contentType: imageResult.contentType,
+                    contentType: responseContentType,
                     data: imageBuffer.toString("base64"),
                 })
             );
@@ -4452,13 +4563,14 @@ router.get("/cover-art/:id?", imageLimiter, async (req, res) => {
         }
 
         // Set appropriate headers
-        if (imageResult.contentType) {
-            res.setHeader("Content-Type", imageResult.contentType);
+        if (responseContentType) {
+            res.setHeader("Content-Type", responseContentType);
         }
 
         // Set aggressive caching headers
         applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
         res.setHeader("Cache-Control", COVER_ART_IMAGE_CACHE_CONTROL);
+        res.setHeader("Vary", "Accept");
         res.setHeader("ETag", etag);
 
         // Send the image
