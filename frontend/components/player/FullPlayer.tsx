@@ -95,7 +95,11 @@ export function FullPlayer() {
         playbackType === "track" ? currentTrack?.id : undefined;
 
     // Get current track's audio features for vibe comparison
-    const currentTrackFeatures = queue[currentIndex]?.audioFeatures || null;
+    const currentQueueItem = queue[currentIndex];
+    const currentTrackFeatures =
+        currentQueueItem && currentQueueItem.itemType !== "episode"
+            ? currentQueueItem.audioFeatures || null
+            : null;
 
     // Calculate vibe match score (simplified version - compares key audio features)
     const vibeMatchScore = useMemo(() => {
@@ -446,7 +450,7 @@ export function FullPlayer() {
                             <button
                                 onClick={previous}
                                 className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
-                                disabled={!hasMedia || playbackType !== "track"}
+                                disabled={!hasMedia || queue.length === 0}
                                 aria-label="Previous track"
                                 title="Previous track"
                             >
@@ -502,7 +506,7 @@ export function FullPlayer() {
                             <button
                                 onClick={next}
                                 className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
-                                disabled={!hasMedia || playbackType !== "track"}
+                                disabled={!hasMedia || queue.length === 0}
                                 aria-label="Next track"
                                 title="Next track"
                             >

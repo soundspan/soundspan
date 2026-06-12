@@ -31,6 +31,15 @@ import {
 } from "./listen-together-session";
 import { toast } from "sonner";
 import { computePlayNowInsertion } from "./queue-utils";
+import {
+    buildEpisodeQueueItem,
+    episodeQueueItemFromPodcast,
+    isEpisodeQueueItem,
+    type EpisodeQueueItem,
+    type QueueItem,
+} from "./queue-item";
+import { resolveQueueAdvance } from "./audio/queue-advance-policy";
+import type { Episode } from "@/features/podcast/types";
 import { separateArtists } from "./separate-artists";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { clampAudioVolume } from "@/lib/audio-volume";
@@ -211,7 +220,18 @@ export function resolveActiveListenTogetherSession(
 export interface GenerateSeparatedShuffleIndicesInput {
     length: number;
     currentIdx: number;
-    queue: Array<Track | null | undefined>;
+    /** Queue items; episode entries have no artist and shuffle independently. */
+    queue: Array<
+        | {
+              id?: string;
+              title?: string;
+              duration?: number;
+              artist?: { id?: string; name?: string };
+              album?: { id?: string; title?: string };
+          }
+        | null
+        | undefined
+    >;
     random?: () => number;
 }
 
@@ -245,8 +265,18 @@ interface AudioControlsContextType {
     playAudiobook: (audiobook: Audiobook) => void;
 
     // Podcast methods
-    playPodcast: (podcast: Podcast) => void;
-    nextPodcastEpisode: () => void;
+    playPodcast: (
+        podcast: Podcast,
+        options?: { episodeQueue?: EpisodeQueueItem[] }
+    ) => void;
+    addEpisodeToQueue: (
+        episode: Episode,
+        podcast: { id: string; title: string; coverUrl: string | null }
+    ) => void;
+    playEpisodeNext: (
+        episode: Episode,
+        podcast: { id: string; title: string; coverUrl: string | null }
+    ) => void;
 
     // Playback controls
     pause: (options?: { suppressListenTogetherBroadcast?: boolean }) => void;
@@ -265,6 +295,7 @@ interface AudioControlsContextType {
     playNext: (track: Track) => void;
     addToQueue: (track: Track, options?: { silent?: boolean }) => void;
     addTracksToQueue: (tracks: Track[], options?: { silent?: boolean }) => void;
+    playQueueIndex: (index: number) => void; // Jump to a queue item (track or episode)
     removeFromQueue: (index: number) => void;
     clearQueue: () => void;
     setUpcoming: (tracks: Track[], preserveOrder?: boolean) => void; // Replace queue after current track
@@ -426,7 +457,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         (targetIndex: number): void => {
             const playbackState = playbackRef.current;
             const targetTrack = state.queue[targetIndex];
-            if (!targetTrack) return;
+            // Listen Together queues are music-only; ignore episode entries.
+            if (!targetTrack || isEpisodeQueueItem(targetTrack)) return;
             const optimisticSelectionPolicy =
                 getListenTogetherOptimisticTrackSelectionPolicy();
             if (
@@ -492,7 +524,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentTrack(track);
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
-            state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing tracks
             state.setQueue([track]);
             state.setCurrentIndex(0);
             playbackState.setIsPlaying(true);
@@ -578,7 +609,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setPlaybackType("track");
             state.setCurrentAudiobook(null);
             state.setCurrentPodcast(null);
-            state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing tracks
             state.setQueue(tracks);
             state.setCurrentIndex(normalizedStartIndex);
             state.setCurrentTrack(startTrack);
@@ -605,7 +635,6 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentAudiobook(audiobook);
             state.setCurrentTrack(null);
             state.setCurrentPodcast(null);
-            state.setPodcastEpisodeQueue(null); // Clear podcast queue when playing audiobooks
             state.setQueue([]);
             state.setCurrentIndex(0);
             playbackState.setIsPlaying(true);
@@ -621,7 +650,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     );
 
     const playPodcast = useCallback(
-        (podcast: Podcast) => {
+        (
+            podcast: Podcast,
+            options?: { episodeQueue?: EpisodeQueueItem[] }
+        ) => {
             const ltSession = getActiveListenTogetherSession();
             if (ltSession) {
                 toast.error("Podcasts are not supported in Listen Together");
@@ -629,14 +661,64 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             }
 
             const playbackState = playbackRef.current;
+            const episodeItem = episodeQueueItemFromPodcast(podcast);
             state.setPlaybackType("podcast");
             state.setCurrentPodcast(podcast);
             state.setCurrentTrack(null);
             state.setCurrentAudiobook(null);
-            state.setQueue([]);
-            state.setCurrentIndex(0);
+            state.setRepeatOneCount(0);
+
+            if (options?.episodeQueue && options.episodeQueue.length > 0) {
+                // Explicit episode context (e.g. podcast page): replace the
+                // queue with the provided episode items, like playTracks does
+                // for albums/playlists.
+                const items = options.episodeQueue;
+                const startIndex = Math.max(
+                    0,
+                    items.findIndex((item) => item.id === episodeItem.id)
+                );
+                state.setQueue(items);
+                state.setCurrentIndex(startIndex);
+                state.setShuffleIndices(
+                    state.isShuffle
+                        ? generateShuffleIndices(items.length, startIndex)
+                        : []
+                );
+            } else if (state.queue.length === 0) {
+                state.setQueue([episodeItem]);
+                state.setCurrentIndex(0);
+                state.setShuffleIndices(state.isShuffle ? [0] : []);
+            } else {
+                // Keep the existing mixed queue: jump to the episode if it is
+                // already queued, otherwise insert it right after the current
+                // item (playNow semantics) so music queued behind it survives.
+                const existingIndex = state.queue.findIndex(
+                    (item) =>
+                        isEpisodeQueueItem(item) && item.id === episodeItem.id
+                );
+                if (existingIndex >= 0) {
+                    state.setCurrentIndex(existingIndex);
+                } else {
+                    const { insertAt, newShuffleIndices } =
+                        computePlayNowInsertion({
+                            queue: state.queue,
+                            currentIndex: state.currentIndex,
+                            isShuffle: state.isShuffle,
+                            shuffleIndices: state.shuffleIndices,
+                        });
+                    state.setQueue((prev) => {
+                        const newQueue = [...prev];
+                        newQueue.splice(insertAt, 0, episodeItem);
+                        return newQueue;
+                    });
+                    state.setCurrentIndex(insertAt);
+                    if (state.isShuffle && newShuffleIndices.length > 0) {
+                        state.setShuffleIndices(newShuffleIndices);
+                    }
+                }
+            }
+
             playbackState.setIsPlaying(true);
-            state.setShuffleIndices([]);
 
             if (podcast.progress?.currentTime) {
                 playbackState.setCurrentTime(podcast.progress.currentTime);
@@ -644,7 +726,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 playbackState.setCurrentTime(0);
             }
         },
-        [state, getActiveListenTogetherSession]
+        [state, generateShuffleIndices, getActiveListenTogetherSession]
     );
 
     const pause = useCallback((options?: { suppressListenTogetherBroadcast?: boolean }) => {
@@ -656,43 +738,71 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         }
     }, [getActiveListenTogetherSession]);
 
-    const nextPodcastEpisode = useCallback(() => {
-        if (!state.podcastEpisodeQueue || state.podcastEpisodeQueue.length === 0) {
-            pause();
-            return;
-        }
+    // Makes the queue item at `index` the current media and starts playback,
+    // dispatching to the track or podcast playback path by item type.
+    const startQueueItemAtIndex = useCallback(
+        (index: number, item: QueueItem) => {
+            const playbackState = playbackRef.current;
+            state.setRepeatOneCount(0);
 
-        if (!state.currentPodcast) {
-            pause();
-            return;
-        }
+            if (isEpisodeQueueItem(item)) {
+                state.setCurrentIndex(index);
+                state.setCurrentTrack(null);
+                state.setCurrentAudiobook(null);
+                state.setPlaybackType("podcast");
+                state.setCurrentPodcast({
+                    id: item.id,
+                    title: item.title,
+                    podcastTitle: item.podcastTitle,
+                    coverUrl: item.coverUrl,
+                    duration: item.duration,
+                    progress: null,
+                });
+                playbackState.setCurrentTime(0);
+                playbackState.setIsPlaying(true);
 
-        // Extract episodeId from currentPodcast.id (format: "podcastId:episodeId")
-        const [podcastId, currentEpisodeId] = state.currentPodcast.id.split(":");
-        
-        // Find current episode index
-        const currentIndex = state.podcastEpisodeQueue.findIndex(
-            (ep) => ep.id === currentEpisodeId
-        );
+                // Resume saved progress via the existing podcast lookup path.
+                void api
+                    .getPodcast(item.podcastId)
+                    .then((podcast: { episodes?: Episode[] }) => {
+                        const episode = podcast.episodes?.find(
+                            (ep: Episode) => ep.id === item.episodeId
+                        );
+                        const progress = episode?.progress;
+                        if (!progress || progress.isFinished) return;
+                        state.setCurrentPodcast((prev) =>
+                            prev && prev.id === item.id
+                                ? { ...prev, progress }
+                                : prev
+                        );
+                        const resumeAt = clampPlaybackTimeToUpperBound(
+                            progress.currentTime,
+                            item.duration || progress.currentTime
+                        );
+                        if (resumeAt > 0) {
+                            const currentPlayback = playbackRef.current;
+                            currentPlayback.lockSeek(resumeAt);
+                            currentPlayback.setCurrentTime(resumeAt);
+                            audioSeekEmitter.emit(resumeAt);
+                        }
+                    })
+                    .catch(() => {
+                        // Progress lookup is best-effort; play from start.
+                    });
+                return;
+            }
 
-        // If there's a next episode, play it
-        if (currentIndex >= 0 && currentIndex < state.podcastEpisodeQueue.length - 1) {
-            const nextEpisode = state.podcastEpisodeQueue[currentIndex + 1];
-            // Build the podcast object for playback
-            playPodcast({
-                id: `${podcastId}:${nextEpisode.id}`,
-                title: nextEpisode.title,
-                podcastTitle: state.currentPodcast.podcastTitle,
-                coverUrl: state.currentPodcast.coverUrl,
-                duration: nextEpisode.duration,
-                progress: nextEpisode.progress || null,
-            });
-        } else {
-            // Last episode, pause and clear queue
-            pause();
-            state.setPodcastEpisodeQueue(null);
-        }
-    }, [state, playPodcast, pause]);
+            resetPersistedTrackStartPosition(item.id);
+            state.setCurrentIndex(index);
+            state.setCurrentAudiobook(null);
+            state.setCurrentPodcast(null);
+            state.setPlaybackType("track");
+            state.setCurrentTrack(item);
+            playbackState.setCurrentTime(0);
+            playbackState.setIsPlaying(true);
+        },
+        [state]
+    );
 
     const resume = useCallback((options?: {
         suppressListenTogetherBroadcast?: boolean;
@@ -802,34 +912,33 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 shuffleIndicesLen: state.shuffleIndices.length,
             });
         }
-        const nextIndex = resolveQueueNavigationIndex({
+        const advance = resolveQueueAdvance({
             action: "next",
-            queueLength: state.queue.length,
+            queue: state.queue,
             currentIndex: state.currentIndex,
             isShuffle: state.isShuffle,
             shuffleIndices: state.shuffleIndices,
             repeatMode: state.repeatMode,
         });
-        if (nextIndex === null) {
+        if (advance.kind === "stop") {
             return;
         }
 
         queueDebugLog("next() chosen", {
             isShuffle: state.isShuffle,
-            nextIndex,
-            nextTrackId: state.queue[nextIndex]?.id,
+            nextIndex: advance.index,
+            nextItemKind: advance.kind,
+            nextItemId: state.queue[advance.index]?.id,
             queueLen: state.queue.length,
         });
-        const nextTrack = state.queue[nextIndex];
-        if (nextTrack?.id) {
-            resetPersistedTrackStartPosition(nextTrack.id);
+        const nextItem = state.queue[advance.index];
+        if (!nextItem) {
+            return;
         }
-        state.setCurrentIndex(nextIndex);
-        state.setCurrentTrack(nextTrack);
-        playbackState.setCurrentTime(0);
-        playbackState.setIsPlaying(true);
+        startQueueItemAtIndex(advance.index, nextItem);
     }, [
         state,
+        startQueueItemAtIndex,
         getActiveListenTogetherSession,
         emitListenTogetherHostTrackOperation,
         applyOptimisticListenTogetherTrackSelection,
@@ -861,28 +970,26 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
 
         state.setRepeatOneCount(0);
 
-        const prevIndex = resolveQueueNavigationIndex({
+        const advance = resolveQueueAdvance({
             action: "previous",
-            queueLength: state.queue.length,
+            queue: state.queue,
             currentIndex: state.currentIndex,
             isShuffle: state.isShuffle,
             shuffleIndices: state.shuffleIndices,
             repeatMode: state.repeatMode,
         });
-        if (prevIndex === null) {
+        if (advance.kind === "stop") {
             return;
         }
 
-        const prevTrack = state.queue[prevIndex];
-        if (prevTrack?.id) {
-            resetPersistedTrackStartPosition(prevTrack.id);
+        const prevItem = state.queue[advance.index];
+        if (!prevItem) {
+            return;
         }
-        state.setCurrentIndex(prevIndex);
-        state.setCurrentTrack(prevTrack);
-        playbackState.setCurrentTime(0);
-        playbackState.setIsPlaying(true);
+        startQueueItemAtIndex(advance.index, prevItem);
     }, [
         state,
+        startQueueItemAtIndex,
         getActiveListenTogetherSession,
         emitListenTogetherHostTrackOperation,
         applyOptimisticListenTogetherTrackSelection,
@@ -946,8 +1053,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 shuffleCursor: shuffleInsertPosRef.current,
             });
 
-            // If no tracks are playing (empty queue or non-track playback), start fresh
-            if (state.queue.length === 0 || state.playbackType !== "track") {
+            // Start a fresh queue only when it is empty and no podcast episode
+            // is playing. Episodes and tracks share one queue, so queueing
+            // music must never interrupt the playing episode (and vice versa).
+            if (state.queue.length === 0 && state.playbackType !== "podcast") {
                 resetPersistedTrackStartPosition(validTracks[0].id);
                 state.setPlaybackType("track");
                 state.setQueue(validTracks);
@@ -966,6 +1075,33 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     firstTrackId: validTracks[0]?.id,
                 });
 
+                if (shouldToastSuccess) {
+                    if (validTracks.length === 1) {
+                        toast.success(`Added "${validTracks[0].title}" to queue`);
+                    } else {
+                        toast.success(`Added ${validTracks.length} tracks to queue`);
+                    }
+                }
+                return;
+            }
+
+            // Legacy state: an episode is playing but is not represented in
+            // the queue yet. Seed the queue with the current episode so it
+            // keeps its place, then append the tracks behind it.
+            if (state.queue.length === 0 && state.currentPodcast) {
+                const episodeItem = episodeQueueItemFromPodcast(
+                    state.currentPodcast
+                );
+                state.setQueue([episodeItem, ...validTracks]);
+                state.setCurrentIndex(0);
+                if (state.isShuffle) {
+                    state.setShuffleIndices(
+                        Array.from(
+                            { length: validTracks.length + 1 },
+                            (_, i) => i
+                        )
+                    );
+                }
                 if (shouldToastSuccess) {
                     if (validTracks.length === 1) {
                         toast.success(`Added "${validTracks[0].title}" to queue`);
@@ -1064,8 +1200,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            // If nothing is playing, just start the track
-            if (state.queue.length === 0 || state.playbackType !== "track") {
+            // If nothing is playing (empty queue, no episode), just start the track
+            if (state.queue.length === 0 && state.playbackType !== "podcast") {
                 resetPersistedTrackStartPosition(track.id);
                 state.setPlaybackType("track");
                 state.setQueue([track]);
@@ -1077,6 +1213,21 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 playbackState.setCurrentTime(0);
                 state.setRepeatOneCount(0);
                 state.setShuffleIndices(generateShuffleIndices(1, 0));
+                toast.success(`Playing "${track.title}" next`);
+                return;
+            }
+
+            // Legacy state: an episode is playing but not in the queue yet.
+            // Seed the queue with the episode, then queue the track after it.
+            if (state.queue.length === 0 && state.currentPodcast) {
+                const episodeItem = episodeQueueItemFromPodcast(
+                    state.currentPodcast
+                );
+                state.setQueue([episodeItem, track]);
+                state.setCurrentIndex(0);
+                if (state.isShuffle) {
+                    state.setShuffleIndices([0, 1]);
+                }
                 toast.success(`Playing "${track.title}" next`);
                 return;
             }
@@ -1158,14 +1309,16 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                 state.setVibeQueueIds([]);
             }
 
-            // Empty queue or non-track playback: start fresh with just this track
-            if (state.queue.length === 0 || state.playbackType !== "track") {
+            // Empty queue or audiobook playback: start fresh with just this track.
+            // With a non-empty mixed queue (including podcast playback) the
+            // track is inserted after the current item instead, so the rest
+            // of the queue survives.
+            if (state.queue.length === 0 || state.playbackType === "audiobook") {
                 resetPersistedTrackStartPosition(track.id);
                 state.setPlaybackType("track");
                 state.setCurrentTrack(track);
                 state.setCurrentAudiobook(null);
                 state.setCurrentPodcast(null);
-                state.setPodcastEpisodeQueue(null);
                 state.setQueue([track]);
                 state.setCurrentIndex(0);
                 playbackState.setIsPlaying(true);
@@ -1201,11 +1354,171 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setShuffleIndices(newShuffleIndices);
             state.setCurrentIndex(insertAt);
             state.setCurrentTrack(track);
+            state.setCurrentPodcast(null);
+            state.setPlaybackType("track");
             state.setRepeatOneCount(0);
             playbackState.setCurrentTime(0);
             playbackState.setIsPlaying(true);
         },
         [state, generateShuffleIndices, getActiveListenTogetherSession]
+    );
+
+    // Builds an episode queue entry from podcast-page data.
+    const toEpisodeQueueItem = useCallback(
+        (
+            episode: Episode,
+            podcast: { id: string; title: string; coverUrl: string | null }
+        ): EpisodeQueueItem =>
+            buildEpisodeQueueItem({
+                podcastId: podcast.id,
+                episodeId: episode.id,
+                title: episode.title,
+                podcastTitle: podcast.title,
+                coverUrl: podcast.coverUrl ?? null,
+                duration: episode.duration,
+            }),
+        []
+    );
+
+    const addEpisodeToQueue = useCallback(
+        (
+            episode: Episode,
+            podcast: { id: string; title: string; coverUrl: string | null }
+        ) => {
+            const ltSession = getActiveListenTogetherSession();
+            if (ltSession) {
+                toast.error("Podcasts are not supported in Listen Together");
+                return;
+            }
+
+            const item = toEpisodeQueueItem(episode, podcast);
+
+            // Nothing playing and empty queue: play the episode immediately,
+            // mirroring addTracksToQueue behavior for tracks.
+            if (
+                state.queue.length === 0 &&
+                !state.currentTrack &&
+                !state.currentPodcast &&
+                !state.currentAudiobook
+            ) {
+                playPodcast({
+                    id: item.id,
+                    title: item.title,
+                    podcastTitle: item.podcastTitle,
+                    coverUrl: item.coverUrl,
+                    duration: item.duration,
+                    progress: episode.progress || null,
+                });
+                return;
+            }
+
+            // Legacy state: current episode playing but not in the queue yet.
+            if (state.queue.length === 0 && state.currentPodcast) {
+                const currentItem = episodeQueueItemFromPodcast(
+                    state.currentPodcast
+                );
+                state.setQueue([currentItem, item]);
+                state.setCurrentIndex(0);
+                toast.success(`Added "${episode.title}" to queue`);
+                return;
+            }
+
+            const queueLenBeforeAppend = state.queue.length;
+            state.setQueue((prev) => [...prev, item]);
+            if (state.isShuffle) {
+                state.setShuffleIndices((prevIndices) =>
+                    prevIndices.length === 0
+                        ? prevIndices
+                        : [...prevIndices, queueLenBeforeAppend]
+                );
+            }
+            toast.success(`Added "${episode.title}" to queue`);
+        },
+        [state, playPodcast, toEpisodeQueueItem, getActiveListenTogetherSession]
+    );
+
+    const playEpisodeNext = useCallback(
+        (
+            episode: Episode,
+            podcast: { id: string; title: string; coverUrl: string | null }
+        ) => {
+            const ltSession = getActiveListenTogetherSession();
+            if (ltSession) {
+                toast.error("Podcasts are not supported in Listen Together");
+                return;
+            }
+
+            const item = toEpisodeQueueItem(episode, podcast);
+
+            if (
+                state.queue.length === 0 &&
+                !state.currentTrack &&
+                !state.currentPodcast &&
+                !state.currentAudiobook
+            ) {
+                playPodcast({
+                    id: item.id,
+                    title: item.title,
+                    podcastTitle: item.podcastTitle,
+                    coverUrl: item.coverUrl,
+                    duration: item.duration,
+                    progress: episode.progress || null,
+                });
+                return;
+            }
+
+            // Legacy state: current episode playing but not in the queue yet.
+            if (state.queue.length === 0 && state.currentPodcast) {
+                const currentItem = episodeQueueItemFromPodcast(
+                    state.currentPodcast
+                );
+                state.setQueue([currentItem, item]);
+                state.setCurrentIndex(0);
+                toast.success(`Playing "${episode.title}" next`);
+                return;
+            }
+
+            // Insert immediately after the currently playing item
+            const insertAt = Math.min(
+                state.currentIndex + 1,
+                state.queue.length
+            );
+            state.setQueue((prevQueue) => {
+                const newQueue = [...prevQueue];
+                newQueue.splice(insertAt, 0, item);
+                return newQueue;
+            });
+            upNextInsertRef.current =
+                Math.max(upNextInsertRef.current, insertAt) + 1;
+            if (state.isShuffle) {
+                state.setShuffleIndices((prevIndices) => {
+                    if (prevIndices.length === 0) return prevIndices;
+                    const shifted = prevIndices.map((i) =>
+                        i >= insertAt ? i + 1 : i
+                    );
+                    const currentShufflePos = shifted.indexOf(
+                        state.currentIndex
+                    );
+                    const shuffleInsertPos =
+                        currentShufflePos >= 0 ? currentShufflePos + 1 : 0;
+                    const newIndices = [...shifted];
+                    newIndices.splice(shuffleInsertPos, 0, insertAt);
+                    return newIndices;
+                });
+            }
+            toast.success(`Playing "${episode.title}" next`);
+        },
+        [state, playPodcast, toEpisodeQueueItem, getActiveListenTogetherSession]
+    );
+
+    // Jump to an arbitrary queue position without rebuilding the queue.
+    const playQueueIndex = useCallback(
+        (index: number) => {
+            const item = state.queue[index];
+            if (!item) return;
+            startQueueItemAtIndex(index, item);
+        },
+        [state, startQueueItemAtIndex]
     );
 
     const removeFromQueue = useCallback(
@@ -1227,11 +1540,26 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                     index === newQueue.length
                 ) {
                     state.setCurrentIndex(0);
-                    if (newQueue.length > 0) {
-                        state.setCurrentTrack(newQueue[0]);
-                    } else {
+                    const first = newQueue[0];
+                    if (!first) {
                         state.setCurrentTrack(null);
+                        state.setCurrentPodcast(null);
                         playbackRef.current.setIsPlaying(false);
+                    } else if (isEpisodeQueueItem(first)) {
+                        state.setCurrentTrack(null);
+                        state.setPlaybackType("podcast");
+                        state.setCurrentPodcast({
+                            id: first.id,
+                            title: first.title,
+                            podcastTitle: first.podcastTitle,
+                            coverUrl: first.coverUrl,
+                            duration: first.duration,
+                            progress: null,
+                        });
+                    } else {
+                        state.setCurrentTrack(first);
+                        state.setPlaybackType("track");
+                        state.setCurrentPodcast(null);
                     }
                 }
 
@@ -1260,6 +1588,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         state.setQueue([]);
         state.setCurrentIndex(0);
         state.setCurrentTrack(null);
+        state.setCurrentPodcast(null);
         state.setPlaybackType(null);
         playbackRef.current.setIsPlaying(false);
         state.setShuffleIndices([]);
@@ -1608,7 +1937,10 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             // Build new queue: current track (with source features) + similar tracks
             state.setQueue((prev) => {
                 const current = prev[state.currentIndex];
-                const base = current || currentTrack;
+                const base =
+                    current && !isEpisodeQueueItem(current)
+                        ? current
+                        : currentTrack;
                 const enriched = response.sourceFeatures
                     ? { ...base, audioFeatures: { ...base.audioFeatures, ...response.sourceFeatures } }
                     : base;
@@ -1641,7 +1973,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playTracks,
             playAudiobook,
             playPodcast,
-            nextPodcastEpisode,
+            addEpisodeToQueue,
+            playEpisodeNext,
             pause,
             resume,
             play,
@@ -1651,6 +1984,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playNext,
             addToQueue,
             addTracksToQueue,
+            playQueueIndex,
             removeFromQueue,
             clearQueue,
             setUpcoming,
@@ -1672,7 +2006,8 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playTracks,
             playAudiobook,
             playPodcast,
-            nextPodcastEpisode,
+            addEpisodeToQueue,
+            playEpisodeNext,
             pause,
             resume,
             play,
@@ -1682,6 +2017,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             playNext,
             addToQueue,
             addTracksToQueue,
+            playQueueIndex,
             removeFromQueue,
             clearQueue,
             setUpcoming,

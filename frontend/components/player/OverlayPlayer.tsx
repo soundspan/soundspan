@@ -150,7 +150,7 @@ export function OverlayPlayer() {
         queue,
         currentIndex,
         playTrack,
-        playTracks,
+        playQueueIndex,
         setUpcoming,
         removeFromQueue,
         clearQueue,
@@ -192,8 +192,10 @@ export function OverlayPlayer() {
         () => resolvePlaybackQualityBadgeFromStreamSource(currentTrack?.streamSource),
         [currentTrack?.streamSource],
     );
-    const canSkip = playbackType === "track";
-    const preferenceTrackId = canSkip ? currentTrack?.id : undefined;
+    // Skip is queue-based: the unified queue can mix tracks and episodes.
+    const canSkip = queue.length > 0;
+    const isTrackMode = playbackType === "track";
+    const preferenceTrackId = isTrackMode ? currentTrack?.id : undefined;
     const isDesktopOverlayLayout = canSkip && !isMobileOrTablet;
     const isTabPanelVisible = canSkip && (isDesktopOverlayLayout || isDrawerOpen);
     const lyricsTrackId =
@@ -261,7 +263,7 @@ export function OverlayPlayer() {
             : 0;
     const currentMediaId = currentTrack?.id || currentAudiobook?.id || currentPodcast?.id || "default";
     const artworkLayoutId = `mobile-player-artwork-${currentMediaId}`;
-    const queueTracks = canSkip ? queue : [];
+    const queueTracks = queue;
     const isQueueTabVisible = isTabPanelVisible && activeTab === "queue";
 
     const queryClient = useQueryClient();
@@ -703,7 +705,7 @@ export function OverlayPlayer() {
             syncSetTrack(index);
             return;
         }
-        playTracks(queue, index);
+        playQueueIndex(index);
     };
 
     const handleRemoveFromQueue = (index: number) => {
@@ -1285,6 +1287,7 @@ export function OverlayPlayer() {
 
                             {canSkip ? (
                                 <>
+                                    {isTrackMode && (
                                     <div className="mb-3 flex items-center justify-center gap-3">
                                         <TrackPreferenceButtons
                                             trackId={preferenceTrackId}
@@ -1339,6 +1342,7 @@ export function OverlayPlayer() {
                                             </button>
                                         )}
                                     </div>
+                                    )}
 
                                     <div
                                         className="mb-3 flex items-center justify-center px-2 gap-5"
@@ -1755,7 +1759,7 @@ export function OverlayPlayer() {
                                                             </button>
                                                         )}
                                                         <span className="text-xs text-gray-400">
-                                                            {queueTracks.length} tracks
+                                                            {queueTracks.length} items
                                                         </span>
                                                     </div>
                                                 </div>
@@ -1771,9 +1775,120 @@ export function OverlayPlayer() {
                                                         ref={queueListRef}
                                                         className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
                                                     >
-                                                        {queueTracks.map((track, queueIndex) => {
+                                                        {queueTracks.map((item, queueIndex) => {
                                                             const isCurrentTrack = queueIndex === currentIndex;
                                                             const isPlayedTrack = queueIndex < currentIndex;
+                                                            if (item.itemType === "episode") {
+                                                                return (
+                                                                    <div
+                                                                        key={`${item.id}-${queueIndex}`}
+                                                                        data-queue-index={queueIndex}
+                                                                        className={cn(
+                                                                            "mb-1.5 flex items-center gap-2 px-2 py-2 transition-colors",
+                                                                            isCurrentTrack
+                                                                                ? "rounded-md border border-[#60a5fa]/35 bg-[#60a5fa]/10"
+                                                                                : isPlayedTrack
+                                                                                  ? "rounded-md bg-white/[0.03] hover:bg-white/[0.06]"
+                                                                                  : "hover:bg-white/[0.06]"
+                                                                        )}
+                                                                    >
+                                                                        <span
+                                                                            className={cn(
+                                                                                "w-5 flex-shrink-0 text-center text-[11px] tabular-nums",
+                                                                                isCurrentTrack
+                                                                                    ? "text-[#60a5fa]"
+                                                                                    : "text-gray-500"
+                                                                            )}
+                                                                        >
+                                                                            {queueIndex + 1}
+                                                                        </span>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                if (!isCurrentTrack) {
+                                                                                    handlePlayFromQueue(queueIndex);
+                                                                                }
+                                                                            }}
+                                                                            className={cn(
+                                                                                "flex min-w-0 flex-1 items-center gap-3 text-left",
+                                                                                isCurrentTrack && "cursor-default"
+                                                                            )}
+                                                                            title={
+                                                                                isCurrentTrack
+                                                                                    ? "Now playing"
+                                                                                    : "Play this episode now"
+                                                                            }
+                                                                        >
+                                                                            <div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-[#1a1a1a]">
+                                                                                {item.coverUrl ? (
+                                                                                    <Image
+                                                                                        src={item.coverUrl}
+                                                                                        alt={item.podcastTitle}
+                                                                                        fill
+                                                                                        sizes="44px"
+                                                                                        className="object-cover"
+                                                                                        unoptimized
+                                                                                    />
+                                                                                ) : (
+                                                                                    <div className="flex h-full w-full items-center justify-center">
+                                                                                        <MusicIcon className="h-4 w-4 text-gray-600" />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="min-w-0">
+                                                                                <p
+                                                                                    className={cn(
+                                                                                        "min-w-0 truncate text-sm",
+                                                                                        isCurrentTrack
+                                                                                            ? "text-[#60a5fa]"
+                                                                                            : "text-white"
+                                                                                    )}
+                                                                                >
+                                                                                    {item.title}
+                                                                                </p>
+                                                                                <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                                                                                    <p className="min-w-0 truncate text-xs text-gray-400">
+                                                                                        {item.podcastTitle || "Podcast"}
+                                                                                    </p>
+                                                                                    {isCurrentTrack && (
+                                                                                        <span className="inline-flex shrink-0 items-center rounded-full border border-[#60a5fa]/40 bg-[#60a5fa]/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
+                                                                                            Playing
+                                                                                        </span>
+                                                                                    )}
+                                                                                    {isPlayedTrack && !isCurrentTrack && (
+                                                                                        <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-gray-400">
+                                                                                            Played
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        </button>
+                                                                        <span
+                                                                            className={cn(
+                                                                                "text-[11px] tabular-nums",
+                                                                                isCurrentTrack
+                                                                                    ? "text-[#60a5fa]"
+                                                                                    : "text-gray-500"
+                                                                            )}
+                                                                        >
+                                                                            {formatTime(item.duration || 0)}
+                                                                        </span>
+                                                                        {!isCurrentTrack && (
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleRemoveFromQueue(queueIndex);
+                                                                                }}
+                                                                                className="ml-1 h-7 w-7 flex items-center justify-center rounded-full text-gray-500 hover:bg-white/10 hover:text-white transition-colors"
+                                                                                title="Remove from queue"
+                                                                                aria-label="Remove from queue"
+                                                                            >
+                                                                                <X className="h-3.5 w-3.5" />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            const track = item;
                                                             const queueTrackQualityBadge =
                                                                 resolvePlaybackQualityBadgeFromStreamSource(
                                                                     track.streamSource,

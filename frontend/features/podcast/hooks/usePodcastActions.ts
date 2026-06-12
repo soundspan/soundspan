@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAudio } from "@/lib/audio-context";
-import { useAudioState } from "@/lib/audio-state-context";
+import { buildEpisodeQueueItem } from "@/lib/queue-item";
 import { api } from "@/lib/api";
 import { Podcast, Episode, PodcastPreview } from "../types";
 import { queryKeys } from "@/hooks/useQueries";
@@ -14,7 +14,7 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 function buildForwardEpisodeQueue(
     selectedEpisode: Episode,
     podcast: Podcast
-): Episode[] | null {
+): Episode[] {
     const episodesByDate = [...podcast.episodes].sort((a, b) => {
         const timeA = new Date(a.publishedAt).getTime();
         const timeB = new Date(b.publishedAt).getTime();
@@ -22,7 +22,7 @@ function buildForwardEpisodeQueue(
     });
 
     if (episodesByDate.length === 0) {
-        return null;
+        return [selectedEpisode];
     }
 
     const selectedIndex = episodesByDate.findIndex(
@@ -30,12 +30,7 @@ function buildForwardEpisodeQueue(
     );
 
     if (selectedIndex === -1) {
-        return null;
-    }
-
-    const latestEpisode = episodesByDate[episodesByDate.length - 1];
-    if (latestEpisode?.id === selectedEpisode.id) {
-        return null;
+        return [selectedEpisode];
     }
 
     return episodesByDate.slice(selectedIndex);
@@ -49,7 +44,6 @@ export function usePodcastActions(podcastId: string) {
     const queryClient = useQueryClient();
     const { playPodcast, currentPodcast, isPlaying, pause, resume } =
         useAudio();
-    const { setPodcastEpisodeQueue } = useAudioState();
 
     const [isSubscribing, setIsSubscribing] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -93,19 +87,35 @@ export function usePodcastActions(podcastId: string) {
 
     const handlePlayEpisode = useCallback(
         (episode: Episode, podcast: Podcast) => {
-            const queue = buildForwardEpisodeQueue(episode, podcast);
-            setPodcastEpisodeQueue(queue);
+            // Forward-only episode context: the selected episode plus newer
+            // episodes become the unified mixed-media queue.
+            const episodeQueue = buildForwardEpisodeQueue(
+                episode,
+                podcast
+            ).map((queuedEpisode) =>
+                buildEpisodeQueueItem({
+                    podcastId,
+                    episodeId: queuedEpisode.id,
+                    title: queuedEpisode.title,
+                    podcastTitle: podcast.title,
+                    coverUrl: podcast.coverUrl ?? null,
+                    duration: queuedEpisode.duration,
+                })
+            );
 
-            playPodcast({
-                id: `${podcastId}:${episode.id}`,
-                title: episode.title,
-                podcastTitle: podcast.title,
-                coverUrl: podcast.coverUrl,
-                duration: episode.duration,
-                progress: episode.progress || null,
-            });
+            playPodcast(
+                {
+                    id: `${podcastId}:${episode.id}`,
+                    title: episode.title,
+                    podcastTitle: podcast.title,
+                    coverUrl: podcast.coverUrl,
+                    duration: episode.duration,
+                    progress: episode.progress || null,
+                },
+                { episodeQueue }
+            );
         },
-        [podcastId, playPodcast, setPodcastEpisodeQueue]
+        [podcastId, playPodcast]
     );
 
     const handlePlayPauseEpisode = useCallback(
