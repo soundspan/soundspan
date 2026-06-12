@@ -57,6 +57,16 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/webhooks.ts` | `/api/webhooks` |
 | `backend/src/routes/youtubeMusic.ts` | `/api/ytmusic` |
 
+## Feature-Gated Prefixes
+
+Some prefixes are mounted only when their coarse feature flag (see
+`config.features` in `backend/src/config.ts`) is enabled; otherwise the prefix
+returns `404 {"error":"feature disabled","code":"FEATURE_DISABLED"}`:
+
+- `AUDIO_ANALYSIS_ENABLED`: `/api/analysis`, `/api/vibe`
+- `DISCOVERY_ENABLED`: `/api/discover`, `/api/recommendations`
+- `AUTO_PLAYLISTS_ENABLED`: `/api/mixes`
+
 ## Update Rule
 
 - When adding, removing, or changing endpoints in this directory, update this README if the entrypoint or test-navigation guidance changes and keep impacted route tests current in the same change set.
