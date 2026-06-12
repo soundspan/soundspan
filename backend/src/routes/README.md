@@ -50,6 +50,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/tidalStreaming.ts` | `/api/tidal-streaming` |
 | `backend/src/routes/vibe.ts` | `/api/vibe` |
 | `backend/src/routes/webhooks.ts` | `/api/webhooks` |
+| `backend/src/routes/youtube.ts` | `/api/youtube` |
 | `backend/src/routes/youtubeMusic.ts` | `/api/ytmusic` |
 
 ## Update Rule

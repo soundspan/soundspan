@@ -8,7 +8,9 @@
  * Endpoints:
  * - GET  /api/youtube/info?url=   — Video metadata
  * - GET  /api/youtube/stream/:videoId — Proxied audio stream
- * - POST /api/youtube/download    — Download audio to disk + scan into library
+ * - POST /api/youtube/download    — Start a background download job (202)
+ * - GET  /api/youtube/download/:jobId — Poll job status; queues a library
+ *   scan once when the job completes
  */
 
 import { Router, Request, Response } from "express";
@@ -159,7 +161,7 @@ const downloadBodySchema = z.object({
  * @openapi
  * /api/youtube/download:
  *   post:
- *     summary: Download YouTube audio to library
+ *     summary: Start a background YouTube audio download job
  *     tags: [YouTube]
  *     requestBody:
  *       required: true
@@ -177,8 +179,12 @@ const downloadBodySchema = z.object({
  *                 type: string
  *                 enum: [LOW, MEDIUM, HIGH, LOSSLESS]
  *     responses:
- *       200:
- *         description: Download result with file path and track info
+ *       202:
+ *         description: Download job accepted; poll GET /api/youtube/download/{jobId}
+ *       400:
+ *         description: Invalid request body
+ *       502:
+ *         description: Sidecar unavailable or rejected the download
  */
 router.post("/download", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -188,51 +194,107 @@ router.post("/download", requireAuth, async (req: Request, res: Response) => {
             `[YouTube Route] Download requested: ${videoId} (${format}, ${quality})`
         );
 
-        const result = await youtubeDownloadService.downloadVideo(
+        const job = await youtubeDownloadService.startDownload(
             videoId,
             format,
             quality
         );
 
-        if (!result.success) {
-            return res.status(502).json({ error: "Download failed" });
-        }
-
-        // Trigger a library scan so the downloaded file appears in the library.
-        // We do this asynchronously — the download response returns immediately.
-        try {
-            const { scanQueue } = await import("../workers/queues");
-            const { prisma } = await import("../utils/db");
-
-            const user = req.user?.id
-                ? { id: req.user.id }
-                : await prisma.user.findFirst();
-
-            if (user) {
-                await scanQueue.add("scan", {
-                    userId: user.id,
-                    source: "youtube-download",
-                });
-                logger.debug(
-                    `[YouTube Route] Library scan queued after download of ${videoId}`
-                );
-            }
-        } catch (scanErr: any) {
-            logger.warn(
-                `[YouTube Route] Failed to queue library scan: ${scanErr.message}`
-            );
-        }
-
-        return res.json(result);
+        return res.status(202).json(job);
     } catch (err: any) {
         if (err instanceof z.ZodError) {
             return res.status(400).json({ error: err.errors[0].message });
         }
-        logger.error("[YouTube Route] Download failed:", err.message);
+        if (err.response?.status === 400) {
+            return res.status(400).json({
+                error: err.response?.data?.detail || "Invalid download request",
+            });
+        }
+        logger.error("[YouTube Route] Download start failed:", err.message);
         return res
             .status(502)
             .json({ error: err.response?.data?.detail || "Download failed" });
     }
 });
+
+// Jobs that have already triggered a library scan, so repeated status polls
+// enqueue the scan exactly once per job. In-memory is fine: jobs themselves
+// are in-memory on the sidecar and lost together on restart.
+const scannedDownloadJobIds = new Set<string>();
+
+/**
+ * @openapi
+ * /api/youtube/download/{jobId}:
+ *   get:
+ *     summary: Get YouTube download job status
+ *     description: >
+ *       Proxies the sidecar's job store. When a poll first observes the
+ *       job as completed, a library scan is enqueued (once per job) so the
+ *       downloaded file appears in the library.
+ *     tags: [YouTube]
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Job status (queued, downloading, processing, completed, failed)
+ *       404:
+ *         description: Unknown job id (e.g. sidecar restarted)
+ *       502:
+ *         description: Sidecar unavailable
+ */
+router.get(
+    "/download/:jobId",
+    requireAuth,
+    async (req: Request, res: Response) => {
+        try {
+            const { jobId } = req.params;
+            const job = await youtubeDownloadService.getDownloadJobStatus(
+                jobId
+            );
+
+            if (
+                job.status === "completed" &&
+                !scannedDownloadJobIds.has(job.jobId)
+            ) {
+                scannedDownloadJobIds.add(job.jobId);
+                try {
+                    const { scanQueue } = await import("../workers/queues");
+                    await scanQueue.add("scan", {
+                        userId: req.user!.id,
+                        source: "youtube-download",
+                    });
+                    logger.debug(
+                        `[YouTube Route] Library scan queued after download job ${job.jobId}`
+                    );
+                } catch (scanErr: any) {
+                    // Allow a later poll to retry the enqueue.
+                    scannedDownloadJobIds.delete(job.jobId);
+                    logger.warn(
+                        `[YouTube Route] Failed to queue library scan: ${scanErr.message}`
+                    );
+                }
+            }
+
+            return res.json(job);
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                return res
+                    .status(404)
+                    .json({ error: "Download job not found" });
+            }
+            logger.error(
+                "[YouTube Route] Download status fetch failed:",
+                err.message
+            );
+            return res
+                .status(502)
+                .json({ error: "Failed to fetch download status" });
+        }
+    }
+);
 
 export default router;

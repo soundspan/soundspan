@@ -111,6 +111,12 @@ export const config = {
           }
         : undefined,
 
+    // YouTube Music streamer sidecar (also serves the regular-YouTube /yt/
+    // endpoints used for URL-paste streaming and download-to-library)
+    ytmusicStreamer: {
+        url: process.env.YTMUSIC_STREAMER_URL || "http://127.0.0.1:8586",
+    },
+
     allowedOrigins:
         allowedOriginsFromEnv ||
         (process.env.NODE_ENV === "development" ? true : []),

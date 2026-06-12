@@ -81,6 +81,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
 | `backend/src/services/vibeVocabulary.ts` | Core |
 | `backend/src/services/wikidata.ts` | Core |
+| `backend/src/services/youtubeDownload.ts` | Core |
 | `backend/src/services/youtubeMusic.ts` | Core |
 
 ## Update Rule

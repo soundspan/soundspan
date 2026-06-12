@@ -12,16 +12,16 @@ Scope:
 | --- | --- | --- | --- | --- | --- |
 | Backend middleware | 4 | 7 | 7 | 0 | 100.0% |
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
-| Backend routes | 39 | 54 | 1 | 53 | 1.9% |
-| Backend services | 70 | 84 | 52 | 32 | 61.9% |
+| Backend routes | 40 | 54 | 1 | 53 | 1.9% |
+| Backend services | 71 | 84 | 52 | 32 | 61.9% |
 | Backend utils | 31 | 79 | 57 | 22 | 72.2% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 73 | 76 | 11 | 65 | 14.5% |
-| Frontend features | 136 | 114 | 8 | 106 | 7.0% |
+| Frontend features | 138 | 116 | 8 | 108 | 6.9% |
 | Frontend hooks | 25 | 89 | 59 | 30 | 66.3% |
-| Frontend lib | 55 | 84 | 26 | 58 | 31.0% |
+| Frontend lib | 56 | 86 | 28 | 58 | 32.6% |
 | Frontend other | 63 | 61 | 6 | 55 | 9.8% |
-| **Total** | **520** | **676** | **244** | **432** | **36.1%** |
+| **Total** | **525** | **680** | **246** | **434** | **36.2%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -177,7 +177,7 @@ Scope:
 | Frontend components | KeyboardShortcutsTooltip | frontend/components/player/KeyboardShortcutsTooltip.tsx:6 |
 | Frontend components | MiniPlayer | frontend/components/player/MiniPlayer.tsx:23 |
 | Frontend components | OverlayPlayer | frontend/components/player/OverlayPlayer.tsx:100 |
-| Frontend components | PlaybackQualityBadge | frontend/components/player/PlaybackQualityBadge.tsx:37 |
+| Frontend components | PlaybackQualityBadge | frontend/components/player/PlaybackQualityBadge.tsx:38 |
 | Frontend components | PlaybackQualityBadgeWithStats | frontend/components/player/PlaybackQualityBadgeWithStats.tsx:56 |
 | Frontend components | PlayerModeWrapper | frontend/components/player/PlayerModeWrapper.tsx:6 |
 | Frontend components | SeekSlider | frontend/components/player/SeekSlider.tsx:35 |

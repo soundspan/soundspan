@@ -10,11 +10,9 @@
 import axios, { AxiosInstance } from "axios";
 import http from "node:http";
 import https from "node:https";
+import { config } from "../config";
 import { logger } from "../utils/logger";
 
-// Reuse the same sidecar URL — the /yt/ endpoints live on the same service
-const YTMUSIC_STREAMER_URL =
-    process.env.YTMUSIC_STREAMER_URL || "http://127.0.0.1:8586";
 const SIDECAR_AGENT_OPTIONS = {
     keepAlive: true,
     maxSockets: 64,
@@ -23,6 +21,7 @@ const SIDECAR_AGENT_OPTIONS = {
 
 // ── Types ──────────────────────────────────────────────────────────
 
+/** Metadata for a regular YouTube video, as returned by the sidecar /yt/info. */
 export interface YtVideoInfo {
     videoId: string;
     title: string;
@@ -30,15 +29,34 @@ export interface YtVideoInfo {
     duration: number;
     thumbnail: string | null;
     uploadDate: string;
+    /** Audio container the stream proxy will serve ("webm" for opus, "mp4" for AAC). */
+    audioFormat?: "webm" | "mp4";
 }
 
-export interface YtDownloadResult {
-    success: boolean;
-    filePath: string;
+/** Lifecycle states reported by the sidecar's download job store. */
+export type YtDownloadJobState =
+    | "queued"
+    | "downloading"
+    | "processing"
+    | "completed"
+    | "failed";
+
+/** Response from starting a download job (POST /yt/download). */
+export interface YtDownloadJobStart {
+    jobId: string;
+    status: YtDownloadJobState;
+}
+
+/** Status snapshot for a download job (GET /yt/download/{jobId}). */
+export interface YtDownloadJobStatus {
+    jobId: string;
+    videoId: string;
+    status: YtDownloadJobState;
+    progressPct: number;
+    filePath: string | null;
     title: string;
-    uploader?: string;
-    duration?: number;
-    alreadyExisted?: boolean;
+    error: string | null;
+    alreadyExisted: boolean;
 }
 
 // ── Service ────────────────────────────────────────────────────────
@@ -48,7 +66,7 @@ class YouTubeDownloadService {
 
     constructor() {
         this.client = axios.create({
-            baseURL: YTMUSIC_STREAMER_URL,
+            baseURL: config.ytmusicStreamer.url,
             timeout: 30_000,
             httpAgent: new http.Agent(SIDECAR_AGENT_OPTIONS),
             httpsAgent: new https.Agent(SIDECAR_AGENT_OPTIONS),
@@ -96,28 +114,50 @@ class YouTubeDownloadService {
     }
 
     /**
-     * Download audio from a YouTube video to disk via the sidecar.
-     * The sidecar handles yt-dlp download, FFmpeg conversion, and
-     * metadata/thumbnail embedding.
+     * Start a background download job for a YouTube video via the sidecar.
+     * Returns immediately with a job id; poll getDownloadJobStatus() for
+     * progress. The sidecar handles yt-dlp download, FFmpeg conversion,
+     * and metadata/thumbnail embedding into YT_DOWNLOAD_DIR.
      */
-    async downloadVideo(
+    async startDownload(
         videoId: string,
         format: string = "mp3",
         quality: string = "HIGH"
-    ): Promise<YtDownloadResult> {
-        const res = await this.client.post(
-            "/yt/download",
-            {
-                video_id: videoId,
-                format,
-                quality,
-                output_dir: "/music/YouTube Downloads",
-            },
-            {
-                timeout: 600_000, // 10 minutes — long DJ sets can take a while
-            }
+    ): Promise<YtDownloadJobStart> {
+        const res = await this.client.post("/yt/download", {
+            video_id: videoId,
+            format,
+            quality,
+        });
+        logger.debug(
+            `[YouTube Download] Job ${res.data.job_id} started for ${videoId} (status=${res.data.status})`
         );
-        return res.data;
+        return {
+            jobId: res.data.job_id,
+            status: res.data.status,
+        };
+    }
+
+    /**
+     * Fetch the status of a download job started via startDownload().
+     * Throws an axios error with response status 404 when the job is
+     * unknown (e.g. the sidecar restarted).
+     */
+    async getDownloadJobStatus(jobId: string): Promise<YtDownloadJobStatus> {
+        const res = await this.client.get(
+            `/yt/download/${encodeURIComponent(jobId)}`
+        );
+        const data = res.data;
+        return {
+            jobId: data.job_id,
+            videoId: data.video_id,
+            status: data.status,
+            progressPct: data.progress_pct ?? 0,
+            filePath: data.file_path ?? null,
+            title: data.title ?? "",
+            error: data.error ?? null,
+            alreadyExisted: Boolean(data.already_existed),
+        };
     }
 }
 

@@ -12,8 +12,8 @@ Scope:
 
 | Area | Implemented Endpoints | Documented Endpoints | Covered Implemented Endpoints | Missing OpenAPI Endpoints | Undocumentable Endpoints | Coverage |
 | --- | --- | --- | --- | --- | --- | --- |
-| Backend API | 349 | 341 | 315 | 34 | 65 | 90.3% |
-| **Total** | **349** | **341** | **315** | **34** | **65** | **90.3%** |
+| Backend API | 353 | 345 | 319 | 34 | 65 | 90.4% |
+| **Total** | **353** | **345** | **319** | **34** | **65** | **90.4%** |
 
 ## Missing OpenAPI Endpoint Docs
 
@@ -24,10 +24,10 @@ Scope:
 | `DELETE` | `/api/lyrics/{trackId}` | `backend/src/routes/lyrics.ts:202` |
 | `GET` | `/api/api-keys` | `backend/src/routes/apiKeys.ts:134` |
 | `GET` | `/api/auth/me` | `backend/src/routes/auth.ts:347` |
-| `GET` | `/api/docs.json` | `backend/src/index.ts:345` |
-| `GET` | `/api/health` | `backend/src/index.ts:299` |
-| `GET` | `/api/health/live` | `backend/src/index.ts:310` |
-| `GET` | `/api/health/ready` | `backend/src/index.ts:319` |
+| `GET` | `/api/docs.json` | `backend/src/index.ts:347` |
+| `GET` | `/api/health` | `backend/src/index.ts:301` |
+| `GET` | `/api/health/live` | `backend/src/index.ts:312` |
+| `GET` | `/api/health/ready` | `backend/src/index.ts:321` |
 | `GET` | `/api/listen-together/active-count` | `backend/src/routes/listenTogether.ts:154` |
 | `GET` | `/api/listen-together/discover` | `backend/src/routes/listenTogether.ts:132` |
 | `GET` | `/api/listen-together/mine` | `backend/src/routes/listenTogether.ts:176` |
@@ -38,9 +38,9 @@ Scope:
 | `GET` | `/api/mixes/mood/buckets/presets` | `backend/src/routes/mixes.ts:523` |
 | `GET` | `/api/search` | `backend/src/routes/search.ts:256` |
 | `GET` | `/api/streaming/v1/sessions/{sessionId}/{segmentName}([A-Za-z0-9_.-]+\\.(?{m4s}\|webm))` | `backend/src/routes/streaming.ts:1163` |
-| `GET` | `/health` | `backend/src/index.ts:293` |
-| `GET` | `/health/live` | `backend/src/index.ts:307` |
-| `GET` | `/health/ready` | `backend/src/index.ts:313` |
+| `GET` | `/health` | `backend/src/index.ts:295` |
+| `GET` | `/health/live` | `backend/src/index.ts:309` |
+| `GET` | `/health/ready` | `backend/src/index.ts:315` |
 | `POST` | `/api/api-keys` | `backend/src/routes/apiKeys.ts:67` |
 | `POST` | `/api/auth/login` | `backend/src/routes/auth.ts:123` |
 | `POST` | `/api/library/scan` | `backend/src/routes/library.ts:816` |
@@ -229,7 +229,7 @@ Scope:
 | `GET` | `/api/discover/exclusions` | `backend/src/routes/discover.ts:2013` |
 | `GET` | `/api/discover/generate/status/{jobId}` | `backend/src/routes/discover.ts:253` |
 | `GET` | `/api/discover/popular-artists` | `backend/src/routes/discover.ts:1034` |
-| `GET` | `/api/docs.json` | `backend/src/index.ts:345` |
+| `GET` | `/api/docs.json` | `backend/src/index.ts:347` |
 | `GET` | `/api/downloads` | `backend/src/routes/downloads.ts:1485` |
 | `GET` | `/api/downloads/{id}` | `backend/src/routes/downloads.ts:1307` |
 | `GET` | `/api/downloads/availability` | `backend/src/routes/downloads.ts:44` |
@@ -243,9 +243,9 @@ Scope:
 | `GET` | `/api/enrichment/search/musicbrainz/release-groups` | `backend/src/routes/enrichment.ts:812` |
 | `GET` | `/api/enrichment/settings` | `backend/src/routes/enrichment.ts:475` |
 | `GET` | `/api/enrichment/status` | `backend/src/routes/enrichment.ts:84` |
-| `GET` | `/api/health` | `backend/src/index.ts:299` |
-| `GET` | `/api/health/live` | `backend/src/index.ts:310` |
-| `GET` | `/api/health/ready` | `backend/src/index.ts:319` |
+| `GET` | `/api/health` | `backend/src/index.ts:301` |
+| `GET` | `/api/health/live` | `backend/src/index.ts:312` |
+| `GET` | `/api/health/ready` | `backend/src/index.ts:321` |
 | `GET` | `/api/homepage/genres` | `backend/src/routes/homepage.ts:34` |
 | `GET` | `/api/homepage/top-podcasts` | `backend/src/routes/homepage.ts:165` |
 | `GET` | `/api/library/album-cover/{mbid}` | `backend/src/routes/library.ts:3892` |
@@ -341,6 +341,9 @@ Scope:
 | `GET` | `/api/vibe/similar/{trackId}` | `backend/src/routes/vibe.ts:193` |
 | `GET` | `/api/vibe/status` | `backend/src/routes/vibe.ts:575` |
 | `GET` | `/api/webhooks/lidarr/verify` | `backend/src/routes/webhooks.ts:31` |
+| `GET` | `/api/youtube/download/{jobId}` | `backend/src/routes/youtube.ts:249` |
+| `GET` | `/api/youtube/info` | `backend/src/routes/youtube.ts:46` |
+| `GET` | `/api/youtube/stream/{videoId}` | `backend/src/routes/youtube.ts:93` |
 | `GET` | `/api/ytmusic/album/{browseId}` | `backend/src/routes/youtubeMusic.ts:625` |
 | `GET` | `/api/ytmusic/artist/{channelId}` | `backend/src/routes/youtubeMusic.ts:667` |
 | `GET` | `/api/ytmusic/library/albums` | `backend/src/routes/youtubeMusic.ts:998` |
@@ -349,9 +352,9 @@ Scope:
 | `GET` | `/api/ytmusic/status` | `backend/src/routes/youtubeMusic.ts:240` |
 | `GET` | `/api/ytmusic/stream-info/{videoId}` | `backend/src/routes/youtubeMusic.ts:766` |
 | `GET` | `/api/ytmusic/stream/{videoId}` | `backend/src/routes/youtubeMusic.ts:858` |
-| `GET` | `/health` | `backend/src/index.ts:293` |
-| `GET` | `/health/live` | `backend/src/index.ts:307` |
-| `GET` | `/health/ready` | `backend/src/index.ts:313` |
+| `GET` | `/health` | `backend/src/index.ts:295` |
+| `GET` | `/health/live` | `backend/src/index.ts:309` |
+| `GET` | `/health/ready` | `backend/src/index.ts:315` |
 | `OPTIONS` | `/api/audiobooks/{id}/cover` | `backend/src/routes/audiobooks.ts:560` |
 | `OPTIONS` | `/api/podcasts/{id}/cover` | `backend/src/routes/podcasts.ts:1939` |
 | `OPTIONS` | `/api/podcasts/episodes/{episodeId}/cover` | `backend/src/routes/podcasts.ts:2041` |
@@ -492,6 +495,7 @@ Scope:
 | `POST` | `/api/tidal-streaming/search` | `backend/src/routes/tidalStreaming.ts:557` |
 | `POST` | `/api/vibe/search` | `backend/src/routes/vibe.ts:365` |
 | `POST` | `/api/webhooks/lidarr` | `backend/src/routes/webhooks.ts:74` |
+| `POST` | `/api/youtube/download` | `backend/src/routes/youtube.ts:189` |
 | `POST` | `/api/ytmusic/auth/clear` | `backend/src/routes/youtubeMusic.ts:506` |
 | `POST` | `/api/ytmusic/auth/device-code` | `backend/src/routes/youtubeMusic.ts:295` |
 | `POST` | `/api/ytmusic/auth/device-code/poll` | `backend/src/routes/youtubeMusic.ts:351` |
@@ -680,6 +684,9 @@ Scope:
 | `GET` | `/api/vibe/similar/{trackId}` | `backend/src/routes/vibe.ts:123` |
 | `GET` | `/api/vibe/status` | `backend/src/routes/vibe.ts:548` |
 | `GET` | `/api/webhooks/lidarr/verify` | `backend/src/routes/webhooks.ts:23` |
+| `GET` | `/api/youtube/download/{jobId}` | `backend/src/routes/youtube.ts:228` |
+| `GET` | `/api/youtube/info` | `backend/src/routes/youtube.ts:33` |
+| `GET` | `/api/youtube/stream/{videoId}` | `backend/src/routes/youtube.ts:73` |
 | `GET` | `/api/ytmusic/album/{browseId}` | `backend/src/routes/youtubeMusic.ts:606` |
 | `GET` | `/api/ytmusic/artist/{channelId}` | `backend/src/routes/youtubeMusic.ts:648` |
 | `GET` | `/api/ytmusic/library/albums` | `backend/src/routes/youtubeMusic.ts:978` |
@@ -827,6 +834,7 @@ Scope:
 | `POST` | `/api/tidal-streaming/search` | `backend/src/routes/tidalStreaming.ts:522` |
 | `POST` | `/api/vibe/search` | `backend/src/routes/vibe.ts:307` |
 | `POST` | `/api/webhooks/lidarr` | `backend/src/routes/webhooks.ts:45` |
+| `POST` | `/api/youtube/download` | `backend/src/routes/youtube.ts:163` |
 | `POST` | `/api/ytmusic/auth/clear` | `backend/src/routes/youtubeMusic.ts:493` |
 | `POST` | `/api/ytmusic/auth/device-code` | `backend/src/routes/youtubeMusic.ts:280` |
 | `POST` | `/api/ytmusic/auth/device-code/poll` | `backend/src/routes/youtubeMusic.ts:326` |
