@@ -110,9 +110,11 @@ async function renderHook() {
     const { useExploreData } = await import(
         "../../features/explore/hooks/useExploreData"
     );
-    let captured: ReturnType<typeof useExploreData> | undefined;
+    const capturedRef = {
+        current: null as ReturnType<typeof useExploreData> | null,
+    };
     const Probe = () => {
-        captured = useExploreData();
+        capturedRef.current = useExploreData();
         return null;
     };
     renderToStaticMarkup(
@@ -122,8 +124,8 @@ async function renderHook() {
             React.createElement(Probe)
         )
     );
-    if (!captured) throw new Error("useExploreData did not run");
-    return captured;
+    if (!capturedRef.current) throw new Error("useExploreData did not run");
+    return capturedRef.current;
 }
 
 beforeEach(() => {
