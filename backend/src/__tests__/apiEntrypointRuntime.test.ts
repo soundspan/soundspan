@@ -81,6 +81,11 @@ describe("api entrypoint runtime behavior", () => {
             databaseUrl?: string;
             redisUrl?: string;
             DOCS_PUBLIC?: string;
+            features?: {
+                audioAnalysis?: boolean;
+                discovery?: boolean;
+                autoPlaylists?: boolean;
+            };
         };
         bcryptHashImpl?: (value: string, salt: number) => Promise<string>;
     } = {}) {
@@ -201,6 +206,12 @@ describe("api entrypoint runtime behavior", () => {
             redisUrl: "redis://redis:6379/0",
             DOCS_PUBLIC: undefined,
             ...(configOverrides || {}),
+            features: {
+                audioAnalysis: true,
+                discovery: true,
+                autoPlaylists: true,
+                ...(configOverrides?.features || {}),
+            },
         };
         const hashedAdminPassword =
             bcryptHashImpl ||
@@ -412,6 +423,92 @@ describe("api entrypoint runtime behavior", () => {
         );
         expect(processOnSpy).toHaveBeenCalled();
         expect(setIntervalSpy).toHaveBeenCalled();
+    });
+
+    it("mounts FEATURE_DISABLED 404 handlers for gated prefixes when flags are off", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+
+        jest.spyOn(process, "on").mockImplementation(() => process as any);
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout
+        );
+        process.exit = jest.fn() as any;
+
+        const mocks = setupApiEntrypointMocks({
+            configOverrides: {
+                features: {
+                    audioAnalysis: false,
+                    discovery: false,
+                    autoPlaylists: false,
+                },
+            },
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        for (const prefix of [
+            "/api/discover",
+            "/api/recommendations",
+            "/api/mixes",
+            "/api/analysis",
+            "/api/vibe",
+        ]) {
+            const call = mocks.app.use.mock.calls.find(
+                (args: unknown[]) => args[0] === prefix
+            );
+            expect(call).toBeDefined();
+            // Disabled prefixes mount only the feature-disabled handler
+            // (no rate limiter, no router module).
+            expect(call).toHaveLength(2);
+            expect(typeof call![1]).toBe("function");
+
+            const res = createJsonRes();
+            (call![1] as (req: any, res: any) => void)({}, res);
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({
+                error: "feature disabled",
+                code: "FEATURE_DISABLED",
+            });
+        }
+    });
+
+    it("mounts gated routers normally when feature flags are on", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+
+        jest.spyOn(process, "on").mockImplementation(() => process as any);
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout
+        );
+        process.exit = jest.fn() as any;
+
+        const mocks = setupApiEntrypointMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        for (const prefix of [
+            "/api/discover",
+            "/api/recommendations",
+            "/api/mixes",
+            "/api/analysis",
+            "/api/vibe",
+        ]) {
+            const call = mocks.app.use.mock.calls.find(
+                (args: unknown[]) => args[0] === prefix
+            );
+            expect(call).toBeDefined();
+            expect(call![1]).toBe("api-limiter");
+            expect(call).toHaveLength(3);
+        }
     });
 
     it("applies safe path and cache-control exclusions in compression filter", async () => {

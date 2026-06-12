@@ -25,6 +25,16 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        features: {
+            audioAnalysis: true,
+            discovery: true,
+            autoPlaylists: true,
+        },
+    },
+}));
+
 import router from "../system";
 import { featureDetection } from "../../services/featureDetection";
 
@@ -82,6 +92,9 @@ describe("system routes runtime", () => {
         expect(res.body).toEqual({
             clapAvailable: true,
             allAvailable: true,
+            audioAnalysis: true,
+            discovery: true,
+            autoPlaylists: true,
         });
     });
 
