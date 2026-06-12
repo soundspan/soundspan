@@ -187,6 +187,89 @@ test("ignores a stale DASH load that resolves after a newer direct load", async 
     assert.equal(videoJsEngine.loadCalls.length, 0);
 });
 
+test("cancels a pending lazy DASH engine load when the user stops playback", async () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
+    const enginePromise = new Promise<AudioEngine>((resolve) => {
+        resolveEngine = resolve;
+    });
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => enginePromise,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load({
+        url: "https://example.test/stream.mpd",
+        protocol: "dash",
+        mimeType: "application/dash+xml",
+    });
+    runtimeEngine.stop();
+    resolveEngine?.(videoJsEngine);
+    await flushAsyncEngineInit();
+
+    assert.equal(videoJsEngine.loadCalls.length, 0);
+});
+
+test("cancels a pending lazy DASH engine load when the user pauses", async () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
+    const enginePromise = new Promise<AudioEngine>((resolve) => {
+        resolveEngine = resolve;
+    });
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => enginePromise,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load({
+        url: "https://example.test/stream.mpd",
+        protocol: "dash",
+        mimeType: "application/dash+xml",
+    });
+    runtimeEngine.pause();
+    resolveEngine?.(videoJsEngine);
+    await flushAsyncEngineInit();
+
+    assert.equal(videoJsEngine.loadCalls.length, 0);
+});
+
+test("stops in-progress playback before the lazy video.js import resolves", async () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
+    const enginePromise = new Promise<AudioEngine>((resolve) => {
+        resolveEngine = resolve;
+    });
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => enginePromise,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load("https://example.test/track.mp3", {
+        autoplay: false,
+    });
+    runtimeEngine.play();
+    runtimeEngine.load({
+        url: "https://example.test/stream.mpd",
+        protocol: "dash",
+        mimeType: "application/dash+xml",
+    });
+
+    // The previously playing direct track must be halted immediately,
+    // not after the (potentially slow) video.js chunk download.
+    assert.equal(howlerEngine.stopCalls, 1);
+
+    resolveEngine?.(videoJsEngine);
+    await flushAsyncEngineInit();
+
+    assert.equal(videoJsEngine.loadCalls.length, 1);
+});
+
 test("reapplies persisted volume and mute state when switching to DASH engine", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();

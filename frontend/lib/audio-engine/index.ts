@@ -171,6 +171,13 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 
     const preferredKind = this.resolvePreferredEngineKind(normalizedSource);
     if (preferredKind === "videojs" && !this.videoJsEngine) {
+      // Halt in-progress playback immediately (mirroring the synchronous
+      // engine-switch path in loadWithEngine) so the previous track does
+      // not keep playing while the video.js chunk downloads.
+      const activeEngine = this.getActiveEngine();
+      if (activeEngine.isPlaying()) {
+        activeEngine.stop();
+      }
       // Video.js engine is lazy-loaded; finish this load once it arrives
       // unless a newer load superseded it in the meantime.
       void this.ensureVideoJsEngine().then((videoJsEngine) => {
@@ -219,10 +226,16 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   }
 
   pause(): void | Promise<void> {
+    // Invalidate any deferred lazy-engine load (see load()) so it cannot
+    // start playback after the user paused.
+    this.loadSequence += 1;
     return this.getActiveEngine().pause();
   }
 
   stop(): void | Promise<void> {
+    // Invalidate any deferred lazy-engine load (see load()) so it cannot
+    // start playback after the user stopped.
+    this.loadSequence += 1;
     return this.getActiveEngine().stop();
   }
 
