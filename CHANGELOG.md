@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- YouTube URL paste support on the search page: paste any YouTube link to stream it instantly or download the audio into your music library for offline listening (great for long DJ sets). Downloads run as background jobs with live progress on the preview card and are imported automatically by a library scan when they finish. Requires the ytmusic-streamer sidecar with the shared music volume mounted (`/music`, configurable via `YT_DOWNLOAD_DIR`); Helm deployments need an RWX music volume in multi-node clusters.
+- YouTube URL paste support on the search page: paste any YouTube link to stream it instantly or download the audio into your music library for offline listening (great for long DJ sets). Downloads run as background jobs with live progress on the preview card; the server watches each job and imports the file with a library scan when it finishes, even if you navigate away mid-download. Pasted-video playback survives queue restore and cross-device resume. Requires the ytmusic-streamer sidecar with the shared music volume mounted (`/music`, configurable via `YT_DOWNLOAD_DIR`); Helm deployments need an RWX music volume in multi-node clusters.
 
 ### Changed
 
