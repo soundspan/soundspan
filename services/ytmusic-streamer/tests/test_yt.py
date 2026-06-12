@@ -17,7 +17,8 @@ if str(SIDECAR_ROOT) not in sys.path:
     sys.path.insert(0, str(SIDECAR_ROOT))
 
 from yt_download import (  # noqa: E402
-    derive_audio_container,
+    PROXY_AUDIO_FORMAT_SELECTORS,
+    derive_proxy_audio_container,
     extract_video_id,
     find_existing_download,
     resolve_download_filepath,
@@ -144,24 +145,46 @@ def test_resolve_filepath_handles_bad_info():
     assert resolve_download_filepath({"requested_downloads": "x"}, "mp3") is None
 
 
-# ── derive_audio_container ──────────────────────────────────────────
+# ── derive_proxy_audio_container ────────────────────────────────────
+# The container hint must be derived from the SAME format selection and
+# acodec mapping the /yt/ stream proxy uses, otherwise the player gets a
+# decode hint that does not match the bytes served.
 
-def test_derive_audio_container_prefers_best_audio_format():
-    formats = [
-        {"acodec": "mp4a.40.2", "vcodec": "none", "abr": 128, "ext": "m4a"},
-        {"acodec": "opus", "vcodec": "none", "abr": 160, "ext": "webm"},
-        {"acodec": "avc1", "vcodec": "avc1", "abr": 0, "ext": "mp4"},
-    ]
-    assert derive_audio_container(formats) == "webm"
-
-
-def test_derive_audio_container_aac_maps_to_mp4():
-    formats = [
-        {"acodec": "mp4a.40.2", "vcodec": "none", "abr": 128, "ext": "m4a"},
-    ]
-    assert derive_audio_container(formats) == "mp4"
+def test_proxy_selectors_cover_all_qualities():
+    assert set(PROXY_AUDIO_FORMAT_SELECTORS) == {
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "LOSSLESS",
+    }
+    # The proxy's default quality — /yt/info extracts with this selector.
+    assert PROXY_AUDIO_FORMAT_SELECTORS["HIGH"] == "ba[abr<=256]/ba"
 
 
-def test_derive_audio_container_defaults_to_mp4():
-    assert derive_audio_container([]) == "mp4"
-    assert derive_audio_container(None) == "mp4"
+def test_derive_proxy_audio_container_opus_maps_to_webm():
+    assert derive_proxy_audio_container({"acodec": "opus"}) == "webm"
+
+
+def test_derive_proxy_audio_container_aac_maps_to_mp4():
+    assert derive_proxy_audio_container({"acodec": "mp4a.40.2"}) == "mp4"
+    assert derive_proxy_audio_container({"acodec": "aac"}) == "mp4"
+
+
+def test_derive_proxy_audio_container_uses_selected_format_not_best_abr():
+    # The selected (top-level) acodec wins even when a higher-abr opus
+    # format exists in the formats list — mirrors the proxy, which maps
+    # Content-Type from the selected format's acodec only.
+    info = {
+        "acodec": "mp4a.40.2",
+        "formats": [
+            {"acodec": "opus", "vcodec": "none", "abr": 999, "ext": "webm"},
+        ],
+    }
+    assert derive_proxy_audio_container(info) == "mp4"
+
+
+def test_derive_proxy_audio_container_defaults_to_mp4():
+    assert derive_proxy_audio_container({}) == "mp4"
+    assert derive_proxy_audio_container({"acodec": None}) == "mp4"
+    assert derive_proxy_audio_container(None) == "mp4"
+    assert derive_proxy_audio_container("nope") == "mp4"

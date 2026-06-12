@@ -41,7 +41,8 @@ from common.sidecar_runtime_utils import (
     env_int,
 )
 from yt_download import (
-    derive_audio_container,
+    PROXY_AUDIO_FORMAT_SELECTORS,
+    derive_proxy_audio_container,
     extract_video_id as _extract_video_id,
     find_existing_download,
     resolve_download_filepath,
@@ -616,14 +617,11 @@ def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
         time.sleep(sleep_time)
     _last_extract_time = time.time()
 
-    # Map quality to yt-dlp format selection
-    format_map = {
-        "LOW": "ba[abr<=64]/worstaudio/ba",
-        "MEDIUM": "ba[abr<=128]/ba[abr<=192]/ba",
-        "HIGH": "ba[abr<=256]/ba",
-        "LOSSLESS": "ba/bestaudio",
-    }
-    fmt = format_map.get(quality, format_map["HIGH"])
+    # Map quality to yt-dlp format selection (shared with /yt/info so the
+    # audioFormat hint matches what this proxy serves)
+    fmt = PROXY_AUDIO_FORMAT_SELECTORS.get(
+        quality, PROXY_AUDIO_FORMAT_SELECTORS["HIGH"]
+    )
 
     ydl_opts = {
         "format": fmt,
@@ -1904,6 +1902,10 @@ async def yt_video_info(url: str = Query(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
     ydl_opts = {
+        # Select the exact format the /yt/ stream proxy serves at its
+        # default quality so the audioFormat hint below matches the bytes
+        # the player will receive.
+        "format": PROXY_AUDIO_FORMAT_SELECTORS["HIGH"],
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
@@ -1942,9 +1944,10 @@ async def yt_video_info(url: str = Query(...)):
             "duration": info.get("duration", 0),
             "thumbnail": best_thumb,
             "uploadDate": info.get("upload_date", ""),
-            # Container the /yt/ stream proxy will most likely serve —
-            # lets the player pick the right decode hint (webm vs mp4).
-            "audioFormat": derive_audio_container(info.get("formats")),
+            # Container the /yt/ stream proxy serves — derived from the
+            # same format selection (and acodec mapping) the proxy uses,
+            # so the player's decode hint (webm vs mp4) always matches.
+            "audioFormat": derive_proxy_audio_container(info),
         }
 
     except HTTPException:
@@ -2155,13 +2158,9 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
         {"key": "EmbedThumbnail"},
     ]
 
-    format_map = {
-        "LOW": "ba[abr<=64]/worstaudio/ba",
-        "MEDIUM": "ba[abr<=128]/ba[abr<=192]/ba",
-        "HIGH": "ba[abr<=256]/ba",
-        "LOSSLESS": "ba/bestaudio",
-    }
-    fmt = format_map.get(quality, format_map["HIGH"])
+    fmt = PROXY_AUDIO_FORMAT_SELECTORS.get(
+        quality, PROXY_AUDIO_FORMAT_SELECTORS["HIGH"]
+    )
 
     ydl_opts = {
         "format": fmt,

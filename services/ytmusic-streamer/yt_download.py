@@ -17,6 +17,17 @@ from typing import Any, Optional
 # bestaudio containers in case postprocessing is skipped).
 AUDIO_EXTENSIONS = {".mp3", ".opus", ".flac", ".m4a", ".ogg", ".webm"}
 
+# yt-dlp format selectors used by the /yt/ stream proxy and downloads,
+# keyed by the app's quality levels. /yt/info extracts with the same
+# selector (HIGH, the proxy's default) so its audioFormat hint is derived
+# from the exact format the proxy will serve.
+PROXY_AUDIO_FORMAT_SELECTORS = {
+    "LOW": "ba[abr<=64]/worstaudio/ba",
+    "MEDIUM": "ba[abr<=128]/ba[abr<=192]/ba",
+    "HIGH": "ba[abr<=256]/ba",
+    "LOSSLESS": "ba/bestaudio",
+}
+
 _VIDEO_ID_PATTERNS = [
     r"(?:youtube\.com|m\.youtube\.com)/watch\?.*?v=([a-zA-Z0-9_-]{11})",
     r"youtu\.be/([a-zA-Z0-9_-]{11})",
@@ -103,30 +114,17 @@ def resolve_download_filepath(info: Any, audio_format: str) -> Optional[str]:
     return None
 
 
-def derive_audio_container(formats: Any) -> str:
+def derive_proxy_audio_container(info: Any) -> str:
     """
-    Derive the audio container ("webm" or "mp4") that the /yt/ stream proxy
-    will most likely serve, from a yt-dlp formats list. Mirrors the proxy's
-    best-audio selection: audio-only formats sorted by abr descending.
-    Opus-in-webm maps to "webm"; AAC/unknown map to "mp4".
+    Derive the audio container ("webm" or "mp4") the /yt/ stream proxy will
+    serve, from a yt-dlp info dict that was extracted with the SAME format
+    selector the proxy uses (PROXY_AUDIO_FORMAT_SELECTORS). Mirrors the
+    proxy's Content-Type mapping exactly: the selected format's acodec is
+    opus -> "webm"; AAC/unknown -> "mp4".
     """
-    if not isinstance(formats, list):
+    if not isinstance(info, dict):
         return "mp4"
-
-    audio_formats = [
-        f
-        for f in formats
-        if isinstance(f, dict)
-        and f.get("acodec") not in (None, "none")
-        and f.get("vcodec") in ("none", None)
-    ]
-    if not audio_formats:
-        return "mp4"
-
-    audio_formats.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
-    best = audio_formats[0]
-    acodec = str(best.get("acodec") or "")
-    ext = str(best.get("ext") or "")
-    if "opus" in acodec or ext == "webm":
+    acodec = str(info.get("acodec") or "")
+    if "opus" in acodec:
         return "webm"
     return "mp4"
