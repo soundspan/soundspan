@@ -17,9 +17,11 @@ if str(SIDECAR_ROOT) not in sys.path:
     sys.path.insert(0, str(SIDECAR_ROOT))
 
 from yt_download import (  # noqa: E402
+    ACTIVE_DOWNLOAD_STATUSES,
     PROXY_AUDIO_FORMAT_SELECTORS,
     derive_proxy_audio_container,
     extract_video_id,
+    find_active_download_job,
     find_existing_download,
     resolve_download_filepath,
 )
@@ -188,3 +190,55 @@ def test_derive_proxy_audio_container_defaults_to_mp4():
     assert derive_proxy_audio_container({"acodec": None}) == "mp4"
     assert derive_proxy_audio_container(None) == "mp4"
     assert derive_proxy_audio_container("nope") == "mp4"
+
+
+# ── find_active_download_job (in-flight dedupe) ─────────────────────
+# POST /yt/download must reuse a non-terminal job for the same video:
+# two parallel yt-dlp runs write the same outtmpl path (conflicting
+# .part files), and during the FFmpegExtractAudio window the raw
+# container file already matches the on-disk idempotency check even
+# though the postprocessor is about to replace it.
+
+def _job(job_id, video_id, status):
+    return {"job_id": job_id, "video_id": video_id, "status": status}
+
+
+@pytest.mark.parametrize("status", sorted(ACTIVE_DOWNLOAD_STATUSES))
+def test_find_active_download_job_matches_each_active_status(status):
+    jobs = {"j1": _job("j1", VIDEO_ID, status)}
+
+    found = find_active_download_job(jobs, VIDEO_ID)
+
+    assert found is jobs["j1"]
+
+
+def test_active_statuses_cover_the_full_non_terminal_lifecycle():
+    assert ACTIVE_DOWNLOAD_STATUSES == {"queued", "downloading", "processing"}
+
+
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_find_active_download_job_ignores_terminal_jobs(status):
+    jobs = {"j1": _job("j1", VIDEO_ID, status)}
+
+    assert find_active_download_job(jobs, VIDEO_ID) is None
+
+
+def test_find_active_download_job_ignores_other_videos():
+    jobs = {"j1": _job("j1", "otherVideo1", "downloading")}
+
+    assert find_active_download_job(jobs, VIDEO_ID) is None
+
+
+def test_find_active_download_job_empty_store():
+    assert find_active_download_job({}, VIDEO_ID) is None
+
+
+def test_find_active_download_job_prefers_active_over_terminal():
+    jobs = {
+        "j1": _job("j1", VIDEO_ID, "failed"),
+        "j2": _job("j2", VIDEO_ID, "processing"),
+    }
+
+    found = find_active_download_job(jobs, VIDEO_ID)
+
+    assert found is jobs["j2"]

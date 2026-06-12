@@ -464,6 +464,9 @@ ytmusicStreamer:
     # Destination for YouTube URL downloads inside the music volume.
     # Uncomment to override the chart default ("/music/YouTube Downloads").
     # YT_DOWNLOAD_DIR: "/music/YouTube Downloads"
+    # Max concurrent YouTube URL downloads. Downloads run on their own
+    # thread pool so long jobs never starve streaming/search.
+    # YT_DOWNLOAD_CONCURRENCY: "2"
   # -- Additional environment variable sources for YT Music streamer container.
   # Example:
   # envFrom:

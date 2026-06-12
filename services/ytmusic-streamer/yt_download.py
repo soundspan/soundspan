@@ -17,6 +17,28 @@ from typing import Any, Optional
 # bestaudio containers in case postprocessing is skipped).
 AUDIO_EXTENSIONS = {".mp3", ".opus", ".flac", ".m4a", ".ogg", ".webm"}
 
+# Download-job states that mean a download is still in flight.
+ACTIVE_DOWNLOAD_STATUSES = {"queued", "downloading", "processing"}
+
+
+def find_active_download_job(jobs: dict, video_id: str) -> Optional[dict]:
+    """
+    Return a non-terminal download job for video_id from the in-memory job
+    store, or None. POST /yt/download reuses such a job instead of starting
+    a second concurrent yt-dlp download: parallel downloads of the same
+    video write the same output-template path (conflicting .part files),
+    and during the FFmpegExtractAudio window the raw container file
+    (.webm/.m4a) would falsely satisfy the on-disk idempotency check even
+    though the postprocessor is about to replace it.
+    """
+    for job in jobs.values():
+        if (
+            job.get("video_id") == video_id
+            and job.get("status") in ACTIVE_DOWNLOAD_STATUSES
+        ):
+            return job
+    return None
+
 # yt-dlp format selectors used by the /yt/ stream proxy and downloads,
 # keyed by the app's quality levels. /yt/info extracts with the same
 # selector (HIGH, the proxy's default) so its audioFormat hint is derived

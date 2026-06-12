@@ -325,6 +325,9 @@ services:
             # Destination for YouTube URL downloads — must live inside the
             # shared music volume so the backend's library scan finds them.
             YT_DOWNLOAD_DIR: ${YT_DOWNLOAD_DIR:-/music/YouTube Downloads}
+            # Max concurrent YouTube URL downloads (dedicated thread pool so
+            # long downloads never starve streaming/search).
+            YT_DOWNLOAD_CONCURRENCY: ${YT_DOWNLOAD_CONCURRENCY:-2}
         volumes:
             - ytmusic_data:/data
             # Shared with the backend (read-write) so YouTube URL downloads

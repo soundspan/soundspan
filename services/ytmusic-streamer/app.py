@@ -21,6 +21,7 @@ import re
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Optional, Literal, cast
 
@@ -44,6 +45,7 @@ from yt_download import (
     PROXY_AUDIO_FORMAT_SELECTORS,
     derive_proxy_audio_container,
     extract_video_id as _extract_video_id,
+    find_active_download_job,
     find_existing_download,
     resolve_download_filepath,
 )
@@ -2165,6 +2167,17 @@ _yt_download_jobs: dict[str, dict] = {}
 # tasks, so an unreferenced download task could be garbage-collected.
 _yt_download_tasks: set = set()
 YT_DOWNLOAD_JOB_TTL = 6 * 60 * 60  # prune terminal jobs after 6 hours
+# Downloads run on a dedicated, size-limited executor so multi-hour yt-dlp
+# jobs cannot exhaust the event loop's shared default thread pool — used by
+# every asyncio.to_thread call (stream-URL extraction, search, /yt/info,
+# /yt/proxy) — and starve streaming for all users. Jobs beyond the limit
+# wait in the executor's queue and stay in the "queued" state until a
+# worker picks them up.
+YT_DOWNLOAD_CONCURRENCY = max(1, env_int("YT_DOWNLOAD_CONCURRENCY", "2"))
+_yt_download_executor = ThreadPoolExecutor(
+    max_workers=YT_DOWNLOAD_CONCURRENCY,
+    thread_name_prefix="yt-download",
+)
 
 
 def _prune_yt_download_jobs():
@@ -2312,7 +2325,17 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
 async def _run_yt_download_job(job: dict, audio_format: str, quality: str, output_dir: str):
     """Background task wrapper that records failures on the job."""
     try:
-        await asyncio.to_thread(_yt_download_sync, job, audio_format, quality, output_dir)
+        # Dedicated executor, NOT asyncio.to_thread: to_thread shares the
+        # loop's default pool with all other endpoints' blocking calls.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            _yt_download_executor,
+            _yt_download_sync,
+            job,
+            audio_format,
+            quality,
+            output_dir,
+        )
     except Exception as e:
         log.error(f"YT download failed for {job['video_id']}: {e}")
         job["status"] = "failed"
@@ -2337,6 +2360,19 @@ async def yt_download(req: YtDownloadRequest):
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
+
+    # Reuse a non-terminal job for the same video: a second concurrent
+    # yt-dlp run would clash on the same output path, and during the
+    # postprocessing window the raw container file would falsely satisfy
+    # the on-disk idempotency check below. No awaits between this check
+    # and job registration, so it is atomic on the event loop.
+    active = find_active_download_job(_yt_download_jobs, video_id)
+    if active:
+        log.info(
+            f"YT download already in flight for {video_id} "
+            f"(job={active['job_id']}, status={active['status']})"
+        )
+        return {"job_id": active["job_id"], "status": active["status"]}
 
     # Check for existing download (idempotent)
     existing = find_existing_download(output_dir, video_id)
