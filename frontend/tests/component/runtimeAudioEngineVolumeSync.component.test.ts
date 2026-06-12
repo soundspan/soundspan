@@ -122,7 +122,72 @@ class FakeAudioEngine implements AudioEngine {
     }
 }
 
-test("reapplies persisted volume and mute state when switching to DASH engine", () => {
+async function flushAsyncEngineInit(): Promise<void> {
+    await new Promise((resolve) => {
+        setImmediate(resolve);
+    });
+}
+
+test("supports an async Video.js engine factory (lazy import path)", async () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    let factoryCalls = 0;
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: async () => {
+            factoryCalls += 1;
+            return videoJsEngine;
+        },
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load("https://example.test/track.mp3", {
+        autoplay: false,
+    });
+    assert.equal(factoryCalls, 0);
+
+    runtimeEngine.setVolume(0.4);
+    runtimeEngine.load({
+        url: "https://example.test/stream.mpd",
+        protocol: "dash",
+        mimeType: "application/dash+xml",
+    });
+    await flushAsyncEngineInit();
+
+    assert.equal(factoryCalls, 1);
+    assert.equal(videoJsEngine.loadCalls.length, 1);
+    assert.equal(videoJsEngine.setVolumeCalls.at(-1), 0.4);
+});
+
+test("ignores a stale DASH load that resolves after a newer direct load", async () => {
+    const howlerEngine = new FakeAudioEngine();
+    const videoJsEngine = new FakeAudioEngine();
+    let resolveEngine: ((engine: AudioEngine) => void) | null = null;
+    const enginePromise = new Promise<AudioEngine>((resolve) => {
+        resolveEngine = resolve;
+    });
+    const runtimeEngine = new HybridRuntimeAudioEngine({
+        howlerEngine,
+        createVideoJsEngine: () => enginePromise,
+        resolveMode: () => "videojs",
+    });
+
+    runtimeEngine.load({
+        url: "https://example.test/stream.mpd",
+        protocol: "dash",
+        mimeType: "application/dash+xml",
+    });
+    runtimeEngine.load("https://example.test/track.mp3", {
+        autoplay: false,
+    });
+    resolveEngine?.(videoJsEngine);
+    await flushAsyncEngineInit();
+
+    assert.equal(howlerEngine.loadCalls.length, 1);
+    assert.equal(videoJsEngine.loadCalls.length, 0);
+});
+
+test("reapplies persisted volume and mute state when switching to DASH engine", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
     const runtimeEngine = new HybridRuntimeAudioEngine({
@@ -139,6 +204,7 @@ test("reapplies persisted volume and mute state when switching to DASH engine", 
         protocol: "dash",
         mimeType: "application/dash+xml",
     });
+    await flushAsyncEngineInit();
 
     assert.equal(howlerEngine.stopCalls, 1);
     assert.equal(videoJsEngine.loadCalls.length, 1);
@@ -146,7 +212,7 @@ test("reapplies persisted volume and mute state when switching to DASH engine", 
     assert.equal(videoJsEngine.setMutedCalls.at(-1), true);
 });
 
-test("keeps local output state when switching back to direct queue playback", () => {
+test("keeps local output state when switching back to direct queue playback", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
     const runtimeEngine = new HybridRuntimeAudioEngine({
@@ -162,6 +228,7 @@ test("keeps local output state when switching back to direct queue playback", ()
         protocol: "dash",
         mimeType: "application/dash+xml",
     });
+    await flushAsyncEngineInit();
 
     runtimeEngine.setVolume(0.12);
     runtimeEngine.setMuted(true);
@@ -175,7 +242,7 @@ test("keeps local output state when switching back to direct queue playback", ()
     assert.equal(howlerEngine.setMutedCalls.at(-1), true);
 });
 
-test("falls back to Howler event stream when Video.js initialization fails", () => {
+test("falls back to Howler event stream when Video.js initialization fails", async () => {
     const howlerEngine = new FakeAudioEngine();
     const runtimeEngine = new HybridRuntimeAudioEngine({
         howlerEngine,
@@ -195,6 +262,7 @@ test("falls back to Howler event stream when Video.js initialization fails", () 
         protocol: "dash",
         mimeType: "application/dash+xml",
     });
+    await flushAsyncEngineInit();
 
     howlerEngine.emit("timeupdate", { timeSec: 12.34 });
 
@@ -202,7 +270,7 @@ test("falls back to Howler event stream when Video.js initialization fails", () 
     assert.equal(lastTimeUpdate, 12.34);
 });
 
-test("forwards representation quarantine to active DASH engine", () => {
+test("forwards representation quarantine to active DASH engine", async () => {
     const howlerEngine = new FakeAudioEngine();
     const videoJsEngine = new FakeAudioEngine();
     videoJsEngine.quarantineRepresentationResult = {
@@ -224,6 +292,7 @@ test("forwards representation quarantine to active DASH engine", () => {
         protocol: "dash",
         mimeType: "application/dash+xml",
     });
+    await flushAsyncEngineInit();
     const result = runtimeEngine.quarantineRepresentation("0", 20_000);
     runtimeEngine.clearRepresentationQuarantine();
 
@@ -274,7 +343,7 @@ test("falls back safely when active engine does not expose segmented helpers", (
     assert.equal(runtimeEngine.getSeekTarget(), null);
 });
 
-test("uses safe helper fallbacks when active DASH engine lacks optional helper APIs", () => {
+test("uses safe helper fallbacks when active DASH engine lacks optional helper APIs", async () => {
     const howlerEngine = new FakeAudioEngine();
     let activeTimeSec = 0;
     const minimalVideoJsEngine = {
@@ -307,6 +376,7 @@ test("uses safe helper fallbacks when active DASH engine lacks optional helper A
         protocol: "dash",
         mimeType: "application/dash+xml",
     });
+    await flushAsyncEngineInit();
     runtimeEngine.seek(3.5);
 
     assert.equal(runtimeEngine.quarantineRepresentation("rep-1", 1_000), null);

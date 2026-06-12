@@ -10,7 +10,6 @@ import type {
   AudioEngineRepresentationFailoverResult,
   AudioEngineSource,
 } from "@/lib/audio-engine/types";
-import { VideoJsSegmentedEngine } from "@/lib/audio-engine/videoJsSegmentedEngine";
 import { createAudioEngine } from "@/lib/audio-engine/engineFactory";
 import {
   DEFAULT_AUDIO_VOLUME,
@@ -58,6 +57,16 @@ const resolveSource = (source: AudioEngineSource | string): AudioEngineSource =>
   return source;
 };
 
+// Lazy-load the Video.js segmented engine (and the ~500KB video.js
+// dependency) only when a DASH/segmented source is actually selected,
+// keeping video.js out of every page's initial bundle.
+const loadVideoJsSegmentedEngine = async (): Promise<AudioEngine> => {
+  const { VideoJsSegmentedEngine } = await import(
+    "@/lib/audio-engine/videoJsSegmentedEngine"
+  );
+  return new VideoJsSegmentedEngine();
+};
+
 interface RuntimeAudioEngine extends AudioEngine {
   load(source: AudioEngineSource | string, options?: AudioEngineLoadOptions): void;
   load(source: AudioEngineSource | string, autoplay?: boolean, format?: string): void;
@@ -78,7 +87,7 @@ interface RuntimeAudioEngine extends AudioEngine {
 
 interface HybridRuntimeAudioEngineOptions {
   howlerEngine?: AudioEngine;
-  createVideoJsEngine?: () => AudioEngine;
+  createVideoJsEngine?: () => AudioEngine | Promise<AudioEngine>;
   resolveMode?: () => ReturnType<typeof resolveStreamingEngineMode>;
 }
 
@@ -90,7 +99,8 @@ interface HybridRuntimeAudioEngineOptions {
 export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   private howlerEngine: AudioEngine;
   private videoJsEngine: AudioEngine | null = null;
-  private readonly createVideoJsEngine: () => AudioEngine;
+  private videoJsEnginePromise: Promise<AudioEngine | null> | null = null;
+  private readonly createVideoJsEngine: () => AudioEngine | Promise<AudioEngine>;
   private readonly resolveMode: () => ReturnType<typeof resolveStreamingEngineMode>;
   private readonly listeners = new Map<
     AudioEngineEventType,
@@ -101,13 +111,15 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   private activeEngineKind: EngineKind = "howler";
   private lastSource: AudioEngineSource | null = null;
   private lastLoadOptions: AudioEngineLoadOptions | null = null;
+  private loadSequence = 0;
+  private isDestroyed = false;
   private outputVolume = DEFAULT_AUDIO_VOLUME;
   private outputMuted = false;
 
   constructor(options: HybridRuntimeAudioEngineOptions = {}) {
     this.howlerEngine = options.howlerEngine ?? new HowlerEngineAdapter();
     this.createVideoJsEngine =
-      options.createVideoJsEngine ?? (() => new VideoJsSegmentedEngine());
+      options.createVideoJsEngine ?? loadVideoJsSegmentedEngine;
     this.resolveMode = options.resolveMode ?? resolveStreamingEngineMode;
     this.bindEngineEvents("howler", this.howlerEngine);
     this.applyOutputState(this.howlerEngine);
@@ -155,19 +167,50 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 
     this.lastSource = normalizedSource;
     this.lastLoadOptions = normalizedOptions;
+    const sequence = ++this.loadSequence;
 
     const preferredKind = this.resolvePreferredEngineKind(normalizedSource);
+    if (preferredKind === "videojs" && !this.videoJsEngine) {
+      // Video.js engine is lazy-loaded; finish this load once it arrives
+      // unless a newer load superseded it in the meantime.
+      void this.ensureVideoJsEngine().then((videoJsEngine) => {
+        if (sequence !== this.loadSequence || this.isDestroyed) {
+          return;
+        }
+        this.loadWithEngine(
+          videoJsEngine ? "videojs" : "howler",
+          videoJsEngine ?? this.howlerEngine,
+          normalizedSource,
+          normalizedOptions,
+        );
+      });
+      return;
+    }
+
     const targetEngine = this.getEngineByKind(preferredKind);
     const targetKind: EngineKind =
       targetEngine === this.howlerEngine ? "howler" : "videojs";
+    this.loadWithEngine(
+      targetKind,
+      targetEngine,
+      normalizedSource,
+      normalizedOptions,
+    );
+  }
 
+  private loadWithEngine(
+    targetKind: EngineKind,
+    targetEngine: AudioEngine,
+    source: AudioEngineSource,
+    options: AudioEngineLoadOptions,
+  ): void {
     if (this.activeEngineKind !== targetKind) {
       this.getActiveEngine().stop();
       this.activeEngineKind = targetKind;
       this.applyOutputState(targetEngine);
     }
 
-    targetEngine.load(normalizedSource, normalizedOptions);
+    targetEngine.load(source, options);
     this.applyOutputState(targetEngine);
   }
 
@@ -248,6 +291,20 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
         : optionsOrFormat ?? {};
 
     const preferredKind = this.resolvePreferredEngineKind(normalizedSource);
+    if (preferredKind === "videojs" && !this.videoJsEngine) {
+      void this.ensureVideoJsEngine().then((videoJsEngine) => {
+        if (
+          !videoJsEngine ||
+          this.isDestroyed ||
+          typeof videoJsEngine.preload !== "function"
+        ) {
+          return;
+        }
+        videoJsEngine.preload(normalizedSource, normalizedOptions);
+      });
+      return;
+    }
+
     const targetEngine = this.getEngineByKind(preferredKind);
     if (typeof targetEngine.preload === "function") {
       targetEngine.preload(normalizedSource, normalizedOptions);
@@ -345,6 +402,9 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   }
 
   destroy(): void {
+    this.isDestroyed = true;
+    this.loadSequence += 1;
+    this.videoJsEnginePromise = null;
     this.unbindEngineEvents("howler", this.howlerEngine);
     if (this.videoJsEngine) {
       this.unbindEngineEvents("videojs", this.videoJsEngine);
@@ -383,21 +443,40 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
       return this.howlerEngine;
     }
 
-    if (!this.videoJsEngine) {
-      try {
-        this.videoJsEngine = this.createVideoJsEngine();
-        this.bindEngineEvents("videojs", this.videoJsEngine);
-        this.applyOutputState(this.videoJsEngine);
-      } catch (error) {
-        sharedFrontendLogger.error(
-          "[AudioEngine] Failed to initialize Video.js segmented engine; continuing with primary Howler engine.",
-          error,
-        );
-        return this.howlerEngine;
-      }
+    return this.videoJsEngine ?? this.howlerEngine;
+  }
+
+  private ensureVideoJsEngine(): Promise<AudioEngine | null> {
+    if (this.videoJsEngine) {
+      return Promise.resolve(this.videoJsEngine);
     }
 
-    return this.videoJsEngine;
+    if (!this.videoJsEnginePromise) {
+      this.videoJsEnginePromise = Promise.resolve()
+        .then(() => this.createVideoJsEngine())
+        .then((engine) => {
+          if (this.isDestroyed) {
+            if (typeof engine.destroy === "function") {
+              engine.destroy();
+            }
+            return null;
+          }
+          this.videoJsEngine = engine;
+          this.bindEngineEvents("videojs", engine);
+          this.applyOutputState(engine);
+          return engine;
+        })
+        .catch((error) => {
+          sharedFrontendLogger.error(
+            "[AudioEngine] Failed to initialize Video.js segmented engine; continuing with primary Howler engine.",
+            error,
+          );
+          this.videoJsEnginePromise = null;
+          return null;
+        });
+    }
+
+    return this.videoJsEnginePromise;
   }
 
   private bindEngineEvents(kind: EngineKind, engine: AudioEngine): void {
