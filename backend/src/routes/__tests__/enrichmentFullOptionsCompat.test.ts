@@ -102,6 +102,16 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        features: {
+            audioAnalysis: true,
+            discovery: true,
+            autoPlaylists: true,
+        },
+    },
+}));
+
 jest.mock("../../utils/redis", () => ({
     redisClient: {
         del: jest.fn(),

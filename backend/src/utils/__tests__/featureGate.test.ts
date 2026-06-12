@@ -1,7 +1,7 @@
 import express from "express";
 import request from "supertest";
 
-import { createFeatureDisabledHandler } from "../featureGate";
+import { createFeatureDisabledHandler, sendFeatureDisabled } from "../featureGate";
 
 describe("createFeatureDisabledHandler", () => {
     const app = express();
@@ -35,5 +35,24 @@ describe("createFeatureDisabledHandler", () => {
 
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ ok: true });
+    });
+});
+
+describe("sendFeatureDisabled", () => {
+    it("sends the standard FEATURE_DISABLED 404 payload from an individual handler", async () => {
+        const app = express();
+        app.post("/api/enrichment/reset-audio-analysis", (_req, res) => {
+            sendFeatureDisabled(res);
+        });
+
+        const res = await request(app).post(
+            "/api/enrichment/reset-audio-analysis"
+        );
+
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({
+            error: "feature disabled",
+            code: "FEATURE_DISABLED",
+        });
     });
 });

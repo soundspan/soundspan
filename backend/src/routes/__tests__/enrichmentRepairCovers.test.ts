@@ -89,6 +89,16 @@ jest.mock("../../services/rateLimiter", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        features: {
+            audioAnalysis: true,
+            discovery: true,
+            autoPlaylists: true,
+        },
+    },
+}));
+
 jest.mock("../../utils/redis", () => ({
     redisClient: {
         del: jest.fn(),

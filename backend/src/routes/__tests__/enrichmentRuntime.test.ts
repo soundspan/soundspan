@@ -81,6 +81,16 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        features: {
+            audioAnalysis: true,
+            discovery: true,
+            autoPlaylists: true,
+        },
+    },
+}));
+
 const prisma = {
     artist: {
         findUnique: jest.fn(),
@@ -134,6 +144,7 @@ import {
 import { rateLimiter } from "../../services/rateLimiter";
 import { prisma as dbPrisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
+import { config } from "../../config";
 
 const mockGetEnrichmentProgress = getEnrichmentProgress as jest.Mock;
 const mockRunFullEnrichment = runFullEnrichment as jest.Mock;
@@ -271,6 +282,7 @@ describe("enrichment route runtime behavior", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        config.features.audioAnalysis = true;
         mockGetEnrichmentProgress.mockResolvedValue({
             artists: { processed: 1, total: 10 },
         });
@@ -636,6 +648,34 @@ describe("enrichment route runtime behavior", () => {
             description: "7 tracks queued for vibe embedding re-analysis",
             count: 7,
         });
+    });
+
+    it("returns FEATURE_DISABLED without queueing when audio analysis flag is off", async () => {
+        config.features.audioAnalysis = false;
+
+        const resetAudioRes = createRes();
+        await resetAudioAnalysisHandler(
+            { user: { id: "admin-1" } } as any,
+            resetAudioRes
+        );
+        expect(resetAudioRes.statusCode).toBe(404);
+        expect(resetAudioRes.body).toEqual({
+            error: "feature disabled",
+            code: "FEATURE_DISABLED",
+        });
+        expect(mockReRunAudioAnalysisOnly).not.toHaveBeenCalled();
+
+        const resetVibeRes = createRes();
+        await resetVibeEmbeddingsHandler(
+            { user: { id: "admin-1" } } as any,
+            resetVibeRes
+        );
+        expect(resetVibeRes.statusCode).toBe(404);
+        expect(resetVibeRes.body).toEqual({
+            error: "feature disabled",
+            code: "FEATURE_DISABLED",
+        });
+        expect(mockReRunVibeEmbeddingsOnly).not.toHaveBeenCalled();
     });
 
     it("returns 500 when artist reset fails", async () => {
