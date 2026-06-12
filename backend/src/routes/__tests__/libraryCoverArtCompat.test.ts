@@ -193,6 +193,7 @@ jest.mock("../../services/coverArtResize", () => {
 });
 
 import crypto from "crypto";
+import path from "path";
 import router from "../library";
 import { redisClient } from "../../utils/redis";
 import { fetchExternalImage } from "../../services/imageProxy";
@@ -499,6 +500,9 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest
             .spyOn(fs, "existsSync")
             .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
         const readSpy = jest
             .spyOn(fs.promises, "readFile")
             .mockResolvedValue(Buffer.from("native-bytes"));
@@ -529,6 +533,117 @@ describe("library cover-art proxy compatibility", () => {
         expect(res.body).toEqual(Buffer.from("native-resized"));
 
         existsSpy.mockRestore();
+        statSpy.mockRestore();
+        readSpy.mockRestore();
+    });
+
+    it("caches resized native cover variants in Redis keyed by file identity, size, and format", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
+        const readSpy = jest
+            .spyOn(fs.promises, "readFile")
+            .mockResolvedValue(Buffer.from("native-bytes"));
+        const resizedBuffer = Buffer.from("native-resized");
+        mockResizeCoverArt.mockResolvedValue({
+            buffer: resizedBuffer,
+            contentType: "image/webp",
+            resized: true,
+        });
+
+        const req = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: { accept: "image/webp,*/*" },
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        const cachePath = path.resolve(
+            "/tmp/soundspan-cache",
+            "../covers",
+            "albums/album-123.jpg"
+        );
+        const expectedKey = `cover-art:native:${crypto
+            .createHash("md5")
+            .update(`${cachePath}-1718000000000-4096-128-webp`)
+            .digest("hex")}`;
+        const expectedEtag = crypto
+            .createHash("md5")
+            .update(resizedBuffer)
+            .digest("hex");
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            expectedKey,
+            90 * 24 * 60 * 60,
+            JSON.stringify({
+                etag: expectedEtag,
+                contentType: "image/webp",
+                data: resizedBuffer.toString("base64"),
+            })
+        );
+        expect(res.headers["ETag"]).toBe(expectedEtag);
+        expect(res.body).toEqual(resizedBuffer);
+
+        existsSpy.mockRestore();
+        statSpy.mockRestore();
+        readSpy.mockRestore();
+    });
+
+    it("serves cached native variants and answers If-None-Match without re-decoding", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
+        const readSpy = jest.spyOn(fs.promises, "readFile");
+        const cachedBuffer = Buffer.from("cached-native-resized");
+        const cachedEtag = "etag-native-cached";
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                etag: cachedEtag,
+                contentType: "image/webp",
+                data: cachedBuffer.toString("base64"),
+            })
+        );
+
+        const req = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: { accept: "image/webp,*/*" },
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.headers["Content-Type"]).toBe("image/webp");
+        expect(res.headers["ETag"]).toBe(cachedEtag);
+        expect(res.body).toEqual(cachedBuffer);
+
+        const conditionalReq = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: {
+                accept: "image/webp,*/*",
+                "if-none-match": cachedEtag,
+            },
+        } as any;
+        const conditionalRes = createRes();
+
+        await coverArtHandler(conditionalReq, conditionalRes);
+
+        expect(conditionalRes.statusCode).toBe(304);
+        expect(conditionalRes.end).toHaveBeenCalled();
+        expect(readSpy).not.toHaveBeenCalled();
+        expect(mockResizeCoverArt).not.toHaveBeenCalled();
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
+
+        existsSpy.mockRestore();
+        statSpy.mockRestore();
         readSpy.mockRestore();
     });
 
@@ -536,6 +651,9 @@ describe("library cover-art proxy compatibility", () => {
         const existsSpy = jest
             .spyOn(fs, "existsSync")
             .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
         const readSpy = jest
             .spyOn(fs.promises, "readFile")
             .mockResolvedValue(Buffer.from("native-bytes"));
@@ -552,6 +670,7 @@ describe("library cover-art proxy compatibility", () => {
         expect(res.sendFile).toHaveBeenCalled();
 
         existsSpy.mockRestore();
+        statSpy.mockRestore();
         readSpy.mockRestore();
     });
 

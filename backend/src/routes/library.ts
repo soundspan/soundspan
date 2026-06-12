@@ -806,10 +806,31 @@ const applyCoverArtCorsHeaders = (res: ExpressResponse, origin?: string) => {
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 };
 
+const sendResizedNativeCoverResponse = (
+    req: ExpressRequest,
+    res: ExpressResponse,
+    etag: string,
+    contentType: string | null,
+    buffer: Buffer
+): void => {
+    if (contentType) {
+        res.setHeader("Content-Type", contentType);
+    }
+    applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
+    res.setHeader("Cache-Control", COVER_ART_IMAGE_CACHE_CONTROL);
+    res.setHeader("Vary", "Accept");
+    res.setHeader("ETag", etag);
+    res.send(buffer);
+};
+
 /**
  * Serves a native cover file resized to the requested `size` query param.
- * Returns true when a response was sent; false when the caller should
- * fall back to sending the original file from disk.
+ * Resized variants are cached in Redis keyed by file identity
+ * (path + mtime + size on disk) plus the snapped size and negotiated
+ * format, so repeat requests and If-None-Match revalidations are
+ * answered without re-decoding the image. Returns true when a response
+ * was sent; false when the caller should fall back to sending the
+ * original file from disk.
  */
 const trySendResizedNativeCover = async (
     req: ExpressRequest,
@@ -822,12 +843,42 @@ const trySendResizedNativeCover = async (
     }
 
     try {
+        const imageFormat = negotiateCoverArtFormat(req.headers.accept);
+        const fileStat = await fs.promises.stat(cachePath);
+        const cacheKey = `cover-art:native:${crypto
+            .createHash("md5")
+            .update(
+                `${cachePath}-${fileStat.mtimeMs}-${fileStat.size}-${requestedSize}-${imageFormat}`
+            )
+            .digest("hex")}`;
+
+        try {
+            const cached = await redisClient.get(cacheKey);
+            if (cached) {
+                const cachedData = JSON.parse(cached);
+                if (req.headers["if-none-match"] === cachedData.etag) {
+                    res.status(304).end();
+                    return true;
+                }
+                sendResizedNativeCoverResponse(
+                    req,
+                    res,
+                    cachedData.etag,
+                    cachedData.contentType ?? null,
+                    Buffer.from(cachedData.data, "base64")
+                );
+                return true;
+            }
+        } catch (cacheError) {
+            logger.warn("[COVER-ART] Redis cache read error:", cacheError);
+        }
+
         const fileBuffer = await fs.promises.readFile(cachePath);
         const resizeResult = await resizeCoverArt({
             buffer: fileBuffer,
             contentType: "image/jpeg",
             size: requestedSize,
-            format: negotiateCoverArtFormat(req.headers.accept),
+            format: imageFormat,
         });
         if (!resizeResult.resized) {
             return false;
@@ -837,19 +888,33 @@ const trySendResizedNativeCover = async (
             .createHash("md5")
             .update(resizeResult.buffer)
             .digest("hex");
+
+        try {
+            await redisClient.setEx(
+                cacheKey,
+                COVER_ART_IMAGE_CACHE_TTL_SECONDS,
+                JSON.stringify({
+                    etag,
+                    contentType: resizeResult.contentType,
+                    data: resizeResult.buffer.toString("base64"),
+                })
+            );
+        } catch (cacheError) {
+            logger.warn("[COVER-ART] Redis cache write error:", cacheError);
+        }
+
         if (req.headers["if-none-match"] === etag) {
             res.status(304).end();
             return true;
         }
 
-        if (resizeResult.contentType) {
-            res.setHeader("Content-Type", resizeResult.contentType);
-        }
-        applyCoverArtCorsHeaders(res, req.headers.origin as string | undefined);
-        res.setHeader("Cache-Control", COVER_ART_IMAGE_CACHE_CONTROL);
-        res.setHeader("Vary", "Accept");
-        res.setHeader("ETag", etag);
-        res.send(resizeResult.buffer);
+        sendResizedNativeCoverResponse(
+            req,
+            res,
+            etag,
+            resizeResult.contentType,
+            resizeResult.buffer
+        );
         return true;
     } catch (error) {
         logger.warn(
