@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { extractYouTubeVideoId } from "@/lib/youtube-url";
-import { resolveYouTubeDownloadPoll } from "@/lib/youtube-download-poll";
+import {
+    resolveYouTubeDownloadPoll,
+    shouldAbandonYouTubeDownloadPolling,
+} from "@/lib/youtube-download-poll";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import type { Track } from "@/lib/audio-state-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
@@ -45,6 +48,12 @@ export function useYouTubeUrl({
     );
     const abortRef = useRef<AbortController | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // True once a poll observed a terminal state (or polling was abandoned).
+    // Checked again after every await so an overlapping in-flight poll cannot
+    // handle the same terminal state twice (double toasts).
+    const pollSettledRef = useRef(false);
+    // Consecutive failed status polls; isolated failures are tolerated.
+    const pollFailuresRef = useRef(0);
     const { playTracks } = useAudioControls();
 
     const stopPolling = useCallback(() => {
@@ -127,6 +136,9 @@ export function useYouTubeUrl({
             if (!videoInfo) return;
 
             stopPolling();
+            // Settle any in-flight poll from a previous job so it cannot
+            // surface toasts for a download we are no longer tracking.
+            pollSettledRef.current = true;
             setIsDownloading(true);
             setDownloadProgress(null);
             const { title } = videoInfo;
@@ -157,11 +169,16 @@ export function useYouTubeUrl({
                 }
 
                 setDownloadProgress(0);
+                pollSettledRef.current = false;
+                pollFailuresRef.current = 0;
                 pollTimerRef.current = setInterval(async () => {
+                    if (pollSettledRef.current) return;
                     try {
                         const status = await api.getYouTubeDownloadStatus(
                             job.jobId
                         );
+                        if (pollSettledRef.current) return;
+                        pollFailuresRef.current = 0;
                         const poll = resolveYouTubeDownloadPoll(status);
 
                         if (poll.progressPct !== null) {
@@ -169,6 +186,7 @@ export function useYouTubeUrl({
                         }
                         if (!poll.done) return;
 
+                        pollSettledRef.current = true;
                         stopPolling();
                         setIsDownloading(false);
                         setDownloadProgress(null);
@@ -183,11 +201,30 @@ export function useYouTubeUrl({
                             });
                         }
                     } catch (pollError) {
+                        if (pollSettledRef.current) return;
+                        pollFailuresRef.current += 1;
                         sharedFrontendLogger.error(
                             "YouTube download status poll failed:",
                             pollError
                         );
-                        finishWithError("Lost track of the download");
+                        // Tolerate transient failures (backend redeploy,
+                        // network blip) — the download continues server-side
+                        // and the backend job watcher imports it on finish.
+                        if (
+                            !shouldAbandonYouTubeDownloadPolling(
+                                pollFailuresRef.current
+                            )
+                        ) {
+                            return;
+                        }
+                        pollSettledRef.current = true;
+                        stopPolling();
+                        setIsDownloading(false);
+                        setDownloadProgress(null);
+                        toast.info(
+                            "Lost download progress — the download continues in the background",
+                            { description: title }
+                        );
                     }
                 }, DOWNLOAD_POLL_INTERVAL_MS);
             } catch (error) {

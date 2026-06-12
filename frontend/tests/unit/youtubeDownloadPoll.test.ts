@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveYouTubeDownloadPoll } from "../../lib/youtube-download-poll.ts";
+import {
+    MAX_CONSECUTIVE_POLL_FAILURES,
+    resolveYouTubeDownloadPoll,
+    shouldAbandonYouTubeDownloadPolling,
+} from "../../lib/youtube-download-poll.ts";
 
 test("queued job keeps polling with zero progress", () => {
     const result = resolveYouTubeDownloadPoll({ status: "queued" });
@@ -68,4 +72,32 @@ test("unknown status keeps polling without progress", () => {
     assert.equal(result.done, false);
     assert.equal(result.toast, null);
     assert.equal(result.progressPct, null);
+});
+
+test("isolated poll failures are tolerated as still in progress", () => {
+    assert.equal(shouldAbandonYouTubeDownloadPolling(1), false);
+    assert.equal(
+        shouldAbandonYouTubeDownloadPolling(
+            MAX_CONSECUTIVE_POLL_FAILURES - 1
+        ),
+        false
+    );
+});
+
+test("polling is abandoned only after the consecutive-failure budget", () => {
+    assert.equal(
+        shouldAbandonYouTubeDownloadPolling(MAX_CONSECUTIVE_POLL_FAILURES),
+        true
+    );
+    assert.equal(
+        shouldAbandonYouTubeDownloadPolling(
+            MAX_CONSECUTIVE_POLL_FAILURES + 1
+        ),
+        true
+    );
+});
+
+test("the failure budget tolerates more than a single transient error", () => {
+    assert.equal(MAX_CONSECUTIVE_POLL_FAILURES >= 3, true);
+    assert.equal(shouldAbandonYouTubeDownloadPolling(0), false);
 });

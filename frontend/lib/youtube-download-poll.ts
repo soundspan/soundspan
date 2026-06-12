@@ -33,6 +33,25 @@ function clampProgress(value: number | null | undefined): number | null {
 }
 
 /**
+ * Consecutive failed status polls tolerated before the UI gives up on
+ * progress reporting. A single rejected poll (backend redeploy, network
+ * blip, laptop sleep) must not abort the progress UI — the download keeps
+ * running server-side and the backend's job watcher still imports it.
+ */
+export const MAX_CONSECUTIVE_POLL_FAILURES = 5;
+
+/**
+ * Returns whether polling should be abandoned after the given number of
+ * consecutive poll failures. Below the budget, a failure is treated as
+ * "still in progress".
+ */
+export function shouldAbandonYouTubeDownloadPolling(
+    consecutiveFailures: number
+): boolean {
+    return consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES;
+}
+
+/**
  * Map a download job status snapshot to a polling decision.
  * Unknown states are treated as still in progress so a sidecar that adds
  * states later does not strand the UI with a spurious error.
