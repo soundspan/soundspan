@@ -1664,10 +1664,20 @@ class ApiClient {
     }
 
     // System Features
-    async getFeatures(): Promise<{ musicCNN: boolean; vibeEmbeddings: boolean }> {
-        return this.request<{ musicCNN: boolean; vibeEmbeddings: boolean }>(
-            "/system/features"
-        );
+    async getFeatures(): Promise<{
+        musicCNN: boolean;
+        vibeEmbeddings: boolean;
+        audioAnalysis: boolean;
+        discovery: boolean;
+        autoPlaylists: boolean;
+    }> {
+        return this.request<{
+            musicCNN: boolean;
+            vibeEmbeddings: boolean;
+            audioAnalysis: boolean;
+            discovery: boolean;
+            autoPlaylists: boolean;
+        }>("/system/features");
     }
 
     // System UI Settings (non-sensitive, available to all authenticated users)

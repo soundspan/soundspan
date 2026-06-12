@@ -9,6 +9,7 @@ import { frontendLogger as log } from "@/lib/logger";
 import { useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
+import { useFeatures } from "@/lib/features-context";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { subscribeQueryEvent } from "@/lib/query-events";
@@ -70,6 +71,7 @@ export interface UseHomeDataReturn {
  */
 export function useHomeData(): UseHomeDataReturn {
     const { isAuthenticated } = useAuth();
+    const { discovery, autoPlaylists } = useFeatures();
     const queryClient = useQueryClient();
 
     // Listen for mixes-updated event (fired when user saves mood preferences)
@@ -96,12 +98,13 @@ export function useHomeData(): UseHomeDataReturn {
     const { data: recentlyAddedData, isLoading: isLoadingAdded } =
         useRecentlyAddedQuery(10);
     const { data: recommendedData, isLoading: isLoadingRecommended } =
-        useRecommendationsQuery(10);
-    const { data: mixesData, isLoading: isLoadingMixes } = useMixesQuery();
+        useRecommendationsQuery(10, discovery);
+    const { data: mixesData, isLoading: isLoadingMixes } =
+        useMixesQuery(autoPlaylists);
 
     // ── Made For You queries ────────────────────────────────────────────
     const { data: likedData } = useLikedPlaylistQuery(4);
-    const { data: discoverData } = useDiscoverWeeklySummaryQuery();
+    const { data: discoverData } = useDiscoverWeeklySummaryQuery(discovery);
 
     // ── Popular Artists / Podcasts / Audiobooks ──────────────────────────
     const { data: popularData, isLoading: isLoadingPopular } =
@@ -139,7 +142,7 @@ export function useHomeData(): UseHomeDataReturn {
     }, [likedData]);
 
     const discoverWeekly = useMemo<DiscoverWeeklySummary | null>(() => {
-        if (!discoverData) return null;
+        if (!discovery || !discoverData) return null;
         const firstCover = discoverData.tracks?.[0]?.coverUrl ?? null;
         return {
             weekStart: discoverData.weekStart,
@@ -147,7 +150,7 @@ export function useHomeData(): UseHomeDataReturn {
             totalCount: discoverData.totalCount,
             coverUrl: firstCover ? api.getCoverArtUrl(firstCover, 200) : null,
         };
-    }, [discoverData]);
+    }, [discovery, discoverData]);
 
     const communityPlaylists = useMemo<PlaylistPreview[]>(() => {
         if (!shelvesData) return [];
@@ -202,8 +205,8 @@ export function useHomeData(): UseHomeDataReturn {
     return {
         recentlyListened: items,
         recentlyAdded: recentlyAddedData?.artists ?? [],
-        recommended: recommendedData?.artists ?? [],
-        mixes: Array.isArray(mixesData) ? mixesData : [],
+        recommended: discovery ? (recommendedData?.artists ?? []) : [],
+        mixes: autoPlaylists && Array.isArray(mixesData) ? mixesData : [],
         likedSummary,
         discoverWeekly,
         popularArtists: popularData?.artists ?? [],
