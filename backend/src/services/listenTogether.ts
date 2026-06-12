@@ -640,6 +640,9 @@ function parseQueueFromDb(raw: Prisma.JsonValue | null): SyncQueueItem[] {
                 youtubeVideoId:
                     (q.provider as Record<string, unknown> | undefined)
                         ?.youtubeVideoId ?? q.youtubeVideoId,
+                youtubeAudioFormat:
+                    (q.provider as Record<string, unknown> | undefined)
+                        ?.youtubeAudioFormat ?? q.youtubeAudioFormat,
             });
             result.push({
                 id: q.id,

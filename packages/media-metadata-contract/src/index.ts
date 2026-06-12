@@ -4,6 +4,7 @@ export const CANONICAL_MEDIA_SOURCE_VALUES = [
     "local",
     "tidal",
     "youtube",
+    "youtube-direct",
 ] as const;
 
 export type CanonicalMediaSource = (typeof CANONICAL_MEDIA_SOURCE_VALUES)[number];
@@ -17,12 +18,16 @@ export interface CanonicalMediaProviderIdentity {
     providerTrackId?: string;
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    /** Audio container served for "youtube-direct" streams (webm for opus, mp4 for AAC). */
+    youtubeAudioFormat?: "mp4" | "webm";
 }
 
 export interface LegacyStreamFields {
     streamSource?: "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    /** Audio container hint carried for "youtube-direct" streams only. */
+    youtubeAudioFormat?: "mp4" | "webm";
 }
 
 export interface CanonicalMediaSearchResult {
@@ -52,10 +57,24 @@ const normalizePositiveFiniteNumber = (value: unknown): number | undefined => {
     return value;
 };
 
+const normalizeYoutubeAudioFormat = (
+    value: unknown,
+): "mp4" | "webm" | undefined => {
+    if (value === "mp4" || value === "webm") {
+        return value;
+    }
+    return undefined;
+};
+
 export const normalizeCanonicalMediaSource = (
     value: unknown,
 ): CanonicalMediaSource | null => {
-    if (value === "local" || value === "tidal" || value === "youtube") {
+    if (
+        value === "local" ||
+        value === "tidal" ||
+        value === "youtube" ||
+        value === "youtube-direct"
+    ) {
         return value;
     }
     if (value === "ytmusic") {
@@ -94,6 +113,7 @@ export const normalizeCanonicalMediaProviderIdentity = (value: {
     providerTrackId?: unknown;
     tidalTrackId?: unknown;
     youtubeVideoId?: unknown;
+    youtubeAudioFormat?: unknown;
 }): CanonicalMediaProviderIdentity => {
     const source = resolveCanonicalMediaSource(value);
     const providerTrackId = normalizeString(value.providerTrackId);
@@ -120,6 +140,17 @@ export const normalizeCanonicalMediaProviderIdentity = (value: {
         };
     }
 
+    if (source === "youtube-direct") {
+        return {
+            source,
+            providerTrackId: providerTrackId ?? youtubeVideoId,
+            youtubeVideoId,
+            youtubeAudioFormat: normalizeYoutubeAudioFormat(
+                value.youtubeAudioFormat,
+            ),
+        };
+    }
+
     return { source: "local" };
 };
 
@@ -141,13 +172,20 @@ export const toLegacyStreamFields = (
             youtubeVideoId: provider.youtubeVideoId,
         };
     }
+    if (provider.source === "youtube-direct") {
+        return {
+            streamSource: "youtube-direct",
+            youtubeVideoId: provider.youtubeVideoId,
+            youtubeAudioFormat: provider.youtubeAudioFormat,
+        };
+    }
     return {};
 };
 
 export const toAudioEngineSourceType = (
     source: CanonicalMediaSource,
 ): AudioEngineSourceType => {
-    if (source === "youtube") {
+    if (source === "youtube" || source === "youtube-direct") {
         return "ytmusic";
     }
     return source;

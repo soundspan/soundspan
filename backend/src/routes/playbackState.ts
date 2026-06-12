@@ -229,6 +229,9 @@ router.post("/", requireAuth, async (req, res) => {
                                     youtubeVideoId:
                                         item.provider?.youtubeVideoId ??
                                         item.youtubeVideoId,
+                                    youtubeAudioFormat:
+                                        item.provider?.youtubeAudioFormat ??
+                                        item.youtubeAudioFormat,
                                 });
                                 const sanitizedProvider = {
                                     source: provider.source,
@@ -256,6 +259,12 @@ router.post("/", requireAuth, async (req, res) => {
                                                   provider.youtubeVideoId,
                                                   64,
                                               ),
+                                          }
+                                        : {}),
+                                    ...(provider.youtubeAudioFormat
+                                        ? {
+                                              youtubeAudioFormat:
+                                                  provider.youtubeAudioFormat,
                                           }
                                         : {}),
                                 };

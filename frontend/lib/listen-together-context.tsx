@@ -136,6 +136,8 @@ function toLocalTrack(item: SyncQueueItem): Track {
         providerTrackId: item.provider?.providerTrackId,
         tidalTrackId: item.provider?.tidalTrackId ?? item.tidalTrackId,
         youtubeVideoId: item.provider?.youtubeVideoId ?? item.youtubeVideoId,
+        youtubeAudioFormat:
+            item.provider?.youtubeAudioFormat ?? item.youtubeAudioFormat,
         streamSource: item.streamSource,
     });
     const legacyStreamFields = toLegacyStreamFields(provider);

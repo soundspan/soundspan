@@ -312,6 +312,63 @@ describe("playbackState routes runtime", () => {
         );
     });
 
+    it("round-trips youtube-direct queue items with their audio format", async () => {
+        mockUpsert.mockResolvedValueOnce({
+            id: "state-yt-direct",
+            userId: "u1",
+            deviceId: "desktop",
+            playbackType: "track",
+        });
+
+        const req = {
+            user: { id: "u1" },
+            header: () => "desktop",
+            body: {
+                playbackType: "track",
+                trackId: "yt-dQw4w9WgXcQ",
+                queue: [
+                    {
+                        id: "yt-dQw4w9WgXcQ",
+                        title: "Some DJ Set",
+                        duration: 7200,
+                        streamSource: "youtube-direct",
+                        youtubeVideoId: "dQw4w9WgXcQ",
+                        youtubeAudioFormat: "webm",
+                        artist: { name: "Uploader" },
+                        album: { title: "YouTube" },
+                    },
+                ],
+                currentIndex: 0,
+            },
+        } as any;
+        const res = createRes();
+
+        await postState(req, res);
+
+        expect(mockUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                update: expect.objectContaining({
+                    queue: [
+                        expect.objectContaining({
+                            id: "yt-dQw4w9WgXcQ",
+                            mediaSource: "youtube-direct",
+                            streamSource: "youtube-direct",
+                            youtubeVideoId: "dQw4w9WgXcQ",
+                            youtubeAudioFormat: "webm",
+                            provider: expect.objectContaining({
+                                source: "youtube-direct",
+                                providerTrackId: "dQw4w9WgXcQ",
+                                youtubeVideoId: "dQw4w9WgXcQ",
+                                youtubeAudioFormat: "webm",
+                            }),
+                        }),
+                    ],
+                }),
+            })
+        );
+        expect(res.statusCode).toBe(200);
+    });
+
     it("falls back to DbNull when queue sanitization throws", async () => {
         mockUpsert.mockResolvedValueOnce({ id: "state-3" });
 

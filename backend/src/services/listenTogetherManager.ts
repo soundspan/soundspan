@@ -28,6 +28,8 @@ export interface SyncQueueItem {
     streamSource?: "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    /** Audio container hint for "youtube-direct" streams (webm for opus, mp4 for AAC). */
+    youtubeAudioFormat?: "mp4" | "webm";
 }
 
 export interface GroupMember {
