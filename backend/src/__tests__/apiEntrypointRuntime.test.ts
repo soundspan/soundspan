@@ -32,6 +32,7 @@ describe("api entrypoint runtime behavior", () => {
         "../routes/notifications",
         "../routes/browse",
         "../routes/analysis",
+        "../routes/analysisInternal",
         "../routes/releases",
         "../routes/vibe",
         "../routes/system",
@@ -451,6 +452,9 @@ describe("api entrypoint runtime behavior", () => {
         require("../index");
         await flushPromises();
 
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const analysisInternalRouter = require("../routes/analysisInternal").default;
+
         for (const prefix of [
             "/api/discover",
             "/api/recommendations",
@@ -462,13 +466,26 @@ describe("api entrypoint runtime behavior", () => {
                 (args: unknown[]) => args[0] === prefix
             );
             expect(call).toBeDefined();
-            // Disabled prefixes mount only the feature-disabled handler
-            // (no rate limiter, no router module).
-            expect(call).toHaveLength(2);
-            expect(typeof call![1]).toBe("function");
+            // Disabled prefixes stay rate limited and mount the
+            // feature-disabled handler instead of the router module.
+            expect(call![1]).toBe("api-limiter");
+            if (prefix === "/api/analysis") {
+                // The CLAP analyzer machine callbacks stay reachable so
+                // in-flight analysis work can still report results.
+                expect(call).toHaveLength(4);
+                expect(call![2]).toBe(analysisInternalRouter);
+            } else {
+                expect(call).toHaveLength(3);
+            }
+
+            const handler = call![call!.length - 1] as (
+                req: any,
+                res: any
+            ) => void;
+            expect(typeof handler).toBe("function");
 
             const res = createJsonRes();
-            (call![1] as (req: any, res: any) => void)({}, res);
+            handler({}, res);
             expect(res.statusCode).toBe(404);
             expect(res.body).toEqual({
                 error: "feature disabled",

@@ -242,7 +242,8 @@ app.use("/api/playlists", apiLimiter, playlistsRoutes);
 app.use("/api/share-links", apiLimiter, shareLinkRoutes);
 app.use("/api/search", apiLimiter, searchRoutes);
 // Feature-gated routers are required lazily so disabled subsystems skip their
-// module side effects entirely; disabled prefixes return a clean 404 payload.
+// module side effects entirely; disabled prefixes stay rate limited and
+// return a clean 404 payload.
 if (config.features.discovery) {
     app.use(
         "/api/recommendations",
@@ -250,7 +251,7 @@ if (config.features.discovery) {
         require("./routes/recommendations").default
     );
 } else {
-    app.use("/api/recommendations", createFeatureDisabledHandler());
+    app.use("/api/recommendations", apiLimiter, createFeatureDisabledHandler());
 }
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
 app.use("/api/notifications", apiLimiter, notificationsRoutes);
@@ -266,7 +267,7 @@ if (config.features.discovery) {
     logger.info(
         "[Features] Discovery disabled (DISCOVERY_ENABLED=false); /api/discover and /api/recommendations return 404"
     );
-    app.use("/api/discover", createFeatureDisabledHandler());
+    app.use("/api/discover", apiLimiter, createFeatureDisabledHandler());
 }
 if (config.features.autoPlaylists) {
     app.use("/api/mixes", apiLimiter, require("./routes/mixes").default);
@@ -274,7 +275,7 @@ if (config.features.autoPlaylists) {
     logger.info(
         "[Features] Auto playlists disabled (AUTO_PLAYLISTS_ENABLED=false); /api/mixes returns 404"
     );
-    app.use("/api/mixes", createFeatureDisabledHandler());
+    app.use("/api/mixes", apiLimiter, createFeatureDisabledHandler());
 }
 app.use("/api/enrichment", apiLimiter, enrichmentRoutes);
 app.use("/api/homepage", apiLimiter, homepageRoutes);
@@ -286,14 +287,22 @@ if (config.features.audioAnalysis) {
     logger.info(
         "[Features] Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); /api/analysis and /api/vibe return 404"
     );
-    app.use("/api/analysis", createFeatureDisabledHandler());
+    // Keep the CLAP analyzer machine callbacks (/vibe/failure, /vibe/success)
+    // reachable so analyzers draining in-flight work (e.g. AIO deployments)
+    // can still report results while the feature is off.
+    app.use(
+        "/api/analysis",
+        apiLimiter,
+        require("./routes/analysisInternal").default,
+        createFeatureDisabledHandler()
+    );
 }
 app.use("/api/admin", apiLimiter, adminRoutes);
 app.use("/api/releases", apiLimiter, releasesRoutes);
 if (config.features.audioAnalysis) {
     app.use("/api/vibe", apiLimiter, require("./routes/vibe").default);
 } else {
-    app.use("/api/vibe", createFeatureDisabledHandler());
+    app.use("/api/vibe", apiLimiter, createFeatureDisabledHandler());
 }
 app.use("/api/system", apiLimiter, systemRoutes);
 app.use("/api/ytmusic", apiLimiter, ytMusicRoutes);

@@ -83,11 +83,27 @@ const mockGetFailures = enrichmentFailureService.getFailures as jest.Mock;
 const mockResetRetryCount = enrichmentFailureService.resetRetryCount as jest.Mock;
 const mockResolveByEntity = enrichmentFailureService.resolveByEntity as jest.Mock;
 
+function findRouteLayer(
+    stack: any[],
+    method: "get" | "post" | "put",
+    path: string
+): any {
+    for (const entry of stack) {
+        if (entry.route?.path === path && entry.route?.methods?.[method]) {
+            return entry;
+        }
+        // Recurse into nested routers (e.g. the analysisInternal machine
+        // callbacks mounted via router.use).
+        if (entry.handle?.stack) {
+            const nested = findRouteLayer(entry.handle.stack, method, path);
+            if (nested) return nested;
+        }
+    }
+    return undefined;
+}
+
 function getHandler(method: "get" | "post" | "put", path: string) {
-    const layer = (router as any).stack.find(
-        (entry: any) =>
-            entry.route?.path === path && entry.route?.methods?.[method]
-    );
+    const layer = findRouteLayer((router as any).stack, method, path);
     if (!layer) throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     return layer.route.stack[layer.route.stack.length - 1].handle;
 }

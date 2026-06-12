@@ -286,6 +286,13 @@ matching background workers.
 > by `audioAnalyzer.enabled` / `audioAnalyzerClap.enabled` — when setting
 > `config.features.audioAnalysis=false`, also disable the analyzer sidecars
 > since no new work will be queued for them.
+>
+> In AIO mode the analyzers run inside the all-in-one container and are not
+> controlled by `audioAnalyzer.enabled` / `audioAnalyzerClap.enabled`; with
+> `config.features.audioAnalysis=false` they stay up and drain any leftover
+> queued work. The analyzer machine callbacks (`/api/analysis/vibe/failure`,
+> `/api/analysis/vibe/success`) remain mounted even when the flag is off so
+> in-flight work can still report results.
 
 ### External Database / Redis (Individual Mode)
 

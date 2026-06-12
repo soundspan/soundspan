@@ -13,6 +13,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | Route File | Mounted Prefixes |
 | --- | --- |
 | `backend/src/routes/analysis.ts` | `/api/analysis` |
+| `backend/src/routes/analysisInternal.ts` | `/api/analysis` (machine callbacks, mounted via `analysis.ts` and directly when the flag is off) |
 | `backend/src/routes/admin.ts` | `/api/admin` |
 | `backend/src/routes/apiKeys.ts` | `/api/api-keys` |
 | `backend/src/routes/artists.ts` | `/api/artists` |
@@ -61,11 +62,18 @@ Start-here guide for API route handlers in `backend/src/routes`.
 
 Some prefixes are mounted only when their coarse feature flag (see
 `config.features` in `backend/src/config.ts`) is enabled; otherwise the prefix
-returns `404 {"error":"feature disabled","code":"FEATURE_DISABLED"}`:
+stays rate limited (`apiLimiter`) and returns
+`404 {"error":"feature disabled","code":"FEATURE_DISABLED"}`:
 
 - `AUDIO_ANALYSIS_ENABLED`: `/api/analysis`, `/api/vibe`
 - `DISCOVERY_ENABLED`: `/api/discover`, `/api/recommendations`
 - `AUTO_PLAYLISTS_ENABLED`: `/api/mixes`
+
+Exception: the CLAP analyzer machine callbacks in
+`backend/src/routes/analysisInternal.ts` (`/api/analysis/vibe/failure`,
+`/api/analysis/vibe/success`) remain mounted even when
+`AUDIO_ANALYSIS_ENABLED=false`, so analyzers draining in-flight work can still
+report results.
 
 ## Update Rule
 
