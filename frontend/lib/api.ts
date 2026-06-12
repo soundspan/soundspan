@@ -2933,16 +2933,25 @@ class ApiClient {
 
     /**
      * Fetch metadata for a regular YouTube video.
+     * Pass an AbortSignal to cancel the request (e.g. when the search
+     * query changes before the lookup resolves).
      */
-    async getYouTubeVideoInfo(url: string): Promise<{
+    async getYouTubeVideoInfo(
+        url: string,
+        signal?: AbortSignal
+    ): Promise<{
         videoId: string;
         title: string;
         uploader: string;
         duration: number;
         thumbnail: string | null;
         uploadDate: string;
+        audioFormat?: "mp4" | "webm";
     }> {
-        return this.get(`/youtube/info?url=${encodeURIComponent(url)}`);
+        return this.request(`/youtube/info?url=${encodeURIComponent(url)}`, {
+            method: "GET",
+            signal,
+        });
     }
 
     /**
@@ -2961,21 +2970,46 @@ class ApiClient {
     }
 
     /**
-     * Download audio from a regular YouTube video to the library.
+     * Start a background download of a regular YouTube video into the
+     * library. Returns immediately with a job id; poll
+     * getYouTubeDownloadStatus() for progress.
      */
     async downloadYouTube(
         videoId: string,
         format: string = "mp3",
         quality: string = "HIGH"
     ): Promise<{
-        success: boolean;
-        filePath: string;
-        title: string;
-        uploader?: string;
-        duration?: number;
-        alreadyExisted?: boolean;
+        jobId: string;
+        status:
+            | "queued"
+            | "downloading"
+            | "processing"
+            | "completed"
+            | "failed";
     }> {
         return this.post(`/youtube/download`, { videoId, format, quality });
+    }
+
+    /**
+     * Poll the status of a YouTube download job started via
+     * downloadYouTube(). Completion triggers a backend library scan.
+     */
+    async getYouTubeDownloadStatus(jobId: string): Promise<{
+        jobId: string;
+        videoId: string;
+        status:
+            | "queued"
+            | "downloading"
+            | "processing"
+            | "completed"
+            | "failed";
+        progressPct: number;
+        filePath: string | null;
+        title: string;
+        error: string | null;
+        alreadyExisted: boolean;
+    }> {
+        return this.get(`/youtube/download/${encodeURIComponent(jobId)}`);
     }
 
     // ── TIDAL Streaming ────────────────────────────────────────────

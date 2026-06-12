@@ -76,6 +76,7 @@ export default function SearchPage() {
         videoInfo,
         isLoading: isYtLoading,
         isDownloading,
+        downloadProgress,
         handlePlay: handleYtPlay,
         handleDownload: handleYtDownload,
     } = useYouTubeUrl({ query });
@@ -158,6 +159,7 @@ export default function SearchPage() {
                         videoInfo={videoInfo!}
                         isLoading={isYtLoading}
                         isDownloading={isDownloading}
+                        downloadProgress={downloadProgress}
                         onPlay={handleYtPlay}
                         onDownload={handleYtDownload}
                     />

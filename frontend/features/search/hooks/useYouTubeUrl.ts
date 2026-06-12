@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { extractYouTubeVideoId } from "@/lib/youtube-url";
+import { resolveYouTubeDownloadPoll } from "@/lib/youtube-download-poll";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import type { Track } from "@/lib/audio-state-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
@@ -17,15 +18,21 @@ export interface YtVideoInfo {
     duration: number;
     thumbnail: string | null;
     uploadDate: string;
+    audioFormat?: "mp4" | "webm";
 }
 
 interface UseYouTubeUrlReturn {
     videoInfo: YtVideoInfo | null;
     isLoading: boolean;
     isDownloading: boolean;
+    /** Download progress percentage (0-100), or null when unknown/idle. */
+    downloadProgress: number | null;
     handlePlay: () => void;
     handleDownload: (format: string, quality: string) => Promise<void>;
 }
+
+/** Interval between download job status polls. */
+const DOWNLOAD_POLL_INTERVAL_MS = 2000;
 
 export function useYouTubeUrl({
     query,
@@ -33,8 +40,22 @@ export function useYouTubeUrl({
     const [videoInfo, setVideoInfo] = useState<YtVideoInfo | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
+    const [downloadProgress, setDownloadProgress] = useState<number | null>(
+        null
+    );
     const abortRef = useRef<AbortController | null>(null);
+    const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const { playTracks } = useAudioControls();
+
+    const stopPolling = useCallback(() => {
+        if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+        }
+    }, []);
+
+    // Stop any in-flight status polling when the component unmounts.
+    useEffect(() => stopPolling, [stopPolling]);
 
     // Fetch video info when query is a YouTube URL
     useEffect(() => {
@@ -50,7 +71,10 @@ export function useYouTubeUrl({
         const fetchInfo = async () => {
             setIsLoading(true);
             try {
-                const info = await api.getYouTubeVideoInfo(query);
+                const info = await api.getYouTubeVideoInfo(
+                    query,
+                    abortController.signal
+                );
                 if (!abortController.signal.aborted) {
                     setVideoInfo(info);
                 }
@@ -92,6 +116,7 @@ export function useYouTubeUrl({
             duration: videoInfo.duration,
             streamSource: "youtube-direct",
             youtubeVideoId: videoInfo.videoId,
+            youtubeAudioFormat: videoInfo.audioFormat,
         };
 
         playTracks([track], 0);
@@ -101,56 +126,85 @@ export function useYouTubeUrl({
         async (format: string, quality: string) => {
             if (!videoInfo) return;
 
+            stopPolling();
             setIsDownloading(true);
+            setDownloadProgress(null);
+            const { title } = videoInfo;
+
+            const finishWithError = (message: string) => {
+                stopPolling();
+                setIsDownloading(false);
+                setDownloadProgress(null);
+                toast.error(message, { description: title });
+            };
+
             try {
-                const result = await api.downloadYouTube(
+                const job = await api.downloadYouTube(
                     videoInfo.videoId,
                     format,
                     quality
                 );
 
-                if (result.alreadyExisted) {
+                if (job.status === "completed") {
+                    // Idempotency hit — the file already exists on disk.
+                    setIsDownloading(false);
                     toast.info("Already in your library", {
-                        description: videoInfo.title,
+                        description: title,
                     });
-                } else {
-                    toast.success("Download complete", {
-                        description: `${videoInfo.title} saved as ${format.toUpperCase()}`,
-                    });
+                    return;
                 }
 
-                // Open activity panel like Soulseek does
-                if (typeof window !== "undefined") {
-                    window.dispatchEvent(
-                        new CustomEvent("set-activity-panel-tab", {
-                            detail: { tab: "active" },
-                        })
-                    );
-                    window.dispatchEvent(
-                        new CustomEvent("open-activity-panel")
-                    );
-                    window.dispatchEvent(
-                        new CustomEvent("notifications-changed")
-                    );
-                }
+                setDownloadProgress(0);
+                pollTimerRef.current = setInterval(async () => {
+                    try {
+                        const status = await api.getYouTubeDownloadStatus(
+                            job.jobId
+                        );
+                        const poll = resolveYouTubeDownloadPoll(status);
+
+                        if (poll.progressPct !== null) {
+                            setDownloadProgress(poll.progressPct);
+                        }
+                        if (!poll.done) return;
+
+                        stopPolling();
+                        setIsDownloading(false);
+                        setDownloadProgress(null);
+
+                        if (poll.toast === "success") {
+                            toast.success("Added to library — scanning", {
+                                description: title,
+                            });
+                        } else {
+                            toast.error(status.error || "Download failed", {
+                                description: title,
+                            });
+                        }
+                    } catch (pollError) {
+                        sharedFrontendLogger.error(
+                            "YouTube download status poll failed:",
+                            pollError
+                        );
+                        finishWithError("Lost track of the download");
+                    }
+                }, DOWNLOAD_POLL_INTERVAL_MS);
             } catch (error) {
                 sharedFrontendLogger.error("YouTube download error:", error);
-                const message =
+                finishWithError(
                     error instanceof Error
                         ? error.message
-                        : "Failed to download";
-                toast.error(message);
-            } finally {
-                setIsDownloading(false);
+                        : "Failed to download"
+                );
             }
         },
-        [videoInfo]
+        [videoInfo, stopPolling]
     );
 
     return {
         videoInfo,
         isLoading,
         isDownloading,
+        downloadProgress,
         handlePlay,
         handleDownload,
     };

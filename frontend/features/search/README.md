@@ -30,8 +30,10 @@ Start-here guide for `frontend/features/search`.
 | `components/SoulseekSongsList.tsx` | components |
 | `components/TopResult.tsx` | components |
 | `components/TVSearchInput.tsx` | components |
+| `components/YouTubePreviewCard.tsx` | components |
 | `hooks/useSearchData.ts` | hooks |
 | `hooks/useSoulseekSearch.ts` | hooks |
+| `hooks/useYouTubeUrl.ts` | hooks |
 | `types.ts` | root |
 
 ## Update Rule

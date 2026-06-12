@@ -89,6 +89,8 @@ export interface Track {
     streamSource?: "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    /** Audio container reported by /api/youtube/info for youtube-direct tracks. */
+    youtubeAudioFormat?: "mp4" | "webm";
     // Metadata override fields
     displayTitle?: string | null;
     displayTrackNo?: number | null;

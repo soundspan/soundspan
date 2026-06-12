@@ -92,6 +92,7 @@ interface RuntimeProviderTrack {
     streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    youtubeAudioFormat?: "mp4" | "webm";
 }
 
 function getNextTrackInfo(
@@ -103,6 +104,7 @@ function getNextTrackInfo(
         streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
         tidalTrackId?: number;
         youtubeVideoId?: string;
+        youtubeAudioFormat?: "mp4" | "webm";
     }[],
     currentIndex: number,
     isShuffle: boolean,
@@ -116,6 +118,7 @@ function getNextTrackInfo(
     streamSource?: "local" | "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
+    youtubeAudioFormat?: "mp4" | "webm";
 } | null {
     if (queue.length === 0) return null;
 
@@ -4956,8 +4959,13 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             setDuration(fallbackDuration);
 
             let format = "mp3";
-            if (currentTrack?.streamSource === "tidal" || currentTrack?.streamSource === "youtube" || currentTrack?.streamSource === "youtube-direct") {
-                // TIDAL and YouTube streams are AAC in MP4 container
+            if (currentTrack?.streamSource === "youtube-direct") {
+                // Direct YouTube audio is opus-in-webm or AAC-in-mp4
+                // depending on the source video; /api/youtube/info reports
+                // the container as audioFormat.
+                format = currentTrack.youtubeAudioFormat === "webm" ? "webm" : "mp4";
+            } else if (currentTrack?.streamSource === "tidal" || currentTrack?.streamSource === "youtube") {
+                // TIDAL and YouTube Music streams are AAC in MP4 container
                 format = "mp4";
             } else {
                 const filePath = currentTrack?.filePath || "";
@@ -5990,7 +5998,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             nextTrack.youtubeVideoId
         ) {
             streamUrl = api.getYouTubeStreamUrl(nextTrack.youtubeVideoId);
-            format = "mp4";
+            format = nextTrack.youtubeAudioFormat === "webm" ? "webm" : "mp4";
         } else {
             streamUrl = api.getStreamUrl(nextTrack.id);
             // Determine format from file path

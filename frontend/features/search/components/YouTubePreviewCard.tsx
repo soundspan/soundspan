@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { Play, Download, Loader2, Check, ChevronDown } from "lucide-react";
+import { Play, Download, Loader2, ChevronDown } from "lucide-react";
 import type { YtVideoInfo } from "../hooks/useYouTubeUrl";
 
 interface YouTubePreviewCardProps {
     videoInfo: YtVideoInfo;
     isLoading: boolean;
     isDownloading: boolean;
+    /** Download progress percentage (0-100), or null when unknown/idle. */
+    downloadProgress: number | null;
     onPlay: () => void;
     onDownload: (format: string, quality: string) => Promise<void>;
 }
@@ -33,11 +35,11 @@ export function YouTubePreviewCard({
     videoInfo,
     isLoading,
     isDownloading,
+    downloadProgress,
     onPlay,
     onDownload,
 }: YouTubePreviewCardProps) {
     const [showFormatMenu, setShowFormatMenu] = useState(false);
-    const [downloadComplete, setDownloadComplete] = useState(false);
 
     if (isLoading) {
         return (
@@ -59,9 +61,9 @@ export function YouTubePreviewCard({
 
     const handleDownloadClick = async (format: string, quality: string) => {
         setShowFormatMenu(false);
+        // Resolves once the job is started; progress/completion arrive via
+        // the polling state (isDownloading/downloadProgress) and toasts.
         await onDownload(format, quality);
-        setDownloadComplete(true);
-        setTimeout(() => setDownloadComplete(false), 5000);
     };
 
     return (
@@ -119,12 +121,9 @@ export function YouTubePreviewCard({
                                     {isDownloading ? (
                                         <>
                                             <Loader2 className="w-4 h-4 animate-spin" />
-                                            Downloading...
-                                        </>
-                                    ) : downloadComplete ? (
-                                        <>
-                                            <Check className="w-4 h-4" />
-                                            Downloaded
+                                            {downloadProgress !== null
+                                                ? `Downloading… ${Math.round(downloadProgress)}%`
+                                                : "Downloading…"}
                                         </>
                                     ) : (
                                         <>
@@ -155,6 +154,18 @@ export function YouTubePreviewCard({
                                 )}
                             </div>
                         </div>
+
+                        {/* Download progress bar */}
+                        {isDownloading && downloadProgress !== null && (
+                            <div className="mt-3 h-1 w-full rounded-full bg-white/10 overflow-hidden">
+                                <div
+                                    className="h-full bg-green-500 transition-all duration-500"
+                                    style={{
+                                        width: `${Math.min(100, Math.max(0, downloadProgress))}%`,
+                                    }}
+                                />
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
