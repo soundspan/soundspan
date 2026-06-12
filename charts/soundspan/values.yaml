@@ -431,6 +431,16 @@ ytmusicStreamer:
     storageClass: ""
     accessMode: ReadWriteOnce
     existingClaim: ""
+  # Mount the chart's music volume at /music (same volume the backend
+  # mounts, read-write). Required for the YouTube URL download-to-library
+  # feature: downloads are written to YT_DOWNLOAD_DIR (default
+  # "/music/YouTube Downloads") and imported by the backend's library scan.
+  # In multi-node clusters the music volume must be RWX (ReadWriteMany)
+  # because the backend and ytmusic-streamer pods mount it concurrently.
+  # Set enabled: false to opt out (YouTube downloads then land on the
+  # pod's ephemeral filesystem and are lost on restart).
+  musicMount:
+    enabled: true
   env:
     DEBUG: ""
     # ── Rate-pacing & request safety ─────────────────────────────────
@@ -454,6 +464,9 @@ ytmusicStreamer:
     # - tv: legacy TV parser only
     # - native: ytmusicapi yt.search() only
     YTMUSIC_SEARCH_MODE: "auto"
+    # Destination for YouTube URL downloads inside the music volume.
+    # Uncomment to override the chart default ("/music/YouTube Downloads").
+    # YT_DOWNLOAD_DIR: "/music/YouTube Downloads"
   # -- Additional environment variable sources for YT Music streamer container.
   # Example:
   # envFrom:

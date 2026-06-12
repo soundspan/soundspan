@@ -42,7 +42,7 @@ spec:
               containerPort: {{ .Values.ytmusicStreamer.port }}
               protocol: TCP
           {{- $ytmusicEnv := .Values.ytmusicStreamer.env | default (dict) }}
-          {{- $ytmusicExplicitEnvKeys := dict "DATA_PATH" true "TZ" true }}
+          {{- $ytmusicExplicitEnvKeys := dict "DATA_PATH" true "TZ" true "YT_DOWNLOAD_DIR" true }}
           env:
             {{- if hasKey $ytmusicEnv "DATA_PATH" }}
             - name: DATA_PATH
@@ -57,6 +57,13 @@ spec:
             {{- else }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
+            {{- end }}
+            {{- if hasKey $ytmusicEnv "YT_DOWNLOAD_DIR" }}
+            - name: YT_DOWNLOAD_DIR
+              value: {{ index $ytmusicEnv "YT_DOWNLOAD_DIR" | quote }}
+            {{- else }}
+            - name: YT_DOWNLOAD_DIR
+              value: /music/YouTube Downloads
             {{- end }}
             {{- range $key := keys $ytmusicEnv | sortAlpha }}
             {{- if not (hasKey $ytmusicExplicitEnvKeys $key) }}
@@ -83,6 +90,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.ytmusicStreamer.musicMount.enabled }}
+            - name: music
+              mountPath: /music
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health
@@ -112,6 +123,24 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if .Values.ytmusicStreamer.musicMount.enabled }}
+        # Same music volume the backend mounts — YouTube URL downloads are
+        # written here so the library scanner can import them.
+        - name: music
+          {{- if .Values.music.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.music.persistence.existingClaim }}
+          {{- else if .Values.music.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "soundspan.fullname" . }}-music
+          {{- else if .Values.music.hostPath }}
+          hostPath:
+            path: {{ .Values.music.hostPath }}
+            type: Directory
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
       {{- with .Values.global.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

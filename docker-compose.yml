@@ -318,8 +318,14 @@ services:
             # auto prefers native ytmusicapi search and falls back to TV per-user
             # when #813 invalid-argument responses occur.
             YTMUSIC_SEARCH_MODE: ${YTMUSIC_SEARCH_MODE:-auto}
+            # Destination for YouTube URL downloads — must live inside the
+            # shared music volume so the backend's library scan finds them.
+            YT_DOWNLOAD_DIR: ${YT_DOWNLOAD_DIR:-/music/YouTube Downloads}
         volumes:
             - ytmusic_data:/data
+            # Shared with the backend (read-write) so YouTube URL downloads
+            # land directly in the music library.
+            - ${MUSIC_PATH:-./music}:/music
         restart: unless-stopped
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:8586/health"]

@@ -249,6 +249,25 @@ ytmusicStreamer:
 These **sidecars** work in both AIO and Individual modes.
 In AIO mode, they run as separate pods alongside the all-in-one container.
 
+#### YouTube downloads and the music volume
+
+When `ytmusicStreamer.enabled` is true, the streamer pod also mounts the
+chart's music volume at `/music` (controlled by
+`ytmusicStreamer.musicMount.enabled`, default `true`). This is required for
+the YouTube URL download-to-library feature: pasted-URL downloads are
+written to `YT_DOWNLOAD_DIR` (default `/music/YouTube Downloads`) and
+imported by the backend's library scan.
+
+Notes:
+- In multi-node clusters the music volume must be **RWX**
+  (`ReadWriteMany`), because the backend and ytmusic-streamer pods mount
+  it read-write concurrently and may be scheduled on different nodes.
+- All `music.persistence` variants are supported (`existingClaim`,
+  chart-managed PVC, `hostPath`).
+- Setting `ytmusicStreamer.musicMount.enabled: false` disables the mount;
+  YouTube downloads then land on the pod's ephemeral filesystem and are
+  lost on restart.
+
 ### Audio Analyzers (Individual Mode Only)
 
 ```yaml
