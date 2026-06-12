@@ -2054,6 +2054,9 @@ class YtDownloadRequest(BaseModel):
 # Jobs are lost on restart — acceptable, because the on-disk idempotency
 # check prevents re-downloading completed files on a retried request.
 _yt_download_jobs: dict[str, dict] = {}
+# Strong references to in-flight tasks: asyncio only keeps weak refs to
+# tasks, so an unreferenced download task could be garbage-collected.
+_yt_download_tasks: set = set()
 YT_DOWNLOAD_JOB_TTL = 6 * 60 * 60  # prune terminal jobs after 6 hours
 
 
@@ -2244,9 +2247,11 @@ async def yt_download(req: YtDownloadRequest):
         return {"job_id": job["job_id"], "status": job["status"]}
 
     job = _new_yt_download_job(video_id)
-    asyncio.create_task(
+    task = asyncio.create_task(
         _run_yt_download_job(job, audio_format, req.quality, output_dir)
     )
+    _yt_download_tasks.add(task)
+    task.add_done_callback(_yt_download_tasks.discard)
     log.info(
         f"YT download queued for {video_id} "
         f"(job={job['job_id']}, format={audio_format}, quality={req.quality})"
