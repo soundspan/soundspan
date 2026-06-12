@@ -1703,7 +1703,12 @@ export async function getEnrichmentProgress() {
     const clapFailed = clapFailedByStatus;
     const clapTotal = Number(clapEligibleTrackCount[0]?.count || 0);
     const clapPending = Math.max(0, clapTotal - clapCompleted - clapFailed);
-    const clapRequiredForFullCompletion = features.vibeEmbeddings;
+    // When AUDIO_ANALYSIS_ENABLED=false the audio/vibe phases never queue
+    // work, so outstanding audio/CLAP counts can never drain and must not
+    // block full completion (status idle, completion notification, caches).
+    const audioRequiredForFullCompletion = config.features.audioAnalysis;
+    const clapRequiredForFullCompletion =
+        audioRequiredForFullCompletion && features.vibeEmbeddings;
     const artistProgress =
         artistTotal > 0 ? Math.round((artistCompleted / artistTotal) * 100) : 0;
     const trackTagsPending = Math.max(0, trackTotal - trackTagsEnriched);
@@ -1774,8 +1779,10 @@ export async function getEnrichmentProgress() {
         coreComplete, // True when artists + track tags are done
         isFullyComplete:
             coreComplete &&
-            audioPending === 0 &&
-            audioProcessing === 0 &&
+            (
+                !audioRequiredForFullCompletion ||
+                (audioPending === 0 && audioProcessing === 0)
+            ) &&
             (
                 !clapRequiredForFullCompletion ||
                 (
