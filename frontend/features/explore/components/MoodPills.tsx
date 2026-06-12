@@ -12,6 +12,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { AudioWaveform, Loader2 } from "lucide-react";
 import { api, type MoodType, type MoodBucketPreset } from "@/lib/api";
+import { useFeatures } from "@/lib/features-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import type { Track } from "@/lib/audio-state-context";
 import { useQueryClient } from "@tanstack/react-query";
@@ -38,6 +39,9 @@ const MOOD_PILLS: {
  * Renders a horizontally scrollable row of mood gradient pills.
  */
 export function MoodPills() {
+    // Mood mixes hit /api/mixes/* (autoPlaylists flag); the Vibe Map page is
+    // gated behind the audioAnalysis flag.
+    const { audioAnalysis, autoPlaylists } = useFeatures();
     const { playTracks } = useAudioControls();
     const queryClient = useQueryClient();
     const [presets, setPresets] = useState<MoodBucketPreset[]>([]);
@@ -45,6 +49,7 @@ export function MoodPills() {
     const [generating, setGenerating] = useState<MoodType | null>(null);
 
     useEffect(() => {
+        if (!autoPlaylists) return;
         api.getMoodBucketPresets()
             .then((data) => {
                 setPresets(data);
@@ -54,7 +59,7 @@ export function MoodPills() {
                 sharedFrontendLogger.error("Failed to load mood presets:", error);
                 setPresetsLoaded(true);
             });
-    }, []);
+    }, [autoPlaylists]);
 
     const getTrackCount = (mood: MoodType): number => {
         const preset = presets.find((p) => p.id === mood);
@@ -111,9 +116,11 @@ export function MoodPills() {
         }
     };
 
+    if (!autoPlaylists && !audioAnalysis) return null;
+
     return (
         <div className="flex flex-wrap gap-2">
-            {MOOD_PILLS.map(({ mood, label, gradient }) => {
+            {autoPlaylists && MOOD_PILLS.map(({ mood, label, gradient }) => {
                 const isGenerating = generating === mood;
                 const trackCount = getTrackCount(mood);
                 const isDisabled = !presetsLoaded || trackCount < 5;
@@ -140,7 +147,7 @@ export function MoodPills() {
                     </button>
                 );
             })}
-            <Link
+            {audioAnalysis && <Link
                 href="/vibe"
                 title="Vibe Map"
                 className="
@@ -153,7 +160,7 @@ export function MoodPills() {
             >
                 <AudioWaveform className="w-3.5 h-3.5" />
                 Vibe Map
-            </Link>
+            </Link>}
         </div>
     );
 }

@@ -29,6 +29,16 @@ const state = {
     isCommunityPlaylistsLoading: false,
 };
 
+const featuresState = {
+    musicCNN: false,
+    vibeEmbeddings: false,
+    audioAnalysis: true,
+    discovery: true,
+    autoPlaylists: true,
+    showVersion: false,
+    loading: false,
+};
+
 const marker = (label: string) => {
     const Component = () => React.createElement("div", null, label);
     Component.displayName = `Mock${label.replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -36,6 +46,12 @@ const marker = (label: string) => {
 };
 
 const Icon = () => React.createElement("i");
+
+mock.module("@/lib/features-context", {
+    namedExports: {
+        useFeatures: () => featuresState,
+    },
+});
 
 mock.module("@/features/home/hooks/useHomeData", {
     namedExports: {
@@ -137,6 +153,7 @@ mock.module("lucide-react", {
 });
 
 beforeEach(() => {
+    featuresState.autoPlaylists = true;
     state.isLoading = false;
     state.isRefreshingMixes = false;
     state.recentlyListened = [{ id: "listen-1" }];
@@ -233,5 +250,14 @@ test("home page hides Recommended For You when empty", async () => {
     const html = renderToStaticMarkup(React.createElement(HomePage));
 
     assert.doesNotMatch(html, /Recommended For You/);
+});
+
+test("home page hides the mixes Refresh button when autoPlaylists is disabled", async () => {
+    featuresState.autoPlaylists = false;
+    const HomePage = (await import("../../app/page")).default;
+    const html = renderToStaticMarkup(React.createElement(HomePage));
+
+    assert.match(html, /Made For You/);
+    assert.doesNotMatch(html, /Refresh/);
 });
 

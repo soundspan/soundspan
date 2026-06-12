@@ -8,6 +8,7 @@ import { RefreshCw, Heart, Zap } from "lucide-react";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
 import { MixCard } from "@/components/MixCard";
+import { useFeatures } from "@/lib/features-context";
 import { SectionHeader } from "@/features/home/components/SectionHeader";
 import { StaticPlaylistCard } from "@/features/home/components/StaticPlaylistCard";
 import type { Mix } from "@/features/home/types";
@@ -34,6 +35,9 @@ export function MadeForYouSection({
     isRefreshingMixes,
     handleRefreshMixes,
 }: MadeForYouSectionProps) {
+    // Mix refresh hits /api/mixes/refresh, which is gated behind the
+    // autoPlaylists feature flag — hide the action when the flag is off.
+    const { autoPlaylists } = useFeatures();
     const hasMadeForYou = likedSummary !== null || discoverWeekly !== null || mixes.length > 0;
 
     if (!hasMadeForYou) return null;
@@ -43,22 +47,24 @@ export function MadeForYouSection({
             <SectionHeader
                 title="Made For You"
                 rightAction={
-                    <button
-                        onClick={handleRefreshMixes}
-                        disabled={isRefreshingMixes}
-                        className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-400 hover:text-white transition-colors font-semibold group bg-white/5 hover:bg-white/10 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isRefreshingMixes ? (
-                            <GradientSpinner size="sm" />
-                        ) : (
-                            <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
-                        )}
-                        <span className="hidden sm:inline">
-                            {isRefreshingMixes
-                                ? "Refreshing..."
-                                : "Refresh"}
-                        </span>
-                    </button>
+                    autoPlaylists ? (
+                        <button
+                            onClick={handleRefreshMixes}
+                            disabled={isRefreshingMixes}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-400 hover:text-white transition-colors font-semibold group bg-white/5 hover:bg-white/10 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isRefreshingMixes ? (
+                                <GradientSpinner size="sm" />
+                            ) : (
+                                <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+                            )}
+                            <span className="hidden sm:inline">
+                                {isRefreshingMixes
+                                    ? "Refreshing..."
+                                    : "Refresh"}
+                            </span>
+                        </button>
+                    ) : undefined
                 }
             />
                 <HorizontalCarousel>

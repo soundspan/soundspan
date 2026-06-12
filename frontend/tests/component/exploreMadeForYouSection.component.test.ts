@@ -18,6 +18,16 @@ const state = {
     isRefreshingMixes: false,
 };
 
+const featuresState = {
+    musicCNN: false,
+    vibeEmbeddings: false,
+    audioAnalysis: true,
+    discovery: true,
+    autoPlaylists: true,
+    showVersion: false,
+    loading: false,
+};
+
 const marker = (label: string) => {
     const Component = () => React.createElement("div", null, label);
     Component.displayName = `Mock${label.replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -25,6 +35,12 @@ const marker = (label: string) => {
 };
 
 const Icon = () => React.createElement("i");
+
+mock.module("@/lib/features-context", {
+    namedExports: {
+        useFeatures: () => featuresState,
+    },
+});
 
 mock.module("@/features/home/components/SectionHeader", {
     namedExports: {
@@ -77,6 +93,7 @@ mock.module("lucide-react", {
 });
 
 beforeEach(() => {
+    featuresState.autoPlaylists = true;
     state.likedSummary = { total: 42, coverUrl: "/covers/liked.jpg" };
     state.discoverWeekly = {
         weekStart: "2026-02-24",
@@ -222,5 +239,26 @@ test("MadeForYouSection shows spinner and Refreshing text when refreshing mixes"
     assert.match(html, /gradient-spinner/);
     assert.match(html, /Refreshing\.\.\./);
     assert.match(html, /disabled/);
+});
+
+test("MadeForYouSection hides the Refresh button when autoPlaylists is disabled", async () => {
+    featuresState.autoPlaylists = false;
+    const { MadeForYouSection } = await import(
+        "../../features/explore/components/MadeForYouSection"
+    );
+    const html = renderToStaticMarkup(
+        React.createElement(MadeForYouSection, {
+            likedSummary: state.likedSummary,
+            discoverWeekly: state.discoverWeekly,
+            mixes: [],
+            isRefreshingMixes: false,
+            handleRefreshMixes: async () => undefined,
+        })
+    );
+
+    assert.match(html, /Made For You/);
+    assert.match(html, /My Liked/);
+    assert.doesNotMatch(html, /Refresh/);
+    assert.doesNotMatch(html, /<button/);
 });
 
