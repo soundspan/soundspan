@@ -4,6 +4,15 @@ All notable changes to soundspan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Coarse feature flags for the ML/recommendation subsystems, all defaulting ON: `AUDIO_ANALYSIS_ENABLED` (audio analysis queueing, mood buckets, `/api/analysis`, `/api/vibe`), `DISCOVERY_ENABLED` (Discover Weekly cron/processors, `/api/discover`, `/api/recommendations`), and `AUTO_PLAYLISTS_ENABLED` (Made For You mixes, `/api/mixes`). Disabled prefixes return `404` with `code: FEATURE_DISABLED`, and the matching background workers are not registered.
+- `GET /api/system/features` now reports the configured `audioAnalysis`, `discovery`, and `autoPlaylists` flags alongside the detection-based fields; the frontend hides the corresponding home sections, pages (`/discover`, `/mix/[id]`, `/vibe`), and TV Discovery nav link when a flag is off.
+- Helm chart values `config.features.audioAnalysis` / `config.features.discovery` / `config.features.autoPlaylists` (default `true`) that render the new env vars on the backend, backend-worker, and AIO workloads.
+
 ## [1.5.0] - 2026-03-27
 
 ### Added
