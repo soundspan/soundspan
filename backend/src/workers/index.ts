@@ -33,6 +33,7 @@ import { config } from "../config";
 import { prisma } from "../utils/db";
 import {
     startDiscoverWeeklyCron,
+    stopDiscoverWeeklyCron,
     processDiscoverCronTick,
 } from "./discoverCron";
 import { runDataIntegrityCheck } from "./dataIntegrity";
@@ -1081,6 +1082,26 @@ if (config.features.discovery) {
     startDiscoverWeeklyCron();
     logger.debug("Discover Weekly scheduler registered");
 } else {
+    // Remove the repeatable cron job persisted in Redis by a previous run with
+    // the flag on, so no stale schedule lingers (or replays as a backlog the
+    // moment the flag is re-enabled).
+    stopDiscoverWeeklyCron();
+    void discoverQueue
+        .getJobCounts()
+        .then((counts) => {
+            const backlog = (counts.waiting ?? 0) + (counts.delayed ?? 0);
+            if (backlog > 0) {
+                logger.warn(
+                    `[Features] Discovery disabled with ${backlog} discover job(s) still in Redis; they will not be processed until DISCOVERY_ENABLED=true`
+                );
+            }
+        })
+        .catch((error: any) => {
+            logger.warn(
+                "[Features] Failed to inspect leftover discover queue backlog:",
+                error.message || error
+            );
+        });
     logger.info(
         "[Features] Discovery disabled (DISCOVERY_ENABLED=false); Discover Weekly scheduler not registered"
     );
