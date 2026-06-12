@@ -1,7 +1,7 @@
 // soundspan Service Worker
 const CACHE_NAME = 'soundspan-v1';
-const IMAGE_CACHE_NAME = 'soundspan-images-v2';
-const IMAGE_METADATA_CACHE_NAME = 'soundspan-images-metadata-v1';
+const IMAGE_CACHE_NAME = 'soundspan-images-v3';
+const IMAGE_METADATA_CACHE_NAME = 'soundspan-images-metadata-v2';
 const MAX_IMAGE_CACHE_ENTRIES = 2000;
 const MAX_CONCURRENT_IMAGE_REQUESTS = 4;
 const REQUEST_DELAY_MS = 10;
@@ -30,6 +30,21 @@ const imageRequestQueue = [];
  */
 function isImageRoute(pathname) {
   return IMAGE_PATTERNS.some(pattern => pattern.test(pathname));
+}
+
+/**
+ * Build a stable cache key for image requests by stripping the rotating
+ * auth token query param (it rotates daily and would otherwise invalidate
+ * the whole art cache every day). Size/format params stay in the key.
+ * The original request (with token) is still used for the network fetch.
+ */
+function getImageCacheKey(request, url) {
+  if (!url.searchParams.has('token')) {
+    return request;
+  }
+  const keyUrl = new URL(url.toString());
+  keyUrl.searchParams.delete('token');
+  return new Request(keyUrl.toString(), { headers: request.headers });
 }
 
 /**
@@ -85,10 +100,10 @@ async function isImageCacheEntryFresh(request) {
  */
 function processImageQueue() {
   while (activeImageRequests < MAX_CONCURRENT_IMAGE_REQUESTS && imageRequestQueue.length > 0) {
-    const { request, resolve, reject } = imageRequestQueue.shift();
+    const { request, cacheKey, resolve, reject } = imageRequestQueue.shift();
     activeImageRequests++;
 
-    fetchAndCacheImage(request)
+    fetchAndCacheImage(request, cacheKey)
       .then(resolve)
       .catch(reject)
       .finally(() => {
@@ -100,9 +115,10 @@ function processImageQueue() {
 }
 
 /**
- * Fetch image from network and cache it
+ * Fetch image from network (with token) and cache it under the
+ * token-stripped cache key. Only 200 responses are cached.
  */
-async function fetchAndCacheImage(request) {
+async function fetchAndCacheImage(request, cacheKey) {
   const cache = await caches.open(IMAGE_CACHE_NAME);
 
   try {
@@ -111,8 +127,8 @@ async function fetchAndCacheImage(request) {
     // Cache successful responses
     if (networkResponse.status === 200) {
       // Clone before caching (response can only be consumed once)
-      cache.put(request, networkResponse.clone());
-      setImageCachedAt(request);
+      cache.put(cacheKey, networkResponse.clone());
+      setImageCachedAt(cacheKey);
 
       // Trim cache in background (don't block response)
       trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES);
@@ -128,9 +144,9 @@ async function fetchAndCacheImage(request) {
 /**
  * Queue an image request with throttling
  */
-function queueImageRequest(request) {
+function queueImageRequest(request, cacheKey) {
   return new Promise((resolve, reject) => {
-    imageRequestQueue.push({ request, resolve, reject });
+    imageRequestQueue.push({ request, cacheKey, resolve, reject });
     processImageQueue();
   });
 }
@@ -203,20 +219,24 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const cache = await caches.open(IMAGE_CACHE_NAME);
         const metadataCache = await caches.open(IMAGE_METADATA_CACHE_NAME);
+        // Key the cache on the token-stripped URL so daily token rotation
+        // doesn't re-download the whole art cache.
+        const cacheKey = getImageCacheKey(request, url);
 
-        // Try cache first
-        const cachedResponse = await cache.match(request);
+        // Try cache first (ignoreVary: the same browser always sends the
+        // same Accept header for image requests)
+        const cachedResponse = await cache.match(cacheKey, { ignoreVary: true });
         if (cachedResponse) {
-          const isFresh = await isImageCacheEntryFresh(request);
+          const isFresh = await isImageCacheEntryFresh(cacheKey);
           if (isFresh) {
             return cachedResponse;
           }
-          await cache.delete(request);
-          await metadataCache.delete(request);
+          await cache.delete(cacheKey, { ignoreVary: true });
+          await metadataCache.delete(cacheKey, { ignoreVary: true });
         }
 
         // Not in cache, queue the request with throttling
-        return queueImageRequest(request);
+        return queueImageRequest(request, cacheKey);
       })()
     );
     return;
