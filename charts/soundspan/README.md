@@ -262,6 +262,31 @@ audioAnalyzerClap:
 > Unlike the sidecars above, these analyzer deployments are only used in Individual mode.
 > In AIO mode, audio analysis is built into the single AIO container.
 
+### Feature Flags (ML / Recommendations / Auto Playlists)
+
+Coarse feature flags for the ML/recommendation subsystems. All default to
+`true` (current behavior). They render as `AUDIO_ANALYSIS_ENABLED`,
+`DISCOVERY_ENABLED`, and `AUTO_PLAYLISTS_ENABLED` on the backend,
+backend-worker, and AIO workloads (per-workload `env` maps override them).
+
+```yaml
+config:
+  features:
+    audioAnalysis: true   # audio analysis queueing (Essentia + CLAP), mood buckets, /api/analysis, /api/vibe
+    discovery: true       # Discover Weekly cron/processor, /api/discover, /api/recommendations
+    autoPlaylists: true   # Made For You mixes, /api/mixes
+```
+
+When a flag is `false`, the backend does not mount the corresponding API
+routes (they return `404` with `code: FEATURE_DISABLED`) and skips the
+matching background workers.
+
+> `config.features.audioAnalysis` only controls the backend side (queueing and
+> consumption of analysis work). The analyzer Deployments are still controlled
+> by `audioAnalyzer.enabled` / `audioAnalyzerClap.enabled` — when setting
+> `config.features.audioAnalysis=false`, also disable the analyzer sidecars
+> since no new work will be queued for them.
+
 ### External Database / Redis (Individual Mode)
 
 ```yaml
@@ -469,6 +494,9 @@ When `deploymentMode=individual` and `backendWorker.enabled=true`, the chart inj
 
 | Env Var | Helm Value | Required | Default |
 | --- | --- | --- | --- |
+| `AUDIO_ANALYSIS_ENABLED` | `config.features.audioAnalysis` | No | `true` |
+| `DISCOVERY_ENABLED` | `config.features.discovery` | No | `true` |
+| `AUTO_PLAYLISTS_ENABLED` | `config.features.autoPlaylists` | No | `true` |
 | `LIDARR_ENABLED` | `config.lidarrEnabled` | No | `false` |
 | `LIDARR_URL` | `config.lidarrUrl` | If Lidarr enabled | none |
 | `LIDARR_API_KEY` | `config.lidarrApiKey` | If Lidarr enabled | none |

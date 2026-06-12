@@ -622,6 +622,22 @@ config:
   deezerApiKey: ""
   # -- Set to true to expose API docs publicly
   docsPublic: false
+  # -- Coarse feature flags for ML/recommendation subsystems (all default ON).
+  #    Rendered as AUDIO_ANALYSIS_ENABLED / DISCOVERY_ENABLED /
+  #    AUTO_PLAYLISTS_ENABLED on the backend, backend-worker, and AIO workloads.
+  features:
+    # -- Backend queueing/consumption of audio analysis work (Essentia + CLAP),
+    #    mood-bucket worker, /api/analysis and /api/vibe routes.
+    #    Note: the analyzers' Deployments are still controlled by
+    #    audioAnalyzer.enabled / audioAnalyzerClap.enabled; setting this false
+    #    stops the backend from queueing analysis work, so the analyzer
+    #    sidecars should also be disabled.
+    audioAnalysis: true
+    # -- Discover Weekly cron/processor, /api/discover and /api/recommendations
+    #    routes, and the discovery auto-download lifecycle.
+    discovery: true
+    # -- Made For You mixes (on-demand programmatic playlists, /api/mixes).
+    autoPlaylists: true
   # -- Enables Socket.IO Redis adapter for Listen Together cross-pod fanout.
   #    Keep true for multi-replica backend API deployments.
   listenTogetherRedisAdapterEnabled: true
