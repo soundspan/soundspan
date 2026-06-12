@@ -25,7 +25,7 @@ export interface SyncQueueItem {
     album: { id: string; title: string; coverArt: string | null };
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "tidal" | "youtube";
+    streamSource?: "tidal" | "youtube" | "youtube-direct";
     tidalTrackId?: number;
     youtubeVideoId?: string;
 }
