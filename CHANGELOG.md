@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Player queue panels (overlay player and `/queue` page) render episode entries with podcast cover art and show titles, and can play or remove them like tracks.
 - Persisted playback state (server and local) round-trips mixed queues; queues saved by older clients are migrated as music tracks automatically.
 
+### Fixed
+
+- Playing an episode from the podcast page while a queue is active now merges the episode (plus its not-yet-queued newer episodes) into the queue after the current item instead of replacing the whole queue, so queued music survives.
+- Skipping away from an episode before its saved-progress lookup finishes no longer seeks (and seek-locks) the newly playing item to that episode's resume position.
+
 ## [1.5.0] - 2026-03-27
 
 ### Added

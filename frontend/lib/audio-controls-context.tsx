@@ -30,7 +30,11 @@ import {
     type ListenTogetherSessionSnapshot,
 } from "./listen-together-session";
 import { toast } from "sonner";
-import { computePlayNowInsertion } from "./queue-utils";
+import {
+    computePlayNowInsertion,
+    computePodcastContextPlacement,
+} from "./queue-utils";
+import { resolveEpisodeResumeSeek } from "./audio/episode-resume";
 import {
     buildEpisodeQueueItem,
     episodeQueueItemFromPodcast,
@@ -352,6 +356,21 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         queueRef.current = state.queue;
     }, [state.queue]);
 
+    // Identity of the media the player is currently on, readable from async
+    // callbacks. Guards late progress-fetch resolutions (see
+    // startQueueItemAtIndex) so they can never seek media the user has
+    // already skipped away from.
+    const activeQueueMediaIdRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        activeQueueMediaIdRef.current =
+            state.playbackType === "podcast"
+                ? (state.currentPodcast?.id ?? null)
+                : state.playbackType === "track"
+                  ? (state.currentTrack?.id ?? null)
+                  : null;
+    }, [state.playbackType, state.currentPodcast, state.currentTrack]);
+
     // Ref to track repeat-one timeout for cleanup
     const repeatTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -668,53 +687,43 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             state.setCurrentAudiobook(null);
             state.setRepeatOneCount(0);
 
-            if (options?.episodeQueue && options.episodeQueue.length > 0) {
-                // Explicit episode context (e.g. podcast page): replace the
-                // queue with the provided episode items, like playTracks does
-                // for albums/playlists.
-                const items = options.episodeQueue;
-                const startIndex = Math.max(
-                    0,
-                    items.findIndex((item) => item.id === episodeItem.id)
-                );
-                state.setQueue(items);
-                state.setCurrentIndex(startIndex);
+            // The episode joins the existing mixed queue instead of clearing
+            // it: replace only when the queue is empty, jump to the episode
+            // when it is already queued, otherwise insert the episode plus
+            // any not-yet-queued context episodes right after the current
+            // item so music queued behind it survives.
+            const placement = computePodcastContextPlacement({
+                queue: state.queue,
+                currentIndex: state.currentIndex,
+                isShuffle: state.isShuffle,
+                shuffleIndices: state.shuffleIndices,
+                selected: episodeItem,
+                context: options?.episodeQueue ?? [],
+            });
+            if (placement.action === "replace") {
+                state.setQueue(placement.items);
+                state.setCurrentIndex(placement.startIndex);
                 state.setShuffleIndices(
                     state.isShuffle
-                        ? generateShuffleIndices(items.length, startIndex)
+                        ? generateShuffleIndices(
+                              placement.items.length,
+                              placement.startIndex
+                          )
                         : []
                 );
-            } else if (state.queue.length === 0) {
-                state.setQueue([episodeItem]);
-                state.setCurrentIndex(0);
-                state.setShuffleIndices(state.isShuffle ? [0] : []);
+            } else if (placement.action === "jump") {
+                state.setCurrentIndex(placement.index);
             } else {
-                // Keep the existing mixed queue: jump to the episode if it is
-                // already queued, otherwise insert it right after the current
-                // item (playNow semantics) so music queued behind it survives.
-                const existingIndex = state.queue.findIndex(
-                    (item) =>
-                        isEpisodeQueueItem(item) && item.id === episodeItem.id
-                );
-                if (existingIndex >= 0) {
-                    state.setCurrentIndex(existingIndex);
-                } else {
-                    const { insertAt, newShuffleIndices } =
-                        computePlayNowInsertion({
-                            queue: state.queue,
-                            currentIndex: state.currentIndex,
-                            isShuffle: state.isShuffle,
-                            shuffleIndices: state.shuffleIndices,
-                        });
-                    state.setQueue((prev) => {
-                        const newQueue = [...prev];
-                        newQueue.splice(insertAt, 0, episodeItem);
-                        return newQueue;
-                    });
-                    state.setCurrentIndex(insertAt);
-                    if (state.isShuffle && newShuffleIndices.length > 0) {
-                        state.setShuffleIndices(newShuffleIndices);
-                    }
+                const { insertAt, items, newCurrentIndex, newShuffleIndices } =
+                    placement;
+                state.setQueue((prev) => {
+                    const newQueue = [...prev];
+                    newQueue.splice(insertAt, 0, ...items);
+                    return newQueue;
+                });
+                state.setCurrentIndex(newCurrentIndex);
+                if (state.isShuffle && newShuffleIndices.length > 0) {
+                    state.setShuffleIndices(newShuffleIndices);
                 }
             }
 
@@ -743,6 +752,9 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
     const startQueueItemAtIndex = useCallback(
         (index: number, item: QueueItem) => {
             const playbackState = playbackRef.current;
+            // Record the new active media synchronously so any in-flight
+            // progress fetch from a previous episode resolves as stale.
+            activeQueueMediaIdRef.current = item.id;
             state.setRepeatOneCount(0);
 
             if (isEpisodeQueueItem(item)) {
@@ -775,15 +787,20 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
                                 ? { ...prev, progress }
                                 : prev
                         );
-                        const resumeAt = clampPlaybackTimeToUpperBound(
-                            progress.currentTime,
-                            item.duration || progress.currentTime
-                        );
-                        if (resumeAt > 0) {
+                        // The fetch may resolve after the user skipped to
+                        // other media; never seek (or seek-lock) the
+                        // now-playing item to this episode's saved position.
+                        const resume = resolveEpisodeResumeSeek({
+                            itemId: item.id,
+                            activeMediaId: activeQueueMediaIdRef.current,
+                            progress,
+                            duration: item.duration,
+                        });
+                        if (resume) {
                             const currentPlayback = playbackRef.current;
-                            currentPlayback.lockSeek(resumeAt);
-                            currentPlayback.setCurrentTime(resumeAt);
-                            audioSeekEmitter.emit(resumeAt);
+                            currentPlayback.lockSeek(resume.resumeAt);
+                            currentPlayback.setCurrentTime(resume.resumeAt);
+                            audioSeekEmitter.emit(resume.resumeAt);
                         }
                     })
                     .catch(() => {
