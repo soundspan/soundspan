@@ -16,7 +16,10 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { requireAuth, requireAuthOrToken } from "../middleware/auth";
-import { youtubeDownloadService } from "../services/youtubeDownload";
+import {
+    youtubeDownloadService,
+    watchYouTubeDownloadJobUntilTerminal,
+} from "../services/youtubeDownload";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -180,7 +183,11 @@ const downloadBodySchema = z.object({
  *                 enum: [LOW, MEDIUM, HIGH, LOSSLESS]
  *     responses:
  *       202:
- *         description: Download job accepted; poll GET /api/youtube/download/{jobId}
+ *         description: >
+ *           Download job accepted. The backend watches the job server-side
+ *           and queues a library scan when it completes (or immediately when
+ *           the file already existed on disk); poll
+ *           GET /api/youtube/download/{jobId} for UI progress.
  *       400:
  *         description: Invalid request body
  *       502:
@@ -189,6 +196,7 @@ const downloadBodySchema = z.object({
 router.post("/download", requireAuth, async (req: Request, res: Response) => {
     try {
         const { videoId, format, quality } = downloadBodySchema.parse(req.body);
+        const userId = req.user!.id;
 
         logger.info(
             `[YouTube Route] Download requested: ${videoId} (${format}, ${quality})`
@@ -199,6 +207,15 @@ router.post("/download", requireAuth, async (req: Request, res: Response) => {
             format,
             quality
         );
+
+        if (job.status === "completed") {
+            // Idempotency hit — the file is already on disk, but it may
+            // never have been imported (failed scan, out-of-band file), so
+            // always queue a scan.
+            await enqueueLibraryScanForDownloadJob(job.jobId, userId);
+        } else {
+            watchDownloadJobAndQueueScan(job.jobId, userId);
+        }
 
         return res.status(202).json(job);
     } catch (err: any) {
@@ -217,10 +234,66 @@ router.post("/download", requireAuth, async (req: Request, res: Response) => {
     }
 });
 
-// Jobs that have already triggered a library scan, so repeated status polls
-// enqueue the scan exactly once per job. In-memory is fine: jobs themselves
-// are in-memory on the sidecar and lost together on restart.
+// Jobs that have already triggered a library scan, so the server-side
+// watcher and repeated status polls enqueue the scan exactly once per job.
+// In-memory is fine: jobs themselves are in-memory on the sidecar and lost
+// together on restart.
 const scannedDownloadJobIds = new Set<string>();
+
+/**
+ * Queue a library scan for a completed download job exactly once. Removes
+ * the job from the dedupe set again when the enqueue fails so a later
+ * caller (watcher retry or status poll) can try again.
+ */
+async function enqueueLibraryScanForDownloadJob(
+    jobId: string,
+    userId: string
+): Promise<void> {
+    if (scannedDownloadJobIds.has(jobId)) {
+        return;
+    }
+    scannedDownloadJobIds.add(jobId);
+    try {
+        const { scanQueue } = await import("../workers/queues");
+        await scanQueue.add("scan", {
+            userId,
+            source: "youtube-download",
+        });
+        logger.debug(
+            `[YouTube Route] Library scan queued after download job ${jobId}`
+        );
+    } catch (scanErr: any) {
+        // Allow a later watcher tick / status poll to retry the enqueue.
+        scannedDownloadJobIds.delete(jobId);
+        logger.warn(
+            `[YouTube Route] Failed to queue library scan: ${scanErr.message}`
+        );
+    }
+}
+
+/**
+ * Fire-and-forget server-side watch of a download job. Guarantees the
+ * library scan fires on completion even when the browser that started the
+ * download stopped polling (navigation, tab close) — important for
+ * multi-hour downloads.
+ */
+function watchDownloadJobAndQueueScan(jobId: string, userId: string): void {
+    void (async () => {
+        try {
+            const outcome = await watchYouTubeDownloadJobUntilTerminal(
+                jobId,
+                (id) => youtubeDownloadService.getDownloadJobStatus(id)
+            );
+            if (outcome === "completed") {
+                await enqueueLibraryScanForDownloadJob(jobId, userId);
+            }
+        } catch (watchErr: any) {
+            logger.warn(
+                `[YouTube Route] Download job watcher crashed for ${jobId}: ${watchErr.message}`
+            );
+        }
+    })();
+}
 
 /**
  * @openapi
@@ -228,9 +301,10 @@ const scannedDownloadJobIds = new Set<string>();
  *   get:
  *     summary: Get YouTube download job status
  *     description: >
- *       Proxies the sidecar's job store. When a poll first observes the
- *       job as completed, a library scan is enqueued (once per job) so the
- *       downloaded file appears in the library.
+ *       Proxies the sidecar's job store for UI progress. The library scan
+ *       is normally queued by the server-side job watcher; as a fallback
+ *       (e.g. after a backend restart mid-download), a poll that observes
+ *       the job as completed also queues the scan (once per job).
  *     tags: [YouTube]
  *     parameters:
  *       - in: path
@@ -256,27 +330,11 @@ router.get(
                 jobId
             );
 
-            if (
-                job.status === "completed" &&
-                !scannedDownloadJobIds.has(job.jobId)
-            ) {
-                scannedDownloadJobIds.add(job.jobId);
-                try {
-                    const { scanQueue } = await import("../workers/queues");
-                    await scanQueue.add("scan", {
-                        userId: req.user!.id,
-                        source: "youtube-download",
-                    });
-                    logger.debug(
-                        `[YouTube Route] Library scan queued after download job ${job.jobId}`
-                    );
-                } catch (scanErr: any) {
-                    // Allow a later poll to retry the enqueue.
-                    scannedDownloadJobIds.delete(job.jobId);
-                    logger.warn(
-                        `[YouTube Route] Failed to queue library scan: ${scanErr.message}`
-                    );
-                }
+            if (job.status === "completed") {
+                await enqueueLibraryScanForDownloadJob(
+                    job.jobId,
+                    req.user!.id
+                );
             }
 
             return res.json(job);

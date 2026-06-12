@@ -19,6 +19,7 @@ jest.mock("../../services/youtubeDownload", () => ({
         startDownload: jest.fn(),
         getDownloadJobStatus: jest.fn(),
     },
+    watchYouTubeDownloadJobUntilTerminal: jest.fn(),
 }));
 
 const scanQueue = {
@@ -29,12 +30,21 @@ jest.mock("../../workers/queues", () => ({
 }));
 
 import router from "../youtube";
-import { youtubeDownloadService } from "../../services/youtubeDownload";
+import {
+    youtubeDownloadService,
+    watchYouTubeDownloadJobUntilTerminal,
+} from "../../services/youtubeDownload";
 
 const mockGetVideoInfo = youtubeDownloadService.getVideoInfo as jest.Mock;
 const mockStartDownload = youtubeDownloadService.startDownload as jest.Mock;
 const mockGetDownloadJobStatus =
     youtubeDownloadService.getDownloadJobStatus as jest.Mock;
+const mockWatchJob = watchYouTubeDownloadJobUntilTerminal as jest.Mock;
+
+/** Flush fire-and-forget promise chains started by the handlers. */
+async function flushAsync() {
+    await new Promise((resolve) => setImmediate(resolve));
+}
 
 function getHandler(path: string, method: "get" | "post") {
     const layer = (router as any).stack.find(
@@ -156,11 +166,12 @@ describe("youtube routes runtime", () => {
     });
 
     describe("POST /download", () => {
-        it("starts a download job and returns 202 with the jobId", async () => {
+        it("starts a download job, returns 202, and watches it server-side", async () => {
             mockStartDownload.mockResolvedValue({
                 jobId: "job-accept",
                 status: "queued",
             });
+            mockWatchJob.mockReturnValue(new Promise(() => undefined));
             const req = {
                 body: { videoId: "dQw4w9WgXcQ", format: "mp3", quality: "HIGH" },
                 user: { id: "user-1" },
@@ -168,6 +179,7 @@ describe("youtube routes runtime", () => {
             const res = createRes();
 
             await downloadHandler(req, res);
+            await flushAsync();
 
             expect(mockStartDownload).toHaveBeenCalledWith(
                 "dQw4w9WgXcQ",
@@ -176,7 +188,95 @@ describe("youtube routes runtime", () => {
             );
             expect(res.statusCode).toBe(202);
             expect(res.body).toMatchObject({ jobId: "job-accept" });
-            // Scan is enqueued by the status poller, not at submit time
+            // The server-side watcher owns the scan trigger; the job is
+            // still running so nothing is enqueued yet.
+            expect(mockWatchJob).toHaveBeenCalledWith(
+                "job-accept",
+                expect.any(Function)
+            );
+            expect(scanQueue.add).not.toHaveBeenCalled();
+        });
+
+        it("enqueues the scan when the server-side watcher sees completion", async () => {
+            mockStartDownload.mockResolvedValue({
+                jobId: "job-watched",
+                status: "queued",
+            });
+            mockWatchJob.mockResolvedValue("completed");
+            scanQueue.add.mockResolvedValue(undefined);
+            const req = {
+                body: { videoId: "dQw4w9WgXcQ" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await downloadHandler(req, res);
+            await flushAsync();
+
+            expect(scanQueue.add).toHaveBeenCalledTimes(1);
+            expect(scanQueue.add).toHaveBeenCalledWith("scan", {
+                userId: "user-1",
+                source: "youtube-download",
+            });
+
+            // A later completed status poll must not enqueue a second scan.
+            mockGetDownloadJobStatus.mockResolvedValue({
+                jobId: "job-watched",
+                status: "completed",
+                progressPct: 100,
+                filePath: "/music/YouTube Downloads/x.mp3",
+                error: null,
+            });
+            const pollRes = createRes();
+            await statusHandler(
+                { params: { jobId: "job-watched" }, user: { id: "user-1" } } as any,
+                pollRes
+            );
+            expect(pollRes.statusCode).toBe(200);
+            expect(scanQueue.add).toHaveBeenCalledTimes(1);
+        });
+
+        it("enqueues a scan immediately when the file already existed", async () => {
+            mockStartDownload.mockResolvedValue({
+                jobId: "job-existing",
+                status: "completed",
+            });
+            scanQueue.add.mockResolvedValue(undefined);
+            const req = {
+                body: { videoId: "dQw4w9WgXcQ" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await downloadHandler(req, res);
+            await flushAsync();
+
+            expect(res.statusCode).toBe(202);
+            // The on-disk file may never have been imported (failed scan,
+            // out-of-band placement), so completion always queues a scan.
+            expect(scanQueue.add).toHaveBeenCalledTimes(1);
+            expect(scanQueue.add).toHaveBeenCalledWith("scan", {
+                userId: "user-1",
+                source: "youtube-download",
+            });
+            expect(mockWatchJob).not.toHaveBeenCalled();
+        });
+
+        it("does not enqueue a scan when the watcher reports failure", async () => {
+            mockStartDownload.mockResolvedValue({
+                jobId: "job-watch-fail",
+                status: "queued",
+            });
+            mockWatchJob.mockResolvedValue("failed");
+            const req = {
+                body: { videoId: "dQw4w9WgXcQ" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await downloadHandler(req, res);
+            await flushAsync();
+
             expect(scanQueue.add).not.toHaveBeenCalled();
         });
 

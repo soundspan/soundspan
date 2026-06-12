@@ -13,15 +13,15 @@ Scope:
 | Backend middleware | 4 | 7 | 7 | 0 | 100.0% |
 | Backend other | 10 | 1 | 1 | 0 | 100.0% |
 | Backend routes | 40 | 54 | 1 | 53 | 1.9% |
-| Backend services | 71 | 84 | 52 | 32 | 61.9% |
+| Backend services | 71 | 85 | 53 | 32 | 62.4% |
 | Backend utils | 31 | 79 | 57 | 22 | 72.2% |
 | Backend workers | 14 | 27 | 16 | 11 | 59.3% |
 | Frontend components | 73 | 76 | 11 | 65 | 14.5% |
 | Frontend features | 138 | 116 | 8 | 108 | 6.9% |
 | Frontend hooks | 25 | 89 | 59 | 30 | 66.3% |
-| Frontend lib | 56 | 86 | 28 | 58 | 32.6% |
+| Frontend lib | 57 | 87 | 29 | 58 | 33.3% |
 | Frontend other | 63 | 61 | 6 | 55 | 9.8% |
-| **Total** | **525** | **680** | **246** | **434** | **36.2%** |
+| **Total** | **526** | **682** | **248** | **434** | **36.4%** |
 
 ## Missing Exported Symbols (Top 250)
 
@@ -95,7 +95,7 @@ Scope:
 | Backend services | fetchExternalImage | backend/src/services/imageProxy.ts:96 |
 | Backend services | startPersistLoop | backend/src/services/listenTogether.ts:473 |
 | Backend services | stopPersistLoop | backend/src/services/listenTogether.ts:479 |
-| Backend services | GroupError | backend/src/services/listenTogetherManager.ts:135 |
+| Backend services | GroupError | backend/src/services/listenTogetherManager.ts:137 |
 | Backend services | setupListenTogetherSocket | backend/src/services/listenTogetherSocket.ts:404 |
 | Backend services | getListenTogetherIO | backend/src/services/listenTogetherSocket.ts:925 |
 | Backend services | shutdownListenTogetherSocket | backend/src/services/listenTogetherSocket.ts:929 |

@@ -59,6 +59,81 @@ export interface YtDownloadJobStatus {
     alreadyExisted: boolean;
 }
 
+/** Terminal outcome of a server-side download-job watch. */
+export type YtDownloadWatchOutcome =
+    | "completed"
+    | "failed"
+    | "gone"
+    | "timeout";
+
+/** Options for watchYouTubeDownloadJobUntilTerminal(). */
+export interface YtDownloadWatchOptions {
+    /** Delay between status polls (default 5s). */
+    intervalMs?: number;
+    /** Give up after this much watch time (default 6h, sized for long sets). */
+    timeoutMs?: number;
+    /** Injectable delay, for tests. */
+    sleep?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_WATCH_INTERVAL_MS = 5_000;
+const DEFAULT_WATCH_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+
+const defaultSleep = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Poll a sidecar download job server-side until it reaches a terminal
+ * state. This is what guarantees the post-download library scan fires even
+ * when no browser is still polling the status endpoint (e.g. the user
+ * navigated away during a multi-hour download).
+ *
+ * Transient status-fetch errors are tolerated until the timeout; a sidecar
+ * 404 means the job store was lost (restart) and resolves "gone".
+ */
+export async function watchYouTubeDownloadJobUntilTerminal(
+    jobId: string,
+    getStatus: (jobId: string) => Promise<YtDownloadJobStatus>,
+    options: YtDownloadWatchOptions = {}
+): Promise<YtDownloadWatchOutcome> {
+    const intervalMs = options.intervalMs ?? DEFAULT_WATCH_INTERVAL_MS;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_WATCH_TIMEOUT_MS;
+    const sleep = options.sleep ?? defaultSleep;
+
+    let elapsedMs = 0;
+    while (elapsedMs < timeoutMs) {
+        try {
+            const status = await getStatus(jobId);
+            if (status.status === "completed") {
+                return "completed";
+            }
+            if (status.status === "failed") {
+                logger.warn(
+                    `[YouTube Download] Watched job ${jobId} failed: ${status.error ?? "unknown error"}`
+                );
+                return "failed";
+            }
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                logger.warn(
+                    `[YouTube Download] Watched job ${jobId} disappeared (sidecar restart?)`
+                );
+                return "gone";
+            }
+            logger.debug(
+                `[YouTube Download] Transient status error while watching job ${jobId}: ${err.message}`
+            );
+        }
+        await sleep(intervalMs);
+        elapsedMs += intervalMs;
+    }
+
+    logger.warn(
+        `[YouTube Download] Gave up watching job ${jobId} after ${timeoutMs}ms`
+    );
+    return "timeout";
+}
+
 // ── Service ────────────────────────────────────────────────────────
 
 class YouTubeDownloadService {

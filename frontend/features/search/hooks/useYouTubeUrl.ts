@@ -146,9 +146,11 @@ export function useYouTubeUrl({
                 );
 
                 if (job.status === "completed") {
-                    // Idempotency hit — the file already exists on disk.
+                    // Idempotency hit — the file already exists on disk and
+                    // the backend has queued a library scan to make sure it
+                    // is imported.
                     setIsDownloading(false);
-                    toast.info("Already in your library", {
+                    toast.info("Already downloaded — scanning library", {
                         description: title,
                     });
                     return;

@@ -2992,7 +2992,8 @@ class ApiClient {
 
     /**
      * Poll the status of a YouTube download job started via
-     * downloadYouTube(). Completion triggers a backend library scan.
+     * downloadYouTube(). Used for UI progress only — the backend watches
+     * the job server-side and queues the library scan on completion.
      */
     async getYouTubeDownloadStatus(jobId: string): Promise<{
         jobId: string;

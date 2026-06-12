@@ -180,7 +180,7 @@ Scope:
 | `DELETE` | `/api/library/tracks/{id}` | `backend/src/routes/library.ts:4886` |
 | `DELETE` | `/api/lyrics/{trackId}` | `backend/src/routes/lyrics.ts:202` |
 | `DELETE` | `/api/offline/albums/{id}` | `backend/src/routes/offline.ts:335` |
-| `DELETE` | `/api/playback-state` | `backend/src/routes/playbackState.ts:412` |
+| `DELETE` | `/api/playback-state` | `backend/src/routes/playbackState.ts:421` |
 | `DELETE` | `/api/playlists/{id}` | `backend/src/routes/playlists.ts:551` |
 | `DELETE` | `/api/playlists/{id}/hide` | `backend/src/routes/playlists.ts:504` |
 | `DELETE` | `/api/playlists/{id}/items/{trackId}` | `backend/src/routes/playlists.ts:754` |
@@ -341,9 +341,9 @@ Scope:
 | `GET` | `/api/vibe/similar/{trackId}` | `backend/src/routes/vibe.ts:193` |
 | `GET` | `/api/vibe/status` | `backend/src/routes/vibe.ts:575` |
 | `GET` | `/api/webhooks/lidarr/verify` | `backend/src/routes/webhooks.ts:31` |
-| `GET` | `/api/youtube/download/{jobId}` | `backend/src/routes/youtube.ts:249` |
-| `GET` | `/api/youtube/info` | `backend/src/routes/youtube.ts:46` |
-| `GET` | `/api/youtube/stream/{videoId}` | `backend/src/routes/youtube.ts:93` |
+| `GET` | `/api/youtube/download/{jobId}` | `backend/src/routes/youtube.ts:323` |
+| `GET` | `/api/youtube/info` | `backend/src/routes/youtube.ts:49` |
+| `GET` | `/api/youtube/stream/{videoId}` | `backend/src/routes/youtube.ts:96` |
 | `GET` | `/api/ytmusic/album/{browseId}` | `backend/src/routes/youtubeMusic.ts:625` |
 | `GET` | `/api/ytmusic/artist/{channelId}` | `backend/src/routes/youtubeMusic.ts:667` |
 | `GET` | `/api/ytmusic/library/albums` | `backend/src/routes/youtubeMusic.ts:998` |
@@ -495,7 +495,7 @@ Scope:
 | `POST` | `/api/tidal-streaming/search` | `backend/src/routes/tidalStreaming.ts:557` |
 | `POST` | `/api/vibe/search` | `backend/src/routes/vibe.ts:365` |
 | `POST` | `/api/webhooks/lidarr` | `backend/src/routes/webhooks.ts:74` |
-| `POST` | `/api/youtube/download` | `backend/src/routes/youtube.ts:189` |
+| `POST` | `/api/youtube/download` | `backend/src/routes/youtube.ts:196` |
 | `POST` | `/api/ytmusic/auth/clear` | `backend/src/routes/youtubeMusic.ts:506` |
 | `POST` | `/api/ytmusic/auth/device-code` | `backend/src/routes/youtubeMusic.ts:295` |
 | `POST` | `/api/ytmusic/auth/device-code/poll` | `backend/src/routes/youtubeMusic.ts:351` |
@@ -536,7 +536,7 @@ Scope:
 | `DELETE` | `/api/library/artists/{id}` | `backend/src/routes/library.ts:5067` |
 | `DELETE` | `/api/library/tracks/{id}` | `backend/src/routes/library.ts:4862` |
 | `DELETE` | `/api/offline/albums/{id}` | `backend/src/routes/offline.ts:316` |
-| `DELETE` | `/api/playback-state` | `backend/src/routes/playbackState.ts:393` |
+| `DELETE` | `/api/playback-state` | `backend/src/routes/playbackState.ts:402` |
 | `DELETE` | `/api/playlists/{id}` | `backend/src/routes/playlists.ts:527` |
 | `DELETE` | `/api/playlists/{id}/hide` | `backend/src/routes/playlists.ts:475` |
 | `DELETE` | `/api/playlists/{id}/items/{trackId}` | `backend/src/routes/playlists.ts:724` |
@@ -684,9 +684,9 @@ Scope:
 | `GET` | `/api/vibe/similar/{trackId}` | `backend/src/routes/vibe.ts:123` |
 | `GET` | `/api/vibe/status` | `backend/src/routes/vibe.ts:548` |
 | `GET` | `/api/webhooks/lidarr/verify` | `backend/src/routes/webhooks.ts:23` |
-| `GET` | `/api/youtube/download/{jobId}` | `backend/src/routes/youtube.ts:228` |
-| `GET` | `/api/youtube/info` | `backend/src/routes/youtube.ts:33` |
-| `GET` | `/api/youtube/stream/{videoId}` | `backend/src/routes/youtube.ts:73` |
+| `GET` | `/api/youtube/download/{jobId}` | `backend/src/routes/youtube.ts:301` |
+| `GET` | `/api/youtube/info` | `backend/src/routes/youtube.ts:36` |
+| `GET` | `/api/youtube/stream/{videoId}` | `backend/src/routes/youtube.ts:76` |
 | `GET` | `/api/ytmusic/album/{browseId}` | `backend/src/routes/youtubeMusic.ts:606` |
 | `GET` | `/api/ytmusic/artist/{channelId}` | `backend/src/routes/youtubeMusic.ts:648` |
 | `GET` | `/api/ytmusic/library/albums` | `backend/src/routes/youtubeMusic.ts:978` |
@@ -834,7 +834,7 @@ Scope:
 | `POST` | `/api/tidal-streaming/search` | `backend/src/routes/tidalStreaming.ts:522` |
 | `POST` | `/api/vibe/search` | `backend/src/routes/vibe.ts:307` |
 | `POST` | `/api/webhooks/lidarr` | `backend/src/routes/webhooks.ts:45` |
-| `POST` | `/api/youtube/download` | `backend/src/routes/youtube.ts:163` |
+| `POST` | `/api/youtube/download` | `backend/src/routes/youtube.ts:166` |
 | `POST` | `/api/ytmusic/auth/clear` | `backend/src/routes/youtubeMusic.ts:493` |
 | `POST` | `/api/ytmusic/auth/device-code` | `backend/src/routes/youtubeMusic.ts:280` |
 | `POST` | `/api/ytmusic/auth/device-code/poll` | `backend/src/routes/youtubeMusic.ts:326` |
