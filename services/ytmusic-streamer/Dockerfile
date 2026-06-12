@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY services/ytmusic-streamer/app.py ./app.py
+COPY services/ytmusic-streamer/yt_download.py ./yt_download.py
 COPY services/common ./common
 
 # Create writable directories and non-root user
