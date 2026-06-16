@@ -70,6 +70,18 @@ _VIDEO_ID_PATTERNS = [
 ]
 
 
+def _match_video_id(url: str) -> Optional[str]:
+    """Return the 11-char video ID for a single-video URL/bare ID, else None."""
+    for pattern in _VIDEO_ID_PATTERNS:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    stripped = url.strip()
+    if re.fullmatch(r"[a-zA-Z0-9_-]{11}", stripped):
+        return stripped
+    return None
+
+
 def extract_video_id(url: str) -> str:
     """
     Extract an 11-char YouTube video ID from any common URL format.
@@ -77,15 +89,160 @@ def extract_video_id(url: str) -> str:
     embed/, /v/, shorts/, or a bare 11-char ID.
     Raises ValueError when no video ID can be extracted.
     """
-    for pattern in _VIDEO_ID_PATTERNS:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    # Bare 11-char ID
-    stripped = url.strip()
-    if re.fullmatch(r"[a-zA-Z0-9_-]{11}", stripped):
-        return stripped
-    raise ValueError(f"Could not extract video ID from: {url}")
+    video_id = _match_video_id(url)
+    if video_id is None:
+        raise ValueError(f"Could not extract video ID from: {url}")
+    return video_id
+
+
+# Playlist / channel URL patterns for bulk-download classification. A
+# "list=" query param identifies a playlist (or, when RD*-prefixed, an
+# auto-generated radio/mix that cannot be enumerated as a static set).
+_LIST_PARAM_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
+_CHANNEL_HANDLE_RE = re.compile(r"youtube\.com/(@[A-Za-z0-9_.\-]+)")
+_CHANNEL_ID_RE = re.compile(r"youtube\.com/channel/(UC[A-Za-z0-9_\-]+)")
+_CHANNEL_LEGACY_RE = re.compile(r"youtube\.com/(c|user)/([A-Za-z0-9_.\-]+)")
+
+
+def classify_youtube_url(url: str) -> dict:
+    """
+    Classify a pasted YouTube URL for the bulk-download flow. Returns a dict
+    whose "kind" is one of:
+
+      - "video":    a single video        -> {"kind","video_id"}
+      - "playlist": an enumerable playlist -> {"kind","playlist_id","enumerate_url"}
+      - "channel":  a channel             -> {"kind","channel","enumerate_url"}
+      - "mix":      an auto-generated radio/mix (list=RD*), not enumerable as
+                    a set, so it falls back to the focused video
+                    -> {"kind","video_id"(maybe None),"list_id"}
+      - "unknown":  anything else (incl. music.youtube.com, handled elsewhere)
+
+    A real (non-RD) "list=" wins over the "v=" focus, so pasting any playlist
+    URL — even a watch URL opened from within a playlist — offers
+    "download all". Channels normalize to their /videos uploads tab.
+    """
+    text = (url or "").strip()
+    if not text or "music.youtube.com" in text.lower():
+        return {"kind": "unknown"}
+
+    # Bare 11-char video ID.
+    if re.fullmatch(r"[a-zA-Z0-9_-]{11}", text):
+        return {"kind": "video", "video_id": text}
+
+    if "youtube.com/" not in text and "youtu.be/" not in text:
+        return {"kind": "unknown"}
+
+    list_match = _LIST_PARAM_RE.search(text)
+    if list_match:
+        list_id = list_match.group(1)
+        if list_id.startswith("RD"):
+            return {
+                "kind": "mix",
+                "video_id": _match_video_id(text),
+                "list_id": list_id,
+            }
+        return {
+            "kind": "playlist",
+            "playlist_id": list_id,
+            "enumerate_url": f"https://www.youtube.com/playlist?list={list_id}",
+        }
+
+    video_id = _match_video_id(text)
+    if video_id:
+        return {"kind": "video", "video_id": video_id}
+
+    handle = _CHANNEL_HANDLE_RE.search(text)
+    if handle:
+        return {
+            "kind": "channel",
+            "channel": handle.group(1),
+            "enumerate_url": f"https://www.youtube.com/{handle.group(1)}/videos",
+        }
+    ucid = _CHANNEL_ID_RE.search(text)
+    if ucid:
+        return {
+            "kind": "channel",
+            "channel": ucid.group(1),
+            "enumerate_url": (
+                f"https://www.youtube.com/channel/{ucid.group(1)}/videos"
+            ),
+        }
+    legacy = _CHANNEL_LEGACY_RE.search(text)
+    if legacy:
+        prefix, name = legacy.group(1), legacy.group(2)
+        return {
+            "kind": "channel",
+            "channel": name,
+            "enumerate_url": f"https://www.youtube.com/{prefix}/{name}/videos",
+        }
+
+    return {"kind": "unknown"}
+
+
+def build_playlist_entries(info: Any, max_entries: int) -> dict:
+    """
+    Parse a yt-dlp flat-extracted playlist/channel info dict into a bounded,
+    JSON-serializable summary for the bulk-download preview:
+
+        {"title","uploader","totalCount","truncated","count","entries":[
+            {"videoId","title","uploader","duration"} ]}
+
+    Skips unavailable entries (None, missing/blank id). Caps the returned
+    entries to max_entries and sets "truncated" when the playlist holds more
+    than were returned (either more entries came back than the cap, or
+    yt-dlp's reported playlist_count exceeds what we kept after a fetch cap).
+    Tolerant of malformed input (returns an empty summary).
+    """
+    empty = {
+        "title": "",
+        "uploader": "",
+        "totalCount": None,
+        "truncated": False,
+        "count": 0,
+        "entries": [],
+    }
+    if not isinstance(info, dict):
+        return empty
+
+    raw = info.get("entries")
+    raw = raw if isinstance(raw, list) else []
+    entries: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        video_id = entry.get("id")
+        if not isinstance(video_id, str) or not video_id:
+            continue
+        duration = entry.get("duration")
+        entries.append(
+            {
+                "videoId": video_id,
+                "title": str(entry.get("title") or ""),
+                "uploader": str(entry.get("uploader") or entry.get("channel") or ""),
+                "duration": int(duration)
+                if isinstance(duration, (int, float))
+                else None,
+            }
+        )
+
+    total_count = info.get("playlist_count")
+    if not isinstance(total_count, int):
+        total_count = None
+
+    cap = max(0, max_entries)
+    capped = entries[:cap]
+    truncated = bool(
+        len(entries) > len(capped)
+        or (total_count is not None and total_count > len(capped))
+    )
+    return {
+        "title": str(info.get("title") or ""),
+        "uploader": str(info.get("uploader") or info.get("channel") or ""),
+        "totalCount": total_count,
+        "truncated": truncated,
+        "count": len(capped),
+        "entries": capped,
+    }
 
 
 def find_existing_download(output_dir: str, video_id: str) -> Optional[str]:

@@ -20,6 +20,8 @@ from yt_download import (  # noqa: E402
     ACTIVE_DOWNLOAD_STATUSES,
     PROXY_AUDIO_FORMAT_SELECTORS,
     YT_PLAYER_CLIENTS,
+    build_playlist_entries,
+    classify_youtube_url,
     derive_proxy_audio_container,
     extract_video_id,
     find_active_download_job,
@@ -256,3 +258,203 @@ def test_find_active_download_job_prefers_active_over_terminal():
     found = find_active_download_job(jobs, VIDEO_ID)
 
     assert found is jobs["j2"]
+
+
+# ── classify_youtube_url ────────────────────────────────────────────
+# Decides whether a pasted URL is a single video, an enumerable playlist
+# or channel, or an un-enumerable auto-generated mix. A real "list=" id
+# wins over the "v=" focus so pasting any playlist URL offers "download
+# all", while RD* radio/mix lists fall back to the single video.
+
+PLAYLIST_ID = "PL-TQY69MwxBRttHQST4uYTaFs4RQPLuOH"
+
+
+def test_classify_pure_playlist_url():
+    result = classify_youtube_url(
+        f"https://www.youtube.com/playlist?list={PLAYLIST_ID}"
+    )
+    assert result["kind"] == "playlist"
+    assert result["playlist_id"] == PLAYLIST_ID
+    assert result["enumerate_url"] == (
+        f"https://www.youtube.com/playlist?list={PLAYLIST_ID}"
+    )
+
+
+def test_classify_watch_with_playlist_prefers_playlist():
+    # A real (non-RD) list wins over the focused video.
+    result = classify_youtube_url(
+        f"https://www.youtube.com/watch?v={VIDEO_ID}&list={PLAYLIST_ID}"
+    )
+    assert result["kind"] == "playlist"
+    assert result["playlist_id"] == PLAYLIST_ID
+
+
+def test_classify_radio_mix_is_mix_not_playlist():
+    # RD* lists are auto-generated radio/mixes — not enumerable as a set,
+    # so they fall back to the single focused video.
+    result = classify_youtube_url(
+        f"https://www.youtube.com/watch?v={VIDEO_ID}&list=RD{VIDEO_ID}&start_radio=1"
+    )
+    assert result["kind"] == "mix"
+    assert result["video_id"] == VIDEO_ID
+    assert result["list_id"] == f"RD{VIDEO_ID}"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://www.youtube.com/watch?v={VIDEO_ID}",
+        f"https://youtu.be/{VIDEO_ID}",
+        f"https://www.youtube.com/shorts/{VIDEO_ID}",
+    ],
+)
+def test_classify_single_video(url):
+    result = classify_youtube_url(url)
+    assert result["kind"] == "video"
+    assert result["video_id"] == VIDEO_ID
+
+
+def test_classify_channel_handle():
+    result = classify_youtube_url("https://www.youtube.com/@BookClubRadio")
+    assert result["kind"] == "channel"
+    assert result["enumerate_url"] == (
+        "https://www.youtube.com/@BookClubRadio/videos"
+    )
+
+
+def test_classify_channel_handle_with_tab_normalizes_to_videos():
+    result = classify_youtube_url(
+        "https://www.youtube.com/@BookClubRadio/streams"
+    )
+    assert result["kind"] == "channel"
+    assert result["enumerate_url"] == (
+        "https://www.youtube.com/@BookClubRadio/videos"
+    )
+
+
+def test_classify_channel_id():
+    result = classify_youtube_url(
+        "https://www.youtube.com/channel/UCabcdEFGHijklMNOpqrSTUvw"
+    )
+    assert result["kind"] == "channel"
+    assert result["enumerate_url"] == (
+        "https://www.youtube.com/channel/UCabcdEFGHijklMNOpqrSTUvw/videos"
+    )
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        (
+            "https://www.youtube.com/c/SomeName",
+            "https://www.youtube.com/c/SomeName/videos",
+        ),
+        (
+            "https://www.youtube.com/user/LegacyName",
+            "https://www.youtube.com/user/LegacyName/videos",
+        ),
+    ],
+)
+def test_classify_legacy_channel_paths(url, expected):
+    result = classify_youtube_url(url)
+    assert result["kind"] == "channel"
+    assert result["enumerate_url"] == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://music.youtube.com/playlist?list=" + PLAYLIST_ID,
+        "https://example.com/playlist?list=" + PLAYLIST_ID,
+        "not a url",
+        "",
+    ],
+)
+def test_classify_unknown(url):
+    assert classify_youtube_url(url)["kind"] == "unknown"
+
+
+# ── build_playlist_entries ──────────────────────────────────────────
+# Parses a yt-dlp flat-extracted playlist/channel info dict into a bounded
+# list of {videoId,title,uploader,duration}, skipping unavailable entries
+# and reporting truncation.
+
+def _flat_info(n, *, playlist_count=None, title="My Playlist", channel="Chan"):
+    return {
+        "title": title,
+        "channel": channel,
+        "playlist_count": playlist_count,
+        "entries": [
+            {"id": f"vid{i:08d}", "title": f"Track {i}", "channel": channel,
+             "duration": 100 + i}
+            for i in range(n)
+        ],
+    }
+
+
+def test_build_playlist_entries_maps_fields():
+    info = {
+        "title": "Set",
+        "uploader": "DJ",
+        "entries": [
+            {"id": "aaaaaaaaaaa", "title": "One", "uploader": "DJ", "duration": 200},
+        ],
+    }
+    out = build_playlist_entries(info, 100)
+    assert out["title"] == "Set"
+    assert out["uploader"] == "DJ"
+    assert out["count"] == 1
+    assert out["truncated"] is False
+    assert out["entries"] == [
+        {"videoId": "aaaaaaaaaaa", "title": "One", "uploader": "DJ", "duration": 200}
+    ]
+
+
+def test_build_playlist_entries_skips_unavailable():
+    info = {
+        "title": "T",
+        "entries": [
+            {"id": "aaaaaaaaaaa", "title": "ok"},
+            None,
+            {"title": "no id"},
+            {"id": "", "title": "empty id"},
+            {"id": "bbbbbbbbbbb", "title": "ok2"},
+        ],
+    }
+    out = build_playlist_entries(info, 100)
+    assert [e["videoId"] for e in out["entries"]] == ["aaaaaaaaaaa", "bbbbbbbbbbb"]
+    assert out["count"] == 2
+
+
+def test_build_playlist_entries_caps_and_marks_truncated():
+    out = build_playlist_entries(_flat_info(10), 4)
+    assert out["count"] == 4
+    assert out["truncated"] is True
+    assert [e["videoId"] for e in out["entries"]] == [f"vid{i:08d}" for i in range(4)]
+
+
+def test_build_playlist_entries_truncated_from_playlist_count():
+    # yt-dlp returned only the first 5 (playlistend cap) but the playlist
+    # actually has 500 — still truncated even though entries <= max.
+    out = build_playlist_entries(_flat_info(5, playlist_count=500), 100)
+    assert out["count"] == 5
+    assert out["totalCount"] == 500
+    assert out["truncated"] is True
+
+
+def test_build_playlist_entries_uploader_falls_back_to_channel():
+    info = {"entries": [{"id": "aaaaaaaaaaa", "title": "x", "channel": "ChanX"}]}
+    assert build_playlist_entries(info, 10)["entries"][0]["uploader"] == "ChanX"
+
+
+def test_build_playlist_entries_duration_none_when_missing():
+    info = {"entries": [{"id": "aaaaaaaaaaa", "title": "x"}]}
+    assert build_playlist_entries(info, 10)["entries"][0]["duration"] is None
+
+
+def test_build_playlist_entries_handles_bad_info():
+    for bad in (None, {}, "nope", {"entries": "x"}):
+        out = build_playlist_entries(bad, 10)
+        assert out["count"] == 0
+        assert out["entries"] == []
+        assert out["truncated"] is False

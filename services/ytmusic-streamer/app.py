@@ -44,6 +44,8 @@ from common.sidecar_runtime_utils import (
 from yt_download import (
     PROXY_AUDIO_FORMAT_SELECTORS,
     YT_PLAYER_CLIENTS,
+    build_playlist_entries,
+    classify_youtube_url,
     derive_proxy_audio_container,
     extract_video_id as _extract_video_id,
     find_active_download_job,
@@ -120,6 +122,11 @@ DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
 # Default destination for /yt/ downloads. Must point inside the shared
 # music volume so the backend's library scanner can pick the files up.
 YT_DOWNLOAD_DIR = os.getenv("YT_DOWNLOAD_DIR", "/music/YouTube Downloads")
+# Upper bound on entries returned by /yt/playlist-info (and therefore on how
+# many download jobs the bulk-download UI fans out at once). Bounds yt-dlp
+# enumeration cost and response size for very large channels; the preview
+# reports truncation when a playlist/channel holds more than this.
+YT_PLAYLIST_MAX_ENTRIES = max(1, env_int("YT_PLAYLIST_MAX_ENTRIES", "200"))
 
 # ════════════════════════════════════════════════════════════════════
 # Rate-pacing & request safety configuration
@@ -2062,6 +2069,95 @@ async def yt_video_info(url: str = Query(...)):
     except Exception as e:
         log.error(f"yt-dlp info extraction failed for {url}: {e}")
         raise HTTPException(status_code=502, detail=f"Failed to fetch video info: {e}")
+
+
+@app.get("/yt/playlist-info")
+async def yt_playlist_info(url: str = Query(...)):
+    """
+    Enumerate a YouTube playlist or channel into a bounded list of video
+    entries for the bulk-download UI. No authentication required — uses
+    yt-dlp anonymous flat extraction (fast: it lists entries without
+    resolving each video's formats).
+
+    Rejects single-video URLs (use /yt/info) and auto-generated radio/mix
+    lists (list=RD*, which YouTube does not expose as a static set) with 422
+    so the UI can explain why.
+    """
+    import yt_dlp
+
+    classification = classify_youtube_url(url)
+    kind = classification.get("kind")
+
+    if kind == "mix":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "This is an auto-generated YouTube mix/radio, which can't be "
+                "downloaded as a set. Paste the individual video instead."
+            ),
+        )
+    if kind not in ("playlist", "channel"):
+        raise HTTPException(
+            status_code=422,
+            detail="URL is not a YouTube playlist or channel.",
+        )
+
+    enumerate_url = classification["enumerate_url"]
+    # Fetch one past the cap so truncation is detectable even when yt-dlp
+    # does not report a playlist_count (common for channel tabs): the extra
+    # entry tips build_playlist_entries into truncated=True.
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "playlistend": YT_PLAYLIST_MAX_ENTRIES + 1,
+        "http_headers": {
+            "User-Agent": _USER_AGENT,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.youtube.com/",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": YT_PLAYER_CLIENTS,
+            },
+        },
+    }
+
+    try:
+        def _extract():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(enumerate_url, download=False)
+
+        info = await asyncio.to_thread(_extract)
+        if not info:
+            raise HTTPException(
+                status_code=404, detail="Playlist or channel not found"
+            )
+
+        summary = build_playlist_entries(info, YT_PLAYLIST_MAX_ENTRIES)
+        if summary["count"] == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="No downloadable videos found in this playlist or channel.",
+            )
+
+        return {
+            "kind": kind,
+            "playlistId": classification.get("playlist_id"),
+            "channel": classification.get("channel"),
+            "sourceUrl": enumerate_url,
+            **summary,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"yt-dlp playlist enumeration failed for {url}: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to enumerate playlist/channel: {e}",
+        )
 
 
 @app.get("/yt/proxy/{video_id}")
