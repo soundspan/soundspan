@@ -327,6 +327,84 @@ describe("MusicScannerService.scanLibrary", () => {
         expect(mockBackfillAllArtistCounts).toHaveBeenCalledTimes(1);
     });
 
+    it("resolves albums by release-group MBID so same-titled albums never merge", async () => {
+        const scanner = new MusicScannerService();
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles"
+        ).mockResolvedValue(["/music/Crystal Castles/Crystal Castles/01.flac"]);
+        // A tagged file from the 2010 self-titled album (distinct release group).
+        mockParseFile.mockResolvedValue({
+            common: {
+                title: "Fainting Spells",
+                track: { no: 1 },
+                disk: { no: 1 },
+                album: "Crystal Castles",
+                albumartist: "Crystal Castles",
+                year: 2010,
+                musicbrainz_releasegroupid: "rg-2010",
+            },
+            format: { duration: 200, codec: "audio/flac" },
+        } as any);
+        // No existing album carries this release group.
+        mockPrisma.album.findFirst.mockResolvedValue(null);
+        mockPrisma.album.create.mockResolvedValue({
+            id: "album-2010",
+            title: "Crystal Castles",
+            coverUrl: null,
+            location: "LIBRARY",
+            rgMbid: "rg-2010",
+        });
+
+        await scanner.scanLibrary("/music");
+
+        // The lookup keys on the unique release-group MBID — NOT the title —
+        // so the 2010 album is not found by the 2008 album's title and merged.
+        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
+            where: { artistId: "artist-1", rgMbid: "rg-2010" },
+        });
+        // Not found by rgMbid -> a separate album is created.
+        expect(mockPrisma.album.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    title: "Crystal Castles",
+                    rgMbid: "rg-2010",
+                }),
+            })
+        );
+    });
+
+    it("falls back to a temp-rgMbid title match only for un-tagged files", async () => {
+        const scanner = new MusicScannerService();
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles"
+        ).mockResolvedValue(["/music/Artist/Untagged.flac"]);
+        // Default parseFile mock has no musicbrainz_releasegroupid (un-tagged).
+        mockPrisma.album.findFirst.mockResolvedValue(null);
+        mockPrisma.album.create.mockResolvedValue({
+            id: "album-temp",
+            title: "Test Album",
+            coverUrl: null,
+            location: "LIBRARY",
+            rgMbid: "temp-x",
+        });
+
+        await scanner.scanLibrary("/music");
+
+        // Un-tagged files match by title but only against other un-tagged
+        // (temp-rgMbid) albums, never a properly MBID-identified album.
+        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
+            where: {
+                artistId: "artist-1",
+                title: "Test Album",
+                rgMbid: { startsWith: "temp-" },
+            },
+        });
+    });
+
     it("marks missing tracks as unhealthy without deleting library context", async () => {
         const scanner = new MusicScannerService();
 
@@ -1537,8 +1615,8 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
             normalizedName: "album band",
             mbid: null,
         });
-        mockPrisma.album.findFirst.mockResolvedValueOnce(null);
-        mockPrisma.album.findUnique.mockResolvedValueOnce({
+        // The album is resolved directly by its release-group MBID.
+        mockPrisma.album.findFirst.mockResolvedValueOnce({
             id: "album-release",
             title: "Album Name",
             coverUrl: null,
@@ -1552,8 +1630,8 @@ describe("MusicScannerService.processAudioFile artist fallbacks", () => {
             "/music"
         );
 
-        expect(mockPrisma.album.findUnique).toHaveBeenCalledWith({
-            where: { rgMbid: "rg-123" },
+        expect(mockPrisma.album.findFirst).toHaveBeenCalledWith({
+            where: { artistId: "artist-release", rgMbid: "rg-123" },
         });
         expect(mockPrisma.album.create).not.toHaveBeenCalled();
     });
