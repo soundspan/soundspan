@@ -430,7 +430,7 @@ class SimpleDownloadManager {
                     matchedJob = activeJobs.find((j) => {
                         const meta = j.metadata as any;
                         return (
-                            (j as any).lidarrAlbumId === lidarrAlbumId ||
+                            j.lidarrAlbumId === lidarrAlbumId ||
                             meta?.lidarrAlbumId === lidarrAlbumId
                         );
                     });
