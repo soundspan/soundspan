@@ -1,8 +1,14 @@
 import { Router } from "express";
 import { logger } from "../utils/logger";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
+import { requireInternalSecret } from "../middleware/internalAuth";
 
 const router = Router();
+
+// Every endpoint in this router is a machine-to-machine callback authenticated
+// by the shared internal secret. Guard the whole router so the check is applied
+// uniformly and fails closed when the secret is unconfigured.
+router.use(requireInternalSecret);
 
 /**
  * @openapi
@@ -47,12 +53,6 @@ const router = Router();
  * Record a vibe embedding failure (called by CLAP analyzer)
  */
 router.post("/vibe/failure", async (req, res) => {
-    // Internal endpoint - verify shared secret from CLAP analyzer
-    const internalSecret = req.headers["x-internal-secret"];
-    if (internalSecret !== process.env.INTERNAL_API_SECRET) {
-        return res.status(403).json({ error: "Forbidden" });
-    }
-
     try {
         const { trackId, trackName, errorMessage, errorCode } = req.body;
 
@@ -112,12 +112,6 @@ router.post("/vibe/failure", async (req, res) => {
  * Resolve failure records when a vibe embedding succeeds (called by CLAP analyzer)
  */
 router.post("/vibe/success", async (req, res) => {
-    // Internal endpoint - verify shared secret from CLAP analyzer
-    const internalSecret = req.headers["x-internal-secret"];
-    if (internalSecret !== process.env.INTERNAL_API_SECRET) {
-        return res.status(403).json({ error: "Forbidden" });
-    }
-
     try {
         const { trackId } = req.body;
 

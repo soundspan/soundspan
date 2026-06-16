@@ -56,6 +56,7 @@ jest.mock("../../services/enrichmentFailureService", () => ({
 }));
 
 import router from "../analysis";
+import { requireInternalSecret } from "../../middleware/internalAuth";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { getSystemSettings } from "../../utils/systemSettings";
@@ -106,6 +107,20 @@ function getHandler(method: "get" | "post" | "put", path: string) {
     const layer = findRouteLayer((router as any).stack, method, path);
     if (!layer) throw new Error(`${method.toUpperCase()} route not found: ${path}`);
     return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+// The internal vibe endpoints are guarded by the router-level
+// requireInternalSecret middleware. getHandler() returns only the final route
+// handler, so compose the real middleware in front of it to exercise the full
+// production chain (the handler runs only if the middleware calls next()).
+async function callInternal(handler: any, req: any, res: any) {
+    let passed = false;
+    requireInternalSecret(req, res, () => {
+        passed = true;
+    });
+    if (passed) {
+        await handler(req, res);
+    }
 }
 
 function createRes() {
@@ -456,7 +471,7 @@ describe("analysis routes runtime", () => {
             body: {},
         } as any;
         const forbiddenRes = createRes();
-        await postVibeFailure(forbiddenReq, forbiddenRes);
+        await callInternal(postVibeFailure, forbiddenReq, forbiddenRes);
         expect(forbiddenRes.statusCode).toBe(403);
 
         const missingReq = {
@@ -464,7 +479,7 @@ describe("analysis routes runtime", () => {
             body: {},
         } as any;
         const missingRes = createRes();
-        await postVibeFailure(missingReq, missingRes);
+        await callInternal(postVibeFailure, missingReq, missingRes);
         expect(missingRes.statusCode).toBe(400);
 
         const req = {
@@ -472,7 +487,7 @@ describe("analysis routes runtime", () => {
             body: { trackId: "t1", trackName: "Track", errorMessage: "bad" },
         } as any;
         const res = createRes();
-        await postVibeFailure(req, res);
+        await callInternal(postVibeFailure, req, res);
         expect(mockRecordFailure).toHaveBeenCalledWith(
             expect.objectContaining({
                 entityType: "vibe",
@@ -482,6 +497,33 @@ describe("analysis routes runtime", () => {
             })
         );
         expect(res.statusCode).toBe(200);
+    });
+
+    it("fails closed on internal vibe endpoints when INTERNAL_API_SECRET is unset", async () => {
+        delete process.env.INTERNAL_API_SECRET;
+
+        const failureReq = { headers: {}, body: { trackId: "t1" } } as any;
+        const failureRes = createRes();
+        await callInternal(postVibeFailure, failureReq, failureRes);
+        expect(failureRes.statusCode).toBe(403);
+        expect(mockRecordFailure).not.toHaveBeenCalled();
+
+        const successReq = { headers: {}, body: { trackId: "t1" } } as any;
+        const successRes = createRes();
+        await callInternal(postVibeSuccess, successReq, successRes);
+        expect(successRes.statusCode).toBe(403);
+        expect(mockResolveByEntity).not.toHaveBeenCalled();
+    });
+
+    it("rejects internal vibe endpoints when the secret does not match", async () => {
+        const req = {
+            headers: { "x-internal-secret": "not-the-secret" },
+            body: { trackId: "t1" },
+        } as any;
+        const res = createRes();
+        await callInternal(postVibeSuccess, req, res);
+        expect(res.statusCode).toBe(403);
+        expect(mockResolveByEntity).not.toHaveBeenCalled();
     });
 
     it("queues vibe embedding jobs in force mode and clears failures", async () => {
@@ -574,7 +616,7 @@ describe("analysis routes runtime", () => {
             body: {},
         } as any;
         const forbiddenRes = createRes();
-        await postVibeSuccess(forbiddenReq, forbiddenRes);
+        await callInternal(postVibeSuccess, forbiddenReq, forbiddenRes);
         expect(forbiddenRes.statusCode).toBe(403);
 
         const missingReq = {
@@ -582,7 +624,7 @@ describe("analysis routes runtime", () => {
             body: {},
         } as any;
         const missingRes = createRes();
-        await postVibeSuccess(missingReq, missingRes);
+        await callInternal(postVibeSuccess, missingReq, missingRes);
         expect(missingRes.statusCode).toBe(400);
 
         const req = {
@@ -590,7 +632,7 @@ describe("analysis routes runtime", () => {
             body: { trackId: "track-77" },
         } as any;
         const res = createRes();
-        await postVibeSuccess(req, res);
+        await callInternal(postVibeSuccess, req, res);
         expect(mockResolveByEntity).toHaveBeenCalledWith("vibe", "track-77");
         expect(res.body).toEqual({ message: "Stale failures resolved" });
     });

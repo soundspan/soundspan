@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Video.js segmented-playback engine is lazy-loaded only when a DASH/segmented stream is selected, removing ~730 kB of JavaScript from every page's first load (home route JS: 2065 kB → 1336 kB).
 - Social presence and notification/download polling now pause while the app tab is hidden and refetch immediately when it becomes visible again, cutting background network chatter on mobile.
 
+### Security
+
+- Internal CLAP analyzer callbacks (`/api/analysis/vibe/failure`, `/api/analysis/vibe/success`) now **fail closed**. The shared-secret check is enforced by a dedicated `requireInternalSecret` middleware that rejects every request when `INTERNAL_API_SECRET` is unset — previously an unset secret combined with a missing header satisfied `undefined !== undefined` and bypassed authentication entirely — and compares the provided secret in constant time.
+
 ## [1.5.0] - 2026-03-27
 
 ### Added
