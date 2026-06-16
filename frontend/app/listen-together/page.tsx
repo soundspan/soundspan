@@ -71,7 +71,8 @@ function CoverThumb({
     className?: string;
 }) {
     const [hasError, setHasError] = useState(false);
-    const imgSrc = coverArt ? api.getCoverArtUrl(coverArt) : null;
+    // Request ~2x the rendered CSS size so the backend serves a small variant
+    const imgSrc = coverArt ? api.getCoverArtUrl(coverArt, size * 2) : null;
 
     if (!imgSrc || hasError) {
         return (

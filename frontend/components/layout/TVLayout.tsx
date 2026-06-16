@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import { cn } from "@/utils/cn";
 import { useAudio } from "@/lib/audio-context";
+import { useFeatures } from "@/lib/features-context";
+import { getTvNavigation } from "./tvNavigation";
 import { api } from "@/lib/api";
 import { DPAD_KEYS } from "@/lib/tv-utils";
 import { useTVNavigation } from "@/hooks/useTVNavigation";
@@ -14,22 +16,15 @@ import { RefreshCw, SkipBack, SkipForward, Shuffle, Repeat } from "lucide-react"
 import { BRAND_NAME } from "@/lib/brand";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
-const tvNavigation = [
-    { name: "Home", href: "/" },
-    { name: "Search", href: "/search" },
-    { name: "Library", href: "/library" },
-    { name: "Audiobooks", href: "/audiobooks" },
-    { name: "Podcasts", href: "/podcasts" },
-    { name: "Discovery", href: "/discover" },
-    { name: "Playlists", href: "/playlists" },
-];
-
 /**
  * Renders the TVLayout component.
  */
 export function TVLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
+    const { discovery } = useFeatures();
+    // Discovery link is hidden when the discovery feature flag is disabled.
+    const tvNavigation = useMemo(() => getTvNavigation(discovery), [discovery]);
     // Start with nav focused and first tab selected for immediate D-pad usability
     const [focusedTabIndex, setFocusedTabIndex] = useState(0);
     const [isNavFocused, setIsNavFocused] = useState(true);
@@ -171,13 +166,16 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
                 focusFirstCard();
             } else if (e.key === DPAD_KEYS.CENTER) {
                 e.preventDefault();
-                router.push(tvNavigation[focusedTabIndex].href);
+                const focusedTab = tvNavigation[focusedTabIndex];
+                if (focusedTab) {
+                    router.push(focusedTab.href);
+                }
             }
         } else {
             // Delegate to content navigation hook
             handleContentKeyDown(e);
         }
-    }, [isNavFocused, focusedTabIndex, router, hasMedia, isPlaying, pause, resume, next, previous, seek, currentTime, duration, focusFirstCard, handleContentKeyDown]);
+    }, [isNavFocused, focusedTabIndex, router, hasMedia, isPlaying, pause, resume, next, previous, seek, currentTime, duration, focusFirstCard, handleContentKeyDown, tvNavigation]);
 
     useEffect(() => {
         window.addEventListener("keydown", handleKeyDown);
@@ -200,7 +198,15 @@ export function TVLayout({ children }: { children: React.ReactNode }) {
         if (currentIndex >= 0) {
             setFocusedTabIndex(currentIndex);
         }
-    }, [pathname]);
+    }, [pathname, tvNavigation]);
+
+    // Clamp focus when the nav list shrinks (e.g. Discovery hidden after the
+    // features fetch resolves with the discovery flag off).
+    useEffect(() => {
+        setFocusedTabIndex(prev =>
+            Math.min(prev, Math.max(0, tvNavigation.length - 1))
+        );
+    }, [tvNavigation]);
 
     return (
         <>

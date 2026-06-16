@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 type RouteParams = { params: Promise<{ path: string[] }> };
 
 // This route backs same-origin API mode. Direct mode bypasses it via absolute backend URLs.
+// In production server.js proxies /api straight to the backend, so this handler is a fallback.
 
 /**
  * Build the backend target path, preserving trailing slashes from the

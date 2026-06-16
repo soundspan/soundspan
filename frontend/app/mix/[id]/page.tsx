@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { useMixQuery } from "@/hooks/useQueries";
 import { useQueuedTrackIds } from "@/hooks/useQueuedTrackIds";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { useFeatures } from "@/lib/features-context";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 interface MixTrack {
@@ -34,8 +35,39 @@ interface MixTrack {
 
 /**
  * Renders the MixPage component.
+ *
+ * Hidden behind the autoPlaylists feature flag: when disabled, an empty state
+ * is shown instead of fetching mix data.
  */
 export default function MixPage() {
+    const { autoPlaylists, loading: featuresLoading } = useFeatures();
+
+    if (featuresLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <GradientSpinner size="md" />
+            </div>
+        );
+    }
+
+    if (!autoPlaylists) {
+        return (
+            <div className="p-6">
+                <h1 className="text-xl font-semibold text-white mb-4">Mix</h1>
+                <div className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-lg p-6">
+                    <p className="text-[#a3a3a3] mb-2">Feature not available</p>
+                    <p className="text-sm text-[#737373]">
+                        Auto-generated mixes are disabled on this server.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    return <MixPageContent />;
+}
+
+function MixPageContent() {
     const params = useParams();
     const router = useRouter();
     const mixId = params.id as string;

@@ -44,6 +44,16 @@ jest.mock("../../utils/db", () => ({
     },
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        features: {
+            audioAnalysis: true,
+            discovery: false,
+            autoPlaylists: true,
+        },
+    },
+}));
+
 import { featureDetection } from "../../services/featureDetection";
 import { prisma } from "../../utils/db";
 import router from "../system";
@@ -83,8 +93,31 @@ describe("system routes integration", () => {
             .set(AUTH_HEADER, AUTH_VALUE);
 
         expect(res.status).toBe(200);
-        expect(res.body).toEqual(features);
+        expect(res.body).toEqual({
+            ...features,
+            audioAnalysis: true,
+            discovery: false,
+            autoPlaylists: true,
+        });
         expect(mockGetFeatures).toHaveBeenCalledTimes(1);
+    });
+
+    it("GET /api/system/features includes configured feature flags", async () => {
+        mockGetFeatures.mockResolvedValueOnce({
+            musicCNN: true,
+            vibeEmbeddings: true,
+        });
+
+        const res = await request(app)
+            .get("/api/system/features")
+            .set(AUTH_HEADER, AUTH_VALUE);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({
+            audioAnalysis: true,
+            discovery: false,
+            autoPlaylists: true,
+        });
     });
 
     it("GET /api/system/features handles errors gracefully", async () => {

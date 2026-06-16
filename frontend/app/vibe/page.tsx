@@ -148,9 +148,10 @@ function CoverImage({
     const [hasError, setHasError] = useState(false);
 
     const imgSrc = useMemo(() => {
-        if (coverUrl) return api.getCoverArtUrl(coverUrl);
+        // Request ~2x the rendered CSS size so the backend serves a small variant
+        if (coverUrl) return api.getCoverArtUrl(coverUrl, size * 2);
         return null;
-    }, [coverUrl]);
+    }, [coverUrl, size]);
 
     if (!imgSrc || hasError) {
         return (
@@ -550,7 +551,7 @@ function TrackRow({
  * Renders the VibePage component.
  */
 export default function VibePage() {
-    const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
+    const { vibeEmbeddings, audioAnalysis, loading: featuresLoading } = useFeatures();
 
     if (featuresLoading) {
         return (
@@ -560,7 +561,7 @@ export default function VibePage() {
         );
     }
 
-    if (!vibeEmbeddings) {
+    if (!vibeEmbeddings || !audioAnalysis) {
         return (
             <div className="p-6">
                 <h1 className="text-xl font-semibold text-white mb-4">Vibe</h1>

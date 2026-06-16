@@ -24,6 +24,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/cacheHelpers.ts` | Core |
 | `backend/src/services/coverArt.ts` | Core |
 | `backend/src/services/coverArtExtractor.ts` | Core |
+| `backend/src/services/coverArtResize.ts` | Core |
 | `backend/src/services/dataCache.ts` | Core |
 | `backend/src/services/deezer.ts` | Core |
 | `backend/src/services/discoverWeekly.ts` | Core |

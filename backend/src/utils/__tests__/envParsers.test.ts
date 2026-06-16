@@ -1,5 +1,6 @@
 import {
     isEnvFlagEnabled,
+    parseEnvBool,
     parseEnvCsv,
     parseEnvInt,
 } from "../envParsers";
@@ -31,6 +32,31 @@ describe("envParsers", () => {
             expect(isEnvFlagEnabled("TRUE")).toBe(false);
             expect(isEnvFlagEnabled("1")).toBe(false);
             expect(isEnvFlagEnabled(undefined)).toBe(false);
+        });
+    });
+
+    describe("parseEnvBool", () => {
+        it("parses literal true/false strings", () => {
+            expect(parseEnvBool("true", false)).toBe(true);
+            expect(parseEnvBool("false", true)).toBe(false);
+        });
+
+        it("uses the default when value is undefined or empty", () => {
+            expect(parseEnvBool(undefined, true)).toBe(true);
+            expect(parseEnvBool(undefined, false)).toBe(false);
+            expect(parseEnvBool("", true)).toBe(true);
+            expect(parseEnvBool("   ", false)).toBe(false);
+        });
+
+        it("uses the default for unrecognized values", () => {
+            expect(parseEnvBool("1", false)).toBe(false);
+            expect(parseEnvBool("yes", false)).toBe(false);
+            expect(parseEnvBool("TRUE-ish", true)).toBe(true);
+        });
+
+        it("accepts case-insensitive and padded true/false", () => {
+            expect(parseEnvBool("TRUE", false)).toBe(true);
+            expect(parseEnvBool(" False ", true)).toBe(false);
         });
     });
 

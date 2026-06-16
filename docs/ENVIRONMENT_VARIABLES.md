@@ -124,6 +124,9 @@ Experimental feature note:
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
 | `SOUNDSPAN_CALLBACK_URL` | `backend`, `soundspan` (AIO) | Optional | split stack: `http://backend:3006`; AIO: `http://host.docker.internal:3030` | Callback URL used for webhook/integration callbacks (for example Lidarr completion hooks). |
+| `AUDIO_ANALYSIS_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for audio analysis queueing/consumption (Essentia + CLAP vibe embeddings), the mood-bucket worker, and the `/api/analysis` + `/api/vibe` routes. Set `false` to disable; analyzer containers should then also be disabled. |
+| `DISCOVERY_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for Discover Weekly (cron + queue processors), the `/api/discover` + `/api/recommendations` routes, and the discovery auto-download lifecycle. |
+| `AUTO_PLAYLISTS_ENABLED` | `backend`, `backend-worker` | Optional | `true` | Feature flag for Made For You mixes (on-demand programmatic playlists) and the `/api/mixes` routes. |
 | `LIDARR_ENABLED` | `backend`, `backend-worker` | Optional | `false` | Enables Lidarr integration logic from env fallback paths. |
 | `LIDARR_URL` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr base URL. |
 | `LIDARR_API_KEY` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr API key. |

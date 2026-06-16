@@ -20,6 +20,32 @@ export function parseEnvInt(value: string | undefined, fallback: number): number
 }
 
 /**
+ * Parses a boolean from an env var, using `defaultValue` when the value is
+ * absent or unrecognized.
+ *
+ * Accepts case-insensitive "true"/"false" (surrounding whitespace ignored);
+ * undefined, empty, or any other value returns `defaultValue`.
+ */
+export function parseEnvBool(
+    value: string | undefined,
+    defaultValue: boolean
+): boolean {
+    if (typeof value !== "string") {
+        return defaultValue;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") {
+        return true;
+    }
+    if (normalized === "false") {
+        return false;
+    }
+
+    return defaultValue;
+}
+
+/**
  * Executes isEnvFlagEnabled.
  */
 export function isEnvFlagEnabled(value: string | undefined): boolean {

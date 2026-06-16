@@ -32,26 +32,21 @@ import offlineRoutes from "./routes/offline";
 import playlistsRoutes from "./routes/playlists";
 import shareLinkRoutes from "./routes/shareLinks";
 import searchRoutes from "./routes/search";
-import recommendationsRoutes from "./routes/recommendations";
 import downloadsRoutes from "./routes/downloads";
 import webhooksRoutes from "./routes/webhooks";
 import audiobooksRoutes from "./routes/audiobooks";
 import podcastsRoutes from "./routes/podcasts";
 import artistsRoutes from "./routes/artists";
 import soulseekRoutes from "./routes/soulseek";
-import discoverRoutes from "./routes/discover";
 import apiKeysRoutes from "./routes/apiKeys";
-import mixesRoutes from "./routes/mixes";
 import enrichmentRoutes from "./routes/enrichment";
 import homepageRoutes from "./routes/homepage";
 import deviceLinkRoutes from "./routes/deviceLink";
 import spotifyRoutes from "./routes/spotify";
 import notificationsRoutes from "./routes/notifications";
 import browseRoutes from "./routes/browse";
-import analysisRoutes from "./routes/analysis";
 import adminRoutes from "./routes/admin";
 import releasesRoutes from "./routes/releases";
-import vibeRoutes from "./routes/vibe";
 import systemRoutes from "./routes/system";
 import ytMusicRoutes from "./routes/youtubeMusic";
 import youtubeRoutes from "./routes/youtube";
@@ -68,6 +63,7 @@ import { startPersistLoop, stopPersistLoop, persistAllGroups } from "./services/
 import { createServer } from "http";
 import type { Socket } from "net";
 import { errorHandler } from "./middleware/errorHandler";
+import { createFeatureDisabledHandler } from "./utils/featureGate";
 import { requireAuth, requireAdmin } from "./middleware/auth";
 import { createDependencyReadinessTracker } from "./utils/dependencyReadiness";
 import {
@@ -246,7 +242,18 @@ app.use("/api/offline", apiLimiter, offlineRoutes);
 app.use("/api/playlists", apiLimiter, playlistsRoutes);
 app.use("/api/share-links", apiLimiter, shareLinkRoutes);
 app.use("/api/search", apiLimiter, searchRoutes);
-app.use("/api/recommendations", apiLimiter, recommendationsRoutes);
+// Feature-gated routers are required lazily so disabled subsystems skip their
+// module side effects entirely; disabled prefixes stay rate limited and
+// return a clean 404 payload.
+if (config.features.discovery) {
+    app.use(
+        "/api/recommendations",
+        apiLimiter,
+        require("./routes/recommendations").default
+    );
+} else {
+    app.use("/api/recommendations", apiLimiter, createFeatureDisabledHandler());
+}
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
 app.use("/api/notifications", apiLimiter, notificationsRoutes);
 app.use("/api/webhooks", webhooksRoutes); // Webhooks should not be rate limited
@@ -255,16 +262,49 @@ app.use("/api/audiobooks", audiobooksRoutes);
 app.use("/api/podcasts", apiLimiter, podcastsRoutes);
 app.use("/api/artists", apiLimiter, artistsRoutes);
 app.use("/api/soulseek", apiLimiter, soulseekRoutes);
-app.use("/api/discover", apiLimiter, discoverRoutes);
-app.use("/api/mixes", apiLimiter, mixesRoutes);
+if (config.features.discovery) {
+    app.use("/api/discover", apiLimiter, require("./routes/discover").default);
+} else {
+    logger.info(
+        "[Features] Discovery disabled (DISCOVERY_ENABLED=false); /api/discover and /api/recommendations return 404"
+    );
+    app.use("/api/discover", apiLimiter, createFeatureDisabledHandler());
+}
+if (config.features.autoPlaylists) {
+    app.use("/api/mixes", apiLimiter, require("./routes/mixes").default);
+} else {
+    logger.info(
+        "[Features] Auto playlists disabled (AUTO_PLAYLISTS_ENABLED=false); /api/mixes returns 404"
+    );
+    app.use("/api/mixes", apiLimiter, createFeatureDisabledHandler());
+}
 app.use("/api/enrichment", apiLimiter, enrichmentRoutes);
 app.use("/api/homepage", apiLimiter, homepageRoutes);
 app.use("/api/spotify", apiLimiter, spotifyRoutes);
 app.use("/api/browse", apiLimiter, browseRoutes);
-app.use("/api/analysis", apiLimiter, analysisRoutes);
+if (config.features.audioAnalysis) {
+    app.use("/api/analysis", apiLimiter, require("./routes/analysis").default);
+} else {
+    logger.info(
+        "[Features] Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); /api/analysis and /api/vibe return 404"
+    );
+    // Keep the CLAP analyzer machine callbacks (/vibe/failure, /vibe/success)
+    // reachable so analyzers draining in-flight work (e.g. AIO deployments)
+    // can still report results while the feature is off.
+    app.use(
+        "/api/analysis",
+        apiLimiter,
+        require("./routes/analysisInternal").default,
+        createFeatureDisabledHandler()
+    );
+}
 app.use("/api/admin", apiLimiter, adminRoutes);
 app.use("/api/releases", apiLimiter, releasesRoutes);
-app.use("/api/vibe", apiLimiter, vibeRoutes);
+if (config.features.audioAnalysis) {
+    app.use("/api/vibe", apiLimiter, require("./routes/vibe").default);
+} else {
+    app.use("/api/vibe", apiLimiter, createFeatureDisabledHandler());
+}
 app.use("/api/system", apiLimiter, systemRoutes);
 app.use("/api/ytmusic", apiLimiter, ytMusicRoutes);
 app.use("/api/youtube", apiLimiter, youtubeRoutes);

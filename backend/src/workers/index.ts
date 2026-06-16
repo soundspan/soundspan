@@ -29,9 +29,11 @@ import {
     stopTrackMappingStalenessWorker,
 } from "./trackMappingStaleness";
 import { downloadQueueManager } from "../services/downloadQueue";
+import { config } from "../config";
 import { prisma } from "../utils/db";
 import {
     startDiscoverWeeklyCron,
+    stopDiscoverWeeklyCron,
     processDiscoverCronTick,
 } from "./discoverCron";
 import { runDataIntegrityCheck } from "./dataIntegrity";
@@ -836,10 +838,16 @@ logger.info(
     `[QueueProcessor/Identity] workerId=${WORKER_PROCESSOR_ID} owner=${schedulerLockOwnerId} hostname=${process.env.HOSTNAME ?? "unknown"} pid=${process.pid}`
 );
 scanQueue.process("scan", processScan);
-discoverQueue.process("discover-recommendation", processDiscoverWeekly);
-discoverQueue.process("discover-cron-tick", processDiscoverCronTick);
-// Keep legacy unnamed handler for older callers that still enqueue without a job name.
-discoverQueue.process(processDiscoverWeekly);
+if (config.features.discovery) {
+    discoverQueue.process("discover-recommendation", processDiscoverWeekly);
+    discoverQueue.process("discover-cron-tick", processDiscoverCronTick);
+    // Keep legacy unnamed handler for older callers that still enqueue without a job name.
+    discoverQueue.process(processDiscoverWeekly);
+} else {
+    logger.info(
+        "[Features] Discovery disabled (DISCOVERY_ENABLED=false); discover queue processors not registered"
+    );
+}
 imageQueue.process(processImageOptimization);
 validationQueue.process(processValidation);
 async function processSchedulerJob(job: Bull.Job<any>): Promise<void> {
@@ -963,9 +971,15 @@ startUnifiedEnrichmentWorker().catch((err) => {
 
 // Start mood bucket worker
 // Assigns newly analyzed tracks to mood buckets for fast mood mix generation
-startMoodBucketWorker().catch((err) => {
-    logger.error("Failed to start mood bucket worker:", err);
-});
+if (config.features.audioAnalysis) {
+    startMoodBucketWorker().catch((err) => {
+        logger.error("Failed to start mood bucket worker:", err);
+    });
+} else {
+    logger.info(
+        "[Features] Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); mood bucket worker not started"
+    );
+}
 
 startTrackMappingStalenessWorker();
 
@@ -1064,8 +1078,34 @@ schedulerQueue.on("failed", (job, err) => {
 logger.debug("Worker processors registered and event handlers attached");
 
 // Start Discovery Weekly cron scheduler (Sundays at 8 PM)
-startDiscoverWeeklyCron();
-logger.debug("Discover Weekly scheduler registered");
+if (config.features.discovery) {
+    startDiscoverWeeklyCron();
+    logger.debug("Discover Weekly scheduler registered");
+} else {
+    // Remove the repeatable cron job persisted in Redis by a previous run with
+    // the flag on, so no stale schedule lingers (or replays as a backlog the
+    // moment the flag is re-enabled).
+    stopDiscoverWeeklyCron();
+    void discoverQueue
+        .getJobCounts()
+        .then((counts) => {
+            const backlog = (counts.waiting ?? 0) + (counts.delayed ?? 0);
+            if (backlog > 0) {
+                logger.warn(
+                    `[Features] Discovery disabled with ${backlog} discover job(s) still in Redis; they will not be processed until DISCOVERY_ENABLED=true`
+                );
+            }
+        })
+        .catch((error: any) => {
+            logger.warn(
+                "[Features] Failed to inspect leftover discover queue backlog:",
+                error.message || error
+            );
+        });
+    logger.info(
+        "[Features] Discovery disabled (DISCOVERY_ENABLED=false); Discover Weekly scheduler not registered"
+    );
+}
 
 registerSchedulerJobs()
     .then(() => {

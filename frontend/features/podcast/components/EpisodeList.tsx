@@ -5,6 +5,7 @@ import { cn } from "@/utils/cn";
 import { Podcast, Episode } from "../types";
 import { formatDuration } from "@/utils/formatTime";
 import { formatDate } from "../utils";
+import { EpisodeOverflowMenu } from "./EpisodeOverflowMenu";
 
 interface EpisodeListProps {
     podcast: Podcast;
@@ -22,7 +23,7 @@ interface EpisodeListProps {
  * Renders the EpisodeList component.
  */
 export function EpisodeList({
-    podcast: _podcast,
+    podcast,
     episodes,
     sortOrder,
     onSortOrderChange,
@@ -177,6 +178,18 @@ export function EpisodeList({
                                 <span className="text-xs text-white/40 shrink-0">
                                     {formatDuration(episode.duration)}
                                 </span>
+
+                                {/* Queue actions */}
+                                <div onClick={(e) => e.stopPropagation()}>
+                                    <EpisodeOverflowMenu
+                                        episode={episode}
+                                        podcast={{
+                                            id: podcast.id,
+                                            title: podcast.title,
+                                            coverUrl: podcast.coverUrl ?? null,
+                                        }}
+                                    />
+                                </div>
 
                                 {/* Complete Button - visible on hover for incomplete episodes */}
                                 {onMarkComplete && !episode.progress?.isFinished && (

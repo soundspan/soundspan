@@ -7,6 +7,7 @@ import { useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { frontendLogger as log } from "@/lib/logger";
 import { useAuth } from "@/lib/auth-context";
+import { useFeatures } from "@/lib/features-context";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import type { Artist, Mix, PopularArtist } from "@/features/home/types";
@@ -110,6 +111,7 @@ export function useExploreData(options?: { showYtMusicExplore?: boolean; showTid
     const showYtMusicExplore = options?.showYtMusicExplore ?? true;
     const showTidalExplore = options?.showTidalExplore ?? false;
     const { isAuthenticated } = useAuth();
+    const { discovery, autoPlaylists } = useFeatures();
     const queryClient = useQueryClient();
 
     // Event listeners for cross-component updates
@@ -124,10 +126,11 @@ export function useExploreData(options?: { showYtMusicExplore?: boolean; showTid
 
     // ── For You queries ──────────────────────────────────────────────────
     const { data: likedData } = useLikedPlaylistQuery(4);
-    const { data: discoverData } = useDiscoverWeeklySummaryQuery();
-    const { data: mixesData, isLoading: isLoadingMixes } = useMixesQuery();
+    const { data: discoverData } = useDiscoverWeeklySummaryQuery(discovery);
+    const { data: mixesData, isLoading: isLoadingMixes } =
+        useMixesQuery(autoPlaylists);
     const { data: recommendedData, isLoading: isLoadingRecommended } =
-        useRecommendationsQuery(10);
+        useRecommendationsQuery(10, discovery);
     const { mutateAsync: refreshMixes, isPending: isRefreshingMixes } =
         useRefreshMixesMutation();
 
@@ -182,7 +185,7 @@ export function useExploreData(options?: { showYtMusicExplore?: boolean; showTid
     }, [likedData]);
 
     const discoverWeekly = useMemo<DiscoverWeeklySummary | null>(() => {
-        if (!discoverData) return null;
+        if (!discovery || !discoverData) return null;
         const firstCover = discoverData.tracks?.[0]?.coverUrl ?? null;
         return {
             weekStart: discoverData.weekStart,
@@ -190,13 +193,13 @@ export function useExploreData(options?: { showYtMusicExplore?: boolean; showTid
             totalCount: discoverData.totalCount,
             coverUrl: firstCover ? api.getCoverArtUrl(firstCover, 200) : null,
         };
-    }, [discoverData]);
+    }, [discovery, discoverData]);
 
     return {
         likedSummary,
         discoverWeekly,
-        mixes: Array.isArray(mixesData) ? mixesData : [],
-        recommended: recommendedData?.artists ?? [],
+        mixes: autoPlaylists && Array.isArray(mixesData) ? mixesData : [],
+        recommended: discovery ? (recommendedData?.artists ?? []) : [],
         homeShelves: shelvesData ?? [],
         charts: chartsData ?? {},
         popularArtists: popularData?.artists ?? [],

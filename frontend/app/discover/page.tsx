@@ -19,6 +19,7 @@ import { TrackList } from "@/features/discover/components/TrackList";
 import { UnavailableAlbums } from "@/features/discover/components/UnavailableAlbums";
 import { HowItWorks } from "@/features/discover/components/HowItWorks";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { useFeatures } from "@/lib/features-context";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 
 const DISCOVER_RECENT_GENERATION_WINDOW_MS = 45 * 60 * 1000;
@@ -27,8 +28,41 @@ const DISCOVER_RECOVERY_RETRY_DELAY_MS = 2500;
 
 /**
  * Renders the DiscoverWeeklyPage component.
+ *
+ * Hidden behind the discovery feature flag: when disabled, an empty state is
+ * shown instead of fetching discover data.
  */
 export default function DiscoverWeeklyPage() {
+    const { discovery, loading: featuresLoading } = useFeatures();
+
+    if (featuresLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <GradientSpinner size="md" />
+            </div>
+        );
+    }
+
+    if (!discovery) {
+        return (
+            <div className="p-6">
+                <h1 className="text-xl font-semibold text-white mb-4">
+                    Discover Weekly
+                </h1>
+                <div className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-lg p-6">
+                    <p className="text-[#a3a3a3] mb-2">Feature not available</p>
+                    <p className="text-sm text-[#737373]">
+                        Discovery is disabled on this server.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    return <DiscoverWeeklyPageContent />;
+}
+
+function DiscoverWeeklyPageContent() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
     const { isPlaying } = useAudioPlayback();

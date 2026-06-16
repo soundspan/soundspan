@@ -15,13 +15,22 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 interface FeaturesState {
     musicCNN: boolean;
     vibeEmbeddings: boolean;
+    audioAnalysis: boolean;
+    discovery: boolean;
+    autoPlaylists: boolean;
     showVersion: boolean;
     loading: boolean;
 }
 
+// Configured feature flags (audioAnalysis/discovery/autoPlaylists) default ON
+// server-side, so they default true here to avoid hiding sections while the
+// first features fetch is in flight.
 const defaultState: FeaturesState = {
     musicCNN: false,
     vibeEmbeddings: false,
+    audioAnalysis: true,
+    discovery: true,
+    autoPlaylists: true,
     showVersion: false,
     loading: true,
 };
@@ -43,6 +52,9 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
             setState({
                 musicCNN: features.musicCNN,
                 vibeEmbeddings: features.vibeEmbeddings,
+                audioAnalysis: features.audioAnalysis ?? true,
+                discovery: features.discovery ?? true,
+                autoPlaylists: features.autoPlaylists ?? true,
                 showVersion: uiSettings.showVersion,
                 loading: false,
             });
@@ -53,6 +65,9 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
                     ? {
                           musicCNN: false,
                           vibeEmbeddings: false,
+                          audioAnalysis: true,
+                          discovery: true,
+                          autoPlaylists: true,
                           showVersion: false,
                           loading: false,
                       }

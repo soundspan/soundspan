@@ -16,6 +16,7 @@ import { AudiobooksGrid } from "@/features/home/components/AudiobooksGrid";
 import { StaticPlaylistCard } from "@/features/home/components/StaticPlaylistCard";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { LastFmBadge } from "@/components/ui/LastFmBadge";
+import { useFeatures } from "@/lib/features-context";
 import { useHomeData } from "@/features/home/hooks/useHomeData";
 
 // Loading skeleton for playlist cards
@@ -55,6 +56,7 @@ export default function HomePage() {
         isCommunityPlaylistsLoading,
         handleRefreshMixes,
     } = useHomeData();
+    const { autoPlaylists } = useFeatures();
 
     if (isLoading) {
         return <LoadingScreen />;
@@ -96,6 +98,7 @@ export default function HomePage() {
                             <SectionHeader
                                 title="Made For You"
                                 rightAction={
+                                    autoPlaylists ? (
                                     <button
                                         onClick={handleRefreshMixes}
                                         disabled={isRefreshingMixes}
@@ -110,6 +113,7 @@ export default function HomePage() {
                                             {isRefreshingMixes ? "Refreshing..." : "Refresh"}
                                         </span>
                                     </button>
+                                    ) : undefined
                                 }
                             />
                             <HorizontalCarousel>

@@ -22,6 +22,8 @@ import {
 import { rateLimiter } from "../services/rateLimiter";
 import { redisClient } from "../utils/redis";
 import { prisma } from "../utils/db";
+import { config } from "../config";
+import { sendFeatureDisabled } from "../utils/featureGate";
 
 const router = Router();
 
@@ -360,13 +362,21 @@ router.post("/reset-mood-tags", requireAdmin, async (req, res) => {
  *         description: Not authenticated
  *       403:
  *         description: Admin access required
+ *       404:
+ *         description: Audio analysis feature disabled (AUDIO_ANALYSIS_ENABLED=false)
  */
 /**
  * POST /enrichment/reset-audio-analysis
  * Reset only audio analysis (keeps artist metadata and mood tags intact)
  * Admin only - selective re-enrichment for large libraries
+ * Gated on config.features.audioAnalysis so disabled deployments never queue
+ * analysis work that no consumer will drain.
  */
 router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
+     if (!config.features.audioAnalysis) {
+         sendFeatureDisabled(res);
+         return;
+     }
      try {
          const queued = await reRunAudioAnalysisOnly();
 
@@ -397,13 +407,21 @@ router.post("/reset-audio-analysis", requireAdmin, async (req, res) => {
  *         description: Not authenticated
  *       403:
  *         description: Admin access required
+ *       404:
+ *         description: Audio analysis feature disabled (AUDIO_ANALYSIS_ENABLED=false)
  */
  /**
   * POST /enrichment/reset-vibe-embeddings
   * Reset only vibe embeddings (keeps all other enrichment intact)
   * Admin only - selective re-enrichment for large libraries
+  * Gated on config.features.audioAnalysis (vibe/CLAP is part of the audio
+  * analysis subsystem) so disabled deployments never queue undrained work.
   */
  router.post("/reset-vibe-embeddings", requireAdmin, async (req, res) => {
+     if (!config.features.audioAnalysis) {
+         sendFeatureDisabled(res);
+         return;
+     }
      try {
          const queued = await reRunVibeEmbeddingsOnly();
 

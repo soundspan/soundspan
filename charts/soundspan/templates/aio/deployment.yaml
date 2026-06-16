@@ -56,6 +56,9 @@ spec:
             "ALLOWED_ORIGINS" true
             "LOG_LEVEL" true
             "DOCS_PUBLIC" true
+            "AUDIO_ANALYSIS_ENABLED" true
+            "DISCOVERY_ENABLED" true
+            "AUTO_PLAYLISTS_ENABLED" true
             "TIDAL_SIDECAR_URL" true
             "YTMUSIC_STREAMER_URL" true
             "LIDARR_ENABLED" true
@@ -115,6 +118,27 @@ spec:
             {{- else if .Values.config.docsPublic }}
             - name: DOCS_PUBLIC
               value: "true"
+            {{- end }}
+            {{- if hasKey $aioEnv "AUDIO_ANALYSIS_ENABLED" }}
+            - name: AUDIO_ANALYSIS_ENABLED
+              value: {{ index $aioEnv "AUDIO_ANALYSIS_ENABLED" | quote }}
+            {{- else }}
+            - name: AUDIO_ANALYSIS_ENABLED
+              value: {{ .Values.config.features.audioAnalysis | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "DISCOVERY_ENABLED" }}
+            - name: DISCOVERY_ENABLED
+              value: {{ index $aioEnv "DISCOVERY_ENABLED" | quote }}
+            {{- else }}
+            - name: DISCOVERY_ENABLED
+              value: {{ .Values.config.features.discovery | quote }}
+            {{- end }}
+            {{- if hasKey $aioEnv "AUTO_PLAYLISTS_ENABLED" }}
+            - name: AUTO_PLAYLISTS_ENABLED
+              value: {{ index $aioEnv "AUTO_PLAYLISTS_ENABLED" | quote }}
+            {{- else }}
+            - name: AUTO_PLAYLISTS_ENABLED
+              value: {{ .Values.config.features.autoPlaylists | quote }}
             {{- end }}
             # Audio analysis
             {{- range $key := keys $aioEnv | sortAlpha }}

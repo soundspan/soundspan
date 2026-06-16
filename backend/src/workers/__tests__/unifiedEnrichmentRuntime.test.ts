@@ -5,7 +5,13 @@ describe("unified enrichment runtime behavior", () => {
         jest.clearAllMocks();
     });
 
-    function setupUnifiedEnrichmentMocks() {
+    function setupUnifiedEnrichmentMocks(options?: {
+        configFeatures?: Partial<{
+            audioAnalysis: boolean;
+            discovery: boolean;
+            autoPlaylists: boolean;
+        }>;
+    }) {
         const trackCountMock = jest.fn(async (args?: { where?: any }) => {
             const where = args?.where;
             if (!where) return 10;
@@ -170,7 +176,16 @@ describe("unified enrichment runtime behavior", () => {
         }));
         jest.doMock("../../services/lastfm", () => ({ lastFmService }));
         jest.doMock("../../utils/ioredis", () => ({ createIORedisClient }));
-        jest.doMock("../../config", () => ({ config: {} }));
+        jest.doMock("../../config", () => ({
+            config: {
+                features: {
+                    audioAnalysis: true,
+                    discovery: true,
+                    autoPlaylists: true,
+                    ...(options?.configFeatures || {}),
+                },
+            },
+        }));
         jest.doMock("../../services/enrichmentState", () => ({
             enrichmentStateService,
         }));
@@ -301,6 +316,60 @@ describe("unified enrichment runtime behavior", () => {
         expect(progress.clapEmbeddings.failed).toBe(1);
         expect(progress.clapEmbeddings.pending).toBe(0);
         expect(progress.isFullyComplete).toBe(true);
+    });
+
+    it("excludes audio and CLAP work from full completion when audio analysis is disabled", async () => {
+        const { prisma } = setupUnifiedEnrichmentMocks({
+            configFeatures: { audioAnalysis: false },
+        });
+        // Core complete (no pending artists/track tags) but plenty of audio
+        // and CLAP work outstanding — which can never drain while the
+        // analyzers are disabled.
+        (prisma.$transaction as jest.Mock).mockResolvedValue([
+            [{ enrichmentStatus: "completed", _count: 2 }],
+            10,
+            [{ count: BigInt(10) }],
+            10,
+            0,
+            10,
+            0,
+            0,
+            [{ count: BigInt(0) }],
+            0,
+            0,
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const progress = await enrichment.getEnrichmentProgress();
+
+        expect(progress.coreComplete).toBe(true);
+        expect(progress.audioAnalysis.pending).toBe(10);
+        expect(progress.isFullyComplete).toBe(true);
+    });
+
+    it("still requires audio analysis work for full completion when the flag is on", async () => {
+        const { prisma } = setupUnifiedEnrichmentMocks();
+        (prisma.$transaction as jest.Mock).mockResolvedValue([
+            [{ enrichmentStatus: "completed", _count: 2 }],
+            10,
+            [{ count: BigInt(10) }],
+            10,
+            0,
+            10,
+            0,
+            0,
+            [{ count: BigInt(0) }],
+            0,
+            0,
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const enrichment = require("../unifiedEnrichment");
+        const progress = await enrichment.getEnrichmentProgress();
+
+        expect(progress.coreComplete).toBe(true);
+        expect(progress.isFullyComplete).toBe(false);
     });
 
     it("disconnects enrichment redis clients during stop", async () => {

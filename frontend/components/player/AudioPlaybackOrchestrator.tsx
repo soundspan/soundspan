@@ -24,6 +24,7 @@ import {
     shouldThrottleForegroundRecovery,
 } from "@/lib/audio-engine/foregroundRecoveryPolicy";
 import { resolveNextTrackPreloadDecision } from "@/lib/audio-engine/nextTrackPreloadPolicy";
+import { resolveQueueAdvance } from "@/lib/audio/queue-advance-policy";
 import {
     resolveSegmentedPrewarmMaxRetries,
 } from "@/lib/audio-engine/segmentedStartupPolicy";
@@ -108,6 +109,7 @@ interface RuntimeProviderTrack {
 function getNextTrackInfo(
     queue: {
         id: string;
+        itemType?: string;
         filePath?: string;
         mediaSource?: CanonicalMediaSource;
         provider?: CanonicalMediaProviderIdentity;
@@ -122,6 +124,7 @@ function getNextTrackInfo(
     repeatMode: "off" | "one" | "all"
 ): {
     id: string;
+    itemType?: string;
     filePath?: string;
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
@@ -152,7 +155,10 @@ function getNextTrackInfo(
         }
     }
 
-    return queue[nextIndex] || null;
+    const nextItem = queue[nextIndex] || null;
+    // Mixed-media queue: only music tracks can be preloaded gaplessly.
+    if (!nextItem || nextItem.itemType === "episode") return null;
+    return nextItem;
 }
 
 interface SegmentedTrackContext {
@@ -616,7 +622,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     } = useAudioPlayback();
 
     // Controls context
-    const { pause, next, nextPodcastEpisode, startVibeMode } = useAudioControls();
+    const { pause, next, startVibeMode } = useAudioControls();
     const queryClient = useQueryClient();
 
     // Refs
@@ -4292,7 +4298,21 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
             // Handle track advancement based on playback type
             if (playbackType === "podcast") {
-                nextPodcastEpisode(); // Auto-advance to next episode
+                // Episodes advance through the same unified mixed-media queue
+                // as tracks; pause when the queue has nowhere left to go.
+                const podcastAdvance = resolveQueueAdvance({
+                    action: "next",
+                    queue,
+                    currentIndex,
+                    isShuffle,
+                    shuffleIndices,
+                    repeatMode,
+                });
+                if (podcastAdvance.kind === "stop") {
+                    pause();
+                } else {
+                    next();
+                }
             } else if (playbackType === "audiobook") {
                 pause();
             } else if (playbackType === "track") {
@@ -4978,7 +4998,6 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         currentPodcast,
         repeatMode,
         next,
-        nextPodcastEpisode,
         pause,
         setCurrentTimeFromEngine,
         setDuration,
@@ -6325,8 +6344,16 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
 
     // Preload next track for gapless playback (music only)
     useEffect(() => {
-        // Only preload for music tracks, not podcasts/audiobooks
-        if (playbackType !== "track" || !currentTrack || !isPlaying) {
+        // Preload while a track or podcast episode plays — but only when the
+        // NEXT queue item is a music track (getNextTrackInfo returns null for
+        // episode items). Audiobooks have no queue and never preload.
+        const hasActiveQueueMedia =
+            playbackType === "track"
+                ? Boolean(currentTrack)
+                : playbackType === "podcast"
+                  ? Boolean(currentPodcast)
+                  : false;
+        if (!hasActiveQueueMedia || !isPlaying) {
             return;
         }
 
@@ -6412,6 +6439,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     }, [
         playbackType,
         currentTrack,
+        currentPodcast,
         isPlaying,
         queue,
         currentIndex,

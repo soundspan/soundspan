@@ -562,16 +562,18 @@ export function useLibraryTracksQuery({
  * Cache time: 5 minutes
  *
  * @param limit - Number of recommendations (default: 10)
+ * @param enabled - Set false to disable fetching (e.g. discovery feature off)
  * @returns Query result with recommended artists
  *
  * @example
  * const { data } = useRecommendationsQuery(10);
  */
-export function useRecommendationsQuery(limit: number = 10) {
+export function useRecommendationsQuery(limit: number = 10, enabled: boolean = true) {
     return useQuery({
         queryKey: queryKeys.recommendations(limit),
         queryFn: () => api.getRecommendationsForYou(limit),
         staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled,
     });
 }
 
@@ -754,12 +756,15 @@ export function useLikedPlaylistQuery(limit: number = 10_000) {
  *
  * Returns week range and track count without full track data hydration.
  * Used by the Explore page to render a playlist card.
+ *
+ * @param enabled - Set false to disable fetching (e.g. discovery feature off)
  */
-export function useDiscoverWeeklySummaryQuery() {
+export function useDiscoverWeeklySummaryQuery(enabled: boolean = true) {
     return useQuery({
         queryKey: queryKeys.discoverWeekly(),
         queryFn: () => api.getCurrentDiscoverWeekly(),
         staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled,
     });
 }
 
@@ -768,16 +773,18 @@ export function useDiscoverWeeklySummaryQuery() {
  *
  * Cache time: 5 minutes
  *
+ * @param enabled - Set false to disable fetching (e.g. auto playlists feature off)
  * @returns Query result with mixes array
  *
  * @example
  * const { data: mixes } = useMixesQuery();
  */
-export function useMixesQuery() {
+export function useMixesQuery(enabled: boolean = true) {
     return useQuery({
         queryKey: queryKeys.mixes(),
         queryFn: () => api.getMixes(),
         staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled,
     });
 }
 

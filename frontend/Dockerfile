@@ -61,6 +61,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/server.js ./server.js
+COPY --from=builder /app/server-proxy.js ./server-proxy.js
 COPY --from=builder /packages/media-metadata-contract /packages/media-metadata-contract
 
 # Copy healthcheck and entrypoint scripts

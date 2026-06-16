@@ -14,10 +14,21 @@ describe("workers runtime behavior", () => {
             add: jest.fn(async () => ({ id: "job-1" })),
             close: jest.fn(async () => undefined),
             removeAllListeners: jest.fn(),
+            getJobCounts: jest.fn(async () => ({
+                waiting: 0,
+                active: 0,
+                completed: 0,
+                failed: 0,
+                delayed: 0,
+            })),
         };
     }
 
-    function setupWorkerModuleMocks() {
+    function setupWorkerModuleMocks(featureOverrides?: {
+        audioAnalysis?: boolean;
+        discovery?: boolean;
+        autoPlaylists?: boolean;
+    }) {
         const scanQueue = createQueueMock();
         const discoverQueue = createQueueMock();
         const imageQueue = createQueueMock();
@@ -36,6 +47,7 @@ describe("workers runtime behavior", () => {
         const startMoodBucketWorker = jest.fn(async () => undefined);
         const stopMoodBucketWorker = jest.fn();
         const startDiscoverWeeklyCron = jest.fn();
+        const stopDiscoverWeeklyCron = jest.fn();
         const processDiscoverCronTick = jest.fn(async () => ({ ok: true }));
         const runDataIntegrityCheck = jest.fn(async () => undefined);
         const shutdownDiscoverProcessor = jest.fn(async () => undefined);
@@ -143,7 +155,18 @@ describe("workers runtime behavior", () => {
         jest.doMock("../../utils/db", () => ({ prisma }));
         jest.doMock("../discoverCron", () => ({
             startDiscoverWeeklyCron,
+            stopDiscoverWeeklyCron,
             processDiscoverCronTick,
+        }));
+        jest.doMock("../../config", () => ({
+            config: {
+                features: {
+                    audioAnalysis: true,
+                    discovery: true,
+                    autoPlaylists: true,
+                    ...(featureOverrides ?? {}),
+                },
+            },
         }));
         jest.doMock("../dataIntegrity", () => ({ runDataIntegrityCheck }));
         jest.doMock("../../services/simpleDownloadManager", () => ({ simpleDownloadManager }));
@@ -185,6 +208,7 @@ describe("workers runtime behavior", () => {
             startMoodBucketWorker,
             stopMoodBucketWorker,
             startDiscoverWeeklyCron,
+            stopDiscoverWeeklyCron,
             runDataIntegrityCheck,
             downloadQueueManager,
             simpleDownloadManager,
@@ -239,8 +263,53 @@ describe("workers runtime behavior", () => {
         expect(mocks.startUnifiedEnrichmentWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startMoodBucketWorker).toHaveBeenCalledTimes(1);
         expect(mocks.startDiscoverWeeklyCron).toHaveBeenCalledTimes(1);
+        expect(mocks.stopDiscoverWeeklyCron).not.toHaveBeenCalled();
         expect(mocks.schedulerQueue.isReady).toHaveBeenCalledTimes(1);
         expect(mocks.schedulerQueue.add).toHaveBeenCalled();
+    });
+
+    it("removes the persisted Discover Weekly repeatable job and reports backlog when discovery is disabled", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks({ discovery: false });
+        mocks.discoverQueue.getJobCounts.mockResolvedValueOnce({
+            waiting: 2,
+            active: 0,
+            completed: 0,
+            failed: 0,
+            delayed: 1,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        expect(mocks.discoverQueue.process).not.toHaveBeenCalledWith(
+            "discover-recommendation",
+            expect.any(Function)
+        );
+        expect(mocks.startDiscoverWeeklyCron).not.toHaveBeenCalled();
+        expect(mocks.stopDiscoverWeeklyCron).toHaveBeenCalledTimes(1);
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("3 discover job(s)")
+        );
+    });
+
+    it("logs but survives a backlog inspection failure when discovery is disabled", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks({ discovery: false });
+        mocks.discoverQueue.getJobCounts.mockRejectedValueOnce(
+            new Error("redis gone")
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        expect(mocks.stopDiscoverWeeklyCron).toHaveBeenCalledTimes(1);
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("discover queue backlog"),
+            "redis gone"
+        );
     });
 
     it("exposes queue exports for downstream consumers", async () => {

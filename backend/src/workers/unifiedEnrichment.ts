@@ -443,6 +443,12 @@ export async function startUnifiedEnrichmentWorker() {
     logger.debug(`   Interval: ${ENRICHMENT_INTERVAL_MS / 1000}s`);
     logger.debug("");
 
+    if (!config.features.audioAnalysis) {
+        logger.info(
+            "[Features] Audio analysis disabled (AUDIO_ANALYSIS_ENABLED=false); enrichment skips audio/vibe queueing phases (steps 3-4)"
+        );
+    }
+
     // Ensure startup begins from a clean local runtime state.
     isPaused = false;
     isStopping = false;
@@ -743,19 +749,24 @@ async function runEnrichmentCycle(fullMode: boolean): Promise<{
         }
         tracksProcessed = trackResult;
 
-        const audioResult = await runPhase("audio", executeAudioPhase);
-        if (audioResult === null) {
-            consecutiveSystemFailures = 0;
-            return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued: 0 };
-        }
-        audioQueued = audioResult;
+        // Steps 3-4 (audio analysis + vibe embeddings queueing) are gated by
+        // the coarse AUDIO_ANALYSIS_ENABLED feature flag.
+        let vibeQueued = 0;
+        if (config.features.audioAnalysis) {
+            const audioResult = await runPhase("audio", executeAudioPhase);
+            if (audioResult === null) {
+                consecutiveSystemFailures = 0;
+                return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued: 0 };
+            }
+            audioQueued = audioResult;
 
-        const vibeResult = await runPhase("vibe", executeVibePhase);
-        if (vibeResult === null) {
-            consecutiveSystemFailures = 0;
-            return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued };
+            const vibeResult = await runPhase("vibe", executeVibePhase);
+            if (vibeResult === null) {
+                consecutiveSystemFailures = 0;
+                return { artists: artistsProcessed, tracks: tracksProcessed, audioQueued };
+            }
+            vibeQueued = vibeResult;
         }
-        const vibeQueued = vibeResult;
 
         // Podcast refresh phase -- only runs if subscriptions exist
         await runPhase("podcasts", executePodcastRefreshPhase);
@@ -1692,7 +1703,12 @@ export async function getEnrichmentProgress() {
     const clapFailed = clapFailedByStatus;
     const clapTotal = Number(clapEligibleTrackCount[0]?.count || 0);
     const clapPending = Math.max(0, clapTotal - clapCompleted - clapFailed);
-    const clapRequiredForFullCompletion = features.vibeEmbeddings;
+    // When AUDIO_ANALYSIS_ENABLED=false the audio/vibe phases never queue
+    // work, so outstanding audio/CLAP counts can never drain and must not
+    // block full completion (status idle, completion notification, caches).
+    const audioRequiredForFullCompletion = config.features.audioAnalysis;
+    const clapRequiredForFullCompletion =
+        audioRequiredForFullCompletion && features.vibeEmbeddings;
     const artistProgress =
         artistTotal > 0 ? Math.round((artistCompleted / artistTotal) * 100) : 0;
     const trackTagsPending = Math.max(0, trackTotal - trackTagsEnriched);
@@ -1763,8 +1779,10 @@ export async function getEnrichmentProgress() {
         coreComplete, // True when artists + track tags are done
         isFullyComplete:
             coreComplete &&
-            audioPending === 0 &&
-            audioProcessing === 0 &&
+            (
+                !audioRequiredForFullCompletion ||
+                (audioPending === 0 && audioProcessing === 0)
+            ) &&
             (
                 !clapRequiredForFullCompletion ||
                 (
