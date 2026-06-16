@@ -187,7 +187,7 @@ export function OverlayPlayer() {
     const [relatedStreamMatches, setRelatedStreamMatches] = useState<Record<string, RelatedStreamMatch>>({});
     const [matchingRelatedTrackKey, setMatchingRelatedTrackKey] = useState<string | null>(null);
     const { vibeEmbeddings, loading: featuresLoading } = useFeatures();
-    const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(500);
+    const { title, subtitle, coverUrl, artistLink, mediaLink } = useMediaInfo(768);
     const currentTrackQualityBadge = useMemo(
         () => resolvePlaybackQualityBadgeFromStreamSource(currentTrack?.streamSource),
         [currentTrack?.streamSource],

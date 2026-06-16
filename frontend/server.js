@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createServer } = require("http");
 const next = require("next");
-const { createProxyMiddleware } = require("http-proxy-middleware");
+const { createBackendProxy } = require("./server-proxy");
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "0.0.0.0";
@@ -10,6 +10,7 @@ const backendUrl = (process.env.BACKEND_URL || "http://127.0.0.1:3006").replace(
 
 const LISTEN_TOGETHER_SOCKET_PATH = "/socket.io/listen-together";
 const SUBSONIC_REST_PATH = "/rest";
+const API_PATH = "/api";
 const HEALTH_LIVE_PATH = "/health/live";
 const HEALTH_READY_PATH = "/health/ready";
 const HEALTH_PATH = "/health";
@@ -81,55 +82,42 @@ function isSubsonicRestPath(pathname) {
     );
 }
 
-const listenTogetherSocketProxy = createProxyMiddleware({
+// All /api/* paths are backend-owned; Next-owned handlers live at
+// /runtime-config and /health (the latter is handled above the proxy).
+function isApiPath(pathname) {
+    return (
+        pathname === API_PATH ||
+        pathname === `${API_PATH}/` ||
+        pathname.startsWith(`${API_PATH}/`)
+    );
+}
+
+const listenTogetherSocketProxy = createBackendProxy({
+    name: "listen-together-proxy",
     target: backendUrl,
-    changeOrigin: true,
     ws: true,
-    xfwd: true,
-    logLevel: "warn",
-    timeout: 120000,
-    proxyTimeout: 120000,
-    onError: (err, req, res) => {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        serverLogger.error(
-            `[listen-together-proxy] ${req.method} ${req.url} failed:`,
-            errorMessage
-        );
-        if (!res.headersSent) {
-            res.writeHead(503, { "Content-Type": "application/json" });
-            res.end(
-                JSON.stringify({
-                    error: "Listen Together backend unavailable",
-                    code: "LISTEN_TOGETHER_PROXY_UNAVAILABLE",
-                })
-            );
-        }
-    },
+    logger: serverLogger,
+    errorMessage: "Listen Together backend unavailable",
+    errorCode: "LISTEN_TOGETHER_PROXY_UNAVAILABLE",
 });
 
-const subsonicRestProxy = createProxyMiddleware({
+const subsonicRestProxy = createBackendProxy({
+    name: "subsonic-rest-proxy",
     target: backendUrl,
-    changeOrigin: true,
-    xfwd: true,
-    logLevel: "warn",
-    timeout: 120000,
-    proxyTimeout: 120000,
-    onError: (err, req, res) => {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        serverLogger.error(
-            `[subsonic-rest-proxy] ${req.method} ${req.url} failed:`,
-            errorMessage
-        );
-        if (!res.headersSent) {
-            res.writeHead(503, { "Content-Type": "application/json" });
-            res.end(
-                JSON.stringify({
-                    error: "Subsonic backend unavailable",
-                    code: "SUBSONIC_PROXY_UNAVAILABLE",
-                })
-            );
-        }
-    },
+    logger: serverLogger,
+    errorMessage: "Subsonic backend unavailable",
+    errorCode: "SUBSONIC_PROXY_UNAVAILABLE",
+});
+
+// Streams /api traffic straight to the backend (no body buffering or
+// gzip stripping, unlike the Next route-handler fallback in
+// app/api/[...path]/route.ts).
+const apiProxy = createBackendProxy({
+    name: "api-proxy",
+    target: backendUrl,
+    logger: serverLogger,
+    errorMessage: "API backend unavailable",
+    errorCode: "API_PROXY_UNAVAILABLE",
 });
 
 app.prepare().then(() => {
@@ -182,6 +170,11 @@ app.prepare().then(() => {
             return;
         }
 
+        if (isApiPath(pathname)) {
+            apiProxy(req, res);
+            return;
+        }
+
         handle(req, res);
     });
 
@@ -200,6 +193,9 @@ app.prepare().then(() => {
         );
         serverLogger.info(
             `> Subsonic REST proxy enabled: ${SUBSONIC_REST_PATH} -> ${backendUrl}`
+        );
+        serverLogger.info(
+            `> API proxy enabled: ${API_PATH} -> ${backendUrl}`
         );
     });
 

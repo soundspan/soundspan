@@ -184,6 +184,16 @@ jest.mock("../../services/imageStorage", () => ({
     downloadAndStoreImage: jest.fn(),
 }));
 
+jest.mock("../../services/coverArtResize", () => {
+    const actual = jest.requireActual("../../services/coverArtResize");
+    return {
+        ...actual,
+        resizeCoverArt: jest.fn(),
+    };
+});
+
+import crypto from "crypto";
+import path from "path";
 import router from "../library";
 import { redisClient } from "../../utils/redis";
 import { fetchExternalImage } from "../../services/imageProxy";
@@ -208,8 +218,10 @@ import {
     getDecadeFromYear,
     getEffectiveYear,
 } from "../../utils/dateFilters";
+import { resizeCoverArt } from "../../services/coverArtResize";
 
 const mockRedisGet = redisClient.get as jest.Mock;
+const mockResizeCoverArt = resizeCoverArt as jest.Mock;
 const mockRedisSetEx = redisClient.setEx as jest.Mock;
 const mockFetchExternalImage = fetchExternalImage as jest.Mock;
 const mockAlbumFindUnique = prisma.album.findUnique as jest.Mock;
@@ -302,6 +314,15 @@ describe("library cover-art proxy compatibility", () => {
         mockCoverArtGetCoverArt.mockResolvedValue(null);
         mockCoverArtClearNotFoundCache.mockResolvedValue(undefined);
         mockImageProviderGetAlbumCover.mockResolvedValue(null);
+        mockResizeCoverArt.mockImplementation(
+            async ({
+                buffer,
+                contentType,
+            }: {
+                buffer: Buffer;
+                contentType: string | null;
+            }) => ({ buffer, contentType, resized: false })
+        );
     });
 
     it("blocks invalid/private cover-art URLs", async () => {
@@ -384,6 +405,295 @@ describe("library cover-art proxy compatibility", () => {
             90 * 24 * 60 * 60,
             expect.any(String)
         );
+    });
+
+    it("resizes fetched cover art and caches the variant under a size+format key", async () => {
+        mockFetchExternalImage.mockResolvedValue({
+            ok: true,
+            buffer: Buffer.from("original-bytes"),
+            contentType: "image/jpeg",
+            etag: "etag-original",
+            url: "https://example.com/cover.jpg",
+        });
+        const resizedBuffer = Buffer.from("resized-bytes");
+        mockResizeCoverArt.mockResolvedValue({
+            buffer: resizedBuffer,
+            contentType: "image/webp",
+            resized: true,
+        });
+
+        const req = {
+            query: { url: "https://example.com/cover.jpg", size: "300" },
+            params: {},
+            headers: { accept: "image/avif,image/webp,*/*" },
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockResizeCoverArt).toHaveBeenCalledWith({
+            buffer: Buffer.from("original-bytes"),
+            contentType: "image/jpeg",
+            size: 320,
+            format: "webp",
+        });
+        const expectedKey = `cover-art:${crypto
+            .createHash("md5")
+            .update("https://example.com/cover.jpg-320-webp")
+            .digest("hex")}`;
+        const expectedEtag = crypto
+            .createHash("md5")
+            .update(resizedBuffer)
+            .digest("hex");
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            expectedKey,
+            90 * 24 * 60 * 60,
+            JSON.stringify({
+                etag: expectedEtag,
+                contentType: "image/webp",
+                data: resizedBuffer.toString("base64"),
+            })
+        );
+        expect(res.headers["Content-Type"]).toBe("image/webp");
+        expect(res.headers["ETag"]).toBe(expectedEtag);
+        expect(res.body).toEqual(resizedBuffer);
+    });
+
+    it("serves the original buffer and etag when no size is requested", async () => {
+        mockFetchExternalImage.mockResolvedValue({
+            ok: true,
+            buffer: Buffer.from("original-bytes"),
+            contentType: "image/jpeg",
+            etag: "etag-123",
+            url: "https://example.com/cover.jpg",
+        });
+
+        const req = {
+            query: { url: "https://example.com/cover.jpg" },
+            params: {},
+            headers: { accept: "image/avif,image/webp,*/*" },
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(mockResizeCoverArt).toHaveBeenCalledWith({
+            buffer: Buffer.from("original-bytes"),
+            contentType: "image/jpeg",
+            size: null,
+            format: "original",
+        });
+        const expectedKey = `cover-art:${crypto
+            .createHash("md5")
+            .update("https://example.com/cover.jpg-original-original")
+            .digest("hex")}`;
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            expectedKey,
+            90 * 24 * 60 * 60,
+            expect.any(String)
+        );
+        expect(res.headers["ETag"]).toBe("etag-123");
+        expect(res.body).toEqual(Buffer.from("original-bytes"));
+    });
+
+    it("serves resized native covers when a size is requested", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
+        const readSpy = jest
+            .spyOn(fs.promises, "readFile")
+            .mockResolvedValue(Buffer.from("native-bytes"));
+        mockResizeCoverArt.mockResolvedValue({
+            buffer: Buffer.from("native-resized"),
+            contentType: "image/webp",
+            resized: true,
+        });
+
+        const req = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: { accept: "image/webp,*/*" },
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(readSpy).toHaveBeenCalled();
+        expect(mockResizeCoverArt).toHaveBeenCalledWith({
+            buffer: Buffer.from("native-bytes"),
+            contentType: "image/jpeg",
+            size: 128,
+            format: "webp",
+        });
+        expect(res.sendFile).not.toHaveBeenCalled();
+        expect(res.headers["Content-Type"]).toBe("image/webp");
+        expect(res.body).toEqual(Buffer.from("native-resized"));
+
+        existsSpy.mockRestore();
+        statSpy.mockRestore();
+        readSpy.mockRestore();
+    });
+
+    it("caches resized native cover variants in Redis keyed by file identity, size, and format", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
+        const readSpy = jest
+            .spyOn(fs.promises, "readFile")
+            .mockResolvedValue(Buffer.from("native-bytes"));
+        const resizedBuffer = Buffer.from("native-resized");
+        mockResizeCoverArt.mockResolvedValue({
+            buffer: resizedBuffer,
+            contentType: "image/webp",
+            resized: true,
+        });
+
+        const req = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: { accept: "image/webp,*/*" },
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        const cachePath = path.resolve(
+            "/tmp/soundspan-cache",
+            "../covers",
+            "albums/album-123.jpg"
+        );
+        const expectedKey = `cover-art:native:${crypto
+            .createHash("md5")
+            .update(`${cachePath}-1718000000000-4096-128-webp`)
+            .digest("hex")}`;
+        const expectedEtag = crypto
+            .createHash("md5")
+            .update(resizedBuffer)
+            .digest("hex");
+        expect(mockRedisSetEx).toHaveBeenCalledWith(
+            expectedKey,
+            90 * 24 * 60 * 60,
+            JSON.stringify({
+                etag: expectedEtag,
+                contentType: "image/webp",
+                data: resizedBuffer.toString("base64"),
+            })
+        );
+        expect(res.headers["ETag"]).toBe(expectedEtag);
+        expect(res.body).toEqual(resizedBuffer);
+
+        existsSpy.mockRestore();
+        statSpy.mockRestore();
+        readSpy.mockRestore();
+    });
+
+    it("serves cached native variants and answers If-None-Match without re-decoding", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
+        const readSpy = jest.spyOn(fs.promises, "readFile");
+        const cachedBuffer = Buffer.from("cached-native-resized");
+        const cachedEtag = "etag-native-cached";
+        mockRedisGet.mockResolvedValue(
+            JSON.stringify({
+                etag: cachedEtag,
+                contentType: "image/webp",
+                data: cachedBuffer.toString("base64"),
+            })
+        );
+
+        const req = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: { accept: "image/webp,*/*" },
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.headers["Content-Type"]).toBe("image/webp");
+        expect(res.headers["ETag"]).toBe(cachedEtag);
+        expect(res.body).toEqual(cachedBuffer);
+
+        const conditionalReq = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: {
+                accept: "image/webp,*/*",
+                "if-none-match": cachedEtag,
+            },
+        } as any;
+        const conditionalRes = createRes();
+
+        await coverArtHandler(conditionalReq, conditionalRes);
+
+        expect(conditionalRes.statusCode).toBe(304);
+        expect(conditionalRes.end).toHaveBeenCalled();
+        expect(readSpy).not.toHaveBeenCalled();
+        expect(mockResizeCoverArt).not.toHaveBeenCalled();
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
+
+        existsSpy.mockRestore();
+        statSpy.mockRestore();
+        readSpy.mockRestore();
+    });
+
+    it("falls back to sending the native file when resize does not apply", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+        const statSpy = jest
+            .spyOn(fs.promises, "stat")
+            .mockResolvedValue({ mtimeMs: 1718000000000, size: 4096 } as fs.Stats);
+        const readSpy = jest
+            .spyOn(fs.promises, "readFile")
+            .mockResolvedValue(Buffer.from("native-bytes"));
+
+        const req = {
+            query: { url: "native:albums/album-123.jpg", size: "128" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(res.sendFile).toHaveBeenCalled();
+
+        existsSpy.mockRestore();
+        statSpy.mockRestore();
+        readSpy.mockRestore();
+    });
+
+    it("sends native files directly when no size is requested", async () => {
+        const existsSpy = jest
+            .spyOn(fs, "existsSync")
+            .mockReturnValue(true);
+        const readSpy = jest.spyOn(fs.promises, "readFile");
+
+        const req = {
+            query: { url: "native:albums/album-123.jpg" },
+            params: {},
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await coverArtHandler(req, res);
+
+        expect(readSpy).not.toHaveBeenCalled();
+        expect(res.sendFile).toHaveBeenCalled();
+
+        existsSpy.mockRestore();
+        readSpy.mockRestore();
     });
 
     it("self-heals missing native query-url covers via Deezer fallback", async () => {

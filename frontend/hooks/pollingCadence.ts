@@ -31,6 +31,17 @@ export function resolvePollingJitter(maxJitterMs: number): number {
 }
 
 /**
+ * Pauses a resolved polling interval while the document is hidden.
+ * Returns the interval unchanged when visible, false otherwise.
+ */
+export function resolveVisibilityGatedPollingInterval(
+    intervalMs: number | false,
+    isDocumentVisible: boolean
+): number | false {
+    return isDocumentVisible ? intervalMs : false;
+}
+
+/**
  * Resolves adaptive polling intervals, switching between active/idle cadences.
  */
 export function resolveAdaptivePollingInterval(

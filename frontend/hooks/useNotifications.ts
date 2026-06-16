@@ -8,7 +8,12 @@ import {
     resolveAdaptivePollingInterval,
     resolveFixedPollingInterval,
     resolvePollingEnabled,
+    resolveVisibilityGatedPollingInterval,
 } from "@/hooks/pollingCadence";
+import {
+    useDocumentVisible,
+    useRefetchOnVisible,
+} from "@/hooks/useDocumentVisibility";
 
 const logger = createFrontendLogger("Hooks.useNotifications");
 const NOTIFICATIONS_POLL_INTERVAL_MS = 30_000;
@@ -78,6 +83,7 @@ interface PollingOptions {
  */
 export function useNotifications(options: PollingOptions = {}): UseNotificationsReturn {
     const enabled = resolvePollingEnabled(options.enabled);
+    const isDocumentVisible = useDocumentVisible();
     const queryClient = useQueryClient();
 
     // Single source of truth - React Query cache
@@ -93,11 +99,15 @@ export function useNotifications(options: PollingOptions = {}): UseNotifications
         staleTime: 15_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchInterval: resolveFixedPollingInterval(
-            enabled,
-            NOTIFICATIONS_POLL_INTERVAL_MS
+        refetchInterval: resolveVisibilityGatedPollingInterval(
+            resolveFixedPollingInterval(
+                enabled,
+                NOTIFICATIONS_POLL_INTERVAL_MS
+            ),
+            isDocumentVisible
         ),
     });
+    useRefetchOnVisible(enabled, refetch);
 
     // Derive unread count from data (computed, not stored)
     const unreadCount = notifications.filter((n) => !n.read).length;
@@ -197,6 +207,7 @@ export function useNotifications(options: PollingOptions = {}): UseNotifications
  * Hook for download history - unchanged from original
  */
 export function useDownloadHistory(): UseDownloadHistoryReturn {
+    const isDocumentVisible = useDocumentVisible();
     const fetchHistory = useCallback(async () => {
         return api.get<DownloadHistoryItem[]>("/notifications/downloads/history");
     }, []);
@@ -212,8 +223,13 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
         staleTime: 15_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchInterval: 30000, // 30s - history doesn't need frequent updates
+        // 30s - history doesn't need frequent updates; paused while hidden
+        refetchInterval: resolveVisibilityGatedPollingInterval(
+            30000,
+            isDocumentVisible
+        ),
     });
+    useRefetchOnVisible(true, refetch);
 
     const queryClient = useQueryClient();
 
