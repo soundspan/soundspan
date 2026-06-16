@@ -67,6 +67,15 @@ const defaultQueueSettings: Bull.QueueOptions["settings"] = {
 export const scanQueue = new Bull("library-scan", {
     redis: redisConfig,
     settings: defaultQueueSettings,
+    // Most of the ~15 scanQueue.add() sites enqueue without per-job retention
+    // options, so without a default Redis accumulates completed/failed scan
+    // records unbounded. Keep a bounded window: the last 100 completed (enough
+    // for the recent-job status lookup in routes/library.ts) and 200 failed for
+    // debugging.
+    defaultJobOptions: {
+        removeOnComplete: 100,
+        removeOnFail: 200,
+    },
 });
 
 export const discoverQueue = new Bull("discover-weekly", {
