@@ -43,6 +43,7 @@ from common.sidecar_runtime_utils import (
 )
 from yt_download import (
     PROXY_AUDIO_FORMAT_SELECTORS,
+    YT_PLAYER_CLIENTS,
     derive_proxy_audio_container,
     extract_video_id as _extract_video_id,
     find_active_download_job,
@@ -649,7 +650,7 @@ def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["android"],
+                "player_client": YT_PLAYER_CLIENTS,
             },
         },
     }
@@ -2023,7 +2024,7 @@ async def yt_video_info(url: str = Query(...)):
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["android"],
+                "player_client": YT_PLAYER_CLIENTS,
             },
         },
     }
@@ -2294,7 +2295,7 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["android"],
+                "player_client": YT_PLAYER_CLIENTS,
             },
         },
     }

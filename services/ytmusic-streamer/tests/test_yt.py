@@ -19,6 +19,7 @@ if str(SIDECAR_ROOT) not in sys.path:
 from yt_download import (  # noqa: E402
     ACTIVE_DOWNLOAD_STATUSES,
     PROXY_AUDIO_FORMAT_SELECTORS,
+    YT_PLAYER_CLIENTS,
     derive_proxy_audio_container,
     extract_video_id,
     find_active_download_job,
@@ -63,6 +64,19 @@ def test_extract_video_id_variants(url):
 def test_extract_video_id_rejects_invalid(url):
     with pytest.raises(ValueError):
         extract_video_id(url)
+
+
+# ── YT_PLAYER_CLIENTS (regular-YouTube extractor clients) ───────────
+
+def test_yt_player_clients_excludes_broken_bare_android():
+    # The bare "android" InnerTube client is PO-token-gated and returns no
+    # usable audio formats, so it must not be used for regular-YouTube
+    # extraction (it made /yt/info 502 with "Requested format is not
+    # available"). The list must be non-empty and only name working clients.
+    assert YT_PLAYER_CLIENTS, "at least one player client is required"
+    assert "android" not in YT_PLAYER_CLIENTS
+    assert "android_vr" in YT_PLAYER_CLIENTS
+    assert all(isinstance(client, str) and client for client in YT_PLAYER_CLIENTS)
 
 
 # ── find_existing_download (idempotency check) ──────────────────────
