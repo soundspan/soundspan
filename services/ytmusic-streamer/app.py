@@ -2254,6 +2254,9 @@ class YtDownloadRequest(BaseModel):
     format: str = "mp3"
     quality: str = "HIGH"
     output_dir: Optional[str] = None  # defaults to YT_DOWNLOAD_DIR
+    # Optional grouping label (e.g. the playlist/channel title) so the
+    # downloads view can group a bulk run's jobs by where they came from.
+    source: Optional[str] = None
 
 
 # ── Download job store (in-memory) ──────────────────────────────────
@@ -2277,13 +2280,17 @@ _yt_download_executor = ThreadPoolExecutor(
 )
 
 
+# Terminal download-job states (no longer doing work).
+TERMINAL_DOWNLOAD_STATUSES = ("completed", "failed", "cancelled")
+
+
 def _prune_yt_download_jobs():
-    """Drop completed/failed jobs older than the TTL to bound memory."""
+    """Drop terminal jobs older than the TTL to bound memory."""
     cutoff = time.time() - YT_DOWNLOAD_JOB_TTL
     stale = [
         job_id
         for job_id, job in _yt_download_jobs.items()
-        if job.get("status") in ("completed", "failed")
+        if job.get("status") in TERMINAL_DOWNLOAD_STATUSES
         and job.get("created_at", 0) <= cutoff
     ]
     for job_id in stale:
@@ -2292,7 +2299,9 @@ def _prune_yt_download_jobs():
         log.debug(f"Pruned {len(stale)} stale YT download job(s)")
 
 
-def _new_yt_download_job(video_id: str, status: str = "queued") -> dict:
+def _new_yt_download_job(
+    video_id: str, status: str = "queued", source: Optional[str] = None
+) -> dict:
     """Create and register a download job record."""
     _prune_yt_download_jobs()
     job = {
@@ -2304,6 +2313,8 @@ def _new_yt_download_job(video_id: str, status: str = "queued") -> dict:
         "title": "",
         "error": None,
         "already_existed": False,
+        "source": source,
+        "cancel_requested": False,
         "created_at": time.time(),
     }
     _yt_download_jobs[job["job_id"]] = job
@@ -2321,6 +2332,8 @@ def _yt_download_job_payload(job: dict) -> dict:
         "title": job["title"],
         "error": job["error"],
         "already_existed": job["already_existed"],
+        "source": job.get("source"),
+        "created_at": job.get("created_at"),
     }
 
 
@@ -2346,6 +2359,10 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
     _last_extract_time = time.time()
 
     def _progress_hook(d: dict):
+        # Abort an in-flight download when the job has been cancelled; yt-dlp
+        # propagates the exception out of extract_info().
+        if job.get("cancel_requested"):
+            raise yt_dlp.utils.DownloadCancelled("cancelled by user")
         status = d.get("status")
         if status == "downloading":
             job["status"] = "downloading"
@@ -2398,6 +2415,11 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
+    # Cancelled while still queued in the executor — never start the download.
+    if job.get("cancel_requested"):
+        job["status"] = "cancelled"
+        return
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
 
@@ -2434,9 +2456,14 @@ async def _run_yt_download_job(job: dict, audio_format: str, quality: str, outpu
             output_dir,
         )
     except Exception as e:
-        log.error(f"YT download failed for {job['video_id']}: {e}")
-        job["status"] = "failed"
-        job["error"] = str(e)
+        if job.get("cancel_requested"):
+            job["status"] = "cancelled"
+            job["error"] = None
+            log.info(f"YT download cancelled for {job['video_id']}")
+        else:
+            log.error(f"YT download failed for {job['video_id']}: {e}")
+            job["status"] = "failed"
+            job["error"] = str(e)
 
 
 @app.post("/yt/download")
@@ -2475,14 +2502,16 @@ async def yt_download(req: YtDownloadRequest):
     existing = find_existing_download(output_dir, video_id)
     if existing:
         log.info(f"YT download already exists: {existing}")
-        job = _new_yt_download_job(video_id, status="completed")
+        job = _new_yt_download_job(
+            video_id, status="completed", source=req.source
+        )
         job["progress_pct"] = 100.0
         job["file_path"] = existing
         job["title"] = os.path.basename(existing)
         job["already_existed"] = True
         return {"job_id": job["job_id"], "status": job["status"]}
 
-    job = _new_yt_download_job(video_id)
+    job = _new_yt_download_job(video_id, source=req.source)
     task = asyncio.create_task(
         _run_yt_download_job(job, audio_format, req.quality, output_dir)
     )
@@ -2504,6 +2533,45 @@ async def yt_download_status(job_id: str):
     job = _yt_download_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Download job not found")
+    return _yt_download_job_payload(job)
+
+
+@app.get("/yt/downloads")
+async def yt_downloads_list():
+    """
+    List all known download jobs (active + recent terminal within the 6h
+    TTL), newest first, for the downloads view. The store is in-memory and
+    per-pod, so it resets on a sidecar restart.
+    """
+    _prune_yt_download_jobs()
+    jobs = sorted(
+        _yt_download_jobs.values(),
+        key=lambda j: j.get("created_at") or 0,
+        reverse=True,
+    )
+    return {"jobs": [_yt_download_job_payload(j) for j in jobs]}
+
+
+@app.delete("/yt/downloads/{job_id}")
+async def yt_download_cancel(job_id: str):
+    """
+    Cancel a download job. A still-queued job never starts; an in-flight job
+    is aborted at its next progress tick. Terminal jobs are a no-op. 404 when
+    the job is unknown.
+    """
+    job = _yt_download_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    if job["status"] in TERMINAL_DOWNLOAD_STATUSES:
+        return _yt_download_job_payload(job)
+    job["cancel_requested"] = True
+    if job["status"] == "queued":
+        # Not yet picked up by a worker — settle it terminally now; the
+        # worker's pre-download check also bails if it starts in the meantime.
+        job["status"] = "cancelled"
+    log.info(
+        f"YT download cancel requested for {job['video_id']} (job={job_id})"
+    )
     return _yt_download_job_payload(job)
 
 
