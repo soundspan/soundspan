@@ -168,15 +168,24 @@ export async function watchYouTubeDownloadJobUntilTerminal(
 // ── Service ────────────────────────────────────────────────────────
 
 class YouTubeDownloadService {
-    private client: AxiosInstance;
+    private _client?: AxiosInstance;
 
-    constructor() {
-        this.client = axios.create({
-            baseURL: config.ytmusicStreamer.url,
-            timeout: 30_000,
-            httpAgent: new http.Agent(SIDECAR_AGENT_OPTIONS),
-            httpsAgent: new https.Agent(SIDECAR_AGENT_OPTIONS),
-        });
+    // Build the axios client lazily so importing this module does not read
+    // sidecar config. The singleton below is constructed at import time (when
+    // index.ts is required), so reading config.ytmusicStreamer.url in the
+    // constructor crashed any context whose config isn't fully populated — e.g.
+    // unit tests that mock a minimal config object. Other sidecar services read
+    // config on first use; match that.
+    private get client(): AxiosInstance {
+        if (!this._client) {
+            this._client = axios.create({
+                baseURL: config.ytmusicStreamer.url,
+                timeout: 30_000,
+                httpAgent: new http.Agent(SIDECAR_AGENT_OPTIONS),
+                httpsAgent: new https.Agent(SIDECAR_AGENT_OPTIONS),
+            });
+        }
+        return this._client;
     }
 
     /**
