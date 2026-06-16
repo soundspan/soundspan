@@ -1,7 +1,10 @@
 import { resolveApiBaseUrl } from "./api-base-url";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { isRemoteTrack, type AddToPlaylistRef } from "./trackRef";
-import type { YouTubePlaylistInfo } from "./youtube-bulk-download";
+import type {
+    YouTubePlaylistInfo,
+    YouTubeDownloadJob,
+} from "./youtube-bulk-download";
 import type {
     CanonicalMediaSearchResult,
     SegmentedStreamingSourceType,
@@ -3308,7 +3311,8 @@ class ApiClient {
     async downloadYouTube(
         videoId: string,
         format: string = "mp3",
-        quality: string = "HIGH"
+        quality: string = "HIGH",
+        source?: string
     ): Promise<{
         jobId: string;
         status:
@@ -3318,7 +3322,33 @@ class ApiClient {
             | "completed"
             | "failed";
     }> {
-        return this.post(`/youtube/download`, { videoId, format, quality });
+        return this.post(`/youtube/download`, {
+            videoId,
+            format,
+            quality,
+            ...(source ? { source } : {}),
+        });
+    }
+
+    /**
+     * List YouTube download jobs (active + recent) for the downloads view in
+     * the activity panel. The sidecar's job store is in-memory per pod.
+     */
+    async getYouTubeDownloads(): Promise<YouTubeDownloadJob[]> {
+        const res = await this.get<{ jobs: YouTubeDownloadJob[] }>(
+            `/youtube/downloads`
+        );
+        return res?.jobs ?? [];
+    }
+
+    /**
+     * Cancel a YouTube download job (queued jobs never start; in-flight jobs
+     * abort at the next progress tick).
+     */
+    async cancelYouTubeDownload(jobId: string): Promise<YouTubeDownloadJob> {
+        return this.delete<YouTubeDownloadJob>(
+            `/youtube/downloads/${encodeURIComponent(jobId)}`
+        );
     }
 
     /**

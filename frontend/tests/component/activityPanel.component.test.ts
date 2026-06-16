@@ -46,6 +46,19 @@ mock.module("@/hooks/useSocialPresence", {
     },
 });
 
+mock.module("@/hooks/useActiveYouTubeDownloads", {
+    namedExports: {
+        useActiveYouTubeDownloads: () => ({
+            jobs: [],
+            activeCount: 0,
+            isLoading: false,
+            refetch: async () => undefined,
+            cancel: () => undefined,
+            cancelAll: () => undefined,
+        }),
+    },
+});
+
 mock.module("@/lib/auth-context", {
     namedExports: {
         useAuth: () => ({ user: { role: state.userRole } }),

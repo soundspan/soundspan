@@ -11,6 +11,8 @@ import { HistoryTab } from "@/components/activity/HistoryTab";
 import { SocialTab } from "@/components/activity/SocialTab";
 import { ImportsTab } from "@/components/activity/ImportsTab";
 import { useSocialPresence } from "@/hooks/useSocialPresence";
+import { useActiveYouTubeDownloads } from "@/hooks/useActiveYouTubeDownloads";
+import { youtubeJobToDownloadItem } from "@/lib/youtube-bulk-download";
 import { useAuth } from "@/lib/auth-context";
 import { useDownloadContext } from "@/lib/download-context";
 import {
@@ -109,16 +111,33 @@ export function ActivityPanel({
         isLoading: isSocialLoading,
         error: socialError,
     } = useSocialPresence(pollingOptions);
+    const {
+        jobs: ytDownloadJobs,
+        activeCount: ytActiveCount,
+        refetch: refetchYtDownloads,
+    } = useActiveYouTubeDownloads(pollingOptions);
+    // Surface YouTube bulk-download jobs alongside the Soulseek/Lidarr ones so
+    // they are visible from any page (not just the search card that started
+    // them) and across multiple queued channels.
+    const combinedActiveDownloads = useMemo<DownloadHistoryItem[]>(() => {
+        const nowIso = new Date().toISOString();
+        const ytItems = ytDownloadJobs.map((job) =>
+            youtubeJobToDownloadItem(job, nowIso)
+        );
+        return [...activeDownloadsForTab, ...ytItems];
+    }, [activeDownloadsForTab, ytDownloadJobs]);
     const refetchActiveDownloads = useCallback(async () => {
         window.dispatchEvent(new CustomEvent("download-status-changed"));
-    }, []);
+        await refetchYtDownloads();
+    }, [refetchYtDownloads]);
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;
 
     const badgeState = getActivityPanelBadgeState({
         unreadCount,
-        activeDownloadCount: downloadStatus.activeDownloads.length,
+        activeDownloadCount:
+            downloadStatus.activeDownloads.length + ytActiveCount,
         socialUserCount: socialUsers.length,
         isAdmin,
     });
@@ -209,7 +228,7 @@ export function ActivityPanel({
                         )}
                         {effectiveActiveTab === "active" && (
                             <ActiveDownloadsTab
-                                downloads={activeDownloadsForTab}
+                                downloads={combinedActiveDownloads}
                                 loading={false}
                                 refetch={refetchActiveDownloads}
                                 queryEnabled={false}
@@ -352,7 +371,7 @@ export function ActivityPanel({
                     )}
                     {effectiveActiveTab === "active" && (
                         <ActiveDownloadsTab
-                            downloads={activeDownloadsForTab}
+                            downloads={combinedActiveDownloads}
                             loading={false}
                             refetch={refetchActiveDownloads}
                             queryEnabled={false}

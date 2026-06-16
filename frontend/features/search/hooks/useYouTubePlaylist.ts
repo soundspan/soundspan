@@ -53,10 +53,11 @@ async function downloadOneToTerminal(
     videoId: string,
     format: string,
     quality: string,
+    source: string | undefined,
     isCancelled: () => boolean
 ): Promise<BulkItemStatus> {
     try {
-        const job = await api.downloadYouTube(videoId, format, quality);
+        const job = await api.downloadYouTube(videoId, format, quality, source);
         if (job.status === "completed") {
             return "completed";
         }
@@ -207,6 +208,7 @@ export function useYouTubePlaylist({
                         entry.videoId,
                         format,
                         quality,
+                        info.title || info.kind,
                         () => cancelRef.current
                     );
                     sync();

@@ -33,6 +33,82 @@ export interface YouTubePlaylistInfo {
     entries: YouTubePlaylistEntry[];
 }
 
+/** Lifecycle states reported by the backend YouTube download job proxy. */
+export type YouTubeDownloadJobState =
+    | "queued"
+    | "downloading"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "cancelled";
+
+/**
+ * A YouTube download job as returned by GET /api/youtube/downloads and the
+ * single-job status endpoint. `source` groups a bulk run by playlist/channel.
+ */
+export interface YouTubeDownloadJob {
+    jobId: string;
+    videoId: string;
+    status: YouTubeDownloadJobState;
+    progressPct: number;
+    filePath: string | null;
+    title: string;
+    error: string | null;
+    alreadyExisted: boolean;
+    source: string | null;
+    createdAt: number | null;
+}
+
+/**
+ * A YouTube job rendered as an activity-panel download row. Structurally a
+ * superset-compatible subset of DownloadHistoryItem (the shared list shape),
+ * tagged `currentSource: "youtube"` so the tab can color it and route cancel
+ * to the YouTube endpoint.
+ */
+export interface YouTubeDownloadListItem {
+    id: string;
+    subject: string;
+    type: string;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    metadata: {
+        currentSource: "youtube";
+        statusText: string;
+        progressPct: number;
+        ytSource: string | null;
+    };
+}
+
+/**
+ * Map a YouTube download job into an activity-panel list row. `nowIso` is the
+ * fallback timestamp when the job has no createdAt (passed in to keep this
+ * pure/testable).
+ */
+export function youtubeJobToDownloadItem(
+    job: YouTubeDownloadJob,
+    nowIso: string
+): YouTubeDownloadListItem {
+    const pct = Math.max(0, Math.min(100, Math.round(job.progressPct || 0)));
+    const createdAt = job.createdAt
+        ? new Date(job.createdAt * 1000).toISOString()
+        : nowIso;
+    return {
+        id: job.jobId,
+        subject: job.title || job.videoId,
+        type: "track",
+        status: job.status,
+        createdAt,
+        updatedAt: createdAt,
+        metadata: {
+            currentSource: "youtube",
+            statusText: job.source ? `${pct}% · ${job.source}` : `${pct}%`,
+            progressPct: pct,
+            ytSource: job.source,
+        },
+    };
+}
+
 /**
  * Max simultaneous per-video download jobs the bulk UI starts from one
  * browser. The sidecar independently queues downloads at its own (smaller)

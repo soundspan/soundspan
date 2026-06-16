@@ -35,10 +35,21 @@ export function ActiveDownloadsTab({
     const refetch = refetchProp ?? downloadsQuery.refetch;
     const [cancelling, setCancelling] = useState<Set<string>>(new Set());
 
+    // YouTube bulk-download jobs live in the sidecar and cancel through a
+    // different endpoint than the Soulseek/Lidarr download manager.
+    const cancelById = async (id: string) => {
+        const download = downloads.find((d) => d.id === id);
+        if (download?.metadata?.currentSource === "youtube") {
+            await api.cancelYouTubeDownload(id);
+        } else {
+            await api.deleteDownload(id);
+        }
+    };
+
     const handleCancel = async (id: string) => {
         setCancelling((prev) => new Set(prev).add(id));
         try {
-            await api.deleteDownload(id);
+            await cancelById(id);
             // Refetch to get updated list
             refetch();
         } catch (error) {
@@ -57,7 +68,7 @@ export function ActiveDownloadsTab({
         setCancelling(new Set(ids));
         try {
             // Cancel all downloads in parallel
-            await Promise.all(ids.map((id) => api.deleteDownload(id)));
+            await Promise.all(ids.map((id) => cancelById(id)));
             refetch();
         } catch (error) {
             logger.error("Failed to cancel all downloads", {
@@ -169,6 +180,10 @@ export function ActiveDownloadsTab({
                                                               .currentSource ===
                                                           "tidal"
                                                         ? "text-cyan-400"
+                                                        : download.metadata
+                                                              .currentSource ===
+                                                          "youtube"
+                                                        ? "text-red-400"
                                                         : "text-teal-400"
                                                 )}
                                             >

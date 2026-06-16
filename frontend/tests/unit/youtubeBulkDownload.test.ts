@@ -4,8 +4,28 @@ import {
     BULK_DOWNLOAD_CONCURRENCY,
     mapLimit,
     summarizeBulkProgress,
+    youtubeJobToDownloadItem,
     type BulkItemStatus,
+    type YouTubeDownloadJob,
 } from "../../lib/youtube-bulk-download.ts";
+
+const NOW_ISO = "2026-06-16T00:00:00.000Z";
+
+function ytJob(overrides: Partial<YouTubeDownloadJob> = {}): YouTubeDownloadJob {
+    return {
+        jobId: "job-1",
+        videoId: "vid00000001",
+        status: "downloading",
+        progressPct: 42.6,
+        filePath: null,
+        title: "Some Mix",
+        error: null,
+        alreadyExisted: false,
+        source: "Book Club Radio",
+        createdAt: 1_700_000_000,
+        ...overrides,
+    };
+}
 
 test("summarizeBulkProgress on an empty run", () => {
     const out = summarizeBulkProgress([]);
@@ -91,4 +111,39 @@ test("mapLimit handles an empty list", async () => {
 
 test("BULK_DOWNLOAD_CONCURRENCY is a sane positive bound", () => {
     assert.ok(BULK_DOWNLOAD_CONCURRENCY >= 1 && BULK_DOWNLOAD_CONCURRENCY <= 8);
+});
+
+test("youtubeJobToDownloadItem maps a job to a tagged list row", () => {
+    const item = youtubeJobToDownloadItem(ytJob(), NOW_ISO);
+    assert.equal(item.id, "job-1");
+    assert.equal(item.subject, "Some Mix");
+    assert.equal(item.type, "track");
+    assert.equal(item.status, "downloading");
+    assert.equal(item.metadata.currentSource, "youtube");
+    assert.equal(item.metadata.progressPct, 43); // rounded from 42.6
+    assert.equal(item.metadata.statusText, "43% · Book Club Radio");
+    assert.equal(item.createdAt, new Date(1_700_000_000 * 1000).toISOString());
+});
+
+test("youtubeJobToDownloadItem falls back to videoId and nowIso", () => {
+    const item = youtubeJobToDownloadItem(
+        ytJob({ title: "", source: null, createdAt: null }),
+        NOW_ISO
+    );
+    assert.equal(item.subject, "vid00000001");
+    assert.equal(item.metadata.statusText, "43%");
+    assert.equal(item.createdAt, NOW_ISO);
+});
+
+test("youtubeJobToDownloadItem clamps progress to 0-100", () => {
+    assert.equal(
+        youtubeJobToDownloadItem(ytJob({ progressPct: 999 }), NOW_ISO).metadata
+            .progressPct,
+        100
+    );
+    assert.equal(
+        youtubeJobToDownloadItem(ytJob({ progressPct: -5 }), NOW_ISO).metadata
+            .progressPct,
+        0
+    );
 });
