@@ -1,0 +1,118 @@
+/**
+ * Pure orchestration helpers for bulk YouTube playlist/channel downloads.
+ *
+ * The useYouTubePlaylist hook fans out one existing /api/youtube/download job
+ * per playlist entry. These helpers — a bounded-concurrency async pool and an
+ * aggregate-progress summarizer — are kept free of React/api imports so they
+ * are unit-testable with the node:test harness.
+ */
+
+/** A single enumerable video within a playlist/channel. */
+export interface YouTubePlaylistEntry {
+    videoId: string;
+    title: string;
+    uploader: string;
+    duration: number | null;
+}
+
+/**
+ * Bounded enumeration of a YouTube playlist or channel
+ * (GET /api/youtube/playlist-info). `entries` is capped server-side;
+ * `truncated` is true when the source holds more videos than were returned.
+ */
+export interface YouTubePlaylistInfo {
+    kind: "playlist" | "channel";
+    playlistId: string | null;
+    channel: string | null;
+    sourceUrl: string;
+    title: string;
+    uploader: string;
+    totalCount: number | null;
+    truncated: boolean;
+    count: number;
+    entries: YouTubePlaylistEntry[];
+}
+
+/**
+ * Max simultaneous per-video download jobs the bulk UI starts from one
+ * browser. The sidecar independently queues downloads at its own (smaller)
+ * concurrency; this bounds how many jobs are started and polled at once so a
+ * large playlist does not fire hundreds of requests in a burst.
+ */
+export const BULK_DOWNLOAD_CONCURRENCY = 3;
+
+/** Per-item lifecycle within a bulk run. */
+export type BulkItemStatus = "pending" | "active" | "completed" | "failed";
+
+/** Aggregate snapshot of a bulk download run, by item count. */
+export interface BulkDownloadProgress {
+    total: number;
+    completed: number;
+    failed: number;
+    active: number;
+    pending: number;
+    /** Completion percentage (0-100) over terminal (completed+failed) items. */
+    pct: number;
+    /** True once every item reached a terminal state. */
+    done: boolean;
+}
+
+/** Summarize per-item statuses into an aggregate progress snapshot. */
+export function summarizeBulkProgress(
+    statuses: BulkItemStatus[]
+): BulkDownloadProgress {
+    const total = statuses.length;
+    let completed = 0;
+    let failed = 0;
+    let active = 0;
+    let pending = 0;
+    for (const status of statuses) {
+        if (status === "completed") completed++;
+        else if (status === "failed") failed++;
+        else if (status === "active") active++;
+        else pending++;
+    }
+    const terminal = completed + failed;
+    return {
+        total,
+        completed,
+        failed,
+        active,
+        pending,
+        pct: total === 0 ? 0 : Math.round((terminal / total) * 100),
+        done: total > 0 && terminal === total,
+    };
+}
+
+/**
+ * Run `worker` over `items` with at most `limit` in flight at once, resolving
+ * when all items have settled. A worker that throws does NOT reject the pool —
+ * callers are expected to capture per-item outcomes inside the worker — so one
+ * failed download never aborts the rest of the playlist.
+ */
+export async function mapLimit<T>(
+    items: T[],
+    limit: number,
+    worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+    const max = Math.max(1, limit);
+    let cursor = 0;
+
+    async function runner(): Promise<void> {
+        while (cursor < items.length) {
+            const index = cursor++;
+            try {
+                await worker(items[index], index);
+            } catch {
+                // Swallow: per-item failures are the worker's responsibility
+                // to record; the pool must keep draining the queue.
+            }
+        }
+    }
+
+    const runners = Array.from(
+        { length: Math.min(max, items.length) },
+        () => runner()
+    );
+    await Promise.all(runners);
+}

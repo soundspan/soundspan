@@ -1,6 +1,7 @@
 import { resolveApiBaseUrl } from "./api-base-url";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 import { isRemoteTrack, type AddToPlaylistRef } from "./trackRef";
+import type { YouTubePlaylistInfo } from "./youtube-bulk-download";
 import type {
     CanonicalMediaSearchResult,
     SegmentedStreamingSourceType,
@@ -3266,6 +3267,22 @@ class ApiClient {
             method: "GET",
             signal,
         });
+    }
+
+    /**
+     * Enumerate a YouTube playlist or channel into a bounded, truncation-aware
+     * list of videos for the bulk-download preview. Rejects single-video URLs
+     * and un-enumerable radio/mix lists (the request throws with status 422).
+     * Pass an AbortSignal to cancel when the query changes.
+     */
+    async getYouTubePlaylistInfo(
+        url: string,
+        signal?: AbortSignal
+    ): Promise<YouTubePlaylistInfo> {
+        return this.request(
+            `/youtube/playlist-info?url=${encodeURIComponent(url)}`,
+            { method: "GET", signal }
+        );
     }
 
     /**

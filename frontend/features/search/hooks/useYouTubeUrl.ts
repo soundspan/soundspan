@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { extractYouTubeVideoId } from "@/lib/youtube-url";
+import { extractYouTubeVideoId, classifyYouTubeUrl } from "@/lib/youtube-url";
 import {
     resolveYouTubeDownloadPoll,
     shouldAbandonYouTubeDownloadPolling,
@@ -68,7 +68,15 @@ export function useYouTubeUrl({
 
     // Fetch video info when query is a YouTube URL
     useEffect(() => {
-        const videoId = extractYouTubeVideoId(query);
+        // Playlist/channel URLs are handled by useYouTubePlaylist; skip the
+        // single-video preview for them. A watch URL opened from inside a
+        // real playlist classifies as "playlist" so the bulk card takes over,
+        // while an RD* mix falls back to its focused single video here.
+        const kind = classifyYouTubeUrl(query).kind;
+        const videoId =
+            kind === "playlist" || kind === "channel"
+                ? null
+                : extractYouTubeVideoId(query);
         if (!videoId) {
             setVideoInfo(null);
             return;

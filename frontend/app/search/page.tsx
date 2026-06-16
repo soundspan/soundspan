@@ -8,6 +8,8 @@ import { useSearchData } from "@/features/search/hooks/useSearchData";
 import { useSoulseekSearch } from "@/features/search/hooks/useSoulseekSearch";
 import { useYouTubeUrl } from "@/features/search/hooks/useYouTubeUrl";
 import { YouTubePreviewCard } from "@/features/search/components/YouTubePreviewCard";
+import { useYouTubePlaylist } from "@/features/search/hooks/useYouTubePlaylist";
+import { YouTubePlaylistPreviewCard } from "@/features/search/components/YouTubePlaylistPreviewCard";
 import { SearchFilters } from "@/features/search/components/SearchFilters";
 import { TopResult } from "@/features/search/components/TopResult";
 import { EmptyState } from "@/features/search/components/EmptyState";
@@ -84,6 +86,16 @@ export default function SearchPage() {
         handleDownload: handleYtDownload,
     } = useYouTubeUrl({ query });
 
+    const {
+        playlistInfo: ytPlaylistInfo,
+        isLoading: isYtPlaylistLoading,
+        error: ytPlaylistError,
+        isDownloading: isYtPlaylistDownloading,
+        progress: ytPlaylistProgress,
+        handleDownloadAll: handleYtDownloadAll,
+        handleCancel: handleYtPlaylistCancel,
+    } = useYouTubePlaylist({ query });
+
     // Sync query from URL params on navigation.
     const urlQuery = searchParams.get("q") ?? "";
     useEffect(() => {
@@ -156,7 +168,7 @@ export default function SearchPage() {
                     <AliasResolutionBanner aliasInfo={aliasInfo} />
                 )}
 
-                {/* YouTube URL Preview Card */}
+                {/* YouTube single-video URL Preview Card */}
                 {(videoInfo || isYtLoading) && (
                     <YouTubePreviewCard
                         videoInfo={videoInfo!}
@@ -165,6 +177,19 @@ export default function SearchPage() {
                         downloadProgress={downloadProgress}
                         onPlay={handleYtPlay}
                         onDownload={handleYtDownload}
+                    />
+                )}
+
+                {/* YouTube playlist/channel bulk-download Preview Card */}
+                {(ytPlaylistInfo || isYtPlaylistLoading || ytPlaylistError) && (
+                    <YouTubePlaylistPreviewCard
+                        playlistInfo={ytPlaylistInfo}
+                        isLoading={isYtPlaylistLoading}
+                        error={ytPlaylistError}
+                        isDownloading={isYtPlaylistDownloading}
+                        progress={ytPlaylistProgress}
+                        onDownloadAll={handleYtDownloadAll}
+                        onCancel={handleYtPlaylistCancel}
                     />
                 )}
 
