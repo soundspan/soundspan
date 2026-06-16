@@ -1234,8 +1234,12 @@ describe("library cover-art proxy compatibility", () => {
     });
 
     it("serves canonicalized native folder paths without attempting album backfill", async () => {
+        // safeResolvePath() runs the candidate through path.resolve(), which
+        // normalizes away the trailing slash, so the resolved cache path is
+        // "/tmp/covers/albums/nested" (no slash) even though the native URL is
+        // "native:nested/".
         const existsSpy = jest.spyOn(fs, "existsSync").mockImplementation((candidate) =>
-            String(candidate) === "/tmp/covers/albums/nested/"
+            String(candidate) === "/tmp/covers/albums/nested"
         );
 
         const queryReq = {
@@ -1257,11 +1261,11 @@ describe("library cover-art proxy compatibility", () => {
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(queryRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/nested/",
+            "/tmp/covers/albums/nested",
             expect.any(Object),
         );
         expect(idRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/nested/",
+            "/tmp/covers/albums/nested",
             expect.any(Object),
         );
         expect(mockAlbumUpdate).toHaveBeenCalledWith({
