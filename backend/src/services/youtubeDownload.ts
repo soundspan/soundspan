@@ -65,7 +65,8 @@ export type YtDownloadJobState =
     | "downloading"
     | "processing"
     | "completed"
-    | "failed";
+    | "failed"
+    | "cancelled";
 
 /** Response from starting a download job (POST /yt/download). */
 export interface YtDownloadJobStart {
@@ -83,6 +84,10 @@ export interface YtDownloadJobStatus {
     title: string;
     error: string | null;
     alreadyExisted: boolean;
+    /** Grouping label (playlist/channel title) for bulk runs, if provided. */
+    source: string | null;
+    /** Unix seconds when the job was created (sidecar clock). */
+    createdAt: number | null;
 }
 
 /** Terminal outcome of a server-side download-job watch. */
@@ -235,12 +240,14 @@ class YouTubeDownloadService {
     async startDownload(
         videoId: string,
         format: string = "mp3",
-        quality: string = "HIGH"
+        quality: string = "HIGH",
+        source?: string
     ): Promise<YtDownloadJobStart> {
         const res = await this.client.post("/yt/download", {
             video_id: videoId,
             format,
             quality,
+            ...(source ? { source } : {}),
         });
         logger.debug(
             `[YouTube Download] Job ${res.data.job_id} started for ${videoId} (status=${res.data.status})`
@@ -260,18 +267,46 @@ class YouTubeDownloadService {
         const res = await this.client.get(
             `/yt/download/${encodeURIComponent(jobId)}`
         );
-        const data = res.data;
-        return {
-            jobId: data.job_id,
-            videoId: data.video_id,
-            status: data.status,
-            progressPct: data.progress_pct ?? 0,
-            filePath: data.file_path ?? null,
-            title: data.title ?? "",
-            error: data.error ?? null,
-            alreadyExisted: Boolean(data.already_existed),
-        };
+        return mapDownloadJob(res.data);
     }
+
+    /**
+     * List all known download jobs (active + recent terminal) for the
+     * downloads view. The sidecar store is in-memory per pod.
+     */
+    async listDownloads(): Promise<YtDownloadJobStatus[]> {
+        const res = await this.client.get("/yt/downloads");
+        const jobs = Array.isArray(res.data?.jobs) ? res.data.jobs : [];
+        return jobs.map(mapDownloadJob);
+    }
+
+    /**
+     * Cancel a download job. Queued jobs never start; in-flight jobs abort at
+     * the next progress tick. Throws an axios error with status 404 when the
+     * job is unknown.
+     */
+    async cancelDownload(jobId: string): Promise<YtDownloadJobStatus> {
+        const res = await this.client.delete(
+            `/yt/downloads/${encodeURIComponent(jobId)}`
+        );
+        return mapDownloadJob(res.data);
+    }
+}
+
+/** Map a sidecar snake_case download-job payload to the camelCase shape. */
+function mapDownloadJob(data: any): YtDownloadJobStatus {
+    return {
+        jobId: data.job_id,
+        videoId: data.video_id,
+        status: data.status,
+        progressPct: data.progress_pct ?? 0,
+        filePath: data.file_path ?? null,
+        title: data.title ?? "",
+        error: data.error ?? null,
+        alreadyExisted: Boolean(data.already_existed),
+        source: data.source ?? null,
+        createdAt: data.created_at ?? null,
+    };
 }
 
 export const youtubeDownloadService = new YouTubeDownloadService();

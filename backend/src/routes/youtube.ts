@@ -218,6 +218,8 @@ const downloadBodySchema = z.object({
     videoId: z.string().min(1),
     format: z.enum(["mp3", "opus", "flac", "m4a"]).default("mp3"),
     quality: z.enum(["LOW", "MEDIUM", "HIGH", "LOSSLESS"]).default("HIGH"),
+    // Optional grouping label (playlist/channel title) for bulk runs.
+    source: z.string().max(300).optional(),
 });
 
 /**
@@ -255,7 +257,9 @@ const downloadBodySchema = z.object({
  */
 router.post("/download", requireAuth, async (req: Request, res: Response) => {
     try {
-        const { videoId, format, quality } = downloadBodySchema.parse(req.body);
+        const { videoId, format, quality, source } = downloadBodySchema.parse(
+            req.body
+        );
         const userId = req.user!.id;
 
         logger.info(
@@ -265,7 +269,8 @@ router.post("/download", requireAuth, async (req: Request, res: Response) => {
         const job = await youtubeDownloadService.startDownload(
             videoId,
             format,
-            quality
+            quality,
+            source
         );
 
         if (job.status === "completed") {
@@ -411,6 +416,72 @@ router.get(
             return res
                 .status(502)
                 .json({ error: "Failed to fetch download status" });
+        }
+    }
+);
+
+// ── Downloads view (list + cancel) ────────────────────────────────
+
+/**
+ * @openapi
+ * /api/youtube/downloads:
+ *   get:
+ *     summary: List YouTube download jobs (active + recent) for the UI
+ *     tags: [YouTube]
+ *     responses:
+ *       200:
+ *         description: Array of download jobs (newest first)
+ *       502:
+ *         description: Sidecar unavailable
+ */
+router.get("/downloads", requireAuth, async (_req: Request, res: Response) => {
+    try {
+        const jobs = await youtubeDownloadService.listDownloads();
+        return res.json({ jobs });
+    } catch (err: any) {
+        logger.error("[YouTube Route] Downloads list failed:", err.message);
+        return res.status(502).json({ error: "Failed to list downloads" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/youtube/downloads/{jobId}:
+ *   delete:
+ *     summary: Cancel a YouTube download job
+ *     tags: [YouTube]
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Updated job (cancelled / cancel requested)
+ *       404:
+ *         description: Unknown job id
+ *       502:
+ *         description: Sidecar unavailable
+ */
+router.delete(
+    "/downloads/:jobId",
+    requireAuth,
+    async (req: Request, res: Response) => {
+        try {
+            const { jobId } = req.params;
+            const job = await youtubeDownloadService.cancelDownload(jobId);
+            return res.json(job);
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                return res
+                    .status(404)
+                    .json({ error: "Download job not found" });
+            }
+            logger.error("[YouTube Route] Download cancel failed:", err.message);
+            return res
+                .status(502)
+                .json({ error: "Failed to cancel download" });
         }
     }
 );

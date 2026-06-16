@@ -19,6 +19,8 @@ jest.mock("../../services/youtubeDownload", () => ({
         getStreamProxy: jest.fn(),
         startDownload: jest.fn(),
         getDownloadJobStatus: jest.fn(),
+        listDownloads: jest.fn(),
+        cancelDownload: jest.fn(),
     },
     watchYouTubeDownloadJobUntilTerminal: jest.fn(),
 }));
@@ -42,6 +44,10 @@ const mockGetPlaylistInfo =
 const mockStartDownload = youtubeDownloadService.startDownload as jest.Mock;
 const mockGetDownloadJobStatus =
     youtubeDownloadService.getDownloadJobStatus as jest.Mock;
+const mockListDownloads =
+    youtubeDownloadService.listDownloads as jest.Mock;
+const mockCancelDownload =
+    youtubeDownloadService.cancelDownload as jest.Mock;
 const mockWatchJob = watchYouTubeDownloadJobUntilTerminal as jest.Mock;
 
 /** Flush fire-and-forget promise chains started by the handlers. */
@@ -49,7 +55,7 @@ async function flushAsync() {
     await new Promise((resolve) => setImmediate(resolve));
 }
 
-function getHandler(path: string, method: "get" | "post") {
+function getHandler(path: string, method: "get" | "post" | "delete") {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method]
@@ -87,6 +93,8 @@ describe("youtube routes runtime", () => {
     const playlistInfoHandler = getHandler("/playlist-info", "get");
     const downloadHandler = getHandler("/download", "post");
     const statusHandler = getHandler("/download/:jobId", "get");
+    const downloadsListHandler = getHandler("/downloads", "get");
+    const cancelHandler = getHandler("/downloads/:jobId", "delete");
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -273,7 +281,8 @@ describe("youtube routes runtime", () => {
             expect(mockStartDownload).toHaveBeenCalledWith(
                 "dQw4w9WgXcQ",
                 "mp3",
-                "HIGH"
+                "HIGH",
+                undefined
             );
             expect(res.statusCode).toBe(202);
             expect(res.body).toMatchObject({ jobId: "job-accept" });
@@ -491,6 +500,100 @@ describe("youtube routes runtime", () => {
                 error: "Video unavailable",
             });
             expect(scanQueue.add).not.toHaveBeenCalled();
+        });
+
+        it("passes the bulk-run source label through to the sidecar", async () => {
+            mockStartDownload.mockResolvedValue({
+                jobId: "job-src",
+                status: "queued",
+            });
+            mockWatchJob.mockReturnValue(new Promise(() => undefined));
+            const req = {
+                body: {
+                    videoId: "dQw4w9WgXcQ",
+                    format: "opus",
+                    quality: "HIGH",
+                    source: "Book Club Radio",
+                },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await downloadHandler(req, res);
+            await flushAsync();
+
+            expect(mockStartDownload).toHaveBeenCalledWith(
+                "dQw4w9WgXcQ",
+                "opus",
+                "HIGH",
+                "Book Club Radio"
+            );
+        });
+    });
+
+    describe("GET /downloads", () => {
+        it("returns the list of jobs from the sidecar", async () => {
+            mockListDownloads.mockResolvedValue([
+                {
+                    jobId: "j1",
+                    videoId: "v1",
+                    status: "downloading",
+                    progressPct: 40,
+                    source: "Book Club Radio",
+                    createdAt: 1000,
+                },
+            ]);
+            const res = createRes();
+
+            await downloadsListHandler({} as any, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toEqual({
+                jobs: [
+                    expect.objectContaining({
+                        jobId: "j1",
+                        source: "Book Club Radio",
+                    }),
+                ],
+            });
+        });
+
+        it("returns 502 when the sidecar is unreachable", async () => {
+            mockListDownloads.mockRejectedValue(new Error("ECONNREFUSED"));
+            const res = createRes();
+
+            await downloadsListHandler({} as any, res);
+
+            expect(res.statusCode).toBe(502);
+        });
+    });
+
+    describe("DELETE /downloads/:jobId", () => {
+        it("cancels a job and returns the updated status", async () => {
+            mockCancelDownload.mockResolvedValue({
+                jobId: "j1",
+                videoId: "v1",
+                status: "cancelled",
+            });
+            const req = { params: { jobId: "j1" } } as any;
+            const res = createRes();
+
+            await cancelHandler(req, res);
+
+            expect(mockCancelDownload).toHaveBeenCalledWith("j1");
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toMatchObject({ status: "cancelled" });
+        });
+
+        it("returns 404 when the job is unknown", async () => {
+            mockCancelDownload.mockRejectedValue(sidecarError(404));
+            const req = { params: { jobId: "missing" } } as any;
+            const res = createRes();
+
+            await cancelHandler(req, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body).toEqual({ error: "Download job not found" });
         });
     });
 });
