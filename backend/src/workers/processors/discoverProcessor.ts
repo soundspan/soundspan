@@ -181,12 +181,11 @@ export async function processDiscoverWeekly(
         );
         logger.error(`[DiscoverJob ${job.id}] Stack trace:`, error.stack);
 
-        return {
-            success: false,
-            playlistName: "",
-            songCount: 0,
-            error: error.message || "Unknown error",
-        };
+        // Re-throw so Bull marks the job failed and applies its retry/backoff and
+        // dead-letter handling. Returning a {success:false} payload here resolves
+        // the promise, so Bull would record a genuine failure (Last.fm down, no
+        // seeds, DB error) as COMPLETED — silently — and never retry it.
+        throw error;
     } finally {
         try {
             await withDiscoverLockRedisRetry(

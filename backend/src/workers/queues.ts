@@ -72,6 +72,16 @@ export const scanQueue = new Bull("library-scan", {
 export const discoverQueue = new Bull("discover-weekly", {
     redis: redisConfig,
     settings: defaultQueueSettings,
+    // The processor now re-throws on failure, so give Bull a bounded retry with
+    // backoff for transient upstream (Last.fm / MusicBrainz) or DB blips instead
+    // of losing the week's generation. The default "recommendation" path is
+    // idempotent per (user, week) — it deletes and recreates the week's batch in
+    // one transaction — so a retry replaces rather than duplicates. Legacy mode's
+    // missing per-(user, week) guard is tracked separately (#13, F20).
+    defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 60000 },
+    },
 });
 
 export const imageQueue = new Bull("image-optimization", {

@@ -171,17 +171,16 @@ describe("discoverProcessor", () => {
         expect(discoverWeeklyService.generatePlaylist).toHaveBeenCalledWith("u1");
     });
 
-    it("returns error payload on generation failure and supports shutdown fallback", async () => {
+    it("re-throws on generation failure so Bull retries, and supports shutdown fallback", async () => {
         const { module, lockClient, logger } = loadDiscoverProcessor({
             generateError: "generation-boom",
         });
         const job = buildJob();
 
-        await expect(module.processDiscoverWeekly(job)).resolves.toEqual(
-            expect.objectContaining({
-                success: false,
-                error: "generation-boom",
-            })
+        // The job must REJECT (not resolve with success:false) so Bull's retry /
+        // dead-letter machinery engages instead of recording a silent failure.
+        await expect(module.processDiscoverWeekly(job)).rejects.toThrow(
+            "generation-boom"
         );
 
         lockClient.quit.mockRejectedValueOnce(new Error("quit-failed"));
