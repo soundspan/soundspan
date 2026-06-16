@@ -12,6 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Coarse feature flags for the ML/recommendation subsystems, all defaulting ON: `AUDIO_ANALYSIS_ENABLED` (audio analysis queueing, mood buckets, `/api/analysis`, `/api/vibe`), `DISCOVERY_ENABLED` (Discover Weekly cron/processors, `/api/discover`, `/api/recommendations`), and `AUTO_PLAYLISTS_ENABLED` (Made For You mixes, `/api/mixes`). Disabled prefixes stay rate limited and return `404` with `code: FEATURE_DISABLED`, the matching background workers are not registered, and enrichment completion ignores audio/CLAP work while audio analysis is off. The CLAP analyzer machine callbacks (`/api/analysis/vibe/failure`, `/api/analysis/vibe/success`) remain mounted so in-flight analysis work can still report results.
 - `GET /api/system/features` now reports the configured `audioAnalysis`, `discovery`, and `autoPlaylists` flags alongside the detection-based fields; the frontend hides the corresponding home and Explore sections (Recommended, Discover Weekly, mixes, mood pills, mix Refresh actions), pages (`/discover`, `/mix/[id]`, `/vibe`), and TV Discovery nav link when a flag is off.
 - Helm chart values `config.features.audioAnalysis` / `config.features.discovery` / `config.features.autoPlaylists` (default `true`) that render the new env vars on the backend, backend-worker, and AIO workloads.
+- Mixed-media play queue: podcast episodes and music tracks now coexist in one queue. Queue music behind a playing episode (or queue episodes behind music) without interrupting what is playing; next/previous and auto-advance walk the queue across media types.
+- "Play next" and "Add to queue" actions for podcast episodes via a new episode overflow menu on the podcast page (blocked inside Listen Together sessions, which remain music-only).
+- Player queue panels (overlay player and `/queue` page) render episode entries with podcast cover art and show titles, and can play or remove them like tracks.
+- Persisted playback state (server and local) round-trips mixed queues; queues saved by older clients are migrated as music tracks automatically.
+
+### Fixed
+
+- Service-worker image cache keys no longer include the rotating auth token, so cached cover art survives the daily token rotation instead of being re-downloaded every 24 hours.
+- Pausing playback while the lazy-loaded Video.js engine chunk is still downloading now completes the pending track load with autoplay suppressed (instead of silently dropping it), and pressing play during the download starts the queued track once ready rather than restarting the previous source from position 0; stopping still cancels the pending load, and the previously playing track is halted immediately when a segmented stream is selected.
+- The custom server's backend proxies (`/api`, `/rest`, Listen Together socket) now register their error handlers through the http-proxy-middleware v3 `on.error` API, restoring the structured 503 JSON response (`{ error, code }`) when the backend is unreachable — the previous v2-style `onError` option was silently ignored, so clients received hpm's plain-text default error instead.
+- Playing an episode from the podcast page while a queue is active now merges the episode (plus its not-yet-queued newer episodes) into the queue after the current item instead of replacing the whole queue, so queued music survives.
+- Skipping away from an episode before its saved-progress lookup finishes no longer seeks (and seek-locks) the newly playing item to that episode's resume position.
+- Skipping away from a playing episode (next/previous, play-now, queue jump, or picking another episode) now saves its listening position first, so manual skips no longer silently lose up to ~30s of podcast progress.
+- Advancing the queue into a partially-listened episode now waits for the saved-progress lookup (bounded by a 2s budget) and starts the stream at the resume position, instead of starting at 0:00 and racing a post-load seek that could be dropped.
+
+### Changed
+
+- Cover art is now resized server-side to the requested size (snapped to a 64–768px allowlist, never upscaled) and served as WebP when the browser supports it, instead of shipping multi-megapixel originals to thumbnail-sized renders. Resized variants are cached in Redis per size+format for both external and native (on-disk) covers — native variants are keyed by file identity (path, mtime, size) so conditional revalidations are answered without re-decoding.
+- All `/api` traffic is now streamed through the custom server's proxy (like `/rest` and the Listen Together socket) instead of being buffered by a Next.js route handler, preserving backend gzip compression and response streaming. The route handler remains as a fallback.
+- The Video.js segmented-playback engine is lazy-loaded only when a DASH/segmented stream is selected, removing ~730 kB of JavaScript from every page's first load (home route JS: 2065 kB → 1336 kB).
+- Social presence and notification/download polling now pause while the app tab is hidden and refetch immediately when it becomes visible again, cutting background network chatter on mobile.
+
 
 ## [1.5.0] - 2026-03-27
 

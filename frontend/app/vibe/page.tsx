@@ -148,9 +148,10 @@ function CoverImage({
     const [hasError, setHasError] = useState(false);
 
     const imgSrc = useMemo(() => {
-        if (coverUrl) return api.getCoverArtUrl(coverUrl);
+        // Request ~2x the rendered CSS size so the backend serves a small variant
+        if (coverUrl) return api.getCoverArtUrl(coverUrl, size * 2);
         return null;
-    }, [coverUrl]);
+    }, [coverUrl, size]);
 
     if (!imgSrc || hasError) {
         return (

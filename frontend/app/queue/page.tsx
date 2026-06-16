@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useAudioState, useAudioControls } from "@/lib/audio-context";
 import type { Track } from "@/lib/audio-state-context";
+import {
+    isEpisodeQueueItem,
+    type EpisodeQueueItem,
+} from "@/lib/queue-item";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/lib/toast-context";
 import { api } from "@/lib/api";
@@ -42,7 +46,7 @@ export default function QueuePage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
     const { queue, currentTrack, currentIndex, setQueue } = useAudioState();
-    const { playTracks, removeFromQueue, clearQueue } = useAudioControls();
+    const { playQueueIndex, removeFromQueue, clearQueue } = useAudioControls();
     const { toast } = useToast();
     const listenTogether = useListenTogether();
     const { isInGroup, isHost, syncSetTrack } = listenTogether;
@@ -92,7 +96,7 @@ export default function QueuePage() {
             syncSetTrack(index);
             return;
         }
-        playTracks(queue, index);
+        playQueueIndex(index);
         toast.success("Playing from queue");
     };
 
@@ -126,15 +130,20 @@ export default function QueuePage() {
     const [playlistName, setPlaylistName] = useState("");
     const [isSaving, setIsSaving] = useState(false);
 
+    // Podcast episodes cannot be saved to playlists; only track items are.
+    const playlistTracks = queue.filter(
+        (item): item is Track => !isEpisodeQueueItem(item)
+    );
+
     const handleSaveAsPlaylist = async () => {
         const name = playlistName.trim() || `Queue — ${new Date().toLocaleDateString()}`;
         setIsSaving(true);
         try {
             const playlist = await api.createPlaylist(name);
-            for (const track of queue) {
+            for (const track of playlistTracks) {
                 await api.addTrackToPlaylist(playlist.id, toAddToPlaylistRef(track));
             }
-            toast.success(`Saved ${queue.length} tracks to "${name}"`);
+            toast.success(`Saved ${playlistTracks.length} tracks to "${name}"`);
             setShowSaveDialog(false);
             setPlaylistName("");
             router.push(`/playlist/${playlist.id}`);
@@ -152,6 +161,11 @@ export default function QueuePage() {
     // Split queue into current, next up, and previous
     const previousTracks = queue.slice(0, currentIndex);
     const nextTracks = queue.slice(currentIndex + 1);
+    const currentQueueItem = queue[currentIndex];
+    const currentEpisode =
+        !currentTrack && isEpisodeQueueItem(currentQueueItem)
+            ? currentQueueItem
+            : null;
     const currentAvailability = currentTrack
         ? trackAvailability.get(currentIndex)
         : undefined;
@@ -163,7 +177,7 @@ export default function QueuePage() {
                 {/* Header */}
                 <PageHeader
                     title={isInGroup ? "Listen Together Queue" : "Queue"}
-                    subtitle={`${queue.length} track${queue.length !== 1 ? "s" : ""} in queue`}
+                    subtitle={`${queue.length} item${queue.length !== 1 ? "s" : ""} in queue`}
                     icon={ListMusic}
                     iconClassName="text-[#3b82f6]"
                     className="mb-8"
@@ -279,6 +293,49 @@ export default function QueuePage() {
                     </section>
                 )}
 
+                {/* Now Playing (podcast episode) */}
+                {currentEpisode && (
+                    <section className="bg-[#111] rounded-lg p-6">
+                        <h2 className="text-xl font-semibold text-white mb-4">
+                            Now Playing
+                        </h2>
+                        <Card>
+                            <div className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-[#2323FF]">
+                                <div className="relative flex-shrink-0 w-16 h-16">
+                                    {currentEpisode.coverUrl ? (
+                                        <Image
+                                            src={currentEpisode.coverUrl}
+                                            alt={currentEpisode.podcastTitle}
+                                            fill
+                                            sizes="64px"
+                                            className="object-cover rounded-sm"
+                                            unoptimized
+                                        />
+                                    ) : (
+                                        <div className="w-16 h-16 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
+                                            <Music className="w-6 h-6 text-gray-600" />
+                                        </div>
+                                    )}
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <Play className="w-6 h-6 text-[#5b5bff] fill-[#5b5bff] animate-pulse" />
+                                    </div>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <h3 className="text-sm font-medium text-[#5b5bff] truncate">
+                                        {currentEpisode.title}
+                                    </h3>
+                                    <p className="text-sm text-gray-400 truncate">
+                                        {currentEpisode.podcastTitle}
+                                    </p>
+                                </div>
+                                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                    {formatTime(currentEpisode.duration)}
+                                </span>
+                            </div>
+                        </Card>
+                    </section>
+                )}
+
                 {/* Next Up */}
                 {nextTracks.length > 0 && (
                     <section className="bg-[#111] rounded-lg p-6">
@@ -292,11 +349,28 @@ export default function QueuePage() {
                                 computeItemKey={(idx) => `next-${nextTracks[idx]?.id ?? idx}-${idx}`}
                                 style={{ height: Math.min(nextTracks.length * 80, 600) }}
                                 itemContent={(idx) => {
-                                    const track = nextTracks[idx];
+                                    const item = nextTracks[idx];
                                     const queueIndex = currentIndex + 1 + idx;
+                                    if (isEpisodeQueueItem(item)) {
+                                        return (
+                                            <EpisodeQueueRow
+                                                episode={item}
+                                                onPlay={
+                                                    isInGroup
+                                                        ? undefined
+                                                        : () => handlePlayFromQueue(queueIndex)
+                                                }
+                                                onRemove={
+                                                    isInGroup
+                                                        ? undefined
+                                                        : () => handleRemoveTrack(queueIndex)
+                                                }
+                                            />
+                                        );
+                                    }
                                     return (
                                         <NextTrackRow
-                                            track={track}
+                                            track={item}
                                             queueIndex={queueIndex}
                                             queueLength={queue.length}
                                             currentIndex={currentIndex}
@@ -328,10 +402,13 @@ export default function QueuePage() {
                                 computeItemKey={(idx) => `prev-${previousTracks[idx]?.id ?? idx}-${idx}`}
                                 style={{ height: Math.min(previousTracks.length * 80, 600) }}
                                 itemContent={(idx) => {
-                                    const track = previousTracks[idx];
+                                    const item = previousTracks[idx];
+                                    if (isEpisodeQueueItem(item)) {
+                                        return <EpisodeQueueRow episode={item} played />;
+                                    }
                                     return (
                                         <PreviousTrackRow
-                                            track={track}
+                                            track={item}
                                             idx={idx}
                                             isInGroup={isInGroup}
                                             resolveQueueSource={resolveQueueSource}
@@ -360,7 +437,9 @@ export default function QueuePage() {
                                 Save Queue as Playlist
                             </h2>
                             <p className="text-sm text-gray-400 mb-4">
-                                Save all {queue.length} tracks to a new playlist
+                                Save {playlistTracks.length} track
+                                {playlistTracks.length !== 1 ? "s" : ""} to a
+                                new playlist
                             </p>
                             <input
                                 type="text"
@@ -390,6 +469,76 @@ export default function QueuePage() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+/** Queue row for a podcast episode entry (Next Up / Previously Played). */
+function EpisodeQueueRow({
+    episode,
+    played = false,
+    onPlay,
+    onRemove,
+}: {
+    episode: EpisodeQueueItem;
+    played?: boolean;
+    onPlay?: () => void;
+    onRemove?: () => void;
+}) {
+    return (
+        <div
+            className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group border-b border-[#1c1c1c] ${played ? "opacity-50" : ""}`}
+        >
+            <div className="relative flex-shrink-0 w-12 h-12">
+                {episode.coverUrl ? (
+                    <Image
+                        src={episode.coverUrl}
+                        alt={episode.podcastTitle}
+                        fill
+                        sizes="48px"
+                        className="object-cover rounded-sm"
+                        unoptimized
+                    />
+                ) : (
+                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
+                        <Music className="w-5 h-5 text-gray-600" />
+                    </div>
+                )}
+            </div>
+            <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-medium text-white truncate">
+                    {episode.title}
+                </h3>
+                <p className="text-sm text-gray-400 truncate">
+                    {episode.podcastTitle}
+                </p>
+                <p className="text-[11px] text-gray-500 truncate">Podcast episode</p>
+            </div>
+            {(onPlay || onRemove) && (
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {onPlay && (
+                        <button
+                            onClick={onPlay}
+                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors"
+                            title="Play now"
+                        >
+                            <Play className="w-4 h-4" />
+                        </button>
+                    )}
+                    {onRemove && (
+                        <button
+                            onClick={onRemove}
+                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors text-red-400 hover:text-red-300"
+                            title="Remove from queue"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
+            )}
+            <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                {formatTime(episode.duration)}
+            </span>
         </div>
     );
 }

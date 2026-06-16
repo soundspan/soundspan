@@ -5,6 +5,7 @@ import {
     resolveFixedPollingInterval,
     resolvePollingEnabled,
     resolvePollingJitter,
+    resolveVisibilityGatedPollingInterval,
 } from "../../hooks/pollingCadence";
 
 test("resolvePollingEnabled defaults to true and preserves explicit false", () => {
@@ -29,6 +30,13 @@ test("resolvePollingJitter returns value within [0, maxJitterMs)", () => {
 
 test("resolvePollingJitter returns 0 for maxJitterMs of 0", () => {
     assert.equal(resolvePollingJitter(0), 0);
+});
+
+test("resolveVisibilityGatedPollingInterval pauses polling while hidden", () => {
+    assert.equal(resolveVisibilityGatedPollingInterval(30_000, true), 30_000);
+    assert.equal(resolveVisibilityGatedPollingInterval(30_000, false), false);
+    assert.equal(resolveVisibilityGatedPollingInterval(false, true), false);
+    assert.equal(resolveVisibilityGatedPollingInterval(false, false), false);
 });
 
 test("resolveAdaptivePollingInterval switches between active and idle cadences", () => {

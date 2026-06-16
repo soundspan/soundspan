@@ -23,7 +23,9 @@ Artist-level Play queues owned albums newest-to-oldest, with track ordering by d
 
 ## Podcast Behavior
 
-Playing an older podcast episode creates a forward-only queue of newer episodes; starting the latest episode does not create an episode queue.
+Playing an older podcast episode creates a forward-only queue of newer episodes; starting the latest episode plays just that episode. If a queue is already active, the episode (and its not-yet-queued newer episodes) is inserted after the current item instead of replacing the queue, so anything you queued stays queued.
+
+Podcast episodes and music tracks share one mixed-media play queue: while an episode plays you can queue tracks behind it (and vice versa) with "Add to queue" / "Play next", and skip controls and auto-advance move through the combined queue. Listen Together sessions remain music-only.
 
 ## Playback Settings
 

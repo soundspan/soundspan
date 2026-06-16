@@ -32,6 +32,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useAudioState, type Track } from "@/lib/audio-state-context";
+import { isEpisodeQueueItem, type QueueItem } from "@/lib/queue-item";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 import {
@@ -185,13 +186,19 @@ function toLocalTrack(
     };
 }
 
-function extractQueueTrackInputs(queue: Track[], currentTrack: Track | null): {
+function extractQueueTrackInputs(
+    queue: readonly QueueItem[],
+    currentTrack: Track | null
+): {
     queueTracks: QueueTrackInput[];
     currentTrackId?: string;
 } {
-    const source = queue.length > 0 ? queue : currentTrack ? [currentTrack] : [];
+    const source: readonly QueueItem[] =
+        queue.length > 0 ? queue : currentTrack ? [currentTrack] : [];
     const queueTracks: QueueTrackInput[] = [];
     for (const track of source) {
+        // Listen Together queues are music-only; skip podcast episodes.
+        if (isEpisodeQueueItem(track)) continue;
         try {
             queueTracks.push(toAddToPlaylistRef(track));
         } catch {
@@ -506,7 +513,10 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
         let trackChanged = false;
         if (currentQueue.length > 0) {
             const safeIdx = Math.min(Math.max(delta.currentIndex, 0), currentQueue.length - 1);
-            const effectiveTrack = currentQueue[safeIdx] ?? null;
+            const queueItem = currentQueue[safeIdx] ?? null;
+            // Listen Together queues are music-only; ignore episode entries.
+            const effectiveTrack =
+                queueItem && !isEpisodeQueueItem(queueItem) ? queueItem : null;
             trackChanged = effectiveTrack?.id !== state.currentTrack?.id;
             if (trackChanged) {
                 // Pause before switching to prevent buffered audio from the old
@@ -1336,7 +1346,8 @@ export function ListenTogetherProvider({ children }: { children: ReactNode }) {
 
         const safeIndex = Math.min(Math.max(index, 0), queue.length - 1);
         const targetTrack = queue[safeIndex] ?? null;
-        if (!targetTrack) return false;
+        // Listen Together queues are music-only; ignore episode entries.
+        if (!targetTrack || isEpisodeQueueItem(targetTrack)) return false;
         const optimisticSelectionPolicy =
             getListenTogetherOptimisticTrackSelectionPolicy();
         if (optimisticSelectionPolicy.guardRemoteApply) {

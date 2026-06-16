@@ -38,6 +38,7 @@ import {
     resolveServerPlaybackPollDecision,
     type PlaybackSnapshotType,
 } from "@/lib/playback-state-reconciliation";
+import { normalizeQueueItems, type QueueItem } from "@/lib/queue-item";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 function queueDebugEnabled(): boolean {
@@ -156,14 +157,13 @@ interface AudioStateContextType {
     currentPodcast: Podcast | null;
     playbackType: "track" | "audiobook" | "podcast" | null;
 
-    // Queue state
-    queue: Track[];
+    // Queue state (unified mixed-media queue: tracks + podcast episodes)
+    queue: QueueItem[];
     currentIndex: number;
     isShuffle: boolean;
     repeatMode: "off" | "one" | "all";
     isRepeat: boolean;
     shuffleIndices: number[];
-    podcastEpisodeQueue: Episode[] | null;
 
     // UI state
     playerMode: PlayerMode;
@@ -188,12 +188,11 @@ interface AudioStateContextType {
     setPlaybackType: (
         type: SetStateAction<"track" | "audiobook" | "podcast" | null>
     ) => void;
-    setQueue: (queue: SetStateAction<Track[]>) => void;
+    setQueue: (queue: SetStateAction<QueueItem[]>) => void;
     setCurrentIndex: (index: SetStateAction<number>) => void;
     setIsShuffle: (shuffle: SetStateAction<boolean>) => void;
     setRepeatMode: (mode: SetStateAction<"off" | "one" | "all">) => void;
     setShuffleIndices: (indices: SetStateAction<number[]>) => void;
-    setPodcastEpisodeQueue: (queue: SetStateAction<Episode[] | null>) => void;
     setPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
     setPreviousPlayerMode: (mode: SetStateAction<PlayerMode>) => void;
     setVolume: (volume: SetStateAction<number>) => void;
@@ -224,7 +223,6 @@ const STORAGE_KEYS = {
     PLAYER_MODE: createMigratingStorageKey("player_mode"),
     VOLUME: createMigratingStorageKey("volume"),
     IS_MUTED: createMigratingStorageKey("muted"),
-    PODCAST_EPISODE_QUEUE: createMigratingStorageKey("podcast_episode_queue"),
     CURRENT_TIME: createMigratingStorageKey("current_time"),
     CURRENT_TIME_TRACK_ID: createMigratingStorageKey("current_time_track_id"),
     LAST_PLAYBACK_STATE_SAVE_AT: createMigratingStorageKey(
@@ -259,8 +257,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
     const [playbackType, setPlaybackType] = useState<
         "track" | "audiobook" | "podcast" | null
     >(() => readStorage(STORAGE_KEYS.PLAYBACK_TYPE) as "track" | "audiobook" | "podcast" | null);
-    const [queue, setQueue] = useState<Track[]>(
-        () => parseStorageJson(STORAGE_KEYS.QUEUE, [])
+    const [queue, setQueue] = useState<QueueItem[]>(
+        () => normalizeQueueItems(parseStorageJson(STORAGE_KEYS.QUEUE, []))
     );
     const [currentIndex, setCurrentIndex] = useState(
         () => { const v = readStorage(STORAGE_KEYS.CURRENT_INDEX); return v ? parseInt(v) : 0; }
@@ -273,9 +271,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         () => (readStorage(STORAGE_KEYS.REPEAT_MODE) as "off" | "one" | "all") ?? "off"
     );
     const [repeatOneCount, setRepeatOneCount] = useState(0);
-    const [podcastEpisodeQueue, setPodcastEpisodeQueue] = useState<Episode[] | null>(
-        () => parseStorageJson(STORAGE_KEYS.PODCAST_EPISODE_QUEUE, null)
-    );
     const [playerMode, setPlayerMode] = useState<PlayerMode>(
         () => (readStorage(STORAGE_KEYS.PLAYER_MODE) as PlayerMode) ?? "full"
     );
@@ -371,7 +366,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverState.podcastId ||
                     null;
                 const serverQueue = Array.isArray(serverState.queue)
-                    ? (serverState.queue as Track[])
+                    ? normalizeQueueItems(serverState.queue)
                     : null;
 
                 const hydratedLocalPlaybackTypeRaw = readStorage(
@@ -396,9 +391,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     STORAGE_KEYS.CURRENT_PODCAST,
                     null
                 );
-                const hydratedLocalQueue = parseStorageJson(
-                    STORAGE_KEYS.QUEUE,
-                    [] as Track[]
+                const hydratedLocalQueue = normalizeQueueItems(
+                    parseStorageJson(STORAGE_KEYS.QUEUE, [])
                 );
                 const hydratedLocalMediaId =
                     hydratedLocalTrack?.id ||
@@ -565,7 +559,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             queue,
             currentIndex,
             isShuffle,
-            podcastEpisodeQueue,
         };
 
         storageFlushRef.current.schedule(() => {
@@ -605,14 +598,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     snapshot.currentIndex.toString()
                 );
                 writeMigratingStorageItem(STORAGE_KEYS.IS_SHUFFLE, snapshot.isShuffle.toString());
-                if (snapshot.podcastEpisodeQueue) {
-                    writeMigratingStorageItem(
-                        STORAGE_KEYS.PODCAST_EPISODE_QUEUE,
-                        JSON.stringify(snapshot.podcastEpisodeQueue)
-                    );
-                } else {
-                    removeMigratingStorageItem(STORAGE_KEYS.PODCAST_EPISODE_QUEUE);
-                }
             } catch (error) {
                 sharedFrontendLogger.error("[AudioState] Failed to save state (debounced):", error);
             }
@@ -627,7 +612,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         queue,
         currentIndex,
         isShuffle,
-        podcastEpisodeQueue,
         isHydrated,
     ]);
 
@@ -753,7 +737,7 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     localCurrentPodcastId;
 
                 const serverQueue = Array.isArray(serverState.queue)
-                    ? (serverState.queue as Track[])
+                    ? normalizeQueueItems(serverState.queue)
                     : null;
                 const pollDecision = resolveServerPlaybackPollDecision({
                     localPlaybackType: localPlaybackType,
@@ -929,7 +913,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             repeatMode,
             isRepeat: repeatMode !== "off",
             shuffleIndices,
-            podcastEpisodeQueue,
             playerMode,
             previousPlayerMode,
             volume,
@@ -949,7 +932,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             setIsShuffle,
             setRepeatMode,
             setShuffleIndices,
-            setPodcastEpisodeQueue,
             setPlayerMode,
             setPreviousPlayerMode,
             setVolume,
@@ -970,7 +952,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
             isShuffle,
             repeatMode,
             shuffleIndices,
-            podcastEpisodeQueue,
             playerMode,
             previousPlayerMode,
             volume,

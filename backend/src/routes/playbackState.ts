@@ -29,6 +29,112 @@ function sanitizeOptionalString(
 }
 
 /**
+ * Sanitizes a podcast-episode queue item from a mixed-media queue payload.
+ * Episode entries are flagged with `itemType: "episode"` and identified by a
+ * composite "podcastId:episodeId" id; missing podcastId/episodeId fields are
+ * derived from the composite id. Returns null when the identity is unusable.
+ */
+function sanitizeEpisodeQueueItem(
+    item: any
+): Record<string, unknown> | null {
+    const id = String(item.id || "");
+    const [idPodcastId = "", idEpisodeId = ""] = id.split(":");
+    const podcastId = String(item.podcastId || idPodcastId || "").substring(
+        0,
+        128
+    );
+    const episodeId = String(item.episodeId || idEpisodeId || "").substring(
+        0,
+        128
+    );
+    if (!podcastId || !episodeId) return null;
+
+    return {
+        itemType: "episode",
+        id: `${podcastId}:${episodeId}`,
+        title: String(item.title || "Unknown").substring(0, 500),
+        podcastTitle: String(item.podcastTitle || "").substring(0, 500),
+        podcastId,
+        episodeId,
+        coverUrl: item.coverUrl
+            ? String(item.coverUrl).substring(0, 1000)
+            : null,
+        duration: Number(item.duration) || 0,
+    };
+}
+
+/**
+ * Sanitizes a music-track queue item, keeping only the essential fields to
+ * reduce JSON size. Items without an `itemType` are treated as tracks
+ * (legacy clients) and tagged with `itemType: "track"`.
+ */
+function sanitizeTrackQueueItem(item: any): Record<string, unknown> {
+    const provider = normalizeCanonicalMediaProviderIdentity({
+        mediaSource: item.mediaSource,
+        streamSource: item.streamSource,
+        sourceType: item.sourceType,
+        providerTrackId:
+            item.provider?.providerTrackId ?? item.providerTrackId,
+        tidalTrackId: item.provider?.tidalTrackId ?? item.tidalTrackId,
+        youtubeVideoId: item.provider?.youtubeVideoId ?? item.youtubeVideoId,
+    });
+    const sanitizedProvider = {
+        source: provider.source,
+        ...(sanitizeOptionalString(provider.providerTrackId, 128)
+            ? {
+                  providerTrackId: sanitizeOptionalString(
+                      provider.providerTrackId,
+                      128
+                  ),
+              }
+            : {}),
+        ...(typeof provider.tidalTrackId === "number" &&
+        Number.isFinite(provider.tidalTrackId)
+            ? { tidalTrackId: provider.tidalTrackId }
+            : {}),
+        ...(sanitizeOptionalString(provider.youtubeVideoId, 64)
+            ? {
+                  youtubeVideoId: sanitizeOptionalString(
+                      provider.youtubeVideoId,
+                      64
+                  ),
+              }
+            : {}),
+    };
+
+    return {
+        itemType: "track",
+        mediaSource: provider.source,
+        provider: sanitizedProvider,
+        ...toLegacyStreamFields(provider),
+        id: String(item.id || ""),
+        title: String(item.title || "Unknown").substring(0, 500),
+        duration: Number(item.duration) || 0,
+        artist: item.artist
+            ? {
+                  id: String(item.artist.id || ""),
+                  name: String(item.artist.name || "Unknown").substring(
+                      0,
+                      200
+                  ),
+              }
+            : null,
+        album: item.album
+            ? {
+                  id: String(item.album.id || ""),
+                  title: String(item.album.title || "Unknown").substring(
+                      0,
+                      500
+                  ),
+                  coverArt: item.album.coverArt
+                      ? String(item.album.coverArt).substring(0, 1000)
+                      : null,
+              }
+            : null,
+    };
+}
+
+/**
  * @openapi
  * /api/playback-state:
  *   get:
@@ -146,8 +252,18 @@ router.get("/", requireAuth, async (req, res) => {
  *                 type: string
  *               queue:
  *                 type: array
+ *                 description: >-
+ *                   Mixed-media queue items. Entries with itemType "episode"
+ *                   are podcast episodes ({itemType, id, title, podcastTitle,
+ *                   podcastId, episodeId, coverUrl, duration}); all other
+ *                   entries are music tracks (itemType defaults to "track"
+ *                   for legacy clients).
  *                 items:
  *                   type: object
+ *                   properties:
+ *                     itemType:
+ *                       type: string
+ *                       enum: [track, episode]
  *               currentIndex:
  *                 type: integer
  *               isShuffle:
@@ -214,85 +330,18 @@ router.post("/", requireAuth, async (req, res) => {
                     safeQueue = queue
                         .slice(0, 100)
                         .filter((item: any) => item && item.id)
-                        .map((item: any) => ({
-                            ...(() => {
-                                const provider = normalizeCanonicalMediaProviderIdentity({
-                                    mediaSource: item.mediaSource,
-                                    streamSource: item.streamSource,
-                                    sourceType: item.sourceType,
-                                    providerTrackId:
-                                        item.provider?.providerTrackId ??
-                                        item.providerTrackId,
-                                    tidalTrackId:
-                                        item.provider?.tidalTrackId ??
-                                        item.tidalTrackId,
-                                    youtubeVideoId:
-                                        item.provider?.youtubeVideoId ??
-                                        item.youtubeVideoId,
-                                });
-                                const sanitizedProvider = {
-                                    source: provider.source,
-                                    ...(sanitizeOptionalString(
-                                        provider.providerTrackId,
-                                        128,
-                                    )
-                                        ? {
-                                              providerTrackId: sanitizeOptionalString(
-                                                  provider.providerTrackId,
-                                                  128,
-                                              ),
-                                          }
-                                        : {}),
-                                    ...(typeof provider.tidalTrackId === "number" &&
-                                    Number.isFinite(provider.tidalTrackId)
-                                        ? { tidalTrackId: provider.tidalTrackId }
-                                        : {}),
-                                    ...(sanitizeOptionalString(
-                                        provider.youtubeVideoId,
-                                        64,
-                                    )
-                                        ? {
-                                              youtubeVideoId: sanitizeOptionalString(
-                                                  provider.youtubeVideoId,
-                                                  64,
-                                              ),
-                                          }
-                                        : {}),
-                                };
-
-                                return {
-                                    mediaSource: provider.source,
-                                    provider: sanitizedProvider,
-                                    ...toLegacyStreamFields(provider),
-                                };
-                            })(),
-                            id: String(item.id || ""),
-                            title: String(item.title || "Unknown").substring(0, 500),
-                            duration: Number(item.duration) || 0,
-                            artist: item.artist
-                                ? {
-                                      id: String(item.artist.id || ""),
-                                      name: String(item.artist.name || "Unknown").substring(
-                                          0,
-                                          200,
-                                      ),
-                                  }
-                                : null,
-                            album: item.album
-                                ? {
-                                      id: String(item.album.id || ""),
-                                      title: String(
-                                          item.album.title || "Unknown",
-                                      ).substring(0, 500),
-                                      coverArt: item.album.coverArt
-                                          ? String(item.album.coverArt).substring(
-                                                0,
-                                                1000,
-                                            )
-                                          : null,
-                                  }
-                                : null,
-                        }));
+                        .map((item: any) => {
+                            // Mixed-media queues: podcast episode entries are
+                            // persisted in their own compact shape.
+                            if (item.itemType === "episode") {
+                                return sanitizeEpisodeQueueItem(item);
+                            }
+                            return sanitizeTrackQueueItem(item);
+                        })
+                        .filter(
+                            (item: Record<string, unknown> | null) =>
+                                item !== null
+                        );
                     if (safeQueue.length === 0) {
                         safeQueue = null;
                     }
