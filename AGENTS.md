@@ -36,6 +36,46 @@ Repository contract for soundspan.
 - **Documentation coverage:** Exported TypeScript symbols, runtime Python modules, and implemented OpenAPI routes should remain fully documented when touched.
 - **Storage:** SQLite at `.acm/context.db` by default. Configure `ACM_PG_DSN` for multi-agent coordination.
 
+## Local Setup & Pre-PR Verification
+
+There is **no root install** — `backend/`, `frontend/`, and `packages/media-metadata-contract/` are each installed and built on their own. A PR is gated by the CI checks in the table below; reproduce all of them locally before pushing.
+
+### Prerequisites
+
+- **Node.js ≥ 20.9** — the frontend is Next.js 16 and will not build on older Node (Node 18 fails with `Node.js version ">=20.9.0" is required`). CI uses Node **20** for the backend job and Node **24** for the frontend job. Match ≥ 20.9 locally.
+- **npm 9+** — each package commits its own lockfile; use `npm ci` for reproducible installs.
+- **Python 3.11+** — only when changing the `services/**` sidecars.
+
+### First-time setup (from the repo root, in this order)
+
+```bash
+# 1. Build the shared contract FIRST. The backend depends on it via a `file:`
+#    path, which npm COPIES (not symlinks) at install time — so its dist/ must
+#    exist before you install the backend, or the copy will lack it.
+npm --prefix packages/media-metadata-contract run build
+
+# 2. Install the apps (their copy of the contract now includes dist/).
+npm --prefix backend install
+npm --prefix frontend install
+```
+
+> Gotcha: if `npm --prefix backend test` reports `Cannot find module '@soundspan/media-metadata-contract'`, the backend was installed before the contract's `dist/` existed. Rebuild it (`npm --prefix packages/media-metadata-contract run build`) and re-run `npm --prefix backend install`.
+
+### Reproduce the CI gates locally (run before every PR)
+
+| CI check (`quality-visibility.yml` / `pr-checks.yml`) | Local command | Catches |
+| --- | --- | --- |
+| Backend Tests + Coverage | `npm --prefix backend run test:coverage` | backend Jest unit/runtime tests + coverage |
+| Frontend Quality Visibility | `npm --prefix frontend run lint` **and** `npm --prefix frontend run build` **and** `npm --prefix frontend run test:coverage` | ESLint, **TypeScript type-check (the `build` step)**, targeted unit coverage |
+| Helm Chart Visibility | `./scripts/helm-chart-render-check.sh` | chart lint + render assertions |
+| ACM Health | `acm health --project soundspan --include-details` | repo contract / receipts |
+
+Notes:
+
+- **The frontend `npm run build` is the type-check gate.** `next build` runs `tsc` over the build graph (`app/`, `lib/`, `components/`, `hooks/`, `features/`). `npm run lint` (ESLint) and the `node --test`/`tsx` unit runners transpile without type-checking, so they will **not** catch a type error — `build` is what fails CI for one. Always run `build` (needs Node ≥ 20.9) before pushing.
+- **RAM:** per the targeted-testing rule above, iterate with `npm --prefix backend test -- <file>`; run the full `test:coverage` once before opening the PR.
+- **No Node ≥ 20.9 handy?** At minimum type-check the frontend directly: `(cd frontend && npx tsc --noEmit -p tsconfig.json)`. Only errors under `app/`, `lib/`, `components/`, `hooks/`, `features/` gate the build — `next build` does not type-check standalone `tests/**` files, which may carry pre-existing fixture type-noise.
+
 ## Verification Evidence Protocol
 
 - Run the verification command. Read the COMPLETE output. Do not assume success.

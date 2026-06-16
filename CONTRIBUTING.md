@@ -6,7 +6,7 @@ First off, thanks for taking the time to contribute! 🎉
 
 1. Fork the repository
 2. Clone your fork locally
-3. Set up the development environment (see README.md)
+3. Set up the development environment and learn how to reproduce the CI gates locally — see **Local Setup & Pre-PR Verification** in [AGENTS.md](AGENTS.md). (There is no root install; each package builds on its own, and the frontend needs Node ≥ 20.9.)
 4. Create a new branch from `main` for your changes
 
 ## Git Hooks
