@@ -15,6 +15,7 @@ jest.mock("../../utils/logger", () => ({
 jest.mock("../../services/youtubeDownload", () => ({
     youtubeDownloadService: {
         getVideoInfo: jest.fn(),
+        getPlaylistInfo: jest.fn(),
         getStreamProxy: jest.fn(),
         startDownload: jest.fn(),
         getDownloadJobStatus: jest.fn(),
@@ -36,6 +37,8 @@ import {
 } from "../../services/youtubeDownload";
 
 const mockGetVideoInfo = youtubeDownloadService.getVideoInfo as jest.Mock;
+const mockGetPlaylistInfo =
+    youtubeDownloadService.getPlaylistInfo as jest.Mock;
 const mockStartDownload = youtubeDownloadService.startDownload as jest.Mock;
 const mockGetDownloadJobStatus =
     youtubeDownloadService.getDownloadJobStatus as jest.Mock;
@@ -81,6 +84,7 @@ function sidecarError(status: number, detail?: string) {
 
 describe("youtube routes runtime", () => {
     const infoHandler = getHandler("/info", "get");
+    const playlistInfoHandler = getHandler("/playlist-info", "get");
     const downloadHandler = getHandler("/download", "post");
     const statusHandler = getHandler("/download/:jobId", "get");
 
@@ -161,6 +165,91 @@ describe("youtube routes runtime", () => {
             expect(res.body).toMatchObject({
                 videoId: "dQw4w9WgXcQ",
                 audioFormat: "webm",
+            });
+        });
+    });
+
+    describe("GET /playlist-info", () => {
+        it("returns 400 when url is missing", async () => {
+            const req = { query: {} } as any;
+            const res = createRes();
+
+            await playlistInfoHandler(req, res);
+
+            expect(res.statusCode).toBe(400);
+            expect(mockGetPlaylistInfo).not.toHaveBeenCalled();
+        });
+
+        it("returns the enumerated playlist on success", async () => {
+            mockGetPlaylistInfo.mockResolvedValue({
+                kind: "playlist",
+                playlistId: "PL-abc123",
+                channel: null,
+                sourceUrl: "https://www.youtube.com/playlist?list=PL-abc123",
+                title: "My Set",
+                uploader: "DJ",
+                totalCount: 2,
+                truncated: false,
+                count: 2,
+                entries: [
+                    { videoId: "aaaaaaaaaaa", title: "One", uploader: "DJ", duration: 100 },
+                    { videoId: "bbbbbbbbbbb", title: "Two", uploader: "DJ", duration: 200 },
+                ],
+            });
+            const req = {
+                query: {
+                    url: "https://www.youtube.com/playlist?list=PL-abc123",
+                },
+            } as any;
+            const res = createRes();
+
+            await playlistInfoHandler(req, res);
+
+            expect(mockGetPlaylistInfo).toHaveBeenCalledWith(
+                "https://www.youtube.com/playlist?list=PL-abc123"
+            );
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toMatchObject({
+                kind: "playlist",
+                count: 2,
+                truncated: false,
+            });
+        });
+
+        it("maps a sidecar 422 (single video / mix) to 422 with its detail", async () => {
+            mockGetPlaylistInfo.mockRejectedValue(
+                sidecarError(
+                    422,
+                    "This is an auto-generated YouTube mix/radio, which can't be downloaded as a set."
+                )
+            );
+            const req = {
+                query: {
+                    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ",
+                },
+            } as any;
+            const res = createRes();
+
+            await playlistInfoHandler(req, res);
+
+            expect(res.statusCode).toBe(422);
+            expect(res.body.error).toMatch(/mix\/radio/);
+        });
+
+        it("returns 502 when the sidecar is unreachable", async () => {
+            mockGetPlaylistInfo.mockRejectedValue(new Error("ECONNREFUSED"));
+            const req = {
+                query: {
+                    url: "https://www.youtube.com/playlist?list=PL-abc123",
+                },
+            } as any;
+            const res = createRes();
+
+            await playlistInfoHandler(req, res);
+
+            expect(res.statusCode).toBe(502);
+            expect(res.body).toEqual({
+                error: "Failed to enumerate playlist or channel",
             });
         });
     });

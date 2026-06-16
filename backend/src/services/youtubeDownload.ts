@@ -33,6 +33,32 @@ export interface YtVideoInfo {
     audioFormat?: "webm" | "mp4";
 }
 
+/** A single enumerable video within a playlist/channel (GET /yt/playlist-info). */
+export interface YtPlaylistEntry {
+    videoId: string;
+    title: string;
+    uploader: string;
+    duration: number | null;
+}
+
+/**
+ * Bounded enumeration of a YouTube playlist or channel, as returned by the
+ * sidecar /yt/playlist-info. `entries` is capped (sidecar-side); `truncated`
+ * is true when the source holds more videos than were returned.
+ */
+export interface YtPlaylistInfo {
+    kind: "playlist" | "channel";
+    playlistId: string | null;
+    channel: string | null;
+    sourceUrl: string;
+    title: string;
+    uploader: string;
+    totalCount: number | null;
+    truncated: boolean;
+    count: number;
+    entries: YtPlaylistEntry[];
+}
+
 /** Lifecycle states reported by the sidecar's download job store. */
 export type YtDownloadJobState =
     | "queued"
@@ -153,6 +179,18 @@ class YouTubeDownloadService {
      */
     async getVideoInfo(url: string): Promise<YtVideoInfo> {
         const res = await this.client.get("/yt/info", {
+            params: { url },
+        });
+        return res.data;
+    }
+
+    /**
+     * Enumerate a YouTube playlist or channel into a bounded list of video
+     * entries for the bulk-download UI. The sidecar caps the count and flags
+     * truncation; it returns 422 for single videos and un-enumerable mixes.
+     */
+    async getPlaylistInfo(url: string): Promise<YtPlaylistInfo> {
+        const res = await this.client.get("/yt/playlist-info", {
             params: { url },
         });
         return res.data;

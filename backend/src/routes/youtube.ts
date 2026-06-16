@@ -68,6 +68,66 @@ router.get("/info", requireAuth, async (req: Request, res: Response) => {
     }
 });
 
+// ── Playlist / Channel Enumeration ────────────────────────────────
+
+const playlistInfoQuerySchema = z.object({
+    url: z.string().min(1, "url is required"),
+});
+
+/**
+ * @openapi
+ * /api/youtube/playlist-info:
+ *   get:
+ *     summary: Enumerate a YouTube playlist or channel for bulk download
+ *     description: >
+ *       Returns a bounded, truncation-aware list of video entries the UI
+ *       fans out into individual download jobs. Rejects single-video URLs
+ *       and auto-generated radio/mix lists with 422.
+ *     tags: [YouTube]
+ *     parameters:
+ *       - in: query
+ *         name: url
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Playlist/channel entries (with truncated flag)
+ *       400:
+ *         description: Missing url
+ *       422:
+ *         description: URL is a single video or an un-enumerable mix/radio
+ *       502:
+ *         description: Sidecar unavailable
+ */
+router.get("/playlist-info", requireAuth, async (req: Request, res: Response) => {
+    try {
+        const { url } = playlistInfoQuerySchema.parse(req.query);
+        const info = await youtubeDownloadService.getPlaylistInfo(url);
+        return res.json(info);
+    } catch (err: any) {
+        if (err instanceof z.ZodError) {
+            return res.status(400).json({ error: err.errors[0].message });
+        }
+        if (err.response?.status === 422) {
+            return res.status(422).json({
+                error:
+                    err.response?.data?.detail ||
+                    "URL is not a downloadable playlist or channel",
+            });
+        }
+        if (err.response?.status === 404) {
+            return res
+                .status(404)
+                .json({ error: "Playlist or channel not found" });
+        }
+        logger.error("[YouTube Route] Playlist info fetch failed:", err.message);
+        return res
+            .status(502)
+            .json({ error: "Failed to enumerate playlist or channel" });
+    }
+});
+
 // ── Audio Stream Proxy ────────────────────────────────────────────
 
 /**
