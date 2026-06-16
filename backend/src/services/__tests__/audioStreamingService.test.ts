@@ -11,6 +11,7 @@ const mockFsExistsSync = jest.fn();
 const mockFsMkdirSync = jest.fn();
 const mockFsCreateReadStream = jest.fn();
 const mockFsStat = jest.fn();
+const mockPipeline = jest.fn();
 const mockFsUnlink = jest.fn();
 
 const mockPrisma = {
@@ -82,6 +83,10 @@ jest.mock("fs", () => ({
         stat: mockFsStat,
         unlink: mockFsUnlink,
     },
+}));
+
+jest.mock("node:stream/promises", () => ({
+    pipeline: mockPipeline,
 }));
 
 jest.mock("p-queue", () => {
@@ -743,10 +748,8 @@ describe("AudioStreamingService", () => {
                 "/music/song.flac",
                 { start: 0, end: 999 }
             );
-            expect(stream.pipe).toHaveBeenCalledWith(res);
-
-            res.emit("close");
-            expect(stream.destroy).toHaveBeenCalledTimes(1);
+            // pipeline() owns piping + teardown of both streams.
+            expect(mockPipeline).toHaveBeenCalledWith(stream, res);
         });
 
         it("streams requested range with 206 and Content-Range", async () => {
@@ -788,7 +791,7 @@ describe("AudioStreamingService", () => {
                 "/music/song.flac",
                 { start: 100, end: 199 }
             );
-            expect(stream.pipe).toHaveBeenCalledWith(res);
+            expect(mockPipeline).toHaveBeenCalledWith(stream, res);
         });
 
         it("returns 416 for invalid range header", async () => {
@@ -825,6 +828,7 @@ describe("AudioStreamingService", () => {
 
             mockFsStat.mockResolvedValueOnce({ size: 1000 });
             mockFsCreateReadStream.mockReturnValueOnce(stream);
+            mockPipeline.mockRejectedValueOnce(new Error("read failure"));
 
             const req: any = { headers: {} };
             const res = createMockResponse(false);
@@ -836,8 +840,6 @@ describe("AudioStreamingService", () => {
                 "audio/flac"
             );
 
-            stream.emit("error", new Error("read failure"));
-
             expect(res.status).toHaveBeenNthCalledWith(1, 200);
             expect(res.status).toHaveBeenNthCalledWith(2, 500);
             expect(res.end).toHaveBeenCalledTimes(1);
@@ -845,6 +847,34 @@ describe("AudioStreamingService", () => {
                 "[AudioStreaming] Stream error for /music/song.flac:",
                 expect.any(Error)
             );
+        });
+
+        it("ignores client aborts (ERR_STREAM_PREMATURE_CLOSE) without logging or 500", async () => {
+            const service = createService();
+            const stream = createMockReadStream();
+
+            mockFsStat.mockResolvedValueOnce({ size: 1000 });
+            mockFsCreateReadStream.mockReturnValueOnce(stream);
+            mockPipeline.mockRejectedValueOnce(
+                Object.assign(new Error("aborted"), {
+                    code: "ERR_STREAM_PREMATURE_CLOSE",
+                })
+            );
+
+            const req: any = { headers: {} };
+            const res = createMockResponse(false);
+
+            await service.streamFileWithRangeSupport(
+                req,
+                res as any,
+                "/music/song.flac",
+                "audio/flac"
+            );
+
+            // 200 set up front; the abort must not produce a 500 or an error log.
+            expect(res.status).toHaveBeenCalledTimes(1);
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(mockLogger.error).not.toHaveBeenCalled();
         });
     });
 

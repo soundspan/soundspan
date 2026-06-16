@@ -5,8 +5,7 @@
 
 import slsk from "slsk-client";
 import path from "path";
-import fs from "fs";
-import { mkdir } from "fs/promises";
+import { mkdir, rm, stat } from "fs/promises";
 import PQueue from "p-queue";
 import { getSystemSettings } from "../utils/systemSettings";
 import { sessionLog } from "../utils/playlistLogger";
@@ -845,14 +844,12 @@ class SoulseekService {
                     );
                     // Record user failure for circuit breaker
                     this.recordUserFailure(match.username);
-                    // Clean up partial file if it exists
-                    if (fs.existsSync(destPath)) {
-                        try {
-                            fs.unlinkSync(destPath);
-                        } catch (e) {
-                            // Ignore cleanup errors
-                        }
-                    }
+                    // Clean up the partial file without blocking the event
+                    // loop; force:true ignores ENOENT so no existence check is
+                    // needed and cleanup errors are swallowed.
+                    void rm(destPath, { force: true }).catch(() => {
+                        // Ignore cleanup errors
+                    });
                     resolve({ success: false, error: "Download timed out" });
                 }
             }, timeout);
@@ -873,7 +870,7 @@ class SoulseekService {
                         file: downloadFile,
                         path: destPath,
                     },
-                    (err) => {
+                    async (err) => {
                         if (resolved) return; // Already timed out
                         resolved = true;
                         clearTimeout(timeoutId);
@@ -898,9 +895,9 @@ class SoulseekService {
                             });
                         }
 
-                        // Verify file was written
-                        if (fs.existsSync(destPath)) {
-                            const stats = fs.statSync(destPath);
+                        // Verify file was written (stat throws if missing).
+                        try {
+                            const stats = await stat(destPath);
                             sessionLog(
                                 "SOULSEEK",
                                 `✓ Downloaded: ${match.filename} (${Math.round(
@@ -908,7 +905,7 @@ class SoulseekService {
                                 )}KB)`
                             );
                             resolve({ success: true });
-                        } else {
+                        } catch {
                             sessionLog(
                                 "SOULSEEK",
                                 "File not found after download",

@@ -8,6 +8,8 @@ const mockFsExistsSync = jest.fn();
 const mockFsStatSync = jest.fn();
 const mockFsUnlinkSync = jest.fn();
 const mockMkdir = jest.fn();
+const mockRm = jest.fn();
+const mockStat = jest.fn();
 
 jest.mock("slsk-client", () => ({
     __esModule: true,
@@ -38,6 +40,8 @@ jest.mock("fs", () => ({
 
 jest.mock("fs/promises", () => ({
     mkdir: (...args: unknown[]) => mockMkdir(...args),
+    rm: (...args: unknown[]) => mockRm(...args),
+    stat: (...args: unknown[]) => mockStat(...args),
 }));
 
 jest.mock("p-queue", () => ({
@@ -1130,7 +1134,7 @@ describe("soulseek service", () => {
                 search: jest.fn(),
                 download: jest.fn(),
             };
-            mockFsExistsSync.mockReturnValue(true);
+            mockRm.mockResolvedValue(undefined);
 
             const promise = soulseekService.downloadTrack(
                 makeTrackMatch({ username: "timeout-user" }),
@@ -1141,7 +1145,9 @@ describe("soulseek service", () => {
             const result = await promise;
 
             expect(result).toEqual({ success: false, error: "Download timed out" });
-            expect(mockFsUnlinkSync).toHaveBeenCalledWith("/music/timeout.flac");
+            expect(mockRm).toHaveBeenCalledWith("/music/timeout.flac", {
+                force: true,
+            });
             expect((soulseekService as any).failedUsers.get("timeout-user")).toEqual(
                 expect.objectContaining({ failures: 1 })
             );
@@ -1234,8 +1240,7 @@ describe("soulseek service", () => {
                     ) => cb(null, { buffer: Buffer.from("ok") })
                 ),
             };
-            mockFsExistsSync.mockReturnValue(true);
-            mockFsStatSync.mockReturnValue({ size: 4096 });
+            mockStat.mockResolvedValue({ size: 4096 });
 
             const result = await soulseekService.downloadTrack(
                 makeTrackMatch(),

@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { promises as fsPromises } from "fs";
+import { pipeline } from "node:stream/promises";
 import { Request, Response } from "express";
 import { logger } from "../utils/logger";
 import * as path from "path";
@@ -493,21 +494,27 @@ export class AudioStreamingService {
             // Create read stream with range
             const stream = fs.createReadStream(filePath, { start, end });
 
-            // Handle stream errors
-            stream.on("error", (err) => {
-                logger.error(`[AudioStreaming] Stream error for ${filePath}:`, err);
-                if (!res.headersSent) {
-                    res.status(500).end();
+            // pipeline() propagates errors from either side and destroys both
+            // streams on completion or failure — replacing the manual
+            // stream.on("error") handler and res.on("close") teardown that raw
+            // pipe() required (and which leaked backpressure/abort handling).
+            try {
+                await pipeline(stream, res);
+            } catch (err) {
+                // A client closing the connection mid-stream (seek, skip,
+                // navigate away) surfaces as ERR_STREAM_PREMATURE_CLOSE; that's
+                // expected for media streaming, not a server error.
+                const code = (err as NodeJS.ErrnoException | undefined)?.code;
+                if (code !== "ERR_STREAM_PREMATURE_CLOSE") {
+                    logger.error(
+                        `[AudioStreaming] Stream error for ${filePath}:`,
+                        err
+                    );
+                    if (!res.headersSent) {
+                        res.status(500).end();
+                    }
                 }
-            });
-
-            // Handle cleanup on response close
-            res.on("close", () => {
-                stream.destroy();
-            });
-
-            // Pipe stream to response
-            stream.pipe(res);
+            }
         } catch (err) {
             logger.error(`[AudioStreaming] Failed to stream ${filePath}:`, err);
             if (!res.headersSent) {
