@@ -8,6 +8,7 @@ import { config } from "./config";
 import { redisClient } from "./utils/redis";
 import { prisma } from "./utils/db";
 import { logger } from "./utils/logger";
+import { isOriginAllowed } from "./utils/cors";
 import {
     getRuntimeDrainState,
     setRuntimeDrainState,
@@ -131,37 +132,19 @@ app.use(
 app.use(
     cors({
         origin: (origin, callback) => {
-            // For self-hosted apps: allow all origins by default
-            // Users deploy on their own domains/IPs - we can't predict them
-            // Security is handled by authentication, not CORS
-            if (!origin) {
-                // Allow requests with no origin (same-origin, curl, etc.)
-                callback(null, true);
-            } else if (
-                config.allowedOrigins === true ||
-                config.nodeEnv === "development"
-            ) {
-                // Explicitly allow all origins
-                callback(null, true);
-            } else if (
-                Array.isArray(config.allowedOrigins) &&
-                config.allowedOrigins.length > 0
-            ) {
-                // Check against specific allowed origins if configured
-                if (config.allowedOrigins.includes(origin)) {
-                    callback(null, true);
-                } else {
-                    // For self-hosted: allow anyway but log it
-                    // Users shouldn't have to configure CORS for their own app
-                    logger.debug(
-                        `[CORS] Origin ${origin} not in allowlist, allowing anyway (self-hosted)`
-                    );
-                    callback(null, true);
-                }
-            } else {
-                // No restrictions - allow all (self-hosted default)
-                callback(null, true);
+            // Self-hosted default is permissive (no allowlist → allow all), but
+            // when ALLOWED_ORIGINS is explicitly configured it is enforced.
+            const allowed = isOriginAllowed(
+                origin,
+                config.allowedOrigins,
+                config.nodeEnv
+            );
+            if (!allowed) {
+                logger.warn(
+                    `[CORS] Origin ${origin} not in ALLOWED_ORIGINS allowlist; denying`
+                );
             }
+            callback(null, allowed);
         },
         credentials: true,
     })

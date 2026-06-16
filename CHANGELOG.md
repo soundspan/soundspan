@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The `ALLOWED_ORIGINS` allowlist is now **enforced**. When it is configured, a cross-origin request from an unlisted origin is denied instead of being logged and reflected back anyway (which, combined with `credentials: true`, silently made the knob a no-op). Behavior is unchanged for the self-hosted default: with no `ALLOWED_ORIGINS` set, all origins are still allowed. The origin decision is now a unit-tested `isOriginAllowed` helper.
 - Internal CLAP analyzer callbacks (`/api/analysis/vibe/failure`, `/api/analysis/vibe/success`) now **fail closed**. The shared-secret check is enforced by a dedicated `requireInternalSecret` middleware that rejects every request when `INTERNAL_API_SECRET` is unset — previously an unset secret combined with a missing header satisfied `undefined !== undefined` and bypassed authentication entirely — and compares the provided secret in constant time.
 
 ## [1.5.0] - 2026-03-27
