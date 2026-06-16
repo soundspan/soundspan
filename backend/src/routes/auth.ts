@@ -1085,6 +1085,11 @@ router.delete(
  *       400:
  *         description: Invalid request, invite code, or username/email already taken
  */
+// Thrown inside the registration transaction when the invite code has no
+// remaining uses at consume time, so the whole transaction rolls back (no user
+// is created) and the handler can return a clean 400.
+class InviteCodeExhaustedError extends Error {}
+
 // POST /auth/register - Public registration with invite code
 router.post("/register", async (req, res) => {
     try {
@@ -1128,6 +1133,23 @@ router.post("/register", async (req, res) => {
         const passwordHash = await bcrypt.hash(data.password, 10);
 
         const result = await prisma.$transaction(async (tx) => {
+            // Atomically consume one use of the invite code — only if uses remain
+            // and it isn't revoked. This closes the TOCTOU between the useCount
+            // check above (read before the transaction) and the increment below:
+            // two concurrent registrations on a single-use code can no longer
+            // both pass. If nothing was consumed, abort so no user is created.
+            const consumed = await tx.inviteCode.updateMany({
+                where: {
+                    id: invite.id,
+                    revoked: false,
+                    useCount: { lt: invite.maxUses },
+                },
+                data: { useCount: { increment: 1 } },
+            });
+            if (consumed.count === 0) {
+                throw new InviteCodeExhaustedError();
+            }
+
             const user = await tx.user.create({
                 data: {
                     username: data.username,
@@ -1154,11 +1176,6 @@ router.post("/register", async (req, res) => {
                     inviteCodeId: invite.id,
                     usedBy: user.id,
                 },
-            });
-
-            await tx.inviteCode.update({
-                where: { id: invite.id },
-                data: { useCount: { increment: 1 } },
             });
 
             return user;
@@ -1193,6 +1210,11 @@ router.post("/register", async (req, res) => {
                 error: firstError.message,
                 details: err.errors,
             });
+        }
+        if (err instanceof InviteCodeExhaustedError) {
+            return res
+                .status(400)
+                .json({ error: "This invite code has been fully used" });
         }
         logger.error("Registration error:", err);
         res.status(500).json({ error: "Registration failed" });

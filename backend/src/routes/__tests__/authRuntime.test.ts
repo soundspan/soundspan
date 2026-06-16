@@ -1234,7 +1234,7 @@ describe("auth routes runtime", () => {
                 create: jest.fn().mockResolvedValue({}),
             },
             inviteCode: {
-                update: jest.fn().mockResolvedValue({}),
+                updateMany: jest.fn().mockResolvedValue({ count: 1 }),
             },
         };
 
@@ -1279,6 +1279,65 @@ describe("auth routes runtime", () => {
         await register(badInviteReq, txErrorRes);
         expect(txErrorRes.statusCode).toBe(500);
         expect(txErrorRes.body).toEqual({ error: "Registration failed" });
+    });
+
+    it("register fails closed when the invite code is concurrently exhausted", async () => {
+        (prisma as any).inviteCode = { findUnique: jest.fn() };
+        (prisma.user as any).findFirst = jest.fn();
+        const register = getHandler("/register", "post");
+
+        // Passes the pre-transaction useCount check (reads 0 of 1)...
+        (prisma as any).inviteCode.findUnique.mockResolvedValueOnce({
+            id: "ic-1",
+            revoked: false,
+            useCount: 0,
+            maxUses: 1,
+            expiresAt: null,
+        });
+        prisma.user.findUnique.mockResolvedValueOnce(null);
+        (prisma.user as any).findFirst.mockResolvedValueOnce(null);
+
+        // ...but the atomic conditional consume finds no remaining uses, as if a
+        // concurrent registration already took the single use.
+        const tx = {
+            user: { create: jest.fn() },
+            userSettings: { create: jest.fn() },
+            inviteCodeUsage: { create: jest.fn() },
+            inviteCode: {
+                updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            },
+        };
+        (prisma as any).$transaction = jest.fn(async (fn: any) => fn(tx));
+
+        const res = createRes();
+        await register(
+            {
+                body: {
+                    inviteCode: "abcd1234",
+                    username: "racer",
+                    displayName: "Racer",
+                    password: "new-password",
+                    confirmPassword: "new-password",
+                    email: "racer@example.com",
+                },
+            } as any,
+            res
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({
+            error: "This invite code has been fully used",
+        });
+        // No user is created when the code is already exhausted.
+        expect(tx.user.create).not.toHaveBeenCalled();
+        expect(tx.inviteCode.updateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    id: "ic-1",
+                    useCount: { lt: 1 },
+                }),
+            })
+        );
     });
 
     it("covers remaining login and 2FA disable edge branches", async () => {

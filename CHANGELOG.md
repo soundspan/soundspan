@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Invite-code registration is now race-safe. The use-count check and increment were separated (check read before the transaction, increment unconditional), so two concurrent registrations on a single-use code could both succeed and push `useCount` past `maxUses`. Consumption is now an atomic conditional update (`useCount < maxUses`) inside the registration transaction; if no use remains the transaction aborts and no account is created.
 - Discover Weekly generation failures are no longer recorded as success. The job processor swallowed exceptions (Last.fm/MusicBrainz outage, no seeds, DB error) into a resolved `{ success: false }` payload, so Bull marked the job `COMPLETED`, never retried it, and it was invisible in bull-board. The processor now re-throws, and the `discover-weekly` queue retries up to 3× with exponential backoff. The default recommendation path is idempotent per (user, week), so a retry replaces rather than duplicates the batch.
 
 ### Security
