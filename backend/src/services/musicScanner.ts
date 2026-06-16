@@ -553,8 +553,11 @@ export class MusicScannerService {
         relativePath: string,
         musicPath: string
     ): Promise<void> {
-        // Extract metadata
-        const metadata = await parseFile(absolutePath);
+        // Extract metadata. `duration: true` is required for opus/ogg (and
+        // other formats where the duration lives in the last page/atom) —
+        // without it music-metadata returns no duration and tracks import as
+        // 0:00. YouTube downloads are opus by default, so this is load-bearing.
+        const metadata = await parseFile(absolutePath, { duration: true });
         const stats = await fs.promises.stat(absolutePath);
 
         // Parse basic info

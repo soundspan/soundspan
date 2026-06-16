@@ -220,6 +220,9 @@ const downloadBodySchema = z.object({
     quality: z.enum(["LOW", "MEDIUM", "HIGH", "LOSSLESS"]).default("HIGH"),
     // Optional grouping label (playlist/channel title) for bulk runs.
     source: z.string().max(300).optional(),
+    // Bulk source type. Only "channel" downloads are collapsed to a single
+    // artist on import; "playlist" downloads keep each track's native artist.
+    sourceKind: z.enum(["channel", "playlist"]).optional(),
 });
 
 /**
@@ -257,9 +260,8 @@ const downloadBodySchema = z.object({
  */
 router.post("/download", requireAuth, async (req: Request, res: Response) => {
     try {
-        const { videoId, format, quality, source } = downloadBodySchema.parse(
-            req.body
-        );
+        const { videoId, format, quality, source, sourceKind } =
+            downloadBodySchema.parse(req.body);
         const userId = req.user!.id;
 
         logger.info(
@@ -270,7 +272,8 @@ router.post("/download", requireAuth, async (req: Request, res: Response) => {
             videoId,
             format,
             quality,
-            source
+            source,
+            sourceKind
         );
 
         if (job.status === "completed") {

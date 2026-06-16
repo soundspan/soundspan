@@ -245,6 +245,67 @@ def build_playlist_entries(info: Any, max_entries: int) -> dict:
     }
 
 
+def bulk_album_metadata(
+    source: Optional[str], kind: Optional[str] = None
+) -> Optional[dict]:
+    """
+    Audio tags to stamp on a bulk-download file so a *channel's* videos group
+    under one artist/album instead of each video's own (often per-DJ) YouTube
+    artist tag. `source` is the channel title and `kind` is the bulk source
+    type ("channel" or "playlist") carried on the download job.
+
+    Only **channels** are collapsed to a single artist — a channel is one
+    coherent entity. **Playlists** are curated, frequently multi-artist
+    collections, so collapsing them would bury the real artists; their tracks
+    keep their native per-video metadata (returns None). Single-video downloads
+    (no source/kind) likewise keep native metadata. An unknown/missing kind is
+    treated conservatively as "do not collapse".
+
+    artist is overridden alongside album_artist on purpose: the library scanner
+    prefers albumartist for grouping but falls back to the artist tag, so
+    setting both makes "one coherent artist" robust across container/parser
+    quirks.
+    """
+    if kind != "channel":
+        return None
+    if not isinstance(source, str):
+        return None
+    label = source.strip()
+    if not label:
+        return None
+    return {"artist": label, "album_artist": label, "album": label}
+
+
+def build_tag_rewrite_command(
+    filepath: str, tags: dict, tmp_path: str
+) -> list:
+    """
+    Build the ffmpeg argv that rewrites `tags` onto `filepath`, stream-copying
+    (no re-encode) into `tmp_path`. ffmpeg-written tags stay readable by the
+    backend scanner's music-metadata parser — mutagen-written Vorbis tags
+    silently break it ("Offset is outside the bounds of the DataView"). `-c
+    copy` avoids re-encoding and `-map_metadata 0` preserves existing tags
+    (title etc.). `tmp_path` should share filepath's extension so ffmpeg infers
+    the output container.
+    """
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        filepath,
+        "-map_metadata",
+        "0",
+        "-c",
+        "copy",
+    ]
+    for key, value in tags.items():
+        cmd += ["-metadata", f"{key}={value}"]
+    cmd.append(tmp_path)
+    return cmd
+
+
 def find_existing_download(output_dir: str, video_id: str) -> Optional[str]:
     """
     Return the path of an already-downloaded audio file for video_id in

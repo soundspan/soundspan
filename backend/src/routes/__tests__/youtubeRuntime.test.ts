@@ -282,6 +282,7 @@ describe("youtube routes runtime", () => {
                 "dQw4w9WgXcQ",
                 "mp3",
                 "HIGH",
+                undefined,
                 undefined
             );
             expect(res.statusCode).toBe(202);
@@ -514,6 +515,7 @@ describe("youtube routes runtime", () => {
                     format: "opus",
                     quality: "HIGH",
                     source: "Book Club Radio",
+                    sourceKind: "channel",
                 },
                 user: { id: "user-1" },
             } as any;
@@ -526,7 +528,8 @@ describe("youtube routes runtime", () => {
                 "dQw4w9WgXcQ",
                 "opus",
                 "HIGH",
-                "Book Club Radio"
+                "Book Club Radio",
+                "channel"
             );
         });
     });

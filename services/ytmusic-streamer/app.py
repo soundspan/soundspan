@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import uuid
@@ -45,6 +46,8 @@ from yt_download import (
     PROXY_AUDIO_FORMAT_SELECTORS,
     YT_PLAYER_CLIENTS,
     build_playlist_entries,
+    build_tag_rewrite_command,
+    bulk_album_metadata,
     classify_youtube_url,
     derive_proxy_audio_container,
     extract_video_id as _extract_video_id,
@@ -52,6 +55,45 @@ from yt_download import (
     find_existing_download,
     resolve_download_filepath,
 )
+
+
+def _safe_remove(path: str) -> None:
+    """Remove a file if it exists, swallowing OS errors."""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _stamp_audio_tags(filepath: str, tags: dict) -> None:
+    """
+    Rewrite audio tags on a downloaded file via ffmpeg (stream copy, no
+    re-encode), covering the opus/flac/ogg/mp3/m4a containers the /yt/
+    downloader produces. ffmpeg-written tags stay readable by the backend
+    scanner's music-metadata parser; mutagen-written Vorbis tags silently break
+    it. Best effort — never raises into the download flow.
+    """
+    if not tags:
+        return
+    root, ext = os.path.splitext(filepath)
+    tmp_path = f"{root}.tagtmp{ext}"
+    cmd = build_tag_rewrite_command(filepath, tags, tmp_path)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120
+        )
+        if result.returncode != 0:
+            log.warning(
+                f"ffmpeg tag stamp failed for {filepath}: "
+                f"{(result.stderr or '').strip()[:300]}"
+            )
+            _safe_remove(tmp_path)
+            return
+        os.replace(tmp_path, filepath)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"Failed to stamp audio tags on {filepath}: {e}")
+        _safe_remove(tmp_path)
 
 # ════════════════════════════════════════════════════════════════════
 # WORKAROUND REGISTRY — ytmusicapi issue #813  (OAuth + WEB_REMIX broken)
@@ -2257,6 +2299,9 @@ class YtDownloadRequest(BaseModel):
     # Optional grouping label (e.g. the playlist/channel title) so the
     # downloads view can group a bulk run's jobs by where they came from.
     source: Optional[str] = None
+    # Bulk source type ("channel" | "playlist"). Only channels are collapsed to
+    # a single artist on import; playlists keep each track's native metadata.
+    source_kind: Optional[str] = None
 
 
 # ── Download job store (in-memory) ──────────────────────────────────
@@ -2300,7 +2345,10 @@ def _prune_yt_download_jobs():
 
 
 def _new_yt_download_job(
-    video_id: str, status: str = "queued", source: Optional[str] = None
+    video_id: str,
+    status: str = "queued",
+    source: Optional[str] = None,
+    source_kind: Optional[str] = None,
 ) -> dict:
     """Create and register a download job record."""
     _prune_yt_download_jobs()
@@ -2314,6 +2362,7 @@ def _new_yt_download_job(
         "error": None,
         "already_existed": False,
         "source": source,
+        "source_kind": source_kind,
         "cancel_requested": False,
         "created_at": time.time(),
     }
@@ -2434,6 +2483,15 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
     if not filepath:
         raise ValueError("Download completed but output file not found")
 
+    # Bulk (playlist/channel) downloads: stamp the source as artist/album so
+    # the channel's videos group under one artist instead of each video's own
+    # (often per-DJ) YouTube artist tag. Written via ffmpeg so the tagged files
+    # stay readable by the library scanner. Single-video downloads (no source)
+    # keep their native metadata.
+    bulk_tags = bulk_album_metadata(job.get("source"), job.get("source_kind"))
+    if bulk_tags:
+        _stamp_audio_tags(filepath, bulk_tags)
+
     job["file_path"] = filepath
     job["title"] = info.get("title", "")
     job["progress_pct"] = 100.0
@@ -2503,7 +2561,10 @@ async def yt_download(req: YtDownloadRequest):
     if existing:
         log.info(f"YT download already exists: {existing}")
         job = _new_yt_download_job(
-            video_id, status="completed", source=req.source
+            video_id,
+            status="completed",
+            source=req.source,
+            source_kind=req.source_kind,
         )
         job["progress_pct"] = 100.0
         job["file_path"] = existing
@@ -2511,7 +2572,9 @@ async def yt_download(req: YtDownloadRequest):
         job["already_existed"] = True
         return {"job_id": job["job_id"], "status": job["status"]}
 
-    job = _new_yt_download_job(video_id, source=req.source)
+    job = _new_yt_download_job(
+        video_id, source=req.source, source_kind=req.source_kind
+    )
     task = asyncio.create_task(
         _run_yt_download_job(job, audio_format, req.quality, output_dir)
     )

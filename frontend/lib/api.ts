@@ -3322,7 +3322,8 @@ class ApiClient {
         videoId: string,
         format: string = "mp3",
         quality: string = "HIGH",
-        source?: string
+        source?: string,
+        sourceKind?: "channel" | "playlist"
     ): Promise<{
         jobId: string;
         status:
@@ -3337,6 +3338,7 @@ class ApiClient {
             format,
             quality,
             ...(source ? { source } : {}),
+            ...(sourceKind ? { sourceKind } : {}),
         });
     }
 

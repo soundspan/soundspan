@@ -21,6 +21,8 @@ from yt_download import (  # noqa: E402
     PROXY_AUDIO_FORMAT_SELECTORS,
     YT_PLAYER_CLIENTS,
     build_playlist_entries,
+    build_tag_rewrite_command,
+    bulk_album_metadata,
     classify_youtube_url,
     derive_proxy_audio_container,
     extract_video_id,
@@ -30,6 +32,69 @@ from yt_download import (  # noqa: E402
 )
 
 VIDEO_ID = "dQw4w9WgXcQ"
+
+
+# ── bulk_album_metadata (collapse a CHANNEL to one artist) ──────────
+
+def test_bulk_album_metadata_channel_sets_artist_albumartist_and_album():
+    assert bulk_album_metadata("Book Club Radio", "channel") == {
+        "artist": "Book Club Radio",
+        "album_artist": "Book Club Radio",
+        "album": "Book Club Radio",
+    }
+
+
+def test_bulk_album_metadata_channel_strips_whitespace():
+    assert bulk_album_metadata("  Book Club Radio  ", "channel") == {
+        "artist": "Book Club Radio",
+        "album_artist": "Book Club Radio",
+        "album": "Book Club Radio",
+    }
+
+
+def test_bulk_album_metadata_playlist_preserves_native_metadata():
+    # Playlists are curated, often multi-artist — never collapse to one artist.
+    assert bulk_album_metadata("Best of 2024", "playlist") is None
+
+
+@pytest.mark.parametrize("kind", [None, "video", "mix", "unknown"])
+def test_bulk_album_metadata_only_collapses_channels(kind):
+    # Anything other than an explicit channel is left as native metadata.
+    assert bulk_album_metadata("Some Title", kind) is None
+
+
+@pytest.mark.parametrize("source", [None, "", "   ", 123, []])
+def test_bulk_album_metadata_none_for_blank_or_nonstring(source):
+    assert bulk_album_metadata(source, "channel") is None
+
+
+# ── build_tag_rewrite_command (ffmpeg tag rewrite, parser-safe) ─────
+
+def test_build_tag_rewrite_command_stream_copies_and_keeps_metadata():
+    cmd = build_tag_rewrite_command(
+        "/music/yt/track.opus",
+        {"artist": "Book Club Radio"},
+        "/music/yt/track.tagtmp.opus",
+    )
+    assert cmd[0] == "ffmpeg"
+    # input file, then stream-copy, then preserve existing tags
+    assert cmd[cmd.index("-i") + 1] == "/music/yt/track.opus"
+    assert cmd[cmd.index("-c") + 1] == "copy"
+    assert cmd[cmd.index("-map_metadata") + 1] == "0"
+    # temp output (same extension) is the final arg
+    assert cmd[-1] == "/music/yt/track.tagtmp.opus"
+    # the tag is rendered as a -metadata key=value pair
+    assert cmd[cmd.index("artist=Book Club Radio") - 1] == "-metadata"
+
+
+def test_build_tag_rewrite_command_emits_one_metadata_pair_per_tag_in_order():
+    cmd = build_tag_rewrite_command(
+        "in.flac",
+        {"artist": "A", "album_artist": "A", "album": "A"},
+        "tmp.flac",
+    )
+    pairs = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "-metadata"]
+    assert pairs == ["artist=A", "album_artist=A", "album=A"]
 
 
 # ── extract_video_id ────────────────────────────────────────────────

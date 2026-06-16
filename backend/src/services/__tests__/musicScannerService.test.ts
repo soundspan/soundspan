@@ -282,7 +282,9 @@ describe("MusicScannerService.scanLibrary", () => {
                 errors: [],
             })
         );
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+            duration: true,
+        });
         expect(mockPrisma.systemSettings.updateMany).toHaveBeenCalledWith({
             data: { discNoBackfillDone: true },
         });
@@ -307,7 +309,9 @@ describe("MusicScannerService.scanLibrary", () => {
                 errors: [],
             })
         );
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+            duration: true,
+        });
         expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: { filePath: "Artist/Test Track.flac" },

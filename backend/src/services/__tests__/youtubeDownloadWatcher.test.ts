@@ -32,6 +32,8 @@ function jobStatus(
         title: "",
         error: null,
         alreadyExisted: false,
+        source: null,
+        createdAt: null,
         ...overrides,
     };
 }

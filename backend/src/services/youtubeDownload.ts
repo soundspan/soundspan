@@ -241,13 +241,15 @@ class YouTubeDownloadService {
         videoId: string,
         format: string = "mp3",
         quality: string = "HIGH",
-        source?: string
+        source?: string,
+        sourceKind?: string
     ): Promise<YtDownloadJobStart> {
         const res = await this.client.post("/yt/download", {
             video_id: videoId,
             format,
             quality,
             ...(source ? { source } : {}),
+            ...(sourceKind ? { source_kind: sourceKind } : {}),
         });
         logger.debug(
             `[YouTube Download] Job ${res.data.job_id} started for ${videoId} (status=${res.data.status})`
