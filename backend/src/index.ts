@@ -178,9 +178,10 @@ app.use((req, res, next) => {
 });
 
 // Session
-// Trust proxy for reverse proxy setups (nginx, traefik, etc.)
-// Set to true to trust all proxies in the chain (common in Docker/Portainer setups)
-app.set("trust proxy", true);
+// Trust proxy for reverse proxy setups (nginx, traefik, etc.). Defaults to
+// trusting all hops; set TRUST_PROXY_HOPS to a numeric depth (usually 1) so a
+// client can't spoof X-Forwarded-For to evade per-IP rate limits.
+app.set("trust proxy", config.trustProxy);
 
 app.use(
     session({
@@ -194,9 +195,10 @@ app.use(
         proxy: true, // Trust the reverse proxy
         cookie: {
             httpOnly: true,
-            // Self-hosted app: default to HTTP-friendly settings for local network use
-            // Set SECURE_COOKIES=true if running behind HTTPS reverse proxy
-            secure: process.env.SECURE_COOKIES === "true",
+            // Secure by default in production (HTTPS-only cookies). HTTP-only
+            // local-network deploys must set SECURE_COOKIES=false. Resolved in
+            // config.ts so the env boundary stays in one place.
+            secure: config.secureCookies,
             sameSite: "lax",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         },

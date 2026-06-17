@@ -5,6 +5,32 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## Session cookie `secure` defaults to true in production (F35)
+
+**Who this affects:** deploys running with `NODE_ENV=production` **over plain
+HTTP** that did **not** set `SECURE_COOKIES`.
+
+**What changed.** The session cookie `secure` flag used to default **off** and
+was only enabled by `SECURE_COOKIES=true`. It now defaults to **`secure: true`
+when `NODE_ENV=production`** (cookies are only sent over HTTPS), resolved through
+`config.ts`. HTTPS deploys behind a reverse proxy gain a safer default with no
+action.
+
+**Action required only if** you run production-mode over plain HTTP (e.g. a
+local-network deploy without TLS): set **`SECURE_COOKIES=false`**, or sessions
+will silently stop working (a `secure` cookie is never sent over HTTP, so login
+won't persist). Development mode (`NODE_ENV` unset/`development`) still defaults
+to non-secure cookies.
+
+**New, optional — `TRUST_PROXY_HOPS`.** `trust proxy` was hardcoded to `true`
+(trust every hop), which lets a client spoof `X-Forwarded-For` to dodge per-IP
+rate limits. Set `TRUST_PROXY_HOPS` to your real reverse-proxy depth (usually
+`1` behind a single nginx/traefik) for spoof-resistant IP resolution. Left
+unset, behavior is unchanged (trust all) so multi-hop Docker/Portainer setups
+keep working. Both vars can be passed via the Helm chart's `global.env`.
+
+---
+
 ## API keys hashed at rest (F28)
 
 **Who this affects:** everyone — transparent, **no immediate action**, no

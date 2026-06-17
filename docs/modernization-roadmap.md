@@ -31,7 +31,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
-| #12 | Request-path auth & egress hardening | 3 / 0 / 8 |
+| #12 | Request-path auth & egress hardening | 4 / 0 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
@@ -92,7 +92,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F32](#f32) | ⬜ | security | high | M | low |  | #12 | Lidarr webhook is unauthenticated and unthrottled by default and parses payload as unty… |
 | [F33](#f33) | ⬜ | security | high | M | medium |  | #12 | SSRF guard blocks only literal private hosts — DNS rebinding to an internal IP bypasses… |
 | [F34](#f34) | ✅ | security | medium | S | low |  | #12 | CORS allows every origin unconditionally despite an allowlist knob, while credentials:t… |
-| [F35](#f35) | ⬜ | security | medium→low | S | medium |  | #12 | Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and tr… |
+| [F35](#f35) | ✅ | security | medium→low | S | medium |  | #12 | Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and tr… |
 | [F36](#f36) | ✅ | security | medium→low | S | low |  | #11 | jwt.verify omits the algorithms pin and /refresh re-reads the secret inline as `as any` |
 | [F37](#f37) | ⬜ | security | high | M | medium | ⚠️ | #12 | Long-lived full-privilege JWT embedded in stream/cover-art URLs (?token=) leaks via log… |
 | [F38](#f38) | ⬜ | security | medium | M | low |  | #10 | ML model artifacts and Python deps are pulled at build time with no checksum/hash pinni… |
@@ -635,9 +635,11 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F35 — Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and trust proxy trusts all hops
 
-**⬜ open** · dimension: security · severity: medium→low · effort: S · risk: medium · epic: #12
+**✅ complete** (`feat/f35-cookie-secure`) · dimension: security · severity: medium→low · effort: S · risk: medium · epic: #12
 
 > **Audit note.** ✓ Headline wrong: helmet ^7 ships default CSP AND HSTS; the code only customizes `crossOriginResourcePolicy`, so both headers ARE sent. Real residual = cookie `secure` gated on a string env + trust-proxy hop count. Severity medium→low.
+>
+> **Fix shipped** (the two valid items only; HSTS/CSP correctly rejected — helmet already ships them). Cookie `secure` moved off raw `process.env` into `config.secureCookies`, defaulting **true in production** (explicit `SECURE_COOKIES` honored either way) — closes the silent non-secure-cookie-in-prod gap. `trust proxy` is now `config.trustProxy`, driven by `TRUST_PROXY_HOPS` (numeric → spoof-resistant IP resolution); default stays trust-all to preserve multi-hop deploys. config.test.ts covers both; operator note in `docs/UPGRADING.md`.
 
 **Files:** `backend/src/index.ts:126`, `backend/src/index.ts:200`, `backend/src/index.ts:216`, `backend/src/middleware/rateLimiter.ts:8`
 

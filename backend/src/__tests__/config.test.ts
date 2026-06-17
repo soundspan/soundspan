@@ -133,6 +133,42 @@ describe("config module", () => {
         expect(prodModule.config.lastfm).toEqual({ apiKey: "" });
     });
 
+    it("defaults secureCookies to true in production and false otherwise", async () => {
+        const prod = await loadConfigModule({ NODE_ENV: "production" });
+        expect(prod.config.secureCookies).toBe(true);
+
+        const dev = await loadConfigModule({ NODE_ENV: "development" });
+        expect(dev.config.secureCookies).toBe(false);
+    });
+
+    it("honors an explicit SECURE_COOKIES override in any environment", async () => {
+        const prodOff = await loadConfigModule({
+            NODE_ENV: "production",
+            SECURE_COOKIES: "false",
+        });
+        expect(prodOff.config.secureCookies).toBe(false);
+
+        const devOn = await loadConfigModule({
+            NODE_ENV: "development",
+            SECURE_COOKIES: "true",
+        });
+        expect(devOn.config.secureCookies).toBe(true);
+    });
+
+    it("trustProxy defaults to true and accepts a numeric hop count", async () => {
+        const def = await loadConfigModule({ TRUST_PROXY_HOPS: undefined });
+        expect(def.config.trustProxy).toBe(true);
+
+        const oneHop = await loadConfigModule({ TRUST_PROXY_HOPS: "1" });
+        expect(oneHop.config.trustProxy).toBe(1);
+
+        const noTrust = await loadConfigModule({ TRUST_PROXY_HOPS: "0" });
+        expect(noTrust.config.trustProxy).toBe(0);
+
+        const invalid = await loadConfigModule({ TRUST_PROXY_HOPS: "nope" });
+        expect(invalid.config.trustProxy).toBe(true);
+    });
+
     it("falls back for malformed numeric env values", async () => {
         const { config } = await loadConfigModule({
             PORT: "not-a-number",

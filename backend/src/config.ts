@@ -50,6 +50,12 @@ let musicConfig: MusicConfig = {
 
 const allowedOriginsFromEnv = parseEnvCsv(process.env.ALLOWED_ORIGINS);
 
+// Reverse-proxy hop count for client-IP resolution. A non-negative
+// TRUST_PROXY_HOPS makes X-Forwarded-For spoofing past that many hops untrusted
+// (so a client can't mint fresh per-IP rate-limit buckets). Unset/invalid →
+// trust all hops, preserving existing multi-hop Docker/Portainer behavior.
+const trustProxyHops = parseEnvInt(process.env.TRUST_PROXY_HOPS, -1);
+
 // Initialize music configuration asynchronously
 /** Loads and validates music-path/cache settings, with safe fallback to env defaults. */
 export async function initializeMusicConfig() {
@@ -72,6 +78,20 @@ export const config = {
     databaseUrl: process.env.DATABASE_URL!,
     redisUrl: process.env.REDIS_URL!,
     sessionSecret: process.env.SESSION_SECRET!,
+
+    // Session cookie `secure` flag. Defaults to true in production (cookies
+    // should only travel over HTTPS); HTTP-only local-network deploys must set
+    // SECURE_COOKIES=false explicitly. An explicit SECURE_COOKIES is honored in
+    // any environment. Routed through config to satisfy the env-boundary rule.
+    secureCookies: parseEnvBool(
+        process.env.SECURE_COOKIES,
+        (process.env.NODE_ENV || "development") === "production"
+    ),
+
+    // Express `trust proxy` value: a numeric hop count for spoof-resistant IP
+    // resolution, or `true` (trust all) by default. Set TRUST_PROXY_HOPS to your
+    // real reverse-proxy depth (usually 1) to enable spoof protection.
+    trustProxy: (trustProxyHops >= 0 ? trustProxyHops : true) as number | boolean,
 
     // Music library configuration (self-contained native music system)
     // Access via config.music - will be updated after initialization
