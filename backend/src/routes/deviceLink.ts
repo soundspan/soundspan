@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { requireAuthOrToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
+import { hashApiKey } from "../utils/apiKeyHash";
 import crypto from "crypto";
 
 const router = Router();
@@ -173,7 +174,9 @@ router.post("/verify", async (req, res) => {
             const createdApiKey = await tx.apiKey.create({
                 data: {
                     userId: linkCode.userId,
-                    key: apiKey,
+                    // Persist only the hash; the raw `apiKey` is returned to the
+                    // device below and is never stored.
+                    key: hashApiKey(apiKey),
                     name: deviceName || "Mobile Device",
                 },
             });

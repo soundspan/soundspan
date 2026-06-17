@@ -1,3 +1,9 @@
+// API-key hashing needs a pepper (API_KEY_PEPPER → SETTINGS_ENCRYPTION_KEY →
+// SESSION_SECRET); provide one for the real apiKeyHash util used by /verify.
+process.env.SETTINGS_ENCRYPTION_KEY =
+    process.env.SETTINGS_ENCRYPTION_KEY ||
+    "device-link-test-pepper-1234567890123456";
+
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: any, _res: any, next: () => void) => next(),
 }));
@@ -247,10 +253,11 @@ describe("deviceLink routes runtime", () => {
                 deviceName: "Living Room Tablet",
             },
         });
+        // The key is persisted HASHED (hmac:<hex>), never as the raw value.
         expect(mockApiKeyCreate).toHaveBeenCalledWith({
             data: {
                 userId: "u1",
-                key: expect.stringMatching(/^[0-9a-f]{64}$/),
+                key: expect.stringMatching(/^hmac:[0-9a-f]{64}$/),
                 name: "Living Room Tablet",
             },
         });

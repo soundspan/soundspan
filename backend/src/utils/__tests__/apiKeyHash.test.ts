@@ -1,0 +1,127 @@
+// The hash pepper resolves from API_KEY_PEPPER → SETTINGS_ENCRYPTION_KEY →
+// SESSION_SECRET; set one before importing the module under test.
+process.env.SETTINGS_ENCRYPTION_KEY =
+    process.env.SETTINGS_ENCRYPTION_KEY || "api-key-hash-test-pepper-123456789";
+
+import {
+    hashApiKey,
+    isHashedApiKey,
+    findApiKeyRecord,
+    planApiKeyHashing,
+    getPepperSource,
+    HASHED_KEY_PREFIX,
+} from "../apiKeyHash";
+
+describe("apiKeyHash", () => {
+    it("hashes deterministically into a prefixed HMAC-hex value", () => {
+        const raw = "a".repeat(64);
+        const hashed = hashApiKey(raw);
+
+        expect(hashed).toBe(hashApiKey(raw)); // deterministic
+        expect(hashed.startsWith(HASHED_KEY_PREFIX)).toBe(true);
+        // 'hmac:' + 64 hex chars
+        expect(hashed).toMatch(/^hmac:[0-9a-f]{64}$/);
+        // The raw key never appears in the stored value.
+        expect(hashed).not.toContain(raw);
+    });
+
+    it("produces different hashes for different keys", () => {
+        expect(hashApiKey("key-one")).not.toBe(hashApiKey("key-two"));
+    });
+
+    it("isHashedApiKey distinguishes migrated values from legacy plaintext keys", () => {
+        expect(isHashedApiKey(hashApiKey("x"))).toBe(true);
+        // A legacy plaintext key (64 random hex chars) has no prefix.
+        expect(isHashedApiKey("deadbeef".repeat(8))).toBe(false);
+        expect(isHashedApiKey(null)).toBe(false);
+        expect(isHashedApiKey(undefined)).toBe(false);
+        expect(isHashedApiKey("")).toBe(false);
+    });
+
+    describe("findApiKeyRecord (dual-validate grace window)", () => {
+        it("looks up the hashed form first and returns it when present", async () => {
+            const raw = "raw-key-abc";
+            const hashed = hashApiKey(raw);
+            const lookup = jest.fn(async (key: string) =>
+                key === hashed ? { id: "hashed-row" } : null
+            );
+
+            const record = await findApiKeyRecord(raw, lookup);
+
+            expect(record).toEqual({ id: "hashed-row" });
+            expect(lookup).toHaveBeenCalledWith(hashed);
+            // No need to fall back to the raw lookup once the hash hits.
+            expect(lookup).toHaveBeenCalledTimes(1);
+        });
+
+        it("falls back to the raw key for not-yet-migrated (plaintext) rows", async () => {
+            const raw = "raw-key-def";
+            const hashed = hashApiKey(raw);
+            const lookup = jest.fn(async (key: string) =>
+                key === raw ? { id: "legacy-row" } : null
+            );
+
+            const record = await findApiKeyRecord(raw, lookup);
+
+            expect(record).toEqual({ id: "legacy-row" });
+            expect(lookup).toHaveBeenNthCalledWith(1, hashed); // hash first
+            expect(lookup).toHaveBeenNthCalledWith(2, raw); // then raw fallback
+        });
+
+        it("returns null when neither form matches", async () => {
+            const lookup = jest.fn(async () => null);
+            expect(await findApiKeyRecord("nope", lookup)).toBeNull();
+            expect(lookup).toHaveBeenCalledTimes(2);
+        });
+
+        it("refuses to authenticate a leaked stored hash presented as the raw key", async () => {
+            // An attacker with a DB dump knows the stored value `hmac:<h>` and
+            // presents it as the X-API-Key. The raw fallback must NOT match it,
+            // or at-rest hashing would be pointless.
+            const stored = hashApiKey("real-raw-key"); // hmac:<h>
+            const lookup = jest.fn(async (key: string) =>
+                key === stored ? { id: "victim-row" } : null
+            );
+
+            const record = await findApiKeyRecord(stored, lookup);
+
+            expect(record).toBeNull();
+            // The hashed-form lookup is attempted (hash of the presented value),
+            // but the verbatim fallback to `stored` is skipped.
+            expect(lookup).not.toHaveBeenCalledWith(stored);
+        });
+    });
+
+    it("getPepperSource reports the highest-precedence configured env var", () => {
+        const original = process.env.API_KEY_PEPPER;
+        try {
+            process.env.API_KEY_PEPPER = "dedicated-pepper";
+            expect(getPepperSource()).toBe("API_KEY_PEPPER");
+            delete process.env.API_KEY_PEPPER;
+            // SETTINGS_ENCRYPTION_KEY is set at the top of this file.
+            expect(getPepperSource()).toBe("SETTINGS_ENCRYPTION_KEY");
+        } finally {
+            if (original === undefined) delete process.env.API_KEY_PEPPER;
+            else process.env.API_KEY_PEPPER = original;
+        }
+    });
+
+    describe("planApiKeyHashing (backfill decision)", () => {
+        it("skips rows already hashed (idempotent re-runs)", () => {
+            const hashed = hashApiKey("some-raw-key");
+            expect(planApiKeyHashing(hashed)).toEqual({ action: "skip-hashed" });
+        });
+
+        it("hashes a legacy plaintext key into its at-rest form", () => {
+            const plaintext = "deadbeef".repeat(8); // 64 hex, no prefix
+            const outcome = planApiKeyHashing(plaintext);
+            expect(outcome).toEqual({
+                action: "hash",
+                value: hashApiKey(plaintext),
+            });
+            // The migrated value still validates the original raw key.
+            if (outcome.action !== "hash") throw new Error("unreachable");
+            expect(outcome.value).toBe(hashApiKey(plaintext));
+        });
+    });
+});

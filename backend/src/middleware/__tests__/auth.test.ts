@@ -31,6 +31,13 @@ import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
+import { hashApiKey } from "../../utils/apiKeyHash";
+
+// API-key hashing needs a pepper. This suite deletes SESSION_SECRET to exercise
+// the JWT_SECRET path, so provide SETTINGS_ENCRYPTION_KEY explicitly as the
+// pepper source (it is never deleted here).
+process.env.SETTINGS_ENCRYPTION_KEY =
+    process.env.SETTINGS_ENCRYPTION_KEY || "auth-test-api-key-pepper-123456789";
 
 const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
 const mockApiKeyFindUnique = prisma.apiKey.findUnique as jest.Mock;
@@ -247,8 +254,9 @@ describe("auth middleware", () => {
 
             await requireAuth(asRequest(req), asResponse(res), asNext(next));
 
+            // Looked up by hash (dual-validate tries the hashed form first).
             expect(mockApiKeyFindUnique).toHaveBeenCalledWith({
-                where: { key: "abc123" },
+                where: { key: hashApiKey("abc123") },
                 include: {
                     user: { select: { id: true, username: true, role: true } },
                 },

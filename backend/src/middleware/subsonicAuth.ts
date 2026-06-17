@@ -6,6 +6,7 @@ import { runDummyBcrypt } from "../utils/dummyCredential";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { prisma } from "../utils/db";
 import { decrypt, encrypt } from "../utils/encryption";
+import { findApiKeyRecord } from "../utils/apiKeyHash";
 import { logger } from "../utils/logger";
 import {
     getResponseFormat,
@@ -111,18 +112,20 @@ export async function requireSubsonicAuth(
     }
 
     if (hasApiKeyAuth) {
-        const apiKeyRecord = await prisma.apiKey.findUnique({
-            where: { key: apiKey },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        username: true,
-                        role: true,
+        const apiKeyRecord = await findApiKeyRecord(apiKey, (key) =>
+            prisma.apiKey.findUnique({
+                where: { key },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            role: true,
+                        },
                     },
                 },
-            },
-        });
+            })
+        );
 
         if (!apiKeyRecord || !apiKeyRecord.user) {
             sendSubsonicError(

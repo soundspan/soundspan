@@ -30,7 +30,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 |------|-------|----------------|
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
-| #11 | Secrets & credential storage hardening | 2 / 0 / 4 |
+| #11 | Secrets & credential storage hardening | 3 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 3 / 0 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
@@ -85,7 +85,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F25](#f25) | ⬜ | idempotency | medium | M | medium |  | #13 | Two overlapping download reconcilers (unlocked 30s queueCleaner interval vs claim-locke… |
 | [F26](#f26) | ✅ | idempotency | medium | S | low |  | #13 | Invite-code maxUses check is outside the transaction with an unconditional increment — … |
 | [F27](#f27) | ⬜ | idempotency | medium | M | low |  | #13 | TIDAL sidecar track/album downloads have no on-disk or in-flight idempotency — retries … |
-| [F28](#f28) | ⬜ | security | high | M | medium |  | #11 | API keys stored in plaintext and looked up by raw value — a read-only DB leak yields wo… |
+| [F28](#f28) | ✅ | security | high | M | medium |  | #11 | API keys stored in plaintext and looked up by raw value — a read-only DB leak yields wo… |
 | [F29](#f29) | ✅ | security | high | M | medium | ⚠️ | #11 | Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a si… |
 | [F30](#f30) | ✅ | security | high | S | low |  | #12 | Internal CLAP-callback endpoints fail open and use non-constant-time secret comparison |
 | [F31](#f31) | ⬜ | security | high | M | medium | ⚠️ | #12 | FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a file… |
@@ -527,9 +527,11 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F28 — API keys stored in plaintext and looked up by raw value — a read-only DB leak yields working device credentials for every user
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · epic: #11
+**✅ complete (code; backfill not yet run)** (`feat/f28-hash-api-keys`) · dimension: security · severity: high · effort: M · risk: medium · epic: #11
 
 > **Audit note.** ✓ Label corrected — NOT 'forced re-issue.' The #11 migration plan hashes keys in place (HMAC) and validation is an exact-value lookup, so existing device keys keep working. The `⚠️ breaking` flag is dropped.
+>
+> **Fix shipped** (#11 Phase 2). Keys are stored as `hmac:<HMAC-SHA256>` (`utils/apiKeyHash.ts`). The three validate sites (auth.ts ×2, subsonicAuth.ts) use `findApiKeyRecord` — **dual-validate**: hash lookup first, raw-key fallback for not-yet-migrated rows, so existing keys keep working with **no re-issue**. The two create sites (apiKeys.ts, deviceLink.ts) store the hash and return the raw key once. The `hmac:` prefix is a self-describing migration marker (raw keys and HMACs are both 64 hex). **Backfill written but not run**: `scripts/hash-existing-api-keys.ts` (dry-run default, idempotent) + `apiKeys` section in `GET /api/admin/secrets-status`. Pepper = `API_KEY_PEPPER` → `SETTINGS_ENCRYPTION_KEY` → `SESSION_SECRET`. **Deferred:** the dedicated `API_KEY_PEPPER` is not yet added to the chart's stable-secret generation (code falls back to the F22-stabilized `SETTINGS_ENCRYPTION_KEY`); and the plaintext-lookup fallback should be removed once the backfill is verified (`apiKeys.plaintext === 0`).
 
 **Files:** `backend/src/routes/apiKeys.ts:82`, `backend/src/routes/apiKeys.ts:88`, `backend/src/middleware/auth.ts:108`, `backend/src/middleware/auth.ts:239`, `backend/src/middleware/subsonicAuth.ts`, `backend/prisma/schema.prisma:1039`
 

@@ -5,6 +5,47 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## API keys hashed at rest (F28)
+
+**Who this affects:** everyone — transparent, **no immediate action**, no
+re-pairing of existing devices.
+
+**What changed.** `ApiKey.key` was stored **verbatim**, so a read-only DB
+exposure handed out working credentials. Keys are now stored as a keyed hash
+(`hmac:<HMAC-SHA256>`). Validation hashes the presented key and looks it up by
+hash, with a **transitional fallback** to a raw-key lookup so keys created
+before this release keep working unchanged. New keys are hashed before insert;
+the raw value is returned only once at creation.
+
+**Action required: none.** Existing device keys keep authenticating.
+
+**The pepper.** The HMAC pepper resolves from `API_KEY_PEPPER` →
+`SETTINGS_ENCRYPTION_KEY` → `SESSION_SECRET`. By default it uses
+`SETTINGS_ENCRYPTION_KEY` (stable since F22), so no new config is required. You
+may set a dedicated **`API_KEY_PEPPER`** for defense-in-depth — but once set (or
+once keys are hashed under the default), **it must stay stable**: changing the
+pepper invalidates every hashed key (those devices would need re-pairing).
+
+> Helm note: `API_KEY_PEPPER` is **not yet auto-generated** by the chart (the
+> code falls back to the chart-managed `SETTINGS_ENCRYPTION_KEY`). Adding it to
+> the chart's stable-secret generation is a tracked follow-up; set it yourself
+> via `secrets`/`existingSecret` if you want a dedicated pepper now.
+
+**Optional — migrate existing plaintext keys.** To remove the last readable
+keys (after which the plaintext-lookup fallback can be dropped):
+
+1. Check progress: `GET /api/admin/secrets-status` → `apiKeys.plaintext`.
+2. **Back up the database.**
+3. With the same pepper the app uses:
+   ```sh
+   npx tsx scripts/hash-existing-api-keys.ts          # dry run — no writes
+   npx tsx scripts/hash-existing-api-keys.ts --apply  # hash plaintext rows
+   ```
+   Idempotent; already-hashed rows are skipped. Irreversible (can't un-hash).
+4. Re-check until `apiKeys.plaintext` is `0`.
+
+---
+
 ## Settings encryption: authenticated AES-256-GCM + versioned envelope (F29)
 
 **Who this affects:** everyone — but the upgrade is transparent and needs **no

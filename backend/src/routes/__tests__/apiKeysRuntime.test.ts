@@ -1,3 +1,9 @@
+// API-key hashing needs a pepper (API_KEY_PEPPER → SETTINGS_ENCRYPTION_KEY →
+// SESSION_SECRET); provide one for the real apiKeyHash util used on create.
+process.env.SETTINGS_ENCRYPTION_KEY =
+    process.env.SETTINGS_ENCRYPTION_KEY ||
+    "api-keys-test-pepper-1234567890123456";
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
@@ -115,17 +121,19 @@ describe("apiKeys routes runtime", () => {
 
         await postCreate(req, res);
 
+        // Persisted key is hashed (hmac:<hex>); the raw key is returned in the
+        // response only.
         expect(mockCreateApiKey).toHaveBeenCalledWith({
             data: {
                 userId: "session-user",
                 name: "Tablet",
-                key: expect.stringMatching(/^[0-9a-f]{64}$/),
+                key: expect.stringMatching(/^hmac:[0-9a-f]{64}$/),
             },
         });
         expect(res.statusCode).toBe(201);
         expect(res.body).toEqual(
             expect.objectContaining({
-                apiKey: "a".repeat(64),
+                apiKey: expect.stringMatching(/^[0-9a-f]{64}$/),
                 name: "My Phone",
                 message:
                     "API key created successfully. Save this key - you won't see it again!",

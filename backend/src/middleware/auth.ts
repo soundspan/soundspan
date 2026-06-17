@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { findApiKeyRecord } from "../utils/apiKeyHash";
 import jwt from "jsonwebtoken";
 
 // JWT_SECRET is required - SESSION_SECRET is used as fallback since docker-entrypoint.sh generates it
@@ -105,12 +106,16 @@ async function authenticateRequest(
     const apiKey = req.headers["x-api-key"] as string;
     if (apiKey) {
         try {
-            const apiKeyRecord = await prisma.apiKey.findUnique({
-                where: { key: apiKey },
-                include: {
-                    user: { select: { id: true, username: true, role: true } },
-                },
-            });
+            const apiKeyRecord = await findApiKeyRecord(apiKey, (key) =>
+                prisma.apiKey.findUnique({
+                    where: { key },
+                    include: {
+                        user: {
+                            select: { id: true, username: true, role: true },
+                        },
+                    },
+                })
+            );
 
             if (apiKeyRecord && apiKeyRecord.user) {
                 // Update last used timestamp (async, don't block)
@@ -236,12 +241,16 @@ export async function requireAuthOrToken(
     const apiKey = req.headers["x-api-key"] as string;
     if (apiKey) {
         try {
-            const apiKeyRecord = await prisma.apiKey.findUnique({
-                where: { key: apiKey },
-                include: {
-                    user: { select: { id: true, username: true, role: true } },
-                },
-            });
+            const apiKeyRecord = await findApiKeyRecord(apiKey, (key) =>
+                prisma.apiKey.findUnique({
+                    where: { key },
+                    include: {
+                        user: {
+                            select: { id: true, username: true, role: true },
+                        },
+                    },
+                })
+            );
 
             if (apiKeyRecord && apiKeyRecord.user) {
                 // Update last used timestamp (async, don't block)

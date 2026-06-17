@@ -1,5 +1,11 @@
+// API-key hashing needs a pepper (API_KEY_PEPPER → SETTINGS_ENCRYPTION_KEY →
+// SESSION_SECRET); provide one for the real apiKeyHash util used here.
+process.env.SETTINGS_ENCRYPTION_KEY =
+    process.env.SETTINGS_ENCRYPTION_KEY || "subsonic-test-pepper-1234567890123456";
+
 import { NextFunction, Request, Response } from "express";
 import { createHash } from "crypto";
+import { hashApiKey } from "../../utils/apiKeyHash";
 
 type RateLimitOptions = {
     keyGenerator: (req: Request) => string;
@@ -480,8 +486,10 @@ describe("requireSubsonicAuth", () => {
 
         await requireSubsonicAuth(req, buildRes(), next);
 
+        // The key is looked up by its hash (the dual-validate path tries the
+        // hashed form first; this mock returns the record on that first call).
         expect(mockApiKeyFindUnique).toHaveBeenCalledWith({
-            where: { key: "apikey-secret" },
+            where: { key: hashApiKey("apikey-secret") },
             include: {
                 user: {
                     select: {

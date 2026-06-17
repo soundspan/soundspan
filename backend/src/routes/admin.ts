@@ -7,6 +7,7 @@ import {
     isV2Envelope,
     type EncryptedModelName,
 } from "../utils/encryptedColumns";
+import { isHashedApiKey } from "../utils/apiKeyHash";
 
 const router = Router();
 
@@ -194,6 +195,17 @@ router.get("/secrets-status", async (_req, res) => {
             legacy += modelLegacy;
         }
 
+        // API keys at rest: hashed (hmac:<hex>) vs legacy plaintext rows.
+        const apiKeyRows = await prisma.apiKey.findMany({
+            select: { key: true },
+        });
+        let apiKeysHashed = 0;
+        let apiKeysPlaintext = 0;
+        for (const row of apiKeyRows) {
+            if (isHashedApiKey(row.key)) apiKeysHashed += 1;
+            else apiKeysPlaintext += 1;
+        }
+
         res.json({
             settingsCipher: {
                 total,
@@ -201,6 +213,12 @@ router.get("/secrets-status", async (_req, res) => {
                 legacy,
                 migrationComplete: legacy === 0,
                 byModel,
+            },
+            apiKeys: {
+                total: apiKeysHashed + apiKeysPlaintext,
+                hashed: apiKeysHashed,
+                plaintext: apiKeysPlaintext,
+                migrationComplete: apiKeysPlaintext === 0,
             },
         });
     } catch (error) {
