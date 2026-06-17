@@ -594,7 +594,10 @@ music:
 #        POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 #
 #   2. Auto-generate — leave existingSecret empty and the chart creates a
-#      Secret for you. Any field left blank is auto-generated on first install.
+#      Secret for you. Any field left blank is auto-generated on first install
+#      and then REUSED on every later upgrade (the chart looks up the live
+#      Secret), so a routine `helm upgrade` no longer rotates these out from
+#      under a running install. See docs/UPGRADING.md.
 #      ⚠️  Do NOT put real secrets in a values file that you commit to git.
 #      Use --set on the CLI or a SOPS/sealed-secrets workflow instead.
 #

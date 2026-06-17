@@ -3,7 +3,7 @@
 Canonical index of the modernization review findings (F1–F53, plus F54 added on audit) from the **2026-06-16** review of soundspan. The review mapped each subsystem, assessed it across readability / performance / idempotency / security / extensibility / dependencies, then adversarially re-read every finding against the real code (53 high-confidence findings, **no true false positive**), grouped them into the epics below, and was itself **independently audited** ([`docs/modernization-roadmap-audit-findings.md`](modernization-roadmap-audit-findings.md)).
 
 > **Read me first.**
-> - **Status:** 5 complete + 3 partial = 8 findings in **open PR #21** (stacked on #3), plus F54 complete on `feat/f54-device-link-toctou` (Wave-1 continuation) — **nothing is merged to `main` yet.** ✅ complete · 🟡 partial · ⬜ open.
+> - **Status:** 5 complete + 3 partial = 8 findings in **open PR #21** (stacked on #3); the Wave-1 continuation adds F54, F22, and the F3/F24/F6/F18 follow-ups on stacked branches — **nothing is merged to `main` yet.** ✅ complete · 🟡 partial · ⬜ open.
 > - **Audit corrections are inline.** Where the audit corrected a count, severity, or premise, the finding carries an **Audit note** (✓ = re-verified against the tree here; "per audit" = relayed). Severity columns show `orig→recalibrated` where adjusted for this single-operator deployment.
 > - **Line numbers** in finding bodies were captured against the pre-#3 branch tree and may be off by a few lines on `main`.
 > - **Not exhaustive.** Areas the review did **not** assess: test quality/coverage, observability/structured logging, data-migration safety, and PWA-offline/accessibility. "53" is ~51 distinct issues (F2≈F44, F17≈F47 are duplicates kept for their differing angles).
@@ -30,7 +30,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 |------|-------|----------------|
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
-| #11 | Secrets & credential storage hardening | 0 / 0 / 4 |
+| #11 | Secrets & credential storage hardening | 1 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 3 / 0 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
@@ -79,7 +79,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F19](#f19) | ✅ | idempotency | high | S | low |  | #13 | Discover processor swallows real failures (returns instead of throws), so Bull never re… |
 | [F20](#f20) | ⬜ | idempotency | high→medium | M | low |  | #13 | Discover Weekly batch creation has no per-(user, week) idempotency guard — double-trigg… |
 | [F21](#f21) | ⬜ | idempotency | high | M | medium |  | #13 | Audio-analysis / vibe re-queue enqueues BEFORE flipping status and has no per-track ded… |
-| [F22](#f22) | ⬜ | idempotency | high | M | low |  | #11 | Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on… |
+| [F22](#f22) | ✅ | idempotency | high | M | low |  | #11 | Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on… |
 | [F23](#f23) | ⬜ | idempotency | high→medium | M | medium |  | #13 | Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade inste… |
 | [F24](#f24) | 🟡 | idempotency | high→medium | M | low |  | #13 | High-volume scan jobs enqueued from ~15 sites with no coalescing jobId, no attempts/bac… |
 | [F25](#f25) | ⬜ | idempotency | medium | M | medium |  | #13 | Two overlapping download reconcilers (unlocked 30s queueCleaner interval vs claim-locke… |
@@ -433,9 +433,11 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F22 — Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on every upgrade — breaks sessions, makes stored credentials undecryptable, desyncs the Postgres password
 
-**⬜ open** · dimension: idempotency · severity: high · effort: M · risk: low · epic: #11
+**✅ complete** (`feat/f22-helm-stable-secrets`) · dimension: idempotency · severity: high · effort: M · risk: low · epic: #11
 
 > **Audit note.** ✓ Omits a 4th regenerated key: the Helm template also defaults `INTERNAL_API_SECRET` via `randAlphaNum` (`secret.yaml:12`), so it rotates on every upgrade too. Fold it into the same lookup-stability fix.
+>
+> **Fix shipped** (#11 Phase 0). `secret.yaml` now reuses the live in-cluster Secret via `lookup` for all **four** keys (SESSION_SECRET, SETTINGS_ENCRYPTION_KEY, INTERNAL_API_SECRET, POSTGRES_PASSWORD); per-key precedence is explicit `secrets.*` → existing Secret → generated. Non-destructive and additive; installs with `existingSecret`/pinned values are unchanged. `helm-chart-render-check.sh` guards the client-renderable paths (4 keys present, explicit honored, existingSecret suppresses); the server-side lookup-reuse path is verified out-of-band per `docs/UPGRADING.md` (operators ship that note).
 
 **Files:** `charts/soundspan/templates/secret.yaml:10`, `charts/soundspan/templates/secret.yaml:11`, `charts/soundspan/templates/secret.yaml:14`
 
