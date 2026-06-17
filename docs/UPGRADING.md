@@ -5,6 +5,28 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## Lidarr webhook hardening — set a webhook secret (F32)
+
+**Who this affects:** anyone using the Lidarr integration.
+
+**What changed (no action required to keep working).** `POST /api/webhooks/lidarr`
+is now rate-limited, and an unmatched download event no longer triggers a full
+library scan. The endpoint still works without a secret, but each
+unauthenticated call now logs a loud warning.
+
+**Strongly recommended.** Set a **webhook secret** so the endpoint is
+authenticated: add `lidarrWebhookSecret` in System Settings, then add the same
+value as an `x-webhook-secret` header on the soundspan webhook connection in
+Lidarr (Settings → Connections). Once set, the webhook is fail-closed (a
+missing/wrong secret is rejected `401`). Until then it remains open but
+throttled.
+
+> Note: a future release may make a webhook secret the hard default
+> (auto-generated). For now you set it yourself, which avoids any surprise
+> breakage of an existing Lidarr connection.
+
+---
+
 ## Session cookie `secure` defaults to true in production (F35)
 
 **Who this affects:** deploys running with `NODE_ENV=production` **over plain

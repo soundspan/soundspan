@@ -133,3 +133,18 @@ export const ytMusicStreamLimiter = rateLimit({
     legacyHeaders: false,
     ...trustProxyValidation,
 });
+
+// Lidarr webhook limiter. The POST /api/webhooks/lidarr endpoint is reachable by
+// Lidarr — and by anyone who can reach the host — so bound abusive bursts while
+// staying generous for the several events Lidarr emits per import. NOTE: keying
+// is by IP, which is spoofable when `trust proxy` is permissive; set
+// TRUST_PROXY_HOPS (see config.trustProxy) to your real proxy depth so the key
+// is trustworthy.
+export const webhookLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 60,
+    message: "Too many webhook requests, please try again later.",
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...trustProxyValidation,
+});

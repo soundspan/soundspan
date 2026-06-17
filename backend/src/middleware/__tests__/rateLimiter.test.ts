@@ -52,7 +52,7 @@ describe("rateLimiter middleware config", () => {
     it("creates each limiter with the documented window and max values", async () => {
         const mod = await loadRateLimiterModule();
 
-        expect(mockRateLimit).toHaveBeenCalledTimes(8);
+        expect(mockRateLimit).toHaveBeenCalledTimes(9);
         expect(mod.apiLimiter).toBeDefined();
         expect(mod.authLimiter).toBeDefined();
         expect(mod.imageLimiter).toBeDefined();
@@ -61,6 +61,7 @@ describe("rateLimiter middleware config", () => {
         expect(mod.lyricsMutationLimiter).toBeDefined();
         expect(mod.ytMusicSearchLimiter).toBeDefined();
         expect(mod.ytMusicStreamLimiter).toBeDefined();
+        expect(mod.webhookLimiter).toBeDefined();
 
         const expectedConfigs = [
             { index: 0, windowMs: 60_000, max: 5000 },
@@ -71,6 +72,7 @@ describe("rateLimiter middleware config", () => {
             { index: 5, windowMs: 900_000, max: 20 },
             { index: 6, windowMs: 60_000, max: 30 },
             { index: 7, windowMs: 60_000, max: 20 },
+            { index: 8, windowMs: 60_000, max: 60 },
         ];
 
         for (const config of expectedConfigs) {

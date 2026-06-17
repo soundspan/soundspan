@@ -10,6 +10,7 @@ import { scanQueue } from "../workers/queues";
 import { simpleDownloadManager } from "../services/simpleDownloadManager";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { getSystemSettings } from "../utils/systemSettings";
+import { webhookLimiter } from "../middleware/rateLimiter";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { BRAND_SLUG } from "../config/brand";
@@ -72,7 +73,7 @@ router.get("/lidarr/verify", (req, res) => {
  *         description: Invalid webhook secret
  */
 // POST /webhooks/lidarr - Handle Lidarr webhooks
-router.post("/lidarr", async (req, res) => {
+router.post("/lidarr", webhookLimiter, async (req, res) => {
     try {
         // Check if Lidarr is enabled before processing any webhooks
         const settings = await getSystemSettings();
@@ -91,7 +92,7 @@ router.post("/lidarr", async (req, res) => {
             });
         }
 
-        // Verify webhook secret if configured
+        // Verify webhook secret if configured (fail-closed when present).
         // Note: settings.lidarrWebhookSecret is already decrypted by getSystemSettings()
         if (settings.lidarrWebhookSecret) {
             const providedSecret = req.headers["x-webhook-secret"] as string;
@@ -104,6 +105,14 @@ router.post("/lidarr", async (req, res) => {
                     error: "Unauthorized - Invalid webhook secret",
                 });
             }
+        } else {
+            // No secret configured: the endpoint is unauthenticated. We don't
+            // hard-fail (that would silently break existing Lidarr integrations
+            // that have no secret yet), but the request is rate-limited and the
+            // operator is strongly nudged to set one. See docs/UPGRADING.md.
+            logger.warn(
+                "[WEBHOOK] Lidarr webhook accepted WITHOUT authentication — set a webhook secret in System Settings and Lidarr's connection (x-webhook-secret) to secure this endpoint."
+            );
         }
 
         const eventType = req.body.eventType;
@@ -240,13 +249,15 @@ async function handleDownload(payload: any) {
 
         // Discovery batch completion (for playlist building) is handled by download manager
     } else {
-        // No job found - this might be an external download not initiated by us
-        // Still trigger a scan to pick up the new music
-        logger.debug(`   No matching job, triggering scan anyway...`);
-        await scanQueue.add("scan", {
-            type: "full",
-            source: "lidarr-import-external",
-        });
+        // No matching job — an external download we didn't initiate. Do NOT
+        // enqueue a full-library scan here: it was unconditional and
+        // unauthenticated-reachable, so a stream of unmatched webhooks could spam
+        // expensive full scans (F32). The periodic library scan picks up
+        // externally-added music; only our own downloads get the targeted
+        // incremental scan above.
+        logger.debug(
+            `   No matching job for downloadId=${downloadId}; skipping scan (external import will be caught by the periodic scan).`
+        );
     }
 }
 

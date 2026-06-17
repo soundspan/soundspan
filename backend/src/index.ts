@@ -244,7 +244,7 @@ if (config.features.discovery) {
 }
 app.use("/api/downloads", apiLimiter, downloadsRoutes);
 app.use("/api/notifications", apiLimiter, notificationsRoutes);
-app.use("/api/webhooks", webhooksRoutes); // Webhooks should not be rate limited
+app.use("/api/webhooks", webhooksRoutes); // The Lidarr POST has its own webhookLimiter; GET /lidarr/verify stays unthrottled for Lidarr's test probe
 // NOTE: /api/audiobooks has its own rate limiting (imageLimiter for covers, apiLimiter for others)
 app.use("/api/audiobooks", audiobooksRoutes);
 app.use("/api/podcasts", apiLimiter, podcastsRoutes);

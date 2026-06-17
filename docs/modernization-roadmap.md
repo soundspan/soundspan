@@ -31,7 +31,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
-| #12 | Request-path auth & egress hardening | 5 / 0 / 8 |
+| #12 | Request-path auth & egress hardening | 5 / 1 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
@@ -89,7 +89,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F29](#f29) | ✅ | security | high | M | medium | ⚠️ | #11 | Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a si… |
 | [F30](#f30) | ✅ | security | high | S | low |  | #12 | Internal CLAP-callback endpoints fail open and use non-constant-time secret comparison |
 | [F31](#f31) | ⬜ | security | high | M | medium | ⚠️ | #12 | FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a file… |
-| [F32](#f32) | ⬜ | security | high | M | low |  | #12 | Lidarr webhook is unauthenticated and unthrottled by default and parses payload as unty… |
+| [F32](#f32) | 🟡 | security | high | M | low |  | #12 | Lidarr webhook is unauthenticated and unthrottled by default and parses payload as unty… |
 | [F33](#f33) | ✅ | security | high | M | medium |  | #12 | SSRF guard blocks only literal private hosts — DNS rebinding to an internal IP bypasses… |
 | [F34](#f34) | ✅ | security | medium | S | low |  | #12 | CORS allows every origin unconditionally despite an allowlist knob, while credentials:t… |
 | [F35](#f35) | ✅ | security | medium→low | S | medium |  | #12 | Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and tr… |
@@ -587,7 +587,11 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F32 — Lidarr webhook is unauthenticated and unthrottled by default and parses payload as untyped any
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: low · epic: #12
+**🟡 partial** (`feat/f32-webhook-auth`) · dimension: security · severity: high · effort: M · risk: low · epic: #12
+
+> **Shipped (the non-breaking, high-value half).** Added a dedicated `webhookLimiter` to the `POST /lidarr` route (it was completely unthrottled), and **removed the unconditional full-library scan** on unmatched download IDs (the easiest DoS — `webhooks.ts` else-branch). The secret check stays fail-closed when a secret is configured; when none is set the request is accepted but logs a loud warning (a startup-style nudge). Rate-limiter keying improves with `TRUST_PROXY_HOPS` (F35).
+>
+> **Deferred (the breaking half), with a note.** Making secret auth the **hard default** requires auto-generating `lidarrWebhookSecret` on startup and wiring it into Lidarr's connection config (which `services/lidarr.ts` has zero handling for today) — otherwise it instantly 401s every real Lidarr webhook on existing installs (e.g. the homelab `music.tonymead.org`, which the audit's safety note names explicitly) and silently breaks download tracking. This is the same "breaks an existing integration" risk class as F37 and was deferred by the same operator decision. Per-event zod schemas (shape safety; the handlers are already null-safe and the 1 MB body limit bounds size) are a low-value follow-up. Operators are advised to set a webhook secret (`docs/UPGRADING.md`), which **is** enforced fail-closed once present.
 
 > **Audit note.** Per audit: the Lidarr webhook secret IS settable via the systemSettings API (it just isn't auto-generated).
 
