@@ -30,7 +30,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 |------|-------|----------------|
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
-| #11 | Secrets & credential storage hardening | 1 / 0 / 4 |
+| #11 | Secrets & credential storage hardening | 2 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 3 / 0 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
@@ -86,7 +86,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F26](#f26) | ✅ | idempotency | medium | S | low |  | #13 | Invite-code maxUses check is outside the transaction with an unconditional increment — … |
 | [F27](#f27) | ⬜ | idempotency | medium | M | low |  | #13 | TIDAL sidecar track/album downloads have no on-disk or in-flight idempotency — retries … |
 | [F28](#f28) | ⬜ | security | high | M | medium |  | #11 | API keys stored in plaintext and looked up by raw value — a read-only DB leak yields wo… |
-| [F29](#f29) | ⬜ | security | high | M | medium | ⚠️ | #11 | Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a si… |
+| [F29](#f29) | ✅ | security | high | M | medium | ⚠️ | #11 | Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a si… |
 | [F30](#f30) | ✅ | security | high | S | low |  | #12 | Internal CLAP-callback endpoints fail open and use non-constant-time secret comparison |
 | [F31](#f31) | ⬜ | security | high | M | medium | ⚠️ | #12 | FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a file… |
 | [F32](#f32) | ⬜ | security | high | M | low |  | #12 | Lidarr webhook is unauthenticated and unthrottled by default and parses payload as unty… |
@@ -543,9 +543,9 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F29 — Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a silent plaintext fallback
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #11
+**✅ complete (code; backfill not yet run)** (`feat/f29-gcm-envelope`) · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #11
 
-**Files:** `backend/src/utils/encryption.ts:4`, `backend/src/utils/encryption.ts:33`, `backend/src/utils/encryption.ts:62`
+> **Fix shipped** (#11 Phase 1). `encrypt()` now writes a versioned authenticated envelope `v2:<salt>:<iv>:<tag>:<ct>` (AES-256-GCM, per-value scrypt over the **full** key). `decrypt()` dispatches on prefix: `v2` is authenticated and **fails closed** (tamper/wrong-key/malformed all throw — no plaintext passthrough); anything else uses the **unchanged** legacy CBC read path (pad/truncate derivation preserved) so all historical data still decrypts. A small salt-keyed scrypt cache avoids a per-request KDF regression on the Subsonic hot path. Tests: `encryption.test.ts` (v2 round-trip, fail-closed on tamper/tag/wrong-key/malformed, full-entropy no-truncation, legacy v1 still decrypts). **Backfill written but not run** (per operator decision): `scripts/migrate-settings-to-gcm.ts` (v1→v2, dry-run default, leaves undecryptable values untouched — `settingsCipherMigration.ts` decision logic unit-tested) + `GET /api/admin/secrets-status`. Operators run the backfill per `docs/UPGRADING.md`; the legacy read path stays until `legacy === 0`.
 
 **Problem.** encryption.ts protects API/OAuth tokens, 2FA secrets (User.twoFactorSecret), Subsonic passwords and Lidarr webhook secret with aes-256-cbc and NO integrity tag, so ciphertext is malleable and tamper-undetectable. The key is derived by padEnd(32,'0') for short keys or slice(0,32) for long ones (lines 33-38) — no KDF, so a low-entropy key stays low-entropy and a >32-char base64 key silently loses its tail. decrypt() fails open: any value without a ':' is returned as cleartext (line 66-68) and any non-ERR_OSSL error returns the input unchanged (line 86-87), so corrupt/tampered/forged data round-trips as 'unencrypted' instead of being rejected.
 

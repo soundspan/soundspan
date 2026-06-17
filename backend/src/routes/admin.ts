@@ -2,10 +2,27 @@ import { Router } from "express";
 import { requireAdmin, requireAuth } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import {
+    ENCRYPTED_SETTINGS_COLUMNS,
+    isV2Envelope,
+    type EncryptedModelName,
+} from "../utils/encryptedColumns";
 
 const router = Router();
 
 router.use(requireAuth, requireAdmin);
+
+// Per-model row fetchers for the secrets-status check. Keyed by the same model
+// names as ENCRYPTED_SETTINGS_COLUMNS so the column inventory stays the single
+// source of truth; the `select` is driven by that inventory at call time.
+const ENCRYPTED_MODEL_QUERIERS: Record<
+    EncryptedModelName,
+    (select: Record<string, boolean>) => Promise<Array<Record<string, unknown>>>
+> = {
+    user: (select) => prisma.user.findMany({ select }),
+    userSettings: (select) => prisma.userSettings.findMany({ select }),
+    systemSettings: (select) => prisma.systemSettings.findMany({ select }),
+};
 
 function isPrismaRecordNotFound(error: unknown): error is { code: string } {
     return Boolean(
@@ -110,6 +127,85 @@ router.delete("/library-health/:recordId", async (req, res) => {
 
         logger.error("Dismiss library health record error:", error);
         res.status(500).json({ error: "Failed to dismiss library health record" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/admin/secrets-status:
+ *   get:
+ *     summary: Report settings-cipher migration progress (legacy v1 vs authenticated v2)
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Counts of encrypted settings values still on the legacy cipher vs migrated to v2
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
+// GET /admin/secrets-status - how many encrypted settings columns are still on
+// the legacy v1 (AES-256-CBC) cipher vs migrated to authenticated v2 GCM. Lets
+// an operator know when the v1→v2 backfill is complete (legacy === 0) and it's
+// safe to drop the legacy read path. Returns only counts — never secret values.
+router.get("/secrets-status", async (_req, res) => {
+    try {
+        const byModel: Record<
+            string,
+            { total: number; v2: number; legacy: number }
+        > = {};
+        let total = 0;
+        let v2 = 0;
+        let legacy = 0;
+
+        for (const [modelName, columns] of Object.entries(
+            ENCRYPTED_SETTINGS_COLUMNS
+        )) {
+            const select: Record<string, boolean> = {};
+            for (const column of columns) select[column] = true;
+
+            const rows = await ENCRYPTED_MODEL_QUERIERS[
+                modelName as EncryptedModelName
+            ](select);
+
+            let modelV2 = 0;
+            let modelLegacy = 0;
+            for (const row of rows) {
+                for (const column of columns) {
+                    const value = row[column];
+                    if (typeof value !== "string" || value.length === 0) {
+                        continue;
+                    }
+                    if (isV2Envelope(value)) modelV2 += 1;
+                    else modelLegacy += 1;
+                }
+            }
+
+            byModel[modelName] = {
+                total: modelV2 + modelLegacy,
+                v2: modelV2,
+                legacy: modelLegacy,
+            };
+            total += modelV2 + modelLegacy;
+            v2 += modelV2;
+            legacy += modelLegacy;
+        }
+
+        res.json({
+            settingsCipher: {
+                total,
+                v2,
+                legacy,
+                migrationComplete: legacy === 0,
+                byModel,
+            },
+        });
+    } catch (error) {
+        logger.error("Secrets status error:", error);
+        res.status(500).json({ error: "Failed to compute secrets status" });
     }
 });
 

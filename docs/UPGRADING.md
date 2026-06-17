@@ -5,6 +5,50 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## Settings encryption: authenticated AES-256-GCM + versioned envelope (F29)
+
+**Who this affects:** everyone — but the upgrade is transparent and needs **no
+immediate action**.
+
+**What changed.** The settings cipher that protects stored integration
+credentials (Lidarr, OAuth tokens, 2FA secrets, Subsonic passwords, etc.) moved
+from unauthenticated AES-256-CBC to **authenticated AES-256-GCM** behind a
+versioned envelope:
+
+- New values are written as `v2:<salt>:<iv>:<tag>:<ciphertext>`, with a per-value
+  `scrypt` key derivation that uses the **full** key entropy (the old path
+  truncated the documented 44-char base64 key to 32 chars).
+- Decrypting a `v2` value **fails closed**: a tampered/forged ciphertext throws
+  instead of being returned as plaintext (the old path returned malformed input
+  unchanged — a fail-open hole).
+- **Legacy (`v1`/CBC) data still decrypts** under its original key derivation,
+  which is deliberately left unchanged. Every save re-writes the value as `v2`,
+  so data migrates forward on its own over normal use.
+
+**Action required: none.** Reads and writes keep working across the upgrade.
+
+**Optional — force-migrate all values now.** If you want nothing left on the
+legacy cipher (so the legacy read path can eventually be dropped):
+
+1. Check progress: `GET /api/admin/secrets-status` (admin-only) returns how many
+   values are still `legacy` vs `v2`.
+2. **Back up the database.**
+3. Dry-run, then apply, with the same `SETTINGS_ENCRYPTION_KEY` the app uses:
+   ```sh
+   # in the backend container/workdir
+   npx tsx scripts/migrate-settings-to-gcm.ts          # dry run — no writes
+   npx tsx scripts/migrate-settings-to-gcm.ts --apply  # re-encrypt v1 -> v2
+   ```
+   The script is forward-only and idempotent; values it cannot decrypt (e.g. data
+   from a previously-lost key) are **left untouched**, never rewritten.
+4. Re-check `secrets-status` until `legacy` is `0`.
+
+> Requires a stable `SETTINGS_ENCRYPTION_KEY` (see F22). If your key was rotated
+> by a past Helm upgrade, the affected legacy values can't be decrypted — re-enter
+> those credentials rather than migrating them.
+
+---
+
 ## Helm: chart-managed secrets are now stable across upgrades (F22)
 
 **Who this affects:** Helm installs that let the chart auto-generate secrets —
