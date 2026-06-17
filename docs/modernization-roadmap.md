@@ -1,26 +1,45 @@
 # Modernization Roadmap
 
-Canonical index of the 53 code-verified findings (F1–F53) from the **2026-06-16** modernization review. The review mapped each subsystem, assessed it across readability / performance / idempotency / security / extensibility / dependencies, then **adversarially re-read every finding against the real code** (53 confirmed, 0 false positives) before grouping them into the epics below.
+Canonical index of the modernization review findings (F1–F53, plus F54 added on audit) from the **2026-06-16** review of soundspan. The review mapped each subsystem, assessed it across readability / performance / idempotency / security / extensibility / dependencies, then adversarially re-read every finding against the real code (53 high-confidence findings, **no true false positive**), grouped them into the epics below, and was itself **independently audited** ([`docs/modernization-roadmap-audit-findings.md`](modernization-roadmap-audit-findings.md)).
 
-Each finding is tracked under a GitHub epic; the deep per-finding recommendations also live in those epic bodies (and the secrets migration plan in the #11 comment). This file is the single durable list — status here is the source of truth.
+> **Read me first.**
+> - **Status:** 5 complete + 3 partial = 8 findings touched, all in **open PR #21** (stacked on #3) — **nothing is merged to `main` yet.** ✅ complete · 🟡 partial · ⬜ open.
+> - **Audit corrections are inline.** Where the audit corrected a count, severity, or premise, the finding carries an **Audit note** (✓ = re-verified against the tree here; "per audit" = relayed). Severity columns show `orig→recalibrated` where adjusted for this single-operator deployment.
+> - **Line numbers** in finding bodies were captured against the pre-#3 branch tree and may be off by a few lines on `main`.
+> - **Not exhaustive.** Areas the review did **not** assess: test quality/coverage, observability/structured logging, data-migration safety, and PWA-offline/accessibility. "53" is ~51 distinct issues (F2≈F44, F17≈F47 are duplicates kept for their differing angles).
 
-**Status: 8/53 shipped** (Wave 1, PR #21). ✅ = merged/in-PR · ⬜ = not started.
+## Corrections from the independent audit
+
+The audit found **0 true false positives** but several packaging/measurement errors and one missed bug. The load-bearing ones (re-verified here):
+
+| Item | Correction |
+|------|------------|
+| **New bug (F54)** | Unauthenticated TOCTOU in `/device-link/verify` mints full-privilege API keys — same class as F26, missed by the review. Added below. |
+| F45 | "five workflows" → **4**; Dockerfiles → **7**. |
+| F46 | "~480 `@ts-ignore`" → **1** (480 is `eslint-disable`). |
+| F35 | "helmet ships without HSTS/CSP" → helmet **does** ship both by default. |
+| F28 | "breaking / keys re-issued" → **no re-issue** (HMAC-in-place; keys keep working). |
+| F3 | shipped **1 of 4 steps**; a 2nd identical cast remains at `simpleDownloadManager.ts:1530`. |
+| F7 / F49 | undercounts: retry predicate in **8** files; a 2nd Express-5 break at `subsonic.ts:6667`. |
+| F22 | omits a 4th regenerated key (`INTERNAL_API_SECRET`). |
+| Status | F3/F18/F24 are **partial**, not complete; F6 re-homed out of #14; severities recalibrated (F20/F23/F24/F35/F36/F47). |
 
 ## Epics
 
-| Epic | Title | Done / Total |
-|------|-------|--------------|
-| #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0/2 |
-| #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0/3 |
-| #11 | Secrets & credential storage hardening | 0/4 |
-| #12 | Request-path auth & egress hardening | 2/7 |
-| #13 | Background-job idempotency, retries & reconciler dedup | 3/8 |
-| #14 | Backend error-handling unification & route god-file decomposition | 1/7 |
-| #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 1/3 |
-| #16 | Frontend consolidation, decomposition & render performance | 0/4 |
-| #17 | Database & streaming performance | 1/5 |
-| #18 | Provider abstractions: acquisition, streaming & engine seams | 0/4 |
-| #19 | Framework & production-image modernization | 0/6 |
+| Epic | Title | ✅ / 🟡 / Total |
+|------|-------|----------------|
+| #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
+| #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
+| #11 | Secrets & credential storage hardening | 0 / 0 / 4 |
+| #12 | Request-path auth & egress hardening | 2 / 0 / 8 |
+| #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
+| #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
+| #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
+| #16 | Frontend consolidation, decomposition & render performance | 0 / 0 / 5 |
+| #17 | Database & streaming performance | 0 / 1 / 5 |
+| #18 | Provider abstractions: acquisition, streaming & engine seams | 0 / 0 / 4 |
+| #19 | Framework & production-image modernization | 0 / 0 / 6 |
+| — | Standalone (no epic) | 1 / 0 / 1 |
 
 ## By dimension
 
@@ -31,71 +50,76 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 | idempotency | 9 |
 | performance | 7 |
 | readability | 11 |
-| security | 11 |
+| security | 12 |
+
+_(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate pairs.)_
 
 ## Index
 
-| ID | ✓ | Dimension | Sev | Eff | Risk | Brk | Epic | Title |
-|----|---|-----------|-----|-----|------|-----|------|-------|
-| [F1](#f1) | ⬜ | readability | high | L | medium |  | #14 | No asyncHandler wrapper: ~130+ hand-rolled try/catch handlers bypass the existing errorHa… |
-| [F2](#f2) | ⬜ | readability | high | L | medium |  | #14 | library.ts is an 8324-LOC route god-file: 36 handlers, 121 direct prisma calls, 66 `any`,… |
-| [F3](#f3) | ✅ | readability | high | L | medium |  | #15 | 888+ `any` across strict:true backend silently defeat the type system, concentrated on th… |
-| [F4](#f4) | ⬜ | readability | high | L | medium |  | #15 | frontend `type ApiData = any` erases types on ~90 return slots; strict:false + ES2017 hol… |
-| [F5](#f5) | ⬜ | readability | high | L | medium |  | #16 | AudioPlaybackOrchestrator is a 7080-LOC headless god-component (97 refs, 24 effects) whos… |
-| [F6](#f6) | ✅ | readability | medium | M | low |  | #14 | Statistically-biased, non-transitive Array.sort() shuffle inlined 10x and a hand-copied L… |
-| [F7](#f7) | ⬜ | readability | medium | M | low |  | #14 | Prisma-retry-proxy + retryable-error infrastructure is copy-pasted near-verbatim across d… |
-| [F8](#f8) | ⬜ | readability | medium | M | low |  | #14 | Manual req.query parsing repeated ~21x with `as string`+parseInt fallbacks instead of the… |
-| [F9](#f9) | ⬜ | readability | medium | M | low |  | #16 | Two parallel frontend systems each duplicated: dual toast renderers (sonner + custom) and… |
-| [F10](#f10) | ⬜ | readability | medium | M | low |  | #16 | Per-page god-components and duplicated cover-art widgets: VibePage (1247 LOC, 16 useState… |
-| [F11](#f11) | ⬜ | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permanent… |
-| [F12](#f12) | ⬜ | performance | high | M | medium |  | #16 | Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency curre… |
-| [F13](#f13) | ⬜ | performance | high | L | medium |  | #17 | Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot p… |
-| [F14](#f14) | ⬜ | performance | high | M | medium |  | #17 | pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query scan… |
-| [F15](#f15) | ⬜ | performance | medium | M | medium |  | #17 | ORDER BY RANDOM() full-table scans on Track / track_embeddings for radio, random tracks, … |
-| [F16](#f16) | ⬜ | performance | medium | M | medium |  | #17 | Genre filtering scans JSONB with jsonb_array_elements_text + LOWER(...) LIKE '%g%' instea… |
-| [F17](#f17) | ⬜ | performance | medium | M | low |  | #19 | API runtime transpiles TypeScript on every cold start via tsx and ships the full TS toolc… |
-| [F18](#f18) | ✅ | performance | medium | M | low |  | #17 | Soulseek downloads buffer whole files into heap; cleanup uses sync fs and audio streaming… |
-| [F19](#f19) | ✅ | idempotency | high | S | low |  | #13 | Discover processor swallows real failures (returns instead of throws), so Bull never retr… |
-| [F20](#f20) | ⬜ | idempotency | high | M | low |  | #13 | Discover Weekly batch creation has no per-(user, week) idempotency guard — double-trigger… |
-| [F21](#f21) | ⬜ | idempotency | high | M | medium |  | #13 | Audio-analysis / vibe re-queue enqueues BEFORE flipping status and has no per-track dedup… |
-| [F22](#f22) | ⬜ | idempotency | high | M | low |  | #11 | Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on e… |
-| [F23](#f23) | ⬜ | idempotency | high | M | medium |  | #13 | Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade instead… |
-| [F24](#f24) | ✅ | idempotency | high | M | low |  | #13 | High-volume scan jobs enqueued from ~15 sites with no coalescing jobId, no attempts/backo… |
-| [F25](#f25) | ⬜ | idempotency | medium | M | medium |  | #13 | Two overlapping download reconcilers (unlocked 30s queueCleaner interval vs claim-locked … |
-| [F26](#f26) | ✅ | idempotency | medium | S | low |  | #13 | Invite-code maxUses check is outside the transaction with an unconditional increment — co… |
-| [F27](#f27) | ⬜ | idempotency | medium | M | low |  | #13 | TIDAL sidecar track/album downloads have no on-disk or in-flight idempotency — retries re… |
-| [F28](#f28) | ⬜ | security | high | M | medium | ⚠️ | #11 | API keys stored in plaintext and looked up by raw value — a read-only DB leak yields work… |
-| [F29](#f29) | ⬜ | security | high | M | medium | ⚠️ | #11 | Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a sile… |
+| ID | St | Dimension | Sev | Eff | Risk | Brk | Epic | Title |
+|----|----|-----------|-----|-----|------|-----|------|-------|
+| [F1](#f1) | ⬜ | readability | high | L | medium |  | #14 | No asyncHandler wrapper: ~130+ hand-rolled try/catch handlers bypass the existing error… |
+| [F2](#f2) | ⬜ | readability | high | L | medium |  | #14 | library.ts is an 8324-LOC route god-file: 36 handlers, 121 direct prisma calls, 66 `any… |
+| [F3](#f3) | 🟡 | readability | high | L | medium |  | #15 | 888+ `any` across strict:true backend silently defeat the type system, concentrated on … |
+| [F4](#f4) | ⬜ | readability | high | L | medium |  | #15 | frontend `type ApiData = any` erases types on ~90 return slots; strict:false + ES2017 h… |
+| [F5](#f5) | ⬜ | readability | high | L | medium |  | #16 | AudioPlaybackOrchestrator is a 7080-LOC headless god-component (97 refs, 24 effects) wh… |
+| [F6](#f6) | ✅ | readability | medium | M | low |  | — | Statistically-biased, non-transitive Array.sort() shuffle inlined 10x and a hand-copied… |
+| [F7](#f7) | ⬜ | readability | medium | M | low |  | #14 | Prisma-retry-proxy + retryable-error infrastructure is copy-pasted near-verbatim across… |
+| [F8](#f8) | ⬜ | readability | medium | M | low |  | #14 | Manual req.query parsing repeated ~21x with `as string`+parseInt fallbacks instead of t… |
+| [F9](#f9) | ⬜ | readability | medium | M | low |  | #16 | Two parallel frontend systems each duplicated: dual toast renderers (sonner + custom) a… |
+| [F10](#f10) | ⬜ | readability | medium | M | low |  | #16 | Per-page god-components and duplicated cover-art widgets: VibePage (1247 LOC, 16 useSta… |
+| [F11](#f11) | ⬜ | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permane… |
+| [F12](#f12) | ⬜ | performance | high | M | medium |  | #16 | Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency cur… |
+| [F13](#f13) | ⬜ | performance | high | L | medium |  | #17 | Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot… |
+| [F14](#f14) | ⬜ | performance | high | M | medium |  | #17 | pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query sc… |
+| [F15](#f15) | ⬜ | performance | medium | M | medium |  | #17 | ORDER BY RANDOM() full-table scans on Track / track_embeddings for radio, random tracks… |
+| [F16](#f16) | ⬜ | performance | medium | M | medium |  | #17 | Genre filtering scans JSONB with jsonb_array_elements_text + LOWER(...) LIKE '%g%' inst… |
+| [F17](#f17) | ⬜ | performance | medium | M | low |  | #19 | API runtime transpiles TypeScript on every cold start via tsx and ships the full TS too… |
+| [F18](#f18) | 🟡 | performance | medium | M | low |  | #17 | Soulseek downloads buffer whole files into heap; cleanup uses sync fs and audio streami… |
+| [F19](#f19) | ✅ | idempotency | high | S | low |  | #13 | Discover processor swallows real failures (returns instead of throws), so Bull never re… |
+| [F20](#f20) | ⬜ | idempotency | high→medium | M | low |  | #13 | Discover Weekly batch creation has no per-(user, week) idempotency guard — double-trigg… |
+| [F21](#f21) | ⬜ | idempotency | high | M | medium |  | #13 | Audio-analysis / vibe re-queue enqueues BEFORE flipping status and has no per-track ded… |
+| [F22](#f22) | ⬜ | idempotency | high | M | low |  | #11 | Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on… |
+| [F23](#f23) | ⬜ | idempotency | high→medium | M | medium |  | #13 | Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade inste… |
+| [F24](#f24) | 🟡 | idempotency | high→medium | M | low |  | #13 | High-volume scan jobs enqueued from ~15 sites with no coalescing jobId, no attempts/bac… |
+| [F25](#f25) | ⬜ | idempotency | medium | M | medium |  | #13 | Two overlapping download reconcilers (unlocked 30s queueCleaner interval vs claim-locke… |
+| [F26](#f26) | ✅ | idempotency | medium | S | low |  | #13 | Invite-code maxUses check is outside the transaction with an unconditional increment — … |
+| [F27](#f27) | ⬜ | idempotency | medium | M | low |  | #13 | TIDAL sidecar track/album downloads have no on-disk or in-flight idempotency — retries … |
+| [F28](#f28) | ⬜ | security | high | M | medium |  | #11 | API keys stored in plaintext and looked up by raw value — a read-only DB leak yields wo… |
+| [F29](#f29) | ⬜ | security | high | M | medium | ⚠️ | #11 | Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a si… |
 | [F30](#f30) | ✅ | security | high | S | low |  | #12 | Internal CLAP-callback endpoints fail open and use non-constant-time secret comparison |
-| [F31](#f31) | ⬜ | security | high | M | medium | ⚠️ | #12 | FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a filesy… |
-| [F32](#f32) | ⬜ | security | high | M | low |  | #12 | Lidarr webhook is unauthenticated and unthrottled by default and parses payload as untype… |
-| [F33](#f33) | ⬜ | security | high | M | medium |  | #12 | SSRF guard blocks only literal private hosts — DNS rebinding to an internal IP bypasses it |
-| [F34](#f34) | ✅ | security | medium | S | low |  | #12 | CORS allows every origin unconditionally despite an allowlist knob, while credentials:true |
-| [F35](#f35) | ⬜ | security | medium | S | medium |  | #12 | Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and trus… |
-| [F36](#f36) | ⬜ | security | medium | S | low |  | #11 | jwt.verify omits the algorithms pin and /refresh re-reads the secret inline as `as any` |
-| [F37](#f37) | ⬜ | security | high | M | medium | ⚠️ | #12 | Long-lived full-privilege JWT embedded in stream/cover-art URLs (?token=) leaks via logs,… |
-| [F38](#f38) | ⬜ | security | medium | M | low |  | #10 | ML model artifacts and Python deps are pulled at build time with no checksum/hash pinning… |
-| [F39](#f39) | ⬜ | extensibility | high | L | medium |  | #18 | No shared MediaSource/DownloadProvider abstraction: each acquisition source is a bespoke … |
-| [F40](#f40) | ⬜ | extensibility | high | L | medium |  | #15 | Frontend api.ts is a 3693-LOC monolithic ApiClient (286 methods) hand-mirroring a backend… |
-| [F41](#f41) | ⬜ | extensibility | medium | M | low |  | #18 | AudioEngine interface declares ~13 optional methods, forcing runtime typeof-capability ch… |
-| [F42](#f42) | ⬜ | extensibility | medium | L | medium |  | #18 | ~50-entry recommender registry is hand-maintained with one near-duplicate bespoke method … |
-| [F43](#f43) | ⬜ | extensibility | medium | L | medium |  | #18 | Per-external-source coupling: each media source is a parallel stack (route file + service… |
-| [F44](#f44) | ⬜ | extensibility | medium | L | medium |  | #14 | library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-rou… |
-| [F45](#f45) | ⬜ | dependencies-build | high | M | low |  | #10 | CI has no security/vulnerability scanning and no dependency automation (Dependabot/Renova… |
-| [F46](#f46) | ⬜ | dependencies-build | medium | S | low |  | #8 | No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend is … |
-| [F47](#f47) | ⬜ | dependencies-build | high | M | low |  | #19 | API runtime image ships uncompiled TypeScript and runs it via tsx in production with full… |
+| [F31](#f31) | ⬜ | security | high | M | medium | ⚠️ | #12 | FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a file… |
+| [F32](#f32) | ⬜ | security | high | M | low |  | #12 | Lidarr webhook is unauthenticated and unthrottled by default and parses payload as unty… |
+| [F33](#f33) | ⬜ | security | high | M | medium |  | #12 | SSRF guard blocks only literal private hosts — DNS rebinding to an internal IP bypasses… |
+| [F34](#f34) | ✅ | security | medium | S | low |  | #12 | CORS allows every origin unconditionally despite an allowlist knob, while credentials:t… |
+| [F35](#f35) | ⬜ | security | medium→low | S | medium |  | #12 | Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and tr… |
+| [F36](#f36) | ⬜ | security | medium→low | S | low |  | #11 | jwt.verify omits the algorithms pin and /refresh re-reads the secret inline as `as any` |
+| [F37](#f37) | ⬜ | security | high | M | medium | ⚠️ | #12 | Long-lived full-privilege JWT embedded in stream/cover-art URLs (?token=) leaks via log… |
+| [F38](#f38) | ⬜ | security | medium | M | low |  | #10 | ML model artifacts and Python deps are pulled at build time with no checksum/hash pinni… |
+| [F39](#f39) | ⬜ | extensibility | high | L | medium |  | #18 | No shared MediaSource/DownloadProvider abstraction: each acquisition source is a bespok… |
+| [F40](#f40) | ⬜ | extensibility | high | L | medium |  | #16 | Frontend api.ts is a 3693-LOC monolithic ApiClient (286 methods) hand-mirroring a backe… |
+| [F41](#f41) | ⬜ | extensibility | medium | M | low |  | #18 | AudioEngine interface declares ~13 optional methods, forcing runtime typeof-capability … |
+| [F42](#f42) | ⬜ | extensibility | medium | L | medium |  | #18 | ~50-entry recommender registry is hand-maintained with one near-duplicate bespoke metho… |
+| [F43](#f43) | ⬜ | extensibility | medium | L | medium |  | #18 | Per-external-source coupling: each media source is a parallel stack (route file + servi… |
+| [F44](#f44) | ⬜ | extensibility | medium | L | medium |  | #14 | library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-r… _(dup F2)_ |
+| [F45](#f45) | ⬜ | dependencies-build | high | M | low |  | #10 | CI has no security/vulnerability scanning and no dependency automation (Dependabot/Reno… |
+| [F46](#f46) | ⬜ | dependencies-build | medium | S | low |  | #8 | No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend i… |
+| [F47](#f47) | ⬜ | dependencies-build | high→medium | M | low |  | #19 | API runtime image ships uncompiled TypeScript and runs it via tsx in production with fu… _(dup F17)_ |
 | [F48](#f48) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Bull 4 is maintenance-only with a version-mismatched @types/bull; migrate to BullMQ |
 | [F49](#f49) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Express 4 (Express 5 is GA) with half-migrated middleware majors |
-| [F50](#f50) | ⬜ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproducibl… |
+| [F50](#f50) | ⬜ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproduci… |
 | [F51](#f51) | ⬜ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
-| [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and run… |
-| [F53](#f53) | ⬜ | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything else … |
+| [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and r… |
+| [F53](#f53) | ⬜ | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
+| [F54](#f54) | ⬜ | security | high | S | low |  | #12 | POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys |
 
 ## Findings
 
 ### F1 — No asyncHandler wrapper: ~130+ hand-rolled try/catch handlers bypass the existing errorHandler/AppError and duplicate the same logger.error+sendInternalRouteError boilerplate
 
-**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14 · confidence: high
+**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14
+
+> **Audit note.** ✓ `ErrorCode` enum is 15-member (not 18); `errorHandler` is registered at index.ts:385 (not 402). Core thesis (asyncHandler 0×, three parallel error paths) holds.
 
 **Files:** `backend/src/routes/library.ts`, `backend/src/routes/subsonic.ts`, `backend/src/middleware/errorHandler.ts`, `backend/src/routes/routeErrorResponse.ts`
 
@@ -109,7 +133,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F2 — library.ts is an 8324-LOC route god-file: 36 handlers, 121 direct prisma calls, 66 `any`, no service layer, 1100-line helper preamble
 
-**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14 · confidence: high
+**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14
+
+> **Audit note.** ✓ Duplicate of F44 (same `library.ts` god-file). The `any` count is ~64–70 depending on the matcher — treat as approximate, not the exact 66/70 in the title/body. The 8324-LOC anchor is exact.
 
 **Files:** `backend/src/routes/library.ts`
 
@@ -123,7 +149,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F3 — 888+ `any` across strict:true backend silently defeat the type system, concentrated on the idempotency-critical metadata in simpleDownloadManager
 
-**✅ shipped (PR #21)** · dimension: readability · severity: high · effort: L · risk: medium · epic: #15 · confidence: high
+**🟡 partial (PR #21)** · dimension: readability · severity: high · effort: L · risk: medium · epic: #15
+
+> **Audit note.** ✓ Only step 1 of 4 shipped (the line-433 cast). A SECOND identical cast remains at `simpleDownloadManager.ts:1530` (`(job as any).lidarrAlbumId`), not yet removed. The `DownloadJobMetadata` interface / discoverWeekly typing / backend ESLint are unbuilt; a partial helper `utils/downloadJobMetadata.ts` already exists to build on.
 
 **Files:** `backend/src/services/simpleDownloadManager.ts`, `backend/src/services/discoverWeekly.ts`, `backend/src/routes/library.ts`
 
@@ -137,7 +165,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F4 — frontend `type ApiData = any` erases types on ~90 return slots; strict:false + ES2017 hold the frontend to a lower bar than the strict backend
 
-**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #15 · confidence: high
+**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #15
+
+> **Audit note.** ✓ No `request<any>` calls exist (residual is 3 `Promise<any>` + 3 `any[]`). Overlaps F40.
 
 **Files:** `frontend/lib/api.ts`, `frontend/tsconfig.json`
 
@@ -151,7 +181,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F5 — AudioPlaybackOrchestrator is a 7080-LOC headless god-component (97 refs, 24 effects) whose core engine-binding effect has a ~40-entry dep array that re-binds all handlers on unrelated state changes
 
-**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #16 · confidence: high
+**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #16
 
 **Files:** `frontend/components/player/AudioPlaybackOrchestrator.tsx`
 
@@ -165,7 +195,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F6 — Statistically-biased, non-transitive Array.sort() shuffle inlined 10x and a hand-copied LCG repeated 22x in programmaticPlaylists, ignoring the correct seededShuffle already in the file
 
-**✅ shipped (PR #21)** · dimension: readability · severity: medium · effort: M · risk: low · epic: #14 · confidence: high
+**✅ complete (PR #21)** · dimension: readability · severity: medium · effort: M · risk: low · epic: —
 
 **Files:** `backend/src/services/programmaticPlaylists.ts`
 
@@ -179,7 +209,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F7 — Prisma-retry-proxy + retryable-error infrastructure is copy-pasted near-verbatim across discoverWeekly and spotifyImport (and the worker Redis claim-lock is duplicated 4x)
 
-**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #14 · confidence: high
+**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #14
+
+> **Audit note.** ✓ Undercount: the retry predicate is duplicated in 8 files (not 7) — `jobs/queueCleaner.ts` is the 8th. Strengthens the finding.
 
 **Files:** `backend/src/services/discoverWeekly.ts`, `backend/src/services/spotifyImport.ts`, `backend/src/workers/index.ts`, `backend/src/workers/moodBucketWorker.ts`, `backend/src/workers/unifiedEnrichment.ts`
 
@@ -193,7 +225,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F8 — Manual req.query parsing repeated ~21x with `as string`+parseInt fallbacks instead of the project's adopted zod standard
 
-**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #14 · confidence: high
+**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #14
+
+> **Audit note.** Per audit: `parseInt(x as string)||fallback` occurs ~7× (not ~21); the in-repo `req.query` zod precedent is `youtube.ts` (streaming.ts validates the body).
 
 **Files:** `backend/src/routes/library.ts`
 
@@ -207,7 +241,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F9 — Two parallel frontend systems each duplicated: dual toast renderers (sonner + custom) and dual data-fetching paradigms (TanStack Query vs hand-rolled useEffect loaders)
 
-**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #16 · confidence: high
+**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #16
+
+> **Audit note.** ✓ ~26 files reference the custom toast-context (this figure stands; an audit claim of 15 counted call-sites, not file imports). sonner = 34. The real point — two toast renderers mounted at once — holds.
 
 **Files:** `frontend/app/layout.tsx`, `frontend/lib/toast-context.tsx`, `frontend/app/vibe/page.tsx`, `frontend/hooks/useQueries.ts`
 
@@ -221,7 +257,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F10 — Per-page god-components and duplicated cover-art widgets: VibePage (1247 LOC, 16 useState, 7 inline components) and two near-identical CoverImage/CoverThumb copies
 
-**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #16 · confidence: high
+**⬜ open** · dimension: readability · severity: medium · effort: M · risk: low · epic: #16
 
 **Files:** `frontend/app/vibe/page.tsx`, `frontend/app/listen-together/page.tsx`
 
@@ -235,7 +271,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F11 — Three near-identical auth resolvers duplicate the credential ladder and carry a permanently-dead express-session branch
 
-**⬜ open** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14 · confidence: high
+**⬜ open** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14
 
 **Files:** `backend/src/middleware/auth.ts`, `backend/src/middleware/subsonicAuth.ts`
 
@@ -249,7 +285,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F12 — Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency currentTime context into the heaviest player trees
 
-**⬜ open** · dimension: performance · severity: high · effort: M · risk: medium · epic: #16 · confidence: high
+**⬜ open** · dimension: performance · severity: high · effort: M · risk: medium · epic: #16
 
 **Files:** `frontend/lib/audio-hooks.tsx:16`, `frontend/lib/audio-playback-context.tsx:303`, `frontend/lib/howler-engine.ts:736`, `frontend/lib/howler-engine.ts:739`, `frontend/components/player/OverlayPlayer.tsx:157`, `frontend/components/player/MiniPlayer.tsx:43`, `frontend/components/player/UniversalPlayer.tsx`, `frontend/components/layout/TVLayout.tsx`
 
@@ -263,7 +299,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F13 — Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot paths
 
-**⬜ open** · dimension: performance · severity: high · effort: L · risk: medium · epic: #17 · confidence: high
+**⬜ open** · dimension: performance · severity: high · effort: L · risk: medium · epic: #17
 
 **Files:** `backend/src/services/spotifyImport.ts:1009`, `backend/src/services/spotifyImport.ts:399`, `backend/src/services/spotifyImport.ts:514`, `backend/src/services/discoverWeekly.ts:3011`, `backend/src/services/discoverWeekly.ts:2016`, `backend/src/services/discoverWeekly.ts:3034`
 
@@ -277,7 +313,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F14 — pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query scans 1 of 224 lists (default recall)
 
-**⬜ open** · dimension: performance · severity: high · effort: M · risk: medium · epic: #17 · confidence: high
+**⬜ open** · dimension: performance · severity: high · effort: M · risk: medium · epic: #17
 
 **Files:** `backend/src/services/hybridSimilarity.ts:136`, `backend/src/services/hybridSimilarity.ts:149`, `backend/prisma/migrations/20260127000000_add_pgvector/migration.sql:21`, `backend/prisma/migrations/20260128100000_reduce_embedding_dimension/migration.sql:25`
 
@@ -291,7 +327,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F15 — ORDER BY RANDOM() full-table scans on Track / track_embeddings for radio, random tracks, and the vibe map
 
-**⬜ open** · dimension: performance · severity: medium · effort: M · risk: medium · epic: #17 · confidence: high
+**⬜ open** · dimension: performance · severity: medium · effort: M · risk: medium · epic: #17
 
 **Files:** `backend/src/routes/library.ts:3994`, `backend/src/routes/library.ts:759`, `backend/src/services/umapProjection.ts:269`, `backend/src/services/discoverWeekly.ts`
 
@@ -305,7 +341,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F16 — Genre filtering scans JSONB with jsonb_array_elements_text + LOWER(...) LIKE '%g%' instead of the existing normalized Genre/TrackGenre tables
 
-**⬜ open** · dimension: performance · severity: medium · effort: M · risk: medium · epic: #17 · confidence: high
+**⬜ open** · dimension: performance · severity: medium · effort: M · risk: medium · epic: #17
 
 **Files:** `backend/src/routes/library.ts:748`, `backend/src/routes/library.ts:6513`, `backend/src/routes/library.ts:6809`, `backend/prisma/schema.prisma:240`
 
@@ -319,7 +355,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F17 — API runtime transpiles TypeScript on every cold start via tsx and ships the full TS toolchain in the production image
 
-**⬜ open** · dimension: performance · severity: medium · effort: M · risk: low · epic: #19 · confidence: high
+**⬜ open** · dimension: performance · severity: medium · effort: M · risk: low · epic: #19
 
 **Files:** `backend/Dockerfile:84`, `backend/Dockerfile:111`, `backend/Dockerfile:73`
 
@@ -333,7 +369,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F18 — Soulseek downloads buffer whole files into heap; cleanup uses sync fs and audio streaming uses raw pipe() instead of pipeline()
 
-**✅ shipped (PR #21)** · dimension: performance · severity: medium · effort: M · risk: low · epic: #17 · confidence: high
+**🟡 partial (PR #21)** · dimension: performance · severity: medium · effort: M · risk: low · epic: #17
 
 **Files:** `backend/src/services/soulseek.ts:831`, `backend/src/services/soulseek.ts:849`, `backend/src/services/audioStreaming.ts:494`, `backend/src/services/audioStreaming.ts:510`
 
@@ -347,7 +383,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F19 — Discover processor swallows real failures (returns instead of throws), so Bull never retries, dead-letters, or alerts background discovery
 
-**✅ shipped (PR #21)** · dimension: idempotency · severity: high · effort: S · risk: low · epic: #13 · confidence: high
+**✅ complete (PR #21)** · dimension: idempotency · severity: high · effort: S · risk: low · epic: #13
 
 **Files:** `backend/src/workers/processors/discoverProcessor.ts:177`, `backend/src/workers/processors/discoverProcessor.ts:184`, `backend/src/workers/discoverCron.ts:51`, `backend/src/routes/discover.ts:181`
 
@@ -361,7 +397,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F20 — Discover Weekly batch creation has no per-(user, week) idempotency guard — double-trigger duplicates the whole batch and its Lidarr downloads
 
-**⬜ open** · dimension: idempotency · severity: high · effort: M · risk: low · epic: #13 · confidence: high
+**⬜ open** · dimension: idempotency · severity: high→medium · effort: M · risk: low · epic: #13
+
+> **Audit note.** ✓ Severity high→medium: the missing guard is confined to the non-default `DISCOVERY_MODE=legacy` path. NOTE: F19's shipped queue-wide `attempts:3` retry now makes this load-bearing — a legacy retry can duplicate the batch and re-trigger Lidarr downloads.
 
 **Files:** `backend/src/services/discoverWeekly.ts:329`, `backend/src/services/discoverWeekly.ts:331`, `backend/src/routes/discover.ts:217`, `backend/prisma/schema.prisma`
 
@@ -375,7 +413,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F21 — Audio-analysis / vibe re-queue enqueues BEFORE flipping status and has no per-track dedup — crash window and duplicate sidecar work
 
-**⬜ open** · dimension: idempotency · severity: high · effort: M · risk: medium · epic: #13 · confidence: high
+**⬜ open** · dimension: idempotency · severity: high · effort: M · risk: medium · epic: #13
 
 **Files:** `backend/src/workers/unifiedEnrichment.ts:1336`, `backend/src/workers/unifiedEnrichment.ts:1350`, `backend/src/workers/unifiedEnrichment.ts:1402`, `backend/src/workers/unifiedEnrichment.ts:1414`
 
@@ -389,7 +427,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F22 — Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on every upgrade — breaks sessions, makes stored credentials undecryptable, desyncs the Postgres password
 
-**⬜ open** · dimension: idempotency · severity: high · effort: M · risk: low · epic: #11 · confidence: high
+**⬜ open** · dimension: idempotency · severity: high · effort: M · risk: low · epic: #11
+
+> **Audit note.** ✓ Omits a 4th regenerated key: the Helm template also defaults `INTERNAL_API_SECRET` via `randAlphaNum` (`secret.yaml:12`), so it rotates on every upgrade too. Fold it into the same lookup-stability fix.
 
 **Files:** `charts/soundspan/templates/secret.yaml:10`, `charts/soundspan/templates/secret.yaml:11`, `charts/soundspan/templates/secret.yaml:14`
 
@@ -403,7 +443,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F23 — Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade instead of DB constraints — best-effort idempotency under load
 
-**⬜ open** · dimension: idempotency · severity: high · effort: M · risk: medium · epic: #13 · confidence: high
+**⬜ open** · dimension: idempotency · severity: high→medium · effort: M · risk: medium · epic: #13
+
+> **Audit note.** ✓ Severity high→medium: the 'no partial-unique' headline is refuted by migration `20260118000000` (the body says so). Real residual = a missing P2002 catch (a 500, not data corruption) + a seq scan.
 
 **Files:** `backend/src/services/simpleDownloadManager.ts:374`, `backend/src/services/simpleDownloadManager.ts:415`, `backend/src/services/simpleDownloadManager.ts:471`, `backend/prisma/schema.prisma`
 
@@ -417,7 +459,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F24 — High-volume scan jobs enqueued from ~15 sites with no coalescing jobId, no attempts/backoff, and no removeOnComplete — stacked full scans + unbounded Redis growth
 
-**✅ shipped (PR #21)** · dimension: idempotency · severity: high · effort: M · risk: low · epic: #13 · confidence: high
+**🟡 partial (PR #21)** · dimension: idempotency · severity: high→medium · effort: M · risk: low · epic: #13
+
+> **Audit note.** ✓ PARTIAL: only the 'safe half' (removeOnComplete/Fail) shipped; coalescing `jobId` + attempts/backoff deferred to BullMQ (#19). Severity high→medium (bounded Redis leak). No regression test shipped — the queues test could assert the options object.
 
 **Files:** `backend/src/routes/webhooks.ts:233`, `backend/src/routes/webhooks.ts:246`, `backend/src/routes/library.ts:1274`, `backend/src/jobs/queueCleaner.ts:360`, `backend/src/workers/queues.ts:67`
 
@@ -431,7 +475,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F25 — Two overlapping download reconcilers (unlocked 30s queueCleaner interval vs claim-locked 2-min scheduler job) race on the same DownloadJob rows
 
-**⬜ open** · dimension: idempotency · severity: medium · effort: M · risk: medium · epic: #13 · confidence: high
+**⬜ open** · dimension: idempotency · severity: medium · effort: M · risk: medium · epic: #13
 
 **Files:** `backend/src/jobs/queueCleaner.ts:132`, `backend/src/jobs/queueCleaner.ts:411`, `backend/src/workers/index.ts:322`
 
@@ -445,7 +489,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F26 — Invite-code maxUses check is outside the transaction with an unconditional increment — concurrent registrations overshoot the cap
 
-**✅ shipped (PR #21)** · dimension: idempotency · severity: medium · effort: S · risk: low · epic: #13 · confidence: high
+**✅ complete (PR #21)** · dimension: idempotency · severity: medium · effort: S · risk: low · epic: #13
 
 **Files:** `backend/src/routes/auth.ts:1104`, `backend/src/routes/auth.ts:1130`, `backend/src/routes/auth.ts:1159`
 
@@ -459,7 +503,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F27 — TIDAL sidecar track/album downloads have no on-disk or in-flight idempotency — retries re-download bytes and re-hit the rate-limited TIDAL API
 
-**⬜ open** · dimension: idempotency · severity: medium · effort: M · risk: low · epic: #13 · confidence: high
+**⬜ open** · dimension: idempotency · severity: medium · effort: M · risk: low · epic: #13
 
 **Files:** `services/tidal-downloader/app.py:277`, `services/tidal-downloader/app.py:1025`, `services/tidal-downloader/app.py:1056`
 
@@ -473,7 +517,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F28 — API keys stored in plaintext and looked up by raw value — a read-only DB leak yields working device credentials for every user
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #11 · confidence: high
+**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · epic: #11
+
+> **Audit note.** ✓ Label corrected — NOT 'forced re-issue.' The #11 migration plan hashes keys in place (HMAC) and validation is an exact-value lookup, so existing device keys keep working. The `⚠️ breaking` flag is dropped.
 
 **Files:** `backend/src/routes/apiKeys.ts:82`, `backend/src/routes/apiKeys.ts:88`, `backend/src/middleware/auth.ts:108`, `backend/src/middleware/auth.ts:239`, `backend/src/middleware/subsonicAuth.ts`, `backend/prisma/schema.prisma:1039`
 
@@ -487,7 +533,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F29 — Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a silent plaintext fallback
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #11 · confidence: high
+**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #11
 
 **Files:** `backend/src/utils/encryption.ts:4`, `backend/src/utils/encryption.ts:33`, `backend/src/utils/encryption.ts:62`
 
@@ -501,7 +547,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F30 — Internal CLAP-callback endpoints fail open and use non-constant-time secret comparison
 
-**✅ shipped (PR #21)** · dimension: security · severity: high · effort: S · risk: low · epic: #12 · confidence: high
+**✅ complete (PR #21)** · dimension: security · severity: high · effort: S · risk: low · epic: #12
 
 **Files:** `backend/src/routes/analysisInternal.ts:51`, `backend/src/routes/analysisInternal.ts:116`, `backend/src/index.ts:294`
 
@@ -515,7 +561,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F31 — FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a filesystem path (path traversal)
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12 · confidence: high
+**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
 
 **Files:** `services/ytmusic-streamer/app.py:291`, `services/ytmusic-streamer/app.py:1383`, `services/ytmusic-streamer/app.py:1420`, `services/tidal-downloader/app.py:1025`
 
@@ -529,7 +575,9 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F32 — Lidarr webhook is unauthenticated and unthrottled by default and parses payload as untyped any
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: low · epic: #12 · confidence: high
+**⬜ open** · dimension: security · severity: high · effort: M · risk: low · epic: #12
+
+> **Audit note.** Per audit: the Lidarr webhook secret IS settable via the systemSettings API (it just isn't auto-generated).
 
 **Files:** `backend/src/routes/webhooks.ts:96`, `backend/src/routes/webhooks.ts:159`, `backend/src/index.ts:259`
 
@@ -543,7 +591,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F33 — SSRF guard blocks only literal private hosts — DNS rebinding to an internal IP bypasses it
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · epic: #12 · confidence: high
+**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · epic: #12
 
 **Files:** `backend/src/services/outboundUrlSafety.ts:41`, `backend/src/services/outboundUrlSafety.ts:58`, `backend/src/services/imageProxy.ts:41`, `backend/src/services/youtubeDownload.ts:185`
 
@@ -557,7 +605,7 @@ Each finding is tracked under a GitHub epic; the deep per-finding recommendation
 
 ### F34 — CORS allows every origin unconditionally despite an allowlist knob, while credentials:true
 
-**✅ shipped (PR #21)** · dimension: security · severity: medium · effort: S · risk: low · epic: #12 · confidence: high
+**✅ complete (PR #21)** · dimension: security · severity: medium · effort: S · risk: low · epic: #12
 
 **Files:** `backend/src/index.ts:131`, `backend/src/index.ts:146`, `backend/src/index.ts:159`, `backend/src/config.ts:133`
 
@@ -575,7 +623,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F35 — Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and trust proxy trusts all hops
 
-**⬜ open** · dimension: security · severity: medium · effort: S · risk: medium · epic: #12 · confidence: high
+**⬜ open** · dimension: security · severity: medium→low · effort: S · risk: medium · epic: #12
+
+> **Audit note.** ✓ Headline wrong: helmet ^7 ships default CSP AND HSTS; the code only customizes `crossOriginResourcePolicy`, so both headers ARE sent. Real residual = cookie `secure` gated on a string env + trust-proxy hop count. Severity medium→low.
 
 **Files:** `backend/src/index.ts:126`, `backend/src/index.ts:200`, `backend/src/index.ts:216`, `backend/src/middleware/rateLimiter.ts:8`
 
@@ -589,7 +639,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F36 — jwt.verify omits the algorithms pin and /refresh re-reads the secret inline as `as any`
 
-**⬜ open** · dimension: security · severity: medium · effort: S · risk: low · epic: #11 · confidence: high
+**⬜ open** · dimension: security · severity: medium→low · effort: S · risk: low · epic: #11
+
+> **Audit note.** ✓ Severity medium→low (body agrees): the RS256→HS256 forgery is unreachable in jsonwebtoken v9 with a string secret. Defense-in-depth, not a live hole.
 
 **Files:** `backend/src/middleware/auth.ts:136`, `backend/src/middleware/auth.ts:165`, `backend/src/routes/auth.ts:296`, `backend/src/services/listenTogetherSocket.ts:603`, `backend/src/routes/onboarding.ts:631`
 
@@ -603,7 +655,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F37 — Long-lived full-privilege JWT embedded in stream/cover-art URLs (?token=) leaks via logs, history, Referer
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12 · confidence: high
+**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
 
 **Files:** `backend/src/middleware/auth.ts:264`, `backend/src/routes/library.ts:4900`, `frontend/lib/api.ts:1241`, `frontend/lib/api.ts:1390`
 
@@ -617,7 +669,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F38 — ML model artifacts and Python deps are pulled at build time with no checksum/hash pinning (supply chain)
 
-**⬜ open** · dimension: security · severity: medium · effort: M · risk: low · epic: #10 · confidence: high
+**⬜ open** · dimension: security · severity: medium · effort: M · risk: low · epic: #10
+
+> **Audit note.** Per audit: internal contradiction with F50 on the Essentia model count, and the CLAP checkpoint is ~600MB per the repo's own comment (the ~2GB figure conflates the torch dependency).
 
 **Files:** `services/audio-analyzer/Dockerfile:78`, `services/audio-analyzer-clap/Dockerfile:39`, `services/ytmusic-streamer/requirements.txt`, `services/audio-analyzer-clap/requirements.txt`
 
@@ -631,7 +685,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F39 — No shared MediaSource/DownloadProvider abstraction: each acquisition source is a bespoke singleton wired into the orchestrator with hardcoded if/else routing
 
-**⬜ open** · dimension: extensibility · severity: high · effort: L · risk: medium · epic: #18 · confidence: high
+**⬜ open** · dimension: extensibility · severity: high · effort: L · risk: medium · epic: #18
 
 **Files:** `backend/src/services/acquisitionService.ts:289`, `backend/src/services/acquisitionService.ts:329`, `backend/src/services/acquisitionService.ts:188`, `backend/src/services/simpleDownloadManager.ts:12`, `backend/src/services/soulseek.ts:54`, `backend/src/services/lidarr.ts:96`, `backend/src/services/youtubeDownload.ts:170`
 
@@ -645,7 +699,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F40 — Frontend api.ts is a 3693-LOC monolithic ApiClient (286 methods) hand-mirroring a backend OpenAPI spec that already exists — drift-prone and untyped via file-wide ApiData=any
 
-**⬜ open** · dimension: extensibility · severity: high · effort: L · risk: medium · epic: #15 · confidence: high
+**⬜ open** · dimension: extensibility · severity: high · effort: L · risk: medium · epic: #16
+
+> **Audit note.** ✓ Re-homed to #16 (frontend decomposition) — the `api.ts` structural split was previously unowned (#15 type-safety disclaimed the structure, #18 disclaimed it as a follow-up). Overlaps F4. swagger schema count is larger than the title's 4.
 
 **Files:** `frontend/lib/api.ts:376`, `frontend/lib/api.ts:405`, `backend/src/config/swagger.ts:104`, `backend/src/config/swagger.ts:130`
 
@@ -659,7 +715,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F41 — AudioEngine interface declares ~13 optional methods, forcing runtime typeof-capability checks instead of a typed capability split
 
-**⬜ open** · dimension: extensibility · severity: medium · effort: M · risk: low · epic: #18 · confidence: high
+**⬜ open** · dimension: extensibility · severity: medium · effort: M · risk: low · epic: #18
+
+> **Audit note.** Per audit: ~11 optional methods (not ~13); the Tauri adapter does not implement `reload`. The capability-split argument holds.
 
 **Files:** `frontend/lib/audio-engine/types.ts:141`, `frontend/lib/audio-engine/index.ts:386`
 
@@ -673,7 +731,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F42 — ~50-entry recommender registry is hand-maintained with one near-duplicate bespoke method per mix — adding a recommender requires editing the orchestrator
 
-**⬜ open** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #18 · confidence: high
+**⬜ open** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #18
+
+> **Audit note.** Per audit: registry is ~38 entries (not ~50). `generateMoodTagMix` (`programmaticPlaylists.ts:2568`) is ✓ dead — only its own test calls it; not in the `mixGenerators` registry (delete candidate).
 
 **Files:** `backend/src/services/programmaticPlaylists.ts:457`, `backend/src/services/programmaticPlaylists.ts:474`, `backend/src/services/hybridSimilarity.ts:104`
 
@@ -687,7 +747,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F43 — Per-external-source coupling: each media source is a parallel stack (route file + service singleton + frontend URL builder) with no unifying stream-provider seam, despite a CanonicalMediaSource contract already existing
 
-**⬜ open** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #18 · confidence: high
+**⬜ open** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #18
 
 **Files:** `backend/src/routes/youtube.ts:1`, `backend/src/routes/youtubeMusic.ts:1`, `backend/src/routes/tidalStreaming.ts:1`, `backend/src/services/tidalStreaming.ts:129`, `packages/media-metadata-contract/src/index.ts:3`
 
@@ -701,7 +761,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F44 — library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-route, blocking reuse and a controller/service/repository layering
 
-**⬜ open** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #14 · confidence: high
+**⬜ open** · dimension: extensibility · severity: medium · effort: L · risk: medium · epic: #14 · duplicate of F2
+
+> **Audit note.** ✓ Duplicate of F2 (same god-file); kept for the controller/service/repository angle. Don't double-count in dimension tallies.
 
 **Files:** `backend/src/routes/library.ts:1`, `backend/src/routes/library.ts:1806`, `backend/src/routes/library.ts:3128`
 
@@ -715,7 +777,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F45 — CI has no security/vulnerability scanning and no dependency automation (Dependabot/Renovate)
 
-**⬜ open** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #10 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #10
+
+> **Audit note.** ✓ The original body's 'FIVE workflows' is wrong — there are FOUR (helm-chart-release, image-builds, pr-checks, quality-visibility) and SEVEN Dockerfiles. The CI-gaps thesis (no CVE/SAST/dep-scan) holds.
 
 **Files:** `.github/workflows/image-builds.yml`, `.github/workflows/quality-visibility.yml`, `.github/workflows/pr-checks.yml`
 
@@ -729,7 +793,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F46 — No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend is strict:true
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
+
+> **Audit note.** ✓ `@ts-ignore` count is 1, not ~480 — that figure is `eslint-disable` (a different mechanism). Scope F46 to the CI typecheck gate; cross-link #15 for the type work.
 
 **Files:** `.github/workflows/quality-visibility.yml`, `frontend/tsconfig.json`, `backend/tsconfig.json`, `backend/package.json`
 
@@ -743,7 +809,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F47 — API runtime image ships uncompiled TypeScript and runs it via tsx in production with full dev dependencies
 
-**⬜ open** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #19 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: high→medium · effort: M · risk: low · epic: #19 · duplicate of F17
+
+> **Audit note.** ✓ Duplicate of F17 (same tsx-in-prod issue); severity high→medium. The worker target already compiles to `dist`.
 
 **Files:** `backend/Dockerfile`, `backend/package.json`
 
@@ -757,7 +825,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F48 — Bull 4 is maintenance-only with a version-mismatched @types/bull; migrate to BullMQ
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · ⚠️ breaking · epic: #19 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · ⚠️ breaking · epic: #19
 
 **Files:** `backend/package.json`, `backend/src/workers/queues.ts`, `backend/src/workers/index.ts`, `backend/src/index.ts`
 
@@ -771,7 +839,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F49 — Express 4 (Express 5 is GA) with half-migrated middleware majors
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · ⚠️ breaking · epic: #19 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · ⚠️ breaking · epic: #19
+
+> **Audit note.** ✓ Undercount: a SECOND guaranteed Express-5 breakage exists at `subsonic.ts:6667` (`router.all("*")`), not just `library.ts`. The migration surface is larger than 'small'.
 
 **Files:** `backend/package.json`
 
@@ -785,7 +855,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F50 — Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproducible ML images
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: M · risk: low · epic: #10 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: medium · effort: M · risk: low · epic: #10
+
+> **Audit note.** Per audit: 10 Essentia `.pb` files; CLAP checkpoint ~600MB per the repo comment (not ~2GB).
 
 **Files:** `services/ytmusic-streamer/requirements.txt`, `services/audio-analyzer-clap/requirements.txt`, `services/tidal-downloader/requirements.txt`, `services/audio-analyzer/requirements.txt`
 
@@ -799,7 +871,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F51 — audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · epic: #19 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · epic: #19
 
 **Files:** `services/audio-analyzer/Dockerfile`, `services/audio-analyzer/requirements.txt`
 
@@ -813,7 +885,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F52 — AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and runtime CVE-removal anti-pattern
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · epic: #19 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · epic: #19
 
 **Files:** `Dockerfile`, `docker-compose.aio.yml`
 
@@ -827,7 +899,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F53 — Node runtime version unpinned and drifts across CI (frontend on Node 24, everything else Node 20)
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8 · confidence: high
+**⬜ open** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
 
 **Files:** `.github/workflows/quality-visibility.yml`, `backend/package.json`, `frontend/package.json`
 
@@ -839,3 +911,74 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ---
 
+### F54 — POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys
+
+**⬜ open** · dimension: security · severity: high · effort: S · risk: low · epic: #12
+
+> **Provenance.** Found by the independent audit (§6.1) and re-verified against deviceLink.ts. NOT in the original 53.
+
+**Files:** `backend/src/routes/deviceLink.ts:118`, `backend/src/routes/deviceLink.ts:136`, `backend/src/routes/deviceLink.ts:146`, `backend/src/routes/deviceLink.ts:155`, `backend/src/index.ts (apiLimiter mount)`
+
+**Problem.** The unauthenticated POST /device-link/verify reads linkCode.usedAt (deviceLink.ts:136), then prisma.apiKey.create(...) (146), then SEPARATELY prisma.deviceLinkCode.update({usedAt}) (155) — with no transaction and no conditional updateMany. Two concurrent verifies of the same code both pass the `if (linkCode.usedAt)` guard and both mint a full-privilege ApiKey (auth.ts resolves these to the user). This is the EXACT TOCTOU class fixed for invite codes in F26 — the in-repo pattern (updateMany ... where usedAt:null) exists and is simply not applied here. Compounding: the route is mounted under the general apiLimiter, not authLimiter, and the code is 6 chars over a 32-char alphabet (~1.1B) with a 5-min TTL — a human-typable, unauthenticated, full-privilege credential mint on the wrong rate-limit tier.
+
+**Recommendation.** Mirror the F26 fix: claim the code atomically before minting — `const claimed = await prisma.deviceLinkCode.updateMany({ where: { id: linkCode.id, usedAt: null }, data: { usedAt: new Date(), deviceName, /* apiKeyId set after create or in a tx */ } })` and proceed only if `claimed.count === 1`, else return 400 'Code already used'. Prefer wrapping the claim + apiKey.create in a single prisma.$transaction so a failed key creation rolls back the claim. Separately, move the route behind authLimiter (the stricter tier) rather than the general apiLimiter. Small, surgical, high-value — a strong Wave-1 candidate (smaller and scarier than several items that shipped).
+
+**Safety / pitfalls.** The apiKeyId currently set on the code points at the created key; with the claim-first ordering, set apiKeyId in a follow-up update inside the same transaction (or create the key first inside the tx, then claim with the id) so the link record still references its key. Keep the existing 404 (invalid) / 400 (expired) branches. Verify generateApiKey() entropy is adequate now that the value is the credential.
+
+---
+
+## Architecture: strategy going forward
+
+> Distilled from the independent audit's architecture pass (§9 of [`modernization-roadmap-audit-findings.md`](modernization-roadmap-audit-findings.md)), re-verified in spots. The framing question: where is the line between a whole revamp, churny PRs, and *actionable* cleanup — given a future model might one day digest the whole tree at once, but real engineers build on a kernel of good stuff?
+
+**Shape.** soundspan is a **modular monolith + Python sidecars**: a Next.js PWA (custom server proxy, one `ApiClient.request<T>()` chokepoint, AudioEngine adapter strategy) → an Express API + Bull workers in one codebase (role-split by `BACKEND_PROCESS_ROLE`, one Prisma gateway) → Postgres 16 + pgvector, Redis (queues + locks + embed streams), and four Python sidecars. The two analyzers are **`BRPOP` workers that write results straight to Postgres** (DB-as-contract), not HTTP services — a deliberate, good seam.
+
+### The kernel — preserve and lean into (do not rewrite)
+
+The most important architectural fact the issue-by-issue review never states: **the codebase already has the two things that make aggressive cleanup — by a human or a future big model — safe rather than reckless.**
+
+1. **A contract-test spine** — 31 `*Contract.test.ts` + a real data-path linter (`scripts/verifyNoIgnoredDataPaths.ts`) encode the boundaries that matter (queue registration, scheduler claim-locks, Prisma resilience, the no-raw-SQL-data-path rule).
+2. **The pure-`*Policy.ts` pattern** — ~14 side-effect-free decision modules (backend services + `frontend/lib/audio-engine/*Policy.ts`) backed by ~125 unit tests, already imported by the god-components. This is the proven template for taming the god-files incrementally.
+
+| Kernel piece | Where |
+|---|---|
+| `media-metadata-contract` (the one true cross-component seam) | `packages/media-metadata-contract` |
+| Single Prisma gateway + role-aware pool | `utils/db.ts`, `worker.ts` |
+| Contract-test spine + data-path linter | 31 `*Contract.test.ts`, `verifyNoIgnoredDataPaths.ts` |
+| Pure `*Policy.ts` + ~125 unit tests (the template) | `frontend/lib/audio-engine/*Policy.ts`, backend services |
+| AudioEngine adapter strategy (Howler / Tauri / video.js) | `frontend/lib/audio-engine/` |
+| pgvector substrate + `hybridSimilarity` (graceful degradation) | `schema.prisma`, `services/hybridSimilarity.ts` |
+| Feature-folder modularization (the target structure) | `frontend/features/*` |
+| Centralized Bull queue registry | `workers/queues.ts` |
+| Per-component multi-stage Dockerfiles + `docker-bake` | `backend/Dockerfile`, `docker-bake.json` |
+
+**Strategic answer:** don't revamp, and don't ship churny PRs that split god-files now. (a) Lean into the kernel; (b) clear cheap cruft so the next reader/LLM isn't misled by phantom paths; and (c) **unify shared infra (retry / lock / error) _before_ any god-file split** — splitting `library.ts` today would triple the copies of the retry proxy; unifying it first makes the split mechanical.
+
+### Tiered cleanup
+
+**NOW — a bundled "janitor PR" + a few small ones (XS–M, low risk, behavior-preserving).** All verified dead/orphan in this pass:
+
+- Delete dead **`analysisQueue`** (`workers/queues.ts:106`, defined never produced/consumed — confirm no sidecar producer), dead **`generateMoodTagMix`** (`programmaticPlaylists.ts:2568`, only its own test calls it), dead **`safeError`/`wrapNodeError`** (`utils/errors.ts`, 0 prod callers), and orphan UI **`MediaCard.tsx`** + **`PagedGridCarousel.tsx`** (0 imports).
+- Fold the 3 unseeded inline Fisher-Yates copies into `utils/shuffle.ts` (keep the seeded LCG layer — that's the F6 determinism).
+- Extract one `utils/withDbRetry` + one proxy factory (collapses the 8 retry copies — see F7).
+- api-runtime: run compiled `node dist` not `tsx` (F17/F47); add `engines.node` + `.nvmrc` (F53); `.gitignore` `frontend/tsconfig.tsbuildinfo`; centralize the TIDAL sidecar URL in `config.ts`; unify the sidecar `from common.*` import root.
+- **Toast unification** (own PR): two systems mounted at once in `app/layout.tsx` (sonner + custom `toast-context`, ~26 files) → migrate to sonner, delete the custom context (F9).
+
+**STAGE — planned, contract-guarded (M–L, medium risk):**
+
+- Unify the ~7 Redis claim-lock blocks into one `withRedisClaim(key, ttl, op)` (leader-election-critical — guard with the existing claim-lock contract tests).
+- Consolidate error handling onto ONE path (today four idioms + ~298 inline `res.status().json()`) — **F1/F14**.
+- Type the hot API paths + flip frontend `strict` per `features/*` folder against the existing contract — **F4/F40**.
+- Adopt npm **workspaces** (collapses the ~8 `tsc` pre-hooks + the `file:`-copy trap) — **F8/#8**, highest-leverage build-friction fix.
+- Add inbound auth to the two HTTP sidecars (mirror `requireInternalSecret`) — **F31**.
+- A thin `SidecarClient` to collapse the per-source streaming triplets — **F39/F43**, driven by a concrete new-source need, not preemptively.
+- Decompose `library.ts` along resource lines (the proven `subsonic.ts` model) — **but only after** the retry/lock/error infra is unified — **F2/F44**.
+
+**LEAVE for the big-bang (or whenever the file is next touched):** the AIO single-stage image (its one-container simplicity is a real self-host feature), full god-component teardown (`AudioPlaybackOrchestrator` 7080 LOC — keep extracting policies behind the 125-test harness, do **not** rewrite — **F5**), routes-own-Prisma → repository layering (**F44**, only pays off folded into the error/retry unification), and the vibe-vocabulary/legacy-column changes (behavior changes needing eval + destructive migration, not refactors).
+
+### Two course-corrections
+
+- **The "no raw SQL" worry is overstated.** `$queryRaw` is deliberately scoped to search/similarity/embedding reads + a few maintenance writes, guarded by a linter + contract tests. Treat it as a *blessed escape hatch*, not cruft.
+- **The codebase is genuinely disciplined where it counts** — only ~5 TODOs, zero FIXME/HACK/@deprecated, no orphaned services, no dishonest skipped tests. The cruft is concentrated in *mechanical duplication* and a handful of *god-files* — a much better problem to have. Don't budget for comment-rot or test-rot.
+
+**Net line:** ship the janitor + toast PRs and the cheap Docker/config wins now; stage the infra unification (retry/lock/error) and workspaces deliberately, behind the contract tests; leave the god-file splits and the AIO monolith for after the infra is unified — or for the model that one day reads all 200k lines at once. The kernel will still be there to build on.
