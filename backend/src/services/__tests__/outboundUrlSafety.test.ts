@@ -1,9 +1,85 @@
+const mockLookup = jest.fn();
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
+
 import {
     normalizeSafeOutboundRedirectTarget,
     normalizeSafeOutboundUrl,
+    resolveSafeOutboundUrl,
+    resolveSafeOutboundRedirectTarget,
 } from "../outboundUrlSafety";
 
 describe("outboundUrlSafety", () => {
+    beforeEach(() => {
+        mockLookup.mockReset();
+    });
+
+    describe("resolveSafeOutboundUrl (DNS-resolving guard)", () => {
+        it("allows a host that resolves to a public address", async () => {
+            mockLookup.mockResolvedValue([
+                { address: "93.184.216.34", family: 4 },
+            ]);
+            expect(
+                await resolveSafeOutboundUrl("https://example.com/feed.xml")
+            ).toBe("https://example.com/feed.xml");
+        });
+
+        it("rejects a host that resolves to a private/loopback address", async () => {
+            mockLookup.mockResolvedValue([{ address: "10.0.0.5", family: 4 }]);
+            expect(
+                await resolveSafeOutboundUrl("https://internal.example.com")
+            ).toBeNull();
+        });
+
+        it("rejects when ANY resolved address is private (DNS multi-record)", async () => {
+            mockLookup.mockResolvedValue([
+                { address: "93.184.216.34", family: 4 },
+                { address: "127.0.0.1", family: 4 },
+            ]);
+            expect(
+                await resolveSafeOutboundUrl("https://example.com")
+            ).toBeNull();
+        });
+
+        it("closes the alternate-encoding bypass (decimal IP -> 127.0.0.1)", async () => {
+            // getaddrinfo normalizes 2130706433 to 127.0.0.1 at runtime; here the
+            // mock simulates that, and the resolved IP is range-checked.
+            mockLookup.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+            expect(await resolveSafeOutboundUrl("http://2130706433/")).toBeNull();
+        });
+
+        it("rejects an unresolvable host (and never resolves blocked literals)", async () => {
+            mockLookup.mockRejectedValue(
+                Object.assign(new Error("ENOTFOUND"), { code: "ENOTFOUND" })
+            );
+            expect(
+                await resolveSafeOutboundUrl("https://does-not-exist.invalid")
+            ).toBeNull();
+
+            // A host blocked by the sync pre-check never reaches DNS resolution.
+            expect(await resolveSafeOutboundUrl("http://localhost")).toBeNull();
+            expect(mockLookup).toHaveBeenCalledTimes(1);
+        });
+
+        it("rejects when DNS returns no addresses", async () => {
+            mockLookup.mockResolvedValue([]);
+            expect(await resolveSafeOutboundUrl("https://example.com")).toBeNull();
+        });
+    });
+
+    describe("resolveSafeOutboundRedirectTarget", () => {
+        it("resolves a relative redirect and re-validates the resolved IP", async () => {
+            mockLookup.mockResolvedValue([{ address: "10.1.2.3", family: 4 }]);
+            expect(
+                await resolveSafeOutboundRedirectTarget(
+                    "/internal",
+                    "https://evil.example.com/start"
+                )
+            ).toBeNull();
+        });
+    });
+
     describe("normalizeSafeOutboundUrl", () => {
         it("allows public http and https urls", () => {
             expect(

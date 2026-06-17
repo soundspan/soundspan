@@ -1,3 +1,5 @@
+import { lookup } from "dns/promises";
+
 const IPV4_PRIVATE_172_RE = /^172\.(1[6-9]|2[0-9]|3[0-1])\./;
 const IPV6_LINK_LOCAL_RE = /^fe[89ab]/i;
 
@@ -88,4 +90,71 @@ export function normalizeSafeOutboundRedirectTarget(
     } catch {
         return null;
     }
+}
+
+/**
+ * Validate that the hostname's RESOLVED address(es) are all public. The
+ * string-only `normalizeSafeOutboundUrl` is bypassed by alternate IP encodings
+ * (decimal `2130706433`, hex `0x7f000001`, octal, `127.1`) and by DNS names that
+ * point at an internal address; resolving via getaddrinfo normalizes those
+ * encodings and exposes the real target IPs, which are then range-checked.
+ * Returns true only if every resolved address is public.
+ *
+ * Note: this checks at resolve time; a DNS-rebinding attacker could in theory
+ * return a different address to the subsequent fetch. Pinning the resolved IP
+ * into the request agent would close that and is a larger follow-up.
+ */
+async function hasOnlyPublicResolvedAddresses(
+    hostname: string
+): Promise<boolean> {
+    const host = stripIpv6Brackets(hostname);
+    try {
+        const addresses = await lookup(host, { all: true });
+        if (addresses.length === 0) {
+            return false;
+        }
+        return addresses.every(
+            ({ address }) =>
+                !isBlockedIpv4Hostname(address) &&
+                !isBlockedIpv6Hostname(address)
+        );
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Like `normalizeSafeOutboundUrl`, but additionally resolves the hostname via
+ * DNS and rejects the URL if any resolved address is private/loopback/link-local
+ * (closing the alternate-encoding and DNS-to-internal SSRF bypasses). Async;
+ * apply at the point an outbound request is actually made.
+ */
+export async function resolveSafeOutboundUrl(
+    rawUrl: string
+): Promise<string | null> {
+    const normalized = normalizeSafeOutboundUrl(rawUrl);
+    if (!normalized) {
+        return null;
+    }
+    const { hostname } = new URL(normalized);
+    return (await hasOnlyPublicResolvedAddresses(hostname))
+        ? normalized
+        : null;
+}
+
+/**
+ * DNS-resolving variant of `normalizeSafeOutboundRedirectTarget` for following
+ * redirects safely (each hop is re-resolved and range-checked).
+ */
+export async function resolveSafeOutboundRedirectTarget(
+    redirectTarget: string,
+    currentUrl: string
+): Promise<string | null> {
+    let absolute: string;
+    try {
+        absolute = new URL(redirectTarget, currentUrl).toString();
+    } catch {
+        return null;
+    }
+    return resolveSafeOutboundUrl(absolute);
 }

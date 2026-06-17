@@ -1,7 +1,7 @@
 import Parser from "rss-parser";
 import axios from "axios";
 import { logger } from "../utils/logger";
-import { normalizeSafeOutboundUrl } from "./outboundUrlSafety";
+import { resolveSafeOutboundUrl } from "./outboundUrlSafety";
 
 interface RSSPodcast {
     title: string;
@@ -92,7 +92,7 @@ class RSSParserService {
         options: RSSFeedRequestOptions = {}
     ): Promise<ParsedPodcastFeed> {
         try {
-            const safeFeedUrl = normalizeSafeOutboundUrl(feedUrl);
+            const safeFeedUrl = await resolveSafeOutboundUrl(feedUrl);
             if (!safeFeedUrl) {
                 throw new Error("Invalid or private feed URL");
             }

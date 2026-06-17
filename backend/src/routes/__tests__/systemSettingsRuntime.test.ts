@@ -1,6 +1,14 @@
 import axios from "axios";
 import { Request, Response } from "express";
 
+// The admin connection-test now DNS-resolves the URL (SSRF guard). Resolve any
+// non-blocked host to a fixed public IP so tests don't depend on real DNS.
+jest.mock("dns/promises", () => ({
+    lookup: jest
+        .fn()
+        .mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
+}));
+
 type AuthFailureMode = "ok" | "unauthorized" | "forbidden";
 const authFailureState = { mode: "ok" as AuthFailureMode };
 

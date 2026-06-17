@@ -8,7 +8,7 @@ import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
-import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
+import { resolveSafeOutboundUrl } from "../services/outboundUrlSafety";
 import {
     sendInternalRouteError,
     sendRouteError,
@@ -20,10 +20,11 @@ const WEBHOOK_URL_ALIASES = [BRAND_SLUG];
 // Shared validation message for admin outbound connection-test URLs.
 const ADMIN_TEST_URL_ERROR = "URL must be a valid public HTTP(S) URL";
 
-function normalizeAdminTestUrl(url: string): string | null {
-    const normalizedUrl = normalizeSafeOutboundUrl(url);
+async function normalizeAdminTestUrl(url: string): Promise<string | null> {
+    // DNS-resolve and range-check (the admin connection test fetches this URL).
+    const resolved = await resolveSafeOutboundUrl(url);
 
-    return normalizedUrl ? normalizedUrl.replace(/\/+$/, "") : null;
+    return resolved ? resolved.replace(/\/+$/, "") : null;
 }
 
 /**
@@ -539,7 +540,7 @@ router.post("/test-lidarr", async (req, res) => {
                 .json({ error: "URL and API key are required" });
         }
 
-        const normalizedUrl = normalizeAdminTestUrl(url);
+        const normalizedUrl = await normalizeAdminTestUrl(url);
         if (!normalizedUrl) {
             return res.status(400).json({ error: ADMIN_TEST_URL_ERROR });
         }
@@ -855,7 +856,7 @@ router.post("/test-audiobookshelf", async (req, res) => {
                 .json({ error: "URL and API key are required" });
         }
 
-        const normalizedUrl = normalizeAdminTestUrl(url);
+        const normalizedUrl = await normalizeAdminTestUrl(url);
         if (!normalizedUrl) {
             return res.status(400).json({ error: ADMIN_TEST_URL_ERROR });
         }
