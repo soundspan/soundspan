@@ -1526,8 +1526,11 @@ class SimpleDownloadManager {
                 }
             }
 
-            // Clean up from Lidarr queue if possible
-            const lidarrAlbumId = (job as any).lidarrAlbumId;
+            // Clean up from Lidarr queue if possible. `job` is a DownloadJob
+            // from prisma.downloadJob.findMany (no select), and lidarrAlbumId is
+            // a real typed column (Int?), so no `as any` is needed — the cast
+            // only disabled type checking on the field that drives dedup/retry.
+            const lidarrAlbumId = job.lidarrAlbumId;
             if (lidarrAlbumId && job.lidarrRef) {
                 await this.blocklistAndRetry(job.lidarrRef, lidarrAlbumId);
             }

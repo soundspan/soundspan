@@ -19,7 +19,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | F46 | "~480 `@ts-ignore`" → **1** (480 is `eslint-disable`). |
 | F35 | "helmet ships without HSTS/CSP" → helmet **does** ship both by default. |
 | F28 | "breaking / keys re-issued" → **no re-issue** (HMAC-in-place; keys keep working). |
-| F3 | shipped **1 of 4 steps**; a 2nd identical cast remains at `simpleDownloadManager.ts:1530`. |
+| F3 | both gratuitous casts now removed (line-433 in #21, line-1530 in `feat/f3-second-cast`); the `DownloadJobMetadata` typing / discoverWeekly / backend ESLint steps remain deferred. |
 | F7 / F49 | undercounts: retry predicate in **8** files; a 2nd Express-5 break at `subsonic.ts:6667`. |
 | F22 | omits a 4th regenerated key (`INTERNAL_API_SECRET`). |
 | Status | F3/F18/F24 are **partial**, not complete; F6 re-homed out of #14; severities recalibrated (F20/F23/F24/F35/F36/F47). |
@@ -151,7 +151,9 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 **🟡 partial (PR #21)** · dimension: readability · severity: high · effort: L · risk: medium · epic: #15
 
-> **Audit note.** ✓ Only step 1 of 4 shipped (the line-433 cast). A SECOND identical cast remains at `simpleDownloadManager.ts:1530` (`(job as any).lidarrAlbumId`), not yet removed. The `DownloadJobMetadata` interface / discoverWeekly typing / backend ESLint are unbuilt; a partial helper `utils/downloadJobMetadata.ts` already exists to build on.
+> **Audit note.** ✓ Originally only step 1 of 4 shipped (the line-433 cast).
+>
+> **Update** (`feat/f3-second-cast`). The SECOND identical cast at `simpleDownloadManager.ts:1530` (`(job as any).lidarrAlbumId`) is now removed too — `job` is a `DownloadJob` from `findMany` (no select) and `lidarrAlbumId` is a typed `Int?` column, so the cast was gratuitous (tsc clean; 88/88 simpleDownloadManager tests pass). Both gratuitous casts are gone. Still 🟡: the `DownloadJobMetadata` interface / `parseMetadata`, the discoverWeekly typing, and the backend ESLint gate are deferred — typing the heterogeneous `Json?` metadata and rewiring `resolveDownloadJobMetadata`'s 3 callers is a regression-prone change better shipped as its own typed-metadata PR under #15.
 
 **Files:** `backend/src/services/simpleDownloadManager.ts`, `backend/src/services/discoverWeekly.ts`, `backend/src/routes/library.ts`
 
