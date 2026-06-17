@@ -3,7 +3,7 @@
 Canonical index of the modernization review findings (F1–F53, plus F54 added on audit) from the **2026-06-16** review of soundspan. The review mapped each subsystem, assessed it across readability / performance / idempotency / security / extensibility / dependencies, then adversarially re-read every finding against the real code (53 high-confidence findings, **no true false positive**), grouped them into the epics below, and was itself **independently audited** ([`docs/modernization-roadmap-audit-findings.md`](modernization-roadmap-audit-findings.md)).
 
 > **Read me first.**
-> - **Status:** 5 complete + 3 partial = 8 findings in **open PR #21** (stacked on #3); the Wave-1 continuation adds F54, F22, and the F3/F24/F6/F18 follow-ups on stacked branches — **nothing is merged to `main` yet.** ✅ complete · 🟡 partial · ⬜ open.
+> - **Status:** PR #21 = 5 complete + 3 partial (8 findings). The **Wave-1 continuation** (stacked PRs #22–#32) then shipped: **F54, F22, F29, F28, F36, F35, F33** complete; the **F3/F24/F6/F18** follow-ups (cast removal + TDD backfill); **F32** partial (rate-limit + no-full-scan shipped, hard-fail-closed auth deferred). The whole **#11 secrets program is done (4/4)**. **F31** and **F37** are **deferred-with-a-note** (see their entries) — F31 because the env had no Python toolchain to verify the security-critical sidecar code, F37 as a cross-cutting redesign. **Nothing is merged to `main` yet** (all stacked on the unmerged #3/#21). ✅ complete · 🟡 partial · ⬜ open/deferred.
 > - **Audit corrections are inline.** Where the audit corrected a count, severity, or premise, the finding carries an **Audit note** (✓ = re-verified against the tree here; "per audit" = relayed). Severity columns show `orig→recalibrated` where adjusted for this single-operator deployment.
 > - **Line numbers** in finding bodies were captured against the pre-#3 branch tree and may be off by a few lines on `main`.
 > - **Not exhaustive.** Areas the review did **not** assess: test quality/coverage, observability/structured logging, data-migration safety, and PWA-offline/accessibility. "53" is ~51 distinct issues (F2≈F44, F17≈F47 are duplicates kept for their differing angles).
@@ -573,7 +573,18 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F31 — FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a filesystem path (path traversal)
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
+**⬜ open · DEFERRED-WITH-SPEC (Wave 1)** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
+
+> **Why deferred (Wave 1).** This is a cross-language change (Python sidecars + TS backend clients) with an **all-or-nothing coupling**: the sidecar auth and the backend `x-internal-secret` header must land together or *every* sidecar call 401s and breaks YouTube/Tidal streaming (the homelab depends on ytmusic-streamer). The Wave-1 working environment had **no Python toolchain** (no pip/pytest/fastapi/httpx), so the security-critical sidecar code could not be run or verified locally — shipping unverified auth/path-traversal code to prod infra was declined under the "verify, don't assume" contract. Surface is fully mapped below; do it as its own focused PR where pytest runs.
+>
+> **Executable spec (ready to implement):**
+> 1. **Shared helper** — add to `services/common/sidecar_runtime_utils.py`:
+>    - `require_internal_secret(request)`: if `request.url.path == "/health"` → return (exempt for k8s probes + the backend's own `/health` checks at `tidal.ts:111`, `tidalStreaming.ts:184`); read `INTERNAL_API_SECRET` and **fail closed** (`HTTPException(403)`) if unset; compare the `x-internal-secret` header with `hmac.compare_digest` (both `str`); 403 on mismatch. Mirrors the verified TS `requireInternalSecret` (F30).
+>    - `validate_user_id(user_id)`: `re.fullmatch(r"[A-Za-z0-9_-]{1,64}", user_id)` or `HTTPException(400)`. Prisma cuids are lowercase-alnum so legit traffic passes.
+> 2. **Apply auth app-wide** in both `services/ytmusic-streamer/app.py` and `services/tidal-downloader/app.py`: `app = FastAPI(..., dependencies=[Depends(require_internal_secret)])` (add `Depends` to the `fastapi` import). The `/health` exemption lives in the dependency.
+> 3. **Path-traversal** — in ytmusic-streamer, call `validate_user_id(user_id)` inside the file-path builders (`_oauth_file` / `client_creds_{user_id}.json`, ~`app.py:291`) so `auth_status`/`auth_restore`/`auth_clear` reject `../`-style ids. Do **not** apply to tidal's body `user_id` (the audit corrected that citation — tidal uses it only as an in-memory dict key, not a path).
+> 4. **Backend (same PR — required or all calls break)** — add `"x-internal-secret": process.env.INTERNAL_API_SECRET` to the **default headers** of each of the four axios clients (one edit each): `youtubeMusic.ts:325`, `youtubeDownload.ts:181`, `tidal.ts:97`, `tidalStreaming.ts:158`. Verified there are **no** direct sidecar calls bypassing these clients, so this covers every call site.
+> 5. **Tests** — pytest (both sidecars' existing `tests/` + `conftest.py`): traversal `user_id=../../etc/x` → 400; missing/wrong `x-internal-secret` → 403; `/health` reachable without the secret; valid secret passes. Backend jest: assert each client sets the header.
 
 **Files:** `services/ytmusic-streamer/app.py:291`, `services/ytmusic-streamer/app.py:1383`, `services/ytmusic-streamer/app.py:1420`, `services/tidal-downloader/app.py:1025`
 
@@ -677,7 +688,11 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F37 — Long-lived full-privilege JWT embedded in stream/cover-art URLs (?token=) leaks via logs, history, Referer
 
-**⬜ open** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
+**⬜ open · DEFERRED-WITH-NOTE (Wave 1)** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
+
+> **Why deferred (Wave 1).** This is a cross-cutting redesign, not a contained fix: it replaces the full-privilege access token in `?token=` media URLs with short-lived, audience-scoped media tokens across the streaming AND cover-art paths (`requireAuthOrToken` query-token branch + `getStreamUrl`/`getCoverArtUrl` in `frontend/lib/api.ts`). The audit (appendix, F37 flag) explicitly warns it is **riskier than "lowest-risk"**: the cover-art→token migration risks breaking canvas/`<img>` cross-origin loads and the Tauri native client, and it touches both backend auth and the frontend API boundary. Deferred by operator decision to a focused follow-up PR with its own verification (real-app run on web + Tauri), rather than a tail-end change.
+>
+> **Approach when picked up.** The repo already has the right pattern to build on: the segmented-streaming `sessionService` mints short-lived tokens bound to `sessionId`+`trackId` delivered via the `x-streaming-session-token` header (the same `SESSION_TOKEN_SECRET` jwt.verify sites at `sessionService.ts:387/790` that F36 left unpinned — pin `algorithms:["HS256"]` there as part of this work). Mint a short-lived (minutes), audience-scoped (`media`/`cover`) token per resource instead of reusing the 24h account JWT; prefer a header or a per-resource signed token over the query param where the client allows it; verify canvas/Tauri/cross-origin cover loads still work before cutover.
 
 **Files:** `backend/src/middleware/auth.ts:264`, `backend/src/routes/library.ts:4900`, `frontend/lib/api.ts:1241`, `frontend/lib/api.ts:1390`
 
