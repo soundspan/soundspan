@@ -197,6 +197,8 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 **✅ complete (PR #21)** · dimension: readability · severity: medium · effort: M · risk: low · epic: —
 
+> **Test backfill** (`feat/wave1-tdd-backfill`). `seededShuffle` is now exported and unit-tested in `programmaticPlaylistsBehavior.test.ts`: determinism (same seed → same order), permutation, **non-mutation** (the old in-place `tracks.sort()` would fail this), and a uniformity-spread check. Closes the audit §3.1 "no test added" gap.
+
 **Files:** `backend/src/services/programmaticPlaylists.ts`
 
 **Problem.** At least 10 mix generators shuffle via `tracks.sort(() => { random = (random*9301+49297)%233280; return random/233280 - 0.5; })` (e.g. line 1964, 2067, 2327, 3834). Passing a comparator that ignores its arguments and returns a stateful value is a non-transitive comparator — V8 sort is implementation-defined for such comparators, the result is a biased (non-uniform) permutation, AND .sort() mutates the cached `tracks` array in place. The `(x*9301+49297)%233280` LCG literal is hand-copied 22 times. Crucially, a correct Fisher-Yates seededShuffle(items, seedKey) ALREADY EXISTS at line 160 and is simply not used by these generators, alongside a separate getSeededRandom 32-bit hash (142) and createSeededRng LCG (152) — three RNG implementations coexist.
@@ -371,6 +373,8 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 **🟡 partial (PR #21)** · dimension: performance · severity: medium · effort: M · risk: low · epic: #17
 
+> **Test backfill** (`feat/wave1-tdd-backfill`). Fixed the tautological "file not written" test the audit §3.1 flagged: it set `existsSync=false` but the code uses `await stat()`, so it passed only because `mockStat` returned `undefined` and reading `.size` threw a swallowed `TypeError`. `mockStat` now **rejects** (ENOENT), exercising the real not-found branch, and the test asserts `stat` was actually called. (Still 🟡: the whole-file-into-heap headline is deferred — the vendored slsk-client buffers regardless.)
+
 **Files:** `backend/src/services/soulseek.ts:831`, `backend/src/services/soulseek.ts:849`, `backend/src/services/audioStreaming.ts:494`, `backend/src/services/audioStreaming.ts:510`
 
 **Problem.** slsk-client's download() delivers the complete file as a single Buffer, so large FLAC/lossless downloads are held entirely in heap before being written, and concurrent downloads multiply this with no byte-budget cap (only a count cap via p-queue). Timed-out partials are cleaned with `fs.existsSync` + `fs.unlinkSync` (soulseek.ts:849) — synchronous fs blocking the event loop on every timeout. Separately, audioStreaming.streamFileWithRangeSupport pipes with raw `stream.pipe(res)` (line 510) and hand-rolls error/close handlers; pipe() does not propagate teardown/backpressure/errors from res back to the source on client abort the way stream.pipeline does — the manual res.on('close') destroy is the only thing covering it.
@@ -461,7 +465,9 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 **🟡 partial (PR #21)** · dimension: idempotency · severity: high→medium · effort: M · risk: low · epic: #13
 
-> **Audit note.** ✓ PARTIAL: only the 'safe half' (removeOnComplete/Fail) shipped; coalescing `jobId` + attempts/backoff deferred to BullMQ (#19). Severity high→medium (bounded Redis leak). No regression test shipped — the queues test could assert the options object.
+> **Audit note.** ✓ PARTIAL: only the 'safe half' (removeOnComplete/Fail) shipped; coalescing `jobId` + attempts/backoff deferred to BullMQ (#19). Severity high→medium (bounded Redis leak).
+>
+> **Test backfill** (`feat/wave1-tdd-backfill`). `queues.test.ts` now asserts the `library-scan` queue's `defaultJobOptions` (`removeOnComplete:100` / `removeOnFail:200`) — the missing regression guard the audit §3.1 flagged. (Still 🟡: the coalescing/backoff half is unbuilt.)
 
 **Files:** `backend/src/routes/webhooks.ts:233`, `backend/src/routes/webhooks.ts:246`, `backend/src/routes/library.ts:1274`, `backend/src/jobs/queueCleaner.ts:360`, `backend/src/workers/queues.ts:67`
 

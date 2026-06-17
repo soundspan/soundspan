@@ -157,7 +157,10 @@ function createSeededRng(seed: number): () => number {
     };
 }
 
-function seededShuffle<T>(items: T[], seedKey: string): T[] {
+// Exported for unit testing: a seeded Fisher-Yates that is deterministic per
+// seed, returns a fresh array (no in-place mutation), and is uniform — unlike
+// the biased `Array.sort()` comparator it replaced (F6).
+export function seededShuffle<T>(items: T[], seedKey: string): T[] {
     const shuffled = [...items];
     const rng = createSeededRng(getSeededRandom(seedKey));
     for (let i = shuffled.length - 1; i > 0; i -= 1) {

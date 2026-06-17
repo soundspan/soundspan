@@ -1205,7 +1205,17 @@ describe("soulseek service", () => {
             jest.spyOn(soulseekService as any, "ensureConnected").mockResolvedValueOnce(
                 undefined
             );
-            mockFsExistsSync.mockReturnValue(false);
+            // The post-download check is `await stat(destPath)`, which REJECTS
+            // when the file is missing — that is the real "not written" path.
+            // (Previously this test only set existsSync=false and left mockStat
+            // returning undefined, so it passed for the wrong reason: reading
+            // `.size` on undefined threw a TypeError that was swallowed into the
+            // same "File not written" result. Reject mockStat so the genuine
+            // not-found branch is exercised.)
+            const enoent = Object.assign(new Error("ENOENT: no such file"), {
+                code: "ENOENT",
+            });
+            mockStat.mockRejectedValueOnce(enoent);
             (soulseekService as any).client = {
                 search: jest.fn(),
                 download: jest.fn(
@@ -1224,6 +1234,9 @@ describe("soulseek service", () => {
                 "/music/missing.flac"
             );
 
+            // The error comes from stat() rejecting on the missing file, not
+            // from an incidental TypeError — assert the verification ran.
+            expect(mockStat).toHaveBeenCalledWith("/music/missing.flac");
             expect(result).toEqual({ success: false, error: "File not written" });
         });
 

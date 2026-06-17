@@ -80,6 +80,23 @@ describe("workers/queues", () => {
         );
     });
 
+    it("bounds the library-scan queue's completed/failed Redis retention", () => {
+        const { bullCtor } = loadQueues("redis://cache.example:6379/0");
+
+        const scanCall = bullCtor.mock.calls.find(
+            (call: any[]) => call[0] === "library-scan"
+        );
+        expect(scanCall).toBeDefined();
+        // Most scanQueue.add() sites enqueue without per-job retention options,
+        // so without this default Redis accumulates completed/failed scan
+        // records unbounded (F24). The queue must cap them: last 100 completed
+        // (enough for the recent-job status lookup) and 200 failed.
+        expect(scanCall![1].defaultJobOptions).toEqual({
+            removeOnComplete: 100,
+            removeOnFail: 200,
+        });
+    });
+
     it("wires queue error and stalled handlers for observability", () => {
         const { bullCtor, logger } = loadQueues("redis://cache.example:6379/0");
 

@@ -1,4 +1,8 @@
-import { ProgrammaticMix, ProgrammaticPlaylistService } from "../programmaticPlaylists";
+import {
+    ProgrammaticMix,
+    ProgrammaticPlaylistService,
+    seededShuffle,
+} from "../programmaticPlaylists";
 import * as programmaticPlaylistArtistCap from "../programmaticPlaylistArtistCap";
 import { prisma } from "../../utils/db";
 import { lastFmService } from "../lastfm";
@@ -1061,5 +1065,58 @@ describe("ProgrammaticPlaylistService behavior coverage", () => {
         expect(query.where.moodParty).toEqual({ gte: 0.3, lte: 0.95 });
         expect(query.where.moodAcoustic).toEqual({ gte: 0.2, lte: 0.9 });
         expect(query.where.moodElectronic).toEqual({ gte: 0.15, lte: 0.85 });
+    });
+});
+
+// F6 backfill: the curated/priority mixes shuffle their candidate pool with
+// seededShuffle (a seeded Fisher-Yates) instead of the biased, in-place
+// `Array.sort()` comparator they previously used. These assertions pin the
+// properties that make the fix correct — and several would FAIL on the old
+// biased sort (notably non-mutation: `tracks.sort()` reordered its input in
+// place, and uniformity: the non-transitive comparator produced a skewed
+// permutation).
+describe("seededShuffle determinism and correctness (F6)", () => {
+    const pool = Array.from({ length: 12 }, (_, i) => `t${i}`);
+
+    it("is deterministic per seed: same seed yields the same order", () => {
+        const a = seededShuffle(pool, "high-energy-2026-06-16");
+        const b = seededShuffle(pool, "high-energy-2026-06-16");
+        expect(b).toEqual(a);
+    });
+
+    it("returns a permutation without losing or duplicating items", () => {
+        const out = seededShuffle(pool, "late-night-2026-06-16");
+        expect(out).toHaveLength(pool.length);
+        expect([...out].sort()).toEqual([...pool].sort());
+    });
+
+    it("does not mutate its input (the biased in-place sort did)", () => {
+        const input = [...pool];
+        const snapshot = [...input];
+        const out = seededShuffle(input, "happy-2026-06-16");
+        // Original array is untouched, and a fresh array is returned.
+        expect(input).toEqual(snapshot);
+        expect(out).not.toBe(input);
+    });
+
+    it("actually reorders, and different seeds give different orders", () => {
+        const a = seededShuffle(pool, "dance-floor-2026-06-16");
+        const b = seededShuffle(pool, "acoustic-2026-06-16");
+        // For a 12-element pool an identical order under two seeds (or an
+        // unshuffled identity) is astronomically unlikely for a real shuffle.
+        expect(a).not.toEqual(pool);
+        expect(a).not.toEqual(b);
+    });
+
+    it("spreads positions roughly uniformly across seeds (Fisher-Yates, not a biased sort)", () => {
+        // The biased comparator tended to leave elements near their original
+        // index; a correct Fisher-Yates lands many different items at index 0
+        // as the seed varies. Over many seeds the first slot should take on a
+        // wide variety of values rather than sticking to the original head.
+        const firsts = new Set<string>();
+        for (let i = 0; i < 240; i++) {
+            firsts.add(seededShuffle(pool, `mood-${i}-2026-06-16`)[0]);
+        }
+        expect(firsts.size).toBeGreaterThanOrEqual(6);
     });
 });
