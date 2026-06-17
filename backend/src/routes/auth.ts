@@ -6,12 +6,12 @@ import { z } from "zod";
 import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
 import {
     requireAuth,
     requireAdmin,
     generateToken,
     generateRefreshToken,
+    verifyAuthToken,
 } from "../middleware/auth";
 import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME } from "../config/brand";
@@ -293,10 +293,10 @@ router.post("/refresh", async (req, res) => {
     }
 
     try {
-        const decoded = jwt.verify(
-            refreshToken,
-            process.env.JWT_SECRET || process.env.SESSION_SECRET!
-        ) as any;
+        // Verify through the shared helper: it pins the HS256 algorithm and
+        // resolves the secret from one validated source (no inline process.env
+        // read, no `as any`).
+        const decoded = verifyAuthToken(refreshToken);
 
         if (decoded.type !== "refresh") {
             return res.status(401).json({ error: "Invalid refresh token" });

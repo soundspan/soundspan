@@ -10,8 +10,10 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 const mockGenerateToken = jest.fn();
+const mockVerifyAuthToken = jest.fn();
 jest.mock("../../middleware/auth", () => ({
     generateToken: mockGenerateToken,
+    verifyAuthToken: mockVerifyAuthToken,
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
     requireAdmin: (_req: any, _res: any, next: () => void) => next(),
 }));
@@ -132,7 +134,7 @@ describe("onboarding route runtime", () => {
         mockGenerateToken.mockReturnValue("jwt-token");
         mockBcryptHash.mockResolvedValue("hash-1");
         mockAxiosGet.mockResolvedValue({ status: 200 });
-        mockJwtVerify.mockReturnValue({ userId: "u1" });
+        mockVerifyAuthToken.mockReturnValue({ userId: "u1" });
     });
 
     afterAll(() => {
@@ -411,7 +413,7 @@ describe("onboarding route runtime", () => {
         });
 
         prisma.user.count.mockResolvedValueOnce(1);
-        mockJwtVerify.mockReturnValueOnce({ userId: "u1" });
+        mockVerifyAuthToken.mockReturnValueOnce({ userId: "u1" });
         prisma.user.findUnique.mockResolvedValueOnce({ onboardingComplete: false });
         const tokenReq = {
             headers: { authorization: "Bearer token-1" },
@@ -425,7 +427,7 @@ describe("onboarding route runtime", () => {
         });
 
         prisma.user.count.mockResolvedValueOnce(1);
-        mockJwtVerify.mockReturnValueOnce({ userId: "u1" });
+        mockVerifyAuthToken.mockReturnValueOnce({ userId: "u1" });
         prisma.user.findUnique.mockResolvedValueOnce({ onboardingComplete: true });
         const onboardingCompleteReq = {
             headers: { authorization: "Bearer token-2" },
@@ -439,7 +441,7 @@ describe("onboarding route runtime", () => {
         });
 
         prisma.user.count.mockResolvedValueOnce(1);
-        mockJwtVerify.mockImplementationOnce(() => {
+        mockVerifyAuthToken.mockImplementationOnce(() => {
             throw new Error("invalid token");
         });
         const badTokenReq = {

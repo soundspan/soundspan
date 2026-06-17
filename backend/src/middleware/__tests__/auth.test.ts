@@ -290,7 +290,9 @@ describe("auth middleware", () => {
 
             await requireAuth(asRequest(req), asResponse(res), asNext(next));
 
-            expect(mockJwtVerify).toHaveBeenCalledWith("access-token", "test-jwt-secret");
+            expect(mockJwtVerify).toHaveBeenCalledWith("access-token", "test-jwt-secret", {
+                algorithms: ["HS256"],
+            });
             expect(req.user).toEqual({
                 id: "u3",
                 username: "jwt-user",
@@ -375,7 +377,9 @@ describe("auth middleware", () => {
 
             await requireAuthOrToken(asRequest(req), asResponse(res), asNext(next));
 
-            expect(mockJwtVerify).toHaveBeenCalledWith("stream-token", "test-jwt-secret");
+            expect(mockJwtVerify).toHaveBeenCalledWith("stream-token", "test-jwt-secret", {
+                algorithms: ["HS256"],
+            });
             expect(req.user).toEqual({
                 id: "stream-user",
                 username: "streamer",

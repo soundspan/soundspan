@@ -30,7 +30,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 |------|-------|----------------|
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
-| #11 | Secrets & credential storage hardening | 3 / 0 / 4 |
+| #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 3 / 0 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
@@ -93,7 +93,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F33](#f33) | ⬜ | security | high | M | medium |  | #12 | SSRF guard blocks only literal private hosts — DNS rebinding to an internal IP bypasses… |
 | [F34](#f34) | ✅ | security | medium | S | low |  | #12 | CORS allows every origin unconditionally despite an allowlist knob, while credentials:t… |
 | [F35](#f35) | ⬜ | security | medium→low | S | medium |  | #12 | Helmet ships without HSTS/CSP, session cookie 'secure' is opt-in via string env, and tr… |
-| [F36](#f36) | ⬜ | security | medium→low | S | low |  | #11 | jwt.verify omits the algorithms pin and /refresh re-reads the secret inline as `as any` |
+| [F36](#f36) | ✅ | security | medium→low | S | low |  | #11 | jwt.verify omits the algorithms pin and /refresh re-reads the secret inline as `as any` |
 | [F37](#f37) | ⬜ | security | high | M | medium | ⚠️ | #12 | Long-lived full-privilege JWT embedded in stream/cover-art URLs (?token=) leaks via log… |
 | [F38](#f38) | ⬜ | security | medium | M | low |  | #10 | ML model artifacts and Python deps are pulled at build time with no checksum/hash pinni… |
 | [F39](#f39) | ⬜ | extensibility | high | L | medium |  | #18 | No shared MediaSource/DownloadProvider abstraction: each acquisition source is a bespok… |
@@ -651,9 +651,11 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F36 — jwt.verify omits the algorithms pin and /refresh re-reads the secret inline as `as any`
 
-**⬜ open** · dimension: security · severity: medium→low · effort: S · risk: low · epic: #11
+**✅ complete** (`feat/f36-jwt-pin`) · dimension: security · severity: medium→low · effort: S · risk: low · epic: #11
 
 > **Audit note.** ✓ Severity medium→low (body agrees): the RS256→HS256 forgery is unreachable in jsonwebtoken v9 with a string secret. Defense-in-depth, not a live hole.
+>
+> **Fix shipped** (#11 Phase 3). A shared `verifyAuthToken(token)` helper (middleware/auth.ts) pins `algorithms: ["HS256"]` and resolves the secret from one validated source. Every auth-class `jwt.verify` now uses it: the 4 middleware sites, the `/refresh` route, and `onboarding.ts` (which had the same inline-`require` + inline-secret + `as any` pattern) — removing all the inline `process.env` reads and casts. The Listen Together socket pins `algorithms` inline. Tests assert `jwt.verify` is called with the algorithm pin. Existing HS256 tokens are unaffected. The segmented-streaming session-token verifies (`sessionService.ts`, a separate `SESSION_TOKEN_SECRET`) are folded into F37's media-token work.
 
 **Files:** `backend/src/middleware/auth.ts:136`, `backend/src/middleware/auth.ts:165`, `backend/src/routes/auth.ts:296`, `backend/src/services/listenTogetherSocket.ts:603`, `backend/src/routes/onboarding.ts:631`
 

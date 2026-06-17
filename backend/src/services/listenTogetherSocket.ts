@@ -631,7 +631,11 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                 return next(new Error("Authentication required"));
             }
 
-            const decoded = jwt.verify(token, JWT_SECRET!) as unknown as JWTPayload;
+            // Pin the algorithm so a token can't be accepted under a weaker or
+            // `none` algorithm (F36).
+            const decoded = jwt.verify(token, JWT_SECRET!, {
+                algorithms: ["HS256"],
+            }) as unknown as JWTPayload;
 
             // Verify user exists and tokenVersion matches
             const user = await prisma.user.findUnique({

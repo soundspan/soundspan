@@ -7,7 +7,12 @@ import axios from "axios";
 import crypto from "crypto";
 import { encryptField } from "../utils/systemSettings";
 import { EnvFileSyncSkippedError, writeEnvFile } from "../utils/envWriter";
-import { generateToken, requireAuth, requireAdmin } from "../middleware/auth";
+import {
+    generateToken,
+    requireAuth,
+    requireAdmin,
+    verifyAuthToken,
+} from "../middleware/auth";
 
 const router = Router();
 
@@ -625,10 +630,9 @@ router.get("/status", async (req, res) => {
 
         // Try to verify token and check onboarding status
         try {
-            const jwt = require("jsonwebtoken");
-            const JWT_SECRET =
-                process.env.JWT_SECRET || process.env.SESSION_SECRET!;
-            const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+            // Shared helper pins HS256 and resolves the secret from one
+            // validated source (no inline require / process.env read / cast).
+            const decoded = verifyAuthToken(token);
 
             const user = await prisma.user.findUnique({
                 where: { id: decoded.userId },

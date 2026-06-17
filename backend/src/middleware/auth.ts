@@ -80,6 +80,19 @@ export function generateRefreshToken(user: {
 }
 
 /**
+ * Verify an HS256 access/refresh token against the validated JWT secret. The
+ * `algorithms` pin prevents a token from being accepted under a different
+ * (weaker or `none`) algorithm, and centralizes secret resolution so callers
+ * never re-read `process.env` inline. Throws, like `jwt.verify`, on an invalid,
+ * expired, or wrong-algorithm token.
+ */
+export function verifyAuthToken(token: string): JWTPayload {
+    return jwt.verify(token, JWT_SECRET_VALIDATED, {
+        algorithms: ["HS256"],
+    }) as unknown as JWTPayload;
+}
+
+/**
  * Helper function to authenticate a request using session, API key, or JWT
  * @param req Express request object
  * @param checkQueryToken Whether to check for token in query params (for streaming)
@@ -138,10 +151,7 @@ async function authenticateRequest(
         const tokenParam = req.query.token as string;
         if (tokenParam) {
             try {
-                const decoded = jwt.verify(
-                    tokenParam,
-                    JWT_SECRET_VALIDATED
-                ) as unknown as JWTPayload;
+                const decoded = verifyAuthToken(tokenParam);
                 const user = await prisma.user.findUnique({
                     where: { id: decoded.userId },
                     select: { id: true, username: true, role: true, tokenVersion: true },
@@ -167,7 +177,7 @@ async function authenticateRequest(
 
     if (token) {
         try {
-            const decoded = jwt.verify(token, JWT_SECRET_VALIDATED) as unknown as JWTPayload;
+            const decoded = verifyAuthToken(token);
             const user = await prisma.user.findUnique({
                 where: { id: decoded.userId },
                 select: { id: true, username: true, role: true, tokenVersion: true },
@@ -273,7 +283,7 @@ export async function requireAuthOrToken(
     const tokenParam = req.query.token as string;
     if (tokenParam) {
         try {
-            const decoded = jwt.verify(tokenParam, JWT_SECRET_VALIDATED) as unknown as JWTPayload;
+            const decoded = verifyAuthToken(tokenParam);
             const user = await prisma.user.findUnique({
                 where: { id: decoded.userId },
                 select: { id: true, username: true, role: true, tokenVersion: true },
@@ -301,7 +311,7 @@ export async function requireAuthOrToken(
 
     if (token) {
         try {
-            const decoded = jwt.verify(token, JWT_SECRET_VALIDATED) as unknown as JWTPayload;
+            const decoded = verifyAuthToken(token);
             const user = await prisma.user.findUnique({
                 where: { id: decoded.userId },
                 select: { id: true, username: true, role: true, tokenVersion: true },

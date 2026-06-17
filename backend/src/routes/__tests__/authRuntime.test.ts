@@ -13,12 +13,14 @@ const mockRequireAuth = jest.fn((_req: any, _res: any, next: () => void) => next
 const mockRequireAdmin = jest.fn((_req: any, _res: any, next: () => void) => next());
 const mockGenerateToken = jest.fn();
 const mockGenerateRefreshToken = jest.fn();
+const mockVerifyAuthToken = jest.fn();
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: mockRequireAuth,
     requireAdmin: mockRequireAdmin,
     generateToken: mockGenerateToken,
     generateRefreshToken: mockGenerateRefreshToken,
+    verifyAuthToken: mockVerifyAuthToken,
 }));
 
 const prisma = {
@@ -181,7 +183,7 @@ describe("auth routes runtime", () => {
             otpauth_url: "otpauth://totp/soundspan:alice?secret=BASE32SECRET",
         });
         mockQrCodeToDataUrl.mockResolvedValue("data:image/png;base64,abc");
-        mockJwtVerify.mockReturnValue({
+        mockVerifyAuthToken.mockReturnValue({
             type: "refresh",
             userId: "u1",
             tokenVersion: 1,
@@ -335,7 +337,7 @@ describe("auth routes runtime", () => {
         await refresh(missingReq, missingRes);
         expect(missingRes.statusCode).toBe(400);
 
-        mockJwtVerify.mockReturnValueOnce({ type: "access", userId: "u1" });
+        mockVerifyAuthToken.mockReturnValueOnce({ type: "access", userId: "u1" });
         const wrongTypeReq = { body: { refreshToken: "rt" } } as any;
         const wrongTypeRes = createRes();
         await refresh(wrongTypeReq, wrongTypeRes);
@@ -374,7 +376,7 @@ describe("auth routes runtime", () => {
             refreshToken: "jwt-refresh",
         });
 
-        mockJwtVerify.mockImplementationOnce(() => {
+        mockVerifyAuthToken.mockImplementationOnce(() => {
             throw new Error("bad token");
         });
         const badJwtReq = { body: { refreshToken: "rt" } } as any;
@@ -1401,7 +1403,7 @@ describe("auth routes runtime", () => {
     });
 
     it("covers refresh invalid-token branch explicitly", async () => {
-        mockJwtVerify.mockImplementationOnce(() => {
+        mockVerifyAuthToken.mockImplementationOnce(() => {
             throw new Error("expired");
         });
         const req = { body: { refreshToken: "expired-token" } } as any;
