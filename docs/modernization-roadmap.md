@@ -3,7 +3,7 @@
 Canonical index of the modernization review findings (F1–F53, plus F54 added on audit) from the **2026-06-16** review of soundspan. The review mapped each subsystem, assessed it across readability / performance / idempotency / security / extensibility / dependencies, then adversarially re-read every finding against the real code (53 high-confidence findings, **no true false positive**), grouped them into the epics below, and was itself **independently audited** ([`docs/modernization-roadmap-audit-findings.md`](modernization-roadmap-audit-findings.md)).
 
 > **Read me first.**
-> - **Status:** 5 complete + 3 partial = 8 findings touched, all in **open PR #21** (stacked on #3) — **nothing is merged to `main` yet.** ✅ complete · 🟡 partial · ⬜ open.
+> - **Status:** 5 complete + 3 partial = 8 findings in **open PR #21** (stacked on #3), plus F54 complete on `feat/f54-device-link-toctou` (Wave-1 continuation) — **nothing is merged to `main` yet.** ✅ complete · 🟡 partial · ⬜ open.
 > - **Audit corrections are inline.** Where the audit corrected a count, severity, or premise, the finding carries an **Audit note** (✓ = re-verified against the tree here; "per audit" = relayed). Severity columns show `orig→recalibrated` where adjusted for this single-operator deployment.
 > - **Line numbers** in finding bodies were captured against the pre-#3 branch tree and may be off by a few lines on `main`.
 > - **Not exhaustive.** Areas the review did **not** assess: test quality/coverage, observability/structured logging, data-migration safety, and PWA-offline/accessibility. "53" is ~51 distinct issues (F2≈F44, F17≈F47 are duplicates kept for their differing angles).
@@ -31,7 +31,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
 | #11 | Secrets & credential storage hardening | 0 / 0 / 4 |
-| #12 | Request-path auth & egress hardening | 2 / 0 / 8 |
+| #12 | Request-path auth & egress hardening | 3 / 0 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
@@ -111,7 +111,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F51](#f51) | ⬜ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
 | [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and r… |
 | [F53](#f53) | ⬜ | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
-| [F54](#f54) | ⬜ | security | high | S | low |  | #12 | POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys |
+| [F54](#f54) | ✅ | security | high | S | low |  | #12 | POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys |
 
 ## Findings
 
@@ -913,7 +913,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F54 — POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys
 
-**⬜ open** · dimension: security · severity: high · effort: S · risk: low · epic: #12
+**✅ complete** (`feat/f54-device-link-toctou`) · dimension: security · severity: high · effort: S · risk: low · epic: #12
+
+> **Fix shipped.** The claim is now an atomic conditional `updateMany({ where: { id, usedAt: null } })` inside a `prisma.$transaction`; the API key is minted only if `count === 1`, otherwise the transaction rolls back and the handler returns `400 'Code already used'` with no key created. The route moved from `apiLimiter` to `authLimiter`. Tests: `deviceLinkRuntime.test.ts` (concurrent-claim case mints no key) + `apiEntrypointRuntime.test.ts` (authLimiter mount).
 
 > **Provenance.** Found by the independent audit (§6.1) and re-verified against deviceLink.ts. NOT in the original 53.
 

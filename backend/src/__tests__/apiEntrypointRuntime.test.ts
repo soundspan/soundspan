@@ -528,6 +528,33 @@ describe("api entrypoint runtime behavior", () => {
         }
     });
 
+    it("mounts /api/device-link behind the stricter authLimiter", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+
+        jest.spyOn(process, "on").mockImplementation(() => process as any);
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout
+        );
+        process.exit = jest.fn() as any;
+
+        const mocks = setupApiEntrypointMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        const call = mocks.app.use.mock.calls.find(
+            (args: unknown[]) => args[0] === "/api/device-link"
+        );
+        expect(call).toBeDefined();
+        // device-link/verify is an unauthenticated, full-privilege API-key mint,
+        // so it belongs on the auth tier, not the lenient general apiLimiter.
+        expect(call![1]).toBe("auth-limiter");
+    });
+
     it("applies safe path and cache-control exclusions in compression filter", async () => {
         process.env = {
             ...originalEnv,

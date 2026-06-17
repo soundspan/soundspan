@@ -114,6 +114,12 @@ router.post("/generate", requireAuthOrToken, async (req, res) => {
  *       404:
  *         description: Invalid code
  */
+// Thrown inside the verify transaction when the link code is claimed by a
+// concurrent request between the findUnique fast-path and the atomic claim, so
+// the whole transaction rolls back (no API key is minted) and the handler can
+// return a clean 400.
+class DeviceCodeAlreadyClaimedError extends Error {}
+
 // POST /device-link/verify - Verify a code and get API key (no auth required)
 router.post("/verify", async (req, res) => {
     try {
@@ -141,24 +147,42 @@ router.post("/verify", async (req, res) => {
             return res.status(400).json({ error: "Code expired" });
         }
 
-        // Generate API key for this device
+        // Generate the API key value up front; it is the credential returned to
+        // the device, so it is only persisted if the atomic claim below wins.
         const apiKey = generateApiKey();
-        const createdApiKey = await prisma.apiKey.create({
-            data: {
-                userId: linkCode.userId,
-                key: apiKey,
-                name: deviceName || "Mobile Device",
-            },
-        });
 
-        // Mark the link code as used
-        await prisma.deviceLinkCode.update({
-            where: { id: linkCode.id },
-            data: {
-                usedAt: new Date(),
-                deviceName: deviceName || "Mobile Device",
-                apiKeyId: createdApiKey.id,
-            },
+        // Claim the code and mint the key atomically. The unauthenticated verify
+        // endpoint previously checked usedAt (above), created the key, then
+        // separately marked the code used — with no transaction, two concurrent
+        // verifies of the same code both passed the check and both minted a
+        // full-privilege key (TOCTOU). The conditional updateMany (usedAt: null)
+        // lets exactly one request win; if it claims nothing the transaction is
+        // rolled back so no key is created. Mirrors the invite-code fix (F26).
+        await prisma.$transaction(async (tx) => {
+            const claimed = await tx.deviceLinkCode.updateMany({
+                where: { id: linkCode.id, usedAt: null },
+                data: {
+                    usedAt: new Date(),
+                    deviceName: deviceName || "Mobile Device",
+                },
+            });
+            if (claimed.count !== 1) {
+                throw new DeviceCodeAlreadyClaimedError();
+            }
+
+            const createdApiKey = await tx.apiKey.create({
+                data: {
+                    userId: linkCode.userId,
+                    key: apiKey,
+                    name: deviceName || "Mobile Device",
+                },
+            });
+
+            // Link the freshly created key back onto the claimed code.
+            await tx.deviceLinkCode.update({
+                where: { id: linkCode.id },
+                data: { apiKeyId: createdApiKey.id },
+            });
         });
 
         res.json({
@@ -168,6 +192,9 @@ router.post("/verify", async (req, res) => {
             username: linkCode.user.username,
         });
     } catch (error) {
+        if (error instanceof DeviceCodeAlreadyClaimedError) {
+            return res.status(400).json({ error: "Code already used" });
+        }
         logger.error("Verify device link code error:", error);
         res.status(500).json({ error: "Failed to verify device link code" });
     }

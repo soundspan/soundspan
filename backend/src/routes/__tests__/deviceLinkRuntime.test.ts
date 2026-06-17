@@ -17,6 +17,7 @@ const prisma = {
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
     },
     apiKey: {
         create: jest.fn(),
@@ -24,6 +25,7 @@ const prisma = {
         findFirst: jest.fn(),
         delete: jest.fn(),
     },
+    $transaction: jest.fn(),
 };
 
 jest.mock("../../utils/db", () => ({
@@ -39,6 +41,9 @@ const mockDeviceCodeFindUnique = prismaClient.deviceLinkCode
     .findUnique as jest.Mock;
 const mockDeviceCodeCreate = prismaClient.deviceLinkCode.create as jest.Mock;
 const mockDeviceCodeUpdate = prismaClient.deviceLinkCode.update as jest.Mock;
+const mockDeviceCodeUpdateMany = prismaClient.deviceLinkCode
+    .updateMany as jest.Mock;
+const mockTransaction = (prismaClient as any).$transaction as jest.Mock;
 
 const mockApiKeyCreate = prismaClient.apiKey.create as jest.Mock;
 const mockApiKeyFindMany = prismaClient.apiKey.findMany as jest.Mock;
@@ -100,6 +105,12 @@ describe("deviceLink routes runtime", () => {
             ...data,
         }));
         mockDeviceCodeUpdate.mockResolvedValue({});
+        // The atomic claim succeeds (count: 1) by default; concurrency tests
+        // override this to simulate losing the race.
+        mockDeviceCodeUpdateMany.mockResolvedValue({ count: 1 });
+        // Run the verify transaction against the same prisma mock so the tx
+        // handle resolves to the top-level deviceLinkCode/apiKey mocks.
+        mockTransaction.mockImplementation(async (fn: any) => fn(prismaClient));
 
         mockApiKeyCreate.mockResolvedValue({ id: "api-key-1" });
         mockApiKeyFindMany.mockResolvedValue([
@@ -226,6 +237,16 @@ describe("deviceLink routes runtime", () => {
             where: { code: "ABC123" },
             include: { user: true },
         });
+        // The code is claimed atomically (usedAt: null guard) before any key is
+        // minted, inside a transaction, so two concurrent verifies cannot both
+        // pass the check and both mint a key.
+        expect(mockDeviceCodeUpdateMany).toHaveBeenCalledWith({
+            where: { id: "link-1", usedAt: null },
+            data: {
+                usedAt: expect.any(Date),
+                deviceName: "Living Room Tablet",
+            },
+        });
         expect(mockApiKeyCreate).toHaveBeenCalledWith({
             data: {
                 userId: "u1",
@@ -233,13 +254,10 @@ describe("deviceLink routes runtime", () => {
                 name: "Living Room Tablet",
             },
         });
+        // The created key id is linked back onto the claimed code.
         expect(mockDeviceCodeUpdate).toHaveBeenCalledWith({
             where: { id: "link-1" },
-            data: expect.objectContaining({
-                usedAt: expect.any(Date),
-                deviceName: "Living Room Tablet",
-                apiKeyId: "api-key-1",
-            }),
+            data: { apiKeyId: "api-key-1" },
         });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
@@ -248,6 +266,38 @@ describe("deviceLink routes runtime", () => {
             userId: "u1",
             username: "alice",
         });
+    });
+
+    it("fails closed when the code is concurrently claimed (TOCTOU), minting no key", async () => {
+        // The findUnique fast-path sees an unused, unexpired code...
+        mockDeviceCodeFindUnique.mockResolvedValueOnce({
+            id: "link-1",
+            code: "ABC123",
+            userId: "u1",
+            usedAt: null,
+            expiresAt: new Date("2026-12-31T00:00:00.000Z"),
+            user: { username: "alice" },
+        });
+        // ...but the atomic claim finds the code already taken, as if a
+        // concurrent verify of the same code won the race first.
+        mockDeviceCodeUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+        const req = {
+            body: { code: "abc123", deviceName: "Racing Tablet" },
+        } as any;
+        const res = createRes();
+
+        await postVerify(req, res);
+
+        expect(mockDeviceCodeUpdateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "link-1", usedAt: null },
+            })
+        );
+        // No full-privilege API key is minted when the claim loses the race.
+        expect(mockApiKeyCreate).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: "Code already used" });
     });
 
     it("returns 500 on verify exceptions", async () => {

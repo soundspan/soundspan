@@ -212,7 +212,10 @@ app.use("/api/onboarding", onboardingRoutes); // Public onboarding routes
 
 // Apply general API rate limiting to all API routes
 app.use("/api/api-keys", apiLimiter, apiKeysRoutes);
-app.use("/api/device-link", apiLimiter, deviceLinkRoutes);
+// device-link/verify is an unauthenticated endpoint that mints full-privilege
+// API keys, so it sits on the stricter authLimiter rather than the lenient
+// general apiLimiter.
+app.use("/api/device-link", authLimiter, deviceLinkRoutes);
 // NOTE: /api/library has its own rate limiting (imageLimiter for cover-art, apiLimiter for others)
 app.use("/api/library", libraryRoutes);
 app.use("/api/plays", apiLimiter, playsRoutes);
