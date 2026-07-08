@@ -20,11 +20,19 @@ the raw value is returned only once at creation.
 **Action required: none.** Existing device keys keep authenticating.
 
 **The pepper.** The HMAC pepper resolves from `API_KEY_PEPPER` →
-`SETTINGS_ENCRYPTION_KEY` → `SESSION_SECRET`. By default it uses
-`SETTINGS_ENCRYPTION_KEY` (stable since F22), so no new config is required. You
-may set a dedicated **`API_KEY_PEPPER`** for defense-in-depth — but once set (or
-once keys are hashed under the default), **it must stay stable**: changing the
-pepper invalidates every hashed key (those devices would need re-pairing).
+`SETTINGS_ENCRYPTION_KEY` → `ENCRYPTION_KEY` (compat alias) → `SESSION_SECRET`.
+By default it uses `SETTINGS_ENCRYPTION_KEY` (stable since F22), so no new
+config is required. You may set a dedicated **`API_KEY_PEPPER`** for
+defense-in-depth — but once set (or once keys are hashed under the default),
+**it must stay stable**: changing the pepper invalidates every hashed key
+(those devices would need re-pairing).
+
+> ⚠️ If the pepper falls all the way back to `SESSION_SECRET`, make sure it is
+> pinned in your env: `docker-entrypoint.sh` generates an **ephemeral**
+> `SESSION_SECRET` when unset, and an ephemeral pepper strands every key hashed
+> under it on the next restart. `GET /api/admin/secrets-status` returns
+> `apiKeys.pepperFingerprint` (an 8-hex identifier of the pepper *value*) so
+> you can confirm the app and the backfill script resolve the same pepper.
 
 > Helm note: `API_KEY_PEPPER` is **not yet auto-generated** by the chart (the
 > code falls back to the chart-managed `SETTINGS_ENCRYPTION_KEY`). Adding it to

@@ -9,6 +9,7 @@ import {
     findApiKeyRecord,
     planApiKeyHashing,
     getPepperSource,
+    getPepperFingerprint,
     HASHED_KEY_PREFIX,
 } from "../apiKeyHash";
 
@@ -100,6 +101,57 @@ describe("apiKeyHash", () => {
             delete process.env.API_KEY_PEPPER;
             // SETTINGS_ENCRYPTION_KEY is set at the top of this file.
             expect(getPepperSource()).toBe("SETTINGS_ENCRYPTION_KEY");
+        } finally {
+            if (original === undefined) delete process.env.API_KEY_PEPPER;
+            else process.env.API_KEY_PEPPER = original;
+        }
+    });
+
+    it("falls back to the ENCRYPTION_KEY compat alias before SESSION_SECRET", () => {
+        // encryption.ts honors ENCRYPTION_KEY as a documented alias of
+        // SETTINGS_ENCRYPTION_KEY. An install configured that way must not
+        // silently pepper API keys with SESSION_SECRET — docker-entrypoint.sh
+        // REGENERATES an unset SESSION_SECRET on every restart, which would
+        // invalidate all keys hashed since the last restart.
+        const saved = {
+            settings: process.env.SETTINGS_ENCRYPTION_KEY,
+            compat: process.env.ENCRYPTION_KEY,
+            session: process.env.SESSION_SECRET,
+        };
+        try {
+            delete process.env.SETTINGS_ENCRYPTION_KEY;
+            process.env.ENCRYPTION_KEY = "compat-alias-pepper-1234567890";
+            process.env.SESSION_SECRET = "ephemeral-session-secret-000000000";
+
+            expect(getPepperSource()).toBe("ENCRYPTION_KEY");
+            const hashed = hashApiKey("raw-key");
+            delete process.env.SESSION_SECRET;
+            // Still resolvable (and identical) without SESSION_SECRET present.
+            expect(hashApiKey("raw-key")).toBe(hashed);
+        } finally {
+            if (saved.settings !== undefined)
+                process.env.SETTINGS_ENCRYPTION_KEY = saved.settings;
+            if (saved.compat === undefined) delete process.env.ENCRYPTION_KEY;
+            else process.env.ENCRYPTION_KEY = saved.compat;
+            if (saved.session === undefined) delete process.env.SESSION_SECRET;
+            else process.env.SESSION_SECRET = saved.session;
+        }
+    });
+
+    it("getPepperFingerprint identifies the pepper value, not just its source name", () => {
+        const original = process.env.API_KEY_PEPPER;
+        try {
+            process.env.API_KEY_PEPPER = "pepper-value-one";
+            const fp1 = getPepperFingerprint();
+            expect(fp1).toMatch(/^[0-9a-f]{8}$/);
+            expect(getPepperFingerprint()).toBe(fp1); // deterministic
+            // A DIFFERENT value under the SAME source name yields a different
+            // fingerprint — this is what catches a script-env vs app-env
+            // mismatch before --apply writes anything.
+            process.env.API_KEY_PEPPER = "pepper-value-two";
+            expect(getPepperFingerprint()).not.toBe(fp1);
+            // The fingerprint never leaks the pepper itself.
+            expect(fp1).not.toContain("pepper-value-one");
         } finally {
             if (original === undefined) delete process.env.API_KEY_PEPPER;
             else process.env.API_KEY_PEPPER = original;

@@ -7,7 +7,7 @@ import {
     isV2Envelope,
     type EncryptedModelName,
 } from "../utils/encryptedColumns";
-import { isHashedApiKey } from "../utils/apiKeyHash";
+import { getPepperFingerprint, isHashedApiKey } from "../utils/apiKeyHash";
 
 const router = Router();
 
@@ -219,6 +219,10 @@ router.get("/secrets-status", async (_req, res) => {
                 hashed: apiKeysHashed,
                 plaintext: apiKeysPlaintext,
                 migrationComplete: apiKeysPlaintext === 0,
+                // Fingerprint of the pepper VALUE (not the value itself) —
+                // compare with the hash-existing-api-keys backfill log to
+                // catch a script-env vs app-env mismatch before --apply.
+                pepperFingerprint: getPepperFingerprint(),
             },
         });
     } catch (error) {

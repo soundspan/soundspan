@@ -11,7 +11,10 @@
  *
  * Idempotent: already-hashed rows (planApiKeyHashing → skip-hashed) are skipped.
  * DEFAULTS TO DRY-RUN — pass `--apply` to write. Requires the SAME pepper the app
- * runs with (API_KEY_PEPPER, or SETTINGS_ENCRYPTION_KEY / SESSION_SECRET).
+ * runs with (API_KEY_PEPPER, or SETTINGS_ENCRYPTION_KEY / ENCRYPTION_KEY /
+ * SESSION_SECRET). Compare the logged pepper fingerprint with the
+ * `apiKeys.pepperFingerprint` field of GET /api/admin/secrets-status — they
+ * MUST match, or the app cannot validate the hashes this script writes.
  *
  *   npx tsx scripts/hash-existing-api-keys.ts            # dry run (no writes)
  *   npx tsx scripts/hash-existing-api-keys.ts --apply    # hash plaintext keys
@@ -20,7 +23,11 @@
  *     change the pepper after running this, all hashed keys stop validating.
  */
 import { PrismaClient } from "@prisma/client";
-import { planApiKeyHashing, getPepperSource } from "../src/utils/apiKeyHash";
+import {
+    getPepperFingerprint,
+    getPepperSource,
+    planApiKeyHashing,
+} from "../src/utils/apiKeyHash";
 
 const prisma = new PrismaClient();
 
@@ -28,10 +35,15 @@ async function run(apply: boolean): Promise<void> {
     console.log(
         `[hash-api-keys] starting (${apply ? "APPLY — writing" : "DRY RUN — no writes"})`
     );
-    // Surface the pepper source so a mismatch with the running app (which would
-    // make every migrated key fail to validate) is caught before --apply.
+    // Surface the pepper source AND a value fingerprint so a mismatch with the
+    // running app (which would make every migrated key fail to validate) is
+    // caught before --apply: the same source name with a different value in
+    // the app env still shows up as a fingerprint difference vs the
+    // apiKeys.pepperFingerprint field of GET /api/admin/secrets-status.
+    const source = getPepperSource();
     console.log(
-        `[hash-api-keys] pepper source: ${getPepperSource() ?? "(none — will fail)"}`
+        `[hash-api-keys] pepper source: ${source ?? "(none — will fail)"}` +
+            (source ? ` (fingerprint ${getPepperFingerprint()})` : "")
     );
 
     let rows = 0;

@@ -1,5 +1,11 @@
 import { Request, Response } from "express";
 
+// The route reports a pepper fingerprint via utils/apiKeyHash, which resolves
+// its pepper from env; set one before the module under test loads.
+process.env.SETTINGS_ENCRYPTION_KEY =
+    process.env.SETTINGS_ENCRYPTION_KEY ||
+    "admin-secrets-status-test-key-123456";
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
     requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
@@ -122,6 +128,10 @@ describe("admin secrets-status route", () => {
                 hashed: 2,
                 plaintext: 1,
                 migrationComplete: false,
+                // 8-hex pepper-VALUE fingerprint: comparing it against the
+                // backfill script's logged fingerprint catches a script-env vs
+                // app-env pepper mismatch before --apply writes anything.
+                pepperFingerprint: expect.stringMatching(/^[0-9a-f]{8}$/),
             },
         });
         // Only counts are returned — never the secret values themselves.

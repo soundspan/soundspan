@@ -16,18 +16,28 @@ export const HASHED_KEY_PREFIX = "hmac:";
 /**
  * Resolve the HMAC pepper. Prefers a dedicated `API_KEY_PEPPER` (Helm-managed,
  * stabilized like the other secrets), falling back to `SETTINGS_ENCRYPTION_KEY`
- * then `SESSION_SECRET` so the hash is always keyed without requiring a new env
- * var. Whichever is chosen MUST stay stable — changing it invalidates every
- * already-hashed key (the keys would need re-issuing).
+ * (or its documented `ENCRYPTION_KEY` compat alias, mirroring
+ * `utils/encryption.ts`) then `SESSION_SECRET` so the hash is always keyed
+ * without requiring a new env var. Whichever is chosen MUST stay stable —
+ * changing it invalidates every already-hashed key (the keys would need
+ * re-issuing). The SESSION_SECRET fallback is last-resort for a reason:
+ * docker-entrypoint.sh generates an ephemeral SESSION_SECRET when unset, and
+ * an ephemeral pepper would strand every key hashed under it on restart.
+ *
+ * NOTE: env is read here directly (not via config.ts) to match
+ * getRawEncryptionKey in utils/encryption.ts — both are leaf crypto utils
+ * imported by config-free unit contexts, and config.ts hard-exits on missing
+ * unrelated env at import time.
  */
 function getPepper(): string {
     const pepper =
         process.env.API_KEY_PEPPER ||
         process.env.SETTINGS_ENCRYPTION_KEY ||
+        process.env.ENCRYPTION_KEY ||
         process.env.SESSION_SECRET;
     if (!pepper) {
         throw new Error(
-            "API_KEY_PEPPER, SETTINGS_ENCRYPTION_KEY, or SESSION_SECRET must be set to hash API keys at rest"
+            "API_KEY_PEPPER, SETTINGS_ENCRYPTION_KEY, ENCRYPTION_KEY, or SESSION_SECRET must be set to hash API keys at rest"
         );
     }
     return pepper;
@@ -41,8 +51,27 @@ function getPepper(): string {
 export function getPepperSource(): string | null {
     if (process.env.API_KEY_PEPPER) return "API_KEY_PEPPER";
     if (process.env.SETTINGS_ENCRYPTION_KEY) return "SETTINGS_ENCRYPTION_KEY";
+    if (process.env.ENCRYPTION_KEY) return "ENCRYPTION_KEY";
     if (process.env.SESSION_SECRET) return "SESSION_SECRET";
     return null;
+}
+
+/**
+ * Short (8-hex) identifier of the pepper VALUE, safe to log or return from the
+ * admin secrets-status endpoint. Two environments resolving the same source
+ * name but different values (script env vs app env) produce different
+ * fingerprints — comparing them catches a pepper mismatch BEFORE a backfill
+ * `--apply` writes hashes the app could never validate. Derived via HMAC over
+ * a fixed label so the pepper itself is not recoverable from the fingerprint.
+ * Returns null when no pepper source is configured (never throws — callers
+ * like secrets-status report on state, they don't require one).
+ */
+export function getPepperFingerprint(): string | null {
+    if (!getPepperSource()) return null;
+    return createHmac("sha256", getPepper())
+        .update("soundspan:api-key-pepper-fingerprint")
+        .digest("hex")
+        .slice(0, 8);
 }
 
 /** The at-rest stored form of an API key: `hmac:` + HMAC-SHA256(rawKey, pepper). */
