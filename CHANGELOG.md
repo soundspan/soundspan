@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Library scans no longer starve the worker's event loop and get the worker killed. The 1.6.0 opus-duration fix made every file pay for a full-file `duration: true` parse; with the scanner's 10-way concurrency a large scan pegged the single Node thread for minutes, so Bull couldn't renew job locks ("Missing lock"/"job stalled" errors, scans endlessly re-queued) and the liveness probe timed out until the kubelet killed the worker — on repeat, on both replicas. The scanner now does a cheap header-only parse first and pays for the full-file parse only when the header lacks a duration (ogg/opus, e.g. YouTube downloads), preserving the 1.6.0 fix at a fraction of the cost.
 - Saving system settings can no longer silently wipe the admin TIDAL download connection. `POST /api/system-settings` previously accepted `tidalAccessToken`/`tidalRefreshToken`/`tidalUserId` and wrote whatever the settings form round-tripped — so any Save from a page loaded before (or without) the device auth overwrote the stored tokens with empty values, after which downloads silently rerouted away from TIDAL. These credential fields are now ignored by the general settings save and are managed exclusively by the `/api/system-settings/tidal-auth` device flow.
 
 ### Security

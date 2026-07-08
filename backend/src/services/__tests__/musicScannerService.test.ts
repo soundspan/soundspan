@@ -282,7 +282,8 @@ describe("MusicScannerService.scanLibrary", () => {
                 errors: [],
             })
         );
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).not.toHaveBeenCalledWith(audioFile, {
             duration: true,
         });
         expect(mockPrisma.systemSettings.updateMany).toHaveBeenCalledWith({
@@ -309,7 +310,8 @@ describe("MusicScannerService.scanLibrary", () => {
                 errors: [],
             })
         );
-        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).not.toHaveBeenCalledWith(audioFile, {
             duration: true,
         });
         expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
@@ -329,6 +331,49 @@ describe("MusicScannerService.scanLibrary", () => {
             })
         );
         expect(mockBackfillAllArtistCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it("re-parses with duration:true only when the cheap parse lacks a duration (opus/ogg)", async () => {
+        const scanner = new MusicScannerService();
+        const audioFile = "/music/Artist/YouTube Rip.opus";
+
+        jest.spyOn(
+            MusicScannerService.prototype as any,
+            "findAudioFiles"
+        ).mockResolvedValue([audioFile]);
+
+        const common = {
+            title: "YouTube Rip",
+            track: { no: 1 },
+            disk: { no: 1 },
+            album: "Test Album",
+            artist: "Test Artist",
+        };
+        // Header-only parse: opus keeps duration in the last page → missing.
+        mockParseFile.mockImplementation(async (_path: string, options?: { duration?: boolean }) => {
+            if (options?.duration) {
+                return {
+                    common,
+                    format: { duration: 145.6, codec: "opus" },
+                } as any;
+            }
+            return { common, format: { codec: "opus" } } as any;
+        });
+
+        const result = await scanner.scanLibrary("/music");
+
+        expect(result.errors).toEqual([]);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile);
+        expect(mockParseFile).toHaveBeenCalledWith(audioFile, {
+            duration: true,
+        });
+        expect(mockPrisma.track.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                create: expect.objectContaining({
+                    duration: 145,
+                }),
+            })
+        );
     });
 
     it("resolves albums by release-group MBID so same-titled albums never merge", async () => {
