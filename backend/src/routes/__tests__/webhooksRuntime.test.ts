@@ -283,7 +283,10 @@ describe("webhooks routes runtime", () => {
 
         // Unmatched (external) downloads must NOT enqueue an unconditional
         // full-library scan — that was an abusable DoS on an unauthenticated,
-        // unthrottled endpoint (F32).
+        // unthrottled endpoint (F32). They DO still get a scan, but a
+        // COALESCED one: a stable Bull jobId collapses any burst of unmatched
+        // webhooks into a single queued scan, so external Lidarr imports keep
+        // appearing without manual intervention.
         mockScanQueueAdd.mockClear();
         mockOnDownloadComplete.mockResolvedValueOnce({ jobId: null });
         const externalReq = {
@@ -299,7 +302,19 @@ describe("webhooks routes runtime", () => {
         await postLidarr(externalReq, externalRes);
 
         expect(externalRes.statusCode).toBe(200);
-        expect(mockScanQueueAdd).not.toHaveBeenCalled();
+        expect(mockScanQueueAdd).toHaveBeenCalledTimes(1);
+        expect(mockScanQueueAdd).toHaveBeenCalledWith(
+            "scan",
+            expect.objectContaining({
+                userId: null,
+                source: "lidarr-webhook-external",
+            }),
+            expect.objectContaining({
+                jobId: "lidarr-external-import-scan",
+                removeOnComplete: true,
+                removeOnFail: true,
+            })
+        );
 
         const noIdReq = {
             body: { eventType: "Rename" },

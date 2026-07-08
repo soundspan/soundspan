@@ -10,9 +10,10 @@ isn't listed here, the upgrade is drop-in.
 **Who this affects:** anyone using the Lidarr integration.
 
 **What changed (no action required to keep working).** `POST /api/webhooks/lidarr`
-is now rate-limited, and an unmatched download event no longer triggers a full
-library scan. The endpoint still works without a secret, but each
-unauthenticated call now logs a loud warning.
+is now rate-limited, and unmatched download events no longer trigger a full
+library scan **each** — bursts are coalesced into a single queued scan, so
+external Lidarr imports still show up automatically. The endpoint still works
+without a secret, but each unauthenticated call now logs a loud warning.
 
 **Strongly recommended.** Set a **webhook secret** so the endpoint is
 authenticated: add `lidarrWebhookSecret` in System Settings, then add the same

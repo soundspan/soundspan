@@ -249,14 +249,31 @@ async function handleDownload(payload: any) {
 
         // Discovery batch completion (for playlist building) is handled by download manager
     } else {
-        // No matching job — an external download we didn't initiate. Do NOT
-        // enqueue a full-library scan here: it was unconditional and
-        // unauthenticated-reachable, so a stream of unmatched webhooks could spam
-        // expensive full scans (F32). The periodic library scan picks up
-        // externally-added music; only our own downloads get the targeted
-        // incremental scan above.
+        // No matching job — an external download we didn't initiate. The old
+        // behavior enqueued an unconditional full-library scan per event: an
+        // unauthenticated-reachable DoS, since a stream of unmatched webhooks
+        // spammed expensive full scans (F32). But there is no periodic/watcher
+        // scan to fall back on, so skipping entirely would strand external
+        // Lidarr imports until someone scans manually. Instead, COALESCE: a
+        // stable Bull jobId makes concurrent add() calls collapse into one
+        // queued scan (same scheme as the YouTube download scan in
+        // routes/youtube.ts), bounding a webhook flood to a single queued scan
+        // at a time. Edge: an import landing while a scan is already ACTIVE
+        // waits for the next scan trigger — acceptable next to the DoS.
         logger.debug(
-            `   No matching job for downloadId=${downloadId}; skipping scan (external import will be caught by the periodic scan).`
+            `   No matching job for downloadId=${downloadId}; requesting coalesced library scan for the external import.`
+        );
+        await scanQueue.add(
+            "scan",
+            {
+                userId: null,
+                source: "lidarr-webhook-external",
+            },
+            {
+                jobId: "lidarr-external-import-scan",
+                removeOnComplete: true,
+                removeOnFail: true,
+            }
         );
     }
 }
