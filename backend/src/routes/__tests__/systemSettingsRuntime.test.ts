@@ -342,6 +342,132 @@ describe("systemSettings runtime routes", () => {
         expect(res.body).not.toHaveProperty("tidalRefreshToken");
     });
 
+    it("treats empty-string secrets as no-change so a settings round-trip cannot wipe stored credentials", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                lidarrEnabled: true,
+                lidarrUrl: "http://lidarr:8686",
+                lidarrApiKey: "",
+                lidarrWebhookSecret: "",
+                openaiApiKey: "",
+                fanartApiKey: "",
+                lastfmApiKey: "",
+                audiobookshelfApiKey: "",
+                soulseekPassword: "",
+                spotifyClientSecret: "",
+                ytMusicClientSecret: "",
+                transcodeCacheMaxGb: 12,
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const upsertArg = mockSystemSettingsUpsert.mock.calls[0][0];
+        for (const field of [
+            "lidarrApiKey",
+            "lidarrWebhookSecret",
+            "openaiApiKey",
+            "fanartApiKey",
+            "lastfmApiKey",
+            "audiobookshelfApiKey",
+            "soulseekPassword",
+            "spotifyClientSecret",
+            "ytMusicClientSecret",
+        ]) {
+            expect(upsertArg.update).not.toHaveProperty(field);
+        }
+        // Non-secret fields still save normally
+        expect(upsertArg.update.lidarrEnabled).toBe(true);
+        expect(upsertArg.update.lidarrUrl).toBe("http://lidarr:8686");
+        expect(upsertArg.update.transcodeCacheMaxGb).toBe(12);
+    });
+
+    it("env sync and webhook config use stored secrets when the form round-trips empty strings", async () => {
+        mockSystemSettingsUpsert.mockResolvedValueOnce({
+            id: "default",
+            lidarrApiKey: "stored-lidarr-key",
+            fanartApiKey: "stored-fanart-key",
+            openaiApiKey: "stored-openai-key",
+            audiobookshelfApiKey: "stored-abs-key",
+        } as any);
+        mockAxiosGet.mockResolvedValueOnce({ data: [] });
+
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                lidarrEnabled: true,
+                lidarrUrl: "http://lidarr:8686",
+                lidarrApiKey: "",
+                fanartApiKey: "",
+                openaiApiKey: "",
+                audiobookshelfApiKey: "",
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockWriteEnvFile).toHaveBeenCalledWith(
+            expect.objectContaining({
+                LIDARR_API_KEY: "dec:stored-lidarr-key",
+                FANART_API_KEY: "dec:stored-fanart-key",
+                OPENAI_API_KEY: "dec:stored-openai-key",
+                AUDIOBOOKSHELF_API_KEY: "dec:stored-abs-key",
+            })
+        );
+        // Webhook auto-config runs with the stored key, not the empty form value
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            "http://lidarr:8686/api/v1/notification",
+            expect.objectContaining({
+                headers: { "X-Api-Key": "dec:stored-lidarr-key" },
+            })
+        );
+    });
+
+    it("env sync clears secrets only on explicit null", async () => {
+        mockSystemSettingsUpsert.mockResolvedValueOnce({
+            id: "default",
+            openaiApiKey: null,
+        } as any);
+
+        const req = {
+            user: { id: "admin-1" },
+            body: { openaiApiKey: null },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockWriteEnvFile).toHaveBeenCalledWith(
+            expect.objectContaining({ OPENAI_API_KEY: null })
+        );
+    });
+
+    it("clears a stored secret only on an explicit null", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                openaiApiKey: null,
+                lidarrApiKey: "",
+                soulseekPassword: "new-pass",
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const upsertArg = mockSystemSettingsUpsert.mock.calls[0][0];
+        expect(upsertArg.update.openaiApiKey).toBeNull();
+        expect(upsertArg.update).not.toHaveProperty("lidarrApiKey");
+        expect(upsertArg.update.soulseekPassword).toBe("enc:new-pass");
+    });
+
     it("ignores TIDAL credential fields on save so a settings round-trip cannot wipe the admin connection", async () => {
         const req = {
             user: { id: "admin-1" },

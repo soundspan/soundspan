@@ -7,6 +7,7 @@ import { EnvFileSyncSkippedError, writeEnvFile } from "../utils/envWriter";
 import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { encrypt, decrypt } from "../utils/encryption";
+import { ENCRYPTED_SETTINGS_COLUMNS } from "../utils/encryptedColumns";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
 import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
 import {
@@ -218,10 +219,14 @@ router.get("/", async (req, res) => {
  *             description: >
  *               Partial system settings to update (Lidarr, OpenAI, Fanart,
  *               Last.fm, Audiobookshelf, Soulseek, Spotify, TIDAL, paths,
- *               feature flags, etc.). TIDAL credential fields
- *               (tidalAccessToken, tidalRefreshToken, tidalUserId) are
- *               ignored — the admin TIDAL connection is managed only via
- *               the /tidal-auth endpoints.
+ *               feature flags, etc.). Secret fields (API keys, passwords,
+ *               client secrets) are write-only with explicit semantics:
+ *               a non-empty string replaces the stored secret, an empty
+ *               string leaves it unchanged (a form round-trip can never
+ *               wipe a credential), and null explicitly clears it. TIDAL
+ *               credential fields (tidalAccessToken, tidalRefreshToken,
+ *               tidalUserId) are ignored entirely — the admin TIDAL
+ *               connection is managed only via the /tidal-auth endpoints.
  *     responses:
  *       200:
  *         description: Settings saved successfully
@@ -243,35 +248,24 @@ router.post("/", async (req, res) => {
             data.transcodeCacheMaxGb
         );
 
-        // Encrypt sensitive fields
+        // Encrypt sensitive fields. Secret semantics: non-empty string →
+        // encrypt and store; empty string → no change (the settings form
+        // round-trips every field, so "" must never overwrite a stored
+        // secret); null → explicit clear. Driven by the canonical
+        // encrypted-columns list so new secrets can't miss the guard.
         const encryptedData: any = { ...data };
 
-        if (data.lidarrApiKey)
-            encryptedData.lidarrApiKey = encrypt(data.lidarrApiKey);
-        if (data.lidarrWebhookSecret)
-            encryptedData.lidarrWebhookSecret = encrypt(
-                data.lidarrWebhookSecret
-            );
-        if (data.openaiApiKey)
-            encryptedData.openaiApiKey = encrypt(data.openaiApiKey);
-        if (data.fanartApiKey)
-            encryptedData.fanartApiKey = encrypt(data.fanartApiKey);
-        if (data.lastfmApiKey)
-            encryptedData.lastfmApiKey = encrypt(data.lastfmApiKey);
-        if (data.audiobookshelfApiKey)
-            encryptedData.audiobookshelfApiKey = encrypt(
-                data.audiobookshelfApiKey
-            );
-        if (data.soulseekPassword)
-            encryptedData.soulseekPassword = encrypt(data.soulseekPassword);
-        if (data.spotifyClientSecret)
-            encryptedData.spotifyClientSecret = encrypt(
-                data.spotifyClientSecret
-            );
-        if (data.ytMusicClientSecret)
-            encryptedData.ytMusicClientSecret = encrypt(
-                data.ytMusicClientSecret
-            );
+        for (const field of ENCRYPTED_SETTINGS_COLUMNS.systemSettings) {
+            const value = (data as Record<string, unknown>)[field];
+            if (value === undefined) continue;
+            if (value === null) {
+                encryptedData[field] = null;
+            } else if (value === "") {
+                delete encryptedData[field];
+            } else {
+                encryptedData[field] = encrypt(value as string);
+            }
+        }
 
         const settings = await prisma.systemSettings.upsert({
             where: { id: "default" },
@@ -283,6 +277,26 @@ router.post("/", async (req, res) => {
         });
 
         invalidateSystemSettingsCache();
+
+        // Effective plaintext secret after the no-change/clear semantics
+        // above: a non-empty submitted value wins, an empty string falls
+        // back to the (persisted) stored value, null means cleared. Every
+        // post-save consumer (.env sync, webhook auto-config) must use
+        // this instead of raw payload values, or "" would leak back in
+        // as a wipe.
+        const effectiveSecret = (
+            field: (typeof ENCRYPTED_SETTINGS_COLUMNS.systemSettings)[number]
+        ): string | null => {
+            const submitted = (data as Record<string, unknown>)[field];
+            if (typeof submitted === "string" && submitted !== "")
+                return submitted;
+            if (submitted === null) return null;
+            return safeDecrypt(
+                ((settings as Record<string, unknown>)[field] as
+                    | string
+                    | null) ?? null
+            );
+        };
 
         // Refresh Last.fm API key if it was updated
         try {
@@ -332,11 +346,11 @@ router.post("/", async (req, res) => {
             await writeEnvFile({
                 LIDARR_ENABLED: data.lidarrEnabled ? "true" : "false",
                 LIDARR_URL: data.lidarrUrl || null,
-                LIDARR_API_KEY: data.lidarrApiKey || null,
-                FANART_API_KEY: data.fanartApiKey || null,
-                OPENAI_API_KEY: data.openaiApiKey || null,
+                LIDARR_API_KEY: effectiveSecret("lidarrApiKey"),
+                FANART_API_KEY: effectiveSecret("fanartApiKey"),
+                OPENAI_API_KEY: effectiveSecret("openaiApiKey"),
                 AUDIOBOOKSHELF_URL: data.audiobookshelfUrl || null,
-                AUDIOBOOKSHELF_API_KEY: data.audiobookshelfApiKey || null,
+                AUDIOBOOKSHELF_API_KEY: effectiveSecret("audiobookshelfApiKey"),
             });
             logger.debug(".env file synchronized with database settings");
         } catch (envError) {
@@ -349,13 +363,14 @@ router.post("/", async (req, res) => {
         }
 
         // Auto-configure Lidarr webhook if Lidarr is enabled
-        if (data.lidarrEnabled && data.lidarrUrl && data.lidarrApiKey) {
+        const effectiveLidarrApiKey = effectiveSecret("lidarrApiKey");
+        if (data.lidarrEnabled && data.lidarrUrl && effectiveLidarrApiKey) {
             try {
                 logger.debug("[LIDARR] Auto-configuring webhook...");
 
                 const axios = (await import("axios")).default;
                 const lidarrUrl = data.lidarrUrl;
-                const apiKey = data.lidarrApiKey;
+                const apiKey = effectiveLidarrApiKey;
 
                 // In Docker, services communicate via service/network names.
                 const callbackHost =
