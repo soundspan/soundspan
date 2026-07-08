@@ -5,8 +5,15 @@ process.env.SETTINGS_ENCRYPTION_KEY =
     process.env.SETTINGS_ENCRYPTION_KEY ||
     "migrate-gcm-test-key-1234567890123456";
 
-import { planColumnReencryption } from "../settingsCipherMigration";
-import { isV2Envelope } from "../encryptedColumns";
+import {
+    migrateModelRows,
+    planColumnReencryption,
+} from "../settingsCipherMigration";
+import {
+    ENCRYPTED_MODEL_PRIMARY_KEYS,
+    ENCRYPTED_SETTINGS_COLUMNS,
+    isV2Envelope,
+} from "../encryptedColumns";
 import { decrypt } from "../encryption";
 
 /** Reproduce the legacy v1 (AES-256-CBC) write format under an arbitrary key. */
@@ -68,5 +75,111 @@ describe("migrate-settings-to-gcm planColumnReencryption", () => {
         expect(outcome.action).toBe("skip-error");
         // Critically, no rewritten value is produced for a value we couldn't read.
         expect(outcome).not.toHaveProperty("value");
+    });
+});
+
+describe("migrate-settings-to-gcm migrateModelRows", () => {
+    /** Minimal in-memory stand-in for a Prisma model delegate. */
+    function fakeDelegate(rows: Array<Record<string, unknown>>) {
+        const findManyCalls: Array<{ select: Record<string, boolean> }> = [];
+        const updateCalls: Array<{
+            where: Record<string, unknown>;
+            data: Record<string, string>;
+        }> = [];
+        return {
+            findManyCalls,
+            updateCalls,
+            delegate: {
+                findMany: async (args: { select: Record<string, boolean> }) => {
+                    findManyCalls.push(args);
+                    return rows;
+                },
+                update: async (args: {
+                    where: Record<string, unknown>;
+                    data: Record<string, string>;
+                }) => {
+                    updateCalls.push(args);
+                    return args;
+                },
+            },
+        };
+    }
+
+    it("declares a primary key for every model in the encrypted-columns inventory", () => {
+        for (const modelName of Object.keys(ENCRYPTED_SETTINGS_COLUMNS)) {
+            expect(ENCRYPTED_MODEL_PRIMARY_KEYS).toHaveProperty(modelName);
+        }
+    });
+
+    it("selects and updates userSettings by its real primary key (userId, not id)", async () => {
+        // Regression: UserSettings has NO `id` column (PK is `userId`); a
+        // hardcoded `{ id: true }` select makes Prisma throw and aborts the
+        // migration between models.
+        const { delegate, findManyCalls, updateCalls } = fakeDelegate([
+            { userId: "u1", ytMusicOAuthJson: "plaintext-oauth-blob" },
+        ]);
+
+        const stats = await migrateModelRows(
+            "userSettings",
+            delegate,
+            ENCRYPTED_SETTINGS_COLUMNS.userSettings,
+            ENCRYPTED_MODEL_PRIMARY_KEYS.userSettings,
+            true
+        );
+
+        expect(findManyCalls[0].select).toMatchObject({
+            userId: true,
+            ytMusicOAuthJson: true,
+            tidalOAuthJson: true,
+        });
+        expect(findManyCalls[0].select).not.toHaveProperty("id");
+        expect(updateCalls).toHaveLength(1);
+        expect(updateCalls[0].where).toEqual({ userId: "u1" });
+        expect(isV2Envelope(updateCalls[0].data.ytMusicOAuthJson)).toBe(true);
+        expect(stats).toMatchObject({ rows: 1, reencrypted: 1 });
+    });
+
+    it("dry-run never calls update but still counts pending re-encryptions", async () => {
+        const { delegate, updateCalls } = fakeDelegate([
+            { id: "default", lidarrApiKey: "plain-key" },
+        ]);
+
+        const stats = await migrateModelRows(
+            "systemSettings",
+            delegate,
+            ["lidarrApiKey"],
+            ENCRYPTED_MODEL_PRIMARY_KEYS.systemSettings,
+            false
+        );
+
+        expect(updateCalls).toHaveLength(0);
+        expect(stats).toMatchObject({ rows: 1, reencrypted: 1 });
+    });
+
+    it("skips v2 rows without updating and counts undecryptable values as skipped", async () => {
+        const undecryptable = legacyEncrypt(
+            "lost",
+            "a-totally-different-32byte-key-000000"
+        );
+        const { delegate, updateCalls } = fakeDelegate([
+            { id: "u1", subsonicPassword: "v2:aa:bb:cc:dd" },
+            { id: "u2", subsonicPassword: undecryptable },
+        ]);
+
+        const stats = await migrateModelRows(
+            "user",
+            delegate,
+            ["subsonicPassword"],
+            ENCRYPTED_MODEL_PRIMARY_KEYS.user,
+            true
+        );
+
+        expect(updateCalls).toHaveLength(0);
+        expect(stats).toMatchObject({
+            rows: 2,
+            reencrypted: 0,
+            alreadyV2: 1,
+            skippedErrors: 1,
+        });
     });
 });

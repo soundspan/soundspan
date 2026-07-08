@@ -35,6 +35,19 @@ export const ENCRYPTED_SETTINGS_COLUMNS = {
 export type EncryptedModelName = keyof typeof ENCRYPTED_SETTINGS_COLUMNS;
 
 /**
+ * Primary-key column per tracked model. The v1→v2 backfill selects and updates
+ * rows by this key — it is NOT `id` everywhere (`UserSettings` is keyed by
+ * `userId`), so a hardcoded `id` would make Prisma reject the query and abort
+ * the migration partway through the model list.
+ */
+export const ENCRYPTED_MODEL_PRIMARY_KEYS: Record<EncryptedModelName, string> =
+    {
+        user: "id",
+        userSettings: "userId",
+        systemSettings: "id",
+    };
+
+/**
  * Prefix of the current authenticated v2 envelope written by `utils/encryption`
  * (`v2:<saltHex>:<ivHex>:<tagHex>:<ctHex>`). Defined here, in a key-free module,
  * so the secrets-status check and the v1→v2 backfill can classify stored values

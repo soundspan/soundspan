@@ -22,74 +22,49 @@
  * ⚠️  Destructive (rewrites secret columns). Take a database backup first.
  */
 import { PrismaClient } from "@prisma/client";
-import { ENCRYPTED_SETTINGS_COLUMNS } from "../src/utils/encryptedColumns";
-import { planColumnReencryption } from "../src/utils/settingsCipherMigration";
+import {
+    ENCRYPTED_MODEL_PRIMARY_KEYS,
+    ENCRYPTED_SETTINGS_COLUMNS,
+    type EncryptedModelName,
+} from "../src/utils/encryptedColumns";
+import {
+    migrateModelRows,
+    type EncryptedModelDelegate,
+    type ModelMigrationStats,
+} from "../src/utils/settingsCipherMigration";
 
 const prisma = new PrismaClient();
 
-interface ModelStats {
-    rows: number;
-    reencrypted: number;
-    alreadyV2: number;
-    skippedErrors: number;
-}
-
-function emptyStats(): ModelStats {
+function emptyStats(): ModelMigrationStats {
     return { rows: 0, reencrypted: 0, alreadyV2: 0, skippedErrors: 0 };
 }
 
 async function migrateModel(
-    modelName: string,
+    modelName: EncryptedModelName,
     columns: readonly string[],
     apply: boolean
-): Promise<ModelStats> {
-    const stats = emptyStats();
+): Promise<ModelMigrationStats> {
     // Dynamic delegate access — this is a one-off migration over a small set of
     // hand-listed models, not runtime app code.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const delegate = (prisma as any)[modelName];
+    const delegate = (prisma as any)[modelName] as
+        | EncryptedModelDelegate
+        | undefined;
     if (!delegate?.findMany) {
         console.warn(`[migrate-gcm] unknown model "${modelName}", skipping`);
-        return stats;
+        return emptyStats();
     }
 
-    const select: Record<string, boolean> = { id: true };
-    for (const column of columns) select[column] = true;
-
-    const rows: Array<Record<string, unknown>> = await delegate.findMany({
-        select,
-    });
-
-    for (const row of rows) {
-        stats.rows += 1;
-        const data: Record<string, string> = {};
-
-        for (const column of columns) {
-            const outcome = planColumnReencryption(row[column]);
-            if (outcome.action === "reencrypt") {
-                data[column] = outcome.value;
-            } else if (outcome.action === "skip-v2") {
-                stats.alreadyV2 += 1;
-            } else if (outcome.action === "skip-error") {
-                stats.skippedErrors += 1;
-                console.warn(
-                    `[migrate-gcm] ${modelName}.${column} (id=${String(
-                        row.id
-                    )}) could not be decrypted; leaving as-is`,
-                    outcome.error instanceof Error
-                        ? outcome.error.message
-                        : outcome.error
-                );
-            }
-        }
-
-        const changed = Object.keys(data).length;
-        if (changed === 0) continue;
-        stats.reencrypted += changed;
-        if (apply) {
-            await delegate.update({ where: { id: row.id }, data });
-        }
-    }
+    // Rows are keyed by the model's REAL primary key (userSettings uses
+    // `userId`, not `id`) — the row loop lives in the unit-tested
+    // settingsCipherMigration module.
+    const stats = await migrateModelRows(
+        modelName,
+        delegate,
+        columns,
+        ENCRYPTED_MODEL_PRIMARY_KEYS[modelName],
+        apply
+    );
 
     console.log(
         `[migrate-gcm] ${modelName}: rows=${stats.rows} reencrypted=${stats.reencrypted} alreadyV2=${stats.alreadyV2} skippedErrors=${stats.skippedErrors}`
@@ -103,9 +78,10 @@ async function run(apply: boolean): Promise<void> {
     );
 
     const totals = emptyStats();
-    for (const [modelName, columns] of Object.entries(
+    for (const modelName of Object.keys(
         ENCRYPTED_SETTINGS_COLUMNS
-    )) {
+    ) as EncryptedModelName[]) {
+        const columns = ENCRYPTED_SETTINGS_COLUMNS[modelName];
         const stats = await migrateModel(modelName, columns, apply);
         totals.rows += stats.rows;
         totals.reencrypted += stats.reencrypted;
