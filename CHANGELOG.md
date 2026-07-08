@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The "When Primary Source Fails: Skip" setting is now honored when the primary download source is unavailable *before* dispatch. Previously the album download processor silently rerouted to any other available source (which is how downloads configured TIDAL-primary-with-Skip ended up in Lidarr); now an unavailable primary with Skip fails the job with a clear error, an explicitly configured fallback is dispatched only if that fallback service is itself available (failing the job otherwise, even when a third source is up), and only legacy settings rows with no stored fallback preference keep the old auto-detect rerouting. Pre-existing limitation, unchanged by this fix: manual album downloads have two dispatch pipelines (TIDAL, and the Lidarr-backed download manager), so a non-TIDAL selection — including a `soulseek` fallback — is still executed by the Lidarr-backed manager.
 - Saving system settings can no longer silently wipe the admin TIDAL download connection. `POST /api/system-settings` previously accepted `tidalAccessToken`/`tidalRefreshToken`/`tidalUserId` and wrote whatever the settings form round-tripped — so any Save from a page loaded before (or without) the device auth overwrote the stored tokens with empty values, after which downloads silently rerouted away from TIDAL. These credential fields are now ignored by the general settings save and are managed exclusively by the `/api/system-settings/tidal-auth` device flow.
 
 ### Security
