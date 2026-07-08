@@ -499,6 +499,9 @@ describe("downloads routes runtime", () => {
                 data: expect.objectContaining({
                     status: "failed",
                     error: expect.stringContaining("Skip"),
+                    metadata: expect.objectContaining({
+                        statusText: "tidal unavailable — skipped",
+                    }),
                 }),
             })
         );
@@ -562,11 +565,16 @@ describe("downloads routes runtime", () => {
         // Soulseek being available must NOT rescue the job — the user chose lidarr
         expect(mockStartDownload).not.toHaveBeenCalled();
         expect(mockTidalFindAlbum).not.toHaveBeenCalled();
+        // The status text must say the fallback was unavailable — NOT "skipped",
+        // which would misrepresent a non-Skip failure in the UI
         expect(mockDownloadUpdate).toHaveBeenCalledWith(
             expect.objectContaining({
                 data: expect.objectContaining({
                     status: "failed",
                     error: expect.stringContaining("unavailable"),
+                    metadata: expect.objectContaining({
+                        statusText: "tidal and fallback lidarr unavailable",
+                    }),
                 }),
             })
         );

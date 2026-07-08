@@ -606,7 +606,8 @@ async function failJobWithoutDispatch(
     jobId: string,
     jobMetadata: unknown,
     source: string,
-    message: string
+    message: string,
+    statusText: string
 ) {
     logger.error(`[Downloads] ${message} — job ${jobId} not dispatched`);
 
@@ -619,7 +620,7 @@ async function failJobWithoutDispatch(
             metadata: {
                 ...((jobMetadata as Record<string, unknown>) || {}),
                 currentSource: source,
-                statusText: `${source} unavailable — skipped`,
+                statusText,
                 failedAt: new Date().toISOString(),
             },
         },
@@ -689,7 +690,8 @@ async function processDownload(
                     jobId,
                     job.metadata,
                     configuredSource,
-                    `${configuredSource} is unavailable and "When primary source fails" is set to Skip`
+                    `${configuredSource} is unavailable and "When primary source fails" is set to Skip`,
+                    `${configuredSource} unavailable — skipped`
                 );
                 return;
             }
@@ -704,14 +706,15 @@ async function processDownload(
                         jobId,
                         job.metadata,
                         configuredSource,
-                        `${configuredSource} is unavailable and the configured fallback (${fallback}) is also unavailable`
+                        `${configuredSource} is unavailable and the configured fallback (${fallback}) is also unavailable`,
+                        `${configuredSource} and fallback ${fallback} unavailable`
                     );
                     return;
                 }
                 effectiveSource = fallback;
             } else if (configuredSource === "tidal") {
                 // Legacy auto-detect (no stored fallback preference):
-                // prefer Tidal > Soulseek > Lidarr
+                // TIDAL is down, so prefer Soulseek, then Lidarr
                 effectiveSource = soulseekAvail ? "soulseek" : lidarrAvail ? "lidarr" : "soulseek";
             } else if (configuredSource === "soulseek") {
                 effectiveSource = tidalAvail ? "tidal" : lidarrAvail ? "lidarr" : "soulseek";
