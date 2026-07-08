@@ -468,6 +468,148 @@ describe("downloads routes runtime", () => {
         );
     });
 
+    it("fails the job instead of rerouting when the primary source is unavailable and fallback is Skip", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "tidal",
+            primaryFailureFallback: "none",
+        });
+        mockTidalAvailable.mockResolvedValue(false);
+        mockLidarrIsEnabled.mockResolvedValue(true);
+        mockSoulseekAvailable.mockResolvedValue(true);
+
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-skip",
+                subject: "Ella Langley - Hungover",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        expect(res.statusCode).toBe(200);
+        expect(mockStartDownload).not.toHaveBeenCalled();
+        expect(mockTidalFindAlbum).not.toHaveBeenCalled();
+        expect(mockDownloadUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    status: "failed",
+                    error: expect.stringContaining("Skip"),
+                    metadata: expect.objectContaining({
+                        statusText: "tidal unavailable — skipped",
+                    }),
+                }),
+            })
+        );
+    });
+
+    it("uses the explicitly configured fallback source when the primary is unavailable", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "tidal",
+            primaryFailureFallback: "lidarr",
+        });
+        mockTidalAvailable.mockResolvedValue(false);
+        mockLidarrIsEnabled.mockResolvedValue(true);
+        mockSoulseekAvailable.mockResolvedValue(false);
+
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-fb",
+                subject: "Artist - Album",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        expect(mockStartDownload).toHaveBeenCalledWith(
+            "job-1",
+            "Artist",
+            "Album",
+            "rg-fb",
+            "user-1"
+        );
+    });
+
+    it("fails the job when both the primary and its configured fallback are unavailable", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "tidal",
+            primaryFailureFallback: "lidarr",
+        });
+        mockTidalAvailable.mockResolvedValue(false);
+        mockLidarrIsEnabled.mockResolvedValue(false);
+        mockSoulseekAvailable.mockResolvedValue(true);
+
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-fb-down",
+                subject: "Artist - Album",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        // Soulseek being available must NOT rescue the job — the user chose lidarr
+        expect(mockStartDownload).not.toHaveBeenCalled();
+        expect(mockTidalFindAlbum).not.toHaveBeenCalled();
+        // The status text must say the fallback was unavailable — NOT "skipped",
+        // which would misrepresent a non-Skip failure in the UI
+        expect(mockDownloadUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({
+                    status: "failed",
+                    error: expect.stringContaining("unavailable"),
+                    metadata: expect.objectContaining({
+                        statusText: "tidal and fallback lidarr unavailable",
+                    }),
+                }),
+            })
+        );
+    });
+
+    it("keeps legacy auto-detect rerouting when no fallback preference is stored", async () => {
+        mockGetSystemSettings.mockResolvedValue({
+            musicPath: "/music",
+            downloadSource: "tidal",
+        });
+        mockTidalAvailable.mockResolvedValue(false);
+        mockLidarrIsEnabled.mockResolvedValue(true);
+        mockSoulseekAvailable.mockResolvedValue(true);
+
+        const req = {
+            body: {
+                type: "album",
+                mbid: "rg-legacy",
+                subject: "Artist - Album",
+            },
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await createJobHandler(req, res);
+        await flushAsyncWork();
+
+        expect(mockStartDownload).toHaveBeenCalled();
+        expect(mockDownloadUpdate).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ status: "failed" }),
+            })
+        );
+    });
+
     it("returns existing active job for P2002 race-condition collisions", async () => {
         mockTransaction.mockRejectedValueOnce({ code: "P2002" });
         mockDownloadFindFirst.mockResolvedValueOnce({
@@ -1463,7 +1605,7 @@ describe("downloads routes runtime", () => {
         mockGetSystemSettings.mockResolvedValue({
             musicPath: "/music",
             downloadSource: "tidal",
-            primaryFailureFallback: "none",
+            primaryFailureFallback: "soulseek",
         });
         mockTidalAvailable.mockResolvedValue(false);
         mockSoulseekAvailable.mockResolvedValue(true);
@@ -1512,7 +1654,7 @@ describe("downloads routes runtime", () => {
         mockGetSystemSettings.mockResolvedValue({
             musicPath: "/music",
             downloadSource: "soulseek",
-            primaryFailureFallback: "none",
+            primaryFailureFallback: "tidal",
         });
         mockTidalAvailable.mockResolvedValue(true);
         mockSoulseekAvailable.mockResolvedValue(false);
@@ -1577,7 +1719,7 @@ describe("downloads routes runtime", () => {
         mockGetSystemSettings.mockResolvedValue({
             musicPath: "/music",
             downloadSource: "lidarr",
-            primaryFailureFallback: "none",
+            primaryFailureFallback: "soulseek",
         });
         mockTidalAvailable.mockResolvedValue(false);
         mockSoulseekAvailable.mockResolvedValue(true);
