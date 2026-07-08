@@ -46,17 +46,30 @@ recoverable**. Remediation:
 secret generation entirely and is the most robust setup for upgrades, restores,
 and multi-environment installs.
 
+**GitOps / client-side rendering caveat.** The reuse path relies on Helm's
+`lookup` function, which only executes against a live cluster during a real
+`helm install`/`helm upgrade` (or a `--dry-run=server` render). Tooling that
+renders client-side — `helm template | kubectl apply`, Flux's
+`helm template` mode, ArgoCD's default Helm rendering — gets `lookup → nil`
+and **still regenerates all four secrets on every sync**. If you deploy that
+way, you must set `secrets.existingSecret` (or pin every `secrets.*` value);
+the chart cannot stabilize generated secrets for you.
+
 > **Verifying the fix on a cluster** (optional, for operators). Server-side
 > `lookup` only runs against a live cluster, so `helm template` alone can't
-> exercise the reuse path. To confirm in an **isolated** namespace:
+> exercise the reuse path — you need `--dry-run=server` (Helm ≥ 3.13). The
+> chart looks up the Secret named `<release>-soundspan` (the chart fullname),
+> so for a release named `ss` seed `ss-soundspan`. To confirm in an
+> **isolated** namespace:
 >
 > ```sh
 > kubectl create namespace ss-upgrade-check
-> kubectl -n ss-upgrade-check create secret generic ss \
+> kubectl -n ss-upgrade-check create secret generic ss-soundspan \
 >   --from-literal=SESSION_SECRET=stable-test-value
-> # Render against that namespace; SESSION_SECRET must come back as the stored value:
-> helm template ss charts/soundspan --namespace ss-upgrade-check \
->   | grep 'SESSION_SECRET:'
+> # Server-side dry-run executes lookup against the cluster;
+> # SESSION_SECRET must come back as the stored value:
+> helm upgrade --install ss charts/soundspan --namespace ss-upgrade-check \
+>   --dry-run=server | grep 'SESSION_SECRET:'
 > kubectl delete namespace ss-upgrade-check
 > ```
 >
