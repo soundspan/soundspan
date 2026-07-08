@@ -611,6 +611,16 @@ async function failJobWithoutDispatch(
 ) {
     logger.error(`[Downloads] ${message} — job ${jobId} not dispatched`);
 
+    // metadata is a Prisma Json column, so it can legally hold a string,
+    // array, or scalar — spreading those would corrupt the shape
+    // (e.g. "abc" → {0:"a",1:"b",2:"c"}). Only spread plain objects.
+    const baseMetadata =
+        jobMetadata &&
+        typeof jobMetadata === "object" &&
+        !Array.isArray(jobMetadata)
+            ? (jobMetadata as Record<string, unknown>)
+            : {};
+
     await prisma.downloadJob.update({
         where: { id: jobId },
         data: {
@@ -618,7 +628,7 @@ async function failJobWithoutDispatch(
             error: message,
             completedAt: new Date(),
             metadata: {
-                ...((jobMetadata as Record<string, unknown>) || {}),
+                ...baseMetadata,
                 currentSource: source,
                 statusText,
                 failedAt: new Date().toISOString(),
@@ -686,11 +696,17 @@ async function processDownload(
             const fallback = settings?.primaryFailureFallback;
 
             if (fallback === "none" || fallback === configuredSource) {
+                // A fallback equal to the (unavailable) primary cannot rescue
+                // the job either — same outcome as Skip, but say so honestly.
+                const reason =
+                    fallback === "none"
+                        ? `${configuredSource} is unavailable and "When primary source fails" is set to Skip`
+                        : `${configuredSource} is unavailable and the configured fallback is also ${configuredSource}`;
                 await failJobWithoutDispatch(
                     jobId,
                     job.metadata,
                     configuredSource,
-                    `${configuredSource} is unavailable and "When primary source fails" is set to Skip`,
+                    reason,
                     `${configuredSource} unavailable — skipped`
                 );
                 return;
