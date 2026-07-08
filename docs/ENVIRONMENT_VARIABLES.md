@@ -78,7 +78,8 @@ Experimental feature note:
 | `TRANSCODE_CACHE_PATH` | `backend` | Optional | `/app/cache/transcodes` (compose) | Directory for transcoding cache files. |
 | `TRANSCODE_CACHE_MAX_GB` | `backend` | Optional | `10` | Max transcode cache size in GB. |
 | `ALLOWED_ORIGINS` | `backend` | Optional | `http://localhost:3000,http://localhost:3030` | Allowed CORS origins (comma-separated). |
-| `SECURE_COOKIES` | `backend` | Optional | `false` | Forces secure cookies when `true`. |
+| `SECURE_COOKIES` | `backend` | Optional | `true` when `NODE_ENV=production`, else `false` | Session cookie `secure` flag. Set `false` explicitly for a production-mode deploy served over plain HTTP (e.g. LAN without TLS), or logins will not persist. |
+| `TRUST_PROXY_HOPS` | `backend` | Optional | unset (trust all hops) | Express `trust proxy` depth. Set to your real reverse-proxy count (usually `1`) for spoof-resistant client-IP resolution in rate limiting; unset preserves the legacy trust-all behavior. |
 | `DOCS_PUBLIC` | `backend` | Optional | `false` | Allows public API docs in production when `true`. |
 | `ADMIN_RESET_PASSWORD` | `backend` | Optional | unset | One-time startup password reset for admin account. |
 | `JWT_SECRET` | `backend` | Optional | falls back to `SESSION_SECRET` | Explicit JWT signing secret override. |
