@@ -5,6 +5,16 @@ All notable changes to soundspan are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Saving system settings can no longer silently wipe the admin TIDAL download connection. `POST /api/system-settings` previously accepted `tidalAccessToken`/`tidalRefreshToken`/`tidalUserId` and wrote whatever the settings form round-tripped — so any Save from a page loaded before (or without) the device auth overwrote the stored tokens with empty values, after which downloads silently rerouted away from TIDAL. These credential fields are now ignored by the general settings save and are managed exclusively by the `/api/system-settings/tidal-auth` device flow.
+
+### Security
+
+- `GET /api/system-settings` no longer returns decrypted TIDAL access/refresh tokens to the browser. The response now carries a `tidalConnected` boolean instead, and the settings UI derives TIDAL connection status from it (previously it inferred "connected" from `tidalUserId`, which survives a token wipe and could show a connected state with no working credentials).
+
 ## [1.6.0] - 2026-07-08
 
 ### Added

@@ -314,6 +314,58 @@ describe("systemSettings runtime routes", () => {
         expect(res.body.fanartApiKey).toBeNull();
     });
 
+    it("never returns TIDAL token material and reports tidalConnected instead", async () => {
+        const req = { user: { id: "user-1" } } as any;
+        const res = createRes();
+        await getSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).not.toHaveProperty("tidalAccessToken");
+        expect(res.body).not.toHaveProperty("tidalRefreshToken");
+        expect(res.body.tidalConnected).toBe(true);
+    });
+
+    it("reports tidalConnected=false when stored tokens are missing", async () => {
+        mockSystemSettingsFindUnique.mockResolvedValueOnce({
+            id: "default",
+            tidalAccessToken: null,
+            tidalRefreshToken: null,
+        } as any);
+
+        const req = { user: { id: "user-1" } } as any;
+        const res = createRes();
+        await getSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.tidalConnected).toBe(false);
+        expect(res.body).not.toHaveProperty("tidalAccessToken");
+        expect(res.body).not.toHaveProperty("tidalRefreshToken");
+    });
+
+    it("ignores TIDAL credential fields on save so a settings round-trip cannot wipe the admin connection", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                tidalEnabled: true,
+                tidalCountryCode: "US",
+                tidalAccessToken: "",
+                tidalRefreshToken: "",
+                tidalUserId: "",
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const upsertArg = mockSystemSettingsUpsert.mock.calls[0][0];
+        expect(upsertArg.update).not.toHaveProperty("tidalAccessToken");
+        expect(upsertArg.update).not.toHaveProperty("tidalRefreshToken");
+        expect(upsertArg.update).not.toHaveProperty("tidalUserId");
+        expect(upsertArg.update.tidalEnabled).toBe(true);
+        expect(upsertArg.update.tidalCountryCode).toBe("US");
+    });
+
     it("creates defaults when settings do not exist", async () => {
         mockSystemSettingsFindUnique.mockResolvedValueOnce(null);
 
@@ -372,14 +424,16 @@ describe("systemSettings runtime routes", () => {
                     lastfmApiKey: "enc:lastfm-key",
                     audiobookshelfApiKey: "enc:audiobookshelf-key",
                     spotifyClientSecret: "enc:spotify-secret",
-                    tidalAccessToken: "enc:tidal-access-token",
-                    tidalRefreshToken: "enc:tidal-refresh-token",
                     soulseekPassword: "enc:slsk-pass",
                     fanartApiKey: "enc:fanart-key",
                     ytMusicClientSecret: "enc:yt-secret",
                 }),
             })
         );
+        // TIDAL credentials are managed exclusively by the /tidal-auth flow
+        const savedUpdate = mockSystemSettingsUpsert.mock.calls[0][0].update;
+        expect(savedUpdate).not.toHaveProperty("tidalAccessToken");
+        expect(savedUpdate).not.toHaveProperty("tidalRefreshToken");
         expect(mockInvalidateSystemSettingsCache).toHaveBeenCalled();
         expect(mockWriteEnvFile).toHaveBeenCalled();
         expect(mockLastFmService.refreshApiKey).toHaveBeenCalled();

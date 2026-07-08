@@ -28,7 +28,7 @@ export function DownloadPreferencesSection({
 
     const isTidalConfigured =
         settings.tidalEnabled === true &&
-        !!settings.tidalUserId;
+        settings.tidalConnected === true;
 
     const configuredCount = [isLidarrConfigured, isSoulseekConfigured, isTidalConfigured].filter(Boolean).length;
     const isDisabled = configuredCount === 0;

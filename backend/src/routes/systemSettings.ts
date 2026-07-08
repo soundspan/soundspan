@@ -98,11 +98,11 @@ const systemSettingsSchema = z.object({
     downloadSource: z.enum(["soulseek", "lidarr", "tidal"]).optional(),
     primaryFailureFallback: z.enum(["none", "lidarr", "soulseek", "tidal"]).optional(),
 
-    // TIDAL
+    // TIDAL — credential fields (tidalAccessToken, tidalRefreshToken,
+    // tidalUserId) are deliberately absent: they are managed exclusively
+    // by the /tidal-auth device flow. Accepting them here let a stale
+    // settings form round-trip wipe the admin download connection.
     tidalEnabled: z.boolean().optional(),
-    tidalAccessToken: z.string().nullable().optional(),
-    tidalRefreshToken: z.string().nullable().optional(),
-    tidalUserId: z.string().nullable().optional(),
     tidalCountryCode: z.string().nullable().optional(),
     tidalQuality: z.enum(["LOW", "HIGH", "LOSSLESS", "HI_RES_LOSSLESS"]).optional(),
     tidalFileTemplate: z.string().nullable().optional(),
@@ -127,7 +127,11 @@ const systemSettingsSchema = z.object({
  *       - apiKeyAuth: []
  *     responses:
  *       200:
- *         description: System settings object with decrypted sensitive fields
+ *         description: >
+ *           System settings object with decrypted sensitive fields.
+ *           TIDAL token material is never included; the boolean
+ *           `tidalConnected` reports whether the admin download
+ *           connection is established.
  *       401:
  *         description: Not authenticated
  *       403:
@@ -165,9 +169,16 @@ router.get("/", async (req, res) => {
         }
 
         // Decrypt sensitive fields before sending to client
-        // Use safeDecrypt to handle corrupted encrypted values gracefully
+        // Use safeDecrypt to handle corrupted encrypted values gracefully.
+        // TIDAL tokens are never sent to the client — only a connection
+        // flag; the tokens live solely server-side (see /tidal-auth flow).
+        const {
+            tidalAccessToken: storedTidalAccessToken,
+            tidalRefreshToken: storedTidalRefreshToken,
+            ...clientSafeSettings
+        } = settings;
         const decryptedSettings = {
-            ...settings,
+            ...clientSafeSettings,
             lidarrApiKey: safeDecrypt(settings.lidarrApiKey),
             lidarrWebhookSecret: safeDecrypt(settings.lidarrWebhookSecret),
             openaiApiKey: safeDecrypt(settings.openaiApiKey),
@@ -176,9 +187,10 @@ router.get("/", async (req, res) => {
             audiobookshelfApiKey: safeDecrypt(settings.audiobookshelfApiKey),
             soulseekPassword: safeDecrypt(settings.soulseekPassword),
             spotifyClientSecret: safeDecrypt(settings.spotifyClientSecret),
-            tidalAccessToken: safeDecrypt(settings.tidalAccessToken),
-            tidalRefreshToken: safeDecrypt(settings.tidalRefreshToken),
             ytMusicClientSecret: safeDecrypt(settings.ytMusicClientSecret),
+            tidalConnected: !!(
+                storedTidalAccessToken && storedTidalRefreshToken
+            ),
         };
 
         res.json(decryptedSettings);
@@ -203,7 +215,13 @@ router.get("/", async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
- *             description: Partial system settings to update (Lidarr, OpenAI, Fanart, Last.fm, Audiobookshelf, Soulseek, Spotify, TIDAL, paths, feature flags, etc.)
+ *             description: >
+ *               Partial system settings to update (Lidarr, OpenAI, Fanart,
+ *               Last.fm, Audiobookshelf, Soulseek, Spotify, TIDAL, paths,
+ *               feature flags, etc.). TIDAL credential fields
+ *               (tidalAccessToken, tidalRefreshToken, tidalUserId) are
+ *               ignored — the admin TIDAL connection is managed only via
+ *               the /tidal-auth endpoints.
  *     responses:
  *       200:
  *         description: Settings saved successfully
@@ -250,10 +268,6 @@ router.post("/", async (req, res) => {
             encryptedData.spotifyClientSecret = encrypt(
                 data.spotifyClientSecret
             );
-        if (data.tidalAccessToken)
-            encryptedData.tidalAccessToken = encrypt(data.tidalAccessToken);
-        if (data.tidalRefreshToken)
-            encryptedData.tidalRefreshToken = encrypt(data.tidalRefreshToken);
         if (data.ytMusicClientSecret)
             encryptedData.ytMusicClientSecret = encrypt(
                 data.ytMusicClientSecret

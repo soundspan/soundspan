@@ -90,6 +90,8 @@ Browser → GET /api/tidal-streaming/stream/:tidalId
 
 Each user authenticates their own TIDAL account via device-code OAuth flow. Stream quality is per-user configurable. The backend looks up the user's encrypted OAuth credentials from `UserSettings.tidalOAuthJson`.
 
+TIDAL has **two separate auth identities**: the per-user OAuth above (streaming only) and a single admin-owned download connection whose encrypted tokens live in `SystemSettings.tidalAccessToken`/`tidalRefreshToken`. Album downloads always use the admin connection (`backend/src/services/tidal.ts`), never per-user credentials. The admin connection is established exclusively through the `/api/system-settings/tidal-auth` device-code endpoints; the general settings API neither returns the token material (`GET` reports a `tidalConnected` boolean instead) nor accepts it on save, so a settings round-trip cannot overwrite the stored tokens.
+
 ### Gap-Fill Playback (YouTube Music)
 
 ```

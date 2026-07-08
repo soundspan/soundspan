@@ -91,6 +91,7 @@ export function TidalCard({ settings, onUpdate, onTest, isTesting }: TidalCardPr
                         setAuthMessage(`Authenticated as ${result.username || result.user_id}`);
                         onUpdate({
                             tidalEnabled: true,
+                            tidalConnected: true,
                             tidalUserId: result.user_id || "",
                             tidalCountryCode: result.country_code || "US",
                         });
@@ -117,7 +118,7 @@ export function TidalCard({ settings, onUpdate, onTest, isTesting }: TidalCardPr
         }
     }, [onUpdate, authState]);
 
-    const isAuthenticated = !!(settings.tidalUserId && settings.tidalEnabled);
+    const isAuthenticated = !!(settings.tidalConnected && settings.tidalEnabled);
 
     const statusText = settings.tidalEnabled
         ? isAuthenticated

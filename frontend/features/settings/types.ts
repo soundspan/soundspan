@@ -46,10 +46,10 @@ export interface SystemSettings {
     // Spotify (for playlist import)
     spotifyClientId: string;
     spotifyClientSecret: string;
-    // TIDAL
+    // TIDAL — token material never leaves the backend; tidalConnected
+    // reports whether the admin download connection is established.
     tidalEnabled: boolean;
-    tidalAccessToken: string;
-    tidalRefreshToken: string;
+    tidalConnected: boolean;
     tidalUserId: string;
     tidalCountryCode: string;
     tidalQuality: "LOW" | "HIGH" | "LOSSLESS" | "HI_RES_LOSSLESS";
