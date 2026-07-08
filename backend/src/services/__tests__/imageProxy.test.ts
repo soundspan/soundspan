@@ -1,3 +1,12 @@
+// fetchExternalImage DNS-resolves the URL and every redirect hop (SSRF
+// guard). Resolve all hosts to a fixed public IP so the suite never depends
+// on real DNS (blocked literals are string-rejected before resolution).
+jest.mock("dns/promises", () => ({
+    lookup: jest
+        .fn()
+        .mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
+}));
+
 import {
     fetchExternalImage,
     normalizeExternalImageUrl,

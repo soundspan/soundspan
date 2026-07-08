@@ -1,14 +1,6 @@
 import axios from "axios";
 import { Request, Response } from "express";
 
-// The admin connection-test now DNS-resolves the URL (SSRF guard). Resolve any
-// non-blocked host to a fixed public IP so tests don't depend on real DNS.
-jest.mock("dns/promises", () => ({
-    lookup: jest
-        .fn()
-        .mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
-}));
-
 type AuthFailureMode = "ok" | "unauthorized" | "forbidden";
 const authFailureState = { mode: "ok" as AuthFailureMode };
 
@@ -638,6 +630,27 @@ describe("systemSettings runtime routes", () => {
             error: "URL must be a valid public HTTP(S) URL",
         });
         expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
+    it("accepts Docker/LAN service hostnames for the admin connection test", async () => {
+        // Regression: the connection test must NOT DNS-resolve-and-reject
+        // private ranges — in the documented compose deployment Lidarr lives on
+        // the Docker bridge (http://lidarr:8686 resolves to 172.16/12), and an
+        // admin probing their own integration is not an SSRF vector worth
+        // breaking that for. Only the string check applies here.
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
+            data: { version: "2.0.0" },
+        });
+        const req = {
+            body: { url: "http://lidarr:8686", apiKey: "key" },
+        } as any;
+        const res = createRes();
+
+        await testLidarrHandler(req, res);
+
+        expect(mockAxiosGet).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).not.toBe(400);
     });
 
     it("returns friendly message when Lidarr host is unresolved", async () => {

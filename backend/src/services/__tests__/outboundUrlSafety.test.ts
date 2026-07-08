@@ -66,6 +66,35 @@ describe("outboundUrlSafety", () => {
             mockLookup.mockResolvedValue([]);
             expect(await resolveSafeOutboundUrl("https://example.com")).toBeNull();
         });
+
+        it("blocks ALL of 127.0.0.0/8 and 0.0.0.0/8, not just the canonical literals", async () => {
+            // String pre-check: non-canonical loopback literals never reach DNS.
+            expect(normalizeSafeOutboundUrl("http://127.0.0.2/")).toBeNull();
+            expect(normalizeSafeOutboundUrl("http://127.255.0.1/")).toBeNull();
+            expect(normalizeSafeOutboundUrl("http://0.1.2.3/")).toBeNull();
+            expect(mockLookup).not.toHaveBeenCalled();
+
+            // Resolved-IP check: a DNS name pointing anywhere in 127/8 (e.g.
+            // systemd-resolved's 127.0.0.53) is rejected — previously only the
+            // exact string "127.0.0.1" was range-checked, so this was a full
+            // guard bypass without needing DNS rebinding.
+            mockLookup.mockResolvedValue([
+                { address: "127.0.0.53", family: 4 },
+            ]);
+            expect(
+                await resolveSafeOutboundUrl("https://rebind.example.com/")
+            ).toBeNull();
+        });
+
+        it("still allows public IPs that merely contain a blocked octet elsewhere", () => {
+            // Prefix checks must anchor at the start of the address.
+            expect(normalizeSafeOutboundUrl("http://8.127.0.1/")).toBe(
+                "http://8.127.0.1/"
+            );
+            expect(normalizeSafeOutboundUrl("http://110.1.2.3/")).toBe(
+                "http://110.1.2.3/"
+            );
+        });
     });
 
     describe("resolveSafeOutboundRedirectTarget", () => {

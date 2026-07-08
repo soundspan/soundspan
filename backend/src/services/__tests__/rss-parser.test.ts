@@ -1,6 +1,15 @@
 const mockParseString = jest.fn();
 const mockAxiosGet = jest.fn();
 
+// parseFeed DNS-resolves the feed URL and every redirect hop (SSRF guard).
+// Resolve all hosts to a fixed public IP so the suite never depends on real
+// DNS (blocked literals like 10.0.0.5 are string-rejected before resolution).
+jest.mock("dns/promises", () => ({
+    lookup: jest
+        .fn()
+        .mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
+}));
+
 jest.mock("rss-parser", () =>
     jest.fn().mockImplementation(() => ({
         parseString: mockParseString,
@@ -540,5 +549,84 @@ describe("rssParserService", () => {
         ).rejects.toThrow("Failed to parse podcast feed: Invalid or private feed URL");
 
         expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
+    it("follows a safe redirect hop and parses the destination feed", async () => {
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 301,
+            headers: { location: "https://example.com/moved.xml" },
+            data: "",
+        });
+        mockFeedResponse({
+            title: "Moved Feed",
+            items: [
+                {
+                    title: "Episode",
+                    enclosure: {
+                        url: "https://cdn.example.com/moved.mp3",
+                        type: "audio/mpeg",
+                    },
+                },
+            ],
+        });
+
+        const result = await rssParserService.parseFeed(
+            "https://example.com/feed.xml"
+        );
+
+        expect(result.podcast.title).toBe("Moved Feed");
+        expect(mockAxiosGet).toHaveBeenCalledTimes(2);
+        expect(mockAxiosGet).toHaveBeenLastCalledWith(
+            "https://example.com/moved.xml",
+            // Redirects must be followed manually (per-hop SSRF check), never
+            // delegated to axios.
+            expect.objectContaining({ maxRedirects: 0 })
+        );
+    });
+
+    it("blocks a redirect hop that targets a private address", async () => {
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 302,
+            headers: { location: "http://10.0.0.5/internal-feed.xml" },
+            data: "",
+        });
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/feed.xml")
+        ).rejects.toThrow(
+            "Failed to parse podcast feed: Invalid or private feed redirect target"
+        );
+        // The private hop is never fetched.
+        expect(mockAxiosGet).toHaveBeenCalledTimes(1);
+        expect(mockParseString).not.toHaveBeenCalled();
+    });
+
+    it("gives up after too many redirect hops", async () => {
+        for (let hop = 0; hop < 6; hop += 1) {
+            mockAxiosGet.mockResolvedValueOnce({
+                status: 301,
+                headers: { location: `https://example.com/hop-${hop}.xml` },
+                data: "",
+            });
+        }
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/feed.xml")
+        ).rejects.toThrow("Failed to parse podcast feed: Too many redirects");
+        expect(mockParseString).not.toHaveBeenCalled();
+    });
+
+    it("rejects a redirect without a Location header", async () => {
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 302,
+            headers: {},
+            data: "",
+        });
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/feed.xml")
+        ).rejects.toThrow(
+            "Failed to parse podcast feed: Redirect without a Location header"
+        );
     });
 });

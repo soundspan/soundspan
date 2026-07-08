@@ -8,7 +8,7 @@ import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 import { queueCleaner } from "../jobs/queueCleaner";
 import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME, BRAND_SLUG } from "../config/brand";
-import { resolveSafeOutboundUrl } from "../services/outboundUrlSafety";
+import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
 import {
     sendInternalRouteError,
     sendRouteError,
@@ -20,11 +20,15 @@ const WEBHOOK_URL_ALIASES = [BRAND_SLUG];
 // Shared validation message for admin outbound connection-test URLs.
 const ADMIN_TEST_URL_ERROR = "URL must be a valid public HTTP(S) URL";
 
-async function normalizeAdminTestUrl(url: string): Promise<string | null> {
-    // DNS-resolve and range-check (the admin connection test fetches this URL).
-    const resolved = await resolveSafeOutboundUrl(url);
+function normalizeAdminTestUrl(url: string): string | null {
+    // Deliberately the STRING check only (no DNS resolution): admin connection
+    // tests legitimately target Docker-network and LAN hostnames
+    // (http://lidarr:8686 resolves to 172.16/12 in the documented compose
+    // deployment), the endpoints are admin-only, and an admin probing their own
+    // integrations is not the SSRF vector the DNS-resolving guard exists for.
+    const normalizedUrl = normalizeSafeOutboundUrl(url);
 
-    return resolved ? resolved.replace(/\/+$/, "") : null;
+    return normalizedUrl ? normalizedUrl.replace(/\/+$/, "") : null;
 }
 
 /**
@@ -540,7 +544,7 @@ router.post("/test-lidarr", async (req, res) => {
                 .json({ error: "URL and API key are required" });
         }
 
-        const normalizedUrl = await normalizeAdminTestUrl(url);
+        const normalizedUrl = normalizeAdminTestUrl(url);
         if (!normalizedUrl) {
             return res.status(400).json({ error: ADMIN_TEST_URL_ERROR });
         }
@@ -856,7 +860,7 @@ router.post("/test-audiobookshelf", async (req, res) => {
                 .json({ error: "URL and API key are required" });
         }
 
-        const normalizedUrl = await normalizeAdminTestUrl(url);
+        const normalizedUrl = normalizeAdminTestUrl(url);
         if (!normalizedUrl) {
             return res.status(400).json({ error: ADMIN_TEST_URL_ERROR });
         }

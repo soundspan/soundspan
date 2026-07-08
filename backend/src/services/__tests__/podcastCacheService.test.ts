@@ -44,12 +44,19 @@ jest.mock("../../config", () => ({
     },
 }));
 
-const mockNormalizeExternalImageUrl = jest.fn(
-    (url: string) => (url.includes("localhost") || url.includes("127.0.0.1") || url.includes("192.168.") ? null : url),
+// downloadCover guards with the DNS-resolving SSRF check (async) — a string
+// check alone missed hostnames that resolve to internal addresses.
+const mockResolveSafeOutboundUrl = jest.fn(async (url: string) =>
+    url.includes("localhost") ||
+    url.includes("127.0.0.1") ||
+    url.includes("192.168.") ||
+    url.includes("resolves-private")
+        ? null
+        : url
 );
 
-jest.mock("../imageProxy", () => ({
-    normalizeExternalImageUrl: (url: string) => mockNormalizeExternalImageUrl(url),
+jest.mock("../outboundUrlSafety", () => ({
+    resolveSafeOutboundUrl: (url: string) => mockResolveSafeOutboundUrl(url),
 }));
 
 import { PodcastCacheService } from "../podcastCache";
@@ -298,9 +305,24 @@ describe("PodcastCacheService", () => {
 
         expect(localPath).not.toBeNull();
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(mockNormalizeExternalImageUrl).toHaveBeenCalledWith(
+        expect(mockResolveSafeOutboundUrl).toHaveBeenCalledWith(
             "https://cdn.podcast.example/cover.jpg"
         );
+    });
+
+    it("downloadCover rejects hostnames that RESOLVE to private addresses", async () => {
+        // The string-only check passed any public-looking hostname; the
+        // DNS-resolving guard must reject one whose records are internal.
+        const service = new PodcastCacheService();
+
+        const localPath = await (service as any).downloadCover(
+            "pod-rebind",
+            "https://resolves-private.example.com/cover.jpg",
+            "podcast"
+        );
+
+        expect(localPath).toBeNull();
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("cleanupOrphanedCovers deletes only files not referenced by podcasts or episodes", async () => {

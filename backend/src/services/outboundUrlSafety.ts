@@ -13,7 +13,12 @@ function stripIpv6Brackets(hostname: string): string {
 
 function isBlockedIpv4Hostname(hostname: string): boolean {
     return (
-        hostname === "127.0.0.1" ||
+        // Whole ranges, not just the canonical literals: 127.0.0.2,
+        // 127.0.0.53 (systemd-resolved), 0.1.2.3 etc. are equally loopback/
+        // "this network" targets, and this predicate also range-checks
+        // DNS-RESOLVED addresses, where any 127/8 answer is an SSRF vector.
+        hostname.startsWith("127.") ||
+        hostname.startsWith("0.") ||
         hostname === "0.0.0.0" ||
         hostname.startsWith("10.") ||
         hostname.startsWith("192.168.") ||

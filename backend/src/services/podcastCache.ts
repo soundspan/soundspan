@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import { config } from "../config";
 import { buildCachePath } from "./cacheHelpers";
-import { normalizeExternalImageUrl } from "./imageProxy";
+import { resolveSafeOutboundUrl } from "./outboundUrlSafety";
 
 /**
  * Service to cache podcast cover images locally
@@ -194,7 +194,10 @@ export class PodcastCacheService {
         type: "podcast" | "episode"
     ): Promise<string | null> {
         try {
-            const safeUrl = normalizeExternalImageUrl(imageUrl);
+            // DNS-resolving SSRF guard: feed-supplied cover URLs are untrusted
+            // and a public-looking hostname can resolve to an internal address.
+            // Redirects stay hard-disabled below, so one check covers the fetch.
+            const safeUrl = await resolveSafeOutboundUrl(imageUrl);
             if (!safeUrl) {
                 logger.error(
                     `SSRF-blocked cover download for ${type} ${id}:`,
