@@ -664,6 +664,38 @@ describe("systemSettings runtime routes", () => {
         expect(res.body.success).toBe(true);
     });
 
+    it("does not disconnect Soulseek when the password merely round-trips as an empty string", async () => {
+        const req = {
+            user: { id: "admin-1" },
+            body: {
+                transcodeCacheMaxGb: 12,
+                soulseekPassword: "",
+            },
+        } as any;
+        const res = createRes();
+
+        await postSettingsHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(mockSoulseekService.disconnect).not.toHaveBeenCalled();
+    });
+
+    it("disconnects Soulseek on a real password change or explicit clear", async () => {
+        const newPassReq = {
+            user: { id: "admin-1" },
+            body: { soulseekPassword: "brand-new-pass" },
+        } as any;
+        await postSettingsHandler(newPassReq, createRes());
+        expect(mockSoulseekService.disconnect).toHaveBeenCalledTimes(1);
+
+        const clearReq = {
+            user: { id: "admin-1" },
+            body: { soulseekPassword: null },
+        } as any;
+        await postSettingsHandler(clearReq, createRes());
+        expect(mockSoulseekService.disconnect).toHaveBeenCalledTimes(2);
+    });
+
     it("continues saving when Soulseek disconnect fails", async () => {
         mockSoulseekService.disconnect.mockImplementationOnce(() => {
             throw new Error("disconnect unavailable");

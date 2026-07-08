@@ -306,10 +306,14 @@ router.post("/", async (req, res) => {
             logger.warn("Failed to refresh Last.fm API key:", err);
         }
 
-        // Disconnect Soulseek if credentials changed
+        // Disconnect Soulseek if credentials changed. An empty-string
+        // password is a no-change round-trip (see the secret semantics
+        // above), so it must not bounce the connection; null (explicit
+        // clear) and non-empty values are real credential changes.
         if (
             data.soulseekUsername !== undefined ||
-            data.soulseekPassword !== undefined
+            (data.soulseekPassword !== undefined &&
+                data.soulseekPassword !== "")
         ) {
             try {
                 const { soulseekService } = await import(
