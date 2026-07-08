@@ -597,6 +597,46 @@ async function processArtistDownload(
     }
 }
 
+/**
+ * Mark a download job failed before any source was contacted — used when
+ * the configured source is unavailable and the fallback setting forbids
+ * rerouting. Mirrors the failure shape of processTidalDownload's catch.
+ */
+async function failJobWithoutDispatch(
+    jobId: string,
+    jobMetadata: unknown,
+    source: string,
+    message: string,
+    statusText: string
+) {
+    logger.error(`[Downloads] ${message} — job ${jobId} not dispatched`);
+
+    // metadata is a Prisma Json column, so it can legally hold a string,
+    // array, or scalar — spreading those would corrupt the shape
+    // (e.g. "abc" → {0:"a",1:"b",2:"c"}). Only spread plain objects.
+    const baseMetadata =
+        jobMetadata &&
+        typeof jobMetadata === "object" &&
+        !Array.isArray(jobMetadata)
+            ? (jobMetadata as Record<string, unknown>)
+            : {};
+
+    await prisma.downloadJob.update({
+        where: { id: jobId },
+        data: {
+            status: "failed",
+            error: message,
+            completedAt: new Date(),
+            metadata: {
+                ...baseMetadata,
+                currentSource: source,
+                statusText,
+                failedAt: new Date().toISOString(),
+            },
+        },
+    });
+}
+
 // Background download processor
 async function processDownload(
     jobId: string,
@@ -639,17 +679,64 @@ async function processDownload(
             lidarrService.isEnabled(),
             soulseekService.isAvailable(),
         ]);
+        const availability: Record<string, boolean> = {
+            tidal: tidalAvail,
+            lidarr: lidarrAvail,
+            soulseek: soulseekAvail,
+        };
 
-        // Determine effective download source:
-        // 1. Use configured source if that service is available
-        // 2. Otherwise auto-detect: prefer Tidal > Soulseek > Lidarr
+        // Determine effective download source. When the configured primary
+        // is unavailable, the user's "When primary source fails" setting
+        // decides what happens: "none" (Skip) fails the job outright, an
+        // explicit fallback source is used only if it is itself available,
+        // and only legacy rows with no stored preference keep the old
+        // auto-detect rerouting.
         let effectiveSource = configuredSource;
-        if (configuredSource === "tidal" && !tidalAvail) {
-            effectiveSource = soulseekAvail ? "soulseek" : lidarrAvail ? "lidarr" : "soulseek";
-        } else if (configuredSource === "soulseek" && !soulseekAvail) {
-            effectiveSource = tidalAvail ? "tidal" : lidarrAvail ? "lidarr" : "soulseek";
-        } else if (configuredSource === "lidarr" && !lidarrAvail) {
-            effectiveSource = tidalAvail ? "tidal" : soulseekAvail ? "soulseek" : "lidarr";
+        if (!availability[configuredSource]) {
+            const fallback = settings?.primaryFailureFallback;
+
+            if (fallback === "none" || fallback === configuredSource) {
+                // A fallback equal to the (unavailable) primary cannot rescue
+                // the job either — same outcome as Skip, but say so honestly.
+                const reason =
+                    fallback === "none"
+                        ? `${configuredSource} is unavailable and "When primary source fails" is set to Skip`
+                        : `${configuredSource} is unavailable and the configured fallback is also ${configuredSource}`;
+                await failJobWithoutDispatch(
+                    jobId,
+                    job.metadata,
+                    configuredSource,
+                    reason,
+                    `${configuredSource} unavailable — skipped`
+                );
+                return;
+            }
+
+            if (
+                fallback === "tidal" ||
+                fallback === "lidarr" ||
+                fallback === "soulseek"
+            ) {
+                if (!availability[fallback]) {
+                    await failJobWithoutDispatch(
+                        jobId,
+                        job.metadata,
+                        configuredSource,
+                        `${configuredSource} is unavailable and the configured fallback (${fallback}) is also unavailable`,
+                        `${configuredSource} and fallback ${fallback} unavailable`
+                    );
+                    return;
+                }
+                effectiveSource = fallback;
+            } else if (configuredSource === "tidal") {
+                // Legacy auto-detect (no stored fallback preference):
+                // TIDAL is down, so prefer Soulseek, then Lidarr
+                effectiveSource = soulseekAvail ? "soulseek" : lidarrAvail ? "lidarr" : "soulseek";
+            } else if (configuredSource === "soulseek") {
+                effectiveSource = tidalAvail ? "tidal" : lidarrAvail ? "lidarr" : "soulseek";
+            } else {
+                effectiveSource = tidalAvail ? "tidal" : soulseekAvail ? "soulseek" : "lidarr";
+            }
         }
 
         logger.debug(`Download source: configured=${configuredSource}, effective=${effectiveSource}`);
@@ -657,7 +744,10 @@ async function processDownload(
         if (effectiveSource === "tidal" && tidalAvail) {
             await processTidalDownload(jobId, parsedArtist, parsedAlbum, job.userId);
         } else {
-            // Use simple download manager for Lidarr/Soulseek downloads
+            // Non-TIDAL dispatch goes through simpleDownloadManager, which
+            // is Lidarr-backed — there is no per-source dispatch below this
+            // point, so a "soulseek" selection is executed by the Lidarr
+            // manager (pre-existing pipeline limitation).
             const result = await simpleDownloadManager.startDownload(
                 jobId,
                 parsedArtist,

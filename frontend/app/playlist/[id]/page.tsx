@@ -21,6 +21,7 @@ import { TrackList as SharedTrackList, TrackListHeader, UnplayableBadge } from "
 import type { TrackRowItem, TrackRowSlots, OverflowConfig, RowState } from "@/components/track";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/lib/toast-context";
+import { removePlaylistItemFromCache } from "./playlistCacheUpdates";
 import { useDownloadContext } from "@/lib/download-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
@@ -481,9 +482,24 @@ export default function PlaylistDetailPage() {
     const handleRemoveTrack = async (itemIdOrTrackId: string) => {
         try {
             await api.removeTrackFromPlaylist(playlistId, itemIdOrTrackId);
-            // Track disappearing from list is feedback enough
+            // Drop the row from the cached playlist immediately (the page
+            // reads through React Query, so without this the stale cache
+            // kept showing the removed track — GH #34), then refetch for
+            // authoritative state.
+            queryClient.setQueryData(
+                ["playlist", playlistId],
+                (old: Record<string, unknown> | undefined) =>
+                    removePlaylistItemFromCache(
+                        old as { items?: { id: string; trackId?: string | null }[] } | undefined,
+                        itemIdOrTrackId
+                    )
+            );
+            queryClient.invalidateQueries({
+                queryKey: ["playlist", playlistId],
+            });
         } catch (error) {
             sharedFrontendLogger.error("Failed to remove track:", error);
+            toast.error("Failed to remove track from playlist");
         }
     };
 
