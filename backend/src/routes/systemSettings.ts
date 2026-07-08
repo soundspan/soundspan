@@ -298,7 +298,8 @@ router.post("/", async (req, res) => {
             );
         };
 
-        // Refresh Last.fm API key if it was updated
+        // Re-read the Last.fm API key from settings (runs on every save —
+        // the service reloads its key unconditionally, cheap no-op if same)
         try {
             const { lastFmService } = await import("../services/lastfm");
             await lastFmService.refreshApiKey();
