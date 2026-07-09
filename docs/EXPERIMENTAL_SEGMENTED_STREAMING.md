@@ -10,7 +10,7 @@ Segmented streaming is an experimental feature.
 
 | Variable | Default | Values | Purpose |
 | --- | --- | --- | --- |
-| `STREAMING_ENGINE_MODE` | `howler` | `howler`, `videojs` | Frontend runtime engine mode (`howler` direct primary playback, `videojs` segmented experimental playback). |
+| `STREAMING_ENGINE_MODE` | `howler` | `howler`, `videojs`, `native` | Frontend runtime engine mode (`howler` direct primary playback, `videojs` segmented experimental playback, `native` direct playback via the native `<audio>`-element engine — see [NATIVE_AUDIO_ENGINE.md](NATIVE_AUDIO_ENGINE.md)). |
 | `SEGMENTED_SESSION_PREWARM_ENABLED` | `true` | `true`, `false` | Enables next-track segmented session prewarm + validation. |
 | `LISTEN_TOGETHER_SEGMENTED_PLAYBACK_ENABLED` | `false` | `true`, `false` | Enables segmented startup/handoff/recovery while a Listen Together group is active. |
 | `SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS` | `20000` | `1500-22000` | Runtime startup timeout used to trigger segmented startup retries when startup stalls. |
@@ -29,6 +29,7 @@ Primary runtime knob:
   - unset/empty: defaults to `howler` (direct)
   - `howler`: direct playback mode
   - `videojs`: segmented playback mode (experimental)
+  - `native`: direct playback via the native `<audio>`-element engine (opt-in; see [NATIVE_AUDIO_ENGINE.md](NATIVE_AUDIO_ENGINE.md))
 
 Guardrails:
 
