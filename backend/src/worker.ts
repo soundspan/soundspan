@@ -201,6 +201,14 @@ async function startWorkerRuntime() {
     await import("./workers");
     workersInitialized = true;
 
+    // Event-loop stall watchdog: attributes liveness-probe-visible stalls
+    // to the Bull jobs running at the time (issue #43)
+    const { startWorkerEventLoopMonitor } = await import(
+        "./services/workerEventLoopMonitor"
+    );
+    const { config } = await import("./config");
+    startWorkerEventLoopMonitor(config.workerEventLoop);
+
     logger.debug(
         "Background enrichment enabled for owned content (genres, MBIDs, etc.)"
     );

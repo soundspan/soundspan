@@ -177,6 +177,8 @@ For small deployments, `all` is fine. For scale-out, run separate `api` and `wor
 
 Coarse feature flags (`AUDIO_ANALYSIS_ENABLED`, `DISCOVERY_ENABLED`, `AUTO_PLAYLISTS_ENABLED`, all default `true`) gate both sides: with a flag off, the API process does not mount the subsystem's routes (requests get `404` with `code: FEATURE_DISABLED`) and the worker process does not register its queues/crons. The flags are exposed through Helm values (`config.features.*`) and forwarded by the docker-compose files.
 
+The worker process runs an event-loop stall watchdog (`services/workerEventLoopMonitor.ts`): its `/health/live` endpoint answers unconditionally, so a liveness-probe timeout always means the single-threaded event loop was blocked. Attribution has two paths: stalls the loop recovers from are logged by a `monitorEventLoopDelay` sampler naming the active Bull jobs (threshold `WORKER_EVENT_LOOP_WARN_MS`, default 1s); stalls that end in a kubelet kill can never reach that sampler (a pegged loop runs no timers), so the heavy queues (`worker-scheduler`, `library-scan`) log an unconditional `job-start` breadcrumb whose final occurrence before death names the culprit.
+
 ## Key Runtime Boundaries
 
 - **Frontend API boundary:** `frontend/lib/api.ts` — all HTTP calls go through here

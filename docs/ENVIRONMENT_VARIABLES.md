@@ -70,6 +70,8 @@ Experimental feature note:
 | `NODE_ENV` | `backend`, `backend-worker`, `frontend` | Optional | `production` (compose) | Runtime mode. |
 | `BACKEND_PROCESS_ROLE` | `backend`, `backend-worker` | Optional | split stack: `all`; HA override for backend: `api`; worker: `worker` | Role split for API/worker processes. |
 | `WORKER_HEALTH_PORT` | `backend-worker` | Optional | `3010` | Worker health endpoint port (`/health/live`, `/health/ready`). |
+| `WORKER_EVENT_LOOP_WARN_MS` | `backend-worker` | Optional | `1000` | Event-loop stall watchdog: stalls at or above this many milliseconds log a warning naming the active Bull jobs. |
+| `WORKER_EVENT_LOOP_SAMPLE_MS` | `backend-worker` | Optional | `5000` | Event-loop stall watchdog sampling interval in milliseconds. |
 | `LOG_LEVEL` | `backend`, `backend-worker`, python sidecars using shared logger | Optional | backend-worker compose: `warn`; otherwise env-dependent defaults | Shared logger verbosity (`debug`, `info`, `warn`, `error`, `silent` for TS; Python also supports `critical`). |
 | `DATABASE_POOL_SIZE` | `backend`, `backend-worker` | Optional | role-aware: `api=8`, `worker=4`, `all=12` | Prisma DB pool connection limit. |
 | `DATABASE_POOL_TIMEOUT` | `backend`, `backend-worker` | Optional | `30` | Prisma DB pool timeout in seconds. |

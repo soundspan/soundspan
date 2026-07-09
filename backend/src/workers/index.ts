@@ -1,5 +1,9 @@
 import { logger } from "../utils/logger";
 import { randomUUID } from "crypto";
+import {
+    trackJobStart,
+    trackJobEnd,
+} from "../services/workerEventLoopMonitor";
 import type Bull from "bull";
 import type Redis from "ioredis";
 import {
@@ -98,6 +102,25 @@ function recordQueueProcessorEvent(
     job: Bull.Job<any>
 ): void {
     queueProcessorCounters[event] += 1;
+
+    // Feed the event-loop stall watchdog's attribution registry (issue #43)
+    const jobId = String(job?.id ?? "unknown");
+    const jobName = String(job?.name ?? "unknown");
+    if (event === "active") {
+        trackJobStart(queueName, jobId, jobName);
+        // Unconditional start breadcrumb for the heavy queues: a job that
+        // pegs the loop until the kubelet kills the process never lets the
+        // watchdog interval fire, so the last log line before death must
+        // already name the culprit. Scheduler cycles and library scans are
+        // the known stall suspects; other queues stay on sampled logging.
+        if (queueName === "worker-scheduler" || queueName === "library-scan") {
+            logger.info(
+                `[WorkerEventLoop] job-start queue=${queueName} jobId=${jobId} jobName=${jobName}`
+            );
+        }
+    } else {
+        trackJobEnd(queueName, jobId);
+    }
 
     if (
         event === "failed" ||
@@ -1040,6 +1063,10 @@ imageQueue.on("failed", (job, err) => {
     logger.error(`Image job ${job.id} failed (workerId=${WORKER_PROCESSOR_ID}):`, err.message);
 });
 
+imageQueue.on("active", (job) => {
+    recordQueueProcessorEvent("image-optimization", "active", job);
+});
+
 // Event handlers for validation queue
 validationQueue.on("completed", (job, result) => {
     recordQueueProcessorEvent("file-validation", "completed", job);
@@ -1056,6 +1083,13 @@ validationQueue.on("failed", (job, err) => {
 validationQueue.on("active", (job) => {
     recordQueueProcessorEvent("file-validation", "active", job);
     logger.debug(` Validation job ${job.id} started (workerId=${WORKER_PROCESSOR_ID})`);
+});
+
+// The scheduler queue runs the heavy maintenance cycles (metadata refresh,
+// reconciliation, artist-count backfills) — the primary stall suspects — so
+// it MUST feed the event-loop watchdog's attribution registry.
+schedulerQueue.on("active", (job) => {
+    recordQueueProcessorEvent("worker-scheduler", "active", job);
 });
 
 schedulerQueue.on("completed", (job) => {

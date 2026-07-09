@@ -118,6 +118,10 @@ describe("worker entrypoint behavior", () => {
             config: {
                 databaseUrl: "postgresql://soundspan:secret@db.example:5432/soundspan",
                 redisUrl: "redis://redis.example:6379/0",
+                workerEventLoop: {
+                    warnThresholdMs: 1000,
+                    sampleIntervalMs: 5000,
+                },
             },
             initializeMusicConfig: jest.fn(
                 initializeMusicConfigImpl || (async () => undefined)

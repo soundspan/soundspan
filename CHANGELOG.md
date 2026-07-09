@@ -5,6 +5,16 @@ All notable changes to soundspan are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Worker event-loop stall watchdog (#43), with two attribution paths. Stalls the loop recovers from: the worker samples `monitorEventLoopDelay` and, when a stall exceeds the warn threshold (default 1s, `WORKER_EVENT_LOOP_WARN_MS`), logs the Bull jobs active at that moment. Stalls that end in a liveness kill: the watchdog's interval can never fire while the loop is pegged, so the heavy queues (`worker-scheduler`, `library-scan`) log an unconditional `job-start` breadcrumb — the last log line before the kill names the culprit. Sample cadence is configurable via `WORKER_EVENT_LOOP_SAMPLE_MS` (default 5s).
+
+### Changed
+
+- The Helm chart's backend-worker liveness probe gets busy-loop headroom: `timeoutSeconds` 10 → 25 and `failureThreshold` 3 → 4 (~2 minutes of sustained event-loop saturation before a kill, up from ~90 seconds). `/health/live` answers unconditionally, so probe timeouts indicate a busy single-threaded worker, not a dead one; true deadlocks still get killed.
+
 ## [1.6.1] - 2026-07-08
 
 ### Fixed

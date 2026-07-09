@@ -312,6 +312,56 @@ describe("workers runtime behavior", () => {
         );
     });
 
+    it("feeds the event-loop watchdog registry and logs a start breadcrumb for heavy-queue jobs", async () => {
+        process.env = { ...originalEnv };
+        const mocks = setupWorkerModuleMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const monitor = require("../../services/workerEventLoopMonitor");
+        monitor.clearActiveJobsForTest();
+
+        const findHandler = (queue: { on: jest.Mock }, event: string) =>
+            queue.on.mock.calls.find(([name]: [string]) => name === event)?.[1];
+
+        const schedulerActive = findHandler(mocks.schedulerQueue, "active");
+        const schedulerCompleted = findHandler(mocks.schedulerQueue, "completed");
+        expect(schedulerActive).toBeDefined();
+        expect(schedulerCompleted).toBeDefined();
+
+        schedulerActive({ id: "r1", name: "download-reconciliation-cycle" });
+        expect(monitor.getActiveJobs()).toEqual([
+            expect.objectContaining({
+                queue: "worker-scheduler",
+                jobId: "r1",
+                jobName: "download-reconciliation-cycle",
+            }),
+        ]);
+        // Unconditional start breadcrumb: a job that pegs the loop until the
+        // kubelet kills the process never lets the watchdog interval fire,
+        // so this must be the last log line naming the culprit.
+        expect(mocks.logger.info).toHaveBeenCalledWith(
+            expect.stringContaining(
+                "job-start queue=worker-scheduler jobId=r1 jobName=download-reconciliation-cycle"
+            )
+        );
+
+        schedulerCompleted({ id: "r1", name: "download-reconciliation-cycle" });
+        expect(monitor.getActiveJobs()).toEqual([]);
+
+        // Image queue jobs are registered for attribution too (no breadcrumb)
+        const imageActive = findHandler(mocks.imageQueue, "active");
+        expect(imageActive).toBeDefined();
+        imageActive({ id: "i1", name: "optimize" });
+        expect(monitor.getActiveJobs()).toEqual([
+            expect.objectContaining({ queue: "image-optimization", jobId: "i1" }),
+        ]);
+        monitor.clearActiveJobsForTest();
+    });
+
     it("exposes queue exports for downstream consumers", async () => {
         process.env = { ...originalEnv };
         const mocks = setupWorkerModuleMocks();

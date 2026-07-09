@@ -93,6 +93,20 @@ export const config = {
     // real reverse-proxy depth (usually 1) to enable spoof protection.
     trustProxy: (trustProxyHops >= 0 ? trustProxyHops : true) as number | boolean,
 
+    // Worker event-loop stall watchdog (issue #43): a stall above the warn
+    // threshold logs the active Bull jobs so liveness-probe kills can be
+    // attributed to the job that pegged the loop.
+    workerEventLoop: {
+        warnThresholdMs: parseEnvInt(
+            process.env.WORKER_EVENT_LOOP_WARN_MS,
+            1000
+        ),
+        sampleIntervalMs: parseEnvInt(
+            process.env.WORKER_EVENT_LOOP_SAMPLE_MS,
+            5000
+        ),
+    },
+
     // Music library configuration (self-contained native music system)
     // Access via config.music - will be updated after initialization
     get music() {

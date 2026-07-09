@@ -394,8 +394,12 @@ spec:
               port: health
             initialDelaySeconds: 30
             periodSeconds: 30
-            timeoutSeconds: 10
-            failureThreshold: 3
+            # /health/live answers unconditionally, so a timeout means the
+            # single-threaded worker is BUSY (event loop pegged by a heavy
+            # job), not dead. Give legitimate work ~2 minutes of headroom
+            # before the kubelet kills the pod; true deadlocks still die.
+            timeoutSeconds: 25
+            failureThreshold: 4
           readinessProbe:
             httpGet:
               path: /health/ready
