@@ -2,7 +2,7 @@ name: Image Builds
 
 on:
     push:
-        branches: [main, "feature/**"]
+        branches: [main, "feature/**", "feat/**"]
     release:
         types: [published]
     workflow_dispatch:
