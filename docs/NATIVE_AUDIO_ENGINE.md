@@ -67,7 +67,12 @@ The bridge is gated to **iOS user agent AND `display-mode: standalone`** only, s
 
 ## Telemetry & Soak
 
-All playback client metrics (`[Playback][ClientMetric]` log lines and the backend beacon) are tagged with `engineMode`, so howler and native are directly comparable over a soak window: playback error events by `MEDIA_ERR` code, playback-start latency, and recovery attempts. The engine additionally emits `[NativeAudioEngine][Telemetry]` events (`playback_start_latency`, `recovery_attempt`, `playback_error`, `load_retry_applied`) tagged `engineMode: native`.
+All playback client metrics (`[Playback][ClientMetric]` log lines and the backend beacon) carry two engine tags:
+
+- `engineMode` — the deployment flag (`STREAMING_ENGINE_MODE` as resolved). Identifies the rollout cohort.
+- `activeEngine` — the engine actually driving playback at the moment of the event (`howler`, `native`, `tauri-native`, or `videojs`). Platform pins (Android WebView → howler), the Tauri upgrade, and per-source videojs routing make this legitimately diverge from `engineMode`, so use `activeEngine` for performance/error comparison and `engineMode` for cohort segmentation. A divergence outside those known cases (e.g. `engineMode: native` with `activeEngine: howler` on a non-WebView client) indicates a selection-policy bug.
+
+This makes howler and native directly comparable over a soak window: playback error events by `MEDIA_ERR` code, playback-start latency, and recovery attempts. The engine additionally emits `[NativeAudioEngine][Telemetry]` events (`playback_start_latency`, `recovery_attempt`, `playback_error`, `load_retry_applied`) tagged `engineMode: native`.
 
 Exit criteria for flipping the default to `native`: no metric regression against the howler baseline and zero new double-play/background-death reports attributable to the native mode.
 
