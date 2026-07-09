@@ -16,6 +16,8 @@ test("normalizeStreamingEngineMode trims, lowercases, and validates values", () 
         normalizeStreamingEngineMode(" Howler "),
         "howler"
     );
+    assert.equal(normalizeStreamingEngineMode(" NATIVE "), "native");
+    assert.equal(normalizeStreamingEngineMode("native"), "native");
     assert.equal(normalizeStreamingEngineMode(""), null);
     assert.equal(normalizeStreamingEngineMode("invalid"), null);
 });
