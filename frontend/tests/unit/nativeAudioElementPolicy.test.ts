@@ -117,6 +117,105 @@ test("LOAD_REQUESTED resets retry budget, gesture retry, and pending seeks from 
     assert.ok(kinds(effects).includes("disarmGestureRetry"));
 });
 
+test("same-source load while playing is deduped (howler parity — LT resync must not restart the track)", () => {
+    const { state, effects } = transitionNativeEngine(playingState(), {
+        type: "LOAD_REQUESTED",
+        autoplay: true,
+        startTimeSec: null,
+        nowMs: 6_000,
+        sameLoadedSource: true,
+    });
+    assert.equal(kinds(effects).includes("applyLoad"), false, "no src reset");
+    assert.equal(kinds(effects).includes("callPlay"), false, "already playing");
+    assert.equal(state.status, "playing");
+});
+
+test("same-source load with autoplay while paused just plays (no reload)", () => {
+    const { effects } = transitionNativeEngine(loadedState(), {
+        type: "LOAD_REQUESTED",
+        autoplay: true,
+        startTimeSec: null,
+        nowMs: 6_000,
+        sameLoadedSource: true,
+    });
+    assert.equal(kinds(effects).includes("applyLoad"), false);
+    assert.ok(kinds(effects).includes("callPlay"));
+});
+
+test("same-source load while still loading merges play intent without a second load", () => {
+    const { state: loading } = transitionNativeEngine(
+        createInitialNativeEngineState(),
+        { type: "LOAD_REQUESTED", autoplay: false, startTimeSec: null, nowMs: 1_000 },
+    );
+    const { state, effects } = transitionNativeEngine(loading, {
+        type: "LOAD_REQUESTED",
+        autoplay: true,
+        startTimeSec: null,
+        nowMs: 1_005,
+        sameLoadedSource: true,
+    });
+    assert.deepEqual(effects, []);
+    assert.equal(state.autoplay, true, "play intent merged");
+});
+
+test("same-source load with a start position seeks instead of dropping it", () => {
+    const { state, effects } = transitionNativeEngine(playingState(), {
+        type: "LOAD_REQUESTED",
+        autoplay: true,
+        startTimeSec: 240,
+        nowMs: 6_000,
+        sameLoadedSource: true,
+    });
+    assert.equal(kinds(effects).includes("applyLoad"), false);
+    const seek = findEffect(effects, "applySeek");
+    assert.equal(seek?.timeSec, 240);
+    assert.equal(state.seekTargetSec, 240);
+});
+
+test("same-source load with a start position before readiness queues the seek", () => {
+    const { state: loading } = transitionNativeEngine(
+        createInitialNativeEngineState(),
+        { type: "LOAD_REQUESTED", autoplay: false, startTimeSec: null, nowMs: 1_000 },
+    );
+    const { state, effects } = transitionNativeEngine(loading, {
+        type: "LOAD_REQUESTED",
+        autoplay: true,
+        startTimeSec: 90,
+        nowMs: 1_005,
+        sameLoadedSource: true,
+    });
+    assert.deepEqual(kinds(effects), []);
+    assert.equal(state.pendingSeekSec, 90);
+});
+
+test("same-source load in error, idle (stopped), or ended status performs a full reload", () => {
+    for (const status of ["error", "idle", "ended"] as const) {
+        const { effects } = transitionNativeEngine(playingState({ status }), {
+            type: "LOAD_REQUESTED",
+            autoplay: true,
+            startTimeSec: null,
+            nowMs: 6_000,
+            sameLoadedSource: true,
+        });
+        assert.ok(
+            kinds(effects).includes("applyLoad"),
+            `full reload expected from ${status} status`,
+        );
+    }
+});
+
+test("forced same-source load (engine-initiated recovery) bypasses the dedupe", () => {
+    const { effects } = transitionNativeEngine(playingState(), {
+        type: "LOAD_REQUESTED",
+        autoplay: true,
+        startTimeSec: null,
+        nowMs: 6_000,
+        sameLoadedSource: true,
+        force: true,
+    });
+    assert.ok(kinds(effects).includes("applyLoad"));
+});
+
 test("load-path race: track change plus play intent in one tick produces exactly one load and one play call", () => {
     let transition = transitionNativeEngine(createInitialNativeEngineState(), {
         type: "LOAD_REQUESTED",

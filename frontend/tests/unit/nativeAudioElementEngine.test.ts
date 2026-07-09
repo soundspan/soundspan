@@ -28,6 +28,7 @@ class FakeAudioElement implements NativeAudioElementLike {
 
     playCalls = 0;
     pauseCalls = 0;
+    srcAssignments = 0;
     playBehavior: PlayBehavior = { kind: "resolve" };
 
     private srcValue = "";
@@ -40,6 +41,7 @@ class FakeAudioElement implements NativeAudioElementLike {
     // Mirrors the media load algorithm: assigning src synchronously stops
     // the in-progress stream and resets readiness.
     set src(value: string) {
+        this.srcAssignments += 1;
         this.srcValue = value;
         this.paused = true;
         this.ended = false;
@@ -298,6 +300,62 @@ test("load with withCredentials switches crossOrigin to use-credentials", () => 
 test("load rejects an empty source URL", () => {
     const harness = createHarness();
     assert.throws(() => harness.engine.load(""), /non-empty source URL/);
+});
+
+test("duplicate load of the current source never restarts playback (LT resync regression)", () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    harness.mainElement().fireLoadedMetadata(200);
+    harness.mainElement().currentTime = 30;
+    const srcAssignmentsBefore = harness.mainElement().srcAssignments;
+    const playCallsBefore = harness.mainElement().playCalls;
+
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    assert.equal(
+        harness.mainElement().srcAssignments,
+        srcAssignmentsBefore,
+        "no src reassignment for the already-loaded source",
+    );
+    assert.equal(harness.mainElement().currentTime, 30, "position preserved");
+    assert.equal(harness.mainElement().paused, false, "still playing");
+    assert.equal(
+        harness.mainElement().playCalls,
+        playCallsBefore,
+        "no redundant play call while playing",
+    );
+});
+
+test("duplicate load with autoplay resumes a paused current source without reloading", () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    harness.mainElement().fireLoadedMetadata(200);
+    harness.engine.pause();
+    const srcAssignmentsBefore = harness.mainElement().srcAssignments;
+
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    assert.equal(harness.mainElement().srcAssignments, srcAssignmentsBefore);
+    assert.equal(harness.mainElement().paused, false, "resumed via play()");
+});
+
+test("same-URL load that changes withCredentials reloads so crossOrigin is honored", () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: false,
+    });
+    assert.equal(harness.mainElement().crossOrigin, "anonymous");
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: false,
+        withCredentials: true,
+    });
+    assert.equal(harness.mainElement().crossOrigin, "use-credentials");
 });
 
 test("legacy boolean-autoplay load signature is supported", () => {

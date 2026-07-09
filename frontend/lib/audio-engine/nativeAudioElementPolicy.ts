@@ -88,6 +88,15 @@ export type NativeEnginePolicyEvent =
            * retry budget survives the reload and repeats still exhaust.
            */
           carryRetryBudget?: boolean;
+          /**
+           * True when the requested URL is already the loaded source.
+           * Duplicate loads are deduped for howler parity (orchestrator
+           * reconciliation, e.g. Listen Together resync, re-issues loads
+           * for the current track and must not restart playback).
+           */
+          sameLoadedSource?: boolean;
+          /** Engine-initiated recovery: bypass the same-source dedupe. */
+          force?: boolean;
       }
     | { type: "LOADED_METADATA"; durationSec: number; nowMs: number }
     | { type: "PLAY_REQUESTED"; currentTimeSec: number; nowMs: number }
@@ -260,7 +269,70 @@ type State = NativeEnginePolicyState;
 
 const noChange = (state: State): Transition => ({ state, effects: [] });
 
+const handleSameSourceLoad = (
+    state: State,
+    event: Extract<NativeEnginePolicyEvent, { type: "LOAD_REQUESTED" }>,
+): Transition => {
+    // Howler parity: a load for the already-current source never resets
+    // the stream. It only merges play intent (play() when autoplay is
+    // requested and nothing is playing yet) and honors a requested start
+    // position as a seek.
+    const autoplay = state.autoplay || event.autoplay;
+    const startSeekSec =
+        typeof event.startTimeSec === "number" && event.startTimeSec > 0
+            ? event.startTimeSec
+            : null;
+    if (!state.metadataReady) {
+        return {
+            state: {
+                ...state,
+                autoplay,
+                pendingSeekSec: startSeekSec ?? state.pendingSeekSec,
+                seekTargetSec: startSeekSec ?? state.seekTargetSec,
+            },
+            effects: [],
+        };
+    }
+    const effects: NativeEnginePolicyEffect[] = [];
+    let nextState: State = { ...state, autoplay };
+    if (startSeekSec !== null) {
+        nextState = {
+            ...nextState,
+            seekTargetSec: startSeekSec,
+            seekMarkUntilMs: event.nowMs + NATIVE_ENGINE_SEEK_MARK_MS,
+        };
+        effects.push({ kind: "applySeek", timeSec: startSeekSec });
+    }
+    if (event.autoplay && state.status !== "playing") {
+        effects.push({ kind: "callPlay" });
+    }
+    return { state: nextState, effects };
+};
+
 const handleLoadRequested = (
+    state: State,
+    event: Extract<NativeEnginePolicyEvent, { type: "LOAD_REQUESTED" }>,
+): Transition => {
+    // Dedupe only while the source is actively in service. After stop
+    // (idle), end, or error, a same-source load is a deliberate
+    // reload/replay and must run the full load path (fresh load event,
+    // position reset).
+    const dedupeEligible =
+        state.status === "loading" ||
+        state.status === "playing" ||
+        state.status === "paused";
+    if (
+        event.sameLoadedSource &&
+        !event.force &&
+        state.hasSource &&
+        dedupeEligible
+    ) {
+        return handleSameSourceLoad(state, event);
+    }
+    return applyFreshLoad(state, event);
+};
+
+const applyFreshLoad = (
     state: State,
     event: Extract<NativeEnginePolicyEvent, { type: "LOAD_REQUESTED" }>,
 ): Transition => ({

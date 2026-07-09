@@ -240,6 +240,17 @@ export class NativeAudioElementEngine implements AudioEngine {
                 ? { autoplay: optionsOrAutoplay, format }
                 : optionsOrAutoplay;
 
+        // Computed before staging: is this a duplicate load for the
+        // source the element already carries? (Howler parity — see the
+        // policy's same-source dedupe.) Load-affecting options are part
+        // of the identity: flipping withCredentials changes crossOrigin,
+        // which is only applied on a fresh load.
+        const sameLoadedSource =
+            this.lastSource?.url === resolvedSource.url &&
+            this.element?.src === resolvedSource.url &&
+            Boolean(this.lastLoadOptions?.withCredentials) ===
+                Boolean(normalizedOptions.withCredentials);
+
         this.lastSource = resolvedSource;
         this.lastLoadOptions = normalizedOptions;
         this.dispatch({
@@ -250,6 +261,7 @@ export class NativeAudioElementEngine implements AudioEngine {
                     ? normalizedOptions.startTimeSec
                     : null,
             nowMs: this.now(),
+            sameLoadedSource,
         });
     }
 
@@ -612,6 +624,9 @@ export class NativeAudioElementEngine implements AudioEngine {
             startTimeSec: resumeAtSec > 0 ? resumeAtSec : null,
             nowMs: this.now(),
             carryRetryBudget,
+            // Recovery reloads exist to re-fetch the source; they must
+            // bypass the same-source dedupe.
+            force: true,
         });
     }
 
