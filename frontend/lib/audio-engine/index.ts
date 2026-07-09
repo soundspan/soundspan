@@ -1,6 +1,11 @@
 import {
   HowlerEngineAdapter,
 } from "@/lib/audio-engine/howlerEngineAdapter";
+import { NativeAudioElementEngine } from "@/lib/audio-engine/nativeAudioElementEngine";
+import {
+  detectAndroidWebView,
+  resolveDirectEngineSelection,
+} from "@/lib/audio-engine/engineSelectionPolicy";
 import { resolveStreamingEngineMode } from "@/lib/audio-engine/engineMode";
 import type {
   AudioEngine,
@@ -93,7 +98,9 @@ interface HybridRuntimeAudioEngineOptions {
 
 /**
  * Hybrid runtime engine:
- * - Uses Howler for direct byte streams (legacy-safe path)
+ * - Uses the direct slot for byte streams (HowlerEngineAdapter by
+ *   default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native;
+ *   TauriNativeEngineAdapter after a platform upgrade)
  * - Uses Video.js for DASH manifests when segmented mode is active
  */
 export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
@@ -494,6 +501,9 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
       return isDashProtocol(source) ? "videojs" : "howler";
     }
 
+    // "native" (and any future direct mode) routes through the direct
+    // slot; createRuntimeAudioEngine seeds that slot with the selected
+    // engine (NativeAudioElementEngine when STREAMING_ENGINE_MODE=native).
     return "howler";
   }
 
@@ -587,12 +597,34 @@ let engineUpgradeInitiated = false;
 
 export const createRuntimeAudioEngine = (): RuntimeAudioEngine => {
   if (!sharedRuntimeAudioEngine) {
-    // Start with HowlerEngineAdapter synchronously so playback is available immediately.
-    sharedRuntimeAudioEngine = new HybridRuntimeAudioEngine();
+    // Selection precedence (GH #42 §10): platform pins (Android WebView →
+    // howler) override the engine-mode flag, which overrides the default.
+    const selection = resolveDirectEngineSelection({
+      mode: resolveStreamingEngineMode(),
+      isAndroidWebView: detectAndroidWebView(
+        typeof navigator !== "undefined" ? navigator.userAgent : "",
+      ),
+    });
 
-    // Kick off async platform detection; if a native engine is needed,
-    // replace the inner howler engine transparently.
-    if (!engineUpgradeInitiated) {
+    // Seed the direct slot synchronously so playback is available
+    // immediately: the native element engine in native mode, otherwise
+    // HowlerEngineAdapter (the constructor default).
+    sharedRuntimeAudioEngine = new HybridRuntimeAudioEngine(
+      selection.engine === "native"
+        ? { howlerEngine: new NativeAudioElementEngine() }
+        : {},
+    );
+    if (selection.engine === "native") {
+      sharedFrontendLogger.info(
+        "[AudioEngine] Native element engine active in the direct slot.",
+        { reason: selection.reason },
+      );
+    }
+
+    // Kick off async platform detection; if a Tauri native engine is
+    // needed, replace the inner direct engine transparently. This path
+    // must not fire when the native element mode is active (GH #42 §10).
+    if (!engineUpgradeInitiated && selection.allowTauriUpgrade) {
       engineUpgradeInitiated = true;
       createAudioEngine()
         .then((engine) => {

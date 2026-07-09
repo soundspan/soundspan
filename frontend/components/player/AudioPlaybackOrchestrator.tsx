@@ -221,6 +221,9 @@ function logPlaybackClientMetric(
     sharedFrontendLogger.info("[Playback][ClientMetric]", {
         event,
         timestamp: new Date().toISOString(),
+        // Engine-mode tag so metrics from the howler and native direct
+        // engines are comparable during the native-engine soak (GH #42).
+        engineMode: resolveStreamingEngineMode(),
         ...fields,
     });
 
@@ -232,7 +235,7 @@ function logPlaybackClientMetric(
     void api
         .reportPlaybackClientMetric({
             event,
-            fields,
+            fields: { engineMode: resolveStreamingEngineMode(), ...fields },
         })
         .catch(() => undefined);
 }
