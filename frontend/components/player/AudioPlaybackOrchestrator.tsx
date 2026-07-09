@@ -10,7 +10,10 @@ import {
 import { api, type SegmentedStreamingSessionResponse } from "@/lib/api";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
-import { resolveStreamingEngineMode } from "@/lib/audio-engine/engineMode";
+import {
+    isSegmentedModeEnabled,
+    resolveStreamingEngineMode,
+} from "@/lib/audio-engine/engineMode";
 import type {
     AudioEngineManifestStallPayload,
     AudioEngineRepresentationFailoverResult,
@@ -5295,7 +5298,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 streamUrl = api.getStreamUrl(currentTrack.id);
             }
             const segmentedStartupEligible =
-                resolveStreamingEngineMode() !== "howler" &&
+                isSegmentedModeEnabled() &&
                 isListenTogetherSegmentedPlaybackAllowed() &&
                 Boolean(resolveSegmentedTrackContext(currentTrack));
             const listenTogetherActiveOrPending =
@@ -5415,7 +5418,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     Boolean(currentTrack) &&
                     Boolean(segmentedTrackContext) &&
                     isListenTogetherSegmentedPlaybackAllowed() &&
-                    resolveStreamingEngineMode() !== "howler";
+                    isSegmentedModeEnabled();
 
                 if (
                     !shouldAttemptSegmentedSession ||
@@ -6429,7 +6432,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             isSegmentedSessionPrewarmEnabled() &&
             Boolean(nextSegmentedTrackContext) &&
             isListenTogetherSegmentedPlaybackAllowed() &&
-            resolveStreamingEngineMode() !== "howler";
+            isSegmentedModeEnabled();
 
         if (!shouldPrewarmSegmentedSession || !nextSegmentedTrackContext) {
             return;
