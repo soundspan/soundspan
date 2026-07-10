@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Clearing the queue actually sticks now (#52). `DELETE /api/playback-state` removed only the caller's device row, while `GET /api/playback-state` still fell back to the shared pre-device `legacy` row and opportunistically re-migrated it onto the device — so the next playback-state poll resurrected the entire cleared queue within a minute. An explicit clear now deletes the legacy row along with the device row; the GET fallback's legacy migration for genuinely new devices is unchanged.
+
 ### Changed
 
 - The native `<audio>`-element engine is now the **default** playback engine for everyone (`DEFAULT_STREAMING_ENGINE_MODE = "native"`), after soaking as the 1.7.0 opt-in. Deployments with no `STREAMING_ENGINE_MODE` set switch to the native engine on upgrade; set `STREAMING_ENGINE_MODE=howler` to stay on the legacy engine (it remains fully supported as the gated fallback, and Android WebView deployments are still pinned to it automatically). The container entrypoints and docs now report `native` as the primary default.

@@ -468,8 +468,11 @@ router.delete("/", requireAuth, async (req, res) => {
         const userId = req.user!.id;
         const deviceId = getPlaybackDeviceId(req);
 
+        // An explicit clear must also remove the shared "legacy" row;
+        // otherwise the GET fallback re-migrates it onto this device and
+        // the cleared queue resurrects on the next playback-state poll.
         await prisma.playbackState.deleteMany({
-            where: { userId, deviceId },
+            where: { userId, deviceId: { in: [deviceId, "legacy"] } },
         });
         publishSocialPresenceUpdate({
             userId,

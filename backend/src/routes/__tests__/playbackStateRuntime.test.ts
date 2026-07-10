@@ -544,7 +544,7 @@ describe("playbackState routes runtime", () => {
         await deleteState(req, res);
 
         expect(mockDeleteMany).toHaveBeenCalledWith({
-            where: { userId: "u1", deviceId: "mobile" },
+            where: { userId: "u1", deviceId: { in: ["mobile", "legacy"] } },
         });
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({ success: true });
