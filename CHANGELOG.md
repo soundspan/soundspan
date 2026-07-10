@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Playlist reordering (#27): playlist owners can move tracks up, down, or to the top from each row's overflow menu. Reorders apply optimistically and persist through the existing `PUT /api/playlists/:id/items/reorder` endpoint. (Drag-and-drop is a planned follow-up — the shared track list is virtualized, so it needs its own design pass.)
+- Playlist reordering (#27): playlist owners can drag tracks by the grip handle that appears on row hover (desktop), or use the Move up / Move down / Move to top actions in each row's overflow menu (all devices, and the accessible path). Reorders apply optimistically and persist through the existing `PUT /api/playlists/:id/items/reorder` endpoint.
 - Worker event-loop stall watchdog (#43), with two attribution paths. Stalls the loop recovers from: the worker samples `monitorEventLoopDelay` and, when a stall exceeds the warn threshold (default 1s, `WORKER_EVENT_LOOP_WARN_MS`), logs the Bull jobs active at that moment. Stalls that end in a liveness kill: the watchdog's interval can never fire while the loop is pegged, so the heavy queues (`worker-scheduler`, `library-scan`) log an unconditional `job-start` breadcrumb — the last log line before the kill names the culprit. Sample cadence is configurable via `WORKER_EVENT_LOOP_SAMPLE_MS` (default 5s).
 
 ### Changed

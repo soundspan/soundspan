@@ -13,6 +13,7 @@ export type {
     TrackRowProps,
     TrackListProps,
     TrackListHeaderProps,
+    TrackListReorderProps,
     OverflowConfig,
     RowState,
 } from "./types";

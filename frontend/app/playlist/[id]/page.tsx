@@ -535,6 +535,14 @@ export default function PlaylistDetailPage() {
         }
     };
 
+    const handleReorderByIndex = (fromIndex: number, toIndex: number) => {
+        // TrackList row indexes map 1:1 onto playlist.items (trackItems is
+        // the unfiltered items array).
+        const item = trackItems[fromIndex];
+        if (!item) return;
+        void handleMoveTrack(item.id, toIndex);
+    };
+
     const handleDeletePlaylist = async () => {
         try {
             await api.deletePlaylist(playlistId);
@@ -985,6 +993,11 @@ export default function PlaylistDetailPage() {
                         <SharedTrackList<PlaylistItem>
                             items={trackItems}
                             getKey={(item) => item.id}
+                            reorder={
+                                playlist.isOwner
+                                    ? { onReorder: handleReorderByIndex }
+                                    : undefined
+                            }
                             toRowItem={(item, index) => ({
                                 id: item.track?.id ?? item.id,
                                 title: item.track?.title || "Unavailable track",
