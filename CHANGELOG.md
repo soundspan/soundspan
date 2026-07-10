@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Queue ("Now Playing") drag-and-drop reordering: the grip handle on each upcoming queue row — previously decorative — now actually drags, with the same hover-reveal handle, drop-indicator line, and pure drop math as playlist reordering. Podcast episode rows in the queue gained the same handle. Reorders route through a new `moveQueueItem` primitive shared with the Move up/down actions, which also fixes a latent bug: the old move handlers didn't remap the shuffle order, so moving tracks while shuffle was on silently corrupted which tracks would play next. Upcoming items only (the playing row and history stay fixed) and disabled in Listen Together sessions, matching the existing move semantics.
+
 ### Fixed
 
 - Queue auto-advance can no longer land on a silently paused next track (#53). Track-end advancement now *declares* play intent — the end handler stamps a bounded (30s) intent that the next load consumes for its autoplay decision — instead of inferring it from transient UI playing state, which raced the element's `pause`→`ended` event pair under the native engine (the element's pause fires before ended, so both the isPlaying mirror and `engine.isPlaying()` could read false by load time). And when autoplay is rejected with `NotAllowedError` in a hidden tab (auto-advance while tabbed away), the native engine now retries `play()` once on the hidden→visible transition instead of sitting silent until a user gesture; the one-shot gesture retry stays armed as the fallback, and a user pause in between is respected.
+- Clearing the queue actually sticks now (#52). `DELETE /api/playback-state` removed only the caller's device row, while `GET /api/playback-state` still fell back to the shared pre-device `legacy` row and opportunistically re-migrated it onto the device — so the next playback-state poll resurrected the entire cleared queue within a minute. An explicit clear now deletes the legacy row along with the device row; the GET fallback's legacy migration for genuinely new devices is unchanged.
+- Repaired the five backend radio test failures that shipped silently with 1.7.0's generation-diversity work (#46): the library route tests' config mock lacked the new `generationDiversity` block, their mock chains didn't account for the diversify stage's artist lookup query, and the vibe random-filler matcher still required the `take` parameter that #46 replaced with uniform sampling. The backend "Tests + Coverage" job is a non-blocking visibility job, so the failures never turned a run red — worth revisiting alongside the CI gating gap tracked in #54.
 
 ### Changed
 

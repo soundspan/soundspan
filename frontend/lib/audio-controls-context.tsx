@@ -33,6 +33,8 @@ import { toast } from "sonner";
 import {
     computePlayNowInsertion,
     computePodcastContextPlacement,
+    moveItemInList,
+    remapShuffleIndicesForMove,
 } from "./queue-utils";
 import {
     resolveEpisodeProgressSaveOnSwitch,
@@ -311,6 +313,14 @@ interface AudioControlsContextType {
     addTracksToQueue: (tracks: Track[], options?: { silent?: boolean }) => void;
     playQueueIndex: (index: number) => void; // Jump to a queue item (track or episode)
     removeFromQueue: (index: number) => void;
+    /**
+     * Move an UPCOMING queue item (index > currentIndex) to another
+     * upcoming position with splice semantics. No-op in Listen Together
+     * sessions, for out-of-range indexes, and for history/current rows;
+     * shuffle indices are remapped so the shuffle order keeps pointing
+     * at the same items.
+     */
+    moveQueueItem: (fromIndex: number, toIndex: number) => void;
     clearQueue: () => void;
     setUpcoming: (tracks: Track[], preserveOrder?: boolean) => void; // Replace queue after current track
 
@@ -1691,6 +1701,35 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         ]
     );
 
+    const moveQueueItem = useCallback(
+        (fromIndex: number, toIndex: number) => {
+            // Listen Together queues are server-owned; local reorder would
+            // desync (matches the existing move-up/down behavior).
+            if (getActiveListenTogetherSession()) {
+                return;
+            }
+            // Only upcoming items move; the current row and history are
+            // fixed, so currentIndex never needs adjustment.
+            if (
+                fromIndex <= state.currentIndex ||
+                toIndex <= state.currentIndex
+            ) {
+                return;
+            }
+            const nextQueue = moveItemInList(state.queue, fromIndex, toIndex);
+            if (nextQueue === state.queue) {
+                return;
+            }
+            state.setQueue(nextQueue);
+            if (state.isShuffle) {
+                state.setShuffleIndices((prev) =>
+                    remapShuffleIndicesForMove(prev, fromIndex, toIndex)
+                );
+            }
+        },
+        [state, getActiveListenTogetherSession]
+    );
+
     const clearQueue = useCallback(() => {
         const ltSession = getActiveListenTogetherSession();
         if (ltSession) {
@@ -2099,6 +2138,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             addTracksToQueue,
             playQueueIndex,
             removeFromQueue,
+            moveQueueItem,
             clearQueue,
             setUpcoming,
             toggleShuffle,
@@ -2132,6 +2172,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             addTracksToQueue,
             playQueueIndex,
             removeFromQueue,
+            moveQueueItem,
             clearQueue,
             setUpcoming,
             toggleShuffle,

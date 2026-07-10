@@ -157,3 +157,57 @@ export function computePodcastContextPlacement<T extends { id: string }>(
         newShuffleIndices,
     };
 }
+
+/**
+ * Move one item to a new index with splice semantics (remove `fromIndex`,
+ * insert at `toIndex`). Returns the input unchanged (same reference) for
+ * no-op moves or out-of-range indexes; never mutates the input.
+ */
+export function moveItemInList<T>(
+    list: T[],
+    fromIndex: number,
+    toIndex: number,
+): T[] {
+    if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= list.length ||
+        toIndex >= list.length
+    ) {
+        return list;
+    }
+    const next = [...list];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    return next;
+}
+
+/**
+ * Remap shuffle indices after a queue move so every shuffle entry keeps
+ * pointing at the same item it referenced before the move (GH queue
+ * reorder; the pre-existing move handlers skipped this, silently
+ * corrupting the shuffle order). Returns the input unchanged for no-ops.
+ */
+export function remapShuffleIndicesForMove(
+    indices: number[],
+    fromIndex: number,
+    toIndex: number,
+): number[] {
+    if (fromIndex === toIndex) {
+        return indices;
+    }
+    return indices.map((position) => {
+        if (position === fromIndex) return toIndex;
+        if (fromIndex < toIndex) {
+            // Positions between the old and new slots shift down by one.
+            return position > fromIndex && position <= toIndex
+                ? position - 1
+                : position;
+        }
+        // Backward move: positions between the new and old slots shift up.
+        return position >= toIndex && position < fromIndex
+            ? position + 1
+            : position;
+    });
+}
