@@ -1,9 +1,9 @@
 # Modernization Roadmap
 
-Canonical index of the modernization review findings (F1–F53, plus F54 added on audit) from the **2026-06-16** review of soundspan. The review mapped each subsystem, assessed it across readability / performance / idempotency / security / extensibility / dependencies, then adversarially re-read every finding against the real code (53 high-confidence findings, **no true false positive**), grouped them into the epics below, and was itself **independently audited** ([`docs/modernization-roadmap-audit-findings.md`](modernization-roadmap-audit-findings.md)).
+Canonical index of the modernization review findings (F1–F53, plus F54 added on audit) from the **2026-06-16** review of soundspan. The review mapped each subsystem, assessed it across readability / performance / idempotency / security / extensibility / dependencies, then adversarially re-read every finding against the real code (53 high-confidence findings, **no true false positive**), grouped them into the epics below, and was itself **independently audited** — the audit's corrections and analysis live inline in this document (see "Corrections from the independent audit" below and the closing "Architecture: strategy going forward" section) rather than in a separate file.
 
 > **Read me first.**
-> - **Status:** PR #21 = 5 complete + 3 partial (8 findings). The **Wave-1 continuation** (stacked PRs #22–#32) then shipped: **F54, F22, F29, F28, F36, F35, F33** complete; the **F3/F24/F6/F18** follow-ups (cast removal + TDD backfill); **F32** partial (rate-limit + no-full-scan shipped, hard-fail-closed auth deferred). The whole **#11 secrets program is done (4/4)**. **F31** and **F37** are **deferred-with-a-note** (see their entries) — F31 because the env had no Python toolchain to verify the security-critical sidecar code, F37 as a cross-cutting redesign. **Merged to `main` so far:** #3, #9, #21, #22 (F54), and #23 (the TDD backfill), each squash-merged; a post-review fix wave landed directly on `main` after them. The remaining Wave-1 continuation (#24–#33) is stacked and rebased onto that `main`, awaiting merge. ✅ complete · 🟡 partial · ⬜ open/deferred.
+> - **Status:** PR #21 = 5 complete + 3 partial (8 findings). The **Wave-1 continuation** (stacked PRs #22–#32) then shipped: **F54, F22, F29, F28, F36, F35, F33** complete; the **F3/F24/F6/F18** follow-ups (cast removal + TDD backfill); **F32** partial (rate-limit + no-full-scan shipped, hard-fail-closed auth deferred). The whole **#11 secrets program is done (4/4)**. **F31** and **F37** are **deferred-with-a-note** (see their entries) — F31 because the env had no Python toolchain to verify the security-critical sidecar code, F37 as a cross-cutting redesign. **Merged to `main` so far:** #3, #9, #21, #22 (F54), and #23 (the TDD backfill), each squash-merged; a post-review fix wave landed directly on `main` after them. The remaining Wave-1 continuation — stacked PRs #24–#26 and #28–#33 (nine PRs) — merged to `main` on 2026-07-08. Releases **1.6.0**, **1.7.0**, and **1.8.0** (current) have shipped since; as of the 1.8.0 cut (2026-07-10), nothing from the Wave-1 continuation remains unmerged. ✅ complete · 🟡 partial · ⬜ open/deferred.
 > - **Audit corrections are inline.** Where the audit corrected a count, severity, or premise, the finding carries an **Audit note** (✓ = re-verified against the tree here; "per audit" = relayed). Severity columns show `orig→recalibrated` where adjusted for this single-operator deployment.
 > - **Line numbers** in finding bodies were captured against the pre-#3 branch tree and may be off by a few lines on `main`.
 > - **Not exhaustive.** Areas the review did **not** assess: test quality/coverage, observability/structured logging, data-migration safety, and PWA-offline/accessibility. "53" is ~51 distinct issues (F2≈F44, F17≈F47 are duplicates kept for their differing angles).
@@ -15,7 +15,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | Item | Correction |
 |------|------------|
 | **New bug (F54)** | Unauthenticated TOCTOU in `/device-link/verify` mints full-privilege API keys — same class as F26, missed by the review. Added below. |
-| F45 | "five workflows" → **3** (was 4; the AWM-health `pr-checks.yml` has since been removed); Dockerfiles → **7**. |
+| F45 | "five workflows" → **3** (was 4; the former AWM-health PR-gate workflow was removed in the ACM→AWM rename); Dockerfiles → **7**. |
 | F46 | "~480 `@ts-ignore`" → **1** (480 is `eslint-disable`). |
 | F35 | "helmet ships without HSTS/CSP" → helmet **does** ship both by default. |
 | F28 | "breaking / keys re-issued" → **no re-issue** (HMAC-in-place; keys keep working). |
@@ -28,7 +28,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 
 | Epic | Title | ✅ / 🟡 / Total |
 |------|-------|----------------|
-| #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
+| #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 1 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 5 / 1 / 8 |
@@ -110,7 +110,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F50](#f50) | ⬜ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproduci… |
 | [F51](#f51) | ⬜ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
 | [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and r… |
-| [F53](#f53) | ⬜ | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
+| [F53](#f53) | 🟡 | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
 | [F54](#f54) | ✅ | security | high | S | low |  | #12 | POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys |
 
 ## Findings
@@ -716,7 +716,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 **Recommendation.** Confirmed and slightly under-scoped. Exact state: services/audio-analyzer/Dockerfile:53-76 curls 10 .pb models from essentia.upf.edu via plain `curl -L` (line 78/79 is only `ls -lh`, not verification); services/audio-analyzer-clap/Dockerfile:34-42 curls the ~2GB .pt from huggingface.co/lukewys/laion_clap using the MUTABLE `resolve/main` ref with no hash; the identical downloads are also in root Dockerfile:60-118 (AIO image, uncited). No sha256sum/--require-hashes/lockfile anywhere under services/; all requirements.txt (clap, ytmusic-streamer, audio-analyzer, tidal-downloader) use unbounded `>=` floors; no pip-audit/Trivy/grype/safety/SBOM in any of the 4 .github/workflows. Tightened fix: (a) Pin every model by sha256 and `sha256sum -c -` immediately after each curl, in ALL THREE Dockerfiles (per-service + root AIO); fail the build on mismatch. (b) For the HF checkpoint additionally swap `resolve/main` -> `resolve/<immutable-commit-sha>/` so the source ref itself is pinned. (c) Best: mirror both model sets into the project GHCR/registry and pull from there to remove the upstream runtime dependency. (d) Adopt uv (or pip-tools) per service with a committed hash lock installed via `uv pip sync --require-hashes`, validated on linux/amd64; keep yt-dlp/ytmusicapi on a deliberately loose, commented constraint (homelab YT fix depends on a recent yt-dlp). (e) Add pip-audit + Trivy image scan in CI, but introduce non-blocking first (ubuntu:20.04 base in audio-analyzer is EOL and torch will surface CVEs) then ratchet to gating on HIGH/CRITICAL.
 
-**Safety / pitfalls.** The remediation is build-tooling only and touches no runtime code or the AGENTS.md app contracts (frontend api.ts, backend config.ts, Prisma/no-raw-SQL) — those are orthogonal. Real operational pitfalls to flag: (1) The same unverified model curls are DUPLICATED in the root AIO /home/tony/projects/soundspan/Dockerfile:60-118 (not cited in the finding); any sha256 fix must be applied in BOTH the per-service Dockerfiles AND the root Dockerfile or the AIO image stays vulnerable. (2) `uv pip sync --require-hashes` will break builds for essentia-tensorflow/laion-clap, which historically ship platform-specific wheels with shifting transitive trees — generating a working hash-locked file for torch+essentia on linux/amd64 is non-trivial and must be validated against the actual build platform (images-builds.yml pins platforms: linux/amd64, and CLAP/AIO run on self-hosted). (3) yt-dlp/ytmusicapi MUST stay loose (documented in MEMORY: the android-client fix depended on a recent sidecar yt-dlp); a blanket lock would regress YT downloads — the finding already carves this out, keep it. (4) Gating release on Trivy HIGH/CRITICAL will likely fail immediately given ubuntu:20.04 base (EOL April 2025) in audio-analyzer and torch CVEs — introduce as non-blocking/allowlisted first, then ratchet, or the release pipeline hard-stops.
+**Safety / pitfalls.** The remediation is build-tooling only and touches no runtime code or the AGENTS.md app contracts (frontend api.ts, backend config.ts, Prisma/no-raw-SQL) — those are orthogonal. Real operational pitfalls to flag: (1) The same unverified model curls are DUPLICATED in the root AIO /home/tony/projects/soundspan/Dockerfile:60-118 (not cited in the finding); any sha256 fix must be applied in BOTH the per-service Dockerfiles AND the root Dockerfile or the AIO image stays vulnerable. (2) `uv pip sync --require-hashes` will break builds for essentia-tensorflow/laion-clap, which historically ship platform-specific wheels with shifting transitive trees — generating a working hash-locked file for torch+essentia on linux/amd64 is non-trivial and must be validated against the actual build platform (image-builds.yml pins platforms: linux/amd64, and CLAP/AIO run on self-hosted). (3) yt-dlp/ytmusicapi MUST stay loose (documented in MEMORY: the android-client fix depended on a recent sidecar yt-dlp); a blanket lock would regress YT downloads — the finding already carves this out, keep it. (4) Gating release on Trivy HIGH/CRITICAL will likely fail immediately given ubuntu:20.04 base (EOL April 2025) in audio-analyzer and torch CVEs — introduce as non-blocking/allowlisted first, then ratchet, or the release pipeline hard-stops.
 
 ---
 
@@ -816,7 +816,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 **⬜ open** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #10
 
-> **Audit note.** ✓ The original body's 'FIVE workflows' is wrong — there are THREE (helm-chart-release, image-builds, quality-visibility) and SEVEN Dockerfiles. (The former `pr-checks.yml` AWM-health gate has since been removed, dropping the count from four to three.) The CI-gaps thesis (no CVE/SAST/dep-scan) holds.
+> **Audit note.** ✓ The original body's 'FIVE workflows' is wrong — there are THREE (helm-chart-release, image-builds, quality-visibility) and SEVEN Dockerfiles. (The former AWM-health PR-gate workflow was removed in the ACM→AWM rename, dropping the count from four to three.) The CI-gaps thesis (no CVE/SAST/dep-scan) holds.
 
 **Files:** `.github/workflows/image-builds.yml`, `.github/workflows/quality-visibility.yml`, `.github/workflows/helm-chart-release.yml`
 
@@ -936,7 +936,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F53 — Node runtime version unpinned and drifts across CI (frontend on Node 24, everything else Node 20)
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
+**🟡 partial (1.7.0)** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
+
+> **Partial.** 1.7.0 added `engines.node` floors (`>=20.9.0`) to backend, frontend, and packages/media-metadata-contract, plus a root `.nvmrc` — but the `.nvmrc` pins **24** while every shipped Dockerfile (backend, frontend, root AIO) builds on `node:20-slim` and `quality-visibility.yml`'s backend job still pins Node **20** (frontend's job stays on 24). The exact Node 20-vs-24 split this finding warned about persists; unifying on one Node major everywhere is owned by the 1.9.0 plan (issue #59, WS2), which is where that major-version call belongs.
 
 **Files:** `.github/workflows/quality-visibility.yml`, `backend/package.json`, `frontend/package.json`
 
@@ -968,7 +970,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ## Architecture: strategy going forward
 
-> Distilled from the independent audit's architecture pass (§9 of [`modernization-roadmap-audit-findings.md`](modernization-roadmap-audit-findings.md)), re-verified in spots. The framing question: where is the line between a whole revamp, churny PRs, and *actionable* cleanup — given a future model might one day digest the whole tree at once, but real engineers build on a kernel of good stuff?
+> Distilled from the independent audit's architecture pass (§9 — the audit was never split into a standalone file; its findings and this architecture pass are inline throughout this document), re-verified in spots. The framing question: where is the line between a whole revamp, churny PRs, and *actionable* cleanup — given a future model might one day digest the whole tree at once, but real engineers build on a kernel of good stuff?
 
 **Shape.** soundspan is a **modular monolith + Python sidecars**: a Next.js PWA (custom server proxy, one `ApiClient.request<T>()` chokepoint, AudioEngine adapter strategy) → an Express API + Bull workers in one codebase (role-split by `BACKEND_PROCESS_ROLE`, one Prisma gateway) → Postgres 16 + pgvector, Redis (queues + locks + embed streams), and four Python sidecars. The two analyzers are **`BRPOP` workers that write results straight to Postgres** (DB-as-contract), not HTTP services — a deliberate, good seam.
 

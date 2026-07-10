@@ -41,7 +41,7 @@ Every command has a CLI and MCP form — use whichever your runtime provides.
 
 ## Feature Plans
 
-For net-new features or large capability expansions, use the staged plan contract: root plan with `kind=feature`, `stage:*` tasks, and leaf tasks with `acceptance_criteria`. Use thinner plans for bugfixes and narrow maintenance. See [docs/feature-plans.md](docs/feature-plans.md) for the full contract.
+For net-new features or large capability expansions, use the staged plan contract: root plan with `kind=feature`, `stage:*` tasks, and leaf tasks with `acceptance_criteria`. Use thinner plans for bugfixes and narrow maintenance. See [docs/AWM_FEATURE_PLANS.md](docs/AWM_FEATURE_PLANS.md) for the full contract.
 
 ## Historical Work Lookup
 

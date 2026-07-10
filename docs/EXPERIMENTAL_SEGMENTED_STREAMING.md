@@ -130,6 +130,4 @@ STREAMING_ENGINE_MODE=videojs docker compose -f docker-compose.aio.yml up -d sou
 
 - Contract/compat coverage: `frontend/tests/e2e/predeploy/media-contract.spec.ts`
 - Startup baseline tooling: `backend/scripts/measure-segmented-startup-baseline.ts`
-- Architecture docs:
-  - `docs/architecture/adr-segmented-streaming.md`
-  - `docs/architecture/segmented-streaming-baseline.md`
+- Architecture docs: a dedicated ADR and a startup-baseline write-up were planned but never committed to the tree — this document remains the single source of truth for segmented-streaming knobs, rollout guidance, and reversion procedures (see the intro above).

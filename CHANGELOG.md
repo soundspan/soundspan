@@ -5,6 +5,39 @@ All notable changes to soundspan are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Documentation and agent-context truth pass from the 2026-07-10 drift audit (#58).
+  The modernization roadmap header no longer claims long-merged PRs are awaiting
+  merge (the nine Wave-1 continuation PRs merged 2026-07-08; F53 flipped to 🟡
+  partial with the Node 20-vs-24 split documented), and its links to a
+  never-committed standalone audit-findings file are gone. `ARCHITECTURE.md` now
+  states the real auth model (Bearer JWT + `X-API-Key`, not a JWT cookie), the
+  real local-stream route (`GET /api/library/tracks/:id/stream`), Bull v4 (not
+  BullMQ), and the sidecars' actual no-inbound-auth posture. `TEST_MATRIX.md`'s
+  pattern command runs as pasted on Jest 30 (`--testPathPatterns`); `TESTING.md`
+  documents the 141 real sidecar pytest functions; `DATA_MODEL.md` says 57
+  models / 1248 lines; `CONFIGURATION_AND_SECURITY.md` says `sameSite=lax` and
+  `/api/admin/queues`. `ENVIRONMENT_VARIABLES.md` gains `STREAMING_ENGINE_MODE`,
+  `FANART_API_KEY` (with its env-only enrichment-path caveat), `YT_DOWNLOAD_DIR`,
+  `YT_DOWNLOAD_CONCURRENCY`, `YTMUSIC_LANGUAGE`, and
+  `YTMUSIC_HOME_FILTERED_SHELVES`, and corrects `REDIS_FLUSH_ON_STARTUP`'s
+  raw-image default (`true` — FLUSHALL on boot — vs the `false` the compose
+  files and Helm chart pass explicitly). `UPGRADING.md` gains the 1.8.0
+  native-engine-default entry (set `STREAMING_ENGINE_MODE=howler` to stay on
+  the legacy engine). `FEATURE_INDEX.json` catches up to 1.8.0 (YouTube
+  downloads, native audio engine, queue and playlist reordering);
+  `docs/README.md` indexes five previously unlisted docs; the kima-hub adoption
+  report is bannered ADOPTED with code evidence; and the remaining phantom file
+  references (the `.awm/awm-work-loop.md` feature-plans link, CLAUDE.md's
+  assets note, two never-committed ADR links) point at real files or say so.
+
 ## [1.8.0] - 2026-07-10
 
 ### Added

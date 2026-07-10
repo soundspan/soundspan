@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-feature-index",
-    "version": "2026-03-11.01",
+    "version": "2026-07-10.01",
     "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
     "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
   },
@@ -297,6 +297,74 @@
       },
       "tests": {
         "backend_route": ["downloadsRuntime.test.ts", "downloadsInteractiveCompat.test.ts", "downloadsReleasesCompat.test.ts", "soulseekRuntime.test.ts", "webhooksRuntime.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "youtube-downloads",
+      "name": "YouTube URL Streaming & Downloads",
+      "description": "Paste any YouTube link on the search page to stream it instantly or download the audio into the library, via the ytmusic-streamer sidecar (frontend/features/search/hooks/useYouTubeUrl.ts, useYouTubePlaylist.ts)",
+      "frontend": {
+        "feature_dirs": ["search"],
+        "routes": ["/search"]
+      },
+      "backend": {
+        "routes": ["youtube.ts"],
+        "services": ["youtubeDownload.ts"]
+      },
+      "tests": {
+        "backend_route": ["youtubeRuntime.test.ts"],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "native-audio-engine",
+      "name": "Native Audio Engine",
+      "description": "Default native <audio>-element playback engine (fourth pluggable backend alongside Howler/Video.js/Tauri) with a pure engine-selection policy (Android WebView pin, Tauri auto-upgrade suppression); implemented entirely under frontend/lib/audio-engine/ (nativeAudioElementEngine.ts, nativeAudioElementPolicy.ts, engineSelectionPolicy.ts, engineMode.ts). See docs/NATIVE_AUDIO_ENGINE.md.",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": []
+      },
+      "backend": {
+        "routes": [],
+        "services": []
+      },
+      "tests": {
+        "backend_route": [],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "queue-reorder",
+      "name": "Queue Drag-and-Drop Reorder",
+      "description": "Drag-and-drop reordering for the Now Playing queue (upcoming tracks and podcast episodes), sharing drop math (frontend/components/track/reorderDnd.ts) with playlist reordering and routed through a moveQueueItem primitive (frontend/lib/audio-controls-context.tsx) that also fixes shuffle-order remapping",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": ["/queue"]
+      },
+      "backend": {
+        "routes": ["playbackState.ts"],
+        "services": []
+      },
+      "tests": {
+        "backend_route": [],
+        "backend_contract": []
+      }
+    },
+    {
+      "id": "playlist-reorder",
+      "name": "Playlist Reordering",
+      "description": "Drag tracks by the grip handle on row hover, or use Move up / Move down / Move to top actions in a playlist row's overflow menu; persists through the existing PUT /api/playlists/:id/items/reorder endpoint",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": ["/playlist/[id]"]
+      },
+      "backend": {
+        "routes": ["playlists.ts"],
+        "services": []
+      },
+      "tests": {
+        "backend_route": ["playlistsRuntime.test.ts"],
         "backend_contract": []
       }
     }

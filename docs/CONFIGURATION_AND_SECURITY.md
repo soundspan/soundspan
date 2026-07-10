@@ -91,7 +91,7 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 - JWT access tokens expire after 24 hours; refresh tokens after 30 days
 - Token refresh uses `/api/auth/refresh`
 - Password changes invalidate existing sessions
-- Session cookies use `httpOnly`, `sameSite=strict`, and `secure` in production
+- Session cookies use `httpOnly`, `sameSite=lax`, and `secure` in production
 - Encryption key validity is checked at startup
 
 ## Streaming Credential Security
@@ -104,8 +104,8 @@ Last.fm no longer ships with a bundled fallback application key. Provide `LASTFM
 ## Webhook and Admin Security
 
 - Lidarr webhook signatures are supported and should be configured
-- Bull Board (`/admin/queues`) requires authenticated admin access
-- Swagger docs (`/api-docs`) require auth in production unless `DOCS_PUBLIC=true`
+- Bull Board (`/api/admin/queues`) requires authenticated admin access
+- Swagger docs: the UI at `/api/docs` is always accessible; the raw spec at `/api/docs.json` requires auth in production unless `DOCS_PUBLIC=true`
 
 ## Optional VPN Notes
 
