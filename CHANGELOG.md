@@ -5,6 +5,18 @@ All notable changes to soundspan are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- CI safety net: `quality-visibility.yml` gained a "Run frontend component tests" step (`npm run test:component`) in the frontend job, plus two standalone typecheck jobs — `backend-typecheck` and `frontend-typecheck`, each a `tsc --noEmit` run against their respective package. Like the existing quality-visibility jobs, both are non-blocking until an admin flips the `CI_NON_BLOCKING_TEST_VISIBILITY` repo variable to `'false'`.
+
+### Changed
+
+- All Node-based Docker images and CI jobs now run Node 24 (`node:24-bookworm-slim` for backend/frontend/root-AIO images), replacing the previous 20/24 split. `@types/node` is bumped to `^24` in backend and frontend to match, and the backend `tsconfig` `lib` is raised `ES2020` → `ES2022` alongside, keeping `tsc` clean under `@types/node` 24 (which dropped the legacy compat declarations for post-ES2020 built-ins like `.at()` that the v20 types carried) — the declared lib now matches what the Node ≥ 20 runtime actually implements; type declarations only, emitted code and `target` unchanged.
+
+### Fixed
+
 ## [1.8.0] - 2026-07-10
 
 ### Added
