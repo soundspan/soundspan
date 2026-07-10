@@ -38,6 +38,11 @@ mock.module("lucide-react", {
         GlobeLock: Icon,
         Pencil: Icon,
         Share2: Icon,
+        GripVertical: Icon,
+        ArrowUp: Icon,
+        ArrowDown: Icon,
+        ArrowUpToLine: Icon,
+        AudioLines: Icon,
     },
 });
 
