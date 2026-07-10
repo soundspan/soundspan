@@ -29,7 +29,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | Epic | Title | ✅ / 🟡 / Total |
 |------|-------|----------------|
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 0 / 2 |
-| #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 0 / 3 |
+| #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 1 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 5 / 1 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
@@ -102,7 +102,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F42](#f42) | ⬜ | extensibility | medium | L | medium |  | #18 | ~50-entry recommender registry is hand-maintained with one near-duplicate bespoke metho… |
 | [F43](#f43) | ⬜ | extensibility | medium | L | medium |  | #18 | Per-external-source coupling: each media source is a parallel stack (route file + servi… |
 | [F44](#f44) | ⬜ | extensibility | medium | L | medium |  | #14 | library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-r… _(dup F2)_ |
-| [F45](#f45) | ⬜ | dependencies-build | high | M | low |  | #10 | CI has no security/vulnerability scanning and no dependency automation (Dependabot/Reno… |
+| [F45](#f45) | 🟡 | dependencies-build | high | M | low |  | #10 | CI has no security/vulnerability scanning and no dependency automation (Dependabot/Reno… |
 | [F46](#f46) | ⬜ | dependencies-build | medium | S | low |  | #8 | No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend i… |
 | [F47](#f47) | ⬜ | dependencies-build | high→medium | M | low |  | #19 | API runtime image ships uncompiled TypeScript and runs it via tsx in production with fu… _(dup F17)_ |
 | [F48](#f48) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Bull 4 is maintenance-only with a version-mismatched @types/bull; migrate to BullMQ |
@@ -814,9 +814,11 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F45 — CI has no security/vulnerability scanning and no dependency automation (Dependabot/Renovate)
 
-**⬜ open** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #10
+**🟡 partial (PR TBD)** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #10
 
 > **Audit note.** ✓ The original body's 'FIVE workflows' is wrong — there are THREE (helm-chart-release, image-builds, quality-visibility) and SEVEN Dockerfiles. (The former `pr-checks.yml` AWM-health gate has since been removed, dropping the count from four to three.) The CI-gaps thesis (no CVE/SAST/dep-scan) holds.
+>
+> **Fix shipped.** `.github/dependabot.yml` opens weekly, grouped minor/patch PRs across the 4 npm manifests (`/`, `/backend`, `/frontend`, `/packages/media-metadata-contract`), the 4 pip services, all 7 Dockerfile directories, and `github-actions`. `.github/workflows/security-scanning.yml` adds Trivy filesystem + image scans (CRITICAL/HIGH, `ignore-unfixed`, findings triaged via `.trivyignore`; the image job is schedule/workflow_dispatch-only and skips gracefully if a GHCR image doesn't exist yet), a gitleaks secret scan via the OSS binary directly (not `gitleaks-action`, which needs an org license), and a `pip-audit` sweep of the 6 sidecar requirements files. `.github/workflows/codeql.yml` adds CodeQL (`javascript-typescript` + `python`, default-setup style). `.github/workflows/dependency-review.yml` adds `dependency-review-action` on PRs. Day-one Trivy fs baseline (this worktree, commit 796dacd): 49 HIGH / 0 CRITICAL across the two npm lockfiles, all with a fixed version available, none allowlisted (left as the intended visible signal — see `.trivyignore`'s policy header). Day-one gitleaks baseline (full history, 407 commits): 7 hits, all confirmed test fixtures / changelog prose, allowlisted in `.gitleaks.toml` with rationale. **Deferred:** every check ships `continue-on-error: true` (tracked to ratchet to blocking in 1.10.0 per #59); Dependabot security-updates (separate from the version-updates this ships) is not yet enabled; the trivy-image job hasn't run for real yet, so the anticipated ubuntu:20.04/torch base-image CVE baseline (#59 risk 3) isn't seeded in `.trivyignore` — add it with rationale the first time that job actually reports something.
 
 **Files:** `.github/workflows/image-builds.yml`, `.github/workflows/quality-visibility.yml`, `.github/workflows/helm-chart-release.yml`
 

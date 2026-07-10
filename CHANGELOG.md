@@ -5,6 +5,18 @@ All notable changes to soundspan are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Admin/Operations
+
+- CI now runs non-blocking security scanning and weekly dependency automation (#59 WS2.4, roadmap F45): Trivy filesystem + image scans (`CRITICAL,HIGH`, `ignore-unfixed`, findings triaged in `.trivyignore`), a gitleaks secret scan via the OSS binary directly (not the licensed `gitleaks-action`), CodeQL (`javascript-typescript` + `python`), `dependency-review-action` on PRs, and a `pip-audit` sweep of the four sidecar services' requirements files. `.github/dependabot.yml` opens weekly, grouped minor/patch PRs across the 4 npm manifests, 4 pip services, 7 Dockerfile directories, and GitHub Actions (`open-pull-requests-limit: 5` per ecosystem; yt-dlp/ytmusicapi are deliberately never excluded). Every check runs `continue-on-error: true` day one so findings are visible without blocking a PR; the blocking ratchet and Dependabot security-updates (separate from the version-updates this ships) are tracked for 1.10.0.
+
 ## [1.8.0] - 2026-07-10
 
 ### Added
