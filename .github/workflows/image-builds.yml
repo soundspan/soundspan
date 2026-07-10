@@ -20,7 +20,7 @@ jobs:
             - name: Set up Node.js
               uses: actions/setup-node@v5
               with:
-                  node-version: "20"
+                  node-version: "24"
 
             - name: Validate release metadata
               id: release-meta
@@ -191,7 +191,7 @@ jobs:
               if: ${{ matrix.needs_node }}
               uses: actions/setup-node@v5
               with:
-                  node-version: "20"
+                  node-version: "24"
 
             - name: Self-hosted pre-build cleanup (neighbor-safe)
               if: ${{ contains(runner.labels, 'self-hosted') }}
