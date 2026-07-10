@@ -104,6 +104,10 @@ jobs:
         working-directory: frontend
         run: npm run test:coverage
 
+      - name: Run frontend component tests
+        working-directory: frontend
+        run: npm run test:component
+
       - name: Build frontend quality summary
         run: |
           E2E_TEST_COUNT=$(rg --files frontend/tests/e2e 2>/dev/null | rg -c '\.(spec|test)\.(ts|tsx)$' || true)
@@ -142,6 +146,66 @@ jobs:
           path: |
             frontend-quality-summary.md
           if-no-files-found: warn
+
+  backend-typecheck:
+    name: Backend Typecheck
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    env:
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Build media-metadata-contract package
+        working-directory: packages/media-metadata-contract
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run backend typecheck
+        working-directory: backend
+        run: ./node_modules/.bin/tsc --noEmit
+
+  frontend-typecheck:
+    name: Frontend Typecheck
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    env:
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build media-metadata-contract package types
+        working-directory: frontend
+        run: npx tsc -p ../packages/media-metadata-contract/tsconfig.json
+
+      - name: Run frontend typecheck
+        working-directory: frontend
+        run: npx tsc --noEmit
 
   helm-chart-visibility:
     name: Helm Chart Visibility
