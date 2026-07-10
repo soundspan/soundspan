@@ -12,7 +12,7 @@ title = "soundspan gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "Confirmed false positives / synthetic test fixtures, triaged 2026-07-10 (cycle 2 / packet E) from a full-history scan (407 commits) of the main checkout."
+description = "Confirmed false positives / synthetic test fixtures, triaged 2026-07-10 (cycle 2 / packet E) from a full-history scan of the main checkout."
 regexes = [
   # backend/src/utils/__tests__/apiKeyHash.test.ts:123 -- a named, obviously
   # non-real legacy-pepper value used to test the encryption-key compat
