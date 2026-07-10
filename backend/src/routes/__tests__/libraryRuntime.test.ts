@@ -149,6 +149,10 @@ jest.mock("../../config", () => ({
             transcodeCachePath: "/tmp/soundspan-cache",
             transcodeCacheMaxGb: 1,
         },
+        generationDiversity: {
+            weightAlpha: 0.5,
+            shareCeiling: 0.3,
+        },
     },
 }));
 
@@ -4637,6 +4641,7 @@ describe("library catalog list runtime coverage", () => {
 
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "u1" }, { id: "u2" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 createRadioTrack("u1"),
                 createRadioTrack("u2"),
@@ -4653,6 +4658,7 @@ describe("library catalog list runtime coverage", () => {
 
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "u3" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 createRadioTrack("lp1"),
                 createRadioTrack("lp2"),
@@ -4677,6 +4683,7 @@ describe("library catalog list runtime coverage", () => {
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "w1" }])
             .mockResolvedValueOnce([{ id: "w3" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 createRadioTrack("w1"),
                 createRadioTrack("w2"),
@@ -5143,11 +5150,14 @@ describe("library catalog list runtime coverage", () => {
             if (
                 Array.isArray(args.where?.id?.notIn) &&
                 args.select?.id &&
-                typeof args.take === "number" &&
                 !args.where?.album &&
                 !args.include
             ) {
-                return Array.from({ length: args.take }, (_unused, index) => ({
+                // Fallback D dropped `take` for sampleUniform (GH #46);
+                // return a generous pool for the sampler to draw from.
+                const fillerCount =
+                    typeof args.take === "number" ? args.take : 60;
+                return Array.from({ length: fillerCount }, (_unused, index) => ({
                     id: `rnd-d${index + 1}`,
                 }));
             }
@@ -5208,7 +5218,9 @@ describe("library catalog list runtime coverage", () => {
 
     it("covers favorites, decade, genre, mood, and all radio branches", async () => {
         mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "fav-1", play_count: 15n }]);
-        mockTrackFindMany.mockResolvedValueOnce([createRadioTrack("fav-1")]);
+        mockTrackFindMany
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
+            .mockResolvedValueOnce([createRadioTrack("fav-1")]);
         const favoritesReq = {
             query: { type: "favorites", limit: "1" },
             user: { id: "user-1" },
@@ -5223,6 +5235,7 @@ describe("library catalog list runtime coverage", () => {
         mockPrismaQueryRaw.mockResolvedValueOnce([]);
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "rand-fav-1" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("rand-fav-1")]);
         const fallbackFavoritesReq = {
             query: { type: "favorites", limit: "1" },
@@ -5235,6 +5248,7 @@ describe("library catalog list runtime coverage", () => {
 
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "dec-1" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("dec-1")]);
         const decadeReq = {
             query: { type: "decade", value: "1990", limit: "1" },
@@ -5247,7 +5261,9 @@ describe("library catalog list runtime coverage", () => {
         expect(decadeRes.body.tracks[0].id).toBe("dec-1");
 
         mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "genre-1" }]);
-        mockTrackFindMany.mockResolvedValueOnce([createRadioTrack("genre-1")]);
+        mockTrackFindMany
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
+            .mockResolvedValueOnce([createRadioTrack("genre-1")]);
         const genreReq = {
             query: { type: "genre", value: "rock", limit: "1" },
             user: { id: "user-1" },
@@ -5259,6 +5275,7 @@ describe("library catalog list runtime coverage", () => {
 
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "mood-1" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("mood-1")]);
         const moodReq = {
             query: { type: "mood", value: "chill", limit: "1" },
@@ -5271,6 +5288,7 @@ describe("library catalog list runtime coverage", () => {
 
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "mood-2" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([createRadioTrack("mood-2")]);
         const defaultMoodReq = {
             query: { type: "mood", value: "obscure-tag", limit: "1" },
@@ -5292,6 +5310,7 @@ describe("library catalog list runtime coverage", () => {
         for (const [moodValue, trackId] of additionalMoodCases) {
             mockTrackFindMany
                 .mockResolvedValueOnce([{ id: trackId }])
+                .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
                 .mockResolvedValueOnce([createRadioTrack(trackId)]);
             const req = {
                 query: { type: "mood", value: moodValue, limit: "1" },
