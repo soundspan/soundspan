@@ -814,7 +814,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F45 — CI has no security/vulnerability scanning and no dependency automation (Dependabot/Renovate)
 
-**🟡 partial (PR TBD)** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #10
+**🟡 partial (PR #63)** · dimension: dependencies-build · severity: high · effort: M · risk: low · epic: #10
 
 > **Audit note.** ✓ The original body's 'FIVE workflows' is wrong — there are THREE (helm-chart-release, image-builds, quality-visibility) and SEVEN Dockerfiles. (The former `pr-checks.yml` AWM-health gate has since been removed, dropping the count from four to three.) The CI-gaps thesis (no CVE/SAST/dep-scan) holds.
 >
