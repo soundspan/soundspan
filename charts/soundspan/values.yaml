@@ -287,7 +287,7 @@ frontend:
   # Frontend runtime knobs (effective without image rebuild), for example:
   # env:
   #   BACKEND_URL: http://my-release-backend:3006
-  #   STREAMING_ENGINE_MODE: howler   # primary mode; videojs is segmented experimental mode
+  #   STREAMING_ENGINE_MODE: howler   # primary mode; videojs = segmented experimental, native = native <audio>-element engine (docs/NATIVE_AUDIO_ENGINE.md)
   #   SEGMENTED_VHS_PROFILE: balanced
   #   SEGMENTED_SESSION_PREWARM_ENABLED: "true"
   #   SEGMENTED_STARTUP_FALLBACK_TIMEOUT_MS: "5000"

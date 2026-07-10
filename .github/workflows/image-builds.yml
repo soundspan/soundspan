@@ -2,7 +2,7 @@ name: Image Builds
 
 on:
     push:
-        branches: [main, "feature/**"]
+        branches: [main, "feature/**", "feat/**"]
     release:
         types: [published]
     workflow_dispatch:
@@ -169,8 +169,19 @@ jobs:
             packages: write
         steps:
             - id: lower-repo
-              name: Repository to lowercase
+              name: Job env setup (repo name + isolated docker config)
               run: |
+                  # Several self-hosted runners share one physical box (and
+                  # one Docker daemon). A per-job docker config isolates
+                  # buildx builder state so no docker/buildx command in this
+                  # job can see — let alone remove — a concurrent job's
+                  # builder. (Without this, one job's cleanup stopped a
+                  # neighbor's in-flight buildkitd: "graceful_stop" build
+                  # failures.) Note: the `runner` context is unavailable in
+                  # job-level env, so this exports via GITHUB_ENV for all
+                  # subsequent steps.
+                  mkdir -p "${RUNNER_TEMP}/docker-config"
+                  echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
                   echo "GHCR_REPO=ghcr.io/${GITHUB_REPOSITORY@L}" >> "$GITHUB_ENV"
 
             - name: Checkout code
@@ -182,20 +193,23 @@ jobs:
               with:
                   node-version: "20"
 
-            - name: Self-hosted pre-build cache trim (safe)
+            - name: Self-hosted pre-build cleanup (neighbor-safe)
               if: ${{ contains(runner.labels, 'self-hosted') }}
               run: |
                   set -euo pipefail
-                  # Prune old BuildKit cache; keeps recent cache for faster rebuilds.
-                  docker buildx prune --all --force --filter "until=168h" || true
+                  # The daemon is shared with concurrently running jobs, so
+                  # only provably neighbor-safe operations belong here. No
+                  # global `docker buildx prune` / `docker builder prune`:
+                  # those race concurrent builds on the shared daemon.
+                  # Daemon-wide disk hygiene belongs in a host cron.
 
-                  # Prune old classic builder cache (safe; no volumes).
-                  docker builder prune --all --force --filter "until=168h" || true
-
-                  # Remove stale dangling images older than a week (untagged only).
+                  # Remove stale dangling images older than a week (untagged
+                  # only; layers in use by running builds are never dangling).
                   docker image prune --force --filter "until=168h" || true
 
-                  # Remove exited buildx/buildkit containers left from interrupted runs.
+                  # Remove exited buildx/buildkit containers left from
+                  # interrupted runs (status=exited cannot match a
+                  # neighbor's live builder).
                   docker ps -a --filter "name=buildx_buildkit" --filter "status=exited" -q | xargs -r docker rm -v || true
 
             - name: Set up Buildx
@@ -328,7 +342,7 @@ jobs:
                   # ARM64 disabled due to QEMU emulation issues with npm packages
                   platforms: linux/amd64
 
-            - name: Self-hosted post-build cleanup (safe)
+            - name: Self-hosted post-build cleanup (neighbor-safe)
               if: ${{ always() && contains(runner.labels, 'self-hosted') }}
               run: |
                   set -euo pipefail
@@ -336,21 +350,19 @@ jobs:
                   echo "Container disk usage before cleanup:"
                   docker system df || true
 
-                  # Remove this workflow's ephemeral Buildx builder if it still exists.
+                  # Remove ONLY this job's ephemeral Buildx builder (its
+                  # build cache dies with it; persistent layer cache lives
+                  # in the GHA cache backend). The per-job DOCKER_CONFIG
+                  # guarantees this name can only resolve to our builder.
                   if [ -n "${BUILDER_NAME}" ]; then
-                      docker buildx rm "${BUILDER_NAME}" >/dev/null 2>&1 || true
+                      docker buildx rm --force "${BUILDER_NAME}" >/dev/null 2>&1 || true
                   fi
 
-                  # Prune old BuildKit cache; keeps recent cache for faster rebuilds.
-                  docker buildx prune --all --force --filter "until=168h" || true
-
-                  # Prune old classic builder cache (safe; no volumes).
-                  docker builder prune --all --force --filter "until=168h" || true
-
-                  # Remove stale dangling images older than a week (untagged only).
+                  # Neighbor-safe daemon hygiene only — see the pre-build
+                  # step for the rationale. Global buildx/builder prunes
+                  # were removed: they stopped concurrent jobs' builders
+                  # mid-build on the shared daemon ("graceful_stop").
                   docker image prune --force --filter "until=168h" || true
-
-                  # Remove exited buildx/buildkit containers left from interrupted runs.
                   docker ps -a --filter "name=buildx_buildkit" --filter "status=exited" -q | xargs -r docker rm -v || true
 
                   echo "Container disk usage after cleanup:"
