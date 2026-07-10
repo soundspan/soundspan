@@ -21,12 +21,18 @@ import { TrackList as SharedTrackList, TrackListHeader, UnplayableBadge } from "
 import type { TrackRowItem, TrackRowSlots, OverflowConfig, RowState } from "@/components/track";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/lib/toast-context";
-import { removePlaylistItemFromCache } from "./playlistCacheUpdates";
+import {
+    movePlaylistItemToIndexInCache,
+    removePlaylistItemFromCache,
+} from "./playlistCacheUpdates";
 import { useDownloadContext } from "@/lib/download-context";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
 import {
     Play,
+    ArrowDown,
+    ArrowUp,
+    ArrowUpToLine,
     Pause,
     Trash2,
     Shuffle,
@@ -503,6 +509,40 @@ export default function PlaylistDetailPage() {
         }
     };
 
+    const handleMoveTrack = async (itemId: string, toIndex: number) => {
+        // Optimistic reorder in the cached payload, then persist the full
+        // resulting order (the backend replaces positions wholesale) and
+        // refetch for authoritative state — same shape as remove (GH #34).
+        const cached = queryClient.getQueryData<{
+            items?: { id: string; trackId?: string | null }[];
+        }>(["playlist", playlistId]);
+        const moved = movePlaylistItemToIndexInCache(cached, itemId, toIndex);
+        if (!moved || moved === cached || !Array.isArray(moved.items)) {
+            return;
+        }
+        queryClient.setQueryData(["playlist", playlistId], moved);
+        try {
+            await api.reorderPlaylistItems(
+                playlistId,
+                moved.items.map((entry) => entry.id)
+            );
+            queryClient.invalidateQueries({ queryKey: ["playlist", playlistId] });
+        } catch (error) {
+            sharedFrontendLogger.error("Failed to reorder playlist:", error);
+            toast.error("Failed to reorder playlist");
+            // Restore the server's order.
+            queryClient.invalidateQueries({ queryKey: ["playlist", playlistId] });
+        }
+    };
+
+    const handleReorderByIndex = (fromIndex: number, toIndex: number) => {
+        // TrackList row indexes map 1:1 onto playlist.items (trackItems is
+        // the unfiltered items array).
+        const item = trackItems[fromIndex];
+        if (!item) return;
+        void handleMoveTrack(item.id, toIndex);
+    };
+
     const handleDeletePlaylist = async () => {
         try {
             await api.deletePlaylist(playlistId);
@@ -953,6 +993,11 @@ export default function PlaylistDetailPage() {
                         <SharedTrackList<PlaylistItem>
                             items={trackItems}
                             getKey={(item) => item.id}
+                            reorder={
+                                playlist.isOwner
+                                    ? { onReorder: handleReorderByIndex }
+                                    : undefined
+                            }
                             toRowItem={(item, index) => ({
                                 id: item.track?.id ?? item.id,
                                 title: item.track?.title || "Unavailable track",
@@ -1010,12 +1055,35 @@ export default function PlaylistDetailPage() {
                                         const canShowFallbackRemoveAction = playlist.isOwner && !canShowLocalActions && !isRemotePlayable;
 
                                         const removeMenuItem = playlist.isOwner ? (
-                                            <TrackMenuButton
-                                                onClick={(e) => { e.stopPropagation(); handleRemoveTrack(removeTargetId); }}
-                                                icon={<Trash2 className="h-4 w-4" />}
-                                                label="Remove from playlist"
-                                                className="text-red-400 hover:text-red-300"
-                                            />
+                                            <>
+                                                {index > 0 && (
+                                                    <TrackMenuButton
+                                                        onClick={(e) => { e.stopPropagation(); handleMoveTrack(item.id, index - 1); }}
+                                                        icon={<ArrowUp className="h-4 w-4" />}
+                                                        label="Move up"
+                                                    />
+                                                )}
+                                                {index < trackItems.length - 1 && (
+                                                    <TrackMenuButton
+                                                        onClick={(e) => { e.stopPropagation(); handleMoveTrack(item.id, index + 1); }}
+                                                        icon={<ArrowDown className="h-4 w-4" />}
+                                                        label="Move down"
+                                                    />
+                                                )}
+                                                {index > 0 && (
+                                                    <TrackMenuButton
+                                                        onClick={(e) => { e.stopPropagation(); handleMoveTrack(item.id, 0); }}
+                                                        icon={<ArrowUpToLine className="h-4 w-4" />}
+                                                        label="Move to top"
+                                                    />
+                                                )}
+                                                <TrackMenuButton
+                                                    onClick={(e) => { e.stopPropagation(); handleRemoveTrack(removeTargetId); }}
+                                                    icon={<Trash2 className="h-4 w-4" />}
+                                                    label="Remove from playlist"
+                                                    className="text-red-400 hover:text-red-300"
+                                                />
+                                            </>
                                         ) : undefined;
 
                                         return (
@@ -1057,13 +1125,33 @@ export default function PlaylistDetailPage() {
                                                     </>
                                                 )}
                                                 {canShowFallbackRemoveAction && (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleRemoveTrack(removeTargetId); }}
-                                                        className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-red-400 transition-all"
-                                                        title="Remove from playlist"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </button>
+                                                    <>
+                                                        {index > 0 && (
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleMoveTrack(item.id, index - 1); }}
+                                                                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white transition-all"
+                                                                title="Move up"
+                                                            >
+                                                                <ArrowUp className="h-4 w-4" />
+                                                            </button>
+                                                        )}
+                                                        {index < trackItems.length - 1 && (
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleMoveTrack(item.id, index + 1); }}
+                                                                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white transition-all"
+                                                                title="Move down"
+                                                            >
+                                                                <ArrowDown className="h-4 w-4" />
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleRemoveTrack(removeTargetId); }}
+                                                            className="h-8 w-8 rounded-full flex items-center justify-center text-gray-400 hover:text-red-400 transition-all"
+                                                            title="Remove from playlist"
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </button>
+                                                    </>
                                                 )}
                                                 {!isPlayable && <span className="text-[11px] text-amber-200">Cannot play</span>}
                                             </div>

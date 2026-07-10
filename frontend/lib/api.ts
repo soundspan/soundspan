@@ -1543,6 +1543,17 @@ class ApiClient {
         });
     }
 
+    /**
+     * Persist a full playlist item order (owner only). `itemIds` is every
+     * playlist item id in the desired order (GH #27 reorder).
+     */
+    async reorderPlaylistItems(playlistId: string, itemIds: string[]) {
+        return this.request<void>(`/playlists/${playlistId}/items/reorder`, {
+            method: "PUT",
+            body: JSON.stringify({ itemIds }),
+        });
+    }
+
     async removeTrackFromPlaylist(playlistId: string, itemId: string) {
         return this.removeItemFromPlaylist(playlistId, itemId);
     }

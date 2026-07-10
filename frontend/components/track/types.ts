@@ -109,6 +109,22 @@ export interface TrackListProps<T> {
     virtualized?: boolean;
     /** Estimated row height in px when virtualized. Default: 64. */
     estimatedItemHeight?: number;
+    /**
+     * Enables drag-and-drop row reordering via a hover-revealed grip
+     * handle (GH #27). Only honored for non-virtualized lists; when
+     * absent the list renders exactly as before. HTML5 drag events do
+     * not fire on touch devices -- surfaces should keep a menu/button
+     * fallback for reordering there.
+     */
+    reorder?: TrackListReorderProps;
+}
+
+/**
+ * Drag-and-drop reorder configuration for TrackList.
+ */
+export interface TrackListReorderProps {
+    /** Called with splice semantics: remove `fromIndex`, insert at `toIndex`. */
+    onReorder: (fromIndex: number, toIndex: number) => void;
 }
 
 /**

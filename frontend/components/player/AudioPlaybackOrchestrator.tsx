@@ -10,7 +10,10 @@ import {
 import { api, type SegmentedStreamingSessionResponse } from "@/lib/api";
 import { toAddToPlaylistRef } from "@/lib/trackRef";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
-import { resolveStreamingEngineMode } from "@/lib/audio-engine/engineMode";
+import {
+    isSegmentedModeEnabled,
+    resolveStreamingEngineMode,
+} from "@/lib/audio-engine/engineMode";
 import type {
     AudioEngineManifestStallPayload,
     AudioEngineRepresentationFailoverResult,
@@ -54,6 +57,7 @@ import {
 import { shouldAutoMatchVibeAtQueueEnd } from "./autoMatchVibePlayback";
 import {
     createEmptySegmentedStartupRecoveryStageAttempts,
+    resolveLoadAutoplayDecision,
     resolvePlaybackDuration,
     resolveRemoteStreamFormat,
     resolveSegmentedStartupRecoveryDecision,
@@ -218,9 +222,19 @@ function logPlaybackClientMetric(
         return;
     }
 
+    // Engine tags for the native-engine soak (GH #42): engineMode is the
+    // deployment flag (cohort), activeEngine is what is actually driving
+    // playback at this moment — platform pins, the Tauri upgrade, and
+    // per-source videojs routing make the two legitimately diverge, and
+    // the disagreements are themselves diagnostic. Read at event time so
+    // errors are attributed to the engine that produced them, not to
+    // whatever a recovery switch installs afterwards.
+    const activeEngine = audioEngine.getActiveEngineDescriptor();
     sharedFrontendLogger.info("[Playback][ClientMetric]", {
         event,
         timestamp: new Date().toISOString(),
+        engineMode: resolveStreamingEngineMode(),
+        activeEngine,
         ...fields,
     });
 
@@ -232,7 +246,11 @@ function logPlaybackClientMetric(
     void api
         .reportPlaybackClientMetric({
             event,
-            fields,
+            fields: {
+                engineMode: resolveStreamingEngineMode(),
+                activeEngine,
+                ...fields,
+            },
         })
         .catch(() => undefined);
 }
@@ -5281,7 +5299,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 streamUrl = api.getStreamUrl(currentTrack.id);
             }
             const segmentedStartupEligible =
-                resolveStreamingEngineMode() !== "howler" &&
+                isSegmentedModeEnabled() &&
                 isListenTogetherSegmentedPlaybackAllowed() &&
                 Boolean(resolveSegmentedTrackContext(currentTrack));
             const listenTogetherActiveOrPending =
@@ -5401,7 +5419,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     Boolean(currentTrack) &&
                     Boolean(segmentedTrackContext) &&
                     isListenTogetherSegmentedPlaybackAllowed() &&
-                    resolveStreamingEngineMode() !== "howler";
+                    isSegmentedModeEnabled();
 
                 if (
                     !shouldAttemptSegmentedSession ||
@@ -5981,8 +5999,18 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     return;
                 }
 
-                const shouldAutoPlayOnLoad =
-                    lastPlayingStateRef.current || wasEnginePlayingBeforeLoad;
+                const listenTogetherSnapshotForLoad =
+                    getListenTogetherSessionSnapshot();
+                const shouldAutoPlayOnLoad = resolveLoadAutoplayDecision({
+                    wasPlayingBeforeLoad:
+                        lastPlayingStateRef.current || wasEnginePlayingBeforeLoad,
+                    // Followers start playback via the LT play-at/delta
+                    // resume, never from local state (audible-blip fix).
+                    isListenTogetherFollower: Boolean(
+                        listenTogetherSnapshotForLoad?.groupId &&
+                            !listenTogetherSnapshotForLoad.isHost,
+                    ),
+                });
 
                 if (typeof sourceForLoad === "string") {
                     activeSegmentedPlaybackTrackIdRef.current = null;
@@ -6072,8 +6100,20 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         });
                     }
 
-                    const shouldAutoPlay =
-                        lastPlayingStateRef.current || wasEnginePlayingBeforeLoad;
+                    const listenTogetherSnapshotAtLoaded =
+                        getListenTogetherSessionSnapshot();
+                    const shouldAutoPlay = resolveLoadAutoplayDecision({
+                        wasPlayingBeforeLoad:
+                            lastPlayingStateRef.current ||
+                            wasEnginePlayingBeforeLoad,
+                        // Same follower rule as the load-time decision: the
+                        // deferred (seek-then-play) path must not start
+                        // follower playback from local state either.
+                        isListenTogetherFollower: Boolean(
+                            listenTogetherSnapshotAtLoaded?.groupId &&
+                                !listenTogetherSnapshotAtLoaded.isHost,
+                        ),
+                    });
 
                     if (shouldAutoPlay && !audioEngine.isPlaying()) {
                         applyCurrentOutputState();
@@ -6415,7 +6455,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             isSegmentedSessionPrewarmEnabled() &&
             Boolean(nextSegmentedTrackContext) &&
             isListenTogetherSegmentedPlaybackAllowed() &&
-            resolveStreamingEngineMode() !== "howler";
+            isSegmentedModeEnabled();
 
         if (!shouldPrewarmSegmentedSession || !nextSegmentedTrackContext) {
             return;
