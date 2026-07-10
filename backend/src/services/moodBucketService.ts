@@ -8,8 +8,8 @@
 
 import { logger } from "../utils/logger";
 import { prisma, Prisma } from "../utils/db";
-import { shuffleArray } from "../utils/shuffle";
 import { applyArtistCap } from "./programmaticPlaylistArtistCap";
+import { sampleUniform } from "./artistSlotAllocation";
 import { separateArtists } from "../utils/separateArtists";
 
 // Mood configuration with scoring rules
@@ -526,13 +526,16 @@ export class MoodBucketService {
 
         const config = MOOD_CONFIG[mood];
 
-        // Get top tracks for this mood, randomly sampled
-        // First get IDs with high scores, then randomly select
+        // Get qualifying tracks for this mood and sample the pool. The
+        // previous top-100-by-score pool was deterministic and
+        // score-clustered -- one artist's sound profile could own a mood
+        // bucket every time (GH #46). A wider score band sampled
+        // uniformly keeps quality while varying composition.
         const moodBuckets = await prisma.moodBucket.findMany({
             where: { mood, score: { gte: 0.5 } },
             select: { trackId: true, score: true },
             orderBy: { score: "desc" },
-            take: 100, // Pool to sample from
+            take: 500, // Quality band to sample from
         });
 
         if (moodBuckets.length < 8) {
@@ -542,9 +545,10 @@ export class MoodBucketService {
             return null;
         }
 
-        // Randomize the candidate pool, then apply artist diversity before final selection.
-        const shuffled = shuffleArray(moodBuckets);
-        const pooledIds = shuffled.map((bucket) => bucket.trackId);
+        // Uniformly sample the candidate pool (random order), then apply
+        // artist diversity before final selection.
+        const sampledBuckets = sampleUniform(moodBuckets, 100);
+        const pooledIds = sampledBuckets.map((bucket) => bucket.trackId);
 
         // Load the entire candidate pool with artist IDs so diversity caps can be enforced.
         const tracks = await prisma.track.findMany({

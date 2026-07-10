@@ -77,3 +77,19 @@ describe("envParsers", () => {
         });
     });
 });
+
+describe("parseEnvFloat", () => {
+    const { parseEnvFloat } = jest.requireActual("../envParsers");
+
+    it("parses decimal values and falls back on junk", () => {
+        expect(parseEnvFloat("0.5", 1)).toBe(0.5);
+        expect(parseEnvFloat(" 0.25 ", 1)).toBe(0.25);
+        expect(parseEnvFloat("2", 1)).toBe(2);
+        expect(parseEnvFloat("-0.5", 1)).toBe(-0.5);
+        expect(parseEnvFloat("abc", 1)).toBe(1);
+        expect(parseEnvFloat("", 1)).toBe(1);
+        expect(parseEnvFloat(undefined, 0.3)).toBe(0.3);
+        expect(parseEnvFloat("NaN", 0.3)).toBe(0.3);
+        expect(parseEnvFloat("Infinity", 0.3)).toBe(0.3);
+    });
+});

@@ -519,10 +519,10 @@ ENVEOF
 # Normalize runtime streaming engine mode (consumed by frontend /runtime-config route).
 ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
 case "$ENGINE_MODE" in
-    ""|"videojs"|"howler")
+    ""|"videojs"|"howler"|"native")
         ;;
     *)
-        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected howler|videojs (videojs is experimental). Using primary default (howler)."
+        echo "WARN: Invalid STREAMING_ENGINE_MODE '$ENGINE_MODE'; expected howler|videojs|native (videojs and native are opt-in). Using primary default (howler)."
         ENGINE_MODE=""
         ;;
 esac

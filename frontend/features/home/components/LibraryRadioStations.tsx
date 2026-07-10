@@ -120,45 +120,6 @@ const getGenreColor = (genre: string): string => {
     return GENRE_COLORS[lower] || GENRE_COLORS.default;
 };
 
-function diversifyTracksByArtist(tracks: Track[]): Track[] {
-    if (tracks.length === 0) {
-        return [];
-    }
-
-    const maxPerArtist = 2;
-    const selected: Track[] = [];
-    const overflow: Track[] = [];
-    const artistCounts = new Map<string, number>();
-
-    for (const track of tracks) {
-        const artistKey =
-            track.artist?.id ||
-            track.artist?.name?.trim().toLowerCase() ||
-            `unknown:${track.id}`;
-        const count = artistCounts.get(artistKey) ?? 0;
-
-        if (count < maxPerArtist) {
-            artistCounts.set(artistKey, count + 1);
-            selected.push(track);
-            continue;
-        }
-
-        overflow.push(track);
-    }
-
-    if (selected.length >= tracks.length) {
-        return selected;
-    }
-
-    for (const track of overflow) {
-        selected.push(track);
-        if (selected.length >= tracks.length) {
-            break;
-        }
-    }
-
-    return selected;
-}
 
 /**
  * Fetches library genre and decade data, then builds three station lists:
@@ -280,8 +241,12 @@ export function LibraryRadioStations({ stations: stationsProp, externalLoading }
                 return;
             }
 
-            const diversifiedTracks = diversifyTracksByArtist(response.tracks);
-            const shuffled = shuffleArray(diversifiedTracks);
+            // Artist diversity is enforced server-side by the radio
+            // endpoint's shared weighted allocator (GH #46). The previous
+            // client-side "diversifier" only reordered tracks and its
+            // output was immediately re-shuffled -- a no-op that masked
+            // the server bug.
+            const shuffled = shuffleArray(response.tracks);
             playTracks(shuffled, 0);
             toast.success(`${station.name} Radio`, {
                 description: `Shuffling ${shuffled.length} tracks`,

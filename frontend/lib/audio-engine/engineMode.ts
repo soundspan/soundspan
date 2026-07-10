@@ -42,3 +42,15 @@ export const isHowlerModeEnabled = (
 ): boolean => {
   return resolveStreamingEngineMode(value) === "howler";
 };
+
+/**
+ * True only when the experimental Video.js segmented mode is active.
+ * Segmented startup/prewarm/session paths must key on this instead of
+ * `mode !== "howler"` — direct modes like "native" are not segmented,
+ * and a bare audio element cannot play DASH manifests (GH #42).
+ */
+export const isSegmentedModeEnabled = (
+  value?: StreamingEngineMode | string,
+): boolean => {
+  return resolveStreamingEngineMode(value) === "videojs";
+};

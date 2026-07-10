@@ -3,6 +3,7 @@ import type { AudioEngineSourceType } from "@soundspan/media-metadata-contract";
 export type StreamingEngineMode =
   | "videojs"
   | "howler"
+  | "native"
   | "tauri-native";
 
 export const DEFAULT_STREAMING_ENGINE_MODE: StreamingEngineMode = "howler";

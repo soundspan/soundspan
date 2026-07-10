@@ -66,6 +66,27 @@ export function shouldAttemptSegmentedRecoveryOnUnexpectedPause(
     );
 }
 
+/**
+ * Decides whether a track load should autoplay from local playing state.
+ *
+ * A Listen Together FOLLOWER's playback starts are owned by the LT
+ * protocol: the server's synchronized play-at (and playback deltas)
+ * call resume() explicitly after the ready gate. Local wasPlaying
+ * leaking into the load autoplayed a fraction of track-start audio
+ * before the gate paused it — an audible blip on every follower track
+ * change (GH #42 soak finding). Hosts and solo playback keep the
+ * existing local-state autoplay.
+ */
+export function resolveLoadAutoplayDecision(input: {
+    wasPlayingBeforeLoad: boolean;
+    isListenTogetherFollower: boolean;
+}): boolean {
+    if (input.isListenTogetherFollower) {
+        return false;
+    }
+    return input.wasPlayingBeforeLoad;
+}
+
 export type SegmentedHandoffRecoveryStartupSkipReason =
     | "eligible"
     | "startup_stabilizing_no_progress"

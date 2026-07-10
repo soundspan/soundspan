@@ -154,7 +154,10 @@ describe("applyArtistCap", () => {
         expect(counts.get("artist-b")).toBeLessThanOrEqual(4);
     });
 
-    it("can refill from excluded tracks after max relaxation", () => {
+    it("refill after max relaxation keeps a hard ceiling instead of un-capping (GH #46)", () => {
+        // 5 of 6 candidates are one artist. The old refill returned all
+        // six -- an 83%-dominated "playlist". The refill now respects a
+        // hard ceiling, preferring a shorter diverse result.
         const input: TestTrack[] = [
             makeTrack("a-1", "artist-a"),
             makeTrack("a-2", "artist-a"),
@@ -175,7 +178,9 @@ describe("applyArtistCap", () => {
             },
         });
 
-        expect(selected).toHaveLength(6);
+        const counts = countByArtist(selected);
+        expect(counts.get("artist-a")).toBeLessThanOrEqual(3);
+        expect(selected).toHaveLength(4); // 3 x artist-a + 1 x artist-b
     });
 
     it("is deterministic across fallback passes with seeded RNG", () => {

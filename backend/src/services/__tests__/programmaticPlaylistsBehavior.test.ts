@@ -9,6 +9,12 @@ import { lastFmService } from "../lastfm";
 import { moodBucketService } from "../moodBucketService";
 import { logger } from "../../utils/logger";
 
+jest.mock("../../config", () => ({
+    config: {
+        generationDiversity: { weightAlpha: 0.5, shareCeiling: 0.3 },
+    },
+}));
+
 jest.mock("../../utils/db", () => ({
     prisma: {
         play: {

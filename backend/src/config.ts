@@ -7,6 +7,7 @@ import {
     isEnvFlagEnabled,
     parseEnvBool,
     parseEnvCsv,
+    parseEnvFloat,
     parseEnvInt,
 } from "./utils/envParsers";
 
@@ -104,6 +105,20 @@ export const config = {
         sampleIntervalMs: parseEnvInt(
             process.env.WORKER_EVENT_LOOP_SAMPLE_MS,
             5000
+        ),
+    },
+
+    // Artist-diversity knobs for generated queues (GH #46): each artist
+    // weighs n^alpha (alpha 0 = one share each, 1 = fully proportional)
+    // under a hard per-artist ceiling expressed as a share of queue size.
+    generationDiversity: {
+        weightAlpha: parseEnvFloat(
+            process.env.GENERATION_ARTIST_WEIGHT_ALPHA,
+            0.5
+        ),
+        shareCeiling: parseEnvFloat(
+            process.env.GENERATION_ARTIST_SHARE_CEILING,
+            0.3
         ),
     },
 

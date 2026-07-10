@@ -33,6 +33,14 @@ type RunMetric = {
     capViolations: number;
     underfill: boolean;
     generationMs: number;
+    /**
+     * Weighting bound (GH #46, artist-skewed stratum only): tracks
+     * selected from the stratum's largest-discography artist. With the
+     * damped proportional allocator this must be > 0 on a filled
+     * playlist — a zero means flat-cap over-correction shut the large
+     * artist out entirely.
+     */
+    largestDiscographySelected: number | null;
     failedReasons: string[];
 };
 
@@ -539,6 +547,18 @@ function evaluateRun(metric: RunMetric): RunMetric {
         metric.failedReasons.push("hhi");
     }
 
+    // Weighting bound (GH #46): on the artist-skewed stratum a filled
+    // playlist must include the largest-discography artist — the damped
+    // proportional allocator gives big discographies MORE weight, so a
+    // complete shut-out indicates flat-cap over-correction.
+    if (
+        metric.largestDiscographySelected !== null &&
+        metric.largestDiscographySelected === 0 &&
+        metric.playlistSize >= Math.ceil(metric.targetSize / 2)
+    ) {
+        metric.failedReasons.push("weightingNotObserved");
+    }
+
     return metric;
 }
 
@@ -721,6 +741,27 @@ async function runMeasurement(): Promise<void> {
                         : 0;
                 const capViolations = counts.filter((count) => count > ARTIST_CAP).length;
                 const underfill = playlistSize < targetSize;
+                let largestDiscographySelected: number | null = null;
+                if (stratum.key === "artist-skewed") {
+                    const libraryCounts = new Map<string, number>();
+                    for (const artistId of trackArtistMap.values()) {
+                        libraryCounts.set(
+                            artistId,
+                            (libraryCounts.get(artistId) ?? 0) + 1,
+                        );
+                    }
+                    let largestArtistId: string | null = null;
+                    let largestCount = -1;
+                    for (const [artistId, count] of libraryCounts) {
+                        if (count > largestCount) {
+                            largestCount = count;
+                            largestArtistId = artistId;
+                        }
+                    }
+                    largestDiscographySelected = largestArtistId
+                        ? artistCounts.get(largestArtistId) ?? 0
+                        : 0;
+                }
 
                 const metric = evaluateRun({
                     stratum: stratum.key,
@@ -734,6 +775,7 @@ async function runMeasurement(): Promise<void> {
                     capViolations,
                     underfill,
                     generationMs,
+                    largestDiscographySelected,
                     failedReasons: [],
                 });
 

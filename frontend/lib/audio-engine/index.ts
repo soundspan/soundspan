@@ -1,6 +1,11 @@
 import {
   HowlerEngineAdapter,
 } from "@/lib/audio-engine/howlerEngineAdapter";
+import { NativeAudioElementEngine } from "@/lib/audio-engine/nativeAudioElementEngine";
+import {
+  detectAndroidWebView,
+  resolveDirectEngineSelection,
+} from "@/lib/audio-engine/engineSelectionPolicy";
 import { resolveStreamingEngineMode } from "@/lib/audio-engine/engineMode";
 import type {
   AudioEngine,
@@ -19,6 +24,17 @@ import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
 type EngineKind = "howler" | "videojs";
 type AnyAudioEventHandler = (payload: unknown) => void;
+
+/** Which concrete engine occupies the direct-playback slot. */
+export type DirectEngineDescriptor = "howler" | "native" | "tauri-native";
+
+/**
+ * The engine actually driving playback right now. Distinct from the
+ * STREAMING_ENGINE_MODE flag: platform pins, the Tauri upgrade, and
+ * per-source videojs routing all make "configured" diverge from
+ * "actual" (GH #42 soak telemetry).
+ */
+export type RuntimeEngineDescriptor = DirectEngineDescriptor | "videojs";
 
 const AUDIO_ENGINE_EVENTS: AudioEngineEventType[] = [
   "load",
@@ -83,17 +99,22 @@ interface RuntimeAudioEngine extends AudioEngine {
   hasTrackEnded(): boolean;
   isCurrentlySeeking(): boolean;
   getSeekTarget(): number | null;
+  getActiveEngineDescriptor(): RuntimeEngineDescriptor;
 }
 
 interface HybridRuntimeAudioEngineOptions {
   howlerEngine?: AudioEngine;
   createVideoJsEngine?: () => AudioEngine | Promise<AudioEngine>;
   resolveMode?: () => ReturnType<typeof resolveStreamingEngineMode>;
+  /** What the injected direct-slot engine actually is (default howler). */
+  directEngineDescriptor?: DirectEngineDescriptor;
 }
 
 /**
  * Hybrid runtime engine:
- * - Uses Howler for direct byte streams (legacy-safe path)
+ * - Uses the direct slot for byte streams (HowlerEngineAdapter by
+ *   default; NativeAudioElementEngine when STREAMING_ENGINE_MODE=native;
+ *   TauriNativeEngineAdapter after a platform upgrade)
  * - Uses Video.js for DASH manifests when segmented mode is active
  */
 export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
@@ -109,6 +130,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
   private readonly howlerForwarders = new Map<AudioEngineEventType, AnyAudioEventHandler>();
   private readonly videoJsForwarders = new Map<AudioEngineEventType, AnyAudioEventHandler>();
   private activeEngineKind: EngineKind = "howler";
+  private directEngineDescriptor: DirectEngineDescriptor;
   private lastSource: AudioEngineSource | null = null;
   private lastLoadOptions: AudioEngineLoadOptions | null = null;
   private loadSequence = 0;
@@ -127,6 +149,7 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
 
   constructor(options: HybridRuntimeAudioEngineOptions = {}) {
     this.howlerEngine = options.howlerEngine ?? new HowlerEngineAdapter();
+    this.directEngineDescriptor = options.directEngineDescriptor ?? "howler";
     this.createVideoJsEngine =
       options.createVideoJsEngine ?? loadVideoJsSegmentedEngine;
     this.resolveMode = options.resolveMode ?? resolveStreamingEngineMode;
@@ -142,7 +165,10 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
    * re-applied and event forwarding is re-wired automatically.
    * Only takes effect when the howler slot is the active engine.
    */
-  upgradeHowlerEngine(engine: AudioEngine): void {
+  upgradeHowlerEngine(
+    engine: AudioEngine,
+    descriptor: DirectEngineDescriptor = "howler",
+  ): void {
     if (engine === this.howlerEngine) {
       return;
     }
@@ -154,8 +180,22 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
     }
 
     this.howlerEngine = engine;
+    this.directEngineDescriptor = descriptor;
     this.bindEngineEvents("howler", this.howlerEngine);
     this.applyOutputState(this.howlerEngine);
+  }
+
+  /**
+   * Reports the engine actually driving playback right now — the
+   * direct-slot descriptor, or "videojs" while the segmented engine is
+   * active. Pairs with the STREAMING_ENGINE_MODE flag in telemetry so
+   * configured-vs-actual divergence (platform pins, Tauri upgrades,
+   * per-source routing) is visible.
+   */
+  getActiveEngineDescriptor(): RuntimeEngineDescriptor {
+    return this.activeEngineKind === "videojs"
+      ? "videojs"
+      : this.directEngineDescriptor;
   }
 
   load(source: AudioEngineSource | string, options?: AudioEngineLoadOptions): void;
@@ -494,6 +534,9 @@ export class HybridRuntimeAudioEngine implements RuntimeAudioEngine {
       return isDashProtocol(source) ? "videojs" : "howler";
     }
 
+    // "native" (and any future direct mode) routes through the direct
+    // slot; createRuntimeAudioEngine seeds that slot with the selected
+    // engine (NativeAudioElementEngine when STREAMING_ENGINE_MODE=native).
     return "howler";
   }
 
@@ -587,17 +630,42 @@ let engineUpgradeInitiated = false;
 
 export const createRuntimeAudioEngine = (): RuntimeAudioEngine => {
   if (!sharedRuntimeAudioEngine) {
-    // Start with HowlerEngineAdapter synchronously so playback is available immediately.
-    sharedRuntimeAudioEngine = new HybridRuntimeAudioEngine();
+    // Selection precedence (GH #42 §10): platform pins (Android WebView →
+    // howler) override the engine-mode flag, which overrides the default.
+    const selection = resolveDirectEngineSelection({
+      mode: resolveStreamingEngineMode(),
+      isAndroidWebView: detectAndroidWebView(
+        typeof navigator !== "undefined" ? navigator.userAgent : "",
+      ),
+    });
 
-    // Kick off async platform detection; if a native engine is needed,
-    // replace the inner howler engine transparently.
-    if (!engineUpgradeInitiated) {
+    // Seed the direct slot synchronously so playback is available
+    // immediately: the native element engine in native mode, otherwise
+    // HowlerEngineAdapter (the constructor default).
+    sharedRuntimeAudioEngine = new HybridRuntimeAudioEngine(
+      selection.engine === "native"
+        ? {
+            howlerEngine: new NativeAudioElementEngine(),
+            directEngineDescriptor: "native",
+          }
+        : {},
+    );
+    if (selection.engine === "native") {
+      sharedFrontendLogger.info(
+        "[AudioEngine] Native element engine active in the direct slot.",
+        { reason: selection.reason },
+      );
+    }
+
+    // Kick off async platform detection; if a Tauri native engine is
+    // needed, replace the inner direct engine transparently. This path
+    // must not fire when the native element mode is active (GH #42 §10).
+    if (!engineUpgradeInitiated && selection.allowTauriUpgrade) {
       engineUpgradeInitiated = true;
       createAudioEngine()
         .then((engine) => {
           if (!(engine instanceof HowlerEngineAdapter) && sharedRuntimeAudioEngine) {
-            sharedRuntimeAudioEngine.upgradeHowlerEngine(engine);
+            sharedRuntimeAudioEngine.upgradeHowlerEngine(engine, "tauri-native");
           }
         })
         .catch((err) => {
