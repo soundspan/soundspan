@@ -57,6 +57,7 @@ import {
 import { shouldAutoMatchVibeAtQueueEnd } from "./autoMatchVibePlayback";
 import {
     createEmptySegmentedStartupRecoveryStageAttempts,
+    resolveLoadAutoplayDecision,
     resolvePlaybackDuration,
     resolveRemoteStreamFormat,
     resolveSegmentedStartupRecoveryDecision,
@@ -5998,8 +5999,18 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     return;
                 }
 
-                const shouldAutoPlayOnLoad =
-                    lastPlayingStateRef.current || wasEnginePlayingBeforeLoad;
+                const listenTogetherSnapshotForLoad =
+                    getListenTogetherSessionSnapshot();
+                const shouldAutoPlayOnLoad = resolveLoadAutoplayDecision({
+                    wasPlayingBeforeLoad:
+                        lastPlayingStateRef.current || wasEnginePlayingBeforeLoad,
+                    // Followers start playback via the LT play-at/delta
+                    // resume, never from local state (audible-blip fix).
+                    isListenTogetherFollower: Boolean(
+                        listenTogetherSnapshotForLoad?.groupId &&
+                            !listenTogetherSnapshotForLoad.isHost,
+                    ),
+                });
 
                 if (typeof sourceForLoad === "string") {
                     activeSegmentedPlaybackTrackIdRef.current = null;
@@ -6089,8 +6100,20 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         });
                     }
 
-                    const shouldAutoPlay =
-                        lastPlayingStateRef.current || wasEnginePlayingBeforeLoad;
+                    const listenTogetherSnapshotAtLoaded =
+                        getListenTogetherSessionSnapshot();
+                    const shouldAutoPlay = resolveLoadAutoplayDecision({
+                        wasPlayingBeforeLoad:
+                            lastPlayingStateRef.current ||
+                            wasEnginePlayingBeforeLoad,
+                        // Same follower rule as the load-time decision: the
+                        // deferred (seek-then-play) path must not start
+                        // follower playback from local state either.
+                        isListenTogetherFollower: Boolean(
+                            listenTogetherSnapshotAtLoaded?.groupId &&
+                                !listenTogetherSnapshotAtLoaded.isHost,
+                        ),
+                    });
 
                     if (shouldAutoPlay && !audioEngine.isPlaying()) {
                         applyCurrentOutputState();
