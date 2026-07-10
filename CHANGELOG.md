@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Contributor toolchain baseline (#8): a root `package.json` provides one-command orchestration — `npm run setup` (contract build + both app installs, in the right order), `npm run verify` (reproduces every CI gate: backend coverage, frontend lint/build/coverage, helm render) — and the required Node version is now declared everywhere (`engines: >=20.9.0` in all three packages, `.nvmrc` pinned to 24). The root package is deliberately not an npm workspace so per-package lockfiles, Docker image layer caching, and CI stay untouched; full workspace conversion remains open under #8.
 - Worker event-loop stall watchdog (#43), with two attribution paths. Stalls the loop recovers from: the worker samples `monitorEventLoopDelay` and, when a stall exceeds the warn threshold (default 1s, `WORKER_EVENT_LOOP_WARN_MS`), logs the Bull jobs active at that moment. Stalls that end in a liveness kill: the watchdog's interval can never fire while the loop is pegged, so the heavy queues (`worker-scheduler`, `library-scan`) log an unconditional `job-start` breadcrumb — the last log line before the kill names the culprit. Sample cadence is configurable via `WORKER_EVENT_LOOP_SAMPLE_MS` (default 5s).
 
 ### Changed

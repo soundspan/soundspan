@@ -1,6 +1,9 @@
 {
   "name": "soundspan-frontend",
   "version": "1.6.1",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "description": "soundspan web frontend",
   "license": "GPL-3.0",
   "repository": {

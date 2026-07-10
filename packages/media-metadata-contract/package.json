@@ -1,6 +1,9 @@
 {
     "name": "@soundspan/media-metadata-contract",
     "version": "1.0.0",
+    "engines": {
+        "node": ">=20.9.0"
+    },
     "private": true,
     "main": "dist/index.js",
     "types": "dist/index.d.ts",

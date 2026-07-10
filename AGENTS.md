@@ -46,17 +46,23 @@ There is **no root install** — `backend/`, `frontend/`, and `packages/media-me
 - **npm 9+** — each package commits its own lockfile; use `npm ci` for reproducible installs.
 - **Python 3.11+** — only when changing the `services/**` sidecars.
 
-### First-time setup (from the repo root, in this order)
+### First-time setup (from the repo root)
 
 ```bash
-# 1. Build the shared contract FIRST. The backend depends on it via a `file:`
-#    path, which npm SYMLINKS at install time — so anything that loads the
-#    contract at runtime needs its dist/ to exist. The backend's pretest/
-#    prebuild scripts compile it automatically, but other entry points
-#    (e.g. `npm run dev`) do not.
-npm --prefix packages/media-metadata-contract run build
+# One command: installs + builds the shared contract FIRST (the backend
+# depends on it via a `file:` path that npm symlinks at install time, so
+# its dist/ must exist), then installs both apps.
+npm run setup        # npm run setup:ci for lockfile-exact installs
 
-# 2. Install the apps (the symlinked contract now includes dist/).
+# Node version: `.nvmrc` pins 24 for local dev; `engines` in every
+# package declares the floor (>= 20.9, required by Next 16).
+```
+
+Equivalent manual sequence (what `npm run setup` runs):
+
+```bash
+npm --prefix packages/media-metadata-contract install
+npm --prefix packages/media-metadata-contract run build
 npm --prefix backend install
 npm --prefix frontend install
 ```
@@ -65,11 +71,13 @@ npm --prefix frontend install
 
 ### Reproduce the CI gates locally (run before every PR)
 
+One command reproduces every CI gate: **`npm run verify`** (from the repo root). Per-gate equivalents:
+
 | CI check (`quality-visibility.yml`) | Local command | Catches |
 | --- | --- | --- |
-| Backend Tests + Coverage | `npm --prefix backend run test:coverage` | backend Jest unit/runtime tests + coverage |
-| Frontend Quality Visibility | `npm --prefix frontend run lint` **and** `npm --prefix frontend run build` **and** `npm --prefix frontend run test:coverage` | ESLint, **TypeScript type-check (the `build` step)**, targeted unit coverage |
-| Helm Chart Visibility | `./scripts/helm-chart-render-check.sh` | chart lint + render assertions |
+| Backend Tests + Coverage | `npm run verify:backend` (= `npm --prefix backend run test:coverage`) | backend Jest unit/runtime tests + coverage |
+| Frontend Quality Visibility | `npm run verify:frontend` (= frontend `lint` + `build` + `test:coverage`) | ESLint, **TypeScript type-check (the `build` step)**, targeted unit coverage |
+| Helm Chart Visibility | `npm run verify:helm` (= `./scripts/helm-chart-render-check.sh`) | chart lint + render assertions |
 
 Notes:
 

@@ -1,6 +1,9 @@
 {
     "name": "soundspan-backend",
     "version": "1.6.1",
+    "engines": {
+        "node": ">=20.9.0"
+    },
     "description": "soundspan backend API server",
     "license": "GPL-3.0",
     "repository": {

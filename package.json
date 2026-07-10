@@ -1,0 +1,20 @@
+{
+    "name": "soundspan-repo",
+    "version": "0.0.0",
+    "private": true,
+    "description": "Repo-level orchestration for the soundspan packages (backend, frontend, media-metadata-contract). Not a published package and deliberately NOT an npm workspace: each package keeps its own lockfile so the per-package Docker image builds and CI caching stay intact (GH #8; full workspace conversion is a tracked follow-up).",
+    "engines": {
+        "node": ">=20.9.0"
+    },
+    "scripts": {
+        "setup": "npm --prefix packages/media-metadata-contract install && npm --prefix packages/media-metadata-contract run build && npm --prefix backend install && npm --prefix frontend install",
+        "setup:ci": "npm --prefix packages/media-metadata-contract ci && npm --prefix packages/media-metadata-contract run build && npm --prefix backend ci && npm --prefix frontend ci",
+        "build:contract": "npm --prefix packages/media-metadata-contract run build",
+        "verify": "npm run verify:backend && npm run verify:frontend && npm run verify:helm",
+        "verify:backend": "npm --prefix backend run test:coverage",
+        "verify:frontend": "npm --prefix frontend run lint && npm --prefix frontend run build && npm --prefix frontend run test:coverage",
+        "verify:helm": "./scripts/helm-chart-render-check.sh",
+        "test:backend": "npm --prefix backend test --",
+        "test:frontend": "npm --prefix frontend run test:unit"
+    }
+}
