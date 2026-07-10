@@ -9,6 +9,13 @@ import {
     getDecadeFromYear,
 } from "../utils/dateFilters";
 import { applyArtistCap, type ArtistCapTrack } from "./programmaticPlaylistArtistCap";
+import {
+    allocateTracksWithArtistWeighting,
+    createSeededRng,
+    getSeededRandom,
+    seededShuffle,
+} from "./artistSlotAllocation";
+import { config } from "../config";
 import { separateArtists } from "../utils/separateArtists";
 export {
     applyArtistCap,
@@ -128,46 +135,68 @@ function getMixColor(type: string): string {
     return MIX_COLORS[type] || MIX_COLORS["default"];
 }
 
-// Helper to randomly sample from array using Fisher-Yates shuffle
-function randomSample<T>(array: T[], count: number): T[] {
-    const result = [...array];
-    for (let i = result.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [result[i], result[j]] = [result[j], result[i]];
-    }
-    return result.slice(0, count);
+// Seeded RNG utilities live in the pure artistSlotAllocation module
+// (config-free import chain); re-exported here for existing consumers.
+export { seededShuffle };
+
+
+/**
+ * Shared diverse selection for mix generators (GH #46): replaces the raw
+ * seededShuffle(...).slice(...) / randomSample(...) pattern with the
+ * damped proportional artist allocator. Artist keys come from a single
+ * batched album lookup (pool track objects carry albumId but not the
+ * artist), so no per-generator select changes are needed. Deterministic
+ * when a seedKey is provided (daily/weekly mixes stay stable per seed).
+ */
+/** Unknown-safe read of an inline album.artist.id on a pool track. */
+function readInlineArtistId(track: unknown): string | undefined {
+    const album = (
+        track as { album?: { artist?: { id?: unknown } | null } | null }
+    ).album;
+    const id = album?.artist?.id;
+    return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
-// Helper to get seeded random number for daily consistency
-function getSeededRandom(seed: string): number {
-    let hash = 0;
-    for (let i = 0; i < seed.length; i++) {
-        const char = seed.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash = hash & hash;
+async function selectTracksWithArtistDiversityForMix<
+    T extends { id: string; albumId?: string | null },
+>(tracks: T[], count: number, seedKey?: string): Promise<T[]> {
+    if (!Array.isArray(tracks) || tracks.length === 0 || count <= 0) {
+        return [];
     }
-    return Math.abs(hash);
-}
-
-function createSeededRng(seed: number): () => number {
-    let state = seed >>> 0;
-    return () => {
-        state = (state * 1664525 + 1013904223) >>> 0;
-        return state / 4294967296;
-    };
-}
-
-// Exported for unit testing: a seeded Fisher-Yates that is deterministic per
-// seed, returns a fresh array (no in-place mutation), and is uniform — unlike
-// the biased `Array.sort()` comparator it replaced (F6).
-export function seededShuffle<T>(items: T[], seedKey: string): T[] {
-    const shuffled = [...items];
-    const rng = createSeededRng(getSeededRandom(seedKey));
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(rng() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
+    // Artist keys prefer an inline album.artist.id (some pool selects
+    // include it); only tracks without one need the batched album lookup.
+    const albumIds = [
+        ...new Set(
+            tracks
+                .filter((track) => !readInlineArtistId(track))
+                .map((track) => track.albumId)
+                .filter((id): id is string => typeof id === "string")
+        ),
+    ];
+    const albums =
+        albumIds.length > 0
+            ? await prisma.album.findMany({
+                  where: { id: { in: albumIds } },
+                  select: { id: true, artistId: true },
+              })
+            : [];
+    const artistByAlbumId = new Map(albums.map((a) => [a.id, a.artistId]));
+    const rng = seedKey
+        ? createSeededRng(getSeededRandom(seedKey))
+        : Math.random;
+    return allocateTracksWithArtistWeighting(
+        tracks,
+        (track, index) =>
+            readInlineArtistId(track) ||
+            (track.albumId && artistByAlbumId.get(track.albumId)) ||
+            `unknown:${index}`,
+        {
+            targetCount: count,
+            alpha: config.generationDiversity.weightAlpha,
+            ceilingShare: config.generationDiversity.shareCeiling,
+            rng,
+        }
+    );
 }
 
 // Type for track with album cover
@@ -1962,9 +1991,7 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const shuffled = seededShuffle(tracks, `high-energy-${today}`);
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT, `high-energy-${today}`);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2059,14 +2086,16 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const shuffled = seededShuffle(tracks, `late-night-${today}`);
-
         // Determine if daily or weekly based on available tracks
         const isWeekly = tracks.length >= this.MIN_TRACKS_WEEKLY;
         const trackLimit = isWeekly
             ? this.WEEKLY_TRACK_LIMIT
             : this.DAILY_TRACK_LIMIT;
-        const selectedTracks = shuffled.slice(0, trackLimit);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(
+            tracks,
+            trackLimit,
+            `late-night-${today}`
+        );
 
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
@@ -2166,9 +2195,7 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const shuffled = seededShuffle(tracks, `happy-${today}`);
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT, `happy-${today}`);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2308,13 +2335,13 @@ export class ProgrammaticPlaylistService {
             return aScore - bScore;
         });
 
-        // Take top 50 most melancholy tracks, then shuffle
-        const shuffled = seededShuffle(
+        // Take the top 50 most melancholy tracks, then select with
+        // artist weighting (GH #46).
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(
             sortedTracks.slice(0, 50),
+            this.TRACK_LIMIT,
             `melancholy-${today}`
         );
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2390,9 +2417,7 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const shuffled = seededShuffle(tracks, `dance-floor-${today}`);
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT, `dance-floor-${today}`);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2466,9 +2491,7 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const shuffled = seededShuffle(tracks, `acoustic-${today}`);
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT, `acoustic-${today}`);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2543,9 +2566,7 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const shuffled = seededShuffle(tracks, `instrumental-${today}`);
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT, `instrumental-${today}`);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2589,9 +2610,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 15) return null;
 
-        const shuffled = seededShuffle(tracks, `mood-${moodTag}-${today}`);
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT, `mood-${moodTag}-${today}`);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2692,9 +2711,7 @@ export class ProgrammaticPlaylistService {
             return null;
         }
 
-        const shuffled = seededShuffle(tracks, `road-trip-${today}`);
-
-        const selectedTracks = shuffled.slice(0, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT, `road-trip-${today}`);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2767,7 +2784,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 15) return null;
 
-        const selectedTracks = randomSample(tracks, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2817,7 +2834,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 15) return null;
 
-        const selectedTracks = randomSample(tracks, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2862,7 +2879,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 15) return null;
 
-        const selectedTracks = randomSample(tracks, this.TRACK_LIMIT);
+        const selectedTracks = await selectTracksWithArtistDiversityForMix(tracks, this.TRACK_LIMIT);
         const coverUrls = selectedTracks
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2929,7 +2946,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -2984,7 +3001,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3040,7 +3057,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3088,7 +3105,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < this.MIN_TRACKS_DAILY) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3139,7 +3156,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3193,7 +3210,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3243,7 +3260,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3284,7 +3301,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3339,7 +3356,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3389,7 +3406,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < this.MIN_TRACKS_DAILY) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3546,7 +3563,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3587,7 +3604,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3633,7 +3650,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 8) return null;
 
-        const shuffled = randomSample(tracks, this.DAILY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3695,7 +3712,7 @@ export class ProgrammaticPlaylistService {
 
             if (filtered.length < 15) return null;
 
-            const shuffled = randomSample(filtered, this.WEEKLY_TRACK_LIMIT);
+            const shuffled = await selectTracksWithArtistDiversityForMix(filtered, this.WEEKLY_TRACK_LIMIT);
             const coverUrls = shuffled
                 .filter((t) => t.album.coverUrl)
                 .slice(0, 4)
@@ -3713,7 +3730,7 @@ export class ProgrammaticPlaylistService {
             };
         }
 
-        const shuffled = randomSample(tracks, this.WEEKLY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.WEEKLY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3788,13 +3805,15 @@ export class ProgrammaticPlaylistService {
                     keyTracks.length,
                     this.WEEKLY_TRACK_LIMIT - journey.length
                 );
-                // Include the key in the seed so each key's shuffle is
+                // Include the key in the seed so each key's selection is
                 // independent; a shared accumulator would correlate them.
-                const shuffled = seededShuffle(
-                    keyTracks,
-                    `key-journey-${today}-${key}`
+                journey.push(
+                    ...(await selectTracksWithArtistDiversityForMix(
+                        keyTracks,
+                        count,
+                        `key-journey-${today}-${key}`
+                    ))
                 );
-                journey.push(...shuffled.slice(0, count));
             }
         }
 
@@ -3849,24 +3868,39 @@ export class ProgrammaticPlaylistService {
         const flow: typeof tracks = [];
 
         // Intro: 4 slow tracks
-        flow.push(...randomSample(slow, Math.min(4, slow.length)));
+        flow.push(
+            ...(await selectTracksWithArtistDiversityForMix(
+                slow,
+                Math.min(4, slow.length)
+            ))
+        );
         // Build: 4 medium tracks
-        flow.push(...randomSample(medium, Math.min(5, medium.length)));
+        flow.push(
+            ...(await selectTracksWithArtistDiversityForMix(
+                medium,
+                Math.min(5, medium.length)
+            ))
+        );
         // Peak: 5 fast tracks
-        flow.push(...randomSample(fast, Math.min(6, fast.length)));
+        flow.push(
+            ...(await selectTracksWithArtistDiversityForMix(
+                fast,
+                Math.min(6, fast.length)
+            ))
+        );
         // Cool down: 3 medium tracks
         flow.push(
-            ...randomSample(
+            ...(await selectTracksWithArtistDiversityForMix(
                 medium.filter((t) => !flow.includes(t)),
                 Math.min(3, medium.length)
-            )
+            ))
         );
         // Outro: 3 slow tracks
         flow.push(
-            ...randomSample(
+            ...(await selectTracksWithArtistDiversityForMix(
                 slow.filter((t) => !flow.includes(t)),
                 Math.min(2, slow.length)
-            )
+            ))
         );
 
         if (flow.length < 15) return null;
@@ -3907,7 +3941,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 15) return null;
 
-        const shuffled = randomSample(tracks, this.WEEKLY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.WEEKLY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -3950,7 +3984,7 @@ export class ProgrammaticPlaylistService {
 
         if (tracks.length < 15) return null;
 
-        const shuffled = randomSample(tracks, this.WEEKLY_TRACK_LIMIT);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.WEEKLY_TRACK_LIMIT);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)
@@ -4224,7 +4258,7 @@ export class ProgrammaticPlaylistService {
         const limit = params.limit || 15;
         if (tracks.length < Math.min(limit, 8)) return null;
 
-        const shuffled = randomSample(tracks, limit);
+        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, limit);
         const coverUrls = shuffled
             .filter((t) => t.album.coverUrl)
             .slice(0, 4)

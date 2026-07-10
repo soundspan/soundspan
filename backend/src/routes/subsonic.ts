@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { requireSubsonicAuth, subsonicRateLimiter } from "../middleware/subsonicAuth";
 import sharp from "sharp";
 import { prisma } from "../utils/db";
+import { seededShuffle } from "../services/artistSlotAllocation";
 import {
     getResponseFormat,
     sendSubsonicError,
@@ -3372,7 +3373,11 @@ export async function handleGetSongsByGenre(
     }
 
     try {
-        const tracks = await prisma.track.findMany({
+        // Every request used to return the same deterministic alphabetical
+        // slice (GH #46). Matching ids are now ordered by a DAY-STABLE
+        // seeded shuffle: offset pagination stays coherent within a day
+        // while composition varies across days.
+        const matchingTracks = await prisma.track.findMany({
             where: {
                 album: {
                     location: LIBRARY_LOCATION,
@@ -3388,36 +3393,54 @@ export async function handleGetSongsByGenre(
                     },
                 },
             },
-            select: {
-                id: true,
-                title: true,
-                trackNo: true,
-                discNo: true,
-                duration: true,
-                fileSize: true,
-                mime: true,
-                filePath: true,
-                album: {
-                    select: {
-                        id: true,
-                        title: true,
-                        year: true,
-                        coverUrl: true,
-                        genres: true,
-                        userGenres: true,
-                        artist: {
-                            select: {
-                                id: true,
-                                name: true,
-                            },
-                        },
-                    },
-                },
-            },
-            orderBy: [{ title: "asc" }, { id: "asc" }],
-            skip: offset,
-            take: count,
+            select: { id: true },
+            // Deterministic base order: the seeded shuffle is only
+            // day-stable (and offset pagination only coherent) when its
+            // input order is stable across requests and query plans.
+            orderBy: { id: "asc" },
         });
+        const dayKey = new Date().toISOString().slice(0, 10);
+        const orderedIds = seededShuffle(
+            matchingTracks.map((t) => t.id),
+            `subsonic-songs-by-genre-${genre.toLowerCase()}-${dayKey}`
+        );
+        const pageIds = orderedIds.slice(offset, offset + count);
+        const trackRows =
+            pageIds.length > 0
+                ? await prisma.track.findMany({
+                      where: { id: { in: pageIds } },
+                      select: {
+                          id: true,
+                          title: true,
+                          trackNo: true,
+                          discNo: true,
+                          duration: true,
+                          fileSize: true,
+                          mime: true,
+                          filePath: true,
+                          album: {
+                              select: {
+                                  id: true,
+                                  title: true,
+                                  year: true,
+                                  coverUrl: true,
+                                  genres: true,
+                                  userGenres: true,
+                                  artist: {
+                                      select: {
+                                          id: true,
+                                          name: true,
+                                      },
+                                  },
+                              },
+                          },
+                      },
+                  })
+                : [];
+        const trackRowById = new Map(trackRows.map((row) => [row.id, row]));
+        const tracks = pageIds
+            .map((id) => trackRowById.get(id))
+            .filter((row): row is NonNullable<typeof row> => row !== undefined);
 
         sendSubsonicSuccess(
             res,

@@ -25,6 +25,9 @@ export type ArtistCapFallbackOptions = {
 const DEFAULT_MAX_PER_ARTIST = 2;
 const DEFAULT_RELAXATION_STEP = 1;
 const DEFAULT_RELAXED_CAP_DELTA = 2;
+// Hard per-artist ceiling (share of targetCount) applied when refilling
+// from excluded tracks after max relaxation (GH #46).
+const REFILL_HARD_CEILING_SHARE = 0.3;
 
 function clampRandomValue(value: number): number {
     if (!Number.isFinite(value)) return 0;
@@ -143,13 +146,17 @@ export function applyArtistCap<T extends ArtistCapTrack>(
         return selected;
     }
 
-    for (let i = 0; i < candidates.length; i += 1) {
-        if (selectedByIndex[i]) continue;
-        selected.push(candidates[i].track);
-        if (selected.length >= targetCount) {
-            break;
-        }
-    }
+    // The refill previously ignored the artist cap entirely, so a narrow
+    // pool was GUARANTEED to end up dominated by 1-2 artists (GH #46).
+    // Refill now respects a hard ceiling (share of the target size);
+    // when the pool is genuinely too narrow, a shorter diverse playlist
+    // beats a full-length dominated one.
+    const refillCeiling = Math.max(
+        maxRelaxedPerArtist,
+        Math.floor(targetCount * REFILL_HARD_CEILING_SHARE),
+        1
+    );
+    trySelectUpToCap(refillCeiling);
 
     return selected;
 }

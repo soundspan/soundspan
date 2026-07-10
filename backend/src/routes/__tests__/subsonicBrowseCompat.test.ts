@@ -606,13 +606,22 @@ describe("subsonic browse compatibility handlers", () => {
             buildRes(),
         );
 
-        expect(mockTrackFindMany).toHaveBeenCalledWith(
+        // Two-phase selection (GH #46): an id-only fetch of all matching
+        // tracks (day-stable seeded ordering handles pagination), then a
+        // full fetch of the requested page by id.
+        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
+            1,
             expect.objectContaining({
                 where: expect.objectContaining({
                     trackGenres: expect.anything(),
                 }),
-                take: 10,
-                skip: 0,
+                select: { id: true },
+            }),
+        );
+        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                where: { id: { in: ["track-1"] } },
             }),
         );
         expect(mockSendSuccess).toHaveBeenCalledWith(

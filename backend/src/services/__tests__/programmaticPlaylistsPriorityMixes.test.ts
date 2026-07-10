@@ -2,6 +2,12 @@ import { ProgrammaticPlaylistService } from "../programmaticPlaylists";
 import { prisma } from "../../utils/db";
 import { lastFmService } from "../lastfm";
 
+jest.mock("../../config", () => ({
+    config: {
+        generationDiversity: { weightAlpha: 0.5, shareCeiling: 0.3 },
+    },
+}));
+
 jest.mock("../../utils/db", () => ({
     prisma: {
         play: {

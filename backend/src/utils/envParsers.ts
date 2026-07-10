@@ -61,3 +61,24 @@ export function parseEnvCsv(value: string | undefined): string[] | undefined {
     }
     return value.split(",").map((entry) => entry.trim());
 }
+
+/**
+ * Parses a finite float from an env var, using `fallback` when the value
+ * is absent, empty, or not a finite number.
+ */
+export function parseEnvFloat(
+    value: string | undefined,
+    fallback: number
+): number {
+    if (typeof value !== "string") {
+        return fallback;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || !/^-?\d+(\.\d+)?$/.test(trimmed)) {
+        return fallback;
+    }
+
+    const parsed = Number.parseFloat(trimmed);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}

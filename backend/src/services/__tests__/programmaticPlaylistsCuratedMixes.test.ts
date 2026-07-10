@@ -1,6 +1,12 @@
 import { ProgrammaticMix, ProgrammaticPlaylistService } from "../programmaticPlaylists";
 import { prisma } from "../../utils/db";
 
+jest.mock("../../config", () => ({
+    config: {
+        generationDiversity: { weightAlpha: 0.5, shareCeiling: 0.3 },
+    },
+}));
+
 jest.mock("../../utils/db", () => ({
     prisma: {
         track: {

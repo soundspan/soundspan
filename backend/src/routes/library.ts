@@ -17,6 +17,10 @@ import fs from "fs";
 import { config } from "../config";
 import { isOriginAllowed } from "../utils/cors";
 import { fanartService } from "../services/fanart";
+import {
+    allocateTracksWithArtistWeighting,
+    sampleUniform,
+} from "../services/artistSlotAllocation";
 import { deezerService } from "../services/deezer";
 import { imageProviderService } from "../services/imageProvider";
 import { musicBrainzService } from "../services/musicbrainz";
@@ -6715,11 +6719,14 @@ router.get("/radio", async (req, res) => {
                         plays: { none: {} }, // No plays by anyone
                     },
                     select: { id: true },
-                    take: limitNum * 2,
                 });
 
                 if (unplayedTracks.length >= limitNum) {
-                    trackIds = unplayedTracks.map((t) => t.id);
+                    // Uniform sample instead of an unordered `take` (GH #46).
+                    trackIds = sampleUniform(
+                        unplayedTracks.map((t) => t.id),
+                        limitNum * 4
+                    );
                 } else {
                     // Fallback: get tracks with the fewest plays using raw count
                     const leastPlayedTracks = await prisma.$queryRaw<
@@ -6778,9 +6785,12 @@ router.get("/radio", async (req, res) => {
                     );
                     const randomTracks = await prisma.track.findMany({
                         select: { id: true },
-                        take: limitNum * 2,
                     });
-                    trackIds = randomTracks.map((t) => t.id);
+                    // Uniform sample instead of an unordered `take` (GH #46).
+                    trackIds = sampleUniform(
+                        randomTracks.map((t) => t.id),
+                        limitNum * 4
+                    );
                 }
                 break;
 
@@ -6788,47 +6798,87 @@ router.get("/radio", async (req, res) => {
                 // Filter by decade (e.g., value = "1990" for 90s)
                 const decadeStart = parseInt(radioValue || "2000", 10) || 2000;
 
+                // Fetch all matching ids and sample uniformly — an
+                // unordered `take` returned the same artist-clustered
+                // slice on every request (GH #46).
                 const decadeTracks = await prisma.track.findMany({
                     where: {
                         album: getDecadeWhereClause(decadeStart),
                     },
                     select: { id: true },
-                    take: limitNum * 3,
                 });
-                trackIds = decadeTracks.map((t) => t.id);
-                break;
-
-            case "genre":
-                // Filter by genre (uses Artist.genres and Artist.userGenres)
-                const genreValue = (radioValue || "").toLowerCase();
-
-                // Query Artist.genres and userGenres fields with raw SQL
-                // Join Artist → Album → Track and filter by genre using LIKE for partial matching
-                // Check BOTH canonical genres AND user-added genres (OR condition)
-                const genreTracks = await prisma.$queryRaw<{ id: string }[]>`
-                    SELECT DISTINCT t.id
-                    FROM "Artist" ar
-                    JOIN "Album" a ON a."artistId" = ar.id
-                    JOIN "Track" t ON t."albumId" = a.id
-                    WHERE (
-                        (ar.genres IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
-                            WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
-                        ))
-                        OR
-                        (ar."userGenres" IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
-                            WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
-                        ))
-                    )
-                    LIMIT ${limitNum * 2}
-                `;
-                trackIds = genreTracks.map((t) => t.id);
-
-                logger.debug(
-                    `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" from Artist.genres and userGenres`
+                trackIds = sampleUniform(
+                    decadeTracks.map((t) => t.id),
+                    limitNum * 4
                 );
                 break;
+
+            case "genre": {
+                const genreValue = (radioValue || "").toLowerCase();
+
+                // Prefer track-level genre evidence (Last.fm track tags,
+                // Essentia genres) so the pool is matching TRACKS — the
+                // artist-level fallback below pulls whole discographies of
+                // any artist whose broad tag list substring-matches, which
+                // is how a couple of prolific artists owned every genre
+                // station (GH #46). Pools are sampled uniformly
+                // (ORDER BY random()) instead of an unordered LIMIT that
+                // truncated to the same artist-clustered slice every time.
+                const trackLevelGenreTracks = await prisma.$queryRaw<
+                    { id: string }[]
+                >`
+                    SELECT t.id
+                    FROM "Track" t
+                    WHERE EXISTS (
+                        SELECT 1 FROM unnest(t."lastfmTags") AS tag(name)
+                        WHERE LOWER(tag.name) LIKE ${"%" + genreValue + "%"}
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM unnest(t."essentiaGenres") AS eg(name)
+                        WHERE LOWER(eg.name) LIKE ${"%" + genreValue + "%"}
+                    )
+                    ORDER BY random()
+                    LIMIT ${limitNum * 4}
+                `;
+                trackIds = trackLevelGenreTracks.map((t) => t.id);
+
+                if (trackIds.length < limitNum) {
+                    // Fallback: artist-level genres (Artist.genres and
+                    // userGenres), uniformly sampled.
+                    const artistLevelGenreTracks = await prisma.$queryRaw<
+                        { id: string }[]
+                    >`
+                        SELECT DISTINCT t.id, random() AS sort_key
+                        FROM "Artist" ar
+                        JOIN "Album" a ON a."artistId" = ar.id
+                        JOIN "Track" t ON t."albumId" = a.id
+                        WHERE (
+                            (ar.genres IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM jsonb_array_elements_text(ar.genres::jsonb) AS g(genre)
+                                WHERE LOWER(g.genre) LIKE ${"%" + genreValue + "%"}
+                            ))
+                            OR
+                            (ar."userGenres" IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM jsonb_array_elements_text(ar."userGenres"::jsonb) AS ug(genre)
+                                WHERE LOWER(ug.genre) LIKE ${"%" + genreValue + "%"}
+                            ))
+                        )
+                        ORDER BY sort_key
+                        LIMIT ${limitNum * 4}
+                    `;
+                    trackIds = [
+                        ...new Set([
+                            ...trackIds,
+                            ...artistLevelGenreTracks.map((t) => t.id),
+                        ]),
+                    ];
+                }
+
+                logger.debug(
+                    `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" (track-level tags first, artist-level fallback)`
+                );
+                break;
+            }
 
             case "mood":
                 // Mood-based filtering using audio analysis features
@@ -6893,12 +6943,15 @@ router.get("/radio", async (req, res) => {
                         };
                 }
 
+                // Uniform sample instead of an unordered `take` (GH #46).
                 const moodTracks = await prisma.track.findMany({
                     where: moodWhere,
                     select: { id: true },
-                    take: limitNum * 3,
                 });
-                trackIds = moodTracks.map((t) => t.id);
+                trackIds = sampleUniform(
+                    moodTracks.map((t) => t.id),
+                    limitNum * 4
+                );
                 break;
 
             case "workout":
@@ -6926,9 +6979,12 @@ router.get("/radio", async (req, res) => {
                         ],
                     },
                     select: { id: true },
-                    take: limitNum * 2,
                 });
-                workoutTrackIds = energyTracks.map((t) => t.id);
+                // Uniform sample instead of an unordered `take` (GH #46).
+                workoutTrackIds = sampleUniform(
+                    energyTracks.map((t) => t.id),
+                    limitNum * 4
+                );
                 logger.debug(
                     `[Radio:workout] Found ${workoutTrackIds.length} tracks via audio analysis`
                 );
@@ -6986,7 +7042,7 @@ router.get("/radio", async (req, res) => {
 
                     // Also check album.genres JSON field
                     if (workoutTrackIds.length < limitNum) {
-                        const albumGenreTracks = await prisma.track.findMany({
+                        const albumGenreTrackRows = await prisma.track.findMany({
                             where: {
                                 album: {
                                     OR: workoutGenreNames.map((g) => ({
@@ -6995,8 +7051,12 @@ router.get("/radio", async (req, res) => {
                                 },
                             },
                             select: { id: true },
-                            take: limitNum,
                         });
+                        // Uniform sample instead of an unordered `take` (GH #46).
+                        const albumGenreTracks = sampleUniform(
+                            albumGenreTrackRows,
+                            limitNum * 2
+                        );
                         workoutTrackIds = [
                             ...new Set([
                                 ...workoutTrackIds,
@@ -7907,9 +7967,12 @@ router.get("/radio", async (req, res) => {
                             id: { notIn: [sourceTrackId, ...vibeMatchedIds] },
                         },
                         select: { id: true },
-                        take: limitNum,
                     });
-                    const newIds = genreTracks.map((t) => t.id);
+                    // Uniform sample instead of an unordered `take` (GH #46).
+                    const newIds = sampleUniform(
+                        genreTracks.map((t) => t.id),
+                        limitNum
+                    );
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
                     logger.debug(
                         `[Radio:vibe] Fallback C (same genre): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`
@@ -7923,9 +7986,12 @@ router.get("/radio", async (req, res) => {
                             id: { notIn: [sourceTrackId, ...vibeMatchedIds] },
                         },
                         select: { id: true },
-                        take: limitNum - vibeMatchedIds.length,
                     });
-                    const newIds = randomTracks.map((t) => t.id);
+                    // Uniform sample instead of an unordered `take` (GH #46).
+                    const newIds = sampleUniform(
+                        randomTracks.map((t) => t.id),
+                        limitNum - vibeMatchedIds.length
+                    );
                     vibeMatchedIds = [...vibeMatchedIds, ...newIds];
                     logger.debug(
                         `[Radio:vibe] Fallback D (random): added ${newIds.length} tracks, total: ${vibeMatchedIds.length}`
@@ -8065,6 +8131,10 @@ router.get("/radio", async (req, res) => {
             radioType === "liked" ||
             radioType === "playlist" ||
             radioType === "tracks";
+        // Artist radio already runs selectTracksWithArtistDiversity (the
+        // reference cap implementation); every other generated pool goes
+        // through the shared weighted allocator below (GH #46).
+        const alreadyDiversified = radioType === "artist";
         const basePoolIds =
             preserveInputOrder ?
                 trackIds
@@ -8072,14 +8142,43 @@ router.get("/radio", async (req, res) => {
                     0,
                     Math.max(limitNum * 4, limitNum)
                 );
+        let diversifiedPoolIds = basePoolIds;
+        if (!preserveInputOrder && !alreadyDiversified && basePoolIds.length > 0) {
+            const poolArtistRows = await prisma.track.findMany({
+                where: { id: { in: basePoolIds } },
+                select: { id: true, album: { select: { artistId: true } } },
+            });
+            const artistByTrackId = new Map(
+                poolArtistRows.map((row) => [row.id, row.album?.artistId ?? ""])
+            );
+            diversifiedPoolIds = allocateTracksWithArtistWeighting(
+                basePoolIds,
+                (trackId, index) =>
+                    artistByTrackId.get(trackId) || `unknown:${index}`,
+                {
+                    targetCount: limitNum,
+                    alpha: config.generationDiversity.weightAlpha,
+                    ceilingShare: config.generationDiversity.shareCeiling,
+                }
+            );
+            logger.debug(
+                `[Radio:${radioType}] Artist-weighted selection: ${diversifiedPoolIds.length}/${basePoolIds.length} tracks (alpha=${config.generationDiversity.weightAlpha}, ceiling=${config.generationDiversity.shareCeiling})`
+            );
+        }
         const preferenceScoreMap =
             radioType === "liked" ?
                 new Map<string, number>()
-            :   await buildTrackPreferenceScoreMapForUser(userId, basePoolIds);
+            :   await buildTrackPreferenceScoreMapForUser(
+                    userId,
+                    diversifiedPoolIds
+                );
         const preferenceWeightedPoolIds =
             preferenceScoreMap.size > 0 ?
-                applyTrackPreferenceOrderBias(basePoolIds, preferenceScoreMap)
-            :   basePoolIds;
+                applyTrackPreferenceOrderBias(
+                    diversifiedPoolIds,
+                    preferenceScoreMap
+                )
+            :   diversifiedPoolIds;
         const finalIds = preferenceWeightedPoolIds.slice(0, limitNum);
 
         if (preferenceScoreMap.size > 0) {
