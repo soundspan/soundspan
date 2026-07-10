@@ -42,7 +42,7 @@
 # audio-analyzer-clap pulls in torch/torchaudio/torchvision -- both will
 # carry unfixable-in-place CVEs once trivy-image actually scans the built
 # GHCR images (schedule/workflow_dispatch only, see
-# .github/workflows/security-scanning.yml). This worktree can't build all
+# .github/workflows/image-security-scanning.yml). This worktree can't build all
 # 8 images to pre-seed that baseline, so nothing has been added for it yet.
 # Add entries here with rationale (CVE ID + why it's unfixable/accepted) the
 # first time that job actually reports something -- don't invent CVE IDs
