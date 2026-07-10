@@ -168,6 +168,14 @@ class FakeAudioEngine {
         return this.playing;
     }
 
+    // Mirrors HybridRuntimeAudioEngine.getActiveEngineDescriptor() (GH #42
+    // native-engine soak): reports "videojs" while the segmented engine is
+    // active, else the direct-slot descriptor. This fake has one slot, so it
+    // keys off the same runtimeEngineMode the engineMode mock uses.
+    getActiveEngineDescriptor(): "howler" | "videojs" {
+        return runtimeEngineMode === "videojs" ? "videojs" : "howler";
+    }
+
     quarantineRepresentation(): null {
         return null;
     }
@@ -816,6 +824,7 @@ mock.module("@/lib/api", {
 mock.module("@/lib/audio-engine/engineMode", {
     namedExports: {
         resolveStreamingEngineMode: () => runtimeEngineMode,
+        isSegmentedModeEnabled: () => runtimeEngineMode === "videojs",
     },
 });
 
