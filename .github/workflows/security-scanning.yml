@@ -1,0 +1,324 @@
+name: Security Scanning
+
+# Vulnerability / secret scanning (docs/modernization-roadmap.md F45, epic
+# #10, #59 WS2.4). Every job below is deliberately non-blocking on day one --
+# see each job's continue-on-error comment -- so red findings are visible
+# signal without gating a PR. The blocking ratchet is tracked for 1.10.0.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scanning-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln # secret scanning is owned by the dedicated gitleaks job below
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "0"
+          format: sarif
+          output: trivy-fs-results.sarif
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-fs-results.sarif
+          category: trivy-fs
+
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: trivy-fs-results-${{ github.run_id }}
+          path: trivy-fs-results.sarif
+          if-no-files-found: warn
+
+      - name: Publish finding count to job summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Filesystem Scan"
+            echo ""
+            if [ -f trivy-fs-results.sarif ]; then
+              COUNT=$(python3 -c "import json; d=json.load(open('trivy-fs-results.sarif')); print(sum(len(r.get('results', [])) for r in d.get('runs', [])))")
+              echo "Findings (CRITICAL/HIGH, ignore-unfixed, after .trivyignore): **${COUNT}**"
+              echo ""
+              echo "Full results: Security tab, category \`trivy-fs\`."
+            else
+              echo "No SARIF output produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Scans the 8 published GHCR images (root AIO + 7 suffixed). Only runs on
+  # schedule/workflow_dispatch: these are *published* image scans, not part
+  # of the PR feedback loop (image-builds.yml doesn't `load:` a local image
+  # for PR builds, so there's nothing fresh to scan on a PR -- see F45's
+  # safety note in the roadmap).
+  trivy-image:
+    name: Trivy Image Scan (${{ matrix.name }})
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aio
+            image: soundspan
+          - name: backend
+            image: soundspan-backend
+          - name: backend-worker
+            image: soundspan-backend-worker
+          - name: frontend
+            image: soundspan-frontend
+          - name: audio-analyzer
+            image: soundspan-audio-analyzer
+          - name: audio-analyzer-clap
+            image: soundspan-audio-analyzer-clap
+          - name: tidal-downloader
+            image: soundspan-tidal-downloader
+          - name: ytmusic-streamer
+            image: soundspan-ytmusic-streamer
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image ref and check it exists
+        id: check
+        run: |
+          set -euo pipefail
+          REPO_OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          IMAGE_REF="ghcr.io/${REPO_OWNER_LOWER}/${{ matrix.image }}:latest"
+          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+
+          # Skip gracefully: a matrix entry can outrun what's actually been
+          # published (e.g. a brand-new image name), so don't hard-fail --
+          # just note it and move on.
+          if docker manifest inspect "${IMAGE_REF}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::${IMAGE_REF} not found in GHCR yet, skipping scan."
+          fi
+
+      - name: Run Trivy image scan
+        if: steps.check.outputs.exists == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.check.outputs.image_ref }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "0"
+          format: sarif
+          output: trivy-image-${{ matrix.name }}.sarif
+
+      - name: Upload SARIF to code scanning
+        if: steps.check.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-image-${{ matrix.name }}.sarif
+          category: trivy-image-${{ matrix.name }}
+
+      - name: Publish finding count to job summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Image Scan: ${{ matrix.image }}:latest"
+            echo ""
+            if [ "${{ steps.check.outputs.exists }}" != "true" ]; then
+              echo "Image not found in GHCR yet -- skipped."
+            elif [ -f "trivy-image-${{ matrix.name }}.sarif" ]; then
+              COUNT=$(python3 -c "import json; d=json.load(open('trivy-image-${{ matrix.name }}.sarif')); print(sum(len(r.get('results', [])) for r in d.get('runs', [])))")
+              echo "Findings (CRITICAL/HIGH, ignore-unfixed, after .trivyignore): **${COUNT}**"
+              echo ""
+              echo "Full results: Security tab, category \`trivy-image-${{ matrix.name }}\`."
+            else
+              echo "No SARIF output produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gitleaks:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      # GitHub Actions expressions have no arithmetic operators, so
+      # "commits + 1" is computed here in shell rather than inline in the
+      # checkout step's `with:`.
+      - name: Determine checkout depth
+        id: depth
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "value=$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          # PR: enough history to cover every commit in the PR (the
+          # diff/recent history). schedule/push/dispatch: full history, so a
+          # secret introduced in any past commit is still caught.
+          fetch-depth: ${{ steps.depth.outputs.value }}
+
+      - name: Run gitleaks
+        # Runs the OSS binary directly via the official Docker image --
+        # deliberately NOT gitleaks/gitleaks-action, which requires a
+        # license key for organization repos.
+        run: |
+          set -euo pipefail
+          mkdir -p gitleaks-report
+
+          LOG_OPTS=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            LOG_OPTS="--log-opts=-${{ github.event.pull_request.commits }}"
+            echo "Scanning PR history: last ${{ github.event.pull_request.commits }} commit(s)"
+          else
+            echo "Scanning full repository history"
+          fi
+
+          CONFIG_FLAG=""
+          if [ -f .gitleaks.toml ]; then
+            CONFIG_FLAG="--config=/repo/.gitleaks.toml"
+          fi
+
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect \
+            --source=/repo \
+            --no-banner \
+            --redact \
+            --exit-code=0 \
+            --report-format=sarif \
+            --report-path=/repo/gitleaks-report/results.sarif \
+            $CONFIG_FLAG \
+            $LOG_OPTS
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gitleaks-report/results.sarif
+          category: gitleaks
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gitleaks-results-${{ github.run_id }}
+          path: gitleaks-report/
+          if-no-files-found: warn
+
+      - name: Publish finding count to job summary
+        if: always()
+        run: |
+          {
+            echo "## Gitleaks Secret Scan"
+            echo ""
+            if [ -f gitleaks-report/results.sarif ]; then
+              COUNT=$(python3 -c "import json; d=json.load(open('gitleaks-report/results.sarif')); print(sum(len(r.get('results', [])) for r in d.get('runs', [])))")
+              echo "Findings: **${COUNT}**"
+            else
+              echo "No report produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pip-audit
+        run: python -m pip install --disable-pip-version-check --quiet pip-audit
+
+      - name: Audit each sidecar's requirements file
+        run: |
+          set +e
+          {
+            echo "## pip-audit"
+            echo ""
+            echo "Six requirements files, audited independently (non-blocking)."
+            echo "The audio-analyzer-clap file pulls in torch/torchaudio/torchvision"
+            echo "and can take a while to resolve on a cold pip cache."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          FILES=(
+            services/audio-analyzer/requirements.txt
+            services/audio-analyzer-clap/requirements.txt
+            services/tidal-downloader/requirements.txt
+            services/tidal-downloader/requirements-test.txt
+            services/ytmusic-streamer/requirements.txt
+            services/ytmusic-streamer/requirements-test.txt
+          )
+
+          for f in "${FILES[@]}"; do
+            {
+              echo "### ${f}"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            if ! pip-audit -r "${f}" -f markdown >> "$GITHUB_STEP_SUMMARY" 2>>"$GITHUB_STEP_SUMMARY"; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "_(pip-audit reported findings and/or a resolution error for this file -- see above; non-blocking.)_" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          done
