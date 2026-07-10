@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveLoadAutoplayDecision } from "../../components/player/audioPlaybackOrchestratorPolicy";
+import {
+    ADVANCE_PLAY_INTENT_TTL_MS,
+    isAdvancePlayIntentFresh,
+    resolveLoadAutoplayDecision,
+} from "../../components/player/audioPlaybackOrchestratorPolicy";
 
 test("solo/host loads autoplay from local playing state (existing behavior)", () => {
     assert.equal(
@@ -38,4 +42,44 @@ test("Listen Together follower loads never autoplay from local state", () => {
         }),
         false,
     );
+});
+
+test("a declared queue-advance intent forces autoplay even when playing state reads false", () => {
+    // Under the native engine the element's pause fires before ended, so
+    // both the isPlaying mirror and engine.isPlaying() can be false by the
+    // time the advanced track loads (GH #53).
+    assert.equal(
+        resolveLoadAutoplayDecision({
+            wasPlayingBeforeLoad: false,
+            isListenTogetherFollower: false,
+            hasAdvancePlayIntent: true,
+        }),
+        true,
+    );
+});
+
+test("advance intent never overrides the Listen Together follower rule", () => {
+    assert.equal(
+        resolveLoadAutoplayDecision({
+            wasPlayingBeforeLoad: false,
+            isListenTogetherFollower: true,
+            hasAdvancePlayIntent: true,
+        }),
+        false,
+    );
+});
+
+test("advance play intent freshness is bounded by the TTL", () => {
+    assert.equal(isAdvancePlayIntentFresh(null, 10_000), false);
+    assert.equal(isAdvancePlayIntentFresh(10_000, 10_001), true);
+    assert.equal(
+        isAdvancePlayIntentFresh(10_000, 10_000 + ADVANCE_PLAY_INTENT_TTL_MS - 1),
+        true,
+    );
+    assert.equal(
+        isAdvancePlayIntentFresh(10_000, 10_000 + ADVANCE_PLAY_INTENT_TTL_MS),
+        false,
+    );
+    // A clock that moved backwards must not validate a future stamp.
+    assert.equal(isAdvancePlayIntentFresh(10_000, 9_000), false);
 });

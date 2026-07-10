@@ -80,11 +80,40 @@ export function shouldAttemptSegmentedRecoveryOnUnexpectedPause(
 export function resolveLoadAutoplayDecision(input: {
     wasPlayingBeforeLoad: boolean;
     isListenTogetherFollower: boolean;
+    hasAdvancePlayIntent?: boolean;
 }): boolean {
     if (input.isListenTogetherFollower) {
         return false;
     }
-    return input.wasPlayingBeforeLoad;
+    return input.wasPlayingBeforeLoad || Boolean(input.hasAdvancePlayIntent);
+}
+
+/**
+ * Validity window for a queue-advance play intent. Generous enough to
+ * cover the async advance paths (auto-match-vibe request before next())
+ * yet bounded so a stalled advance can't autoplay an unrelated load
+ * minutes later.
+ */
+export const ADVANCE_PLAY_INTENT_TTL_MS = 30_000;
+
+/**
+ * A track-end auto-advance DECLARES that the next load must play; it is
+ * never inferred from transient UI playing state. Under the native
+ * engine the element's `pause` fires before `ended`, so by load time
+ * both the isPlaying mirror ref and engine.isPlaying() can read false —
+ * the advance would land paused (GH #53). The intent is a timestamp
+ * stamped when the end handler advances the queue and consumed by the
+ * next load.
+ */
+export function isAdvancePlayIntentFresh(
+    intentAtMs: number | null,
+    nowMs: number,
+): boolean {
+    if (intentAtMs === null || !Number.isFinite(intentAtMs)) {
+        return false;
+    }
+    const ageMs = nowMs - intentAtMs;
+    return ageMs >= 0 && ageMs < ADVANCE_PLAY_INTENT_TTL_MS;
 }
 
 export type SegmentedHandoffRecoveryStartupSkipReason =

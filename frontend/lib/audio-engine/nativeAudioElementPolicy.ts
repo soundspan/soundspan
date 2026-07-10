@@ -120,9 +120,11 @@ export type NativeEnginePolicyEvent =
           type: "PLAY_PROMISE_REJECTED";
           errorName: string;
           errorMessage: string;
+          isPageHidden: boolean;
           nowMs: number;
       }
     | { type: "GESTURE_RETRY_FIRED"; nowMs: number }
+    | { type: "VISIBILITY_RETRY_FIRED"; nowMs: number }
     | { type: "RETRY_TIMER_FIRED"; nowMs: number }
     | { type: "RELOAD_REQUESTED"; nowMs: number }
     | {
@@ -146,6 +148,8 @@ export type NativeEnginePolicyEffect =
     | { kind: "cancelRetry" }
     | { kind: "armGestureRetry" }
     | { kind: "disarmGestureRetry" }
+    | { kind: "armVisibilityRetry" }
+    | { kind: "disarmVisibilityRetry" }
     | {
           kind: "reloadFromSource";
           resumeAtSec: number;
@@ -757,6 +761,14 @@ const handlePlayPromiseRejected = (
         if (!state.gestureRetryUsed) {
             effects.push({ kind: "armGestureRetry" });
         }
+        // Autoplay rejected in a hidden tab (e.g. a queue auto-advance
+        // while the user is tabbed away) is not a gesture problem: the
+        // same play() is typically allowed once the page is visible.
+        // Retry once on the hidden→visible transition instead of sitting
+        // silent until the user happens to click (GH #53).
+        if (event.isPageHidden) {
+            effects.push({ kind: "armVisibilityRetry" });
+        }
         return {
             state: {
                 ...state,
@@ -793,6 +805,23 @@ const handleGestureRetryFired = (state: State): Transition => {
     return {
         state,
         effects: [{ kind: "callPlay" }, { kind: "disarmGestureRetry" }],
+    };
+};
+
+const handleVisibilityRetryFired = (state: State): Transition => {
+    // One-shot: whatever happens, the arm is spent. A user pause between
+    // the rejection and the tab return must stay a pause, so only a
+    // still-externally-paused source is retried.
+    if (
+        state.status !== "paused" ||
+        !state.hasSource ||
+        state.pauseClassification === "user"
+    ) {
+        return { state, effects: [{ kind: "disarmVisibilityRetry" }] };
+    }
+    return {
+        state,
+        effects: [{ kind: "callPlay" }, { kind: "disarmVisibilityRetry" }],
     };
 };
 
@@ -894,6 +923,8 @@ export function transitionNativeEngine(
             return handlePlayPromiseRejected(state, event);
         case "GESTURE_RETRY_FIRED":
             return handleGestureRetryFired(state);
+        case "VISIBILITY_RETRY_FIRED":
+            return handleVisibilityRetryFired(state);
         case "RETRY_TIMER_FIRED":
             return handleRetryTimerFired(state);
         case "RELOAD_REQUESTED":

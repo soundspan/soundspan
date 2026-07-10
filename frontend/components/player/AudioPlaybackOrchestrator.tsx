@@ -57,6 +57,7 @@ import {
 import { shouldAutoMatchVibeAtQueueEnd } from "./autoMatchVibePlayback";
 import {
     createEmptySegmentedStartupRecoveryStageAttempts,
+    isAdvancePlayIntentFresh,
     resolveLoadAutoplayDecision,
     resolvePlaybackDuration,
     resolveRemoteStreamFormat,
@@ -647,6 +648,10 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     const lastTrackIdRef = useRef<string | null>(null);
     const hasSeenTrackLoadRef = useRef<boolean>(false);
     const lastPlayingStateRef = useRef<boolean>(isPlaying);
+    // Timestamp of the last track-end auto-advance. Declares that the next
+    // load must autoplay regardless of transient isPlaying commits between
+    // the element's pause/ended pair and the load effect (GH #53).
+    const advancePlayIntentAtMsRef = useRef<number | null>(null);
     const progressSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const lastProgressSaveRef = useRef<number>(0);
     const isUserInitiatedRef = useRef<boolean>(false);
@@ -4329,6 +4334,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 if (podcastAdvance.kind === "stop") {
                     pause();
                 } else {
+                    advancePlayIntentAtMsRef.current = Date.now();
                     next();
                 }
             } else if (playbackType === "audiobook") {
@@ -4387,6 +4393,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                     });
 
                     if (!shouldAutoMatchVibe || !currentTrack?.id) {
+                        advancePlayIntentAtMsRef.current = Date.now();
                         next();
                         return;
                     }
@@ -4396,6 +4403,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         force: true,
                     }).finally(() => {
                         if (currentTrackRef.current?.id !== endedTrackId) return;
+                        advancePlayIntentAtMsRef.current = Date.now();
                         next();
                     });
                 }
@@ -5356,6 +5364,14 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         if (streamUrl) {
             setCurrentTime(Math.max(0, startTime));
             const wasEnginePlayingBeforeLoad = audioEngine.isPlaying();
+            // Consume a declared auto-advance play intent (stamped by the
+            // track-end handler). Captured once so the load-time and the
+            // deferred (handleLoaded) autoplay decisions agree.
+            const hasAdvancePlayIntent = isAdvancePlayIntentFresh(
+                advancePlayIntentAtMsRef.current,
+                Date.now(),
+            );
+            advancePlayIntentAtMsRef.current = null;
 
             const fallbackDuration =
                 currentTrack?.duration ||
@@ -6004,6 +6020,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                 const shouldAutoPlayOnLoad = resolveLoadAutoplayDecision({
                     wasPlayingBeforeLoad:
                         lastPlayingStateRef.current || wasEnginePlayingBeforeLoad,
+                    hasAdvancePlayIntent,
                     // Followers start playback via the LT play-at/delta
                     // resume, never from local state (audible-blip fix).
                     isListenTogetherFollower: Boolean(
@@ -6106,6 +6123,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
                         wasPlayingBeforeLoad:
                             lastPlayingStateRef.current ||
                             wasEnginePlayingBeforeLoad,
+                        hasAdvancePlayIntent,
                         // Same follower rule as the load-time decision: the
                         // deferred (seek-then-play) path must not start
                         // follower playback from local state either.

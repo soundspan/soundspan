@@ -906,3 +906,64 @@ test("destroy releases elements, timers, and global listeners", () => {
     assert.equal(harness.mainElement().src, "");
     assert.equal(harness.engine.isPlaying(), false);
 });
+
+test("NotAllowedError in a hidden tab retries automatically when the page becomes visible", async () => {
+    let hidden = true;
+    const harness = createHarness({ isPageHidden: () => hidden });
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    harness.mainElement().playBehavior = {
+        kind: "reject",
+        name: "NotAllowedError",
+        message: "background tab autoplay blocked",
+    };
+    harness.mainElement().fireLoadedMetadata(200);
+    await flushMicrotasks();
+
+    const visibilityBindings = harness.bindings.filter(
+        (binding) =>
+            binding.target === "document" &&
+            binding.type === "visibilitychange" &&
+            !binding.removed,
+    );
+    assert.equal(visibilityBindings.length, 1, "visibility retry armed");
+
+    // A visibility event while still hidden must not retry.
+    visibilityBindings[0].handler({});
+    await flushMicrotasks();
+    assert.equal(harness.mainElement().playCalls, 1);
+
+    // Tab returns to the foreground: exactly one automatic retry.
+    hidden = false;
+    harness.mainElement().playBehavior = { kind: "resolve" };
+    visibilityBindings[0].handler({});
+    await flushMicrotasks();
+    assert.equal(harness.mainElement().playCalls, 2);
+    assert.ok(
+        harness.bindings
+            .filter((binding) => binding.type === "visibilitychange")
+            .every((binding) => binding.removed),
+        "visibility retry disarmed after firing",
+    );
+});
+
+test("NotAllowedError in a visible tab does not arm a visibility retry", async () => {
+    const harness = createHarness();
+    harness.engine.load("https://stream.example/track.flac", {
+        autoplay: true,
+    });
+    harness.mainElement().playBehavior = {
+        kind: "reject",
+        name: "NotAllowedError",
+        message: "user gesture required",
+    };
+    harness.mainElement().fireLoadedMetadata(200);
+    await flushMicrotasks();
+    assert.equal(
+        harness.bindings.filter(
+            (binding) => binding.type === "visibilitychange",
+        ).length,
+        0,
+    );
+});

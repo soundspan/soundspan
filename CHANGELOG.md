@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Queue auto-advance can no longer land on a silently paused next track (#53). Track-end advancement now *declares* play intent — the end handler stamps a bounded (30s) intent that the next load consumes for its autoplay decision — instead of inferring it from transient UI playing state, which raced the element's `pause`→`ended` event pair under the native engine (the element's pause fires before ended, so both the isPlaying mirror and `engine.isPlaying()` could read false by load time). And when autoplay is rejected with `NotAllowedError` in a hidden tab (auto-advance while tabbed away), the native engine now retries `play()` once on the hidden→visible transition instead of sitting silent until a user gesture; the one-shot gesture retry stays armed as the fallback, and a user pause in between is respected.
+
 ### Changed
 
 - The native `<audio>`-element engine is now the **default** playback engine for everyone (`DEFAULT_STREAMING_ENGINE_MODE = "native"`), after soaking as the 1.7.0 opt-in. Deployments with no `STREAMING_ENGINE_MODE` set switch to the native engine on upgrade; set `STREAMING_ENGINE_MODE=howler` to stay on the legacy engine (it remains fully supported as the gated fallback, and Android WebView deployments are still pinned to it automatically). The container entrypoints and docs now report `native` as the primary default.

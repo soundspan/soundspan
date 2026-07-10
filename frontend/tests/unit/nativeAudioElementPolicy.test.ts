@@ -1037,6 +1037,7 @@ test("NotAllowedError parks paused, surfaces the gesture requirement, and arms o
             type: "PLAY_PROMISE_REJECTED",
             errorName: "NotAllowedError",
             errorMessage: "play() failed because the user didn't interact",
+            isPageHidden: false,
             nowMs: 2_000,
         },
     );
@@ -1053,12 +1054,14 @@ test("a second NotAllowedError does not re-arm the gesture retry (never loop)", 
         type: "PLAY_PROMISE_REJECTED",
         errorName: "NotAllowedError",
         errorMessage: "blocked",
+        isPageHidden: false,
         nowMs: 2_000,
     });
     const second = transitionNativeEngine(first.state, {
         type: "PLAY_PROMISE_REJECTED",
         errorName: "NotAllowedError",
         errorMessage: "blocked",
+        isPageHidden: false,
         nowMs: 2_100,
     });
     assert.equal(kinds(second.effects).includes("armGestureRetry"), false);
@@ -1071,6 +1074,7 @@ test("GESTURE_RETRY_FIRED plays once and disarms", () => {
             type: "PLAY_PROMISE_REJECTED",
             errorName: "NotAllowedError",
             errorMessage: "blocked",
+            isPageHidden: false,
             nowMs: 2_000,
         },
     );
@@ -1087,6 +1091,7 @@ test("AbortError from an interrupted play() is ignored", () => {
         type: "PLAY_PROMISE_REJECTED",
         errorName: "AbortError",
         errorMessage: "interrupted by a new load request",
+        isPageHidden: false,
         nowMs: 2_000,
     });
     assert.deepEqual(effects, []);
@@ -1099,6 +1104,7 @@ test("NotSupportedError from play() surfaces a play error in error state", () =>
             type: "PLAY_PROMISE_REJECTED",
             errorName: "NotSupportedError",
             errorMessage: "no supported source",
+            isPageHidden: false,
             nowMs: 2_000,
         },
     );
@@ -1160,4 +1166,82 @@ test("PAGE_RESTORED with a consistent state is a no-op", () => {
         nowMs: 7_000,
     });
     assert.deepEqual(effects, []);
+});
+
+// ---------------------------------------------------------------------------
+// Visibility retry (GH #53): autoplay rejected while the page is hidden
+// ---------------------------------------------------------------------------
+
+test("NotAllowedError while hidden arms a visibility retry alongside the gesture retry", () => {
+    const { state, effects } = transitionNativeEngine(
+        loadedState({ autoplay: true }),
+        {
+            type: "PLAY_PROMISE_REJECTED",
+            errorName: "NotAllowedError",
+            errorMessage: "blocked in background tab",
+            isPageHidden: true,
+            nowMs: 2_000,
+        },
+    );
+    assert.equal(state.status, "paused");
+    assert.ok(kinds(effects).includes("armVisibilityRetry"));
+    assert.ok(kinds(effects).includes("armGestureRetry"));
+});
+
+test("NotAllowedError while visible does not arm a visibility retry", () => {
+    const { effects } = transitionNativeEngine(loadedState({ autoplay: true }), {
+        type: "PLAY_PROMISE_REJECTED",
+        errorName: "NotAllowedError",
+        errorMessage: "blocked",
+        isPageHidden: false,
+        nowMs: 2_000,
+    });
+    assert.equal(kinds(effects).includes("armVisibilityRetry"), false);
+});
+
+test("VISIBILITY_RETRY_FIRED plays once and disarms", () => {
+    const { state: blocked } = transitionNativeEngine(
+        loadedState({ autoplay: true }),
+        {
+            type: "PLAY_PROMISE_REJECTED",
+            errorName: "NotAllowedError",
+            errorMessage: "blocked in background tab",
+            isPageHidden: true,
+            nowMs: 2_000,
+        },
+    );
+    const { effects } = transitionNativeEngine(blocked, {
+        type: "VISIBILITY_RETRY_FIRED",
+        nowMs: 3_000,
+    });
+    assert.ok(kinds(effects).includes("callPlay"));
+    assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
+});
+
+test("VISIBILITY_RETRY_FIRED after a user pause disarms without playing", () => {
+    const { state: blocked } = transitionNativeEngine(
+        loadedState({ autoplay: true }),
+        {
+            type: "PLAY_PROMISE_REJECTED",
+            errorName: "NotAllowedError",
+            errorMessage: "blocked in background tab",
+            isPageHidden: true,
+            nowMs: 2_000,
+        },
+    );
+    const { effects } = transitionNativeEngine(
+        { ...blocked, pauseClassification: "user" },
+        { type: "VISIBILITY_RETRY_FIRED", nowMs: 3_000 },
+    );
+    assert.equal(kinds(effects).includes("callPlay"), false);
+    assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
+});
+
+test("VISIBILITY_RETRY_FIRED while already playing only disarms", () => {
+    const { effects } = transitionNativeEngine(playingState(), {
+        type: "VISIBILITY_RETRY_FIRED",
+        nowMs: 3_000,
+    });
+    assert.equal(kinds(effects).includes("callPlay"), false);
+    assert.ok(kinds(effects).includes("disarmVisibilityRetry"));
 });

@@ -186,6 +186,7 @@ export class NativeAudioElementEngine implements AudioEngine {
     private retryTimerId: unknown = null;
     private tickerId: unknown = null;
     private gestureCleanups: Array<() => void> = [];
+    private visibilityRetryCleanup: (() => void) | null = null;
     private pageShowCleanup: (() => void) | null = null;
     private elementCleanups: Array<() => void> = [];
     private isDestroyed = false;
@@ -398,6 +399,7 @@ export class NativeAudioElementEngine implements AudioEngine {
         this.cancelRetryTimer();
         this.stopTicker();
         this.disarmGestureRetry();
+        this.disarmVisibilityRetry();
         this.pageShowCleanup?.();
         this.pageShowCleanup = null;
         this.elementCleanups.forEach((cleanup) => cleanup());
@@ -449,6 +451,10 @@ export class NativeAudioElementEngine implements AudioEngine {
                 return this.armGestureRetry();
             case "disarmGestureRetry":
                 return this.disarmGestureRetry();
+            case "armVisibilityRetry":
+                return this.armVisibilityRetry();
+            case "disarmVisibilityRetry":
+                return this.disarmVisibilityRetry();
             case "reloadFromSource":
                 return this.reloadFromSource(
                     effect.resumeAtSec,
@@ -587,6 +593,7 @@ export class NativeAudioElementEngine implements AudioEngine {
                     type: "PLAY_PROMISE_REJECTED",
                     errorName,
                     errorMessage,
+                    isPageHidden: this.isPageHidden(),
                     nowMs: this.now(),
                 });
             });
@@ -680,6 +687,30 @@ export class NativeAudioElementEngine implements AudioEngine {
     private disarmGestureRetry(): void {
         this.gestureCleanups.forEach((cleanup) => cleanup());
         this.gestureCleanups = [];
+    }
+
+    private armVisibilityRetry(): void {
+        this.disarmVisibilityRetry();
+        this.visibilityRetryCleanup = this.bindGlobalListener(
+            "document",
+            "visibilitychange",
+            () => {
+                if (this.isPageHidden()) {
+                    return;
+                }
+                this.dispatch({
+                    type: "VISIBILITY_RETRY_FIRED",
+                    nowMs: this.now(),
+                });
+            },
+        );
+    }
+
+    private disarmVisibilityRetry(): void {
+        if (this.visibilityRetryCleanup) {
+            this.visibilityRetryCleanup();
+            this.visibilityRetryCleanup = null;
+        }
     }
 
     // ------------------------------------------------------------------
