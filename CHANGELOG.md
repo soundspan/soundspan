@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Queue ("Now Playing") drag-and-drop reordering: the grip handle on each upcoming queue row — previously decorative — now actually drags, with the same hover-reveal handle, drop-indicator line, and pure drop math as playlist reordering. Podcast episode rows in the queue gained the same handle. Reorders route through a new `moveQueueItem` primitive shared with the Move up/down actions, which also fixes a latent bug: the old move handlers didn't remap the shuffle order, so moving tracks while shuffle was on silently corrupted which tracks would play next. Upcoming items only (the playing row and history stay fixed) and disabled in Listen Together sessions, matching the existing move semantics.
+
 ### Changed
 
 - The native `<audio>`-element engine is now the **default** playback engine for everyone (`DEFAULT_STREAMING_ENGINE_MODE = "native"`), after soaking as the 1.7.0 opt-in. Deployments with no `STREAMING_ENGINE_MODE` set switch to the native engine on upgrade; set `STREAMING_ENGINE_MODE=howler` to stay on the legacy engine (it remains fully supported as the gated fallback, and Android WebView deployments are still pinned to it automatically). The container entrypoints and docs now report `native` as the primary default.

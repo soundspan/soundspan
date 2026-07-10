@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Virtuoso } from "react-virtuoso";
@@ -8,6 +8,11 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useAudioState, useAudioControls } from "@/lib/audio-context";
+import {
+    resolveDropPosition,
+    resolveDropTargetIndex,
+    type DropPosition,
+} from "@/components/track/reorderDnd";
 import type { Track } from "@/lib/audio-state-context";
 import {
     isEpisodeQueueItem,
@@ -45,8 +50,8 @@ import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 export default function QueuePage() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
-    const { queue, currentTrack, currentIndex, setQueue } = useAudioState();
-    const { playQueueIndex, removeFromQueue, clearQueue } = useAudioControls();
+    const { queue, currentTrack, currentIndex } = useAudioState();
+    const { playQueueIndex, removeFromQueue, clearQueue, moveQueueItem } = useAudioControls();
     const { toast } = useToast();
     const listenTogether = useListenTogether();
     const { isInGroup, isHost, syncSetTrack } = listenTogether;
@@ -103,31 +108,96 @@ export default function QueuePage() {
         toast.success("Playing from queue");
     };
 
+    // Both the arrow actions and drag-and-drop route through the shared
+    // moveQueueItem primitive (LT/current/bounds guards + shuffle-index
+    // remapping live there).
     const handleMoveUp = (index: number) => {
-        if (isInGroup) return;
-        if (index <= currentIndex + 1) return;
-        setQueue((prev) => {
-            const newQueue = [...prev];
-            [newQueue[index], newQueue[index - 1]] = [
-                newQueue[index - 1],
-                newQueue[index],
-            ];
-            return newQueue;
-        });
+        moveQueueItem(index, index - 1);
     };
 
     const handleMoveDown = (index: number) => {
-        if (isInGroup) return;
-        if (index >= queue.length - 1 || index <= currentIndex) return;
-        setQueue((prev) => {
-            const newQueue = [...prev];
-            [newQueue[index], newQueue[index + 1]] = [
-                newQueue[index + 1],
-                newQueue[index],
-            ];
-            return newQueue;
-        });
+        moveQueueItem(index, index + 1);
     };
+
+    // Drag-and-drop reorder for the Next Up list (same mechanic and pure
+    // drop math as playlist reordering). Indexes here are positions
+    // WITHIN nextTracks; moveQueueItem receives absolute queue indexes.
+    const dragFromIdxRef = useRef<number | null>(null);
+    const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
+    const [dragOver, setDragOver] = useState<{
+        idx: number;
+        position: DropPosition;
+    } | null>(null);
+
+    const clearQueueDragState = () => {
+        dragFromIdxRef.current = null;
+        setDragFromIdx(null);
+        setDragOver(null);
+    };
+
+    const buildDragHandleProps = (idx: number) =>
+        isInGroup
+            ? undefined
+            : {
+                  draggable: true,
+                  onClick: (e: React.MouseEvent) => e.stopPropagation(),
+                  onDragStart: (e: React.DragEvent) => {
+                      dragFromIdxRef.current = idx;
+                      setDragFromIdx(idx);
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", String(idx));
+                      const row = (e.currentTarget as HTMLElement).closest(
+                          "[data-queue-dnd-row]"
+                      );
+                      if (row instanceof HTMLElement) {
+                          e.dataTransfer.setDragImage(
+                              row,
+                              16,
+                              row.clientHeight / 2
+                          );
+                      }
+                  },
+                  onDragEnd: clearQueueDragState,
+              };
+
+    const buildRowDropProps = (idx: number) => ({
+        "data-queue-dnd-row": true,
+        onDragOver: (e: React.DragEvent) => {
+            if (dragFromIdxRef.current === null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            const rect = e.currentTarget.getBoundingClientRect();
+            setDragOver({
+                idx,
+                position: resolveDropPosition(
+                    e.clientY - rect.top,
+                    rect.height
+                ),
+            });
+        },
+        onDragLeave: (e: React.DragEvent) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+            setDragOver((current) => (current?.idx === idx ? null : current));
+        },
+        onDrop: (e: React.DragEvent) => {
+            const fromIdx = dragFromIdxRef.current;
+            if (fromIdx === null) return;
+            e.preventDefault();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const toIdx = resolveDropTargetIndex(
+                fromIdx,
+                idx,
+                resolveDropPosition(e.clientY - rect.top, rect.height)
+            );
+            clearQueueDragState();
+            if (toIdx !== fromIdx) {
+                moveQueueItem(
+                    currentIndex + 1 + fromIdx,
+                    currentIndex + 1 + toIdx
+                );
+            }
+        },
+    });
 
     const [showSaveDialog, setShowSaveDialog] = useState(false);
     const [playlistName, setPlaylistName] = useState("");
@@ -354,24 +424,22 @@ export default function QueuePage() {
                                 itemContent={(idx) => {
                                     const item = nextTracks[idx];
                                     const queueIndex = currentIndex + 1 + idx;
-                                    if (isEpisodeQueueItem(item)) {
-                                        return (
-                                            <EpisodeQueueRow
-                                                episode={item}
-                                                onPlay={
-                                                    isInGroup
-                                                        ? undefined
-                                                        : () => handlePlayFromQueue(queueIndex)
-                                                }
-                                                onRemove={
-                                                    isInGroup
-                                                        ? undefined
-                                                        : () => handleRemoveTrack(queueIndex)
-                                                }
-                                            />
-                                        );
-                                    }
-                                    return (
+                                    const row = isEpisodeQueueItem(item) ? (
+                                        <EpisodeQueueRow
+                                            episode={item}
+                                            onPlay={
+                                                isInGroup
+                                                    ? undefined
+                                                    : () => handlePlayFromQueue(queueIndex)
+                                            }
+                                            onRemove={
+                                                isInGroup
+                                                    ? undefined
+                                                    : () => handleRemoveTrack(queueIndex)
+                                            }
+                                            dragHandleProps={buildDragHandleProps(idx)}
+                                        />
+                                    ) : (
                                         <NextTrackRow
                                             track={item}
                                             queueIndex={queueIndex}
@@ -384,7 +452,30 @@ export default function QueuePage() {
                                             onPlay={handlePlayFromQueue}
                                             onRemove={handleRemoveTrack}
                                             trackAvailability={trackAvailability}
+                                            dragHandleProps={buildDragHandleProps(idx)}
                                         />
+                                    );
+                                    return (
+                                        <div
+                                            className={
+                                                dragFromIdx === idx
+                                                    ? "relative opacity-50"
+                                                    : "relative"
+                                            }
+                                            {...buildRowDropProps(idx)}
+                                        >
+                                            {dragOver?.idx === idx &&
+                                                dragFromIdx !== idx && (
+                                                    <div
+                                                        className={`pointer-events-none absolute left-0 right-0 h-0.5 rounded bg-blue-400 z-10 ${
+                                                            dragOver.position === "before"
+                                                                ? "top-0"
+                                                                : "bottom-0"
+                                                        }`}
+                                                    />
+                                                )}
+                                            {row}
+                                        </div>
                                     );
                                 }}
                             />
@@ -482,16 +573,29 @@ function EpisodeQueueRow({
     played = false,
     onPlay,
     onRemove,
+    dragHandleProps,
 }: {
     episode: EpisodeQueueItem;
     played?: boolean;
     onPlay?: () => void;
     onRemove?: () => void;
+    dragHandleProps?: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+        draggable?: boolean;
+    };
 }) {
     return (
         <div
             className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group border-b border-[#1c1c1c] ${played ? "opacity-50" : ""}`}
         >
+            {dragHandleProps && (
+                <button
+                    {...dragHandleProps}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
+                    title="Drag to reorder"
+                >
+                    <GripVertical className="w-5 h-5" />
+                </button>
+            )}
             <div className="relative flex-shrink-0 w-12 h-12">
                 {episode.coverUrl ? (
                     <Image
@@ -559,6 +663,7 @@ function NextTrackRow({
     onPlay,
     onRemove,
     trackAvailability,
+    dragHandleProps,
 }: {
     track: Track;
     queueIndex: number;
@@ -571,6 +676,9 @@ function NextTrackRow({
     onPlay: (index: number) => void;
     onRemove: (index: number) => void;
     trackAvailability: Map<number, AvailabilityItem>;
+    dragHandleProps?: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+        draggable?: boolean;
+    };
 }) {
     const availability = isInGroup ? trackAvailability.get(queueIndex) : undefined;
     const isUnavailable = availability?.available === false;
@@ -580,8 +688,9 @@ function NextTrackRow({
         <div
             className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group border-b border-[#1c1c1c] ${isUnavailable ? "opacity-50" : ""}`}
         >
-            {!isInGroup && (
+            {!isInGroup && dragHandleProps && (
                 <button
+                    {...dragHandleProps}
                     className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
                     title="Drag to reorder"
                 >
