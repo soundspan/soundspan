@@ -3,6 +3,7 @@ name: Dependency Review
 # Flags newly-introduced vulnerable / license-incompatible dependencies on
 # PRs (docs/modernization-roadmap.md F45, epic #10, #59 WS2.4). Free for
 # public repos (no GHAS license needed).
+# Prerequisite: the repo's Dependency graph must be enabled (Settings -> Security; admin-only) or this fails with "Dependency review is not supported on this repository".
 on:
   pull_request:
     branches: [main]
