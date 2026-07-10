@@ -7,6 +7,8 @@ name: CodeQL
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main] # immediate post-merge analysis, aligned with security-scanning.yml
   schedule:
     - cron: "30 6 * * 1" # Monday 06:30 UTC, offset from security-scanning.yml
   workflow_dispatch:
