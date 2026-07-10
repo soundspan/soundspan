@@ -167,19 +167,21 @@ jobs:
         permissions:
             contents: read
             packages: write
-        env:
-            # Several self-hosted runners share one physical box (and one
-            # Docker daemon). A per-job docker config isolates buildx
-            # builder state so no docker/buildx command in this job can
-            # see — let alone remove — a concurrent job's builder.
-            # (Without this, one job's cleanup stopped a neighbor's
-            # in-flight buildkitd: "graceful_stop" build failures.)
-            DOCKER_CONFIG: ${{ runner.temp }}/docker-config
         steps:
             - id: lower-repo
-              name: Repository to lowercase
+              name: Job env setup (repo name + isolated docker config)
               run: |
-                  mkdir -p "$DOCKER_CONFIG"
+                  # Several self-hosted runners share one physical box (and
+                  # one Docker daemon). A per-job docker config isolates
+                  # buildx builder state so no docker/buildx command in this
+                  # job can see — let alone remove — a concurrent job's
+                  # builder. (Without this, one job's cleanup stopped a
+                  # neighbor's in-flight buildkitd: "graceful_stop" build
+                  # failures.) Note: the `runner` context is unavailable in
+                  # job-level env, so this exports via GITHUB_ENV for all
+                  # subsequent steps.
+                  mkdir -p "${RUNNER_TEMP}/docker-config"
+                  echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
                   echo "GHCR_REPO=ghcr.io/${GITHUB_REPOSITORY@L}" >> "$GITHUB_ENV"
 
             - name: Checkout code
