@@ -179,6 +179,20 @@ mock.module("@/lib/listen-together-context", {
     },
 });
 
+mock.module("@/lib/features-context", {
+    namedExports: {
+        useFeatures: () => ({
+            musicCNN: false,
+            vibeEmbeddings: false,
+            audioAnalysis: true,
+            discovery: true,
+            autoPlaylists: true,
+            showVersion: false,
+            loading: false,
+        }),
+    },
+});
+
 mock.module("@/hooks/useImageColor", {
     namedExports: {
         useImageColor: () => ({
