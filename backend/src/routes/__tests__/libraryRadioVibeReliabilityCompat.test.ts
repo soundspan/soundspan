@@ -63,6 +63,10 @@ jest.mock("../../config", () => ({
             transcodeCachePath: "/tmp/soundspan-cache",
             transcodeCacheMaxGb: 1,
         },
+        generationDiversity: {
+            weightAlpha: 0.5,
+            shareCeiling: 0.3,
+        },
     },
 }));
 
@@ -591,6 +595,7 @@ describe("library vibe radio reliability compatibility", () => {
     it("uses shuffled non-vibe radio ordering and tolerates tracks without artist ids", async () => {
         mockTrackFindMany
             .mockResolvedValueOnce([{ id: "all-track-1" }, { id: "all-track-2" }])
+            .mockResolvedValueOnce([]) // GH #46 diversify: pool artist lookup
             .mockResolvedValueOnce([
                 {
                     id: "all-track-1",
@@ -655,7 +660,8 @@ describe("library vibe radio reliability compatibility", () => {
                 }),
             ],
         });
-        expect(mockTrackFindMany).toHaveBeenCalledTimes(2);
+        // Pool query + diversify artist lookup (GH #46) + full track fetch.
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(3);
     });
 
     it("returns 500 when radio processing throws", async () => {

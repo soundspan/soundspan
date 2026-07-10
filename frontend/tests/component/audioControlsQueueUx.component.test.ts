@@ -464,3 +464,61 @@ test("rapid next() skips advance past an episode while its progress lookup is pe
     assert.equal((state.currentPodcast as { id: string }).id, ep2.id);
     assert.equal(playback.isPlaying, true);
 });
+
+test("moveQueueItem moves an upcoming item and remaps shuffle indices in lockstep", async () => {
+    const tracks = ["t1", "t2", "t3", "t4", "t5"].map((id) => ({
+        id,
+        title: id,
+        artist: { name: "a" },
+        album: { title: "al" },
+        duration: 100,
+    }));
+    const state = createDeferredAudioState({
+        queue: tracks,
+        currentIndex: 0,
+        isShuffle: true,
+        // Shuffle order references queue POSITIONS.
+        shuffleIndices: [0, 4, 2, 1, 3],
+    });
+    const playback = createPlaybackStub({ currentTime: 0, duration: 100 });
+    const controls = await renderControls({ state, playback });
+
+    // Move position 1 (t2) to position 3.
+    controls.moveQueueItem(1, 3);
+    state.commit();
+
+    assert.deepEqual(
+        (state.queue as Array<{ id: string }>).map((t) => t.id),
+        ["t1", "t3", "t4", "t2", "t5"],
+    );
+    // Every shuffle entry still points at the same TRACK it did before:
+    // old positions map 0->0, 1->3, 2->1, 3->2, 4->4.
+    assert.deepEqual(state.shuffleIndices, [0, 4, 1, 3, 2]);
+});
+
+test("moveQueueItem refuses to move the current row or cross into history", async () => {
+    const tracks = ["t1", "t2", "t3"].map((id) => ({
+        id,
+        title: id,
+        artist: { name: "a" },
+        album: { title: "al" },
+        duration: 100,
+    }));
+    const state = createDeferredAudioState({
+        queue: tracks,
+        currentIndex: 1,
+    });
+    const playback = createPlaybackStub({ currentTime: 0, duration: 100 });
+    const controls = await renderControls({ state, playback });
+
+    controls.moveQueueItem(1, 2); // current row itself
+    controls.moveQueueItem(2, 1); // upcoming into the current slot
+    controls.moveQueueItem(2, 0); // upcoming into history
+    state.commit();
+
+    assert.deepEqual(
+        (state.queue as Array<{ id: string }>).map((t) => t.id),
+        ["t1", "t2", "t3"],
+    );
+    assert.equal(state.currentIndex, 1);
+});

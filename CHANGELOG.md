@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Queue ("Now Playing") drag-and-drop reordering: the grip handle on each upcoming queue row — previously decorative — now actually drags, with the same hover-reveal handle, drop-indicator line, and pure drop math as playlist reordering. Podcast episode rows in the queue gained the same handle. Reorders route through a new `moveQueueItem` primitive shared with the Move up/down actions, which also fixes a latent bug: the old move handlers didn't remap the shuffle order, so moving tracks while shuffle was on silently corrupted which tracks would play next. Upcoming items only (the playing row and history stay fixed) and disabled in Listen Together sessions, matching the existing move semantics.
+
 ### Fixed
 
 - Clearing the queue actually sticks now (#52). `DELETE /api/playback-state` removed only the caller's device row, while `GET /api/playback-state` still fell back to the shared pre-device `legacy` row and opportunistically re-migrated it onto the device — so the next playback-state poll resurrected the entire cleared queue within a minute. An explicit clear now deletes the legacy row along with the device row; the GET fallback's legacy migration for genuinely new devices is unchanged.
+- Repaired the five backend radio test failures that shipped silently with 1.7.0's generation-diversity work (#46): the library route tests' config mock lacked the new `generationDiversity` block, their mock chains didn't account for the diversify stage's artist lookup query, and the vibe random-filler matcher still required the `take` parameter that #46 replaced with uniform sampling. The backend "Tests + Coverage" job is a non-blocking visibility job, so the failures never turned a run red — worth revisiting alongside the CI gating gap tracked in #54.
 
 ### Changed
 
