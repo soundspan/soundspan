@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - All Node-based Docker images and CI jobs now run Node 24 (`node:24-bookworm-slim` for backend/frontend/root-AIO images), replacing the previous 20/24 split. `@types/node` is bumped to `^24` in backend and frontend to match, and the backend `tsconfig` `lib` is raised `ES2020` → `ES2022` alongside, keeping `tsc` clean under `@types/node` 24 (which dropped the legacy compat declarations for post-ES2020 built-ins like `.at()` that the v20 types carried) — the declared lib now matches what the Node ≥ 20 runtime actually implements; type declarations only, emitted code and `target` unchanged.
+- Similar-tracks and vibe search now surface genuinely related neighbours instead of near-random ones: every pgvector ANN query now applies a configurable `ivfflat.probes` on the same pooled connection (a transaction-scoped `set_config`), fixing recall that was silently stuck at Postgres' default of scanning 1 of the index's 224 lists. New `IVFFLAT_PROBES` env var, default `32` — benchmark-chosen on the local 15,230-track corpus, where it lifts recall@10 from ≈0.26 (probes=1) to ≈0.96 at ~6 ms p95.
 
 ### Fixed
 
