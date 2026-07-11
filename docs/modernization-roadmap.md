@@ -35,7 +35,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
-| #16 | Frontend consolidation, decomposition & render performance | 0 / 0 / 5 |
+| #16 | Frontend consolidation, decomposition & render performance | 0 / 1 / 5 |
 | #17 | Database & streaming performance | 1 / 3 / 5 |
 | #18 | Provider abstractions: acquisition, streaming & engine seams | 0 / 0 / 4 |
 | #19 | Framework & production-image modernization | 0 / 0 / 6 |
@@ -69,7 +69,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F9](#f9) | ⬜ | readability | medium | M | low |  | #16 | Two parallel frontend systems each duplicated: dual toast renderers (sonner + custom) a… |
 | [F10](#f10) | ⬜ | readability | medium | M | low |  | #16 | Per-page god-components and duplicated cover-art widgets: VibePage (1247 LOC, 16 useSta… |
 | [F11](#f11) | ⬜ | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permane… |
-| [F12](#f12) | ⬜ | performance | high | M | medium |  | #16 | Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency cur… |
+| [F12](#f12) | 🟡 | performance | high | M | medium |  | #16 | Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency cur… |
 | [F13](#f13) | 🟡 | performance | high | L | medium |  | #17 | Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot… |
 | [F14](#f14) | ✅ | performance | high | M | medium |  | #17 | pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query sc… |
 | [F15](#f15) | 🟡 | performance | medium | M | medium |  | #17 | ORDER BY RANDOM() full-table scans on Track / track_embeddings for radio, random tracks… |
@@ -289,7 +289,27 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F12 — Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency currentTime context into the heaviest player trees
 
-**⬜ open** · dimension: performance · severity: high · effort: M · risk: medium · epic: #16
+**🟡 partial (PR #TBD-CYCLE3-C)** · dimension: performance · severity: high · effort: M · risk: medium · epic: #16
+
+> **Fix shipped (partial).** Tightened-plan items (A) + (B) landed, frontend-only.
+> (A) `UniversalPlayer` — the animated render root that mounts
+> OverlayPlayer/MiniPlayer/FullPlayer inside AnimatePresence/LayoutGroup — moved
+> off `useAudio()` onto the granular `useAudioState()`, so it no longer re-renders
+> that whole subtree on every clock tick. (B) `setCurrentTimeFromEngine` now
+> publishes to React state only at display-second (`Math.floor`) boundaries (or on
+> a forced discontinuity), a decision extracted to the pure, unit-tested
+> `lib/audio-clock-policy.ts`; an authoritative full-precision `currentTimeRef` is
+> written on every accepted tick and by every discontinuity setter, and the former
+> state→ref sync effect was removed — so server-progress persistence
+> (`savePlaybackProgressToServer`) now reads engine-fresh precision rather than a
+> quantized copy. howler-engine's 250ms tick is unchanged. **Render evidence**
+> (real provider stack under happy-dom, 8 ticks / 2 simulated seconds): the
+> `UniversalPlayer` subtree re-renders **8 → 0**, and playback-state publishes
+> **8 → 2** (quantized to the 1.0s/2.0s boundaries). Tests:
+> `audioClockPolicy.test.ts` (unit), `universalPlayerSubscription.component.test.ts`
+> and `universalPlayerRenderCount.component.test.ts` (component). **Still open:**
+> leaf extraction in OverlayPlayer/MiniPlayer/TVLayout (item C) and any F5
+> orchestrator work.
 
 **Files:** `frontend/lib/audio-hooks.tsx:16`, `frontend/lib/audio-playback-context.tsx:303`, `frontend/lib/howler-engine.ts:736`, `frontend/lib/howler-engine.ts:739`, `frontend/components/player/OverlayPlayer.tsx:157`, `frontend/components/player/MiniPlayer.tsx:43`, `frontend/components/player/UniversalPlayer.tsx`, `frontend/components/layout/TVLayout.tsx`
 

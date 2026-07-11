@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The animated player UI (the mini/overlay/full-player shell) no longer
+  re-renders 4×/second during playback — smoother UI with less battery drain and
+  jank on mobile. The player render root now subscribes to the granular playback
+  *state* context instead of the merged clock hook, and the engine clock is
+  published to React state at display-second granularity while a full-precision
+  clock is preserved for seek-lock and resume/progress persistence (roadmap F12
+  items A+B).
 - Documentation and agent-context truth pass from the 2026-07-10 drift audit (#58).
   The modernization roadmap header no longer claims long-merged PRs are awaiting
   merge (the nine Wave-1 continuation PRs merged 2026-07-08; F53 flipped to 🟡
