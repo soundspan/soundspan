@@ -319,7 +319,8 @@ jobs:
                       org.opencontainers.image.revision=${{ github.sha }}
                       org.opencontainers.image.version=${{ steps.tag-config.outputs.version_label }}
                   cache-from: type=gha,scope=${{ matrix.cache_scope }}
-                  cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+                  # ignore-error: a cache-write failure must not fail a leg whose image already pushed (#66).
+                  cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }},ignore-error=true
                   # ARM64 disabled due to QEMU emulation issues with npm packages
                   platforms: linux/amd64
 
@@ -338,7 +339,8 @@ jobs:
                       org.opencontainers.image.revision=${{ github.sha }}
                       org.opencontainers.image.version=${{ steps.tag-config.outputs.version_label }}
                   cache-from: type=gha,scope=${{ matrix.cache_scope }}
-                  cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+                  # ignore-error: a cache-write failure must not fail a leg whose image already pushed (#66).
+                  cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }},ignore-error=true
                   # ARM64 disabled due to QEMU emulation issues with npm packages
                   platforms: linux/amd64
 
