@@ -1,6 +1,6 @@
 # Audio Analyzer Service - Essentia with TensorFlow (MusiCNN)
 # Using Ubuntu 20.04 with Python 3.8 for essentia-tensorflow compatibility
-FROM ubuntu:20.04
+FROM ubuntu:26.04
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
