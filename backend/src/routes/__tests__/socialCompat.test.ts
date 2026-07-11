@@ -57,6 +57,11 @@ function asAsyncIterable<T>(items: T[]): AsyncIterable<T> {
     };
 }
 
+// node-redis v5+ scanIterator yields one array of keys per SCAN page.
+function asScanIterable(keys: string[]): AsyncIterable<string[]> {
+    return asAsyncIterable(keys.length > 0 ? [keys] : []);
+}
+
 function getGetHandler(path: string) {
     const layer = (router as any).stack.find(
         (entry: any) => entry.route?.path === path && entry.route?.methods?.get
@@ -102,7 +107,7 @@ describe("social presence compatibility", () => {
     it("returns online roster with privacy filtering and listen-together indicator", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable([
+            asScanIterable([
                 "social:presence:user:user-1",
                 "social:presence:user:user-2",
                 "social:presence:user:user-3",
@@ -229,7 +234,7 @@ describe("social presence compatibility", () => {
     });
 
     it("returns an empty roster when nobody is online", async () => {
-        mockScanIterator.mockReturnValue(asAsyncIterable([]));
+        mockScanIterator.mockReturnValue(asScanIterable([]));
 
         const req = {
             user: { id: "viewer-1", role: "user" },
@@ -247,7 +252,7 @@ describe("social presence compatibility", () => {
     it("returns null listening track when playback queue payload is invalid", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -315,7 +320,7 @@ describe("social presence compatibility", () => {
 
     it("ignores malformed presence timestamps", async () => {
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue(["not-a-number"]);
 
@@ -332,7 +337,7 @@ describe("social presence compatibility", () => {
 
     it("ignores non-string presence keys during scan iteration", async () => {
         mockScanIterator.mockReturnValue(
-            asAsyncIterable([123 as unknown as string])
+            asScanIterable([123 as unknown as string])
         );
 
         const req = {
@@ -349,7 +354,7 @@ describe("social presence compatibility", () => {
     it("returns null listening track when queue is not an array", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -387,7 +392,7 @@ describe("social presence compatibility", () => {
     it("returns null listening track when queue entry is not an object", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -425,7 +430,7 @@ describe("social presence compatibility", () => {
     it("returns null listening track when artist payload is not an object", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -471,7 +476,7 @@ describe("social presence compatibility", () => {
     it("returns null listening track when album payload is not an object", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -517,7 +522,7 @@ describe("social presence compatibility", () => {
     it("projects valid tracks with paused status and missing heartbeat fallback", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -593,7 +598,7 @@ describe("social presence compatibility", () => {
     it("reports idle status when pause age exceeds five minutes", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -649,7 +654,7 @@ describe("social presence compatibility", () => {
     it("reports idle status when the playback queue is empty", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -689,7 +694,7 @@ describe("social presence compatibility", () => {
     it("returns all connected users for admins regardless of sharing settings", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable([
+            asScanIterable([
                 "social:presence:user:user-1",
                 "social:presence:user:user-2",
             ])
@@ -753,7 +758,7 @@ describe("social presence compatibility", () => {
     });
 
     it("returns an empty connected list for admins when no users are online", async () => {
-        mockScanIterator.mockReturnValue(asAsyncIterable([]));
+        mockScanIterator.mockReturnValue(asScanIterable([]));
 
         const req = {
             user: { id: "admin-1", role: "admin" },
@@ -770,7 +775,7 @@ describe("social presence compatibility", () => {
     it("defaults connected sharing flags to false when settings are missing", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -810,7 +815,7 @@ describe("social presence compatibility", () => {
     it("uses connected heartbeat timestamp fallback when map entry is missing", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockResolvedValue([
@@ -875,7 +880,7 @@ describe("social presence compatibility", () => {
         expect(mockSet).toHaveBeenCalledWith(
             "social:presence:user:user-1",
             expect.any(String),
-            { EX: 75 }
+            { expiration: { type: "EX", value: 75 } }
         );
         expect(res.statusCode).toBe(200);
         expect(res.body).toEqual({
@@ -901,7 +906,7 @@ describe("social presence compatibility", () => {
     it("returns 500 when online roster query fails", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockRejectedValue(new Error("db down"));
@@ -920,7 +925,7 @@ describe("social presence compatibility", () => {
     it("returns 500 when connected users query fails", async () => {
         const now = Date.now();
         mockScanIterator.mockReturnValue(
-            asAsyncIterable(["social:presence:user:user-1"])
+            asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
         mockUserFindMany.mockRejectedValue(new Error("db down"));

@@ -212,7 +212,7 @@ describe("artists preview (YT Music) routes", () => {
             expect(mockRedisSet).toHaveBeenCalledWith(
                 "yt-preview:artist:track",
                 "abc123",
-                { EX: 24 * 60 * 60 }
+                { expiration: { type: "EX", value: 24 * 60 * 60 } }
             );
         });
 
@@ -225,7 +225,7 @@ describe("artists preview (YT Music) routes", () => {
             expect(mockRedisSet).toHaveBeenCalledWith(
                 "yt-preview:nobody:nothing",
                 "null",
-                { EX: 24 * 60 * 60 }
+                { expiration: { type: "EX", value: 24 * 60 * 60 } }
             );
             expect(res.statusCode).toBe(404);
             expect(res.body).toEqual({ error: "Preview not found" });
