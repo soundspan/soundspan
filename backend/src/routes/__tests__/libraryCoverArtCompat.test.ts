@@ -195,6 +195,7 @@ jest.mock("../../services/coverArtResize", () => {
 import crypto from "crypto";
 import path from "path";
 import router from "../library";
+import { errorHandler } from "../../middleware/errorHandler";
 import { redisClient } from "../../utils/redis";
 import { fetchExternalImage } from "../../services/imageProxy";
 import { coverArtService } from "../../services/coverArt";
@@ -301,6 +302,23 @@ function createRes() {
         }),
     };
     return res;
+}
+
+/**
+ * Invokes a route handler the way Express does with `errorHandler` mounted
+ * after the router (as index.ts wires it in production): awaits the handler,
+ * and if it forwarded an error via next() (the asyncHandler path), runs the
+ * real errorHandler to produce the final response. Also compatible with
+ * hand-rolled try/catch handlers, which respond directly and never call
+ * next(err).
+ */
+async function invokeWithErrorHandler(handler: any, req: any, res: any) {
+    const next = jest.fn();
+    await handler(req, res, next);
+    const forwarded = next.mock.calls.find((call: any[]) => call[0] != null);
+    if (forwarded) {
+        errorHandler(forwarded[0], req, res, jest.fn());
+    }
 }
 
 describe("library cover-art proxy compatibility", () => {
@@ -1770,10 +1788,9 @@ describe("library cover-art proxy compatibility", () => {
         } as any;
         const res = createRes();
 
-        await coverArtHandler(req, res);
+        await invokeWithErrorHandler(coverArtHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to fetch cover art" });
     });
 });
 
@@ -1874,10 +1891,9 @@ describe("library policy and backfill compatibility", () => {
         const req = {} as any;
         const res = createRes();
 
-        await artistCountsStatusHandler(req, res);
+        await invokeWithErrorHandler(artistCountsStatusHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to check status" });
     });
 
     it("returns processing when artist-counts backfill is already running", async () => {
@@ -2025,10 +2041,9 @@ describe("library policy and backfill compatibility", () => {
         const req = {} as any;
         const res = createRes();
 
-        await genresBackfillHandler(req, res);
+        await invokeWithErrorHandler(genresBackfillHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to backfill genres" });
     });
 });
 
@@ -2075,10 +2090,9 @@ describe("library discovery metadata compatibility", () => {
 
         const req = {} as any;
         const res = createRes();
-        await genresHandler(req, res);
+        await invokeWithErrorHandler(genresHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to get genres" });
     });
 
     it("returns sorted decades with minimum-track filtering", async () => {

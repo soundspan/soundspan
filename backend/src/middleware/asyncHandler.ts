@@ -29,6 +29,8 @@ export function asyncHandler<
     ) => Promise<unknown>
 ): RequestHandler<P, ResBody, ReqBody, ReqQuery, Locals> {
     return (req, res, next) => {
-        Promise.resolve(fn(req, res, next)).catch(next);
+        // The chain is returned (Express 4 ignores handler return values) so
+        // direct-invocation test harnesses can `await` handler completion.
+        return Promise.resolve(fn(req, res, next)).catch(next);
     };
 }
