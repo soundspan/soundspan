@@ -111,6 +111,12 @@ mock.module("@/components/activity/SocialTab", {
     },
 });
 
+mock.module("@/components/activity/ImportsTab", {
+    namedExports: {
+        ImportsTab: tab("imports-tab"),
+    },
+});
+
 mock.module("@/utils/cn", {
     namedExports: {
         cn: (...values: Array<string | false | null | undefined>) =>
@@ -122,6 +128,7 @@ mock.module("lucide-react", {
     namedExports: {
         Bell: Icon,
         Download: Icon,
+        FileInput: Icon,
         History: Icon,
         Users: Icon,
         ChevronLeft: Icon,

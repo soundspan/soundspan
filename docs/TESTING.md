@@ -15,7 +15,7 @@ It defines:
 | --- | --- | --- | --- |
 | Backend (`backend/`) | Jest + ts-jest | `npm --prefix backend test`, `npm --prefix backend run test:coverage` | Unit/integration/contract/runtime tests under `backend/src/**/__tests__` |
 | Frontend (`frontend/`) | Node test runner (unit + component + coverage), Playwright (E2E), ESLint | `npm --prefix frontend run test:unit`, `npm --prefix frontend run test:coverage`, `npm --prefix frontend run test:component`, `npm --prefix frontend run test:component:coverage`, `npm --prefix frontend run test:component:coverage:changed`, `npm --prefix frontend run test:coverage:social`, `npm --prefix frontend run test:e2e`, `npm --prefix frontend run test:predeploy`, `npm --prefix frontend run lint` | Unit specs under `frontend/tests/unit`; component specs under `frontend/tests/component`; E2E specs under `frontend/tests/e2e` |
-| Python sidecars (`services/*`) | `pytest` (scaffolded) | N/A | `tests/` directories are in place; runnable sidecar test cases are still to be added |
+| Python sidecars (`services/*`) | `pytest` | N/A | Real `pytest` suites exist under `services/*/tests/` — 141 test functions total (tidal-downloader 55, ytmusic-streamer 81, audio-analyzer 3, audio-analyzer-clap 2); `pytest` is a declared dependency (`requirements-test.txt`) for tidal-downloader and ytmusic-streamer, each with its own `tests/conftest.py` |
 
 ## Directory Structure (Canonical)
 
@@ -227,10 +227,12 @@ Release helpers remain maintainer-invoked workflows outside `awm verify`; use `s
 
 ## Sidecar Test Standard
 
-Python sidecar test scaffolds now exist at:
+Python sidecar `pytest` suites exist for all four sidecars:
 
-- `services/audio-analyzer/tests/`
-- `services/audio-analyzer-clap/tests/`
+- `services/audio-analyzer/tests/` (3 test functions)
+- `services/audio-analyzer-clap/tests/` (2 test functions)
+- `services/tidal-downloader/tests/` (55 test functions)
+- `services/ytmusic-streamer/tests/` (81 test functions)
 
 Use this structure consistently when adding sidecar tests:
 

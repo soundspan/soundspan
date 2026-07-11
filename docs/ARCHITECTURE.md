@@ -36,14 +36,14 @@ graph TD
 
 | Source | Target | Protocol | Port | Auth | Purpose |
 |--------|--------|----------|------|------|---------|
-| frontend | backend | HTTP (custom-server streaming proxy `/api/*`; Next route-handler fallback) | 3006 | JWT cookie | All API requests (admin-only surfaces such as Library Health and Bull Board included) |
+| frontend | backend | HTTP (custom-server streaming proxy `/api/*`; Next route-handler fallback) | 3006 | Bearer JWT (`Authorization` header, token in localStorage), plus `X-API-Key`; `?token=` query JWT only for media-element URLs | All API requests (admin-only surfaces such as Library Health and Bull Board included) |
 | frontend | backend | WebSocket (Socket.IO, proxied by the custom server) | 3006 | JWT (`handshake.auth.token`) | Listen Together real-time sync |
 | backend | PostgreSQL | TCP (Prisma) | 5432 | Connection string | All persistent state |
 | backend | Redis | TCP | 6379 | None | Listen Together presence/state, cache, pub/sub, stream queues |
-| backend | tidal-downloader | HTTP | 8585 | `INTERNAL_API_SECRET` header | TIDAL OAuth, search, stream extraction, downloads |
+| backend | tidal-downloader | HTTP | 8585 | None (sidecar enforces no inbound auth today; network isolation is the control) | TIDAL OAuth, search, stream extraction, downloads |
 | backend | ytmusic-streamer | HTTP | 8586 | None (sidecar-internal) | YT Music OAuth, search, stream proxy, browse shelves; `/yt/*` pasted-URL preview/stream/download jobs |
 | backend-worker | PostgreSQL | TCP (Prisma) | 5432 | Connection string | Background job state |
-| backend-worker | Redis | TCP | 6379 | None | Job queues (BullMQ/streams), scheduler claims |
+| backend-worker | Redis | TCP | 6379 | None | Job queues (Bull/streams), scheduler claims |
 | audio-analyzer | PostgreSQL | TCP (direct) | 5432 | Connection string | Analysis results write |
 | audio-analyzer | Redis | TCP | 6379 | None | BRPOP job queue |
 | audio-analyzer-clap | PostgreSQL | TCP (direct) | 5432 | Connection string | Embedding writes |
@@ -74,10 +74,10 @@ The frontend's custom server (`frontend/server.js` + `frontend/server-proxy.js`)
 ### Music Playback (Local Library)
 
 ```
-Browser → GET /api/streaming/track/:id → backend reads file from /music → audio stream response
+Browser → GET /api/library/tracks/:id/stream → backend reads file from /music → audio stream response
 ```
 
-Local files are served directly from the mounted `/music` volume. Transcoded variants are cached in `backend_cache` volume.
+Local files are served directly from the mounted `/music` volume. Transcoded variants are cached in `backend_cache` volume. The separate `/api/streaming` router is the experimental segmented/DASH playback path (see [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md)) and is not used for standard local playback.
 
 ### Gap-Fill Playback (TIDAL)
 

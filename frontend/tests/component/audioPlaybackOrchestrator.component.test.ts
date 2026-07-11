@@ -168,6 +168,14 @@ class FakeAudioEngine {
         return this.playing;
     }
 
+    // Mirrors HybridRuntimeAudioEngine.getActiveEngineDescriptor() (GH #42
+    // native-engine soak): reports "videojs" while the segmented engine is
+    // active, else the direct-slot descriptor. This fake has one slot, so it
+    // keys off the same runtimeEngineMode the engineMode mock uses.
+    getActiveEngineDescriptor(): "howler" | "videojs" {
+        return runtimeEngineMode === "videojs" ? "videojs" : "howler";
+    }
+
     quarantineRepresentation(): null {
         return null;
     }
@@ -552,32 +560,32 @@ const applyValue = <T>(
 };
 
 mock.module("react", {
-    defaultExport: {
-        createElement: (..._args: unknown[]) => ({ __mocked: true }),
-        createContext: <T>(defaultValue: T) => ({
-            __defaultValue: defaultValue,
-        }),
-        useContext: (context: { __defaultValue: unknown } | null) =>
-            context?.__defaultValue ?? { prefetchQuery: async () => undefined },
-        useRef: <T>(value: T) => hookRuntime.useRef(value),
-        useCallback: <T extends (...args: unknown[]) => unknown>(
-            fn: T,
-            deps?: readonly unknown[],
-        ) => hookRuntime.useCallback(fn, deps),
-        useEffect: (effect: EffectCallback, deps?: readonly unknown[]) =>
-            hookRuntime.useEffect(effect, deps),
-        useLayoutEffect: (effect: EffectCallback, deps?: readonly unknown[]) =>
-            hookRuntime.useLayoutEffect(effect, deps),
-        useState: <T>(initial: T | (() => T)) => [
-            typeof initial === "function" ? (initial as () => T)() : initial,
-            () => undefined,
-        ],
-        useMemo: <T>(factory: () => T) => factory(),
-        memo: <T>(component: T) => component,
-        forwardRef: <T>(render: T) => render,
-        Fragment: "mock-fragment",
-    },
-    namedExports: {
+    exports: {
+        default: {
+            createElement: (..._args: unknown[]) => ({ __mocked: true }),
+            createContext: <T>(defaultValue: T) => ({
+                __defaultValue: defaultValue,
+            }),
+            useContext: (context: { __defaultValue: unknown } | null) =>
+                context?.__defaultValue ?? { prefetchQuery: async () => undefined },
+            useRef: <T>(value: T) => hookRuntime.useRef(value),
+            useCallback: <T extends (...args: unknown[]) => unknown>(
+                fn: T,
+                deps?: readonly unknown[],
+            ) => hookRuntime.useCallback(fn, deps),
+            useEffect: (effect: EffectCallback, deps?: readonly unknown[]) =>
+                hookRuntime.useEffect(effect, deps),
+            useLayoutEffect: (effect: EffectCallback, deps?: readonly unknown[]) =>
+                hookRuntime.useLayoutEffect(effect, deps),
+            useState: <T>(initial: T | (() => T)) => [
+                typeof initial === "function" ? (initial as () => T)() : initial,
+                () => undefined,
+            ],
+            useMemo: <T>(factory: () => T) => factory(),
+            memo: <T>(component: T) => component,
+            forwardRef: <T>(render: T) => render,
+            Fragment: "mock-fragment",
+        },
         memo: <T>(component: T) => component,
         createContext: <T>(defaultValue: T) => ({
             __defaultValue: defaultValue,
@@ -597,13 +605,13 @@ mock.module("react", {
 });
 
 mock.module("@/lib/audio-engine", {
-    namedExports: {
+    exports: {
         createRuntimeAudioEngine: () => engine,
     },
 });
 
 mock.module("@/lib/audio-state-context", {
-    namedExports: {
+    exports: {
         useAudioState: () => ({
             currentTrack: audioState.currentTrack,
             currentAudiobook: audioState.currentAudiobook,
@@ -637,7 +645,7 @@ mock.module("@/lib/audio-state-context", {
 });
 
 mock.module("@/lib/audio-playback-context", {
-    namedExports: {
+    exports: {
         useAudioPlayback: () => ({
             isPlaying: playbackState.isPlaying,
             currentTime: playbackState.currentTime,
@@ -681,7 +689,7 @@ mock.module("@/lib/audio-playback-context", {
 });
 
 mock.module("@/lib/audio-controls-context", {
-    namedExports: {
+    exports: {
         useAudioControls: () => ({
             pause: () => {
                 controlCalls.pause += 1;
@@ -701,7 +709,7 @@ mock.module("@/lib/audio-controls-context", {
 });
 
 mock.module("@/lib/audio-load-preemption", {
-    namedExports: {
+    exports: {
         shouldAllowInitialPersistedTrackResume: () => false,
         shouldPreemptInFlightAudioLoad: (input: {
             currentMediaId: string | null;
@@ -720,7 +728,7 @@ mock.module("@/lib/audio-load-preemption", {
 });
 
 mock.module("@/lib/api", {
-    namedExports: {
+    exports: {
         api: {
             getStreamUrl: (trackId: string) => {
                 apiCalls.getStreamUrl.push(trackId);
@@ -814,13 +822,14 @@ mock.module("@/lib/api", {
 });
 
 mock.module("@/lib/audio-engine/engineMode", {
-    namedExports: {
+    exports: {
         resolveStreamingEngineMode: () => runtimeEngineMode,
+        isSegmentedModeEnabled: () => runtimeEngineMode === "videojs",
     },
 });
 
 mock.module("@/lib/audio-engine/recoveryPolicy", {
-    namedExports: {
+    exports: {
         resolveLocalAuthoritativeRecovery: (
             local: { positionSec: number; shouldPlay: boolean },
             server?: { resumeAtSec?: number },
@@ -840,13 +849,13 @@ mock.module("@/lib/audio-engine/recoveryPolicy", {
 });
 
 mock.module("@/lib/audio-engine/segmentedStartupPolicy", {
-    namedExports: {
+    exports: {
         resolveSegmentedPrewarmMaxRetries: () => 0,
     },
 });
 
 mock.module("@/lib/audio-engine/segmentedPlaybackRegressionPolicy", {
-    namedExports: {
+    exports: {
         isSeekWithinTolerance: (_actual: number, _target: number) =>
             seekToleranceOverride ?? true,
         resolveHeartbeatGuardedRefreshDecision: () => ({
@@ -893,7 +902,7 @@ mock.module("@/lib/audio-engine/segmentedPlaybackRegressionPolicy", {
 });
 
 mock.module("@/lib/audio-engine/segmentedRepresentationPolicy", {
-    namedExports: {
+    exports: {
         resolveSegmentAssetNameFromUri: (uri: string | null | undefined) => {
             if (!uri) return null;
             const parts = uri.split("/");
@@ -907,7 +916,7 @@ mock.module("@/lib/audio-engine/segmentedRepresentationPolicy", {
 });
 
 mock.module("@/lib/audio-seek-emitter", {
-    namedExports: {
+    exports: {
         audioSeekEmitter: {
             subscribe: (handler: (time: number) => void | Promise<void>) => {
                 seekSubscribers.add(handler);
@@ -920,13 +929,13 @@ mock.module("@/lib/audio-seek-emitter", {
 });
 
 mock.module("@/lib/query-events", {
-    namedExports: {
+    exports: {
         dispatchQueryEvent: () => undefined,
     },
 });
 
 mock.module("@/lib/listen-together-session", {
-    namedExports: {
+    exports: {
         enqueueLatestListenTogetherHostTrackOperation: async () => undefined,
         getListenTogetherSessionSnapshot: () => listenTogetherSnapshot,
         isListenTogetherActiveOrPending: () => false,
@@ -945,7 +954,7 @@ mock.module("@/lib/listen-together-session", {
 });
 
 mock.module("@/lib/storage-migration", {
-    namedExports: {
+    exports: {
         createMigratingStorageKey: (key: string) => key,
         PODCAST_DEBUG_STORAGE_KEY: "podcast_debug",
         readMigratingStorageItem: () => null,
@@ -1018,7 +1027,7 @@ class MockHeartbeatMonitor {
 }
 
 mock.module("@/lib/audio", {
-    namedExports: {
+    exports: {
         playbackStateMachine: {
             transition: (next: string) => {
                 playbackMachine.state = next;
@@ -1041,7 +1050,7 @@ mock.module("@/lib/audio", {
 });
 
 mock.module("@tanstack/react-query", {
-    namedExports: {
+    exports: {
         useQueryClient: () => ({
             prefetchQuery: async () => undefined,
         }),
@@ -1049,7 +1058,7 @@ mock.module("@tanstack/react-query", {
 });
 
 mock.module("@/hooks/useLyrics", {
-    namedExports: {
+    exports: {
         fetchLyrics: async () => null,
         lyricsQueryKeys: {
             lyrics: (trackId: string) => ["lyrics", trackId],
@@ -1058,13 +1067,13 @@ mock.module("@/hooks/useLyrics", {
 });
 
 mock.module("@/lib/lyrics-cache-policy", {
-    namedExports: {
+    exports: {
         LYRICS_QUERY_STALE_TIME: 60_000,
     },
 });
 
 mock.module("sonner", {
-    namedExports: {
+    exports: {
         toast: {
             error: (message: string) => {
                 toastErrors.push(message);
@@ -1074,7 +1083,7 @@ mock.module("sonner", {
 });
 
 mock.module("@/lib/logger", {
-    namedExports: {
+    exports: {
         frontendLogger: {
             info: (...args: unknown[]) => {
                 loggerCalls.info.push(args);
@@ -1090,7 +1099,7 @@ mock.module("@/lib/logger", {
 });
 
 mock.module("@soundspan/media-metadata-contract", {
-    namedExports: {
+    exports: {
         normalizeCanonicalMediaProviderIdentity: (input: {
             streamSource?: "local" | "tidal" | "youtube";
             tidalTrackId?: number;

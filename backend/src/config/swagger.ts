@@ -102,7 +102,7 @@ const options: swaggerJsdoc.Options = {
         },
         security: [{ sessionAuth: [] }, { apiKeyAuth: [] }],
     },
-    apis: ["./src/routes/*.ts", "./src/config/swaggerSchemas.ts"],
+    apis: ["./src/routes/*.ts"],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);

@@ -5,6 +5,30 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## Native `<audio>`-element engine is now the default playback engine (1.8.0)
+
+**Who this affects:** every deployment that does not explicitly set `STREAMING_ENGINE_MODE`.
+
+**What changed.** The native `<audio>`-element playback engine — introduced as the
+opt-in `STREAMING_ENGINE_MODE=native` in 1.7.0 — is now the **default** playback
+engine for everyone (`DEFAULT_STREAMING_ENGINE_MODE = "native"`), after soaking as
+the 1.7.0 opt-in. Deployments with no `STREAMING_ENGINE_MODE` set switch to the
+native engine on upgrade. Howler remains fully supported as the gated fallback,
+and Android WebView deployments stay auto-pinned to it automatically regardless
+of this setting (the established crackling/pop fix there is unchanged). The
+container entrypoints and docs now report `native` as the primary default.
+
+**Action required: none to adopt.** To remain on the legacy engine, set
+**`STREAMING_ENGINE_MODE=howler`** (frontend/AIO container env; on Helm, the
+frontend workload's `frontend.env` map — see the commented
+`STREAMING_ENGINE_MODE` example in `charts/soundspan/values.yaml` — or `aio.env`
+in AIO mode) and restart the frontend/AIO container.
+
+> See `docs/NATIVE_AUDIO_ENGINE.md` for engine-selection precedence, telemetry
+> tags, and rollback details.
+
+---
+
 ## Lidarr webhook hardening — set a webhook secret (F32)
 
 **Who this affects:** anyone using the Lidarr integration.

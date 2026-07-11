@@ -285,8 +285,8 @@ router.post("/download/:albumMbid", async (req, res) => {
 
         logger.debug(`[Releases] Download requested for album: ${albumMbid}`);
 
-        // TODO: Implement downloadAlbum method on LidarrService
-        // For now, return not implemented error
+        // Release-radar downloads are intentionally unimplemented; this endpoint
+        // returns 501 until that feature is built.
         res.status(501).json({
             error: "Download feature not yet implemented for release radar"
         });

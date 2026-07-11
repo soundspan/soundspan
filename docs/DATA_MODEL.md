@@ -2,7 +2,7 @@
 
 Entity relationships, classification, and resolution chains for soundspan's Prisma schema.
 
-Schema source: `backend/prisma/schema.prisma` (53 models, 1162 lines)
+Schema source: `backend/prisma/schema.prisma` (57 models, 1248 lines)
 
 ## Entity Relationship Overview
 
