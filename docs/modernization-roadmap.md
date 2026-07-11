@@ -29,7 +29,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | Epic | Title | ✅ / 🟡 / Total |
 |------|-------|----------------|
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 1 / 1 / 2 |
-| #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 1 / 3 |
+| #10 | CI security scanning & supply-chain guardrails (Wave 0) | 1 / 1 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 6 / 1 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 2 / 8 |
@@ -107,7 +107,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F47](#f47) | ⬜ | dependencies-build | high→medium | M | low |  | #19 | API runtime image ships uncompiled TypeScript and runs it via tsx in production with fu… _(dup F17)_ |
 | [F48](#f48) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Bull 4 is maintenance-only with a version-mismatched @types/bull; migrate to BullMQ |
 | [F49](#f49) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Express 4 (Express 5 is GA) with half-migrated middleware majors |
-| [F50](#f50) | ⬜ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproduci… |
+| [F50](#f50) | ✅ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproduci… |
 | [F51](#f51) | ⬜ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
 | [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and r… |
 | [F53](#f53) | ✅ | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
@@ -958,9 +958,11 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F50 — Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproducible ML images
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: M · risk: low · epic: #10
+**✅ complete (#119)** · dimension: dependencies-build · severity: medium · effort: M · risk: low · epic: #10
 
 > **Audit note.** Per audit: 10 Essentia `.pb` files; CLAP checkpoint ~600MB per the repo comment (not ~2GB).
+
+> **Fix shipped.** Every Python image (4 sidecars + AIO) now installs from a hash-pinned lock generated with `uv pip compile --generate-hashes` targeted at each image's interpreter, installed via plain `pip install --require-hashes` — a rebuild of one commit resolves the identical transitive tree. Per-image locks: `ytmusic-streamer/requirements.lock` (py3.14), `tidal-downloader/requirements.lock` (py3.14), `audio-analyzer-clap/requirements.lock` (py3.10), `audio-analyzer/requirements.lock` (py3.8) — the last now that its requirements.txt is the real manifest (TF 2.13.x + essentia-tensorflow + redis/psycopg2/numpy<2.0), converting both former inline installs. The AIO uses ONE merged `requirements-aio.lock` (analyzer+clap resolved jointly at py3.11 — the joint resolution IS satisfiable, so no sequential-lock fallback was needed) replacing all three of its pip installs, plus a new build-time import smoke (`import numpy, tensorflow`; `find_spec('essentia')`). `.github/workflows/security-scanning.yml` pip-audit repoints its 4 runtime lanes at the locks and adds an AIO-lock lane. **Exemption (F38/F50 carve-out):** `yt-dlp` and `ytmusicapi` stay loose floors (installed after the lock from `ytmusic-streamer/requirements-exempt.txt`) so a YouTube breakage stays a same-day floor bump; their `requests` transitive is pre-pinned in the lock so only those two float. **Corrections to this finding, verified on the built images (2026-07-11):** (i) the Recommendation's "curls 11 Essentia .pb files" is wrong — it is **10** (the Audit note is right); (ii) the ~600MB figure (Audit note + AIO `Dockerfile:105` comment) is wrong — the measured checkpoint is **2,352,471,003 bytes ≈ 2.35 GB** (Hugging Face `x-linked-size`), so the Problem's "~2GB" was the closer number; (iii) pitfall (2)'s premise that "torch is typically resolved from the PyTorch index" does **not** hold here — the CLAP image installs torch from plain PyPI today, and that is exactly what got pinned+hashed (no index change). Tests: ytmusic 125 / tidal 63 / analyzer env-helper 5 pytest green under py3.14 docker; tidal built twice `--no-cache` → identical `pip freeze`; a flipped hash fails the install layer. Model-checksum sha256 pinning is the separate F38 packet's scope (same issue #119).
 
 **Files:** `services/ytmusic-streamer/requirements.txt`, `services/audio-analyzer-clap/requirements.txt`, `services/tidal-downloader/requirements.txt`, `services/audio-analyzer/requirements.txt`
 

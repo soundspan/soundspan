@@ -26,6 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pool (F13).
 - All Node-based Docker images and CI jobs now run Node 24 (`node:24-bookworm-slim` for backend/frontend/root-AIO images), replacing the previous 20/24 split. `@types/node` is bumped to `^24` in backend and frontend to match, and the backend `tsconfig` `lib` is raised `ES2020` → `ES2022` alongside, keeping `tsc` clean under `@types/node` 24 (which dropped the legacy compat declarations for post-ES2020 built-ins like `.at()` that the v20 types carried) — the declared lib now matches what the Node ≥ 20 runtime actually implements; type declarations only, emitted code and `target` unchanged.
 - Similar-tracks and vibe search now surface genuinely related neighbours instead of near-random ones: every pgvector ANN query now applies a configurable `ivfflat.probes` on the same pooled connection (a transaction-scoped `set_config`), fixing recall that was silently stuck at Postgres' default of scanning 1 of the index's 224 lists. New `IVFFLAT_PROBES` env var, default `32` — benchmark-chosen on the local 15,230-track corpus, where it lifts recall@10 from ≈0.26 (probes=1) to ≈0.96 at ~6 ms p95.
+- Every Python sidecar image (`ytmusic-streamer`, `tidal-downloader`,
+  `audio-analyzer-clap`, `audio-analyzer`) and the all-in-one image now installs
+  its dependencies from a committed, hash-pinned lock (`requirements.lock` per
+  service; `requirements-aio.lock` for the AIO) via
+  `pip install --require-hashes`, so rebuilding a given commit resolves the
+  identical transitive dependency tree instead of whatever floated on PyPI that
+  day (roadmap F50). Locks are generated per-interpreter with
+  `uv pip compile --generate-hashes` (py3.14 for ytmusic/tidal, py3.10 for CLAP,
+  py3.8 for the Essentia analyzer; one merged py3.11 lock resolving the analyzer
+  and CLAP manifests jointly for the AIO's shared site-packages). The Essentia
+  analyzer's `requirements.txt` became its real manifest (it now carries the
+  TensorFlow/essentia/numpy pins the Dockerfile previously installed inline), and
+  the AIO gained a build-time import smoke. `yt-dlp` and `ytmusicapi` are
+  deliberately kept as loose floors (installed after the lock from
+  `requirements-exempt.txt`) so a YouTube-side breakage stays a same-day floor
+  bump. The `pip-audit` CI lanes now audit the locks (plus a new AIO-lock lane)
+  alongside the unchanged loose test-manifest lanes.
 - `image-builds.yml` cache exports (`cache-to: type=gha`) no longer fail a leg whose image already pushed. Self-hosted legs (AIO, CLAP) run cache exports for an hour-plus, which can outlive the GHA cache backend's ~1-hour SAS token and die with an Azure Blob 403 (`Signature not valid in the specified time frame`) after the image build itself already succeeded and pushed — turning a green push into a red job. Both `cache-to` sites now set `ignore-error=true`, so a cache-write failure is a warning instead of a job failure (#66).
 
 ### Fixed
