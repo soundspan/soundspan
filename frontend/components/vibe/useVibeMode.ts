@@ -14,7 +14,14 @@
  * always returns to explore.
  */
 
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useReducer,
+    useRef,
+    useState,
+} from "react";
 import { api } from "@/lib/api";
 import type { Track } from "@/lib/audio-state-context";
 import type { MapTrack } from "./types";
@@ -303,6 +310,8 @@ export interface UseVibeMode {
     startJourney: () => void;
     /** Alchemy result ids to glow on the canvas (else null → spotlight owns it). */
     highlightIds: ReadonlySet<string> | null;
+    /** Add a track to the alchemy tray (ctrl/⌘-click anywhere, incl. halos). */
+    addIngredient: (id: string) => void;
     travel: TravelView | null;
     journey: JourneyView | null;
     alchemy: AlchemyView | null;
@@ -338,6 +347,14 @@ export function useVibeMode({
         setAlchemyError(null);
     }, []);
 
+    // Generation counters for the journey/blend async fetches: bumped on every
+    // new request AND on mode teardown, so a stale response (e.g. Esc + re-enter
+    // before the in-flight request lands) can't apply its result. Same shape as
+    // the `cancelled` flag used for the travel-neighbours fetch below, just
+    // shared across the whole mode lifetime rather than one effect run.
+    const journeyGen = useRef(0);
+    const alchemyGen = useRef(0);
+
     // Mode exclusivity: leaving a mode drops its overlay state.
     const activeMode = state.mode;
     useEffect(() => {
@@ -345,8 +362,14 @@ export function useVibeMode({
             setRawNeighbors([]);
             setTravelError(null);
         }
-        if (activeMode !== "journey") clearJourneyResults();
-        if (activeMode !== "alchemy") clearAlchemyResults();
+        if (activeMode !== "journey") {
+            clearJourneyResults();
+            journeyGen.current++;
+        }
+        if (activeMode !== "alchemy") {
+            clearAlchemyResults();
+            alchemyGen.current++;
+        }
     }, [activeMode, clearJourneyResults, clearAlchemyResults]);
 
     // --- travel: fetch similar for the current node -------------------------
@@ -454,21 +477,33 @@ export function useVibeMode({
         [clearAlchemyResults]
     );
 
+    // Lookup by id over the full (on-map + off-map) shown neighbours, so
+    // navigate/queue can build a playable Track from the candidate payload
+    // itself even when the neighbour isn't plotted on this map sample.
+    const shownNeighborById = useMemo(() => {
+        const m = new Map<string, CompassCandidate>();
+        for (const n of shownNeighbors) m.set(n.id, n);
+        return m;
+    }, [shownNeighbors]);
+
     const navigateTravel = useCallback(
         (id: string) => {
-            const t = trackById.get(id);
-            dispatch({ type: "TRAVEL_TO", id });
-            if (t) controls.playTrack(mapTrackToTrack(t));
+            const candidate = shownNeighborById.get(id);
+            if (candidate) controls.playTrack(waypointToTrack(candidate));
+            // Only move `currentId` (and trigger the neighbours refetch) when the
+            // target is actually on the map — off-map neighbours play/queue but
+            // never become the new travel origin.
+            if (trackById.has(id)) dispatch({ type: "TRAVEL_TO", id });
         },
-        [trackById, controls]
+        [shownNeighborById, trackById, controls]
     );
 
     const queueTravel = useCallback(
         (id: string) => {
-            const t = trackById.get(id);
-            if (t) controls.addToQueue(mapTrackToTrack(t));
+            const candidate = shownNeighborById.get(id);
+            if (candidate) controls.addToQueue(waypointToTrack(candidate));
         },
-        [trackById, controls]
+        [shownNeighborById, controls]
     );
 
     const onDotClick = useCallback(
@@ -476,9 +511,13 @@ export function useVibeMode({
             const t = trackById.get(id);
             if (!t) return;
             // Journey "pick on map" intercepts the next dot for the destination.
+            // Picking the journey's own origin is a no-op (the backend rejects
+            // from === to; catch it here so the map doesn't even round-trip).
             if (state.mode === "journey" && state.picking) {
-                dispatch({ type: "SET_DEST", id });
-                clearJourneyResults();
+                if (id !== state.fromId) {
+                    dispatch({ type: "SET_DEST", id });
+                    clearJourneyResults();
+                }
                 return;
             }
             if (mods.ctrlOrMeta) {
@@ -525,6 +564,7 @@ export function useVibeMode({
             mood: string | undefined,
             steps: number
         ) => {
+            const gen = ++journeyGen.current;
             setJourneyLoading(true);
             setJourneyError(null);
             setRoute(null);
@@ -535,11 +575,12 @@ export function useVibeMode({
                     mood,
                     steps,
                 });
+                if (gen !== journeyGen.current) return; // superseded — drop it
                 setRoute(res as JourneyRoute);
             } catch (e) {
-                setJourneyError(journeyErrorMessage(e));
+                if (gen === journeyGen.current) setJourneyError(journeyErrorMessage(e));
             } finally {
-                setJourneyLoading(false);
+                if (gen === journeyGen.current) setJourneyLoading(false);
             }
         },
         []
@@ -589,6 +630,7 @@ export function useVibeMode({
     const runBlend = useCallback(() => {
         if (state.mode !== "alchemy" || state.ingredients.length < 2) return;
         const ings = state.ingredients;
+        const gen = ++alchemyGen.current;
         setAlchemyLoading(true);
         setAlchemyError(null);
         setBlend(null);
@@ -597,9 +639,16 @@ export function useVibeMode({
             ings.map((i) => i.weight),
             20
         )
-            .then((res) => setBlend(res.tracks))
-            .catch(() => setAlchemyError("Couldn't blend those tracks"))
-            .finally(() => setAlchemyLoading(false));
+            .then((res) => {
+                if (gen === alchemyGen.current) setBlend(res.tracks);
+            })
+            .catch(() => {
+                if (gen === alchemyGen.current)
+                    setAlchemyError("Couldn't blend those tracks");
+            })
+            .finally(() => {
+                if (gen === alchemyGen.current) setAlchemyLoading(false);
+            });
     }, [state]);
 
     const playBlend = useCallback(() => {
@@ -710,6 +759,7 @@ export function useVibeMode({
         startJourney,
         highlightIds:
             state.mode === "alchemy" && resultIds.size > 0 ? resultIds : null,
+        addIngredient,
         travel,
         journey,
         alchemy,

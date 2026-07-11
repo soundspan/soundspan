@@ -39,6 +39,14 @@ export interface MapDecorationsProps {
         fromId: string;
         waypoints: readonly VibeListItem[];
     } | null;
+    /**
+     * A halo opts into pointer events (the overlay root is pointer-events-none),
+     * which otherwise swallows a pointerdown that starts a pan. Wire this to arm
+     * the same drag state the canvas's own pointerdown does.
+     */
+    onHaloPointerDown?: (e: React.PointerEvent<SVGCircleElement>) => void;
+    /** ctrl/⌘-click on a halo adds the neighbour to the alchemy tray. */
+    onHaloAddIngredient?: (id: string) => void;
 }
 
 export function MapDecorations({
@@ -46,6 +54,8 @@ export function MapDecorations({
     trackById,
     travel,
     journey,
+    onHaloPointerDown,
+    onHaloAddIngredient,
 }: MapDecorationsProps) {
     const nodes: React.ReactNode[] = [];
 
@@ -105,11 +115,15 @@ export function MapDecorations({
                         stroke={EDGE_COLOR}
                         strokeWidth={2}
                         style={{ pointerEvents: "auto", cursor: "pointer" }}
-                        onClick={(e) =>
-                            e.shiftKey
-                                ? travel.onQueue(n.id)
-                                : travel.onNavigate(n.id)
-                        }
+                        onPointerDown={onHaloPointerDown}
+                        onClick={(e) => {
+                            if (e.ctrlKey || e.metaKey) {
+                                onHaloAddIngredient?.(n.id);
+                                return;
+                            }
+                            if (e.shiftKey) travel.onQueue(n.id);
+                            else travel.onNavigate(n.id);
+                        }}
                     >
                         <title>{n.title}</title>
                     </circle>

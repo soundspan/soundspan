@@ -223,29 +223,29 @@ export function VibeMap() {
         []
     );
 
-    const handlePointerMove = useCallback(
-        (e: React.PointerEvent<HTMLCanvasElement>) => {
-            if (!viewport) return;
-            const d = drag.current;
-            if (d.active) {
-                const dx = e.clientX - d.lastX;
-                const dy = e.clientY - d.lastY;
-                d.lastX = e.clientX;
-                d.lastY = e.clientY;
-                d.moved += Math.hypot(dx, dy);
-                setViewport((vp) =>
-                    vp
-                        ? clampViewport(
-                              { scale: vp.scale, tx: vp.tx + dx, ty: vp.ty + dy },
-                              dims
-                          )
-                        : vp
-                );
-                return;
-            }
+    // A neighbour halo (MapDecorations) opts into pointer events so it can be
+    // clicked, which means a drag that *starts* on a halo never reaches the
+    // canvas's own onPointerDown. This arms the same drag state directly so
+    // panning can still begin from a halo. Deliberately does not call
+    // setPointerCapture (that belongs to the canvas, not this SVG circle).
+    const handleHaloPointerDown = useCallback(
+        (e: React.PointerEvent<SVGCircleElement>) => {
+            drag.current = {
+                active: true,
+                lastX: e.clientX,
+                lastY: e.clientY,
+                moved: 0,
+            };
+        },
+        []
+    );
 
-            // Hover hit-test in screen space, skipping filtered-out dots.
-            const cursor = cursorFromEvent(e.clientX, e.clientY);
+    // Shared hit-test (screen space, skipping filtered-out dots) used by both
+    // hover (pointermove) and the touch click fallback (pointerup) below.
+    const hitTest = useCallback(
+        (clientX: number, clientY: number): string | null => {
+            if (!viewport) return null;
+            const cursor = cursorFromEvent(clientX, clientY);
             let closest: string | null = null;
             let closestDist = HOVER_HIT_RADIUS;
             const mask = filters.mask;
@@ -258,9 +258,43 @@ export function VibeMap() {
                     closestDist = dist;
                 }
             }
-            setHoveredId(closest);
+            return closest;
         },
-        [viewport, dims, cursorFromEvent, tracks, filters.mask]
+        [viewport, cursorFromEvent, tracks, filters.mask]
+    );
+
+    const handlePointerMove = useCallback(
+        (e: React.PointerEvent<HTMLCanvasElement>) => {
+            if (!viewport) return;
+            const d = drag.current;
+            if (d.active) {
+                // Self-heal a drag armed by a halo pointerdown whose matching
+                // pointerup landed on the halo itself (stationary tap — the
+                // halo has no pointerup wiring back to this canvas): once no
+                // button/touch is actually down, stop treating hover as a pan.
+                if (e.buttons === 0) {
+                    d.active = false;
+                } else {
+                    const dx = e.clientX - d.lastX;
+                    const dy = e.clientY - d.lastY;
+                    d.lastX = e.clientX;
+                    d.lastY = e.clientY;
+                    d.moved += Math.hypot(dx, dy);
+                    setViewport((vp) =>
+                        vp
+                            ? clampViewport(
+                                  { scale: vp.scale, tx: vp.tx + dx, ty: vp.ty + dy },
+                                  dims
+                              )
+                            : vp
+                    );
+                    return;
+                }
+            }
+
+            setHoveredId(hitTest(e.clientX, e.clientY));
+        },
+        [viewport, dims, hitTest]
     );
 
     const endDrag = useCallback(() => {
@@ -272,14 +306,20 @@ export function VibeMap() {
             const wasClick = drag.current.active && drag.current.moved < CLICK_MOVE_THRESHOLD;
             drag.current.active = false;
             e.currentTarget.releasePointerCapture?.(e.pointerId);
-            if (wasClick && hoveredId) {
-                vibe.onDotClick(hoveredId, {
-                    ctrlOrMeta: e.ctrlKey || e.metaKey,
-                    shift: e.shiftKey,
-                });
+            if (wasClick) {
+                // Touch taps never set hoveredId (no hover concept on touch, and
+                // pointermove during the tap takes the drag branch above), so
+                // fall back to hit-testing at the pointerup coordinates.
+                const clickedId = hoveredId ?? hitTest(e.clientX, e.clientY);
+                if (clickedId) {
+                    vibe.onDotClick(clickedId, {
+                        ctrlOrMeta: e.ctrlKey || e.metaKey,
+                        shift: e.shiftKey,
+                    });
+                }
             }
         },
-        [hoveredId, vibe]
+        [hoveredId, hitTest, vibe]
     );
 
     const zoomByCenter = useCallback(
@@ -493,6 +533,8 @@ export function VibeMap() {
                                               }
                                             : null
                                     }
+                                    onHaloPointerDown={handleHaloPointerDown}
+                                    onHaloAddIngredient={vibe.addIngredient}
                                 />
                             }
                         />

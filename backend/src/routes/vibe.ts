@@ -452,6 +452,12 @@ router.post("/journey", requireAuth, async (req, res) => {
             });
         }
 
+        if (hasToTrackId && toTrackId === fromTrackId) {
+            return res.status(400).json({
+                error: "Origin and destination are the same track",
+            });
+        }
+
         let excludeIds: string[] = [];
         if (excludeTrackIds !== undefined) {
             if (
@@ -470,10 +476,16 @@ router.post("/journey", requireAuth, async (req, res) => {
             excludeIds = excludeTrackIds;
         }
 
-        const steps = Math.min(
-            Math.max(MIN_JOURNEY_STEPS, requestedSteps || DEFAULT_JOURNEY_STEPS),
-            MAX_JOURNEY_STEPS
-        );
+        let steps = DEFAULT_JOURNEY_STEPS;
+        if (requestedSteps !== undefined) {
+            if (!Number.isInteger(requestedSteps)) {
+                return res.status(400).json({ error: "steps must be an integer" });
+            }
+            steps = Math.min(
+                Math.max(MIN_JOURNEY_STEPS, requestedSteps),
+                MAX_JOURNEY_STEPS
+            );
+        }
 
         const fromEmbed = await fetchTrackEmbedding(fromTrackId);
         if (!fromEmbed) {
@@ -485,6 +497,7 @@ router.post("/journey", requireAuth, async (req, res) => {
         let mode: "track" | "mood";
         let targetEmbed: number[];
         let target: { trackId: string; title: string } | { mood: string; label: string };
+        let destinationWaypoint: ReturnType<typeof formatNearestTrack> | null = null;
 
         if (hasToTrackId) {
             mode = "track";
@@ -498,9 +511,26 @@ router.post("/journey", requireAuth, async (req, res) => {
 
             const destinationTrack = await prisma.track.findUnique({
                 where: { id: toTrackId },
-                select: { title: true },
+                include: { album: { include: { artist: true } } },
             });
             target = { trackId: toTrackId, title: destinationTrack?.title ?? toTrackId };
+            destinationWaypoint = destinationTrack
+                ? {
+                      id: destinationTrack.id,
+                      title: destinationTrack.title,
+                      distance: 0,
+                      similarity: 1,
+                      album: {
+                          id: destinationTrack.album.id,
+                          title: destinationTrack.album.title,
+                          coverUrl: destinationTrack.album.coverUrl,
+                      },
+                      artist: {
+                          id: destinationTrack.album.artist.id,
+                          name: destinationTrack.album.artist.name,
+                      },
+                  }
+                : null;
         } else {
             mode = "mood";
             const moodKey = mood as MoodType;
@@ -531,13 +561,33 @@ router.post("/journey", requireAuth, async (req, res) => {
             target = { mood: moodKey, label: MOOD_CONFIG[moodKey].name };
         }
 
-        const tValues = Array.from({ length: steps }, (_, idx) => (idx + 1) / steps);
-        const waypoints = await walkEmbeddingSteps(
-            fromEmbed,
-            targetEmbed,
-            tValues,
-            [fromTrackId, ...excludeIds]
-        );
+        let waypoints: ReturnType<typeof formatNearestTrack>[];
+        if (mode === "track") {
+            // Walk only the intermediate steps (t = i/steps for i in 1..steps-1);
+            // the destination itself is appended as the literal final waypoint
+            // below, so it is never re-derived from a possibly-drifted ANN query.
+            const tValues = Array.from(
+                { length: steps - 1 },
+                (_, idx) => (idx + 1) / steps
+            );
+            const intermediate = await walkEmbeddingSteps(
+                fromEmbed,
+                targetEmbed,
+                tValues,
+                [fromTrackId, toTrackId, ...excludeIds]
+            );
+            waypoints = destinationWaypoint
+                ? [...intermediate, destinationWaypoint]
+                : intermediate;
+        } else {
+            const tValues = Array.from({ length: steps }, (_, idx) => (idx + 1) / steps);
+            waypoints = await walkEmbeddingSteps(
+                fromEmbed,
+                targetEmbed,
+                tValues,
+                [fromTrackId, ...excludeIds]
+            );
+        }
 
         res.json({ mode, target, waypoints });
     } catch (error: any) {

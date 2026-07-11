@@ -34,6 +34,10 @@ export function SpotlightSearch({
     const [warming, setWarming] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const warmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Staleness token: bumped on clear() and on every new submit, so a search
+    // that resolves after being superseded (cleared, or a newer query submitted)
+    // can't land its results and re-dim the map.
+    const searchToken = useRef(0);
 
     const stopWarm = useCallback(() => {
         if (warmTimer.current) {
@@ -51,23 +55,28 @@ export function SpotlightSearch({
                 onClear();
                 return;
             }
+            const token = ++searchToken.current;
             setLoading(true);
             setError(null);
             warmTimer.current = setTimeout(() => setWarming(true), WARM_UP_MS);
             try {
                 const res = await api.vibeSearch(q);
+                if (token !== searchToken.current) return; // superseded — drop it
                 onResults(new Set(res.tracks.map((t) => t.id)), q);
             } catch {
-                setError("Search failed — try again");
+                if (token === searchToken.current) setError("Search failed — try again");
             } finally {
-                setLoading(false);
-                stopWarm();
+                if (token === searchToken.current) {
+                    setLoading(false);
+                    stopWarm();
+                }
             }
         },
         [query, onResults, onClear, stopWarm]
     );
 
     const clear = useCallback(() => {
+        searchToken.current++;
         setQuery("");
         setError(null);
         setLoading(false);
@@ -86,7 +95,13 @@ export function SpotlightSearch({
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => {
-                        if (e.key === "Escape") clear();
+                        if (e.key !== "Escape") return;
+                        // First Esc just clears the box (and swallows the event so
+                        // it doesn't bubble to VibeMap's window listener and tear
+                        // down the active mode); only a second Esc, with nothing
+                        // left to clear, is allowed to bubble and exit the mode.
+                        if (query.trim().length > 0) e.stopPropagation();
+                        clear();
                     }}
                     placeholder="Spotlight a vibe…"
                     aria-label="Spotlight a vibe"

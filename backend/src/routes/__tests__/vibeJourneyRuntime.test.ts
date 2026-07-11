@@ -207,13 +207,19 @@ describe("vibe journey + moods runtime", () => {
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId
                 .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]); // toTrackId
-            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "dest-1",
+                title: "Destination Song",
+                album: {
+                    id: "album-dest",
+                    title: "Album Dest",
+                    coverUrl: null,
+                    artist: { id: "artist-dest", name: "Artist Dest" },
+                },
+            });
             mockRunAnnQuery
                 .mockResolvedValueOnce([nearestRow({ id: "mid-1", title: "Mid One" })])
-                .mockResolvedValueOnce([nearestRow({ id: "mid-2", title: "Mid Two" })])
-                .mockResolvedValueOnce([
-                    nearestRow({ id: "dest-1", title: "Destination Song", distance: 0 }),
-                ]);
+                .mockResolvedValueOnce([nearestRow({ id: "mid-2", title: "Mid Two" })]);
 
             const req = {
                 body: { fromTrackId: "from-1", toTrackId: "dest-1", steps: 3 },
@@ -226,21 +232,50 @@ describe("vibe journey + moods runtime", () => {
             expect(res.body.mode).toBe("track");
             expect(res.body.target).toEqual({ trackId: "dest-1", title: "Destination Song" });
             expect(res.body.waypoints).toHaveLength(3);
-            expect(res.body.waypoints[2]).toEqual(
-                expect.objectContaining({ id: "dest-1" })
-            );
+            expect(res.body.waypoints[res.body.waypoints.length - 1].id).toBe("dest-1");
+        });
+
+        it("returns 400 when fromTrackId equals toTrackId", async () => {
+            const req = {
+                body: { fromTrackId: "same-1", toTrackId: "same-1" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body.error).toBe("Origin and destination are the same track");
+            expect(mockQueryRaw).not.toHaveBeenCalled();
+        });
+
+        it("returns 400 when steps is not an integer", async () => {
+            const req = {
+                body: { fromTrackId: "from-1", toTrackId: "dest-1", steps: "abc" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body.error).toBe("steps must be an integer");
+            expect(mockQueryRaw).not.toHaveBeenCalled();
         });
 
         it("clamps steps below the minimum up to 2", async () => {
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
                 .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]);
-            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
-            mockRunAnnQuery
-                .mockResolvedValueOnce([nearestRow({ id: "mid-1" })])
-                .mockResolvedValueOnce([
-                    nearestRow({ id: "dest-1", title: "Destination Song", distance: 0 }),
-                ]);
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "dest-1",
+                title: "Destination Song",
+                album: {
+                    id: "album-dest",
+                    title: "Album Dest",
+                    coverUrl: null,
+                    artist: { id: "artist-dest", name: "Artist Dest" },
+                },
+            });
+            mockRunAnnQuery.mockResolvedValueOnce([nearestRow({ id: "mid-1" })]);
 
             const req = {
                 body: { fromTrackId: "from-1", toTrackId: "dest-1", steps: 1 },
@@ -251,13 +286,23 @@ describe("vibe journey + moods runtime", () => {
 
             expect(res.statusCode).toBe(200);
             expect(res.body.waypoints).toHaveLength(2);
+            expect(res.body.waypoints[1].id).toBe("dest-1");
         });
 
         it("clamps steps above the maximum down to 20", async () => {
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
                 .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]);
-            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "dest-1",
+                title: "Destination Song",
+                album: {
+                    id: "album-dest",
+                    title: "Album Dest",
+                    coverUrl: null,
+                    artist: { id: "artist-dest", name: "Artist Dest" },
+                },
+            });
 
             let call = 0;
             mockRunAnnQuery.mockImplementation(() => {
@@ -274,6 +319,7 @@ describe("vibe journey + moods runtime", () => {
 
             expect(res.statusCode).toBe(200);
             expect(res.body.waypoints).toHaveLength(20);
+            expect(res.body.waypoints[19].id).toBe("dest-1");
         });
 
         it("mood mode: returns waypoints toward the mood centroid", async () => {
@@ -308,7 +354,16 @@ describe("vibe journey + moods runtime", () => {
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId
                 .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]); // toTrackId
-            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "dest-1",
+                title: "Destination Song",
+                album: {
+                    id: "album-dest",
+                    title: "Album Dest",
+                    coverUrl: null,
+                    artist: { id: "artist-dest", name: "Artist Dest" },
+                },
+            });
 
             const candidatePool = [
                 nearestRow({ id: "blocked-1", title: "Blocked", distance: 0.05 }),
@@ -349,7 +404,9 @@ describe("vibe journey + moods runtime", () => {
             expect(res.statusCode).toBe(200);
             const ids = res.body.waypoints.map((w: any) => w.id);
             expect(ids).not.toContain("blocked-1");
-            expect(ids).toEqual(["cand-1", "cand-2", "cand-3"]);
+            // steps: 3 => 2 intermediate ANN-walked waypoints, then the literal
+            // destination appended as the final waypoint (never re-derived via ANN).
+            expect(ids).toEqual(["cand-1", "cand-2", "dest-1"]);
         });
     });
 
