@@ -39,7 +39,7 @@ const router = express.Router();
  */
 // Profile picture serving — must be before router-level requireAuth
 // because <img> tags can't send Authorization headers; uses query token instead
-router.get("/profile-picture/:userId", requireAuthOrToken, async (req, res) => {
+router.get<{ userId: string }>("/profile-picture/:userId", requireAuthOrToken, async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.params.userId },

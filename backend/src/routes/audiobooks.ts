@@ -437,7 +437,7 @@ router.get("/", requireAuthOrToken, apiLimiter, async (req, res) => {
  * GET /audiobooks/series/:seriesName
  * Get all books in a series (from cached database)
  */
-router.get(
+router.get<{ seriesName: string }>(
     "/series/:seriesName",
     requireAuthOrToken,
     apiLimiter,
@@ -707,7 +707,7 @@ router.get("/:id/cover", async (req, res) => {
  * GET /audiobooks/:id
  * Get a specific audiobook with full details (from cache, fallback to API)
  */
-router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
+router.get<{ id: string }>("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
     try {
         // Check if Audiobookshelf is enabled
         const { getSystemSettings } = await import("../utils/systemSettings");
@@ -840,7 +840,7 @@ router.get("/:id", requireAuthOrToken, apiLimiter, async (req, res) => {
  * GET /audiobooks/:id/stream
  * Proxy the audiobook stream with authentication
  */
-router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
+router.get<{ id: string }>("/:id/stream", requireAuthOrToken, async (req, res) => {
     try {
         logger.debug(
             `[Audiobook Stream] Request for audiobook: ${req.params.id}`
@@ -966,7 +966,7 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
  * POST /audiobooks/:id/progress
  * Update playback progress for an audiobook
  */
-router.post(
+router.post<{ id: string }>(
     "/:id/progress",
     requireAuthOrToken,
     apiLimiter,
@@ -1162,7 +1162,7 @@ router.post(
  * DELETE /audiobooks/:id/progress
  * Remove/reset progress for an audiobook
  */
-router.delete(
+router.delete<{ id: string }>(
     "/:id/progress",
     requireAuthOrToken,
     apiLimiter,

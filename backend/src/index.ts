@@ -78,6 +78,12 @@ import { swaggerSpec } from "./config/swagger";
 import { BRAND_API_DOCS_TITLE, BRAND_NAME } from "./config/brand";
 
 const app = express();
+
+// Express 5 changed the default query parser from "extended" to "simple".
+// Restore "extended" (qs) so nested/bracketed query strings keep parsing the
+// way they did on Express 4 (and to match the ParsedQs typing of req.query).
+app.set("query parser", "extended");
+
 type BackendProcessRole = "all" | "api" | "worker";
 
 function isCompressionExcludedPath(path: string): boolean {
@@ -168,6 +174,17 @@ app.use(
     })
 );
 app.use(express.json({ limit: "1mb" })); // Increased from 100KB default to support large queue payloads
+
+// Express 5 leaves req.body undefined when no body parser matched (e.g. GET
+// requests or non-JSON content types); Express 4's body-parser set {} instead.
+// Handlers throughout the routes destructure req.body unconditionally, so
+// restore the Express 4 default to keep those returning 400s instead of 500s.
+app.use((req, res, next) => {
+    if (req.body === undefined) {
+        req.body = {};
+    }
+    next();
+});
 
 // When the process is draining, force connection close so clients reconnect to healthy pods quickly.
 app.use((req, res, next) => {

@@ -286,7 +286,7 @@ router.post(
  * GET /soulseek/search/:searchId
  * Get results for an ongoing search
  */
-router.get("/search/:searchId", requireAuth, async (req, res) => {
+router.get<{ searchId: string }>("/search/:searchId", requireAuth, async (req, res) => {
     try {
         const { searchId } = req.params;
         const session = searchSessions.get(searchId);

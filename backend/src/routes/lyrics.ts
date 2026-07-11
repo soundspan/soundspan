@@ -199,7 +199,7 @@ router.get("/:trackId", async (req, res) => {
  *       500:
  *         description: Server error
  */
-router.delete("/:trackId", lyricsMutationLimiter, async (req, res) => {
+router.delete<{ trackId: string }>("/:trackId", lyricsMutationLimiter, async (req, res) => {
     try {
         const { trackId } = req.params;
         await clearLyricsCache(trackId);

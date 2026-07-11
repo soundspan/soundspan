@@ -247,7 +247,7 @@ router.post("/retry-failed", requireAuth, requireAdmin, async (req, res) => {
  * POST /api/analysis/analyze/:trackId
  * Queue a specific track for analysis
  */
-router.post("/analyze/:trackId", requireAuth, async (req, res) => {
+router.post<{ trackId: string }>("/analyze/:trackId", requireAuth, async (req, res) => {
     try {
         const { trackId } = req.params;
 
@@ -320,7 +320,7 @@ router.post("/analyze/:trackId", requireAuth, async (req, res) => {
  * GET /api/analysis/track/:trackId
  * Get analysis data for a specific track
  */
-router.get("/track/:trackId", requireAuth, async (req, res) => {
+router.get<{ trackId: string }>("/track/:trackId", requireAuth, async (req, res) => {
     try {
         const { trackId } = req.params;
 

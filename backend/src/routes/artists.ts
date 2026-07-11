@@ -155,7 +155,7 @@ router.get(
     "/preview-stream/:videoId",
     requireAuthOrToken,
     ytMusicStreamLimiter,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const rangeHeader = req.headers.range;

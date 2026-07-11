@@ -160,7 +160,7 @@ router.get("/playlist-info", requireAuth, async (req: Request, res: Response) =>
 router.get(
     "/stream/:videoId",
     requireAuthOrToken,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const quality = (
@@ -547,7 +547,7 @@ router.get(
     "/download/:jobId",
     requireAuth,
     requireAdmin,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ jobId: string }>, res: Response) => {
         try {
             const { jobId } = req.params;
             const job = await youtubeDownloadService.getDownloadJobStatus(
@@ -631,7 +631,7 @@ router.delete(
     "/downloads/:jobId",
     requireAuth,
     requireAdmin,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ jobId: string }>, res: Response) => {
         try {
             const { jobId } = req.params;
             const job = await youtubeDownloadService.cancelDownload(jobId);

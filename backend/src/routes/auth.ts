@@ -703,7 +703,7 @@ router.post("/create-user", requireAuth, requireAdmin, async (req, res) => {
  *         description: User not found
  */
 // PATCH /auth/users/:id (Admin only) - Edit user's username, email, or password
-router.patch("/users/:id", requireAuth, requireAdmin, async (req, res) => {
+router.patch<{ id: string }>("/users/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const updateSchema = z.object({
@@ -813,7 +813,7 @@ router.patch("/users/:id", requireAuth, requireAdmin, async (req, res) => {
  *         description: User not found
  */
 // DELETE /auth/users/:id (Admin only)
-router.delete("/users/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete<{ id: string }>("/users/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -1023,7 +1023,7 @@ router.get(
  *         description: Invite code not found
  */
 // DELETE /auth/invite-codes/:id - Revoke an invite code (admin only)
-router.delete(
+router.delete<{ id: string }>(
     "/invite-codes/:id",
     requireAuth,
     requireAdmin,

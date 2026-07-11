@@ -653,7 +653,7 @@ router.get(
     "/album/:browseId",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ browseId: string }>, res: Response) => {
         try {
             const effectiveUserId = await getUserIdOrPublic(req.user!.id);
             const album = await ytMusicService.getAlbum(effectiveUserId, req.params.browseId);
@@ -694,7 +694,7 @@ router.get(
     "/artist/:channelId",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ channelId: string }>, res: Response) => {
         try {
             const effectiveUserId = await getUserIdOrPublic(req.user!.id);
             const artist = await ytMusicService.getArtist(effectiveUserId, req.params.channelId);
@@ -735,7 +735,7 @@ router.get(
     "/song/:videoId",
     requireAuth,
     requireYtMusicEnabled,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const effectiveUserId = await getUserIdOrPublic(req.user!.id);
             const song = await ytMusicService.getSong(effectiveUserId, req.params.videoId);
@@ -792,7 +792,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const userId = req.user!.id;
             const effectiveUserId = await getUserIdOrPublic(userId);
@@ -884,7 +884,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const userId = req.user!.id;
             const effectiveUserId = await getUserIdOrPublic(userId);
@@ -1267,7 +1267,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const quality = normalizeYtMusicStreamQuality(
@@ -1339,7 +1339,7 @@ router.get(
     requireAuthOrToken,
     requireYtMusicEnabled,
     ytMusicStreamLimiter,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const quality = normalizeYtMusicStreamQuality(

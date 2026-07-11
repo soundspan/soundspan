@@ -38,7 +38,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #16 | Frontend consolidation, decomposition & render performance | 0 / 1 / 5 |
 | #17 | Database & streaming performance | 1 / 3 / 5 |
 | #18 | Provider abstractions: acquisition, streaming & engine seams | 0 / 0 / 4 |
-| #19 | Framework & production-image modernization | 0 / 0 / 6 |
+| #19 | Framework & production-image modernization | 1 / 0 / 5 |
 | — | Standalone (no epic) | 1 / 0 / 1 |
 
 ## By dimension
@@ -106,7 +106,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F46](#f46) | 🟡 | dependencies-build | medium | S | low |  | #8 | No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend i… |
 | [F47](#f47) | ⬜ | dependencies-build | high→medium | M | low |  | #19 | API runtime image ships uncompiled TypeScript and runs it via tsx in production with fu… _(dup F17)_ |
 | [F48](#f48) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Bull 4 is maintenance-only with a version-mismatched @types/bull; migrate to BullMQ |
-| [F49](#f49) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Express 4 (Express 5 is GA) with half-migrated middleware majors |
+| [F49](#f49) | ✅ | dependencies-build | medium | L | medium | ⚠️ | #19 | Express 4 (Express 5 is GA) with half-migrated middleware majors |
 | [F50](#f50) | ✅ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproduci… |
 | [F51](#f51) | ⬜ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
 | [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and r… |
@@ -946,7 +946,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F49 — Express 4 (Express 5 is GA) with half-migrated middleware majors
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · ⚠️ breaking · epic: #19
+**✅ complete** (`deps/express-5`) · dimension: dependencies-build · severity: medium · effort: L · risk: medium · ⚠️ breaking · epic: #19
+
+> **Fix shipped.** Express 4.22 → 5.2.1 (+`@types/express` ^5), migrated per this finding's own recommendation as a compatibility-only change — no try/catch removal, no error-path refactor. The audit's undercount was itself an undercount: THREE path-to-regexp v8 breakages existed, not two — `library.ts` `"/cover-art/:id?"` → `"/cover-art{/:id}"`, `subsonic.ts` `router.all("*")` → `"/{*splat}"`, and a third nobody had flagged: `streaming.ts`'s inline regex-constrained param `":segmentName([A-Za-z0-9_.-]+\\.(?:m4s|webm))"` (removed syntax in v8), now an unconstrained `:segmentName` plus a pre-auth guard middleware that `next("route")`s on a pattern mismatch, preserving Express 4's 404-without-auth-check semantics. Two Express-4 behavior defaults are explicitly restored in `index.ts`: `app.set("query parser", "extended")` (v5 flipped the default to `simple`) and a post-`express.json` shim that resets `req.body` to `{}` when no parser matched (v5 leaves it `undefined`; ~100 handlers destructure it unconditionally, and without the shim malformed requests would 500 instead of 400). The `@types/express` v5 `ParamsDictionary` widening to `string | string[]` (splat params) surfaced ~70 type errors at routes whose middleware breaks literal-path param inference; fixed with per-route param typings (`Request<{ id: string }>` / `router.get<{ id: string }>`) across 19 route files — no runtime change, named params are always strings. Middleware survey: `@bull-board/express` resolves to 6.16.4 (depends on express ^5.2.0), `express-session` 1.19.0, `express-rate-limit` 8.5.2 (peer `>= 4.11`), `swagger-ui-express` 5.0.1 (peer allows 5.x); cors/compression/multer/connect-redis are express-agnostic — nothing hard-blocked. helmet stays on 7 per this finding's own recommendation (v8 + CSP/HSTS is its own PR). Verified: `tsc --noEmit` 0 errors, full backend Jest suite green, plus a runtime smoke that registered all 339 route path literals on an Express 5 router (syntax proof) and exercised the three migrated patterns end-to-end against the real subsonic/library/streaming routers.
 
 > **Audit note.** ✓ Undercount: a SECOND guaranteed Express-5 breakage exists at `subsonic.ts:6667` (`router.all("*")`), not just `library.ts`. The migration surface is larger than 'small'.
 

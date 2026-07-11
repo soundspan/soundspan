@@ -322,7 +322,7 @@ async function invokeWithErrorHandler(handler: any, req: any, res: any) {
 }
 
 describe("library cover-art proxy compatibility", () => {
-    const coverArtHandler = getGetHandler("/cover-art/:id?");
+    const coverArtHandler = getGetHandler("/cover-art{/:id}");
     const colorsHandler = getGetHandler("/cover-art-colors");
 
     beforeEach(() => {

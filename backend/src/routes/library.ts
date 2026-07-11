@@ -4051,7 +4051,9 @@ router.get("/tracks/shuffle", asyncHandler(async (req, res) => {
  */
 // GET /library/cover-art/:id?size= or GET /library/cover-art?url=&size=
 // Apply lenient image limiter (500 req/min) instead of general API limiter (100 req/15min)
-router.get("/cover-art/:id?", imageLimiter, asyncHandler(async (req, res) => {
+// Express 5 (path-to-regexp v8) replaced the ":id?" optional-param syntax with
+// braces: "{/:id}" matches both /cover-art and /cover-art/:id.
+router.get<{ id?: string }>("/cover-art{/:id}", imageLimiter, asyncHandler(async (req, res) => {
     const { size, url } = req.query;
     let coverUrl: string;
 
@@ -4624,7 +4626,7 @@ router.get("/cover-art/:id?", imageLimiter, asyncHandler(async (req, res) => {
  */
 // GET /library/album-cover/:mbid - Fetch and cache album cover by MBID
 // This is called lazily by the frontend when an album doesn't have a cached cover
-router.get("/album-cover/:mbid", imageLimiter, asyncHandler(async (req, res) => {
+router.get<{ mbid: string }>("/album-cover/:mbid", imageLimiter, asyncHandler(async (req, res) => {
     const { mbid } = req.params;
 
     if (!mbid || mbid.startsWith("temp-")) {
@@ -5784,7 +5786,7 @@ router.get("/tracks/:id", asyncHandler(async (req, res) => {
 // Returns audio quality metadata (bitrate, sample rate, bit depth, codec)
 // by probing the file on disk with music-metadata. Uses a short-lived
 // in-process cache keyed by track/file identity to avoid repeated probes.
-router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
+router.get<{ id: string }>("/tracks/:id/audio-info", requireAuth, async (req, res) => {
     try {
         const trackId = req.params.id;
         const playback = parseBooleanQueryParam(req.query.playback, false);
@@ -5908,7 +5910,7 @@ router.get("/tracks/:id/audio-info", requireAuth, async (req, res) => {
  *         description: Not authenticated
  */
 // DELETE /library/tracks/:id
-router.delete("/tracks/:id", requireAdmin, asyncHandler(async (req, res) => {
+router.delete<{ id: string }>("/tracks/:id", requireAdmin, asyncHandler(async (req, res) => {
     const deletionsEnabled = await isLibraryDeletionEnabled();
     if (!deletionsEnabled) {
         return res.status(403).json({
@@ -5996,7 +5998,7 @@ router.delete("/tracks/:id", requireAdmin, asyncHandler(async (req, res) => {
  *         description: Not authenticated
  */
 // DELETE /library/albums/:id
-router.delete("/albums/:id", requireAdmin, asyncHandler(async (req, res) => {
+router.delete<{ id: string }>("/albums/:id", requireAdmin, asyncHandler(async (req, res) => {
     const deletionsEnabled = await isLibraryDeletionEnabled();
     if (!deletionsEnabled) {
         return res.status(403).json({
@@ -6119,7 +6121,7 @@ router.delete("/albums/:id", requireAdmin, asyncHandler(async (req, res) => {
  *         description: Not authenticated
  */
 // DELETE /library/artists/:id
-router.delete("/artists/:id", requireAdmin, async (req, res) => {
+router.delete<{ id: string }>("/artists/:id", requireAdmin, async (req, res) => {
     try {
         const deletionsEnabled = await isLibraryDeletionEnabled();
         if (!deletionsEnabled) {
