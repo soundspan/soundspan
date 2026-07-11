@@ -93,7 +93,7 @@
         "@types/node": "^24",
         "@types/supertest": "^7.2.0",
         "jest": "^30.4.2",
-        "prisma": "^6.19.2",
+        "prisma": "^6.19.3",
         "supertest": "^7.2.2",
         "ts-jest": "^29.4.11",
         "tsx": "^4.23.0",

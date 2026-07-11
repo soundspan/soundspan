@@ -1,17 +1,17 @@
 # CLAP and ML
-laion-clap>=1.1.4
+laion-clap>=1.1.7
 torch>=2.0.0
-torchaudio>=2.0.0
+torchaudio>=2.11.0
 torchvision>=0.15.0
-transformers>=4.30.0
+transformers>=5.13.1
 librosa>=0.11.0
 
 # Database and queue
-redis>=4.5.0
+redis>=8.0.1
 psycopg2-binary>=2.9.0
 pgvector>=0.5.0
 
 # Utilities
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 numpy>=1.24.0
 requests>=2.31.0
