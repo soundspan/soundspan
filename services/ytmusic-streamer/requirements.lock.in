@@ -1,0 +1,19 @@
+# Compile input for requirements.lock — the hash-locked portion of the
+# ytmusic-streamer image.
+#
+# This is every dependency the image needs EXCEPT the two deliberately-exempt
+# packages, yt-dlp and ytmusicapi (see requirements-exempt.txt for why). Those
+# two are installed loose, AFTER this lock, so a YouTube breakage can be fixed
+# with a same-day floor bump without regenerating the lock.
+#
+# `requests` is ytmusicapi's only runtime dependency; it is pinned+hashed here
+# so that when the exempt install runs, ONLY yt-dlp + ytmusicapi themselves are
+# unpinned — their transitive tree is already fixed by this lock.
+#
+# Regenerate the lock: see the header of requirements.lock.
+fastapi>=0.139.0
+uvicorn>=0.51.0
+mutagen>=1.48.1
+pydantic>=2.13.4
+httpx>=0.28.1
+requests>=2.22.0

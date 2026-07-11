@@ -56,7 +56,7 @@ describe("api entrypoint runtime behavior", () => {
         dependencyProbeImpl,
         dependencyHealthy = true,
         invokeListenCallback = true,
-        redisQuitImpl,
+        redisCloseImpl,
         prismaDisconnectImpl,
         prismaConnectImpl,
         prismaQueryRawImpl,
@@ -68,7 +68,7 @@ describe("api entrypoint runtime behavior", () => {
         dependencyProbeImpl?: () => Promise<any>;
         dependencyHealthy?: boolean;
         invokeListenCallback?: boolean;
-        redisQuitImpl?: () => Promise<unknown>;
+        redisCloseImpl?: () => Promise<unknown>;
         prismaDisconnectImpl?: () => Promise<unknown>;
         prismaConnectImpl?: () => Promise<unknown>;
         prismaQueryRawImpl?: () => Promise<unknown>;
@@ -120,7 +120,7 @@ describe("api entrypoint runtime behavior", () => {
         const redisClient = {
             isReady: true,
             ping: jest.fn(async () => "PONG"),
-            quit: jest.fn(redisQuitImpl || (async () => "OK")),
+            close: jest.fn(redisCloseImpl || (async () => "OK")),
         };
         const prisma = {
             $queryRaw: jest.fn(
@@ -827,7 +827,7 @@ describe("api entrypoint runtime behavior", () => {
         expect(mocks.server.close).toHaveBeenCalledTimes(1);
         expect(mocks.server.closeIdleConnections).toHaveBeenCalledTimes(1);
         expect(mocks.shutdownWorkers).toHaveBeenCalledTimes(1);
-        expect(mocks.redisClient.quit).toHaveBeenCalledTimes(1);
+        expect(mocks.redisClient.close).toHaveBeenCalledTimes(1);
         expect(mocks.prisma.$disconnect).toHaveBeenCalled();
         expect(process.exit).toHaveBeenCalledWith(0);
         expect(mocks.logger.debug).toHaveBeenCalledWith(
@@ -850,8 +850,8 @@ describe("api entrypoint runtime behavior", () => {
         process.exit = jest.fn() as any;
 
         const mocks = setupApiEntrypointMocks({
-            redisQuitImpl: async () => {
-                throw new Error("quit-failed");
+            redisCloseImpl: async () => {
+                throw new Error("close-failed");
             },
         });
 

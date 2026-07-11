@@ -29,7 +29,8 @@ redisClient.on("error", (err) => {
     // Don't crash the app - Redis is optional for caching
 });
 
-redisClient.on("disconnect", () => {
+// node-redis emits "end" when the connection closes (there is no "disconnect" event).
+redisClient.on("end", () => {
     logger.debug("Redis disconnected - will reconnect automatically");
 });
 

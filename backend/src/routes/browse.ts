@@ -789,7 +789,7 @@ router.get("/ytmusic/mood-playlists", async (req: Request, res: Response) => {
  *       401:
  *         description: Not authenticated
  */
-router.get("/ytmusic/album/:id", async (req: Request, res: Response) => {
+router.get("/ytmusic/album/:id", async (req: Request<{ id: string }>, res: Response) => {
     try {
         if (!(await ensureYtMusicEnabled(res))) {
             return;
@@ -872,7 +872,7 @@ router.get("/ytmusic/album/:id", async (req: Request, res: Response) => {
  *       401:
  *         description: Not authenticated
  */
-router.get("/ytmusic/playlist/:id", async (req: Request, res: Response) => {
+router.get("/ytmusic/playlist/:id", async (req: Request<{ id: string }>, res: Response) => {
     try {
         if (!(await ensureYtMusicEnabled(res))) {
             return;
@@ -1399,7 +1399,7 @@ router.get("/tidal/genre-playlists", async (req: Request, res: Response) => {
  *       401:
  *         description: Not authenticated
  */
-router.get("/tidal/playlist/:id", async (req: Request, res: Response) => {
+router.get("/tidal/playlist/:id", async (req: Request<{ id: string }>, res: Response) => {
     try {
         if (!(await ensureTidalEnabled(req, res))) {
             return;
@@ -1456,7 +1456,7 @@ router.get("/tidal/playlist/:id", async (req: Request, res: Response) => {
  *       401:
  *         description: Not authenticated
  */
-router.get("/tidal/mix/:id", async (req: Request, res: Response) => {
+router.get("/tidal/mix/:id", async (req: Request<{ id: string }>, res: Response) => {
     try {
         if (!(await ensureTidalEnabled(req, res))) {
             return;

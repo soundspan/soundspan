@@ -808,7 +808,7 @@ router.get(
     "/stream-info/:trackId",
     requireAuthOrToken,
     requireTidalStreamingEnabled,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ trackId: string }>, res: Response) => {
         const userId = req.user!.id;
         const trackId = parseInt(req.params.trackId, 10);
         if (isNaN(trackId)) {
@@ -890,7 +890,7 @@ router.get(
 router.get(
     "/stream/:trackId",
     requireAuthOrToken,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ trackId: string }>, res: Response) => {
         const userId = req.user!.id;
         const trackId = parseInt(req.params.trackId, 10);
         if (isNaN(trackId)) {

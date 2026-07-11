@@ -384,8 +384,13 @@ const respondWithSegmentedStartupError = ({
     return res.status(statusCode).json(payload);
 };
 
+type SegmentedSessionRouteParams = { sessionId: string };
+type SegmentedSegmentRouteParams = SegmentedSessionRouteParams & {
+    segmentName: string;
+};
+
 interface AuthorizeSegmentedSessionOptions {
-    req: express.Request;
+    req: express.Request<SegmentedSessionRouteParams>;
     res: express.Response;
     metricEvent: string;
     startedAtMs: number;
@@ -631,7 +636,7 @@ const handleSegmentedSendFileError = ({
 };
 
 const handleSegmentFetch = async (
-    req: express.Request,
+    req: express.Request<SegmentedSegmentRouteParams>,
     res: express.Response,
 ): Promise<express.Response> => {
     const startedAtMs = Date.now();
@@ -962,7 +967,7 @@ router.post("/v1/sessions", requireAuth, async (req, res) => {
  *       404:
  *         description: Session or manifest not found
  */
-router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req, res) => {
+router.get("/v1/sessions/:sessionId/manifest.mpd", requireAuth, async (req: express.Request<SegmentedSessionRouteParams>, res) => {
     const startedAtMs = Date.now();
     const startupCorrelationFields = resolveSegmentedStartupCorrelationFields(req);
     let sourceType: string | undefined;
@@ -1160,8 +1165,21 @@ router.get(
  *       404:
  *         description: Session or segment not found
  */
+// Express 5 (path-to-regexp v8) removed inline ":param(regex)" constraints, so
+// the segment-name pattern is enforced by an explicit guard. It runs before
+// requireAuth and skips to the next route via next("route") on a mismatch,
+// preserving Express 4's behavior of never invoking this route (404 fall
+// through, no auth check) for shorthand paths that are not media segments.
+const SEGMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+\.(?:m4s|webm)$/;
 router.get(
-    "/v1/sessions/:sessionId/:segmentName([A-Za-z0-9_.-]+\\.(?:m4s|webm))",
+    "/v1/sessions/:sessionId/:segmentName",
+    (req: express.Request<SegmentedSegmentRouteParams>, _res, next) => {
+        if (!SEGMENT_NAME_PATTERN.test(req.params.segmentName)) {
+            next("route");
+            return;
+        }
+        next();
+    },
     requireAuth,
     handleSegmentFetch,
 );
@@ -1203,7 +1221,7 @@ router.get(
  *       404:
  *         description: Session not found
  */
-router.post("/v1/sessions/:sessionId/heartbeat", requireAuth, async (req, res) => {
+router.post("/v1/sessions/:sessionId/heartbeat", requireAuth, async (req: express.Request<SegmentedSessionRouteParams>, res) => {
     const startedAtMs = Date.now();
     let sourceType: string | undefined;
     try {
@@ -1314,7 +1332,7 @@ router.post("/v1/sessions/:sessionId/heartbeat", requireAuth, async (req, res) =
  *       404:
  *         description: Session not found
  */
-router.post("/v1/sessions/:sessionId/handoff", requireAuth, async (req, res) => {
+router.post("/v1/sessions/:sessionId/handoff", requireAuth, async (req: express.Request<SegmentedSessionRouteParams>, res) => {
     const startedAtMs = Date.now();
     let sourceType: string | undefined;
     logSegmentedStreamingMetric("session.handoff", {

@@ -129,15 +129,16 @@ function createFirstByteTimeoutProxyReqHandler({ name, logger, env }) {
 }
 
 /**
- * Build an http-proxy-middleware v3 error handler that preserves the
- * structured 503 JSON error contract ({ error, code }) used by all
+ * Build an http-proxy-middleware (v3+) error handler that preserves
+ * the structured 503 JSON error contract ({ error, code }) used by all
  * backend proxies in server.js.
  *
  * v3 removed the v2 `onError` option, so handlers must be registered
  * via `on.error`; when a custom handler is registered, hpm also skips
- * its default plain-text error response. WebSocket upgrade failures
- * hand the handler a raw socket instead of a ServerResponse, so
- * socket-like targets are destroyed rather than written to.
+ * its default error response (still true in v4, which swapped the
+ * underlying proxy from http-proxy to httpxy). WebSocket upgrade
+ * failures hand the handler a raw socket instead of a ServerResponse,
+ * so socket-like targets are destroyed rather than written to.
  *
  * @param {{ name: string, logger: { error: Function }, errorMessage: string, errorCode: string }} config
  * @returns {(err: unknown, req: { method?: string, url?: string }, res: unknown) => void}

@@ -123,7 +123,7 @@ router.get(
 router.post(
     "/:id/read",
     requireAuth,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ id: string }>, res: Response) => {
         try {
             await notificationService.markAsRead(req.params.id, req.user!.id);
             res.json({ success: true });
@@ -207,7 +207,7 @@ router.post(
 router.post(
     "/:id/clear",
     requireAuth,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ id: string }>, res: Response) => {
         try {
             await notificationService.clear(req.params.id, req.user!.id);
             res.json({ success: true });
@@ -388,7 +388,7 @@ router.get(
 router.post(
     "/downloads/:id/clear",
     requireAuth,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ id: string }>, res: Response) => {
         try {
             await prisma.downloadJob.updateMany({
                 where: {
@@ -492,7 +492,7 @@ router.post(
 router.post(
     "/downloads/:id/retry",
     requireAuth,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ id: string }>, res: Response) => {
         try {
             // Get the failed download
             const failedJob = await prisma.downloadJob.findFirst({

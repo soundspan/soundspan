@@ -6687,7 +6687,9 @@ router.post(endpointAliases("unstar"), handleUnstar);
  *       200:
  *         description: Subsonic error response indicating endpoint not supported
  */
-router.all("*", (req, res) => {
+// Express 5 (path-to-regexp v8) requires named wildcards; "/{*splat}" keeps
+// the Express 4 "*" behavior of also matching the router root path.
+router.all("/{*splat}", (req, res) => {
     const { format, callback } = getRequestContext(req);
     sendSubsonicError(
         res,

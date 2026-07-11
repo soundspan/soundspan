@@ -112,7 +112,7 @@ router.get("/preview/:artistName/:trackTitle", async (req, res) => {
 
         if (redisClient) {
             await redisClient.set(cacheKey, videoId || "null", {
-                EX: DISCOVERY_CACHE_TTL,
+                expiration: { type: "EX", value: DISCOVERY_CACHE_TTL },
             });
         }
 
@@ -155,7 +155,7 @@ router.get(
     "/preview-stream/:videoId",
     requireAuthOrToken,
     ytMusicStreamLimiter,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const rangeHeader = req.headers.range;
