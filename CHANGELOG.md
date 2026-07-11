@@ -46,7 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Admin/Operations
 
-- Database migration `20260711012100_add_track_random_sample_column` (roadmap F15) adds `Track.random double precision` (DB-generated `random()` default) plus a btree index, backing the new `/tracks/shuffle` sampling query above. Because the default is volatile, this `ADD COLUMN` rewrites the whole table in PostgreSQL 16 (not the metadata-only fast path constant defaults get) — milliseconds at the current 15,230-row corpus. Every writer (Prisma upserts in the scanner, any future inserts) gets a value automatically with zero app-code changes; the Python analyzer sidecars only `UPDATE` existing `Track` rows, so they need no changes either.
+- Database migration `20260711012100_add_track_random_sample_column` (roadmap F15) adds `Track.random double precision` (DB-generated `random()` default) plus a btree index, backing the new `/tracks/shuffle` sampling query above. Because the default is volatile, this `ADD COLUMN` rewrites the whole table in PostgreSQL 16 (not the metadata-only fast path constant defaults get) — milliseconds at the current 15,230-row corpus. Every writer (Prisma upserts in the scanner, any future inserts) gets a value automatically with zero app-code changes; the Python analyzer sidecars only `UPDATE` existing `Track` rows, so they need no changes either. The `CREATE INDEX` is non-`CONCURRENT` (repo migration convention), so it briefly locks writes to `Track` while it builds — negligible at homelab scale.
+
 ## [1.8.0] - 2026-07-10
 
 ### Added
