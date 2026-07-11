@@ -74,6 +74,6 @@
     "happy-dom": "20.10.6",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
-    "typescript": "^5"
+    "typescript": "^6"
   }
 }
