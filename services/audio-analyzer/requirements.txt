@@ -1,10 +1,17 @@
-# Audio Analyzer Requirements
-# Note: TensorFlow + essentia-tensorflow are installed directly in Dockerfile.
-# This file only tracks the queue/database/runtime support dependencies.
+# Audio Analyzer Requirements — Essentia with TensorFlow (MusiCNN)
+# This is the real, complete image manifest. It is compiled into a
+# hash-pinned lock (requirements.lock, Python 3.8 target) that the Dockerfile
+# installs with `pip install --require-hashes`. Keep this file and the lock in
+# sync — regenerate the lock (see its header) after any edit here.
+
+# TensorFlow + Essentia (MusiCNN). essentia-tensorflow links against the
+# TF 2.13–2.15 ABI; on Python 3.8 this resolves to the last TF 2.13.x wheel.
+tensorflow>=2.13.0,<2.16.0
+essentia-tensorflow
 
 # Queue and database
-redis>=8.0.1
-psycopg2-binary>=2.9.12
+redis>=4.5.0
+psycopg2-binary>=2.9.0
 
-# Numeric operations (compatible with older TensorFlow)
-numpy>=1.19.0,<1.24.0
+# Numeric operations (numpy<2.0 required by the TensorFlow/Essentia ABI)
+numpy>=1.19.0,<2.0.0

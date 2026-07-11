@@ -14,9 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY services/tidal-downloader/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies from the hash-pinned lock (roadmap F50) so a
+# rebuild of this commit resolves the identical transitive tree.
+COPY services/tidal-downloader/requirements.lock ./requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Copy application code
 COPY services/tidal-downloader/app.py ./app.py
