@@ -235,7 +235,7 @@ router.post("/login", async (req, res) => {
         if (err instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: err.errors });
+                .json({ error: "Invalid request", details: err.issues });
         }
         logger.error("Login error:", err);
         res.status(500).json({ error: "Internal error" });
@@ -773,10 +773,10 @@ router.patch("/users/:id", requireAuth, requireAdmin, async (req, res) => {
         res.json(updated);
     } catch (err) {
         if (err instanceof z.ZodError) {
-            const firstError = err.errors[0];
+            const firstError = err.issues[0];
             return res.status(400).json({
                 error: firstError.message,
-                details: err.errors,
+                details: err.issues,
             });
         }
         logger.error("Update user error:", err);
@@ -923,7 +923,7 @@ router.post(
             if (err instanceof z.ZodError) {
                 return res
                     .status(400)
-                    .json({ error: "Invalid request", details: err.errors });
+                    .json({ error: "Invalid request", details: err.issues });
             }
             logger.error("Create invite code error:", err);
             res.status(500).json({ error: "Failed to create invite code" });
@@ -1205,10 +1205,10 @@ router.post("/register", async (req, res) => {
         });
     } catch (err) {
         if (err instanceof z.ZodError) {
-            const firstError = err.errors[0];
+            const firstError = err.issues[0];
             return res.status(400).json({
                 error: firstError.message,
-                details: err.errors,
+                details: err.issues,
             });
         }
         if (err instanceof InviteCodeExhaustedError) {

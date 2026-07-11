@@ -57,7 +57,7 @@ router.get("/info", requireAuth, async (req: Request, res: Response) => {
         return res.json(info);
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            return res.status(400).json({ error: err.errors[0].message });
+            return res.status(400).json({ error: err.issues[0].message });
         }
         if (err.response?.status === 400) {
             return res
@@ -111,7 +111,7 @@ router.get("/playlist-info", requireAuth, async (req: Request, res: Response) =>
         return res.json(info);
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            return res.status(400).json({ error: err.errors[0].message });
+            return res.status(400).json({ error: err.issues[0].message });
         }
         if (err.response?.status === 422) {
             return res.status(422).json({
@@ -299,7 +299,7 @@ router.post("/download", requireAuth, requireAdmin, async (req: Request, res: Re
         return res.status(202).json(job);
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            return res.status(400).json({ error: err.errors[0].message });
+            return res.status(400).json({ error: err.issues[0].message });
         }
         if (err.response?.status === 400) {
             return res.status(400).json({

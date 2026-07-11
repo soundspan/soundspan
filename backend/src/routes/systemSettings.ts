@@ -525,7 +525,7 @@ router.post("/", async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid settings", details: error.errors });
+                .json({ error: "Invalid settings", details: error.issues });
         }
         logger.error("Update system settings error:", error);
         sendInternalRouteError(res, "Failed to update system settings");

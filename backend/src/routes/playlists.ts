@@ -325,7 +325,7 @@ router.post("/", async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Create playlist error:", error);
         res.status(500).json({ error: "Failed to create playlist" });
@@ -535,7 +535,7 @@ router.put("/:id", async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Update playlist error:", error);
         res.status(500).json({ error: "Failed to update playlist" });
@@ -774,7 +774,7 @@ router.post("/:id/items", async (req, res) => {
         if (!parsedBody.success) {
             return res.status(400).json({
                 error: "Invalid request",
-                details: parsedBody.error.errors,
+                details: parsedBody.error.issues,
             });
         }
         const addTrackData = parsedBody.data;
@@ -891,7 +891,7 @@ router.post("/:id/items", async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         if (
             error instanceof Error &&

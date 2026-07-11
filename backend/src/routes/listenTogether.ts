@@ -72,7 +72,7 @@ const joinGroupSchema = z.object({
 
 function handleError(label: string, error: unknown, res: Response) {
     if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid request", details: error.errors });
+        return res.status(400).json({ error: "Invalid request", details: error.issues });
     }
     if (error instanceof GroupError) {
         const statusMap: Record<string, number> = {

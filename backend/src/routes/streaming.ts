@@ -33,7 +33,7 @@ const continuitySnapshotSchema = z.object({
 
 const clientMetricSchema = z.object({
     event: z.string().min(1).max(128),
-    fields: z.record(z.unknown()).optional(),
+    fields: z.record(z.string(), z.unknown()).optional(),
 });
 
 const resolveSessionToken = (req: express.Request): string | null => {
