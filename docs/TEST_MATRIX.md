@@ -15,7 +15,7 @@ Canonical domain-to-test mapping for fast, targeted verification.
 npx --prefix backend jest --no-coverage <testFile>
 
 # Pattern match
-npx --prefix backend jest --no-coverage --testPathPattern "<pattern>"
+npx --prefix backend jest --no-coverage --testPathPatterns "<pattern>"
 
 # With coverage (slower)
 npm --prefix backend run test:coverage

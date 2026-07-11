@@ -7,5 +7,5 @@ If AWM is available in your session, also follow [.awm/AGENTS-AWM.md](.awm/AGENT
 ## Source Of Truth
 
 - `AGENTS.md` is the full repo contract.
-- Claude assets: `.claude/commands/`, `.claude/awm-broker/`
+- Claude assets (created by the reinstall command below; `.claude/` is local-only, not tracked): `.claude/commands/`, `.claude/awm-broker/`
 - Reinstall command pack: `bash <(curl -fsSL https://raw.githubusercontent.com/bonztm/agent-workflow-manager/main/scripts/install-skill-pack.sh) --claude`

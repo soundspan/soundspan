@@ -1,0 +1,34 @@
+# Gitleaks config for soundspan (docs/modernization-roadmap.md F45, epic
+# #10, #59 WS2.4).
+#
+# Extends gitleaks' built-in default ruleset; only adds allowlist entries
+# for confirmed false positives / synthetic test fixtures, each with a
+# one-line rationale. Never add an entry for a plausibly-real secret --
+# rotate it and scrub it from history instead of allowlisting it.
+
+title = "soundspan gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Confirmed false positives / synthetic test fixtures, triaged 2026-07-10 (cycle 2 / packet E) from a full-history scan of the main checkout."
+regexes = [
+  # backend/src/utils/__tests__/apiKeyHash.test.ts:123 -- a named, obviously
+  # non-real legacy-pepper value used to test the encryption-key compat
+  # alias path ("compat-alias-pepper" is literally what it says it is).
+  # Hit at 2 commits (fe5f5858, 600f632e) touching the same line.
+  '''compat-alias-pepper-1234567890''',
+
+  # backend/src/utils/__tests__/timingSafe.test.ts:35-36 -- synthetic
+  # "a1b2c3d4..." placeholder hex strings used to test constant-time string
+  # comparison; not real key material. Hit at commit ab0bfc44 (2 lines).
+  '''a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4''',
+
+  # CHANGELOG.md:59,65 -- prose ("...OAuth tokens, 2FA/Subsonic secrets...")
+  # describing what the encryption-at-rest work covers. "2FA/Subsonic" is
+  # two feature names joined by a slash, not a credential; gitleaks'
+  # generic-api-key rule pattern-matches the slash-joined token shape.
+  # Hit at 3 commits (d5dad958, b27eb406, 0888643a).
+  '''2FA/Subsonic''',
+]

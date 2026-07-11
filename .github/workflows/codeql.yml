@@ -1,0 +1,55 @@
+name: CodeQL
+
+# Static analysis via GitHub's default-setup-style CodeQL (docs/modernization-
+# roadmap.md F45, epic #10, #59 WS2.4). Alerts surface in the Security tab
+# and are non-blocking by nature; the `continue-on-error` below is defense
+# in depth for the same day-one non-blocking posture as security-scanning.yml.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main] # immediate post-merge analysis, aligned with security-scanning.yml
+  schedule:
+    - cron: "30 6 * * 1" # Monday 06:30 UTC, offset from security-scanning.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # javascript-typescript (not separate javascript/typescript entries)
+        # covers both frontend and backend; python covers the 4 sidecars.
+        # Helm/bash are out of CodeQL's scope.
+        language: [javascript-typescript, python]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

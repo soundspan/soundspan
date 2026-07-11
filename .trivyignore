@@ -1,0 +1,52 @@
+# Trivy ignore-list policy (docs/modernization-roadmap.md F45, epic #10,
+# #59 WS2.4, #59 risk 3).
+#
+# What belongs here: confirmed false positives, and CVEs reviewed and
+# deliberately deferred -- each entry MUST carry a one-line rationale
+# comment. Never add an entry silently.
+#
+# What does NOT belong here: a CVE just because it's noisy. Every workflow
+# that references this file runs Trivy non-blocking (`exit-code: 0`,
+# `continue-on-error: true`), specifically so real findings stay visible
+# without gating anything -- see F45's "red is signal, not noise" framing.
+# Blanket-allowlisting a fixable CVE defeats the point of shipping this
+# scanner in the first place.
+#
+# Do NOT add entries here to suppress yt-dlp / ytmusicapi findings
+# (services/ytmusic-streamer). Those pins are deliberately loose so
+# YouTube-breakage fixes land fast; Dependabot/Trivy pressure on them is
+# wanted, not something to silence. See .github/dependabot.yml's header.
+#
+# --- Day-one filesystem baseline (2026-07-10, cycle 2 / packet E) ----------
+# Command (from a clean worktree at commit 796dacd / 1.8.0):
+#   docker run --rm -v "$PWD:/repo" aquasec/trivy fs \
+#     --severity CRITICAL,HIGH --ignore-unfixed /repo
+#
+# Result: 49 findings, all HIGH (0 CRITICAL), all with a fixed version
+# already published (Status: fixed) -- i.e. every one of them is a real,
+# Dependabot-actionable finding, not noise:
+#   - backend/package-lock.json (31): axios, defu, effect,
+#     express-rate-limit, form-data, lodash, minimatch, multer,
+#     music-metadata, path-to-regexp, socket.io-parser, ws
+#   - frontend/package-lock.json (18): @xmldom/xmldom,
+#     http-proxy-middleware, next, picomatch, socket.io-parser, ws
+#
+# None of these 49 were allowlisted. They're left as the intended day-one
+# visible baseline; expect most to clear as the weekly grouped Dependabot
+# PRs (.github/dependabot.yml) land minor/patch bumps. Re-triage individual
+# CVE IDs into this file (with rationale) only if a specific one turns out
+# to be a false positive or a deliberate, reasoned "not fixing this now".
+#
+# --- Anticipated (not yet seeded) base-image baseline -----------------------
+# services/audio-analyzer/Dockerfile is `FROM ubuntu:20.04` (EOL) and
+# audio-analyzer-clap pulls in torch/torchaudio/torchvision -- both will
+# carry unfixable-in-place CVEs once trivy-image actually scans the built
+# GHCR images (schedule/workflow_dispatch only, see
+# .github/workflows/image-security-scanning.yml). This worktree can't build all
+# 8 images to pre-seed that baseline, so nothing has been added for it yet.
+# Add entries here with rationale (CVE ID + why it's unfixable/accepted) the
+# first time that job actually reports something -- don't invent CVE IDs
+# speculatively.
+#
+# Syntax: one CVE-ID / GHSA-ID per line, optional trailing comment. See
+# https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/#trivyignore

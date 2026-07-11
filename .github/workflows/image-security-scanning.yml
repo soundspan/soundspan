@@ -1,0 +1,122 @@
+name: Image Security Scanning
+
+# Trivy scans of the 8 published GHCR images (root AIO + 7 suffixed), split
+# out of security-scanning.yml: gating the job there with a job-level
+# event `if:` meant every PR showed a permanently skipped check literally
+# named "Trivy Image Scan (${{ matrix.name }})" (the matrix never expands
+# on skipped jobs). Here the workflow's own triggers do the gating.
+#
+# These are *published* image scans, not part of the PR feedback loop
+# (image-builds.yml doesn't `load:` a local image for PR builds, so there's
+# nothing fresh to scan on a PR -- see F45's safety note in the roadmap).
+# Non-blocking day one, same as security-scanning.yml; the blocking ratchet
+# is tracked for 1.10.0 (#59).
+on:
+  schedule:
+    - cron: "15 6 * * 1" # Monday 06:15 UTC, offset from security-scanning.yml (06:00) and codeql.yml (06:30)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-security-scanning-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy-image:
+    name: Trivy Image Scan (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aio
+            image: soundspan
+          - name: backend
+            image: soundspan-backend
+          - name: backend-worker
+            image: soundspan-backend-worker
+          - name: frontend
+            image: soundspan-frontend
+          - name: audio-analyzer
+            image: soundspan-audio-analyzer
+          - name: audio-analyzer-clap
+            image: soundspan-audio-analyzer-clap
+          - name: tidal-downloader
+            image: soundspan-tidal-downloader
+          - name: ytmusic-streamer
+            image: soundspan-ytmusic-streamer
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image ref and check it exists
+        id: check
+        run: |
+          set -euo pipefail
+          REPO_OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          IMAGE_REF="ghcr.io/${REPO_OWNER_LOWER}/${{ matrix.image }}:latest"
+          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+
+          # Skip gracefully: a matrix entry can outrun what's actually been
+          # published (e.g. a brand-new image name), so don't hard-fail --
+          # just note it and move on.
+          if docker manifest inspect "${IMAGE_REF}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::${IMAGE_REF} not found in GHCR yet, skipping scan."
+          fi
+
+      - name: Run Trivy image scan
+        if: steps.check.outputs.exists == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.check.outputs.image_ref }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "0"
+          format: sarif
+          output: trivy-image-${{ matrix.name }}.sarif
+
+      - name: Upload SARIF to code scanning
+        if: steps.check.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-image-${{ matrix.name }}.sarif
+          category: trivy-image-${{ matrix.name }}
+
+      - name: Publish finding count to job summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Image Scan: ${{ matrix.image }}:latest"
+            echo ""
+            if [ "${{ steps.check.outputs.exists }}" != "true" ]; then
+              echo "Image not found in GHCR yet -- skipped."
+            elif [ -f "trivy-image-${{ matrix.name }}.sarif" ]; then
+              COUNT=$(python3 -c "import json; d=json.load(open('trivy-image-${{ matrix.name }}.sarif')); print(sum(len(r.get('results', [])) for r in d.get('runs', [])))")
+              echo "Findings (CRITICAL/HIGH, ignore-unfixed, after .trivyignore): **${COUNT}**"
+              echo ""
+              echo "Full results: Security tab, category \`trivy-image-${{ matrix.name }}\`."
+            else
+              echo "No SARIF output produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

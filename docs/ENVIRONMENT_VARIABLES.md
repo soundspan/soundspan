@@ -78,7 +78,7 @@ Experimental feature note:
 | `DATABASE_POOL_SIZE` | `backend`, `backend-worker` | Optional | role-aware: `api=8`, `worker=4`, `all=12` | Prisma DB pool connection limit. |
 | `DATABASE_POOL_TIMEOUT` | `backend`, `backend-worker` | Optional | `30` | Prisma DB pool timeout in seconds. |
 | `LOG_QUERIES` | `backend`, `backend-worker` | Optional | `false` | Enables Prisma query logging in development. |
-| `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` | Preserves Redis streams/groups by default; do not flush on start. |
+| `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` in all shipped deploy configs (compose files and the Helm chart's `config.redisFlushOnStartup`); backend image default when the variable is unset: `true` | When `true`, the backend image's entrypoint runs a destructive `FLUSHALL` against the configured Redis at container start. The compose files and the Helm chart all pass `false` explicitly to preserve the Redis Streams/consumer-group state the analyzers rely on — but the entrypoint's own fallback when the variable is unset is `true`, so operators running the raw backend image outside compose/the chart (especially against a shared Redis) must set `false` themselves. |
 | `TRANSCODE_CACHE_PATH` | `backend` | Optional | `/app/cache/transcodes` (compose) | Directory for transcoding cache files. |
 | `TRANSCODE_CACHE_MAX_GB` | `backend` | Optional | `10` | Max transcode cache size in GB. |
 | `ALLOWED_ORIGINS` | `backend` | Optional | `http://localhost:3000,http://localhost:3030` | Allowed CORS origins (comma-separated). |
@@ -116,6 +116,7 @@ Experimental feature note:
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
 | `BACKEND_URL` | `frontend` (and `audio-analyzer-clap-local` in local profile) | Optional (required when default route is not correct) | split stack: `http://backend:3006`; local CLAP: `http://host.docker.internal:3007` | Server-side URL used by frontend proxy/SSR and local CLAP callback target. |
+| `STREAMING_ENGINE_MODE` | `frontend`, `soundspan` (AIO) | Optional | `native` | Playback engine selection, validated by the container entrypoint: `native` (default as of 1.8.0 — single native `<audio>` element; see [`NATIVE_AUDIO_ENGINE.md`](NATIVE_AUDIO_ENGINE.md)), `howler` (legacy engine, the gated fallback/opt-out — Android WebView deployments are pinned to it automatically regardless of this setting), or `videojs` (segmented experimental playback; see [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md)). Container runtime env, not a `NEXT_PUBLIC_*` build arg; an unrecognized value logs a warning and falls back to `native`. |
 | `NEXT_PUBLIC_API_URL` | `frontend` (build-time) | Optional (build-time only) | empty | Explicit browser API base URL. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_API_PATH_MODE` | `frontend` (build-time) | Optional (build-time only) | `auto` | Browser API routing mode: `auto`, `proxy`, or `direct`. Runtime changes on prebuilt images do not affect browser bundle behavior. |
 | `NEXT_PUBLIC_LISTEN_TOGETHER_ALLOW_POLLING` | `frontend` (build-time) | Optional (build-time only) | `false` | Browser polling fallback toggle for Listen Together socket client. Runtime changes on prebuilt images do not affect browser bundle behavior. |
@@ -136,6 +137,7 @@ Experimental feature note:
 | `LIDARR_URL` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr base URL. |
 | `LIDARR_API_KEY` | `backend`, `backend-worker` | Required when `LIDARR_ENABLED=true` | unset | Lidarr API key. |
 | `LASTFM_API_KEY` | `backend`, `backend-worker` | Optional | unset | Last.fm metadata/recommendation API key. When unset, Last.fm features stay disabled unless an encrypted system setting supplies a key. |
+| `FANART_API_KEY` | `backend` | Optional | unset | Fanart.tv API key for artist images/backgrounds. A database-stored key (System Settings) takes precedence; this var is the `.env` fallback used only when no key is stored. Note: that DB precedence applies to the on-demand `FanartService` paths; the background enrichment cycle's `ImageProviderService` reads only this env var (a stored System Settings key is ignored there), so set the env var if you rely on automatic artist/album image enrichment. |
 | `OPENAI_API_KEY` | `backend`, `backend-worker` | Optional | unset | OpenAI key for AI-assisted recommendation features. |
 | `DEEZER_API_KEY` | `backend`, `backend-worker` | Optional | unset | Deezer API key override. |
 | `DISCOVERY_MODE` | `backend`, `backend-worker` | Optional | `recommendation` | Discovery mode (`recommendation` or `legacy`). |
@@ -161,6 +163,10 @@ Experimental feature note:
 | `YTMUSIC_EXTRACT_DELAY_MAX` | `ytmusic-streamer` | Optional | `2.0` | Max delay between stream extraction calls (seconds). |
 | `YTMUSIC_SEARCH_CACHE_TTL` | `ytmusic-streamer` | Optional | `300` | Search cache TTL in seconds (`0` disables cache). |
 | `YTMUSIC_SEARCH_MODE` | `ytmusic-streamer` | Optional | `auto` | Search strategy: `auto` (native-first with per-user TV fallback on #813 invalid-argument errors), `tv` (legacy TV parser), or `native` (`ytmusicapi` `yt.search()` only). |
+| `YTMUSIC_LANGUAGE` | `ytmusic-streamer` | Optional | `en` | BCP-47 language code forwarded to all `YTMusic()` client instances; controls the language of shelf titles and content descriptions regardless of the server's geo-IP locale. |
+| `YTMUSIC_HOME_FILTERED_SHELVES` | `ytmusic-streamer` | Optional | `Quick picks` | Comma-separated, case-insensitive list of shelf titles to exclude from `/home` responses. |
+| `YT_DOWNLOAD_DIR` | `ytmusic-streamer` | Optional | `/music/YouTube Downloads` | Destination directory for `/yt/download` audio files. Must live inside the shared `/music` volume so the backend's library scanner picks up completed downloads; Helm deployments need an RWX music volume in multi-node clusters. |
+| `YT_DOWNLOAD_CONCURRENCY` | `ytmusic-streamer` | Optional | `2` | Max concurrent YouTube download jobs processed by the sidecar's download worker pool. |
 
 ## Analyzer Variables
 

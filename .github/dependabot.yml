@@ -1,0 +1,201 @@
+# Dependabot version-update configuration (docs/modernization-roadmap.md F45,
+# epic #10, #59 WS2.4).
+#
+# Grouping rationale: this is a single-operator homelab (see AGENTS.md) --
+# one PR per bumped dependency per week, per ecosystem, is unreviewable
+# noise for one person. Every ecosystem/directory below groups its own
+# minor+patch updates into a single weekly PR; major-version bumps (which
+# can be breaking) are deliberately left *ungrouped* so each lands as its
+# own, individually reviewable PR instead of being buried in a batch.
+# `open-pull-requests-limit: 5` caps how many PRs (grouped + major, combined)
+# any one ecosystem/directory can have open at once.
+#
+# Do NOT add `ignore:` rules for yt-dlp or ytmusicapi (services/ytmusic-streamer)
+# anywhere in this file. Those pins are deliberately loose -- YouTube-side
+# breakage fixes land as new yt-dlp releases, so Dependabot pressure on them
+# is wanted, not noise. See the soundspan-sidecars skill and F45's notes.
+version: 2
+
+updates:
+  # --- npm: 4 manifests (root orchestration + backend + frontend + the
+  # media-metadata-contract package) ---------------------------------------
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/backend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/packages/media-metadata-contract"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # --- pip: the 4 Python sidecar services ----------------------------------
+  # ytmusic-streamer's yt-dlp / ytmusicapi pins are deliberately loose (see
+  # header note above) -- no ignore rules for them here, ever.
+  - package-ecosystem: pip
+    directory: "/services/audio-analyzer"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directory: "/services/audio-analyzer-clap"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directory: "/services/tidal-downloader"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directory: "/services/ytmusic-streamer"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # --- docker: all 7 Dockerfile directories --------------------------------
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: "/backend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: "/services/audio-analyzer"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: "/services/audio-analyzer-clap"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: "/services/tidal-downloader"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: "/services/ytmusic-streamer"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # --- github-actions: pinned `uses:` across every workflow ---------------
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch

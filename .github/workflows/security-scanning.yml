@@ -1,0 +1,237 @@
+name: Security Scanning
+
+# Vulnerability / secret scanning (docs/modernization-roadmap.md F45, epic
+# #10, #59 WS2.4). Every job below is deliberately non-blocking on day one --
+# see each job's continue-on-error comment -- so red findings are visible
+# signal without gating a PR. The blocking ratchet is tracked for 1.10.0.
+#
+# Trivy scans of the published GHCR images live in their own workflow,
+# image-security-scanning.yml (schedule/workflow_dispatch only): keeping
+# that job here behind a job-level event `if:` made every PR show a
+# permanently skipped, never-expanded "Trivy Image Scan" check.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scanning-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln # secret scanning is owned by the dedicated gitleaks job below
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "0"
+          format: sarif
+          output: trivy-fs-results.sarif
+
+      - name: Upload SARIF to code scanning
+        # hashFiles guard: if the scan step failed before writing the SARIF,
+        # skip the upload instead of cascading a second, confusing red step.
+        if: always() && hashFiles('trivy-fs-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-fs-results.sarif
+          category: trivy-fs
+
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: trivy-fs-results-${{ github.run_id }}
+          path: trivy-fs-results.sarif
+          if-no-files-found: warn
+
+      - name: Publish finding count to job summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Filesystem Scan"
+            echo ""
+            if [ -f trivy-fs-results.sarif ]; then
+              COUNT=$(python3 -c "import json; d=json.load(open('trivy-fs-results.sarif')); print(sum(len(r.get('results', [])) for r in d.get('runs', [])))")
+              echo "Findings (CRITICAL/HIGH, ignore-unfixed, after .trivyignore): **${COUNT}**"
+              echo ""
+              echo "Full results: Security tab, category \`trivy-fs\`."
+            else
+              echo "No SARIF output produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gitleaks:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          # Full history unconditionally. schedule/push/dispatch need it to
+          # scan every past commit, and the PR range scan below needs both
+          # range endpoints (base.sha, head.sha) reachable locally -- a
+          # shallow clone makes range walks unreliable. The repo's history
+          # is small, so a full fetch is cheap.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        # Runs the OSS binary directly via the official Docker image --
+        # deliberately NOT gitleaks/gitleaks-action, which requires a
+        # license key for organization repos.
+        run: |
+          set -euo pipefail
+          mkdir -p gitleaks-report
+
+          LOG_OPTS=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # On pull_request, actions/checkout checks out the synthetic
+            # refs/pull/N/merge commit -- and gitleaks treats merge commits
+            # as zero diff content, so a commit-count form (--log-opts=-N)
+            # walking back from that merge ref scans "0 commits / 0 bytes"
+            # and misses every secret in the PR (proven with the real
+            # binary in review). An explicit base..head range scans exactly
+            # the PR's own commits, regardless of base-branch movement.
+            LOG_OPTS="--log-opts=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+            echo "Scanning PR commit range: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          else
+            echo "Scanning full repository history"
+          fi
+
+          CONFIG_FLAG=""
+          if [ -f .gitleaks.toml ]; then
+            CONFIG_FLAG="--config=/repo/.gitleaks.toml"
+          fi
+
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect \
+            --source=/repo \
+            --no-banner \
+            --redact \
+            --exit-code=0 \
+            --report-format=sarif \
+            --report-path=/repo/gitleaks-report/results.sarif \
+            $CONFIG_FLAG \
+            $LOG_OPTS
+
+      - name: Upload SARIF to code scanning
+        # hashFiles guard: if the scan step failed before writing the SARIF,
+        # skip the upload instead of cascading a second, confusing red step.
+        if: always() && hashFiles('gitleaks-report/results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gitleaks-report/results.sarif
+          category: gitleaks
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gitleaks-results-${{ github.run_id }}
+          path: gitleaks-report/
+          if-no-files-found: warn
+
+      - name: Publish finding count to job summary
+        if: always()
+        run: |
+          {
+            echo "## Gitleaks Secret Scan"
+            echo ""
+            if [ -f gitleaks-report/results.sarif ]; then
+              COUNT=$(python3 -c "import json; d=json.load(open('gitleaks-report/results.sarif')); print(sum(len(r.get('results', [])) for r in d.get('runs', [])))")
+              echo "Findings: **${COUNT}**"
+            else
+              echo "No report produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  pip-audit:
+    name: pip-audit (${{ matrix.requirements }})
+    runs-on: ubuntu-latest
+    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    continue-on-error: true
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # pip-audit resolves a requirements file against the *running*
+        # interpreter, so each file is audited on the Python its service
+        # actually ships (per its Dockerfile) -- a single hardcoded version
+        # fails resolution outright (e.g. tiddl requires >=3.13; the
+        # analyzer's numpy<1.24 has no cp312 wheel).
+        include:
+          # audio-analyzer's image is ubuntu:20.04 / Python 3.8 (EOL, below
+          # pip-audit's supported floor), so 3.10 is the nearest supported
+          # approximation. Its requirements.txt is also partially vestigial
+          # (roadmap F51: the Dockerfile pins TF/numpy inline and never runs
+          # pip install -r) -- audit results here are best-effort signal.
+          - requirements: services/audio-analyzer/requirements.txt
+            python-version: "3.10"
+          # matches its image, python:3.10-slim. Pulls in
+          # torch/torchaudio/torchvision -- can be slow on a cold pip cache.
+          - requirements: services/audio-analyzer-clap/requirements.txt
+            python-version: "3.10"
+          # tidal-downloader + ytmusic-streamer images are python:3.13-slim.
+          - requirements: services/tidal-downloader/requirements.txt
+            python-version: "3.13"
+          - requirements: services/tidal-downloader/requirements-test.txt
+            python-version: "3.13"
+          - requirements: services/ytmusic-streamer/requirements.txt
+            python-version: "3.13"
+          - requirements: services/ytmusic-streamer/requirements-test.txt
+            python-version: "3.13"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: ${{ matrix.requirements }}
+
+      - name: Install pip-audit
+        run: python -m pip install --disable-pip-version-check --quiet pip-audit
+
+      - name: Audit ${{ matrix.requirements }}
+        run: |
+          set +e
+          {
+            echo "## pip-audit: ${{ matrix.requirements }} (Python ${{ matrix.python-version }})"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if ! pip-audit -r "${{ matrix.requirements }}" -f markdown >> "$GITHUB_STEP_SUMMARY" 2>>"$GITHUB_STEP_SUMMARY"; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "_(pip-audit reported findings and/or a resolution error for this file -- see above; non-blocking.)_" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
