@@ -93,7 +93,7 @@ Experimental feature note:
 
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
-| `INTERNAL_API_SECRET` | `backend`, `backend-worker`, `audio-analyzer-clap` (+ local CLAP) | Required (production) | `soundspan-internal-secret-change-me` | Auth secret for internal analyzer callbacks and trusted internal routes. |
+| `INTERNAL_API_SECRET` | `backend`, `backend-worker`, `audio-analyzer-clap` (+ local CLAP), `ytmusic-streamer`, `tidal-downloader` | Required (production) | `soundspan-internal-secret-change-me` | Auth secret for internal analyzer callbacks, trusted internal routes, and backend→HTTP-sidecar auth (F31). The ytmusic-streamer/tidal-downloader FastAPI sidecars now **reject** any request without the matching `x-internal-secret` header (fail-closed; `/health` is exempt), so this must be set to the same value on the backend and both HTTP sidecars. |
 | `LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED` | `backend` | Optional | `true` | Enables Redis adapter fanout for cross-replica Socket.IO. |
 | `LISTEN_TOGETHER_STATE_SYNC_ENABLED` | `backend` | Optional | `true` | Enables Redis pub/sub state sync for Listen Together. |
 | `LISTEN_TOGETHER_STATE_STORE_ENABLED` | `backend` | Optional | `true` | Enables Redis-backed authoritative group state snapshots. |

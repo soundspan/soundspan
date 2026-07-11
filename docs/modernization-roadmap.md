@@ -31,7 +31,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 1 / 1 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 1 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
-| #12 | Request-path auth & egress hardening | 5 / 1 / 8 |
+| #12 | Request-path auth & egress hardening | 6 / 1 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
@@ -88,7 +88,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F28](#f28) | ✅ | security | high | M | medium |  | #11 | API keys stored in plaintext and looked up by raw value — a read-only DB leak yields wo… |
 | [F29](#f29) | ✅ | security | high | M | medium | ⚠️ | #11 | Settings encrypted with unauthenticated AES-256-CBC, a naive pad/truncate key, and a si… |
 | [F30](#f30) | ✅ | security | high | S | low |  | #12 | Internal CLAP-callback endpoints fail open and use non-constant-time secret comparison |
-| [F31](#f31) | ⬜ | security | high | M | medium | ⚠️ | #12 | FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a file… |
+| [F31](#f31) | ✅ | security | high | M | medium | ⚠️ | #12 | FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a file… |
 | [F32](#f32) | 🟡 | security | high | M | low |  | #12 | Lidarr webhook is unauthenticated and unthrottled by default and parses payload as unty… |
 | [F33](#f33) | ✅ | security | high | M | medium |  | #12 | SSRF guard blocks only literal private hosts — DNS rebinding to an internal IP bypasses… |
 | [F34](#f34) | ✅ | security | medium | S | low |  | #12 | CORS allows every origin unconditionally despite an allowlist knob, while credentials:t… |
@@ -609,18 +609,19 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F31 — FastAPI sidecars have zero inbound authentication and use unvalidated user_id as a filesystem path (path traversal)
 
-**⬜ open · DEFERRED-WITH-SPEC (Wave 1)** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
+**✅ complete (PR #TBD)** · dimension: security · severity: high · effort: M · risk: medium · ⚠️ breaking · epic: #12
 
-> **Why deferred (Wave 1).** This is a cross-language change (Python sidecars + TS backend clients) with an **all-or-nothing coupling**: the sidecar auth and the backend `x-internal-secret` header must land together or *every* sidecar call 401s and breaks YouTube/Tidal streaming (the homelab depends on ytmusic-streamer). The Wave-1 working environment had **no Python toolchain** (no pip/pytest/fastapi/httpx), so the security-critical sidecar code could not be run or verified locally — shipping unverified auth/path-traversal code to prod infra was declined under the "verify, don't assume" contract. Surface is fully mapped below; do it as its own focused PR where pytest runs.
+> **Fix shipped.** Both FastAPI sidecars now mount an app-wide fail-closed auth dependency `require_internal_secret` (shared helper in `services/common/sidecar_runtime_utils.py`, mirroring the TS `internalAuth.ts`/F30): unset/empty `INTERNAL_API_SECRET` → **403**, missing/mismatched `x-internal-secret` header → 403 (constant-time `hmac.compare_digest`), and `/health` is exempt so k8s probes + the backend health checks keep working. ytmusic-streamer's path builders (`_oauth_file` and a new `_client_creds_file`) call `validate_user_id` (`re.fullmatch(r"[A-Za-z0-9_-]{1,64}")` → **400**) so `../`-style ids are rejected before any file op; tidal's body `user_id` is left alone (in-memory dict key, not a path — audit-corrected). Backend sends the header on all four axios clients (`youtubeMusic.ts`, `youtubeDownload.ts`, `tidal.ts`, `tidalStreaming.ts`) sourced via `config.internalApiSecret` (new optional `config.ts` field; boot never fails when unset — unset simply sends no header and the sidecar rejects fail-closed) plus the gate-caught fifth site (see item 5). Deploy layers threaded: `docker-compose.yml` (both sidecars), Helm `tidal.yaml`/`ytmusic.yaml` (`secretKeyRef` into the existing `soundspan-secrets` `INTERNAL_API_SECRET`, matching CLAP), `docs/ENVIRONMENT_VARIABLES.md`, `docs/UPGRADING.md` (⚠️ breaking, operator checklist). The AIO image does not bundle the HTTP sidecars, so no AIO change was needed (its backend + CLAP already receive the secret). Tests: pytest both sidecars (auth 403/400 + `/health`-exempt + valid-passes; ytmusic traversal), backend jest (each client sets the header when configured; the fifth-site fix).
 >
-> **Executable spec (ready to implement):**
+> **Executable spec (as implemented):**
 > 1. **Shared helper** — add to `services/common/sidecar_runtime_utils.py`:
 >    - `require_internal_secret(request)`: if `request.url.path == "/health"` → return (exempt for k8s probes + the backend's own `/health` checks at `tidal.ts:111`, `tidalStreaming.ts:184`); read `INTERNAL_API_SECRET` and **fail closed** (`HTTPException(403)`) if unset; compare the `x-internal-secret` header with `hmac.compare_digest` (both `str`); 403 on mismatch. Mirrors the verified TS `requireInternalSecret` (F30).
 >    - `validate_user_id(user_id)`: `re.fullmatch(r"[A-Za-z0-9_-]{1,64}", user_id)` or `HTTPException(400)`. Prisma cuids are lowercase-alnum so legit traffic passes.
 > 2. **Apply auth app-wide** in both `services/ytmusic-streamer/app.py` and `services/tidal-downloader/app.py`: `app = FastAPI(..., dependencies=[Depends(require_internal_secret)])` (add `Depends` to the `fastapi` import). The `/health` exemption lives in the dependency.
 > 3. **Path-traversal** — in ytmusic-streamer, call `validate_user_id(user_id)` inside the file-path builders (`_oauth_file` / `client_creds_{user_id}.json`, ~`app.py:291`) so `auth_status`/`auth_restore`/`auth_clear` reject `../`-style ids. Do **not** apply to tidal's body `user_id` (the audit corrected that citation — tidal uses it only as an in-memory dict key, not a path).
-> 4. **Backend (same PR — required or all calls break)** — add `"x-internal-secret": process.env.INTERNAL_API_SECRET` to the **default headers** of each of the four axios clients (one edit each): `youtubeMusic.ts:325`, `youtubeDownload.ts:181`, `tidal.ts:97`, `tidalStreaming.ts:158`. Verified there are **no** direct sidecar calls bypassing these clients, so this covers every call site.
-> 5. **Tests** — pytest (both sidecars' existing `tests/` + `conftest.py`): traversal `user_id=../../etc/x` → 400; missing/wrong `x-internal-secret` → 403; `/health` reachable without the secret; valid secret passes. Backend jest: assert each client sets the header.
+> 4. **Backend (same PR — required or all calls break)** — add the `x-internal-secret` header (sourced via `config.internalApiSecret`, per the backend-env-only-via-config.ts rule — **not** a raw `process.env` read) to the **default headers** of each of the four axios clients (one edit each): `youtubeMusic.ts`, `youtubeDownload.ts`, `tidal.ts`, `tidalStreaming.ts`.
+> 5. **Gate-caught correction:** the original claim "there are **no** direct sidecar calls bypassing these clients" was **FALSE** — `backend/src/routes/tidalStreaming.ts:119` (`ensureUserOAuth`) probed the tidal sidecar's `/user/auth/status` via a **bare `axios.get`** with a raw env URL, bypassing all four clients. Left alone it would 403 forever after F31 and be silently misread as "sidecar has no session." Fixed by routing it through a new `tidalStreamingService.checkSidecarAuthStatus()` (authenticated client, header attached), covered by a route test. A `grep -rn "TIDAL_SIDECAR_URL\|YTMUSIC_STREAMER" backend/src` sweep confirmed this was the only extra site.
+> 6. **Tests** — pytest (both sidecars' existing `tests/` + `conftest.py`): traversal `user_id=../../etc/x` → 400; missing/wrong `x-internal-secret` → 403; unset secret → 403 (fail-closed); `/health` reachable without the secret; valid secret passes. Backend jest: assert each client sets the header + the fifth-site fix.
 
 **Files:** `services/ytmusic-streamer/app.py:291`, `services/ytmusic-streamer/app.py:1383`, `services/ytmusic-streamer/app.py:1420`, `services/tidal-downloader/app.py:1025`
 

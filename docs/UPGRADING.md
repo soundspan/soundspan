@@ -5,6 +5,34 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## ⚠️ Breaking: HTTP sidecars now require `INTERNAL_API_SECRET` (F31)
+
+**Who this affects:** any deployment that uses the YouTube Music (`ytmusic-streamer`)
+or TIDAL (`tidal-downloader`) FastAPI sidecars — i.e. YouTube URL/library streaming
+and downloads, and TIDAL streaming/downloads.
+
+**What changed.** Both HTTP sidecars previously had **zero inbound authentication**
+and built filesystem paths from an unvalidated `user_id` (path traversal). They now
+require the `x-internal-secret` header on every request and **fail closed**: an unset
+or mismatched secret is rejected with **403**. The backend sends the header
+(sourced from `INTERNAL_API_SECRET` via `config.ts`) on all four sidecar clients plus
+the previously-bare `/user/auth/status` probe. `/health` is exempt so k8s probes and
+the backend's own health checks keep working. `ytmusic-streamer` also now rejects a
+malformed `user_id` with **400** before any file operation.
+
+**Action required — operator pre-deploy checklist:** before the next deploy, confirm
+`INTERNAL_API_SECRET` is present on the backend AND both HTTP sidecars
+(compose/chart wire it automatically; custom setups must set it manually to the
+**same value** on all three) — unset means sidecar calls fail closed with 403 and
+YouTube/TIDAL streaming silently stops working. The Helm chart injects it into the
+`tidal`/`ytmusic` deployments via `secretKeyRef` (same `soundspan-secrets` key the
+backend and CLAP analyzer already use); `docker-compose.yml` defaults it for both
+sidecars. The all-in-one image does not bundle the HTTP sidecars — if you run them
+alongside an AIO container, set `INTERNAL_API_SECRET` on them to match the value the
+AIO persists at `/data/secrets/internal_api_secret`.
+
+---
+
 ## Node 24 everywhere — images and CI (F53)
 
 **Who this affects:** operators running the published `ghcr.io/soundspan/*`
