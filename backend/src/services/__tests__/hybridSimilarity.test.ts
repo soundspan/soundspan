@@ -88,6 +88,15 @@ describe("hybridSimilarity service", () => {
         // and never through the bare prisma.$queryRaw path.
         expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
         expect(mockQueryRaw).not.toHaveBeenCalled();
+
+        // The right values reached the query: the Prisma.Sql passed to the
+        // helper binds the source trackId and the 5x candidate limit (which
+        // appears twice — the candidate CTE's LIMIT and the outer LIMIT).
+        const sqlArg = mockRunAnnQuery.mock.calls[0]?.[0] as { values: unknown[] };
+        expect(sqlArg.values).toContain(sourceTrackId);
+        expect(
+            sqlArg.values.filter((value: unknown) => value === limit * 5).length
+        ).toBeGreaterThanOrEqual(2);
         expect(mockLoggerWarn).not.toHaveBeenCalled();
     });
 
@@ -115,6 +124,12 @@ describe("hybridSimilarity service", () => {
         );
         expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
         expect(mockQueryRaw).not.toHaveBeenCalled();
+
+        // Default limit 20 -> candidate limit 100, bound exactly once (the
+        // LIMIT), alongside the source trackId.
+        const sqlArg = mockRunAnnQuery.mock.calls[0]?.[0] as { values: unknown[] };
+        expect(sqlArg.values).toContain(sourceTrackId);
+        expect(sqlArg.values.filter((value: unknown) => value === 100)).toHaveLength(1);
     });
 
     it("uses features-only mode (non-ANN, direct query) when CLAP embeddings are unavailable", async () => {
@@ -142,6 +157,12 @@ describe("hybridSimilarity service", () => {
         // features-only has no ANN, so it must NOT go through the probes helper.
         expect(mockQueryRaw).toHaveBeenCalledTimes(1);
         expect(mockRunAnnQuery).not.toHaveBeenCalled();
+
+        // The right values reached the tagged-template query: its bound args
+        // carry the source trackId and the 5x candidate limit.
+        const queryArgs = mockQueryRaw.mock.calls[0] ?? [];
+        expect(queryArgs).toContain(sourceTrackId);
+        expect(queryArgs).toContain(limit * 5);
     });
 
     it("returns an empty list and warns when no feature systems are available", async () => {
