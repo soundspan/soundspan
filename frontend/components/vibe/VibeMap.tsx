@@ -1,233 +1,361 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
-import { Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
-import { useAudio } from "@/lib/audio-context";
+/**
+ * VibeMap — thin container for the vibe map.
+ *
+ * Wires: data load (raw useEffect + api.getVibeMap, the accepted pattern),
+ * viewport state (mapViewport math), non-destructive filters (useMapFilters),
+ * now-playing beacon + session trail (MapOverlay / useSessionTrail), and the
+ * spotlight lens (SpotlightSearch). Interaction (cursor-anchored wheel zoom,
+ * click-vs-drag threshold, transform-aware hit-test) lives here; rendering is
+ * delegated to MapCanvas + MapOverlay.
+ *
+ * `mode` is the F2 extension point: it stays "explore" here; F2 adds travel /
+ * journey / alchemy branches and draws into `<MapOverlay decorations>`.
+ */
 
-interface MapTrack {
-    id: string;
-    x: number;
-    y: number;
-    title: string;
-    artist: string;
-    artistId: string;
-    albumId: string;
-    coverUrl: string | null;
-    dominantMood: string;
-    moodScore: number;
-    energy: number | null;
-    valence: number | null;
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Crosshair, Loader2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { api } from "@/lib/api";
+import { useAudioState } from "@/lib/audio-state-context";
+import { useAudioControls } from "@/lib/audio-controls-context";
+import { MapCanvas } from "./MapCanvas";
+import { MapOverlay } from "./MapOverlay";
+import { SpotlightSearch } from "./SpotlightSearch";
+import { useMapFilters } from "./useMapFilters";
+import { useSessionTrail } from "./useSessionTrail";
+import {
+    fitViewport,
+    flyTo,
+    worldToScreen,
+    zoomAt,
+    clampViewport,
+    type MapDims,
+    type Viewport,
+} from "./mapViewport";
+import type { MapMode, MapTrack } from "./types";
+import { MOOD_COLORS, getMoodColor, moodLabel } from "./types";
+
+const CLICK_MOVE_THRESHOLD = 4; // px between down/up to still count as a click
+const HOVER_HIT_RADIUS = 12; // px
+
+interface DragState {
+    active: boolean;
+    lastX: number;
+    lastY: number;
+    moved: number;
 }
 
-const MOOD_COLORS: Record<string, string> = {
-    moodHappy: "#facc15",
-    moodSad: "#60a5fa",
-    moodRelaxed: "#34d399",
-    moodAggressive: "#ef4444",
-    moodParty: "#f97316",
-    moodAcoustic: "#c084fc",
-    moodElectronic: "#f472b6",
-};
-
-function getMoodColor(mood: string): string {
-    return MOOD_COLORS[mood] ?? "#6b7280";
+/** Compact min/max dual-range control (no external deps). */
+function DualRange({
+    label,
+    value,
+    onChange,
+}: {
+    label: string;
+    value: [number, number];
+    onChange: (v: [number, number]) => void;
+}) {
+    const [lo, hi] = value;
+    return (
+        <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-gray-500 w-10">{label}</span>
+            <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={lo}
+                aria-label={`${label} minimum`}
+                onChange={(e) =>
+                    onChange([Math.min(parseFloat(e.target.value), hi), hi])
+                }
+                className="w-14 accent-indigo-400"
+            />
+            <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={hi}
+                aria-label={`${label} maximum`}
+                onChange={(e) =>
+                    onChange([lo, Math.max(parseFloat(e.target.value), lo)])
+                }
+                className="w-14 accent-indigo-400"
+            />
+            <span className="text-[10px] text-gray-600 tabular-nums w-14">
+                {lo.toFixed(2)}–{hi.toFixed(2)}
+            </span>
+        </div>
+    );
 }
 
 /**
- * Canvas-based 2D scatter plot of the library's CLAP embedding projections.
+ * Canvas-based 2D navigator over the library's CLAP embedding projections.
  */
 export function VibeMap() {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [tracks, setTracks] = useState<MapTrack[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [hoveredTrack, setHoveredTrack] = useState<MapTrack | null>(null);
-    const [zoom, setZoom] = useState(1);
-    const [offset, setOffset] = useState({ x: 0, y: 0 });
-    const isDragging = useRef(false);
-    const lastMouse = useRef({ x: 0, y: 0 });
-    const { playTrack } = useAudio();
 
+    // F2 extension point — only "explore" is implemented in F1.
+    const [mode] = useState<MapMode>("explore");
+
+    const [dims, setDims] = useState<MapDims>({ width: 0, height: 0 });
+    const [viewport, setViewport] = useState<Viewport | null>(null);
+    const [hoveredId, setHoveredId] = useState<string | null>(null);
+    const [highlightIds, setHighlightIds] = useState<Set<string> | null>(null);
+    const drag = useRef<DragState>({ active: false, lastX: 0, lastY: 0, moved: 0 });
+
+    const { currentTrack } = useAudioState();
+    const { playTrack } = useAudioControls();
+    const filters = useMapFilters(tracks);
+    const trailIds = useSessionTrail();
+
+    // --- Data load (accepted raw useEffect + api pattern) -------------------
     useEffect(() => {
+        let cancelled = false;
         async function load() {
             try {
                 const data = await api.getVibeMap();
-                setTracks(data.tracks);
+                if (!cancelled) setTracks(data.tracks);
             } catch {
-                setError("Failed to load vibe map data");
+                if (!cancelled) setError("Failed to load vibe map data");
             } finally {
-                setIsLoading(false);
+                if (!cancelled) setIsLoading(false);
             }
         }
         void load();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
-    const draw = useCallback(() => {
-        const canvas = canvasRef.current;
-        const container = containerRef.current;
-        if (!canvas || !container || tracks.length === 0) return;
-
-        const rect = container.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        canvas.style.width = `${rect.width}px`;
-        canvas.style.height = `${rect.height}px`;
-
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-
-        ctx.scale(dpr, dpr);
-        ctx.clearRect(0, 0, rect.width, rect.height);
-
-        const w = rect.width;
-        const h = rect.height;
-        const padding = 40;
-
-        for (const track of tracks) {
-            const px = padding + (track.x * (w - 2 * padding) + offset.x) * zoom;
-            const py = padding + (track.y * (h - 2 * padding) + offset.y) * zoom;
-
-            if (px < -10 || px > w + 10 || py < -10 || py > h + 10) continue;
-
-            const radius = hoveredTrack?.id === track.id ? 6 : 3.5;
-            const color = getMoodColor(track.dominantMood);
-            const alpha = hoveredTrack?.id === track.id ? 1 : 0.7;
-
-            ctx.beginPath();
-            ctx.arc(px, py, radius, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.globalAlpha = alpha;
-            ctx.fill();
-            ctx.globalAlpha = 1;
-        }
-    }, [tracks, hoveredTrack, zoom, offset]);
-
-    useEffect(() => {
-        draw();
-    }, [draw]);
-
+    // --- Measure container + initialise viewport ---------------------------
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
-        const observer = new ResizeObserver(() => draw());
+        const measure = () => {
+            const rect = container.getBoundingClientRect();
+            setDims({ width: rect.width, height: rect.height });
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
         observer.observe(container);
         return () => observer.disconnect();
-    }, [draw]);
+    }, []);
 
-    const handleMouseMove = useCallback(
-        (e: React.MouseEvent<HTMLCanvasElement>) => {
-            const canvas = canvasRef.current;
-            const container = containerRef.current;
-            if (!canvas || !container) return;
+    useEffect(() => {
+        if (dims.width > 0 && dims.height > 0) {
+            setViewport((vp) => vp ?? fitViewport(dims));
+        }
+    }, [dims]);
 
-            if (isDragging.current) {
-                const dx = e.clientX - lastMouse.current.x;
-                const dy = e.clientY - lastMouse.current.y;
-                lastMouse.current = { x: e.clientX, y: e.clientY };
-                setOffset((prev) => ({
-                    x: prev.x + dx / zoom,
-                    y: prev.y + dy / zoom,
-                }));
+    // --- Lookups ------------------------------------------------------------
+    const trackById = useMemo(() => {
+        const m = new Map<string, MapTrack>();
+        for (const t of tracks) m.set(t.id, t);
+        return m;
+    }, [tracks]);
+
+    const beaconTrack = currentTrack ? trackById.get(currentTrack.id) : undefined;
+    const beaconOnMap = !!beaconTrack;
+
+    const trailPoints = useMemo(() => {
+        const pts: { x: number; y: number }[] = [];
+        for (const id of trailIds) {
+            const t = trackById.get(id);
+            if (t) pts.push({ x: t.x, y: t.y });
+        }
+        return pts;
+    }, [trailIds, trackById]);
+
+    const dimUnhighlighted = highlightIds !== null;
+
+    // --- Interaction --------------------------------------------------------
+    const cursorFromEvent = useCallback((clientX: number, clientY: number) => {
+        const container = containerRef.current;
+        if (!container) return { x: 0, y: 0 };
+        const rect = container.getBoundingClientRect();
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    }, []);
+
+    const playById = useCallback(
+        (id: string) => {
+            const t = trackById.get(id);
+            if (!t) return;
+            playTrack({
+                id: t.id,
+                title: t.title,
+                artist: { name: t.artist, id: t.artistId },
+                album: {
+                    title: "", // album title is not in the map payload
+                    id: t.albumId,
+                    coverArt: t.coverUrl ?? undefined,
+                },
+                duration: 0,
+            });
+        },
+        [trackById, playTrack]
+    );
+
+    const handleWheel = useCallback(
+        (e: React.WheelEvent<HTMLCanvasElement>) => {
+            e.preventDefault();
+            const cursor = cursorFromEvent(e.clientX, e.clientY);
+            const factor = Math.exp(-e.deltaY * 0.0015);
+            setViewport((vp) => (vp ? zoomAt(vp, cursor, factor, dims) : vp));
+        },
+        [cursorFromEvent, dims]
+    );
+
+    const handlePointerDown = useCallback(
+        (e: React.PointerEvent<HTMLCanvasElement>) => {
+            drag.current = {
+                active: true,
+                lastX: e.clientX,
+                lastY: e.clientY,
+                moved: 0,
+            };
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+        },
+        []
+    );
+
+    const handlePointerMove = useCallback(
+        (e: React.PointerEvent<HTMLCanvasElement>) => {
+            if (!viewport) return;
+            const d = drag.current;
+            if (d.active) {
+                const dx = e.clientX - d.lastX;
+                const dy = e.clientY - d.lastY;
+                d.lastX = e.clientX;
+                d.lastY = e.clientY;
+                d.moved += Math.hypot(dx, dy);
+                setViewport((vp) =>
+                    vp
+                        ? clampViewport(
+                              { scale: vp.scale, tx: vp.tx + dx, ty: vp.ty + dy },
+                              dims
+                          )
+                        : vp
+                );
                 return;
             }
 
-            const rect = canvas.getBoundingClientRect();
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
-            const w = rect.width;
-            const h = rect.height;
-            const padding = 40;
-
-            let closest: MapTrack | null = null;
-            let closestDist = 20;
-
-            for (const track of tracks) {
-                const px = padding + (track.x * (w - 2 * padding) + offset.x) * zoom;
-                const py = padding + (track.y * (h - 2 * padding) + offset.y) * zoom;
-                const dist = Math.sqrt((mx - px) ** 2 + (my - py) ** 2);
+            // Hover hit-test in screen space, skipping filtered-out dots.
+            const cursor = cursorFromEvent(e.clientX, e.clientY);
+            let closest: string | null = null;
+            let closestDist = HOVER_HIT_RADIUS;
+            const mask = filters.mask;
+            for (let i = 0; i < tracks.length; i++) {
+                if (mask[i] === 0) continue;
+                const s = worldToScreen(viewport, tracks[i]);
+                const dist = Math.hypot(cursor.x - s.x, cursor.y - s.y);
                 if (dist < closestDist) {
-                    closest = track;
+                    closest = tracks[i].id;
                     closestDist = dist;
                 }
             }
-
-            setHoveredTrack(closest);
-            canvas.style.cursor = closest ? "pointer" : isDragging.current ? "grabbing" : "grab";
+            setHoveredId(closest);
         },
-        [tracks, zoom, offset]
+        [viewport, dims, cursorFromEvent, tracks, filters.mask]
     );
 
-    const handleClick = useCallback(() => {
-        if (!hoveredTrack) return;
-        playTrack({
-            id: hoveredTrack.id,
-            title: hoveredTrack.title,
-            artist: hoveredTrack.artist,
-            artistId: hoveredTrack.artistId,
-            albumId: hoveredTrack.albumId,
-            coverUrl: hoveredTrack.coverUrl,
-        } as any);
-    }, [hoveredTrack, playTrack]);
-
-    const handleMouseDown = useCallback((e: React.MouseEvent) => {
-        isDragging.current = true;
-        lastMouse.current = { x: e.clientX, y: e.clientY };
+    const endDrag = useCallback(() => {
+        drag.current.active = false;
     }, []);
 
-    const handleMouseUp = useCallback(() => {
-        isDragging.current = false;
-    }, []);
+    const handlePointerUp = useCallback(
+        (e: React.PointerEvent<HTMLCanvasElement>) => {
+            const wasClick = drag.current.active && drag.current.moved < CLICK_MOVE_THRESHOLD;
+            drag.current.active = false;
+            e.currentTarget.releasePointerCapture?.(e.pointerId);
+            if (wasClick && hoveredId) playById(hoveredId);
+        },
+        [hoveredId, playById]
+    );
 
-    const handleWheel = useCallback((e: React.WheelEvent) => {
-        e.preventDefault();
-        setZoom((prev) => Math.max(0.5, Math.min(5, prev - e.deltaY * 0.001)));
-    }, []);
+    const zoomByCenter = useCallback(
+        (factor: number) => {
+            setViewport((vp) =>
+                vp
+                    ? zoomAt(
+                          vp,
+                          { x: dims.width / 2, y: dims.height / 2 },
+                          factor,
+                          dims
+                      )
+                    : vp
+            );
+        },
+        [dims]
+    );
 
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center h-full">
-                <Loader2 className="w-8 h-8 text-gray-500 animate-spin" />
-            </div>
+    const resetView = useCallback(() => {
+        if (dims.width > 0) setViewport(fitViewport(dims));
+    }, [dims]);
+
+    const locateNowPlaying = useCallback(() => {
+        if (!viewport || !beaconTrack) return;
+        const targetScale = Math.max(viewport.scale, fitViewport(dims).scale * 3);
+        setViewport(
+            flyTo(viewport, { x: beaconTrack.x, y: beaconTrack.y }, targetScale, dims)
         );
-    }
+    }, [viewport, beaconTrack, dims]);
 
-    if (error || tracks.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                <p className="text-gray-400 text-sm">
-                    {error || "No tracks with embeddings available for the map"}
-                </p>
-            </div>
-        );
-    }
+    const hoveredTrack = hoveredId ? trackById.get(hoveredId) : undefined;
+    const mapReady = viewport !== null && dims.width > 0 && dims.height > 0;
 
     return (
-        <div className="flex flex-col h-full">
-            {/* Controls */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
-                <p className="text-xs text-gray-500">
-                    {tracks.length} tracks &middot; Click to play
+        <div className="flex flex-col h-full" data-vibe-mode={mode}>
+            {/* Top bar: spotlight + view controls */}
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
+                <SpotlightSearch
+                    className="relative flex-1 max-w-xs"
+                    onResults={(ids) => setHighlightIds(ids)}
+                    onClear={() => setHighlightIds(null)}
+                />
+                <p className="text-xs text-gray-500 ml-auto whitespace-nowrap tabular-nums">
+                    {filters.visibleCount} of {tracks.length} visible
                 </p>
                 <div className="flex items-center gap-1">
                     <button
-                        onClick={() => setZoom((z) => Math.min(5, z * 1.3))}
+                        type="button"
+                        onClick={locateNowPlaying}
+                        disabled={!beaconOnMap}
+                        title={
+                            beaconOnMap
+                                ? "Fly to now playing"
+                                : currentTrack
+                                  ? "Now playing isn't on the map"
+                                  : "Nothing playing"
+                        }
+                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+                    >
+                        <Crosshair className="w-4 h-4" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => zoomByCenter(1.3)}
                         className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors"
                         title="Zoom in"
                     >
                         <ZoomIn className="w-4 h-4" />
                     </button>
                     <button
-                        onClick={() => setZoom((z) => Math.max(0.5, z / 1.3))}
+                        type="button"
+                        onClick={() => zoomByCenter(1 / 1.3)}
                         className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors"
                         title="Zoom out"
                     >
                         <ZoomOut className="w-4 h-4" />
                     </button>
                     <button
-                        onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+                        type="button"
+                        onClick={resetView}
                         className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors"
                         title="Reset view"
                     >
@@ -236,20 +364,96 @@ export function VibeMap() {
                 </div>
             </div>
 
-            {/* Canvas */}
-            <div ref={containerRef} className="flex-1 relative">
-                <canvas
-                    ref={canvasRef}
-                    className="absolute inset-0"
-                    onMouseMove={handleMouseMove}
-                    onMouseDown={handleMouseDown}
-                    onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseUp}
-                    onWheel={handleWheel}
-                    onClick={handleClick}
+            {/* Filter bar: mood chips (toggles) + energy/valence ranges */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 border-b border-white/5">
+                {Object.keys(MOOD_COLORS).map((mood) => {
+                    const active =
+                        filters.activeMoods.size === 0 ||
+                        filters.activeMoods.has(mood);
+                    return (
+                        <button
+                            key={mood}
+                            type="button"
+                            onClick={() => filters.toggleMood(mood)}
+                            aria-pressed={filters.activeMoods.has(mood)}
+                            className={`flex items-center gap-1.5 transition-opacity ${
+                                active ? "opacity-100" : "opacity-30"
+                            }`}
+                            title={`Toggle ${moodLabel(mood)}`}
+                        >
+                            <span
+                                className="w-2 h-2 rounded-full"
+                                style={{ backgroundColor: getMoodColor(mood) }}
+                            />
+                            <span className="text-[10px] text-gray-400">
+                                {moodLabel(mood)}
+                            </span>
+                        </button>
+                    );
+                })}
+                <div className="h-3 w-px bg-white/10 mx-1" />
+                <DualRange
+                    label="Energy"
+                    value={filters.energyRange}
+                    onChange={filters.setEnergyRange}
                 />
+                <DualRange
+                    label="Valence"
+                    value={filters.valenceRange}
+                    onChange={filters.setValenceRange}
+                />
+            </div>
 
-                {/* Tooltip */}
+            {/* Map area */}
+            <div ref={containerRef} className="flex-1 relative overflow-hidden">
+                {mapReady && (
+                    <>
+                        <MapCanvas
+                            tracks={tracks}
+                            viewport={viewport}
+                            width={dims.width}
+                            height={dims.height}
+                            mask={filters.mask}
+                            highlightIds={highlightIds}
+                            dimUnhighlighted={dimUnhighlighted}
+                            hoveredId={hoveredId}
+                            onWheel={handleWheel}
+                            onPointerDown={handlePointerDown}
+                            onPointerMove={handlePointerMove}
+                            onPointerUp={handlePointerUp}
+                            onPointerLeave={endDrag}
+                        />
+                        <MapOverlay
+                            viewport={viewport}
+                            width={dims.width}
+                            height={dims.height}
+                            beacon={
+                                beaconTrack
+                                    ? { x: beaconTrack.x, y: beaconTrack.y }
+                                    : null
+                            }
+                            trail={trailPoints}
+                            decorations={null}
+                        />
+                    </>
+                )}
+
+                {/* Status overlays in the map area (do not hide the controls). */}
+                {isLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <Loader2 className="w-8 h-8 text-gray-500 animate-spin" />
+                    </div>
+                )}
+                {!isLoading && (error || tracks.length === 0) && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4 pointer-events-none">
+                        <p className="text-gray-400 text-sm">
+                            {error ||
+                                "No tracks with embeddings available for the map"}
+                        </p>
+                    </div>
+                )}
+
+                {/* Hover tooltip */}
                 {hoveredTrack && (
                     <div className="absolute bottom-4 left-4 right-4 pointer-events-none">
                         <div className="bg-black/90 border border-white/10 rounded-lg px-3 py-2 inline-block">
@@ -262,21 +466,6 @@ export function VibeMap() {
                         </div>
                     </div>
                 )}
-            </div>
-
-            {/* Legend */}
-            <div className="flex flex-wrap gap-3 px-4 py-2 border-t border-white/5">
-                {Object.entries(MOOD_COLORS).map(([mood, color]) => (
-                    <div key={mood} className="flex items-center gap-1.5">
-                        <span
-                            className="w-2 h-2 rounded-full"
-                            style={{ backgroundColor: color }}
-                        />
-                        <span className="text-[10px] text-gray-500">
-                            {mood.replace("mood", "")}
-                        </span>
-                    </div>
-                ))}
             </div>
         </div>
     );
