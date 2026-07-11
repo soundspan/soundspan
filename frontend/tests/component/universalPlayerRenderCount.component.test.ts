@@ -71,12 +71,14 @@ mock.module("@/lib/audio-controls-context", {
 // boundary between them), giving a Profiler-independent count of UniversalPlayer
 // renders as a cross-check.
 const childRenderCounts = { "full-player-stub": 0, "mini-player-stub": 0, "overlay-player-stub": 0 };
-const childStub =
-    (label: keyof typeof childRenderCounts) =>
-    () => {
+const childStub = (label: keyof typeof childRenderCounts) => {
+    const ChildStub = () => {
         childRenderCounts[label] += 1;
         return React.createElement("div", { "data-stub": label }, label);
     };
+    ChildStub.displayName = `ChildStub(${label})`;
+    return ChildStub;
+};
 mock.module("../../components/player/MiniPlayer.tsx", {
     namedExports: { MiniPlayer: childStub("mini-player-stub") },
 });
@@ -124,8 +126,12 @@ test("UniversalPlayer renders exactly 0 times across 8 clock ticks; clock publis
     );
 
     let commitCount = 0;
-    let playbackRenders = 0;
-    let capturedEngineTick: EngineTickFn | null = null;
+    // Ref-shaped mutation containers: the react-hooks lint rule forbids
+    // reassigning outer variables inside a component, but allows writes to the
+    // `.current` field of *Ref-named values (house pattern, see
+    // audioContextHookGuards.component.test.ts).
+    const playbackRendersRef = { current: 0 };
+    const capturedEngineTickRef = { current: null as EngineTickFn | null };
 
     // A real playback subscriber. It re-renders whenever the ticking clock is
     // published to state — the A/B control that proves the ticks actually drive
@@ -133,8 +139,8 @@ test("UniversalPlayer renders exactly 0 times across 8 clock ticks; clock publis
     // vacuous). UniversalPlayer must NOT track this counter.
     const Probe = () => {
         const playback = useAudioPlayback();
-        capturedEngineTick = playback.setCurrentTimeFromEngine;
-        playbackRenders += 1;
+        capturedEngineTickRef.current = playback.setCurrentTimeFromEngine;
+        playbackRendersRef.current += 1;
         return null;
     };
 
@@ -173,10 +179,10 @@ test("UniversalPlayer renders exactly 0 times across 8 clock ticks; clock publis
     });
 
     const mountCommits = commitCount;
-    const mountPlaybackRenders = playbackRenders;
+    const mountPlaybackRenders = playbackRendersRef.current;
     const mountChildRenders = childRenderCounts["full-player-stub"];
     assert.ok(
-        capturedEngineTick,
+        capturedEngineTickRef.current,
         "expected the playback provider's engine-tick setter to be captured",
     );
 
@@ -187,12 +193,12 @@ test("UniversalPlayer renders exactly 0 times across 8 clock ticks; clock publis
     const ticks = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
     for (const time of ticks) {
         await React.act(async () => {
-            capturedEngineTick!(time, null);
+            capturedEngineTickRef.current!(time, null);
         });
     }
 
     const tickCommits = commitCount - mountCommits;
-    const tickPlaybackRenders = playbackRenders - mountPlaybackRenders;
+    const tickPlaybackRenders = playbackRendersRef.current - mountPlaybackRenders;
     const tickChildRenders =
         childRenderCounts["full-player-stub"] - mountChildRenders;
     t.diagnostic(

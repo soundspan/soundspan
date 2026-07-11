@@ -67,10 +67,12 @@ mock.module("@/hooks/useMediaQuery", {
     },
 });
 
-const childStub =
-    (label: string) =>
-    () =>
+const childStub = (label: string) => {
+    const ChildStub = () =>
         React.createElement("div", { "data-stub": label }, label);
+    ChildStub.displayName = `ChildStub(${label})`;
+    return ChildStub;
+};
 
 mock.module("../../components/player/MiniPlayer.tsx", {
     namedExports: { MiniPlayer: childStub("mini-player-stub") },

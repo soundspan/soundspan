@@ -62,11 +62,15 @@ test("localStorage resume snapshot stores the full-precision engine clock, not t
     const currentTimeKey = createMigratingStorageKey("current_time");
 
     type EngineTickFn = (time: number, invocationTrackId?: string | null) => void;
-    let capturedEngineTick: EngineTickFn | null = null;
+    // Ref-shaped mutation container: the react-hooks lint rule forbids
+    // reassigning outer variables inside a component, but allows writes to the
+    // `.current` field of *Ref-named values (house pattern, see
+    // audioContextHookGuards.component.test.ts).
+    const capturedEngineTickRef = { current: null as EngineTickFn | null };
 
     const Probe = () => {
         const playback = useAudioPlayback();
-        capturedEngineTick = playback.setCurrentTimeFromEngine;
+        capturedEngineTickRef.current = playback.setCurrentTimeFromEngine;
         return null;
     };
 
@@ -94,7 +98,7 @@ test("localStorage resume snapshot stores the full-precision engine clock, not t
     });
 
     assert.ok(
-        capturedEngineTick,
+        capturedEngineTickRef.current,
         "expected the playback provider's engine-tick setter to be captured",
     );
     assert.equal(
@@ -109,8 +113,8 @@ test("localStorage resume snapshot stores the full-precision engine clock, not t
     // after the batch with published state 1.02 but ref 1.27.
     t.mock.timers.tick(6000);
     await React.act(async () => {
-        capturedEngineTick!(1.02, null);
-        capturedEngineTick!(1.27, null);
+        capturedEngineTickRef.current!(1.02, null);
+        capturedEngineTickRef.current!(1.27, null);
     });
 
     assert.equal(
