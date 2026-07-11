@@ -375,6 +375,7 @@ describe("computeMapProjection", () => {
                 ],
                 nNeighbors: 2,
             },
+            execArgv: ["--import", "tsx"],
         });
         expect(pipeline.setEx).toHaveBeenCalledWith(
             "vibe:map:v3:projection",
