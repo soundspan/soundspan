@@ -1,5 +1,5 @@
 # Stage 1: Dependencies
-FROM node:20-slim AS deps
+FROM node:24-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ RUN npm ci && \
 RUN npx tsc -p /packages/media-metadata-contract/tsconfig.json
 
 # Stage 2: Builder
-FROM node:20-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -45,7 +45,7 @@ ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 RUN npm run build
 
 # Stage 3: Production (Hardened)
-FROM node:20-slim
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 

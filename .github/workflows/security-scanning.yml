@@ -36,7 +36,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -94,7 +94,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # Full history unconditionally. schedule/push/dispatch need it to
           # scan every past commit, and the PR range scan below needs both
@@ -211,7 +211,7 @@ jobs:
             python-version: "3.13"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v5

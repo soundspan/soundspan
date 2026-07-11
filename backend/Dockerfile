@@ -7,7 +7,7 @@
 # =============================================================================
 
 # Stage 1: Full dependencies for build + API runtime
-FROM node:20-slim AS deps
+FROM node:24-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -41,7 +41,7 @@ FROM build AS worker-deps
 RUN npm prune --omit=dev && npm cache clean --force
 
 # Stage 4: Slim worker runtime (compiled JS + prod deps)
-FROM node:20-slim AS worker-runtime
+FROM node:24-bookworm-slim AS worker-runtime
 
 WORKDIR /app
 
@@ -70,7 +70,7 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "dist/worker.js"]
 
 # Stage 5: API runtime (default target for backend image)
-FROM node:20-slim AS api-runtime
+FROM node:24-bookworm-slim AS api-runtime
 
 WORKDIR /app
 

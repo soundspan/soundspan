@@ -28,7 +28,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 
 | Epic | Title | ✅ / 🟡 / Total |
 |------|-------|----------------|
-| #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 0 / 1 / 2 |
+| #8 | JS toolchain: workspaces + pinned Node (pre-existing issue) | 1 / 1 / 2 |
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 1 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 5 / 1 / 8 |
@@ -103,14 +103,14 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F43](#f43) | ⬜ | extensibility | medium | L | medium |  | #18 | Per-external-source coupling: each media source is a parallel stack (route file + servi… |
 | [F44](#f44) | ⬜ | extensibility | medium | L | medium |  | #14 | library.ts (305KB) mixes HTTP, business logic, and 121 direct Prisma calls in one god-r… _(dup F2)_ |
 | [F45](#f45) | 🟡 | dependencies-build | high | M | low |  | #10 | CI has no security/vulnerability scanning and no dependency automation (Dependabot/Reno… |
-| [F46](#f46) | ⬜ | dependencies-build | medium | S | low |  | #8 | No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend i… |
+| [F46](#f46) | 🟡 | dependencies-build | medium | S | low |  | #8 | No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend i… |
 | [F47](#f47) | ⬜ | dependencies-build | high→medium | M | low |  | #19 | API runtime image ships uncompiled TypeScript and runs it via tsx in production with fu… _(dup F17)_ |
 | [F48](#f48) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Bull 4 is maintenance-only with a version-mismatched @types/bull; migrate to BullMQ |
 | [F49](#f49) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Express 4 (Express 5 is GA) with half-migrated middleware majors |
 | [F50](#f50) | ⬜ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproduci… |
 | [F51](#f51) | ⬜ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
 | [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and r… |
-| [F53](#f53) | 🟡 | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
+| [F53](#f53) | ✅ | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
 | [F54](#f54) | ✅ | security | high | S | low |  | #12 | POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys |
 
 ## Findings
@@ -832,7 +832,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F46 — No typecheck gate in CI; frontend stuck on strict:false / target ES2017 while backend is strict:true
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
+**🟡 partial (PR #64)** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
+
+> **Fix shipped, partial.** Added the missing fast, standalone, PR-visible typecheck: two new `quality-visibility.yml` jobs, `backend-typecheck` and `frontend-typecheck`, each a whole-program `tsc --noEmit` (backend's builds `packages/media-metadata-contract` first; frontend's does too via its existing `tsc -p ../packages/media-metadata-contract/tsconfig.json` prebuild step), plus a "Run frontend component tests" step in the existing frontend job. Ratcheted exactly the way this finding's own Safety section prescribed — `continue-on-error` gated on `CI_NON_BLOCKING_TEST_VISIBILITY`, non-blocking first. `backend-typecheck` lands GREEN day one: the 4 errors this PR's own `@types/node` 24 bump would otherwise surface (all one class — `.at()` vs the old `lib: ["ES2020"]`; see F53's companion-lib note) are resolved by the same PR's `lib: ["ES2022"]` alignment, so backend `tsc --noEmit` is 0 errors. `frontend-typecheck` surfaces 92 pre-existing errors non-blocking — that's the 1.10.0 error-budget work, none of it introduced here. (Still 🟡: making it a required PR check needs an admin to flip `CI_NON_BLOCKING_TEST_VISIBILITY` to `'false'` plus branch protection — not done here. The frontend ES2017→ES2020 target bump and the frontend strict:false→strict:true incremental ratchet from this finding's own Recommendation are untouched — the backend `lib` bump is a type-declaration alignment with the already-running runtime, not an ES-target or strict-flag change, per this same Audit note + #59 WS2.2.)
 
 > **Audit note.** ✓ `@ts-ignore` count is 1, not ~480 — that figure is `eslint-disable` (a different mechanism). Scope F46 to the CI typecheck gate; cross-link #15 for the type work.
 
@@ -938,9 +940,13 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F53 — Node runtime version unpinned and drifts across CI (frontend on Node 24, everything else Node 20)
 
-**🟡 partial (1.7.0)** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
+**✅ complete (PR #64)** · dimension: dependencies-build · severity: medium · effort: S · risk: low · epic: #8
 
-> **Partial.** 1.7.0 added `engines.node` floors (`>=20.9.0`) to backend, frontend, and packages/media-metadata-contract, plus a root `.nvmrc` — but the `.nvmrc` pins **24** while every shipped Dockerfile (backend, frontend, root AIO) builds on `node:20-slim` and `quality-visibility.yml`'s backend job still pins Node **20** (frontend's job stays on 24). The exact Node 20-vs-24 split this finding warned about persists; unifying on one Node major everywhere is owned by the 1.9.0 plan (issue #59, WS2), which is where that major-version call belongs.
+> **Fix shipped.** Every Node-based Dockerfile (backend x3 stages, frontend x3 stages, root AIO x1) now builds `FROM node:24-bookworm-slim` (was node:20-slim; bookworm pinned explicitly — see commit message — because the AIO image installs PG16 via `$(lsb_release -cs)-pgdg` and TF/Essentia/CLAP via pip against the image's system Python 3.11, so pinning the Debian family keeps both stable across future `node:24` tag updates). Every CI `node-version` pin (quality-visibility's backend job, both image-builds.yml jobs, helm-chart-release.yml) now reads `24`, closing the exact divergence this finding named (frontend CI-validated on 24, shipped on 20). `@types/node` bumped to `^24` in backend + frontend. `engines.node` floors intentionally left at `>=20.9.0` (operator decision, out of scope).
+>
+> **Companion lib alignment.** `@types/node` 24 drops the legacy compat declarations for post-ES2020 built-ins that v20 carried, so under the old `lib: ["ES2020"]` the types bump alone would surface 4 new `TS2550` errors at backend's `Array/String.prototype.at()` call sites (2 test files + 1 service file; verified clean-room that base `796dacd` with its own lockfile typechecks at 0 errors). The same PR raises `backend/tsconfig.json` `lib` to `ES2022` — a type-declaration alignment with the actual runtime (Node ≥ 20 implements `.at()`; the api-runtime image already executes this code via `tsx`), preventing that would-be regression. Emitted code and `target` unchanged.
+>
+> **Verified (proof of ✅):** all three `bake core` images build clean on Node 24 — `backend` (api-runtime), `backend-worker`, `frontend` — and `node --version` inside each → `v24.18.0`; the full AIO image (all 45 steps: apt + `pgdg` PG16 repo, both Python analyzer dependency installs (TF/Essentia and torch/transformers/laion-clap), Essentia model downloads, the ~600MB CLAP checkpoint (unauthenticated — that HF repo is ungated), backend `npm run build`, frontend `next build`) built to completion locally; backend `tsc --noEmit` under node:24 → 0 errors.
 
 **Files:** `.github/workflows/quality-visibility.yml`, `backend/package.json`, `frontend/package.json`
 

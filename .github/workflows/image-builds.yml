@@ -15,12 +15,12 @@ jobs:
             release_tag: ${{ steps.release-meta.outputs.release_tag }}
         steps:
             - name: Checkout code
-              uses: actions/checkout@v5
+              uses: actions/checkout@v7
 
             - name: Set up Node.js
-              uses: actions/setup-node@v5
+              uses: actions/setup-node@v6
               with:
-                  node-version: "20"
+                  node-version: "24"
 
             - name: Validate release metadata
               id: release-meta
@@ -185,13 +185,13 @@ jobs:
                   echo "GHCR_REPO=ghcr.io/${GITHUB_REPOSITORY@L}" >> "$GITHUB_ENV"
 
             - name: Checkout code
-              uses: actions/checkout@v5
+              uses: actions/checkout@v7
 
             - name: Set up Node.js
               if: ${{ matrix.needs_node }}
-              uses: actions/setup-node@v5
+              uses: actions/setup-node@v6
               with:
-                  node-version: "20"
+                  node-version: "24"
 
             - name: Self-hosted pre-build cleanup (neighbor-safe)
               if: ${{ contains(runner.labels, 'self-hosted') }}
@@ -219,7 +219,7 @@ jobs:
                   cleanup: true
 
             - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ghcr.io
                   username: ${{ github.actor }}
