@@ -1,4 +1,4 @@
-fastapi>=0.115.0
+fastapi>=0.139.0
 uvicorn>=0.51.0
 tiddl>=3.4.4
 tidalapi>=0.8.11,<1.0.0
