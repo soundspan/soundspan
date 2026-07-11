@@ -95,6 +95,72 @@ class SimpleDownloadManager {
     }
 
     /**
+     * Recovery path for onDownloadGrabbed when a concurrent duplicate Grab
+     * webhook (the same Lidarr download delivered/retried twice, or a race
+     * with the queue-cleaner reconciler) loses the partial-unique-index race
+     * on targetMbid (`DownloadJob_targetMbid_active_unique`, migration
+     * `20260118000000_add_partial_unique_index_active_downloads`) at either
+     * the matched-job update or the tracking-job create inside
+     * onDownloadGrabbed's transaction.
+     *
+     * Placement note: both writes happen inside the SAME withTransaction
+     * callback, so by the time this runs, Prisma's interactive $transaction
+     * has already rolled the transaction back and rethrown (that's how a
+     * callback rejection is handled). The `tx` client from that callback is
+     * dead — re-querying with it here would fail with "current transaction
+     * is aborted, commands ignored until end of transaction block". This
+     * method is wired via `.catch()` on the *outside* of the withTransaction
+     * call (see below) specifically so the re-find runs against the plain
+     * `prisma` singleton, which opens its own fresh implicit
+     * transaction/connection, unaffected by the aborted one.
+     */
+    private async recoverFromGrabRaceError(
+        error: any,
+        downloadId: string
+    ): Promise<{ matched: boolean; jobId?: string }> {
+        if (error?.code !== "P2002") {
+            throw error;
+        }
+
+        logger.debug(
+            `[GRAB-TX] P2002 on grab for downloadId=${downloadId}; re-finding the winning job`
+        );
+
+        // Both the matched-update and the tracking-job create write
+        // lidarrRef + metadata.downloadId together on success (see Step 4
+        // above), so whichever concurrent call won the race is findable by
+        // either signal. Prefer the indexed lidarrRef column; keep the
+        // JSON-path metadata check as a fallback for the same reason Step 1's
+        // idempotency check uses it.
+        const winner = await prisma.downloadJob.findFirst({
+            where: {
+                OR: [
+                    { lidarrRef: downloadId },
+                    { metadata: { path: ["downloadId"], equals: downloadId } },
+                ],
+            },
+        });
+
+        if (winner) {
+            logger.debug(
+                `[GRAB-TX] Duplicate grab resolved to existing job: ${winner.id}`
+            );
+            return { matched: true, jobId: winner.id };
+        }
+
+        // Truthful, non-throwing fallback: we couldn't identify the winner
+        // (e.g. a different downloadId raced on the same targetMbid, which is
+        // outside this recipe's scope), but a real active row exists
+        // somewhere under the partial-unique constraint. Preserve the
+        // existing "can't determine, don't fabricate a match" contract shape
+        // rather than inventing a new resolution path.
+        logger.warn(
+            `[DownloadManager] P2002 on grab but no winning job found for downloadId=${downloadId}`
+        );
+        return { matched: false };
+    }
+
+    /**
      * Start a new download
      * Returns the correlation ID for webhook matching
      * @param isDiscovery - If true, tags the artist in Lidarr for discovery cleanup
@@ -588,6 +654,8 @@ class SimpleDownloadManager {
                 return { matched: true, jobId: trackingJob.id };
             },
             { logPrefix: "[GRAB-TX]" }
+        ).catch((error: any) =>
+            this.recoverFromGrabRaceError(error, downloadId)
         );
     }
 
