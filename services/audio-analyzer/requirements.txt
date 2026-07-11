@@ -3,7 +3,7 @@
 # This file only tracks the queue/database/runtime support dependencies.
 
 # Queue and database
-redis>=4.5.0
+redis>=8.0.1
 psycopg2-binary>=2.9.0
 
 # Numeric operations (compatible with older TensorFlow)
