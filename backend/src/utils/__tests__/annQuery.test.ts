@@ -81,4 +81,39 @@ describe("runAnnQuery (F14 ivfflat.probes helper)", () => {
         expect(batch[0].__sqlArgs).toContain("8");
         expect(batch[0].__sqlArgs).not.toContain(8);
     });
+
+    // ivfflat.probes' valid domain is 1..32768. Postgres does NOT error on an
+    // out-of-range set_config — it emits only a server-log WARNING (invisible to
+    // the app) and silently keeps the prior value, i.e. probes=1, resurrecting
+    // the exact near-random-recall bug this helper fixes. So out-of-range input
+    // must be clamped BEFORE it reaches set_config.
+    it("clamps probes below 1 up to the domain floor (0 -> \"1\")", async () => {
+        mockTransaction.mockResolvedValueOnce([[{ set_config: "1" }], []]);
+
+        await runAnnQuery(Prisma.sql`SELECT 1`, 0);
+
+        const batch = mockTransaction.mock.calls[0][0] as Descriptor[];
+        expect(batch[0].__sqlArgs).toContain("1");
+        expect(batch[0].__sqlArgs).not.toContain("0");
+    });
+
+    it("clamps probes above 32768 down to the domain ceiling", async () => {
+        mockTransaction.mockResolvedValueOnce([[{ set_config: "32768" }], []]);
+
+        await runAnnQuery(Prisma.sql`SELECT 1`, 999999999);
+
+        const batch = mockTransaction.mock.calls[0][0] as Descriptor[];
+        expect(batch[0].__sqlArgs).toContain("32768");
+        expect(batch[0].__sqlArgs).not.toContain("999999999");
+    });
+
+    it("truncates fractional probes to an integer (set_config rejects non-integer text for an int GUC)", async () => {
+        mockTransaction.mockResolvedValueOnce([[{ set_config: "7" }], []]);
+
+        await runAnnQuery(Prisma.sql`SELECT 1`, 7.9);
+
+        const batch = mockTransaction.mock.calls[0][0] as Descriptor[];
+        expect(batch[0].__sqlArgs).toContain("7");
+        expect(batch[0].__sqlArgs).not.toContain("7.9");
+    });
 });

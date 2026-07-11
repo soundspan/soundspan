@@ -131,6 +131,8 @@ export const config = {
     // for the local corpus (recall@10 ≥ ~0.95); see scripts/benchmark-ivfflat-probes.ts.
     // Benchmark (15,230-row corpus, lists=224): probes=1 recall@10≈0.26 (near-random)
     // → probes=32 recall@10≈0.96 at p95≈5.7ms; latency cliffs to ~44ms only at probes≥112.
+    // Values outside Postgres' valid 1..32768 domain are clamped at the query site
+    // (out-of-range only WARNs server-side and silently keeps probes=1 otherwise).
     ivfflatProbes: parseEnvInt(process.env.IVFFLAT_PROBES, 32),
 
     // Music library configuration (self-contained native music system)

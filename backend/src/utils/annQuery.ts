@@ -39,8 +39,17 @@ export async function runAnnQuery<T>(
     annQuery: Prisma.Sql,
     probes: number = config.ivfflatProbes,
 ): Promise<T> {
+    // Clamp to ivfflat.probes' valid domain, 1..32768. An out-of-range value
+    // does NOT error: Postgres emits only a server-log WARNING (invisible to
+    // the app — db.ts never surfaces PG WARNINGs) and silently keeps the prior
+    // value, i.e. probes=1 — which would silently resurrect the exact
+    // near-random-recall bug this helper exists to fix. Truncate too:
+    // set_config rejects non-integer text for an integer GUC. This is the
+    // single consumption point, so a misconfigured IVFFLAT_PROBES (0, negative,
+    // huge, fractional) degrades to the nearest valid value instead.
+    const effectiveProbes = Math.min(32768, Math.max(1, Math.trunc(probes)));
     const [, rows] = await prisma.$transaction([
-        prisma.$queryRaw`SELECT set_config('ivfflat.probes', ${String(probes)}, true)`,
+        prisma.$queryRaw`SELECT set_config('ivfflat.probes', ${String(effectiveProbes)}, true)`,
         prisma.$queryRaw<T>(annQuery),
     ]);
     return rows;
