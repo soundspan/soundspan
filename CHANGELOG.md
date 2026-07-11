@@ -15,7 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `GET /api/library/tracks/shuffle`'s large-library path no longer runs a full-table `ORDER BY RANDOM()` scan+sort per request (roadmap F15). It now samples via a new indexed `Track.random` column: pick a uniform pivot in `[0, 1)`, take the next `limit` rows by `random` ascending from that pivot, and top up with a wrap-around query (`random < pivot`) on shortfall — removing the endpoint's raw-SQL site entirely. On the local 15,230-track corpus: `LIMIT 100` p50 ~2.0ms → ~0.7ms, p95 ~4.1ms → ~1.5ms; `LIMIT 1000` p50 ~2.7ms → ~2.0ms, p95 ~3.3ms → ~2.4ms. The old query's cost is dominated by sorting the whole table and stays roughly flat regardless of `limit`; the new query's cost scales with `limit` via the index, so the win is largest at typical shuffle sizes and grows further as the library grows (the old query gets linearly slower with table size; the new one doesn't).
+- Spotify/Deezer playlist-import preview matches tracks against the library
+  roughly 2.5x faster on a 50-track playlist (≈130ms → ≈52ms median wall-clock
+  on a 15,230-track dev corpus), by running the per-track library lookups
+  through a bounded-concurrency queue (`p-queue`, concurrency 4) instead of
+  one at a time. Discover Weekly's tier-based artist recommendations also
+  check library membership via one batched query per generation run instead
+  of up to 2 Prisma round trips per candidate artist across the similar-artist
+  pool (F13).
 - All Node-based Docker images and CI jobs now run Node 24 (`node:24-bookworm-slim` for backend/frontend/root-AIO images), replacing the previous 20/24 split. `@types/node` is bumped to `^24` in backend and frontend to match, and the backend `tsconfig` `lib` is raised `ES2020` → `ES2022` alongside, keeping `tsc` clean under `@types/node` 24 (which dropped the legacy compat declarations for post-ES2020 built-ins like `.at()` that the v20 types carried) — the declared lib now matches what the Node ≥ 20 runtime actually implements; type declarations only, emitted code and `target` unchanged.
+- Similar-tracks and vibe search now surface genuinely related neighbours instead of near-random ones: every pgvector ANN query now applies a configurable `ivfflat.probes` on the same pooled connection (a transaction-scoped `set_config`), fixing recall that was silently stuck at Postgres' default of scanning 1 of the index's 224 lists. New `IVFFLAT_PROBES` env var, default `32` — benchmark-chosen on the local 15,230-track corpus, where it lifts recall@10 from ≈0.26 (probes=1) to ≈0.96 at ~6 ms p95.
 
 ### Fixed
 

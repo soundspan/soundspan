@@ -1,4 +1,6 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
+import { runAnnQuery } from "../utils/annQuery";
 import { featureDetection } from "./featureDetection";
 import { logger } from "../utils/logger";
 import { separateArtistsPreservingOrder } from "../utils/separateArtists";
@@ -133,7 +135,7 @@ async function findSimilarHybrid(
     // Fetch 5x candidates from CLAP to ensure good coverage after re-ranking
     const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
 
-    const results = await prisma.$queryRaw<SimilarTrack[]>`
+    const results = await runAnnQuery<SimilarTrack[]>(Prisma.sql`
         WITH source AS (
             SELECT
                 te.embedding,
@@ -183,7 +185,7 @@ async function findSimilarHybrid(
         CROSS JOIN source s
         ORDER BY similarity DESC
         LIMIT ${candidateLimit}
-    `;
+    `);
 
     return applyArtistDiversityCap(results, limit);
 }
@@ -193,7 +195,7 @@ async function findSimilarClapOnly(
     limit: number
 ): Promise<SimilarTrack[]> {
     const candidateLimit = Math.max(limit * CANDIDATE_MULTIPLIER, limit);
-    const results = await prisma.$queryRaw<SimilarTrack[]>`
+    const results = await runAnnQuery<SimilarTrack[]>(Prisma.sql`
         WITH source AS (
             SELECT embedding FROM track_embeddings WHERE track_id = ${trackId}
         )
@@ -219,7 +221,7 @@ async function findSimilarClapOnly(
         WHERE te.track_id != ${trackId}
         ORDER BY distance
         LIMIT ${candidateLimit}
-    `;
+    `);
 
     return applyArtistDiversityCap(results, limit);
 }

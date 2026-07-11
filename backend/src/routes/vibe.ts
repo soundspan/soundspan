@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
+import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import { runAnnQuery } from "../utils/annQuery";
 import { redisClient } from "../utils/redis";
 import { parseEmbedding } from "../utils/embedding";
 import { requireAuth } from "../middleware/auth";
@@ -199,7 +201,7 @@ async function findNearestToEmbedding(
     excludeIds: string[] = []
 ): Promise<NearestTrackRow[]> {
     if (excludeIds.length > 0) {
-        return prisma.$queryRaw<NearestTrackRow[]>`
+        return runAnnQuery<NearestTrackRow[]>(Prisma.sql`
             SELECT
                 t.id, t.title,
                 te.embedding <=> ${embedding}::vector AS distance,
@@ -212,9 +214,9 @@ async function findNearestToEmbedding(
             WHERE te.track_id != ALL(${excludeIds}::text[])
             ORDER BY te.embedding <=> ${embedding}::vector
             LIMIT ${limit}
-        `;
+        `);
     }
-    return prisma.$queryRaw<NearestTrackRow[]>`
+    return runAnnQuery<NearestTrackRow[]>(Prisma.sql`
         SELECT
             t.id, t.title,
             te.embedding <=> ${embedding}::vector AS distance,
@@ -226,7 +228,7 @@ async function findNearestToEmbedding(
         JOIN "Artist" ar ON a."artistId" = ar.id
         ORDER BY te.embedding <=> ${embedding}::vector
         LIMIT ${limit}
-    `;
+    `);
 }
 
 function formatNearestTrack(row: NearestTrackRow) {
@@ -765,7 +767,7 @@ router.post("/search", requireAuth, async (req, res) => {
             // Query for similar tracks using the (possibly expanded) embedding
             // Fetch more candidates for re-ranking (3x limit)
             // Filter by max distance to exclude poor matches
-            const similarTracks = await prisma.$queryRaw<TextSearchResult[]>`
+            const similarTracks = await runAnnQuery<TextSearchResult[]>(Prisma.sql`
                 SELECT
                     t.id,
                     t.title,
@@ -791,7 +793,7 @@ router.post("/search", requireAuth, async (req, res) => {
                 WHERE te.embedding <=> ${searchEmbedding}::vector <= ${maxDistance}
                 ORDER BY te.embedding <=> ${searchEmbedding}::vector
                 LIMIT ${limit * 3}
-            `;
+            `);
 
             logger.info(`Vibe search "${normalizedQuery}": found ${similarTracks.length} candidates above ${Math.round(similarityThreshold * 100)}% similarity (max distance: ${maxDistance.toFixed(2)})`);
 

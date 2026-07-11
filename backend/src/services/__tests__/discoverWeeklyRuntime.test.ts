@@ -95,6 +95,12 @@ describe("discover weekly runtime behavior", () => {
             },
             artist: {
                 findFirst: jest.fn(async () => null),
+                // Default: nobody matches the batched membership prefetch (see
+                // prefetchArtistLibraryMembership), i.e. every candidate
+                // classifies as not-in-library unless a test overrides this or
+                // spies on isArtistInLibrary directly (which still wins --
+                // jest.spyOn replaces the whole method regardless of this mock).
+                findMany: jest.fn(async () => []),
             },
             discoverExclusion: {
                 findFirst: jest.fn(async () => null),

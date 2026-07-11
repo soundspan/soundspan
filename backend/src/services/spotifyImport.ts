@@ -1003,20 +1003,43 @@ class SpotifyImportService {
             }
         }
 
-        const matchedTracks: MatchedTrack[] = [];
+        // matchTrack is purely Prisma-bound (no per-track external API calls --
+        // MusicBrainz lookups only happen later, per unmatched album), so the
+        // per-track DB round trips can safely overlap. Concurrency is bounded to
+        // the worker's Prisma pool size (4 connections); going higher just queues
+        // at the pool instead of buying more overlap.
+        //
+        // Order stability is required: matchedTracks must stay in the exact
+        // input order (the UI and downstream consumers rely on it), and the
+        // unmatchedByAlbum grouping must produce the same Map insertion order as
+        // the old serial loop (it drives albumsToDownload order downstream). So
+        // we collect the queued promises in input order via Promise.all (which
+        // preserves array position regardless of resolution order) and only
+        // build unmatchedByAlbum AFTER every match has resolved, iterating the
+        // ordered results -- never inside the concurrent phase.
+        const SPOTIFY_IMPORT_MATCH_CONCURRENCY = 4;
+        const matchQueue = new PQueue({
+            concurrency: SPOTIFY_IMPORT_MATCH_CONCURRENCY,
+        });
+        const matchedTracks: MatchedTrack[] = await Promise.all(
+            tracks.map((track) => matchQueue.add(() => this.matchTrack(track)))
+        );
+
+        // Group by the ORIGINAL input track (positionally zipped via the same
+        // index Promise.all/.map preserved), not by matchedTracks[i].spotifyTrack
+        // -- matchTrack always echoes its input back unchanged in production, but
+        // matching on the input track directly, like the old serial loop did,
+        // keeps this immune to that assumption either way.
         const unmatchedByAlbum = new Map<string, SpotifyTrack[]>();
-
-        for (const track of tracks) {
-            const matched = await this.matchTrack(track);
-            matchedTracks.push(matched);
-
+        tracks.forEach((track, index) => {
+            const matched = matchedTracks[index];
             if (!matched.localTrack) {
                 const key = `${track.artist}|||${track.album}`;
                 const existing = unmatchedByAlbum.get(key) || [];
                 existing.push(track);
                 unmatchedByAlbum.set(key, existing);
             }
-        }
+        });
 
         const albumsToDownload: AlbumToDownload[] = [];
 

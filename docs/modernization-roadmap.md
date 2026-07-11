@@ -36,7 +36,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
 | #16 | Frontend consolidation, decomposition & render performance | 0 / 0 / 5 |
-| #17 | Database & streaming performance | 0 / 2 / 5 |
+| #17 | Database & streaming performance | 1 / 3 / 5 |
 | #18 | Provider abstractions: acquisition, streaming & engine seams | 0 / 0 / 4 |
 | #19 | Framework & production-image modernization | 0 / 0 / 6 |
 | — | Standalone (no epic) | 1 / 0 / 1 |
@@ -70,8 +70,8 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F10](#f10) | ⬜ | readability | medium | M | low |  | #16 | Per-page god-components and duplicated cover-art widgets: VibePage (1247 LOC, 16 useSta… |
 | [F11](#f11) | ⬜ | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permane… |
 | [F12](#f12) | ⬜ | performance | high | M | medium |  | #16 | Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency cur… |
-| [F13](#f13) | ⬜ | performance | high | L | medium |  | #17 | Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot… |
-| [F14](#f14) | ⬜ | performance | high | M | medium |  | #17 | pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query sc… |
+| [F13](#f13) | 🟡 | performance | high | L | medium |  | #17 | Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot… |
+| [F14](#f14) | ✅ | performance | high | M | medium |  | #17 | pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query sc… |
 | [F15](#f15) | 🟡 | performance | medium | M | medium |  | #17 | ORDER BY RANDOM() full-table scans on Track / track_embeddings for radio, random tracks… |
 | [F16](#f16) | ⬜ | performance | medium | M | medium |  | #17 | Genre filtering scans JSONB with jsonb_array_elements_text + LOWER(...) LIKE '%g%' inst… |
 | [F17](#f17) | ⬜ | performance | medium | M | low |  | #19 | API runtime transpiles TypeScript on every cold start via tsx and ships the full TS too… |
@@ -303,7 +303,9 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F13 — Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot paths
 
-**⬜ open** · dimension: performance · severity: high · effort: L · risk: medium · epic: #17
+**🟡 partial (PR #108)** · dimension: performance · severity: high · effort: L · risk: medium · epic: #17
+
+> **Fix shipped.** Audited smallest-safe scope, split by path per this finding's own Recommendation. SPOTIFY IMPORT: `buildPreviewFromTracklist`'s matchTrack loop (spotifyImport.ts:1009) is bounded via the already-imported PQueue (concurrency 4, matching the worker's Prisma pool size), order-stable (`matchedTracks` and the `unmatchedByAlbum` grouping stay in exact input order regardless of DB-resolution order). matchTrack's internals and per-track query sequences are untouched, so `spotifyImportRuntime.test.ts`'s pinned findFirst/findMany call-count assertions stay green unmodified; the deeper matchTrack query-merge remains deferred pending that suite's migration to behavior-based assertions, as this finding's Recommendation specifies. Benchmarked ~2.5x faster matchTrack-loop wall-clock on a 50-track playlist (medians 130.31ms → 52.14ms across 3 interleaved runs each, 15,230-track/299-artist/1,241-album dev corpus). DISCOVER WEEKLY: `selectFromTier` and the "fill remaining slots" loop (discoverWeekly.ts ~:3161 / ~:3241 at this branch's HEAD) now consult one batch-prefetched `artist.findMany` membership map instead of up to 2 DB round trips per candidate artist across the tier pool; `isArtistInLibrary`'s two-probe decision (temp- MBID exclusion, MBID-hit-with-zero-albums falling through to an independent name probe, case-insensitive name match) is reproduced exactly and pinned by a parity test — with one deliberate edge resolution, also pinned there: schema-legal duplicate case-insensitively-equal artist names (`Artist.name` carries no unique constraint; the live DB has zero such pairs) were previously decided by an unordered `findFirst` — nondeterministic true/false depending on which duplicate row Postgres happened to return — and now resolve as a deterministic OR across the duplicate rows (any duplicate owning an album ⇒ in-library, i.e. skip the ambiguous same-named artist — the safe direction for a discovery feature). `selectFromTier` itself stays fully serial by design (early break + ordered `seenArtists`/`seenAlbums` mutation unchanged) — this is a query-count win only, NOT a wall-clock win, since the dominant Discover Weekly cost is the rate-limited lastFm/MusicBrainz funnel, which batching cannot remove (per this finding's Safety/pitfalls). Tests: `spotifyImportMatchConcurrency.test.ts`, `discoverWeeklyPrefilterParity.test.ts` (new); `spotifyImportRuntime.test.ts`, `spotifyImportResilienceContract.test.ts`, `discoverWeeklyRuntime.test.ts`, `discoverWeeklyPrismaRetryContract.test.ts` (existing, count assertions unchanged).
 
 **Files:** `backend/src/services/spotifyImport.ts:1009`, `backend/src/services/spotifyImport.ts:399`, `backend/src/services/spotifyImport.ts:514`, `backend/src/services/discoverWeekly.ts:3011`, `backend/src/services/discoverWeekly.ts:2016`, `backend/src/services/discoverWeekly.ts:3034`
 
@@ -317,7 +319,9 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F14 — pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query scans 1 of 224 lists (default recall)
 
-**⬜ open** · dimension: performance · severity: high · effort: M · risk: medium · epic: #17
+**✅ complete (PR #107)** · dimension: performance · severity: high · effort: M · risk: medium · epic: #17
+
+> **Fix shipped.** All five pgvector ANN sites — `hybridSimilarity.ts` hybrid + CLAP-only modes, and `vibe.ts` `findNearestToEmbedding` (both variants) + the text-vibe search — now route through one shared `backend/src/utils/annQuery.ts` helper that applies `ivfflat.probes` via a transaction-scoped `set_config('ivfflat.probes', …, true)` on the SAME pooled connection as the query (a bare `SET LOCAL` no-ops under Prisma pooling; utility statements reject bind params, so `set_config` with `is_local=true` is the parameterizable `SET LOCAL` equivalent). New `IVFFLAT_PROBES` config value, default **32**, chosen by `backend/scripts/benchmark-ivfflat-probes.ts` on the real local corpus (15,230 embeddings, lists=224): recall@10 rises from ≈0.26 at probes=1 (the silent pg default) to ≈0.96 at probes=32, p95 ≈ 6 ms; latency only cliffs (~44 ms) at probes≥112. lists=224 kept for the 15,230-row corpus; re-evaluation deferred — a lists change is an index rebuild (migration), out of smallest-safe scope. Tests: `annQuery.test.ts` (helper set_config/transaction contract), `hybridSimilarity.test.ts` + `vibeSearchCompat.test.ts` (route/service behaviour through the helper).
 
 **Files:** `backend/src/services/hybridSimilarity.ts:136`, `backend/src/services/hybridSimilarity.ts:149`, `backend/prisma/migrations/20260127000000_add_pgvector/migration.sql:21`, `backend/prisma/migrations/20260128100000_reduce_embedding_dimension/migration.sql:25`
 
