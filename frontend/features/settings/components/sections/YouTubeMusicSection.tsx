@@ -5,7 +5,8 @@ import { SettingsSection, SettingsRow, SettingsToggle, SettingsSelect, SettingsI
 import { UserSettings, SystemSettings } from "../../types";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
-import { CheckCircle, XCircle, Loader2, ExternalLink, Copy, AlertTriangle, Youtube, ChevronDown, ChevronRight } from "lucide-react";
+// lucide-react 1.x removed brand icons (Youtube included); SquarePlay is the closest generic stand-in.
+import { CheckCircle, XCircle, Loader2, ExternalLink, Copy, AlertTriangle, SquarePlay, ChevronDown, ChevronRight } from "lucide-react";
 
 const logger = createFrontendLogger("Settings.YouTubeMusicSection");
 
@@ -368,7 +369,7 @@ export function YouTubeMusicCard({ settings, onUpdate }: YouTubeMusicCardProps) 
 
     return (
         <IntegrationCard
-            icon={<Youtube className="w-5 h-5 text-red-500" />}
+            icon={<SquarePlay className="w-5 h-5 text-red-500" />}
             title="YouTube Music"
             statusText={statusText}
             statusColor={statusColor}

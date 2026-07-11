@@ -187,12 +187,17 @@ jest.mock("../../services/remoteTrackMetadataResolver", () => ({
 
 import router from "../library";
 import { createRouteTestApp } from "./helpers/createRouteTestApp";
+import { errorHandler } from "../../middleware/errorHandler";
 import { trackMappingService } from "../../services/trackMappingService";
 import {
     resolveRemoteTrackMetadataForRequest,
 } from "../../services/remoteTrackMetadataResolver";
 
 const app = createRouteTestApp("/api/library", router);
+// Mount the real errorHandler after the router, as index.ts does in
+// production: asyncHandler-migrated routes surface unexpected failures via
+// next(err) -> errorHandler instead of responding from an inline catch.
+app.use(errorHandler);
 const mockEnsureRemoteTrack = trackMappingService.ensureRemoteTrack as jest.Mock;
 const mockResolveRemoteTrackMetadataForRequest =
     resolveRemoteTrackMetadataForRequest as jest.Mock;
@@ -317,7 +322,6 @@ describe("library remote track preference endpoints", () => {
                 .set(AUTH_HEADER, AUTH_VALUE);
 
             expect(res.status).toBe(500);
-            expect(res.body.error).toMatch(/failed/i);
         });
     });
 
@@ -574,7 +578,6 @@ describe("library remote track preference endpoints", () => {
                 .send({ signal: "thumbs_up", metadata: { title: "T", artist: "A" } });
 
             expect(res.status).toBe(500);
-            expect(res.body.error).toMatch(/failed/i);
         });
 
         it("defaults metadata fields to 'Unknown' when not provided", async () => {

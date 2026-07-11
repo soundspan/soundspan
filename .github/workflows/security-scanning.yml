@@ -183,32 +183,42 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # pip-audit resolves a requirements file against the *running*
-        # interpreter, so each file is audited on the Python its service
-        # actually ships (per its Dockerfile) -- a single hardcoded version
-        # fails resolution outright (e.g. tiddl requires >=3.13; the
-        # analyzer's numpy<1.24 has no cp312 wheel).
+        # Each file is audited on the Python its service actually ships (per its
+        # Dockerfile). The runtime lanes now point at the hash-pinned locks
+        # (roadmap F50): those are fully pinned, so pip-audit does NOT re-resolve
+        # -- the versions checked are exactly what the image installs. Only
+        # environment markers are evaluated on the runner's interpreter.
         include:
-          # audio-analyzer's image is ubuntu:20.04 / Python 3.8 (EOL, below
-          # pip-audit's supported floor), so 3.10 is the nearest supported
-          # approximation. Its requirements.txt is also partially vestigial
-          # (roadmap F51: the Dockerfile pins TF/numpy inline and never runs
-          # pip install -r) -- audit results here are best-effort signal.
-          - requirements: services/audio-analyzer/requirements.txt
-            python-version: "3.10"
-          # matches its image, python:3.10-slim. Pulls in
+          # ytmusic-streamer + tidal-downloader images are python:3.14-slim.
+          - requirements: services/ytmusic-streamer/requirements.lock
+            python-version: "3.14"
+          - requirements: services/tidal-downloader/requirements.lock
+            python-version: "3.14"
+          # audio-analyzer-clap image is python:3.10-slim. Pulls in
           # torch/torchaudio/torchvision -- can be slow on a cold pip cache.
-          - requirements: services/audio-analyzer-clap/requirements.txt
+          - requirements: services/audio-analyzer-clap/requirements.lock
             python-version: "3.10"
-          # tidal-downloader + ytmusic-streamer images are python:3.13-slim.
-          - requirements: services/tidal-downloader/requirements.txt
-            python-version: "3.13"
+          # audio-analyzer's image is ubuntu:20.04 / Python 3.8 (EOL, below
+          # pip-audit's >=3.10 floor). Its lock is compiled FOR 3.8; auditing it
+          # on 3.10 is the nearest supported approximation. Exact-pin audits do
+          # not re-resolve, so the versions checked are the ones shipped; only
+          # py3.8-only environment markers may evaluate differently under 3.10
+          # (accepted, documented gap).
+          - requirements: services/audio-analyzer/requirements.lock
+            python-version: "3.10"
+          # AIO image bakes the analyzer + clap deps into one Debian-bookworm
+          # system Python 3.11 site-packages; requirements-aio.lock is that
+          # merged, jointly-resolved tree.
+          - requirements: requirements-aio.lock
+            python-version: "3.11"
+          # Loose full manifests via requirements-test.txt (-> requirements.txt):
+          # audits the un-locked floors, INCLUDING the deliberately-exempt
+          # yt-dlp/ytmusicapi that never appear in a lock. Images are
+          # python:3.14-slim.
           - requirements: services/tidal-downloader/requirements-test.txt
-            python-version: "3.13"
-          - requirements: services/ytmusic-streamer/requirements.txt
-            python-version: "3.13"
+            python-version: "3.14"
           - requirements: services/ytmusic-streamer/requirements-test.txt
-            python-version: "3.13"
+            python-version: "3.14"
     steps:
       - name: Checkout code
         uses: actions/checkout@v7

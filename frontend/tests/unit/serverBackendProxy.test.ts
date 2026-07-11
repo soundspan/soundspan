@@ -56,7 +56,7 @@ function createFakeProxyReq() {
     return proxyReq;
 }
 
-test("buildBackendProxyOptions registers the error handler via the v3 on.error API", () => {
+test("buildBackendProxyOptions registers the error handler via the v3+ on.error API", () => {
     const logger = createFakeLogger();
     const options = buildBackendProxyOptions({
         name: "api-proxy",
@@ -66,8 +66,8 @@ test("buildBackendProxyOptions registers the error handler via the v3 on.error A
         errorCode: "API_PROXY_UNAVAILABLE",
     });
 
-    // http-proxy-middleware v3 only honors options.on.error; the v2
-    // onError/logLevel options are silently ignored (dead code).
+    // http-proxy-middleware v3+ (incl. v4) only honors options.on.error;
+    // the v2 onError/logLevel options are silently ignored (dead code).
     assert.equal(typeof options.on?.error, "function");
     assert.equal("onError" in options, false);
     assert.equal("logLevel" in options, false);
