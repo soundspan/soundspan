@@ -31,15 +31,19 @@ RUN mkdir -p /app/models
 
 # Download CLAP model at build time
 # Using music_audioset checkpoint for music-specific embeddings
+# Pinned to an immutable repo commit (not `resolve/main`, which can move) and
+# verified against a pinned sha256 digest (roadmap F38); a mismatch fails the
+# build. Digest measured 2026-07-11 (see docs/modernization-roadmap.md F38).
 RUN --mount=type=secret,id=hf_token \
     HF_TOKEN=$(cat /run/secrets/hf_token) \
     set -e; \
-    MODEL_URL="https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt"; \
+    MODEL_URL="https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt"; \
     if [ -n "${HF_TOKEN}" ]; then \
         curl -L -H "Authorization: Bearer ${HF_TOKEN}" -o /app/models/music_audioset_epoch_15_esc_90.14.pt "${MODEL_URL}"; \
     else \
         curl -L -o /app/models/music_audioset_epoch_15_esc_90.14.pt "${MODEL_URL}"; \
-    fi
+    fi; \
+    echo "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd  /app/models/music_audioset_epoch_15_esc_90.14.pt" | sha256sum -c -
 
 # Verify model loads correctly
 RUN python -c "import laion_clap; model = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-base'); model.load_ckpt('/app/models/music_audioset_epoch_15_esc_90.14.pt'); print('CLAP model verified successfully')"
