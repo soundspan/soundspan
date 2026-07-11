@@ -1,5 +1,12 @@
+// requireAuth populates req.user (never req.session) — this mock mirrors that
+// so tests exercise the same request shape a real authenticated client
+// produces. Unused by the getHandler-extraction calls below (they bypass
+// router.use middleware entirely), kept accurate so it isn't misleading.
 jest.mock("../../middleware/auth", () => ({
-    requireAuth: (_req: any, _res: any, next: () => void) => next(),
+    requireAuth: (req: any, _res: any, next: () => void) => {
+        req.user = { id: "u1", username: "u1", role: "user" };
+        next();
+    },
 }));
 
 const mockLoggerError = jest.fn();
@@ -91,7 +98,8 @@ describe("listeningState routes runtime", () => {
 
     it("validates payload for POST / and returns zod details", async () => {
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             body: { kind: "music", entityId: "album-1", positionMs: -1 },
         } as any;
         const res = createRes();
@@ -108,7 +116,8 @@ describe("listeningState routes runtime", () => {
 
     it("upserts listening state for authenticated session user", async () => {
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             body: {
                 kind: "music",
                 entityId: "album-1",
@@ -154,7 +163,8 @@ describe("listeningState routes runtime", () => {
     it("returns 500 for unexpected POST errors", async () => {
         mockUpsert.mockRejectedValueOnce(new Error("db down"));
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             body: {
                 kind: "music",
                 entityId: "album-1",
@@ -175,7 +185,8 @@ describe("listeningState routes runtime", () => {
 
     it("requires kind/entityId for GET / and handles missing/not-found/success", async () => {
         const missingReq = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             query: {},
         } as any;
         const missingRes = createRes();
@@ -186,7 +197,8 @@ describe("listeningState routes runtime", () => {
 
         mockFindUnique.mockResolvedValueOnce(null);
         const notFoundReq = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             query: { kind: "music", entityId: "album-1" },
         } as any;
         const notFoundRes = createRes();
@@ -217,7 +229,8 @@ describe("listeningState routes runtime", () => {
     it("returns 500 on GET / query failures", async () => {
         mockFindUnique.mockRejectedValueOnce(new Error("db down"));
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             query: { kind: "music", entityId: "album-1" },
         } as any;
         const res = createRes();
@@ -229,7 +242,11 @@ describe("listeningState routes runtime", () => {
     });
 
     it("returns recent listening states with default and explicit limits", async () => {
-        const defaultReq = { session: { userId: "u1" }, query: {} } as any;
+        const defaultReq = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+            query: {},
+        } as any;
         const defaultRes = createRes();
         await getRecent(defaultReq, defaultRes);
         expect(mockFindMany).toHaveBeenCalledWith({
@@ -243,7 +260,8 @@ describe("listeningState routes runtime", () => {
         );
 
         const customReq = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             query: { limit: "3" },
         } as any;
         const customRes = createRes();
@@ -256,9 +274,34 @@ describe("listeningState routes runtime", () => {
         expect(customRes.statusCode).toBe(200);
     });
 
+    it("scopes /recent to the authenticated user, not a hardcoded id", async () => {
+        // Regression guard for the req.session.userId! bug (roadmap F11 step 1):
+        // a second, differently-authenticated user must see their OWN userId
+        // reach Prisma, proving userId is read from req.user and not stale
+        // session state or a copy-pasted literal.
+        const otherUserReq = {
+            session: {},
+            user: { id: "u2", username: "u2", role: "user" },
+            query: {},
+        } as any;
+        const res = createRes();
+
+        await getRecent(otherUserReq, res);
+
+        expect(mockFindMany).toHaveBeenCalledWith({
+            where: { userId: "u2" },
+            orderBy: { updatedAt: "desc" },
+            take: 10,
+        });
+    });
+
     it("returns 500 when recent state query fails", async () => {
         mockFindMany.mockRejectedValueOnce(new Error("db down"));
-        const req = { session: { userId: "u1" }, query: {} } as any;
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+            query: {},
+        } as any;
         const res = createRes();
 
         await getRecent(req, res);

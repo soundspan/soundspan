@@ -1,5 +1,12 @@
+// requireAuth populates req.user (never req.session) — this mock mirrors that
+// so tests exercise the same request shape a real authenticated client
+// produces. Unused by the getHandler-extraction calls below (they bypass
+// router.use middleware entirely), kept accurate so it isn't misleading.
 jest.mock("../../middleware/auth", () => ({
-    requireAuth: (_req: any, _res: any, next: () => void) => next(),
+    requireAuth: (req: any, _res: any, next: () => void) => {
+        req.user = { id: "u1", username: "u1", role: "user" };
+        next();
+    },
 }));
 
 const mockLoggerError = jest.fn();
@@ -164,7 +171,8 @@ describe("offline routes runtime", () => {
 
     it("creates download jobs with explicit quality", async () => {
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "album-1" },
             body: { quality: "high" },
         } as any;
@@ -215,7 +223,8 @@ describe("offline routes runtime", () => {
             });
 
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "album-1" },
             body: {},
         } as any;
@@ -232,7 +241,8 @@ describe("offline routes runtime", () => {
     it("returns 404 when album does not exist", async () => {
         mockAlbumFindUnique.mockResolvedValueOnce(null);
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "missing-album" },
             body: { quality: "medium" },
         } as any;
@@ -255,7 +265,8 @@ describe("offline routes runtime", () => {
         });
 
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "album-1" },
             body: { quality: "high" },
         } as any;
@@ -274,7 +285,8 @@ describe("offline routes runtime", () => {
 
     it("returns 400 for invalid payload and 500 for unexpected failures", async () => {
         const invalidReq = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "album-1" },
             body: { quality: "ultra" },
         } as any;
@@ -288,7 +300,8 @@ describe("offline routes runtime", () => {
 
         mockAlbumFindUnique.mockRejectedValueOnce(new Error("db down"));
         const errorReq = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "album-1" },
             body: { quality: "high" },
         } as any;
@@ -300,7 +313,8 @@ describe("offline routes runtime", () => {
 
     it("validates required fields for track completion", async () => {
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "t1" },
             body: {},
         } as any;
@@ -317,7 +331,8 @@ describe("offline routes runtime", () => {
 
     it("upserts completed cached tracks and handles errors", async () => {
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "t1" },
             body: {
                 localPath: "/cache/t1.mp3",
@@ -363,7 +378,10 @@ describe("offline routes runtime", () => {
     });
 
     it("returns cached albums grouped by album id", async () => {
-        const req = { session: { userId: "u1" } } as any;
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+        } as any;
         const res = createRes();
 
         await getAlbums(req, res);
@@ -407,7 +425,10 @@ describe("offline routes runtime", () => {
 
     it("returns 500 when cached albums query fails", async () => {
         mockCachedTrackFindMany.mockRejectedValueOnce(new Error("db down"));
-        const req = { session: { userId: "u1" } } as any;
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+        } as any;
         const res = createRes();
 
         await getAlbums(req, res);
@@ -418,7 +439,8 @@ describe("offline routes runtime", () => {
 
     it("deletes all cached tracks for an album and returns deleted count", async () => {
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "album-1" },
         } as any;
         const res = createRes();
@@ -451,7 +473,8 @@ describe("offline routes runtime", () => {
     it("returns 500 when album cache deletion fails", async () => {
         mockCachedTrackDeleteMany.mockRejectedValueOnce(new Error("delete failed"));
         const req = {
-            session: { userId: "u1" },
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
             params: { id: "album-1" },
         } as any;
         const res = createRes();
@@ -469,7 +492,10 @@ describe("offline routes runtime", () => {
             _count: 5,
         });
 
-        const req = { session: { userId: "u1" } } as any;
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+        } as any;
         const res = createRes();
         await getStats(req, res);
 
@@ -485,12 +511,38 @@ describe("offline routes runtime", () => {
 
     it("returns 500 when stats query fails", async () => {
         mockCachedTrackAggregate.mockRejectedValueOnce(new Error("aggregate failed"));
-        const req = { session: { userId: "u1" } } as any;
+        const req = {
+            session: {},
+            user: { id: "u1", username: "u1", role: "user" },
+        } as any;
         const res = createRes();
 
         await getStats(req, res);
 
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to get cache stats" });
+    });
+
+    it("scopes /stats to the authenticated user, not a hardcoded id", async () => {
+        // Regression guard for the req.session.userId! bug (roadmap F11 step 1):
+        // a second, differently-authenticated user must see their OWN userId
+        // reach Prisma, proving userId is read from req.user and not stale
+        // session state or a copy-pasted literal.
+        const otherUserReq = {
+            session: {},
+            user: { id: "u2", username: "u2", role: "user" },
+        } as any;
+        const res = createRes();
+
+        await getStats(otherUserReq, res);
+
+        expect(mockUserSettingsFindUnique).toHaveBeenCalledWith({
+            where: { userId: "u2" },
+        });
+        expect(mockCachedTrackAggregate).toHaveBeenCalledWith({
+            where: { userId: "u2" },
+            _sum: { fileSizeMb: true },
+            _count: true,
+        });
     });
 });
