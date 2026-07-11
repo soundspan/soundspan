@@ -112,7 +112,7 @@ router.get("/preview/:artistName/:trackTitle", async (req, res) => {
 
         if (redisClient) {
             await redisClient.set(cacheKey, videoId || "null", {
-                EX: DISCOVERY_CACHE_TTL,
+                expiration: { type: "EX", value: DISCOVERY_CACHE_TTL },
             });
         }
 

@@ -17,7 +17,7 @@ describe("worker entrypoint behavior", () => {
         dependencyHealthy = true,
         redisIsReady = true,
         redisPingImpl,
-        redisQuitImpl,
+        redisCloseImpl,
         prismaQueryRawImpl,
         prismaDisconnectImpl,
         prismaConnectImpl,
@@ -30,7 +30,7 @@ describe("worker entrypoint behavior", () => {
         dependencyHealthy?: boolean;
         redisIsReady?: boolean;
         redisPingImpl?: () => Promise<unknown>;
-        redisQuitImpl?: () => Promise<unknown>;
+        redisCloseImpl?: () => Promise<unknown>;
         prismaQueryRawImpl?: () => Promise<unknown>;
         prismaDisconnectImpl?: () => Promise<unknown>;
         prismaConnectImpl?: () => Promise<unknown>;
@@ -89,7 +89,7 @@ describe("worker entrypoint behavior", () => {
         const redisClient = {
             isReady: redisIsReady,
             ping: jest.fn(redisPingImpl || (async () => "PONG")),
-            quit: jest.fn(redisQuitImpl || (async () => "OK")),
+            close: jest.fn(redisCloseImpl || (async () => "OK")),
         };
 
         const logger = {
@@ -684,13 +684,13 @@ describe("worker entrypoint behavior", () => {
         expect(exitMock).toHaveBeenCalledWith(0);
     });
 
-    it("logs shutdown errors and exits with code 1 when redis quit fails", async () => {
+    it("logs shutdown errors and exits with code 1 when redis close fails", async () => {
         const processOnSpy = jest
             .spyOn(process, "on")
             .mockImplementation(() => process as any);
         const { logger, exitMock } = setupWorkerRuntime({
-            redisQuitImpl: async () => {
-                throw new Error("worker-quit-failed");
+            redisCloseImpl: async () => {
+                throw new Error("worker-close-failed");
             },
         });
 

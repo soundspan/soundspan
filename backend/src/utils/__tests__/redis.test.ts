@@ -97,7 +97,7 @@ describe("redisClient", () => {
 
         expect(client.on).toHaveBeenCalledWith("error", expect.any(Function));
         expect(client.on).toHaveBeenCalledWith(
-            "disconnect",
+            "end",
             expect.any(Function)
         );
         expect(client.on).toHaveBeenCalledWith(
