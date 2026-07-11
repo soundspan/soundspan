@@ -59,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report is bannered ADOPTED with code evidence; and the remaining phantom file
   references (the `.awm/awm-work-loop.md` feature-plans link, CLAUDE.md's
   assets note, two never-committed ADR links) point at real files or say so.
+- A duplicate or concurrent Lidarr `Grab` webhook (the same download delivered
+  or retried twice) no longer 500s at `POST /api/webhooks/lidarr`.
+  `onDownloadGrabbed` now catches the partial-unique-index violation
+  (`DownloadJob_targetMbid_active_unique`) that a racing grab triggers on
+  either the matched-job update or the tracking-job create, and resolves with
+  the winning job's id instead of throwing — Lidarr sees an idempotent
+  success instead of an error and stops retrying the webhook (roadmap F23).
 
 ### Admin/Operations
 
