@@ -18,9 +18,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY services/ytmusic-streamer/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies in two steps.
+# Step 1: the hash-locked base — every dependency EXCEPT the two exempt YouTube
+# libs, installed with --require-hashes so a rebuild of this commit resolves the
+# identical transitive tree.
+COPY services/ytmusic-streamer/requirements.lock ./requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
+# Step 2: yt-dlp + ytmusicapi are DELIBERATELY EXEMPT from hash-locking (roadmap
+# F38/F50) so a YouTube breakage can be fixed with a same-day floor bump. Their
+# only transitive (requests) is already pinned by the lock above, so just these
+# two dists float. Installed loose, without --require-hashes.
+COPY services/ytmusic-streamer/requirements-exempt.txt ./requirements-exempt.txt
+RUN pip install --no-cache-dir -r requirements-exempt.txt
 
 # Copy application code
 COPY services/ytmusic-streamer/app.py ./app.py

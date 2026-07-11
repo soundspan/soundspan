@@ -12,18 +12,25 @@ export function errorHandler(
 ) {
     // Handle AppError with proper categorization
     if (err instanceof AppError) {
-        // Map error category to HTTP status code
-        let statusCode = 500;
-        switch (err.category) {
-            case ErrorCategory.RECOVERABLE:
-                statusCode = 400; // Bad Request - client can retry with changes
-                break;
-            case ErrorCategory.TRANSIENT:
-                statusCode = 503; // Service Unavailable - client can retry later
-                break;
-            case ErrorCategory.FATAL:
-                statusCode = 500; // Internal Server Error - cannot recover
-                break;
+        // An explicit httpStatus (e.g. 401/404/409) wins over the
+        // category->status map below, which can only express 400/503/500.
+        // No explicit status set => identical behavior to before.
+        let statusCode: number;
+        if (err.httpStatus !== undefined) {
+            statusCode = err.httpStatus;
+        } else {
+            statusCode = 500;
+            switch (err.category) {
+                case ErrorCategory.RECOVERABLE:
+                    statusCode = 400; // Bad Request - client can retry with changes
+                    break;
+                case ErrorCategory.TRANSIENT:
+                    statusCode = 503; // Service Unavailable - client can retry later
+                    break;
+                case ErrorCategory.FATAL:
+                    statusCode = 500; // Internal Server Error - cannot recover
+                    break;
+            }
         }
 
         logger.error(`[AppError] ${err.code}: ${err.message}`, err.details);
@@ -36,8 +43,10 @@ export function errorHandler(
         });
     }
 
-    // Log stack trace for unhandled errors
-    logger.error("Unhandled error:", err.stack);
+    // Log stack trace for unhandled errors. Include req.method + req.path so
+    // the log line still identifies the failing route once callers migrate
+    // to asyncHandler and lose their per-site try/catch log context (F1).
+    logger.error("Unhandled error:", `${req.method} ${req.path}`, err.stack);
 
     // In production, hide stack traces and internal details
     if (config.nodeEnv === "production") {

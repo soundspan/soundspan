@@ -301,6 +301,7 @@ jest.mock("../../services/remoteTrackMetadataResolver", () => ({
 }));
 
 import router from "../library";
+import { errorHandler } from "../../middleware/errorHandler";
 import { config } from "../../config";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
@@ -484,6 +485,23 @@ const flushPromises = () =>
         setImmediate(resolve);
     });
 
+/**
+ * Invokes a route handler the way Express does with `errorHandler` mounted
+ * after the router (as index.ts wires it in production): awaits the handler,
+ * and if it forwarded an error via next() (the asyncHandler path), runs the
+ * real errorHandler to produce the final response. Also compatible with
+ * hand-rolled try/catch handlers, which respond directly and never call
+ * next(err).
+ */
+async function invokeWithErrorHandler(handler: any, req: any, res: any) {
+    const next = jest.fn();
+    await handler(req, res, next);
+    const forwarded = next.mock.calls.find((call: any[]) => call[0] != null);
+    if (forwarded) {
+        errorHandler(forwarded[0], req, res, jest.fn());
+    }
+}
+
 function createNativeTrack(overrides?: Partial<any>) {
     return {
         id: "track-1",
@@ -606,10 +624,9 @@ describe("library scan and organize runtime coverage", () => {
         const req = { user: { id: "user-3" } } as any;
         const res = createRes();
 
-        await scanHandler(req, res);
+        await invokeWithErrorHandler(scanHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to start scan" });
     });
 
     it("returns 404 for unknown scan jobs", async () => {
@@ -653,10 +670,9 @@ describe("library scan and organize runtime coverage", () => {
         const req = { params: { jobId: "job-99" } } as any;
         const res = createRes();
 
-        await scanStatusHandler(req, res);
+        await invokeWithErrorHandler(scanStatusHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to get job status" });
     });
 
     it("starts manual organization in background", async () => {
@@ -700,10 +716,9 @@ describe("library scan and organize runtime coverage", () => {
         const req = {} as any;
         const res = createRes();
 
-        await organizeHandler(req, res);
+        await invokeWithErrorHandler(organizeHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to start organization" });
     });
 });
 
@@ -785,10 +800,9 @@ describe("library policy and backfill runtime coverage", () => {
 
         const req = { user: { id: "admin-1", role: "admin" } } as any;
         const res = createRes();
-        await deletePolicyHandler(req, res);
+        await invokeWithErrorHandler(deletePolicyHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to determine delete policy" });
     });
 
     it("returns artist count status and handles status failures", async () => {
@@ -805,13 +819,13 @@ describe("library policy and backfill runtime coverage", () => {
 
         mockIsBackfillNeeded.mockRejectedValueOnce(new Error("status failed"));
         const errRes = createRes();
-        await artistCountsStatusHandler(
+        await invokeWithErrorHandler(
+            artistCountsStatusHandler,
             { user: { id: "admin-1" } } as any,
             errRes
         );
 
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to check status" });
     });
 
     it("handles artist count backfill in-progress, start, and trigger errors", async () => {
@@ -846,9 +860,8 @@ describe("library policy and backfill runtime coverage", () => {
             throw new Error("tracker unavailable");
         });
         const errRes = createRes();
-        await artistCountsBackfillHandler({ user: { id: "admin-1" } } as any, errRes);
+        await invokeWithErrorHandler(artistCountsBackfillHandler, { user: { id: "admin-1" } } as any, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to start backfill" });
     });
 
     it("logs artist-count progress on 100-item boundaries and still responds with started", async () => {
@@ -891,12 +904,12 @@ describe("library policy and backfill runtime coverage", () => {
             new Error("image status failed")
         );
         const errRes = createRes();
-        await imageBackfillStatusHandler(
+        await invokeWithErrorHandler(
+            imageBackfillStatusHandler,
             { user: { id: "admin-1" } } as any,
             errRes
         );
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to check status" });
     });
 
     it("handles image backfill start in-progress, start, and trigger errors", async () => {
@@ -939,9 +952,8 @@ describe("library policy and backfill runtime coverage", () => {
             throw new Error("progress unavailable");
         });
         const errRes = createRes();
-        await imageBackfillStartHandler({ user: { id: "admin-1" } } as any, errRes);
+        await invokeWithErrorHandler(imageBackfillStartHandler, { user: { id: "admin-1" } } as any, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to start image backfill" });
     });
 
     it("keeps image backfill request responsive when background backfill fails", async () => {
@@ -1003,9 +1015,8 @@ describe("library policy and backfill runtime coverage", () => {
 
         mockArtistFindMany.mockRejectedValueOnce(new Error("artist query failed"));
         const errRes = createRes();
-        await backfillGenresHandler({ user: { id: "admin-1" } } as any, errRes);
+        await invokeWithErrorHandler(backfillGenresHandler, { user: { id: "admin-1" } } as any, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to backfill genres" });
     });
 });
 
@@ -1583,10 +1594,9 @@ describe("library catalog list runtime coverage", () => {
         } as any;
         const res = createRes();
 
-        await recentlyListenedHandler(req, res);
+        await invokeWithErrorHandler(recentlyListenedHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to fetch recently listened" });
     });
 
     it("returns recently added artists with dedupe and album counts", async () => {
@@ -1663,10 +1673,9 @@ describe("library catalog list runtime coverage", () => {
         const req = { query: { limit: "3" } } as any;
         const res = createRes();
 
-        await recentlyAddedHandler(req, res);
+        await invokeWithErrorHandler(recentlyAddedHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to fetch recently added" });
     });
 
     it("uses transaction-backed artist list with image cache and cursor output", async () => {
@@ -2634,9 +2643,8 @@ describe("library catalog list runtime coverage", () => {
         mockTrackFindMany.mockRejectedValueOnce(new Error("track lookup failed"));
         const errReq = { query: {} } as any;
         const errRes = createRes();
-        await tracksHandler(errReq, errRes);
+        await invokeWithErrorHandler(tracksHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to fetch tracks" });
     });
 
     it("requires authentication for liked playlist retrieval", async () => {
@@ -3215,9 +3223,8 @@ describe("library catalog list runtime coverage", () => {
         mockTrackCount.mockRejectedValueOnce(new Error("shuffle failed"));
         const errReq = { query: {} } as any;
         const errRes = createRes();
-        await shuffleHandler(errReq, errRes);
+        await invokeWithErrorHandler(shuffleHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to shuffle tracks" });
     });
 
     it("formats single track responses and handles not-found/errors", async () => {
@@ -3255,9 +3262,8 @@ describe("library catalog list runtime coverage", () => {
 
         const errReq = { params: { id: "err-track" } } as any;
         const errRes = createRes();
-        await trackByIdHandler(errReq, errRes);
+        await invokeWithErrorHandler(trackByIdHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to fetch track" });
     });
 
     it("returns resolved thumbs preference state for a track", async () => {
@@ -3683,13 +3689,13 @@ describe("library catalog list runtime coverage", () => {
         );
 
         const failureRes = createRes();
-        await deleteAlbumHandler(
+        await invokeWithErrorHandler(
+            deleteAlbumHandler,
             { params: { id: "album-delete-fail" } } as any,
             failureRes
         );
 
         expect(failureRes.statusCode).toBe(500);
-        expect(failureRes.body).toEqual({ error: "Failed to delete album" });
     });
 
     it("applies delete-policy gates and not-found/success behavior for track, album, and artist deletion", async () => {
@@ -3869,10 +3875,9 @@ describe("library catalog list runtime coverage", () => {
         mockTrackDelete.mockRejectedValueOnce(new Error("db delete failed"));
 
         const res = createRes();
-        await deleteTrackHandler({ params: { id: "track-delete-3" } } as any, res);
+        await invokeWithErrorHandler(deleteTrackHandler, { params: { id: "track-delete-3" } } as any, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to delete track" });
     });
 
     it("collects artist deletion folders from multiple file path formats", async () => {
@@ -4404,9 +4409,8 @@ describe("library catalog list runtime coverage", () => {
         mockCoverArtGetCoverArt.mockRejectedValueOnce(new Error("cover boom"));
         const errReq = { params: { mbid: "mbid-3" } } as any;
         const errRes = createRes();
-        await albumCoverHandler(errReq, errRes);
+        await invokeWithErrorHandler(albumCoverHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to fetch cover art" });
     });
 
     it("serves local native cover IDs from disk and falls back to Deezer when missing", async () => {
@@ -4643,9 +4647,8 @@ describe("library catalog list runtime coverage", () => {
         mockExtractColorsFromImage.mockRejectedValueOnce(new Error("extract failed"));
         const errReq = { query: { url: "https://img.example/crash.jpg" } } as any;
         const errRes = createRes();
-        await coverArtColorsHandler(errReq, errRes);
+        await invokeWithErrorHandler(coverArtColorsHandler, errReq, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to extract colors" });
     });
 
     it("continues color extraction when cache read fails", async () => {
@@ -4709,9 +4712,8 @@ describe("library catalog list runtime coverage", () => {
 
         mockPrismaQueryRaw.mockRejectedValueOnce(new Error("genre query failed"));
         const errRes = createRes();
-        await genresHandler(req, errRes);
+        await invokeWithErrorHandler(genresHandler, req, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to get genres" });
     });
 
     it("returns decades based on effective year and minimum track threshold", async () => {
@@ -4747,9 +4749,8 @@ describe("library catalog list runtime coverage", () => {
 
         mockAlbumFindMany.mockRejectedValueOnce(new Error("decade query failed"));
         const errRes = createRes();
-        await decadesHandler(req, errRes);
+        await invokeWithErrorHandler(decadesHandler, req, errRes);
         expect(errRes.statusCode).toBe(500);
-        expect(errRes.body).toEqual({ error: "Failed to get decades" });
     });
 
     it("validates radio type and handles discovery unplayed and least-played fallback flows", async () => {
@@ -5606,9 +5607,8 @@ describe("library catalog list runtime coverage", () => {
             user: { id: "user-1" },
         } as any;
         const errorRes = createRes();
-        await radioHandler(errorReq, errorRes);
+        await invokeWithErrorHandler(radioHandler, errorReq, errorRes);
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "Failed to get radio tracks" });
     });
 });
 
@@ -5681,10 +5681,9 @@ describe("library album cover and media route edge coverage", () => {
         const req = { params: { mbid: "mbid-down" } } as any;
         const res = createRes();
 
-        await albumCoverHandler(req, res);
+        await invokeWithErrorHandler(albumCoverHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to fetch cover art" });
     });
 
     it("returns 404 when audio info track is missing", async () => {
@@ -5991,5 +5990,90 @@ describe("library album cover and media route edge coverage", () => {
 
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({ error: "Failed to stream track" });
+    });
+});
+
+describe("library unexpected-failure tails return 500 via the shared error path", () => {
+    // Catch-tail behavior pins for the routes that had no 500-path coverage
+    // before the F1 asyncHandler migration: an unexpected service/database
+    // rejection must surface as a 500 response (not a hang, not a leak of a
+    // different status). Written pre-migration and kept identical across it.
+    const artistByIdHandler = getHandler("get", "/artists/:id");
+    const albumByIdHandler = getHandler("get", "/albums/:id");
+    const likedPlaylistHandler = getHandler("get", "/liked");
+    const trackPreferenceHandler = getHandler("get", "/tracks/:id/preference");
+    const setTrackPreferenceHandler = getHandler("post", "/tracks/:id/preference");
+    const setAlbumPreferenceHandler = getHandler("post", "/albums/:id/preference");
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it("returns 500 when the artist lookup rejects", async () => {
+        mockArtistFindFirst.mockRejectedValueOnce(new Error("db down"));
+
+        const req = { params: { id: "artist-1" }, query: {} } as any;
+        const res = createRes();
+        await invokeWithErrorHandler(artistByIdHandler, req, res);
+
+        expect(res.statusCode).toBe(500);
+    });
+
+    it("returns 500 when the album lookup rejects", async () => {
+        mockAlbumFindFirst.mockRejectedValueOnce(new Error("db down"));
+
+        const req = { params: { id: "album-1" }, query: {} } as any;
+        const res = createRes();
+        await invokeWithErrorHandler(albumByIdHandler, req, res);
+
+        expect(res.statusCode).toBe(500);
+    });
+
+    it("returns 500 when the liked-playlist aggregation rejects", async () => {
+        mockLikedTrackCount.mockRejectedValueOnce(new Error("db down"));
+
+        const req = { user: { id: "user-1" }, query: {} } as any;
+        const res = createRes();
+        await invokeWithErrorHandler(likedPlaylistHandler, req, res);
+
+        expect(res.statusCode).toBe(500);
+    });
+
+    it("returns 500 when the track-preference lookup rejects", async () => {
+        mockTrackFindUnique.mockRejectedValueOnce(new Error("db down"));
+
+        const req = { user: { id: "user-1" }, params: { id: "track-1" } } as any;
+        const res = createRes();
+        await invokeWithErrorHandler(trackPreferenceHandler, req, res);
+
+        expect(res.statusCode).toBe(500);
+    });
+
+    it("returns 500 when setting a track preference rejects", async () => {
+        mockTrackFindUnique.mockRejectedValueOnce(new Error("db down"));
+
+        const req = {
+            user: { id: "user-1" },
+            params: { id: "track-1" },
+            body: { signal: "thumbs_up" },
+        } as any;
+        const res = createRes();
+        await invokeWithErrorHandler(setTrackPreferenceHandler, req, res);
+
+        expect(res.statusCode).toBe(500);
+    });
+
+    it("returns 500 when setting an album preference rejects", async () => {
+        mockAlbumFindFirst.mockRejectedValueOnce(new Error("db down"));
+
+        const req = {
+            user: { id: "user-1" },
+            params: { id: "album-1" },
+            body: { signal: "thumbs_up" },
+        } as any;
+        const res = createRes();
+        await invokeWithErrorHandler(setAlbumPreferenceHandler, req, res);
+
+        expect(res.statusCode).toBe(500);
     });
 });

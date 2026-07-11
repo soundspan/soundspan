@@ -1,0 +1,14 @@
+# DELIBERATELY EXEMPT from hash-locking (roadmap F38/F50 carve-out).
+#
+# yt-dlp and ytmusicapi track YouTube's frequently-changing internals. A
+# breakage (e.g. the android-client format regression) must be fixable with a
+# same-day floor bump and rebuild; hash-pinning them would force a full lock
+# regeneration on every YouTube break. They are therefore installed as loose
+# floors, in a plain `pip install` AFTER the hash-locked requirements.lock.
+#
+# Their transitive dependency (requests) is already pinned+hashed in
+# requirements.lock, so only these two dists float at build time.
+#
+# Floors here must match services/ytmusic-streamer/requirements.txt.
+yt-dlp>=2026.7.4
+ytmusicapi>=1.12.1
