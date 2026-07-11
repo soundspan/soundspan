@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Spotify/Deezer playlist-import preview matches tracks against the library
-  roughly 2.5x faster on a 50-track playlist (129ms → 52ms median wall-clock
+  roughly 2.5x faster on a 50-track playlist (≈130ms → ≈52ms median wall-clock
   on a 15,230-track dev corpus), by running the per-track library lookups
   through a bounded-concurrency queue (`p-queue`, concurrency 4) instead of
   one at a time. Discover Weekly's tier-based artist recommendations also
