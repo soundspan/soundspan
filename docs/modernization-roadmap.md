@@ -487,7 +487,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F23 — Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade instead of DB constraints — best-effort idempotency under load
 
-**🟡 partial** (`fix/f23-grab-webhook-p2002`) · dimension: idempotency · severity: high→medium · effort: M · risk: medium · epic: #13
+**🟡 partial (PR #116)** · dimension: idempotency · severity: high→medium · effort: M · risk: medium · epic: #13
 
 > **Audit note.** ✓ Severity high→medium: the 'no partial-unique' headline is refuted by migration `20260118000000` (the body says so). Real residual = a missing P2002 catch (a 500, not data corruption) + a seq scan.
 >
