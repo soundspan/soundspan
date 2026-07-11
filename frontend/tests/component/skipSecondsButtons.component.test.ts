@@ -449,6 +449,7 @@ beforeEach(() => {
     fullPlayerState.playbackType = "track";
     fullPlayerState.currentTrack = { id: "track-1", duration: 200, audioFeatures: null };
     fullPlayerState.queue = [{ audioFeatures: null }];
+    fullPlayerState.canSeek = true;
 
     overlayCalls.skipBackward.length = 0;
     overlayCalls.skipForward.length = 0;
@@ -457,6 +458,7 @@ beforeEach(() => {
     overlayState.playbackType = "podcast";
     overlayState.currentPodcast = { id: "pod-1", duration: 1800, progress: null };
     overlayState.queue = [{}];
+    overlayState.canSeek = true;
 });
 
 async function mount(element: React.ReactElement) {
@@ -596,6 +598,49 @@ test("FullPlayer: skip buttons are disabled when no media is loaded", async () =
     await unmount(mounted);
 });
 
+test("FullPlayer: skip buttons are disabled and inert while canSeek is false; Previous/Next stay enabled", async () => {
+    // The uncached-podcast window: media is loaded (hasMedia true) but the
+    // playback provider has flipped canSeek false until caching completes.
+    // The seek slider disables in this window — the skip buttons are seeks,
+    // so they must too. Previous/Next are track switches, not seeks, and
+    // must NOT be gated on canSeek.
+    fullPlayerState.canSeek = false;
+
+    const { FullPlayer } = await import("../../components/player/FullPlayer");
+    const mounted = await mount(React.createElement(FullPlayer));
+
+    const skipBack = mounted.container.querySelector(
+        '[aria-label="Skip back 15 seconds"]',
+    ) as HTMLButtonElement | null;
+    const skipForward = mounted.container.querySelector(
+        '[aria-label="Skip forward 15 seconds"]',
+    ) as HTMLButtonElement | null;
+    const previous = mounted.container.querySelector(
+        '[aria-label="Previous track"]',
+    ) as HTMLButtonElement | null;
+    const next = mounted.container.querySelector(
+        '[aria-label="Next track"]',
+    ) as HTMLButtonElement | null;
+    assert.ok(skipBack);
+    assert.ok(skipForward);
+    assert.equal(skipBack!.disabled, true, "skip-back must disable while !canSeek");
+    assert.equal(skipForward!.disabled, true, "skip-forward must disable while !canSeek");
+    assert.equal(previous!.disabled, false, "Previous is a track switch, not a seek — not gated on canSeek");
+    assert.equal(next!.disabled, false, "Next is a track switch, not a seek — not gated on canSeek");
+
+    await React.act(async () => {
+        skipBack!.click();
+    });
+    await React.act(async () => {
+        skipForward!.click();
+    });
+
+    assert.deepEqual(fullPlayerCalls.skipBackward, [], "clicking the disabled skip-back must fire nothing");
+    assert.deepEqual(fullPlayerCalls.skipForward, [], "clicking the disabled skip-forward must fire nothing");
+
+    await unmount(mounted);
+});
+
 // ---------------------------------------------------------------------------
 // OverlayPlayer
 // ---------------------------------------------------------------------------
@@ -673,6 +718,46 @@ test("OverlayPlayer: Previous/Next buttons are unchanged (still call previous()/
 
     assert.equal(overlayCalls.previous, 1);
     assert.equal(overlayCalls.next, 1);
+
+    await unmount(mounted);
+});
+
+test("OverlayPlayer: skip buttons are disabled and inert while canSeek is false; Previous/Next stay enabled", async () => {
+    // Same uncached-podcast window as the FullPlayer test: OverlayPlayer only
+    // renders with media loaded, so the gate is canSeek alone.
+    overlayState.canSeek = false;
+
+    const { OverlayPlayer } = await import("../../components/player/OverlayPlayer");
+    const mounted = await mount(withQueryClient(React.createElement(OverlayPlayer)));
+
+    const skipBack = mounted.container.querySelector(
+        '[aria-label="Skip back 15 seconds"]',
+    ) as HTMLButtonElement | null;
+    const skipForward = mounted.container.querySelector(
+        '[aria-label="Skip forward 15 seconds"]',
+    ) as HTMLButtonElement | null;
+    const previous = mounted.container.querySelector(
+        '[aria-label="Previous"]',
+    ) as HTMLButtonElement | null;
+    const next = mounted.container.querySelector(
+        '[aria-label="Next"]',
+    ) as HTMLButtonElement | null;
+    assert.ok(skipBack);
+    assert.ok(skipForward);
+    assert.equal(skipBack!.disabled, true, "skip-back must disable while !canSeek");
+    assert.equal(skipForward!.disabled, true, "skip-forward must disable while !canSeek");
+    assert.equal(previous!.disabled, false, "Previous is a track switch, not a seek — not gated on canSeek");
+    assert.equal(next!.disabled, false, "Next is a track switch, not a seek — not gated on canSeek");
+
+    await React.act(async () => {
+        skipBack!.click();
+    });
+    await React.act(async () => {
+        skipForward!.click();
+    });
+
+    assert.deepEqual(overlayCalls.skipBackward, [], "clicking the disabled skip-back must fire nothing");
+    assert.deepEqual(overlayCalls.skipForward, [], "clicking the disabled skip-forward must fire nothing");
 
     await unmount(mounted);
 });

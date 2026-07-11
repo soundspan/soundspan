@@ -1348,8 +1348,14 @@ export function OverlayPlayer() {
                                     </div>
                                     )}
 
+                                    {/* 7 fixed-size buttons (208px of icons) + ancestor padding
+                                        (px-4 + p-3 = 56px) must fit a 320px-class viewport:
+                                        gap-2 (6x8=48px) fits with 8px slack; >=375px restores the
+                                        roomier gap-4 (6x16=96px, 360px total <= 375). Base class is
+                                        the compact gap, so if the arbitrary variant ever failed to
+                                        compile the row still fits everywhere. */}
                                     <div
-                                        className="mb-3 flex items-center justify-center px-2 gap-4"
+                                        className="mb-3 flex items-center justify-center gap-2 min-[375px]:gap-4"
                                     >
                                         <button
                                             onClick={toggleShuffle}
@@ -1365,10 +1371,13 @@ export function OverlayPlayer() {
                                             <Shuffle className="h-5 w-5" />
                                         </button>
 
-                                        {/* Skip back 15s — podcast/audiobook-friendly seek, independent of queue length */}
+                                        {/* Skip back 15s — a seek, so gated on canSeek like the seek slider
+                                            (false while an uncached podcast episode is still caching);
+                                            independent of queue length */}
                                         <button
                                             onClick={() => skipBackward(15)}
-                                            className="text-white/85 transition-colors hover:text-white"
+                                            className="text-white/85 transition-colors hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                            disabled={!canSeek}
                                             title="Skip back 15 seconds"
                                             aria-label="Skip back 15 seconds"
                                         >
@@ -1387,7 +1396,7 @@ export function OverlayPlayer() {
                                         <button
                                             onClick={handlePlayPause}
                                             className={cn(
-                                                "flex h-16 w-16 items-center justify-center rounded-full shadow-xl transition-all",
+                                                "flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full shadow-xl transition-all",
                                                 audioError
                                                     ? "bg-red-500 text-white hover:bg-red-400"
                                                     : isBuffering
@@ -1432,10 +1441,13 @@ export function OverlayPlayer() {
                                             <SkipForward className="h-8 w-8" />
                                         </button>
 
-                                        {/* Skip forward 15s — podcast/audiobook-friendly seek, independent of queue length */}
+                                        {/* Skip forward 15s — a seek, so gated on canSeek like the seek slider
+                                            (false while an uncached podcast episode is still caching);
+                                            independent of queue length */}
                                         <button
                                             onClick={() => skipForward(15)}
-                                            className="text-white/85 transition-colors hover:text-white"
+                                            className="text-white/85 transition-colors hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                            disabled={!canSeek}
                                             title="Skip forward 15 seconds"
                                             aria-label="Skip forward 15 seconds"
                                         >
