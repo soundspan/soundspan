@@ -305,7 +305,7 @@ jobs:
 
             - name: Build and push image (with target)
               if: ${{ matrix.target != '' }}
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: ${{ matrix.context }}
                   file: ${{ matrix.file }}
@@ -325,7 +325,7 @@ jobs:
 
             - name: Build and push image
               if: ${{ matrix.target == '' }}
-              uses: docker/build-push-action@v5
+              uses: docker/build-push-action@v7
               with:
                   context: ${{ matrix.context }}
                   file: ${{ matrix.file }}
