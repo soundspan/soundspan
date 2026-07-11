@@ -1,4 +1,5 @@
 const mockQueryRaw = jest.fn();
+const mockRunAnnQuery = jest.fn();
 const mockGetFeatures = jest.fn();
 const mockLoggerDebug = jest.fn();
 const mockLoggerWarn = jest.fn();
@@ -7,6 +8,17 @@ jest.mock("../../utils/db", () => ({
     prisma: {
         $queryRaw: (...args: unknown[]) => mockQueryRaw(...args),
     },
+}));
+
+// The ANN sites (hybrid + CLAP-only modes) route through the F14 helper, which
+// owns the transaction-scoped ivfflat.probes. We mock it at that boundary and
+// feed canned candidate rows, so these tests assert findSimilarTracks BEHAVIOUR
+// (mode chosen, rows returned/ranked, artist-diversity cap) rather than SQL or
+// call shapes. The helper's own transaction/set_config contract is covered by
+// src/utils/__tests__/annQuery.test.ts. features-only mode is non-ANN and still
+// goes straight through prisma.$queryRaw.
+jest.mock("../../utils/annQuery", () => ({
+    runAnnQuery: (...args: unknown[]) => mockRunAnnQuery(...args),
 }));
 
 jest.mock("../featureDetection", () => ({
@@ -47,12 +59,13 @@ function buildSimilarTrack(overrides: Partial<SimilarTrack> = {}): SimilarTrack 
 describe("hybridSimilarity service", () => {
     beforeEach(() => {
         mockQueryRaw.mockReset();
+        mockRunAnnQuery.mockReset();
         mockGetFeatures.mockReset();
         mockLoggerDebug.mockReset();
         mockLoggerWarn.mockReset();
     });
 
-    it("uses hybrid mode when both feature systems are available", async () => {
+    it("uses hybrid mode (via the ANN helper) when both feature systems are available", async () => {
         const sourceTrackId = "source-track-1";
         const limit = 7;
         const expected = [
@@ -64,22 +77,21 @@ describe("hybridSimilarity service", () => {
             vibeEmbeddings: true,
             musicCNN: true,
         });
-        mockQueryRaw.mockResolvedValueOnce(expected);
+        mockRunAnnQuery.mockResolvedValueOnce(expected);
 
         await expect(findSimilarTracks(sourceTrackId, limit)).resolves.toEqual(expected);
 
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             `[HYBRID-SIMILARITY] Using hybrid mode for track ${sourceTrackId}`
         );
-        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
-
-        const queryArgs = mockQueryRaw.mock.calls[0] ?? [];
-        expect(queryArgs).toContain(sourceTrackId);
-        expect(queryArgs.filter((value: unknown) => value === limit * 5).length).toBeGreaterThanOrEqual(2);
+        // Hybrid mode is ANN: it goes through the probes-applying helper, once,
+        // and never through the bare prisma.$queryRaw path.
+        expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
+        expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockLoggerWarn).not.toHaveBeenCalled();
     });
 
-    it("uses CLAP-only mode and default limit when only vibe embeddings are available", async () => {
+    it("uses CLAP-only mode (via the ANN helper) when only vibe embeddings are available", async () => {
         const sourceTrackId = "source-track-2";
         const expected = [
             buildSimilarTrack({
@@ -93,21 +105,19 @@ describe("hybridSimilarity service", () => {
             vibeEmbeddings: true,
             musicCNN: false,
         });
-        mockQueryRaw.mockResolvedValueOnce(expected);
+        mockRunAnnQuery.mockResolvedValueOnce(expected);
 
+        // No explicit limit -> default of 20 flows through to a returned result.
         await expect(findSimilarTracks(sourceTrackId)).resolves.toEqual(expected);
 
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             `[HYBRID-SIMILARITY] Using CLAP-only mode for track ${sourceTrackId}`
         );
-        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
-
-        const queryArgs = mockQueryRaw.mock.calls[0] ?? [];
-        expect(queryArgs).toContain(sourceTrackId);
-        expect(queryArgs.filter((value: unknown) => value === 100)).toHaveLength(1);
+        expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
+        expect(mockQueryRaw).not.toHaveBeenCalled();
     });
 
-    it("uses features-only mode when CLAP embeddings are unavailable", async () => {
+    it("uses features-only mode (non-ANN, direct query) when CLAP embeddings are unavailable", async () => {
         const sourceTrackId = "source-track-3";
         const limit = 12;
         const expected = [
@@ -129,11 +139,9 @@ describe("hybridSimilarity service", () => {
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             `[HYBRID-SIMILARITY] Using features-only mode for track ${sourceTrackId}`
         );
+        // features-only has no ANN, so it must NOT go through the probes helper.
         expect(mockQueryRaw).toHaveBeenCalledTimes(1);
-
-        const queryArgs = mockQueryRaw.mock.calls[0] ?? [];
-        expect(queryArgs).toContain(sourceTrackId);
-        expect(queryArgs).toContain(limit * 5);
+        expect(mockRunAnnQuery).not.toHaveBeenCalled();
     });
 
     it("returns an empty list and warns when no feature systems are available", async () => {
@@ -144,6 +152,7 @@ describe("hybridSimilarity service", () => {
 
         await expect(findSimilarTracks("source-track-4", 9)).resolves.toEqual([]);
 
+        expect(mockRunAnnQuery).not.toHaveBeenCalled();
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             "[HYBRID-SIMILARITY] No similarity features available"
@@ -151,7 +160,7 @@ describe("hybridSimilarity service", () => {
         expect(mockLoggerDebug).not.toHaveBeenCalled();
     });
 
-    it("propagates feature-detection failures without querying prisma", async () => {
+    it("propagates feature-detection failures without querying", async () => {
         const failure = new Error("feature detection unavailable");
         mockGetFeatures.mockRejectedValueOnce(failure);
 
@@ -159,18 +168,19 @@ describe("hybridSimilarity service", () => {
             "feature detection unavailable"
         );
 
+        expect(mockRunAnnQuery).not.toHaveBeenCalled();
         expect(mockQueryRaw).not.toHaveBeenCalled();
         expect(mockLoggerDebug).not.toHaveBeenCalled();
         expect(mockLoggerWarn).not.toHaveBeenCalled();
     });
 
-    it("propagates prisma query failures in hybrid mode", async () => {
+    it("propagates ANN query failures in hybrid mode", async () => {
         const sourceTrackId = "source-track-6";
         mockGetFeatures.mockResolvedValueOnce({
             vibeEmbeddings: true,
             musicCNN: true,
         });
-        mockQueryRaw.mockRejectedValueOnce(new Error("hybrid query failed"));
+        mockRunAnnQuery.mockRejectedValueOnce(new Error("hybrid query failed"));
 
         await expect(findSimilarTracks(sourceTrackId, 4)).rejects.toThrow(
             "hybrid query failed"
@@ -179,16 +189,16 @@ describe("hybridSimilarity service", () => {
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             `[HYBRID-SIMILARITY] Using hybrid mode for track ${sourceTrackId}`
         );
-        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+        expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
     });
 
-    it("propagates prisma query failures in CLAP-only mode", async () => {
+    it("propagates ANN query failures in CLAP-only mode", async () => {
         const sourceTrackId = "source-track-7";
         mockGetFeatures.mockResolvedValueOnce({
             vibeEmbeddings: true,
             musicCNN: false,
         });
-        mockQueryRaw.mockRejectedValueOnce(new Error("clap query failed"));
+        mockRunAnnQuery.mockRejectedValueOnce(new Error("clap query failed"));
 
         await expect(findSimilarTracks(sourceTrackId, 10)).rejects.toThrow(
             "clap query failed"
@@ -197,10 +207,10 @@ describe("hybridSimilarity service", () => {
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             `[HYBRID-SIMILARITY] Using CLAP-only mode for track ${sourceTrackId}`
         );
-        expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+        expect(mockRunAnnQuery).toHaveBeenCalledTimes(1);
     });
 
-    it("propagates prisma query failures in features-only mode", async () => {
+    it("propagates query failures in features-only mode", async () => {
         const sourceTrackId = "source-track-8";
         mockGetFeatures.mockResolvedValueOnce({
             vibeEmbeddings: false,
@@ -225,7 +235,7 @@ describe("hybridSimilarity service", () => {
             vibeEmbeddings: true,
             musicCNN: true,
         });
-        mockQueryRaw.mockResolvedValueOnce([
+        mockRunAnnQuery.mockResolvedValueOnce([
             buildSimilarTrack({ id: "a-1", artistId: "artist-a", artistName: "Artist A" }),
             buildSimilarTrack({ id: "a-2", artistId: "artist-a", artistName: "Artist A" }),
             buildSimilarTrack({ id: "a-3", artistId: "artist-a", artistName: "Artist A" }),
@@ -254,7 +264,7 @@ describe("hybridSimilarity service", () => {
             vibeEmbeddings: true,
             musicCNN: true,
         });
-        mockQueryRaw.mockResolvedValueOnce([
+        mockRunAnnQuery.mockResolvedValueOnce([
             buildSimilarTrack({
                 id: "missing-artist-1",
                 artistId: "" as unknown as string,
@@ -289,7 +299,7 @@ describe("hybridSimilarity service", () => {
             vibeEmbeddings: true,
             musicCNN: true,
         });
-        mockQueryRaw.mockResolvedValueOnce([
+        mockRunAnnQuery.mockResolvedValueOnce([
             buildSimilarTrack({ id: "artist-a-1", artistId: "artist-a", artistName: "Artist A" }),
             buildSimilarTrack({ id: "artist-a-2", artistId: "artist-a", artistName: "Artist A" }),
             buildSimilarTrack({ id: "artist-a-3", artistId: "artist-a", artistName: "Artist A" }),
