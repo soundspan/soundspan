@@ -6,9 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 /**
  * Static render smoke tests for VibeMap. renderToStaticMarkup does not run
  * effects, so the async map load never resolves here — these assertions cover
- * the always-rendered shell (spotlight, mood chips, visible-count) and graceful
- * behaviour when the map API will reject. The interaction/viewport/filter logic
- * is covered in depth by the unit tests.
+ * the always-rendered floating control shell (spotlight pill, view controls,
+ * the collapsed filters pill with its count) and graceful behaviour when the
+ * map API will reject. Media queries resolve to their SSR default (false), so
+ * the desktop layout renders. The now-playing card is intentionally absent
+ * (nothing is playing). Interaction/viewport/filter logic is covered in depth
+ * by the unit tests; the filters/now-playing markup by vibePanels.
  */
 
 const state: { rejectMap: boolean } = { rejectMap: false };
@@ -77,7 +80,17 @@ mock.module("@/lib/audio-controls-context", {
     namedExports: {
         useAudioControls: () => ({
             playTrack: () => undefined,
+            playTracks: () => undefined,
+            addToQueue: () => undefined,
+            pause: () => undefined,
+            play: () => undefined,
         }),
+    },
+});
+
+mock.module("@/lib/audio-playback-context", {
+    namedExports: {
+        useAudioPlayback: () => ({ isPlaying: false }),
     },
 });
 
@@ -85,22 +98,21 @@ beforeEach(() => {
     state.rejectMap = false;
 });
 
-test("renders the spotlight input, mood chips and visible-count shell", async () => {
+test("renders the floating spotlight, view controls and filters pill shell", async () => {
     const { VibeMap } = await import("../../components/vibe/VibeMap");
     const html = renderToStaticMarkup(React.createElement(VibeMap));
 
-    // Spotlight search input.
+    // Spotlight search pill (input still carries the accessible label).
     assert.match(html, /Spotlight a vibe/);
-    // Mood legend chips (now toggles).
-    assert.match(html, />Happy</);
-    assert.match(html, />Sad</);
-    assert.match(html, />Relaxed</);
-    assert.match(html, />Party</);
-    // "N of M visible" count element (pre-load count is 0 under static render).
-    assert.match(html, /of\s+0\s+visible/);
-    // Energy/mood range filters are present (valence range relabeled "Mood").
-    assert.match(html, /Energy/);
-    assert.match(html, /Mood/);
+    // View controls extracted to the top-right stack expose aria-labels.
+    assert.match(html, /aria-label="Zoom in"/);
+    assert.match(html, /aria-label="Reset view"/);
+    assert.match(html, /aria-label="Enter fullscreen"/);
+    // Filters collapse to a pill with the visible/total count (0/0 pre-load).
+    assert.match(html, /Filters/);
+    assert.match(html, /0\/0/);
+    // Nothing is playing -> the now-playing card is absent.
+    assert.doesNotMatch(html, /aria-label="Pause"/);
 });
 
 test("renders its shell without throwing when the map API rejects", async () => {
@@ -111,7 +123,8 @@ test("renders its shell without throwing when the map API rejects", async () => 
     assert.doesNotThrow(() => {
         html = renderToStaticMarkup(React.createElement(VibeMap));
     });
-    // The controls shell still renders even though the data load will fail.
+    // The floating controls shell still renders even though the load will fail.
     assert.match(html, /Spotlight a vibe/);
-    assert.match(html, />Happy</);
+    assert.match(html, /aria-label="Zoom in"/);
+    assert.match(html, /Filters/);
 });

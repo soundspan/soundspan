@@ -24,25 +24,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-    Crosshair,
-    Loader2,
-    Maximize2,
-    Minimize2,
-    Network,
-    RotateCcw,
-    Route,
-    Shuffle,
-    ZoomIn,
-    ZoomOut,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
+import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { MapCanvas } from "./MapCanvas";
 import { MapOverlay } from "./MapOverlay";
 import { MapDecorations } from "./MapDecorations";
 import { SpotlightSearch } from "./SpotlightSearch";
+import { NowPlayingCard, type NowPlayingCardTrack } from "./NowPlayingCard";
+import { ViewControls } from "./ViewControls";
+import { FiltersPanel } from "./FiltersPanel";
 import { TravelPanel } from "./TravelPanel";
 import { JourneyPanel } from "./JourneyPanel";
 import { AlchemyTray } from "./AlchemyTray";
@@ -61,7 +55,7 @@ import {
 } from "./mapViewport";
 import { buildPositions, computeSpreadPositions, lerpPositions } from "./mapLayout";
 import type { MapTrack } from "./types";
-import { MOOD_COLORS, getMoodColor, moodLabel } from "./types";
+import { getMoodColor } from "./types";
 
 const CLICK_MOVE_THRESHOLD = 4; // px between down/up to still count as a click
 const MIN_HOVER_HIT_RADIUS = 8; // px — floor for touch-friendly hit-testing
@@ -92,101 +86,39 @@ interface DragState {
     moved: number;
 }
 
-/** Compact min/max dual-range control (no external deps). Renders as ONE
- * track with two overlapped thumbs (the standard dual-range CSS trick):
- * both inputs are stacked with `pointer-events: none`, and only their
- * ::-webkit-slider-thumb / ::-moz-range-thumb get `pointer-events: auto`. */
-function DualRange({
-    label,
-    tooltip,
-    value,
-    onChange,
+/**
+ * Thin connected wrapper for the now-playing card. It isolates the
+ * frequently-changing `isPlaying` subscription (the audio playback clock ticks
+ * several times a second) to just the card, so VibeMap — the 15k-dot canvas
+ * host — never re-renders on the playback clock. Play/pause uses the verified
+ * real controls (`pause()` / `play()`, matching the MiniPlayer toggle).
+ */
+function NowPlayingConnected({
+    track,
+    onMapPresent,
+    moodColor,
+    onFlyTo,
 }: {
-    label: string;
-    tooltip: string;
-    value: [number, number];
-    onChange: (v: [number, number]) => void;
+    track: NowPlayingCardTrack | null;
+    onMapPresent: boolean;
+    moodColor: string | null;
+    onFlyTo: () => void;
 }) {
-    const [lo, hi] = value;
+    const { isPlaying } = useAudioPlayback();
+    const { pause, play } = useAudioControls();
+    const onTogglePlay = useCallback(
+        () => (isPlaying ? pause() : play()),
+        [isPlaying, pause, play]
+    );
     return (
-        <div className="flex items-center gap-1.5" title={tooltip}>
-            <span className="text-[10px] text-gray-500 w-10">{label}</span>
-            <div className="vibe-dualrange relative w-14 h-4">
-                <div
-                    className="pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-white/10"
-                    aria-hidden="true"
-                />
-                <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={lo}
-                    aria-label={`${label} minimum`}
-                    onChange={(e) =>
-                        onChange([Math.min(parseFloat(e.target.value), hi), hi])
-                    }
-                    className="vibe-dualrange-input"
-                />
-                <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={hi}
-                    aria-label={`${label} maximum`}
-                    onChange={(e) =>
-                        onChange([lo, Math.max(parseFloat(e.target.value), lo)])
-                    }
-                    className="vibe-dualrange-input"
-                />
-                <style>{`
-                    .vibe-dualrange-input {
-                        position: absolute;
-                        inset: 0;
-                        width: 100%;
-                        height: 100%;
-                        margin: 0;
-                        background: transparent;
-                        pointer-events: none;
-                        -webkit-appearance: none;
-                        appearance: none;
-                    }
-                    .vibe-dualrange-input::-webkit-slider-runnable-track {
-                        background: transparent;
-                        height: 100%;
-                    }
-                    .vibe-dualrange-input::-moz-range-track {
-                        background: transparent;
-                        height: 100%;
-                        border: none;
-                    }
-                    .vibe-dualrange-input::-webkit-slider-thumb {
-                        -webkit-appearance: none;
-                        appearance: none;
-                        pointer-events: auto;
-                        width: 12px;
-                        height: 12px;
-                        margin-top: 2px;
-                        border-radius: 9999px;
-                        background: #818cf8;
-                        cursor: pointer;
-                    }
-                    .vibe-dualrange-input::-moz-range-thumb {
-                        pointer-events: auto;
-                        width: 12px;
-                        height: 12px;
-                        border: none;
-                        border-radius: 9999px;
-                        background: #818cf8;
-                        cursor: pointer;
-                    }
-                `}</style>
-            </div>
-            <span className="text-[10px] text-gray-600 tabular-nums w-14">
-                {lo.toFixed(2)}–{hi.toFixed(2)}
-            </span>
-        </div>
+        <NowPlayingCard
+            track={track}
+            isPlaying={isPlaying}
+            onMapPresent={onMapPresent}
+            moodColor={moodColor}
+            onFlyTo={onFlyTo}
+            onTogglePlay={onTogglePlay}
+        />
     );
 }
 
@@ -204,7 +136,12 @@ export function VibeMap() {
     const [hoveredId, setHoveredId] = useState<string | null>(null);
     const [highlightIds, setHighlightIds] = useState<Set<string> | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [filtersExpanded, setFiltersExpanded] = useState(false);
+    const [escHintVisible, setEscHintVisible] = useState(false);
     const drag = useRef<DragState>({ active: false, lastX: 0, lastY: 0, moved: 0 });
+
+    const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+    const isSmall = useMediaQuery("(max-width: 639px)");
 
     const { currentTrack } = useAudioState();
     const { playTrack, playTracks, addToQueue } = useAudioControls();
@@ -277,6 +214,14 @@ export function VibeMap() {
             cancelAnimationFrame(layoutRafRef.current);
             layoutRafRef.current = null;
         }
+
+        // Reduced motion: snap straight to the target buffer in a single
+        // setState — no rAF loop, no interpolation.
+        if (reducedMotion) {
+            setRawPositions(to);
+            return;
+        }
+
         if (layoutBuffersRef.current[0].length !== to.length) {
             layoutBuffersRef.current = [
                 new Float32Array(to.length),
@@ -300,7 +245,7 @@ export function VibeMap() {
             }
         };
         layoutRafRef.current = requestAnimationFrame(tick);
-    }, [layoutMode, positions, spreadPositions, naturalPositions]);
+    }, [layoutMode, positions, spreadPositions, naturalPositions, reducedMotion]);
 
     const indexById = useMemo(() => {
         const m = new Map<string, number>();
@@ -571,167 +516,37 @@ export function VibeMap() {
         return () => window.removeEventListener("keydown", onKey);
     }, [vibeMode, exitToExplore, isFullscreen]);
 
+    // Fullscreen nicety: a bottom-center "Esc to exit" whisper that fades out
+    // after ~2.5s. Under reduced motion the chip is static-then-removed (no
+    // fade) — same timeout, the fade animation itself is disabled via CSS.
+    useEffect(() => {
+        if (!isFullscreen) {
+            setEscHintVisible(false);
+            return;
+        }
+        setEscHintVisible(true);
+        const id = setTimeout(() => setEscHintVisible(false), 2500);
+        return () => clearTimeout(id);
+    }, [isFullscreen]);
+
     const hoveredTrack = hoveredId ? trackById.get(hoveredId) : undefined;
     const mapReady = viewport !== null && dims.width > 0 && dims.height > 0;
+    // A mode panel (travel/journey/alchemy) takes over the right side / bottom
+    // sheet; auto-collapse the filters so they can't collide with it.
+    const modePanelOpen = vibe.mode !== "explore";
+    const filtersOpen = filtersExpanded && !modePanelOpen;
 
     return (
         <div
             className={
                 isFullscreen
-                    ? "fixed inset-0 z-[100] bg-[#0a0a0a] flex flex-col h-full"
-                    : "flex flex-col h-full"
+                    ? "fixed inset-0 z-[100] bg-[#0a0a0a] overflow-hidden"
+                    : "relative w-full h-full overflow-hidden"
             }
             data-vibe-mode={vibe.mode}
         >
-            {/* Top bar: spotlight + view controls */}
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
-                <SpotlightSearch
-                    className="relative flex-1 max-w-xs"
-                    onResults={(ids) => setHighlightIds(ids)}
-                    onClear={() => setHighlightIds(null)}
-                />
-                <p className="text-xs text-gray-500 ml-auto whitespace-nowrap tabular-nums">
-                    {filters.visibleCount} of {tracks.length} visible
-                </p>
-                <div className="flex items-center gap-1">
-                    <button
-                        type="button"
-                        onClick={vibe.startJourney}
-                        disabled={!vibe.canStartJourney}
-                        title={
-                            vibe.canStartJourney
-                                ? "Plan a journey from the current track"
-                                : "Play a track (or pick one in Travel) to start a journey"
-                        }
-                        className="flex items-center gap-1 px-2 py-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
-                    >
-                        <Route className="w-4 h-4" />
-                        <span className="text-xs">Journey</span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={locateNowPlaying}
-                        disabled={!beaconOnMap}
-                        title={
-                            beaconOnMap
-                                ? "Fly to now playing"
-                                : currentTrack
-                                  ? "Now playing isn't on the map"
-                                  : "Nothing playing"
-                        }
-                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-500"
-                    >
-                        <Crosshair className="w-4 h-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => zoomByCenter(1.3)}
-                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors"
-                        title="Zoom in"
-                    >
-                        <ZoomIn className="w-4 h-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => zoomByCenter(1 / 1.3)}
-                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors"
-                        title="Zoom out"
-                    >
-                        <ZoomOut className="w-4 h-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={resetView}
-                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors"
-                        title="Reset view"
-                    >
-                        <RotateCcw className="w-4 h-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={toggleLayoutMode}
-                        disabled={tracks.length === 0}
-                        title={
-                            layoutMode === "spread"
-                                ? "Cluster: return to the natural layout"
-                                : "Spread: uniformly space out crowded clusters"
-                        }
-                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-500"
-                    >
-                        {layoutMode === "spread" ? (
-                            <Network className="w-4 h-4" />
-                        ) : (
-                            <Shuffle className="w-4 h-4" />
-                        )}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setIsFullscreen((v) => !v)}
-                        title={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
-                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/5 rounded transition-colors"
-                    >
-                        {isFullscreen ? (
-                            <Minimize2 className="w-4 h-4" />
-                        ) : (
-                            <Maximize2 className="w-4 h-4" />
-                        )}
-                    </button>
-                </div>
-            </div>
-
-            {/* Filter bar: mood chips (subtractive toggles) + energy/mood ranges */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 border-b border-white/5">
-                {Object.keys(MOOD_COLORS).map((mood) => {
-                    const active = filters.activeMoods.has(mood);
-                    return (
-                        <button
-                            key={mood}
-                            type="button"
-                            onClick={(e) => {
-                                if (e.shiftKey) filters.soloMood(mood);
-                                else filters.toggleMood(mood);
-                            }}
-                            aria-pressed={active}
-                            className={`flex items-center gap-1.5 transition-opacity ${
-                                active ? "opacity-100" : "opacity-30"
-                            }`}
-                            title={`${moodLabel(mood)} — click to toggle, shift-click to solo`}
-                        >
-                            <span
-                                className="w-2 h-2 rounded-full"
-                                style={{ backgroundColor: getMoodColor(mood) }}
-                            />
-                            <span className="text-[10px] text-gray-400">
-                                {moodLabel(mood)}
-                            </span>
-                        </button>
-                    );
-                })}
-                <button
-                    type="button"
-                    onClick={filters.selectAllMoods}
-                    title="Show all moods"
-                    className="text-[10px] text-gray-500 hover:text-white underline decoration-dotted underline-offset-2 transition-colors"
-                >
-                    All
-                </button>
-                <div className="h-3 w-px bg-white/10 mx-1" />
-                <DualRange
-                    label="Energy"
-                    tooltip="calm ↔ intense"
-                    value={filters.energyRange}
-                    onChange={filters.setEnergyRange}
-                />
-                <DualRange
-                    label="Mood"
-                    tooltip="sad ↔ happy"
-                    value={filters.valenceRange}
-                    onChange={filters.setValenceRange}
-                />
-            </div>
-
-            {/* Map area */}
-            <div ref={containerRef} className="flex-1 relative overflow-hidden">
+            {/* Canvas fills the whole component; all controls float over it. */}
+            <div ref={containerRef} className="absolute inset-0 overflow-hidden">
                 {mapReady && (
                     <>
                         <MapCanvas
@@ -795,12 +610,7 @@ export function VibeMap() {
                     </>
                 )}
 
-                {/* Mode panels (compact overlays / mobile bottom-sheet). */}
-                {vibe.travel && <TravelPanel view={vibe.travel} />}
-                {vibe.journey && <JourneyPanel view={vibe.journey} />}
-                {vibe.alchemy && <AlchemyTray view={vibe.alchemy} />}
-
-                {/* Status overlays in the map area (do not hide the controls). */}
+                {/* Status overlays. */}
                 {isLoading && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <Loader2 className="w-8 h-8 text-gray-500 animate-spin" />
@@ -814,41 +624,129 @@ export function VibeMap() {
                         </p>
                     </div>
                 )}
+            </div>
 
-                {/* Hover tooltip */}
-                {hoveredTrack && (
-                    <div className="absolute bottom-4 left-4 right-4 pointer-events-none">
-                        <div className="bg-black/90 border border-white/10 rounded-lg px-3 py-2 inline-flex items-center gap-2">
-                            {hoveredTrack.coverUrl && (
-                                <img
-                                    src={hoveredTrack.coverUrl}
-                                    alt=""
-                                    loading="lazy"
-                                    className="w-10 h-10 rounded object-cover flex-shrink-0"
-                                />
-                            )}
-                            <div>
-                                <div className="flex items-center gap-1.5">
-                                    <span
-                                        className="w-2 h-2 rounded-full flex-shrink-0"
-                                        style={{
-                                            backgroundColor: getMoodColor(
-                                                hoveredTrack.dominantMood
-                                            ),
-                                        }}
-                                    />
-                                    <p className="text-sm text-white font-medium">
-                                        {hoveredTrack.title}
-                                    </p>
-                                </div>
-                                <p className="text-xs text-gray-400">
-                                    {hoveredTrack.artist}
-                                </p>
-                            </div>
-                        </div>
+            {/* Floating control surface. The wrapper is pointer-events-none so
+                the map still pans in the empty gaps; each panel opts its own
+                surface back in with pointer-events-auto. */}
+            <div className="pointer-events-none absolute inset-0 z-30">
+                {/* TOP-LEFT — now playing (the fullscreen "what's playing" fix). */}
+                {currentTrack && (
+                    <div className="absolute top-3 left-3">
+                        <NowPlayingConnected
+                            track={currentTrack}
+                            onMapPresent={beaconOnMap}
+                            moodColor={
+                                beaconTrack
+                                    ? getMoodColor(beaconTrack.dominantMood)
+                                    : null
+                            }
+                            onFlyTo={locateNowPlaying}
+                        />
                     </div>
                 )}
+
+                {/* TOP-CENTER — spotlight. */}
+                <div className="absolute top-3 left-1/2 -translate-x-1/2">
+                    <SpotlightSearch
+                        onResults={(ids) => setHighlightIds(ids)}
+                        onClear={() => setHighlightIds(null)}
+                    />
+                </div>
+
+                {/* TOP-RIGHT — view controls. */}
+                <div className="absolute top-3 right-3">
+                    <ViewControls
+                        onZoomIn={() => zoomByCenter(1.3)}
+                        onZoomOut={() => zoomByCenter(1 / 1.3)}
+                        onReset={resetView}
+                        layoutMode={layoutMode}
+                        layoutDisabled={tracks.length === 0}
+                        onToggleLayout={toggleLayoutMode}
+                        canLocate={beaconOnMap}
+                        locateHint={
+                            beaconOnMap
+                                ? "Fly to now playing"
+                                : currentTrack
+                                  ? "Now playing isn't on the map"
+                                  : "Nothing playing"
+                        }
+                        onLocate={locateNowPlaying}
+                        canStartJourney={vibe.canStartJourney}
+                        journeyHint={
+                            vibe.canStartJourney
+                                ? "Plan a journey from the current track"
+                                : "Play a track (or pick one in Travel) to start a journey"
+                        }
+                        onStartJourney={vibe.startJourney}
+                        isFullscreen={isFullscreen}
+                        onToggleFullscreen={() => setIsFullscreen((v) => !v)}
+                    />
+                </div>
+
+                {/* BOTTOM-LEFT — filters (self-positioning pill / card / sheet). */}
+                <FiltersPanel
+                    filters={filters}
+                    total={tracks.length}
+                    expanded={filtersOpen}
+                    onExpandedChange={setFiltersExpanded}
+                    reducedMotion={reducedMotion}
+                    compact={isSmall}
+                />
             </div>
+
+            {/* Mode panels (right side / mobile bottom-sheet), above controls. */}
+            {vibe.travel && <TravelPanel view={vibe.travel} />}
+            {vibe.journey && <JourneyPanel view={vibe.journey} />}
+            {vibe.alchemy && <AlchemyTray view={vibe.alchemy} />}
+
+            {/* Hover tooltip (bottom-center, clear of the bottom-left filters). */}
+            {hoveredTrack && (
+                <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-40 max-w-[80%]">
+                    <div className="bg-black/60 backdrop-blur-md border border-white/10 rounded-xl px-3 py-2 shadow-lg inline-flex items-center gap-2">
+                        {hoveredTrack.coverUrl && (
+                            <img
+                                src={hoveredTrack.coverUrl}
+                                alt=""
+                                loading="lazy"
+                                className="w-10 h-10 rounded object-cover flex-shrink-0"
+                            />
+                        )}
+                        <div>
+                            <div className="flex items-center gap-1.5">
+                                <span
+                                    className="w-2 h-2 rounded-full flex-shrink-0"
+                                    style={{
+                                        backgroundColor: getMoodColor(
+                                            hoveredTrack.dominantMood
+                                        ),
+                                    }}
+                                />
+                                <p className="text-sm text-white font-medium">
+                                    {hoveredTrack.title}
+                                </p>
+                            </div>
+                            <p className="text-xs text-gray-400">
+                                {hoveredTrack.artist}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Fullscreen nicety — "Esc to exit" whisper, fades after ~2.5s. */}
+            {isFullscreen && escHintVisible && (
+                <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-40">
+                    <div className="vibe-esc-hint px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-xs text-gray-300 shadow-lg">
+                        Esc to exit
+                    </div>
+                    <style>{`
+                        .vibe-esc-hint { animation: vibe-esc-fade 2.5s ease-out forwards; }
+                        @keyframes vibe-esc-fade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+                        @media (prefers-reduced-motion: reduce) { .vibe-esc-hint { animation: none; } }
+                    `}</style>
+                </div>
+            )}
         </div>
     );
 }
