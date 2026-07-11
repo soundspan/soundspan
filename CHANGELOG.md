@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Spotify/Deezer playlist-import preview matches tracks against the library
+  roughly 2.5x faster on a 50-track playlist (129ms → 52ms median wall-clock
+  on a 15,230-track dev corpus), by running the per-track library lookups
+  through a bounded-concurrency queue (`p-queue`, concurrency 4) instead of
+  one at a time. Discover Weekly's tier-based artist recommendations also
+  check library membership via one batched query per generation run instead
+  of up to 2 Prisma round trips per candidate artist across the similar-artist
+  pool (F13).
 - All Node-based Docker images and CI jobs now run Node 24 (`node:24-bookworm-slim` for backend/frontend/root-AIO images), replacing the previous 20/24 split. `@types/node` is bumped to `^24` in backend and frontend to match, and the backend `tsconfig` `lib` is raised `ES2020` → `ES2022` alongside, keeping `tsc` clean under `@types/node` 24 (which dropped the legacy compat declarations for post-ES2020 built-ins like `.at()` that the v20 types carried) — the declared lib now matches what the Node ≥ 20 runtime actually implements; type declarations only, emitted code and `target` unchanged.
 
 ### Fixed
