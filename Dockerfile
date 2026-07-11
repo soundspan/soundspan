@@ -53,32 +53,45 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     -r /tmp/requirements-aio-audio-analyzer.txt \
     && rm -f /tmp/requirements-aio-audio-analyzer.txt
 
-# Download Essentia ML models (~200MB total) - these enable Enhanced vibe matching
+# Download Essentia ML models (~4MB total) - these enable Enhanced vibe matching
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
+# Each download is verified against a pinned sha256 digest (roadmap F38); a
+# mismatch fails the build immediately. Digests measured 2026-07-11 (see
+# docs/modernization-roadmap.md F38).
 RUN echo "Downloading Essentia ML models for Enhanced vibe matching..." && \
     # Base MusiCNN embedding model (required for all predictions)
     curl -L --progress-bar -o /app/models/msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/autotagging/msd/msd-musicnn-1.pb" && \
+    echo "cdea0722bcee7f731286843f2233e3aa69887bb5c3e2dce011eff55f38d04f3e  /app/models/msd-musicnn-1.pb" | sha256sum -c - && \
     # Mood classification heads (using MusiCNN architecture)
     curl -L --progress-bar -o /app/models/mood_happy-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-msd-musicnn-1.pb" && \
+    echo "d7382bc60304ea4578c298222968cd8d600c31252c7bf3e90b1f728ebb3ec36d  /app/models/mood_happy-msd-musicnn-1.pb" | sha256sum -c - && \
     curl -L --progress-bar -o /app/models/mood_sad-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_sad/mood_sad-msd-musicnn-1.pb" && \
+    echo "a5e908cf7f59e8c379ff7c7d138dd85416985fddaebb5de14ca4193200411f61  /app/models/mood_sad-msd-musicnn-1.pb" | sha256sum -c - && \
     curl -L --progress-bar -o /app/models/mood_relaxed-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_relaxed/mood_relaxed-msd-musicnn-1.pb" && \
+    echo "1252d28ca7d2204e34e0cdf84a00aa2bc9627a87bdcf923df3aad39cfa69d2d9  /app/models/mood_relaxed-msd-musicnn-1.pb" | sha256sum -c - && \
     curl -L --progress-bar -o /app/models/mood_aggressive-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_aggressive/mood_aggressive-msd-musicnn-1.pb" && \
+    echo "3b6eb5645e4b47a2ceb28ef3f8612f224640c583048770791b9fc6e8e5627a67  /app/models/mood_aggressive-msd-musicnn-1.pb" | sha256sum -c - && \
     curl -L --progress-bar -o /app/models/mood_party-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_party/mood_party-msd-musicnn-1.pb" && \
+    echo "765b096300ee1d92103cb0a122fc12c33882166fb94d37875284e82ce06322a1  /app/models/mood_party-msd-musicnn-1.pb" | sha256sum -c - && \
     curl -L --progress-bar -o /app/models/mood_acoustic-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_acoustic/mood_acoustic-msd-musicnn-1.pb" && \
+    echo "519ee3af8210fe32e021002a0094546aeb6fb5a59d22b7d53c48e4ee1ac9e6cc  /app/models/mood_acoustic-msd-musicnn-1.pb" | sha256sum -c - && \
     curl -L --progress-bar -o /app/models/mood_electronic-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/mood_electronic/mood_electronic-msd-musicnn-1.pb" && \
+    echo "86c109b504fc6cf666c7513d684381a594218a552c3c954f212dd3a9d0c6cdc5  /app/models/mood_electronic-msd-musicnn-1.pb" | sha256sum -c - && \
     # Other classification heads
     curl -L --progress-bar -o /app/models/danceability-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/danceability/danceability-msd-musicnn-1.pb" && \
+    echo "874a4b86afc9e12de3f15a47baf9ff1ac676ace109c56203e26103f2259eb95e  /app/models/danceability-msd-musicnn-1.pb" | sha256sum -c - && \
     curl -L --progress-bar -o /app/models/voice_instrumental-msd-musicnn-1.pb \
         "https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-msd-musicnn-1.pb" && \
+    echo "eb762cc7ee6751b2ea32179d3716e2d60a1d1a9e615b7e3b8be8a6f79d71675e  /app/models/voice_instrumental-msd-musicnn-1.pb" | sha256sum -c - && \
     echo "ML models downloaded successfully" && \
     ls -lh /app/models/
 
@@ -102,18 +115,22 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # Copy CLAP analyzer script
 COPY services/audio-analyzer-clap/analyzer.py /app/audio-analyzer-clap/
 
-# Pre-download CLAP model (~600MB) during build to avoid runtime download
+# Pre-download CLAP model (~2.35 GB / 2,352,471,003 bytes) during build to avoid runtime download
 # The analyzer expects the model at /app/models/music_audioset_epoch_15_esc_90.14.pt
+# Pinned to an immutable repo commit (not `resolve/main`) and verified against
+# a pinned sha256 digest (roadmap F38); a mismatch fails the build. Digest
+# measured 2026-07-11 (see docs/modernization-roadmap.md F38).
 RUN --mount=type=secret,id=hf_token \
     HF_TOKEN=$(cat /run/secrets/hf_token) \
     echo "Downloading CLAP model for vibe similarity..." && \
     if [ -n "${HF_TOKEN}" ]; then \
       curl -L --progress-bar -H "Authorization: Bearer ${HF_TOKEN}" -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
-        "https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt"; \
+        "https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt"; \
     else \
       curl -L --progress-bar -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
-        "https://huggingface.co/lukewys/laion_clap/resolve/main/music_audioset_epoch_15_esc_90.14.pt"; \
+        "https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt"; \
     fi && \
+    echo "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd  /app/models/music_audioset_epoch_15_esc_90.14.pt" | sha256sum -c - && \
     echo "CLAP model downloaded successfully" && \
     ls -lh /app/models/music_audioset_epoch_15_esc_90.14.pt
 
