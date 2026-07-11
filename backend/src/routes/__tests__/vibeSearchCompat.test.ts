@@ -45,6 +45,15 @@ jest.mock("../../services/hybridSimilarity", () => ({
     findSimilarTracks: jest.fn(),
 }));
 
+// The vibe ANN sites (findNearestToEmbedding + text-vibe search) route through
+// the F14 helper, which applies ivfflat.probes in a transaction. Mock it at that
+// boundary so these tests still assert route BEHAVIOUR on canned neighbour rows.
+// The plain embedding lookups (fetchTrackEmbedding) and the status count remain
+// on prisma.$queryRaw.
+jest.mock("../../utils/annQuery", () => ({
+    runAnnQuery: jest.fn(),
+}));
+
 jest.mock("../../services/umapProjection", () => ({
     computeMapProjection: jest.fn(),
 }));
@@ -71,6 +80,7 @@ import router from "../vibe";
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { findSimilarTracks } from "../../services/hybridSimilarity";
+import { runAnnQuery } from "../../utils/annQuery";
 import { computeMapProjection } from "../../services/umapProjection";
 import {
     getVocabulary,
@@ -87,6 +97,7 @@ const mockRedisXAdd = redisClient.xAdd as jest.Mock;
 const mockRedisBlPop = redisClient.blPop as jest.Mock;
 const mockRedisDel = redisClient.del as jest.Mock;
 const mockFindSimilarTracks = findSimilarTracks as jest.Mock;
+const mockRunAnnQuery = runAnnQuery as jest.Mock;
 const mockComputeMapProjection = computeMapProjection as jest.Mock;
 const mockGetVocabulary = getVocabulary as jest.Mock;
 const mockExpandQueryWithVocabulary = expandQueryWithVocabulary as jest.Mock;
@@ -141,6 +152,7 @@ describe("vibe search transport compatibility", () => {
         mockRedisXAdd.mockResolvedValue("1712345-0");
         mockRedisDel.mockResolvedValue(1);
         mockQueryRaw.mockResolvedValue([]);
+        mockRunAnnQuery.mockResolvedValue([]);
         mockLikedTrackFindMany.mockResolvedValue([]);
         mockDislikedEntityFindMany.mockResolvedValue([]);
         mockFindSimilarTracks.mockResolvedValue([]);
@@ -371,7 +383,7 @@ describe("vibe search transport compatibility", () => {
                 modelVersion: "laion-clap-music-v1",
             }),
         });
-        mockQueryRaw.mockResolvedValue([
+        mockRunAnnQuery.mockResolvedValue([
             {
                 id: "track-1",
                 title: "Track One",
@@ -461,7 +473,7 @@ describe("vibe search transport compatibility", () => {
             })
         );
         expect(mockRedisDel).toHaveBeenCalledWith("audio:text:embed:response:req-123");
-        expect(mockQueryRaw).not.toHaveBeenCalled();
+        expect(mockRunAnnQuery).not.toHaveBeenCalled();
     });
 
     it("validates query length and handles analyzer payload errors", async () => {
@@ -542,7 +554,7 @@ describe("vibe search transport compatibility", () => {
             genreConfidence: 0.8,
             matchedTerms: [{ name: "energetic" }],
         });
-        mockQueryRaw.mockResolvedValueOnce([
+        mockRunAnnQuery.mockResolvedValueOnce([
             {
                 id: "track-2",
                 title: "Track Two",
@@ -617,15 +629,15 @@ describe("vibe search transport compatibility", () => {
         const pathHandler = getGetHandler("/path");
 
         it("returns interpolated tracks between two endpoints", async () => {
-            // Source and target embeddings
+            // Source and target embeddings (plain lookups, still prisma.$queryRaw)
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // from
-                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]) // to
-                // Step 1 nearest
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]); // to
+            // Per-step nearest-neighbour search routes through the ANN helper
+            mockRunAnnQuery
                 .mockResolvedValueOnce([
                     { id: "mid-1", title: "Mid One", distance: 0.1, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
                 ])
-                // Step 2 nearest
                 .mockResolvedValueOnce([
                     { id: "mid-2", title: "Mid Two", distance: 0.15, albumId: "a-2", albumTitle: "A2", albumCoverUrl: null, artistId: "ar-2", artistName: "Artist 2" },
                 ]);
@@ -670,14 +682,14 @@ describe("vibe search transport compatibility", () => {
         const alchemyHandler = getPostHandler("/alchemy");
 
         it("blends multiple track embeddings and returns matching tracks", async () => {
-            // Embedding lookups for each ingredient
+            // Embedding lookups for each ingredient (plain prisma.$queryRaw)
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
-                .mockResolvedValueOnce([{ embedding: "[0,1,0]" }])
-                // Nearest-neighbor search from blended embedding
-                .mockResolvedValueOnce([
-                    { id: "result-1", title: "Blended Hit", distance: 0.2, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
-                ]);
+                .mockResolvedValueOnce([{ embedding: "[0,1,0]" }]);
+            // Nearest-neighbour search from the blended embedding via the ANN helper
+            mockRunAnnQuery.mockResolvedValueOnce([
+                { id: "result-1", title: "Blended Hit", distance: 0.2, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
+            ]);
 
             const req = {
                 body: { trackIds: ["track-a", "track-b"], limit: 10 },
@@ -696,10 +708,10 @@ describe("vibe search transport compatibility", () => {
         it("applies custom weights to ingredient embeddings", async () => {
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
-                .mockResolvedValueOnce([{ embedding: "[0,1,0]" }])
-                .mockResolvedValueOnce([
-                    { id: "result-1", title: "Weighted", distance: 0.1, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
-                ]);
+                .mockResolvedValueOnce([{ embedding: "[0,1,0]" }]);
+            mockRunAnnQuery.mockResolvedValueOnce([
+                { id: "result-1", title: "Weighted", distance: 0.1, albumId: "a-1", albumTitle: "A1", albumCoverUrl: null, artistId: "ar-1", artistName: "Artist 1" },
+            ]);
 
             const req = {
                 body: { trackIds: ["track-a", "track-b"], weights: [0.8, 0.2], limit: 5 },
