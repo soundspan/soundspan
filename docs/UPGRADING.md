@@ -18,16 +18,20 @@ or mismatched secret is rejected with **403**. The backend sends the header
 (sourced from `INTERNAL_API_SECRET` via `config.ts`) on all four sidecar clients plus
 the previously-bare `/user/auth/status` probe. `/health` is exempt so k8s probes and
 the backend's own health checks keep working. `ytmusic-streamer` also now rejects a
-malformed `user_id` with **400** before any file operation.
+malformed `user_id` with **400** before any file operation. The FastAPI schema/docs
+routes (`/docs`, `/redoc`, `/openapi.json`) are disabled on both sidecars — they were
+registered outside the auth dependency's reach and would otherwise disclose the API
+schema unauthenticated; they now return **404**.
 
 **Action required — operator pre-deploy checklist:** before the next deploy, confirm
 `INTERNAL_API_SECRET` is present on the backend AND both HTTP sidecars
 (compose/chart wire it automatically; custom setups must set it manually to the
 **same value** on all three) — unset means sidecar calls fail closed with 403 and
 YouTube/TIDAL streaming silently stops working. The Helm chart injects it into the
-`tidal`/`ytmusic` deployments via `secretKeyRef` (same `soundspan-secrets` key the
-backend and CLAP analyzer already use); `docker-compose.yml` defaults it for both
-sidecars. The all-in-one image does not bundle the HTTP sidecars — if you run them
+`tidal`/`ytmusic` deployments via `secretKeyRef` into the chart's managed Secret —
+the same Secret (named per `soundspan.secretName`, by default the release name) that
+already carries `INTERNAL_API_SECRET` for the backend and CLAP analyzer;
+`docker-compose.yml` defaults it for both sidecars. The all-in-one image does not bundle the HTTP sidecars — if you run them
 alongside an AIO container, set `INTERNAL_API_SECRET` on them to match the value the
 AIO persists at `/data/secrets/internal_api_secret`.
 
