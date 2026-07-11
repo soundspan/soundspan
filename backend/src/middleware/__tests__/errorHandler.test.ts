@@ -28,6 +28,10 @@ describe("errorHandler middleware", () => {
         return res;
     }
 
+    function createRequest(overrides: Partial<{ method: string; path: string }> = {}) {
+        return { method: "GET", path: "/api/example", ...overrides } as any;
+    }
+
     it("maps AppError categories to status codes and includes details in development", async () => {
         const { errorHandler } = await loadHandler("development");
         const { AppError, ErrorCategory, ErrorCode } = await import(
@@ -42,7 +46,7 @@ describe("errorHandler middleware", () => {
             { hint: "fix input" }
         );
 
-        errorHandler(recoverable, {} as any, resRecoverable, jest.fn());
+        errorHandler(recoverable, createRequest(), resRecoverable, jest.fn());
 
         expect(resRecoverable.status).toHaveBeenCalledWith(400);
         expect(resRecoverable.json).toHaveBeenCalledWith({
@@ -62,7 +66,7 @@ describe("errorHandler middleware", () => {
             ErrorCategory.TRANSIENT,
             "retry later"
         );
-        errorHandler(transient, {} as any, resTransient, jest.fn());
+        errorHandler(transient, createRequest(), resTransient, jest.fn());
         expect(resTransient.status).toHaveBeenCalledWith(503);
 
         const resFatal = createResponse();
@@ -71,7 +75,7 @@ describe("errorHandler middleware", () => {
             ErrorCategory.FATAL,
             "fatal error"
         );
-        errorHandler(fatal, {} as any, resFatal, jest.fn());
+        errorHandler(fatal, createRequest(), resFatal, jest.fn());
         expect(resFatal.status).toHaveBeenCalledWith(500);
     });
 
@@ -89,7 +93,7 @@ describe("errorHandler middleware", () => {
                 "prod-safe",
                 { secret: "hide-me" }
             ),
-            {} as any,
+            createRequest(),
             res,
             jest.fn()
         );
@@ -107,10 +111,18 @@ describe("errorHandler middleware", () => {
         const prodRes = createResponse();
         const prodErr = new Error("db exploded");
         prodErr.stack = "stack-trace";
+        const req = createRequest({ method: "POST", path: "/api/downloads/123" });
 
-        prod.errorHandler(prodErr, {} as any, prodRes, jest.fn());
+        prod.errorHandler(prodErr, req, prodRes, jest.fn());
 
-        expect(mockLoggerError).toHaveBeenCalledWith("Unhandled error:", "stack-trace");
+        // Unhandled-error logs carry req.method + req.path (F1 P1 mitigation:
+        // per-site log context is disappearing as routes migrate to
+        // asyncHandler, so the shared errorHandler must supply it instead).
+        expect(mockLoggerError).toHaveBeenCalledWith(
+            "Unhandled error:",
+            "POST /api/downloads/123",
+            "stack-trace"
+        );
         expect(prodRes.status).toHaveBeenCalledWith(500);
         expect(prodRes.json).toHaveBeenCalledWith({
             error: "Internal server error",
@@ -123,7 +135,7 @@ describe("errorHandler middleware", () => {
         const devErr = new Error("dev-visible");
         devErr.stack = "dev-stack";
 
-        dev.errorHandler(devErr, {} as any, devRes, jest.fn());
+        dev.errorHandler(devErr, createRequest(), devRes, jest.fn());
 
         expect(devRes.status).toHaveBeenCalledWith(500);
         expect(devRes.json).toHaveBeenCalledWith({
@@ -138,12 +150,82 @@ describe("errorHandler middleware", () => {
         const err = new Error("");
         err.stack = "empty-message-stack";
 
-        dev.errorHandler(err, {} as any, res, jest.fn());
+        dev.errorHandler(err, createRequest(), res, jest.fn());
 
         expect(res.status).toHaveBeenCalledWith(500);
         expect(res.json).toHaveBeenCalledWith({
             error: "Internal server error",
             stack: "empty-message-stack",
+        });
+    });
+
+    it("uses AppError.httpStatus when present, overriding the category-based mapping", async () => {
+        const { errorHandler } = await loadHandler("development");
+        const { AppError, ErrorCategory, ErrorCode } = await import(
+            "../../utils/errors"
+        );
+
+        const resUnauthorized = createResponse();
+        const unauthorized = new AppError(
+            ErrorCode.INTERNAL,
+            ErrorCategory.RECOVERABLE,
+            "not authorized",
+            undefined,
+            401
+        );
+        errorHandler(unauthorized, createRequest(), resUnauthorized, jest.fn());
+        expect(resUnauthorized.status).toHaveBeenCalledWith(401);
+        expect(resUnauthorized.json).toHaveBeenCalledWith({
+            error: "not authorized",
+            code: ErrorCode.INTERNAL,
+            category: ErrorCategory.RECOVERABLE,
+        });
+
+        // FATAL would normally map to 500 (see the category-mapping test
+        // above) — pairing it with an explicit 404 proves explicit status
+        // wins over the category map, not just that it can produce a 4xx.
+        const resNotFound = createResponse();
+        const notFound = new AppError(
+            ErrorCode.INTERNAL,
+            ErrorCategory.FATAL,
+            "resource missing",
+            undefined,
+            404
+        );
+        errorHandler(notFound, createRequest(), resNotFound, jest.fn());
+        expect(resNotFound.status).toHaveBeenCalledWith(404);
+        expect(resNotFound.json).toHaveBeenCalledWith({
+            error: "resource missing",
+            code: ErrorCode.INTERNAL,
+            category: ErrorCategory.FATAL,
+        });
+    });
+
+    it("keeps AppError explicit-status responses shaped the same in production (message included, details dev-gated)", async () => {
+        const { errorHandler } = await loadHandler("production");
+        const { AppError, ErrorCategory, ErrorCode } = await import(
+            "../../utils/errors"
+        );
+        const res = createResponse();
+
+        errorHandler(
+            new AppError(
+                ErrorCode.INTERNAL,
+                ErrorCategory.RECOVERABLE,
+                "not found",
+                { secret: "hide-me" },
+                404
+            ),
+            createRequest(),
+            res,
+            jest.fn()
+        );
+
+        expect(res.status).toHaveBeenCalledWith(404);
+        expect(res.json).toHaveBeenCalledWith({
+            error: "not found",
+            code: ErrorCode.INTERNAL,
+            category: ErrorCategory.RECOVERABLE,
         });
     });
 });
