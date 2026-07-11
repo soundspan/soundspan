@@ -317,7 +317,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F14 — pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query scans 1 of 224 lists (default recall)
 
-**✅ complete (PR #TBD-CYCLE3-A)** · dimension: performance · severity: high · effort: M · risk: medium · epic: #17
+**✅ complete (PR #107)** · dimension: performance · severity: high · effort: M · risk: medium · epic: #17
 
 > **Fix shipped.** All five pgvector ANN sites — `hybridSimilarity.ts` hybrid + CLAP-only modes, and `vibe.ts` `findNearestToEmbedding` (both variants) + the text-vibe search — now route through one shared `backend/src/utils/annQuery.ts` helper that applies `ivfflat.probes` via a transaction-scoped `set_config('ivfflat.probes', …, true)` on the SAME pooled connection as the query (a bare `SET LOCAL` no-ops under Prisma pooling; utility statements reject bind params, so `set_config` with `is_local=true` is the parameterizable `SET LOCAL` equivalent). New `IVFFLAT_PROBES` config value, default **32**, chosen by `backend/scripts/benchmark-ivfflat-probes.ts` on the real local corpus (15,230 embeddings, lists=224): recall@10 rises from ≈0.26 at probes=1 (the silent pg default) to ≈0.96 at probes=32, p95 ≈ 6 ms; latency only cliffs (~44 ms) at probes≥112. lists=224 kept for the 15,230-row corpus; re-evaluation deferred — a lists change is an index rebuild (migration), out of smallest-safe scope. Tests: `annQuery.test.ts` (helper set_config/transaction contract), `hybridSimilarity.test.ts` + `vibeSearchCompat.test.ts` (route/service behaviour through the helper).
 
