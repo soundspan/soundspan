@@ -31,6 +31,12 @@ const mockHttpsAgent = jest.fn().mockImplementation(() => ({ kind: "https-agent"
 
 const ORIGINAL_ENV = { ...process.env };
 
+// tidalStreaming.ts now reads config.internalApiSecret; mock config so the real
+// module (which process.exit(1)s on missing env) never loads under jest.
+const mockConfig: { internalApiSecret?: string } = {};
+
+jest.mock("../../config", () => ({ config: mockConfig }));
+
 jest.mock("axios", () => ({
     __esModule: true,
     default: {
@@ -153,6 +159,7 @@ describe("tidal streaming service", () => {
         mockPrisma.systemSettings.findUnique.mockReset();
         mockPrisma.userSettings.findUnique.mockReset();
         mockPrisma.userSettings.update.mockReset();
+        mockConfig.internalApiSecret = undefined;
         resetServiceState(privateService);
         process.env = { ...ORIGINAL_ENV };
     });
@@ -189,6 +196,23 @@ describe("tidal streaming service", () => {
                     baseURL: "http://sidecar.test:9000",
                     timeout: 30000,
                     headers: { "Content-Type": "application/json" },
+                })
+            );
+        });
+
+        it("attaches the x-internal-secret header when configured (F31)", () => {
+            mockConfig.internalApiSecret = "sek-123";
+            loadIsolatedService({
+                NODE_ENV: "test",
+                TIDAL_SIDECAR_URL: "http://sidecar.test:9000",
+            });
+
+            expect(mockAxiosCreate).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        "Content-Type": "application/json",
+                        "x-internal-secret": "sek-123",
+                    }),
                 })
             );
         });
@@ -259,6 +283,29 @@ describe("tidal streaming service", () => {
                 authenticated: false,
                 credentialsConfigured: false,
             });
+        });
+
+        it("checkSidecarAuthStatus queries the sidecar via the authenticated client (F31)", async () => {
+            mockClient.get.mockResolvedValueOnce({
+                data: { authenticated: true },
+            });
+            await expect(
+                tidalStreamingService.checkSidecarAuthStatus("user/1")
+            ).resolves.toBe(true);
+            // Uses the shared client (which carries x-internal-secret), not a
+            // bare axios.get with a raw env URL.
+            expect(mockClient.get).toHaveBeenCalledWith(
+                "/user/auth/status?user_id=user%2F1",
+                { timeout: 5000 }
+            );
+            expect(mockAxiosGet).not.toHaveBeenCalled();
+
+            mockClient.get.mockResolvedValueOnce({
+                data: { authenticated: false },
+            });
+            await expect(
+                tidalStreamingService.checkSidecarAuthStatus("user-2")
+            ).resolves.toBe(false);
         });
 
         it("restores OAuth without persisting when the sidecar does not refresh", async () => {

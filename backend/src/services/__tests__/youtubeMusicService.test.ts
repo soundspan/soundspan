@@ -4,6 +4,13 @@ const mockClient = {
 };
 
 const mockAxiosCreate = jest.fn((_config?: any) => mockClient);
+
+// youtubeMusic.ts now reads config.internalApiSecret; mock config so the real
+// module (which process.exit(1)s on missing env) never loads under jest.
+const mockConfig: { internalApiSecret?: string } = {};
+
+jest.mock("../../config", () => ({ config: mockConfig }));
+
 jest.mock("axios", () => ({
     __esModule: true,
     default: {
@@ -30,6 +37,32 @@ describe("youtubeMusic service", () => {
     beforeEach(() => {
         jest.clearAllMocks();
         jest.useRealTimers();
+        mockConfig.internalApiSecret = undefined;
+    });
+
+    describe("internal-secret header (F31)", () => {
+        it("attaches x-internal-secret to the sidecar client when configured", () => {
+            mockConfig.internalApiSecret = "sek-123";
+            jest.isolateModules(() => {
+                require("../youtubeMusic");
+            });
+            expect(mockAxiosCreate).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        "x-internal-secret": "sek-123",
+                    }),
+                })
+            );
+        });
+
+        it("omits the header when no secret is configured (fail-closed at sidecar)", () => {
+            mockConfig.internalApiSecret = undefined;
+            jest.isolateModules(() => {
+                require("../youtubeMusic");
+            });
+            const createArg = mockAxiosCreate.mock.calls.at(-1)?.[0] ?? {};
+            expect(createArg.headers).toBeUndefined();
+        });
     });
 
     it("checks sidecar availability and handles auth/oath method payloads", async () => {

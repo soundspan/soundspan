@@ -16,6 +16,7 @@ const tidalStreamingService = {
     isEnabled: jest.fn(),
     isAvailable: jest.fn(),
     getAuthStatus: jest.fn(),
+    checkSidecarAuthStatus: jest.fn(),
     getUserPreferredQuality: jest.fn(),
     initiateDeviceAuth: jest.fn(),
     pollDeviceAuth: jest.fn(),
@@ -51,14 +52,6 @@ const mockDecrypt = jest.fn((value: string) =>
 jest.mock("../../utils/encryption", () => ({
     encrypt: mockEncrypt,
     decrypt: mockDecrypt,
-}));
-
-const mockAxiosGet = jest.fn();
-jest.mock("axios", () => ({
-    __esModule: true,
-    default: {
-        get: (...args: any[]) => mockAxiosGet(...args),
-    },
 }));
 
 import router from "../tidalStreaming";
@@ -172,7 +165,9 @@ describe("tidal streaming route runtime", () => {
         prisma.userSettings.upsert.mockResolvedValue({});
         prisma.userSettings.update.mockResolvedValue({});
 
-        mockAxiosGet.mockResolvedValue({ data: { authenticated: true } });
+        // Sidecar reports an existing in-memory session by default (F31: this
+        // now flows through the authenticated tidalStreaming client).
+        tidalStreamingService.checkSidecarAuthStatus.mockResolvedValue(true);
     });
 
     it("reports status and handles status errors", async () => {
@@ -187,6 +182,11 @@ describe("tidal streaming route runtime", () => {
             authenticated: true,
             credentialsConfigured: true,
         });
+        // Fifth call site (F31): the sidecar session probe goes through the
+        // authenticated service client, not a bare axios.get.
+        expect(
+            tidalStreamingService.checkSidecarAuthStatus
+        ).toHaveBeenCalledWith("u1");
 
         tidalStreamingService.getAuthStatus.mockRejectedValueOnce(
             new Error("status failed")
@@ -197,7 +197,7 @@ describe("tidal streaming route runtime", () => {
     });
 
     it("restores user oauth during status checks when sidecar session is missing", async () => {
-        mockAxiosGet.mockResolvedValueOnce({ data: { authenticated: false } });
+        tidalStreamingService.checkSidecarAuthStatus.mockResolvedValueOnce(false);
         prisma.userSettings.findUnique.mockResolvedValueOnce({
             userId: "u1",
             tidalOAuthJson: "enc:{\"access_token\":\"abc\"}",
@@ -319,7 +319,7 @@ describe("tidal streaming route runtime", () => {
         await searchHandler(invalidSearchReq, invalidSearchRes);
         expect(invalidSearchRes.statusCode).toBe(400);
 
-        mockAxiosGet.mockResolvedValueOnce({ data: { authenticated: false } });
+        tidalStreamingService.checkSidecarAuthStatus.mockResolvedValueOnce(false);
         prisma.userSettings.findUnique.mockResolvedValueOnce(null);
         const noAuthReq = {
             user: { id: "u1" },
@@ -329,7 +329,7 @@ describe("tidal streaming route runtime", () => {
         await searchHandler(noAuthReq, noAuthRes);
         expect(noAuthRes.statusCode).toBe(401);
 
-        mockAxiosGet.mockResolvedValueOnce({ data: { authenticated: true } });
+        tidalStreamingService.checkSidecarAuthStatus.mockResolvedValueOnce(true);
         const okSearchReq = {
             user: { id: "u1" },
             body: { query: "hello" },
@@ -381,7 +381,7 @@ describe("tidal streaming route runtime", () => {
         await streamInfoHandler(invalidInfoReq, invalidInfoRes);
         expect(invalidInfoRes.statusCode).toBe(400);
 
-        mockAxiosGet.mockResolvedValueOnce({ data: { authenticated: false } });
+        tidalStreamingService.checkSidecarAuthStatus.mockResolvedValueOnce(false);
         prisma.userSettings.findUnique.mockResolvedValueOnce(null);
         const noAuthInfoReq = {
             user: { id: "u1" },
@@ -503,7 +503,9 @@ describe("tidal streaming route runtime", () => {
     });
 
     it("restores DB-stored credentials when sidecar auth status lookup fails", async () => {
-        mockAxiosGet.mockRejectedValueOnce(new Error("sidecar down"));
+        tidalStreamingService.checkSidecarAuthStatus.mockRejectedValueOnce(
+            new Error("sidecar down")
+        );
         prisma.userSettings.findUnique.mockResolvedValueOnce({
             userId: "u1",
             tidalOAuthJson: "enc:{\"access_token\":\"abc\"}",
