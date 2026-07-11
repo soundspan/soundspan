@@ -1,5 +1,5 @@
 # CLAP and ML
-laion-clap>=1.1.4
+laion-clap>=1.1.7
 torch>=2.0.0
 torchaudio>=2.0.0
 torchvision>=0.15.0
