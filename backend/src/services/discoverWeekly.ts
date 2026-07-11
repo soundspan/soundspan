@@ -187,6 +187,15 @@ function getTierFromSimilarity(
 }
 
 /**
+ * Pre-batched artist library membership, keyed for the two independent probes
+ * isArtistInLibrary performs (see prefetchArtistLibraryMembership).
+ */
+interface ArtistLibraryMembership {
+    mbidHasAlbum: Map<string, boolean>;
+    nameHasAlbum: Map<string, boolean>;
+}
+
+/**
  * Represents the DiscoverWeeklyService class.
  */
 export class DiscoverWeeklyService {
@@ -2012,11 +2021,32 @@ export class DiscoverWeeklyService {
     /**
      * Check if an artist is already in the user's library
      * Discovery should find NEW artists, not more albums from artists they already own
+     *
+     * @param membership Optional pre-batched membership map (see
+     *   prefetchArtistLibraryMembership). When supplied, this replays the exact
+     *   decision below (MBID probe, falling through to the name probe on a miss
+     *   OR a zero-album MBID hit -- these are two independent checks, not
+     *   mbid-first-else-name) against the pre-fetched maps instead of issuing
+     *   per-candidate DB round trips. Callers that don't pass a membership map
+     *   (the three single-artist call sites elsewhere in this file) fall
+     *   through to the original per-call DB behavior, unchanged.
      */
     private async isArtistInLibrary(
         artistName: string,
-        artistMbid: string | undefined
+        artistMbid: string | undefined,
+        membership?: ArtistLibraryMembership
     ): Promise<boolean> {
+        if (membership) {
+            if (
+                artistMbid &&
+                !artistMbid.startsWith("temp-") &&
+                membership.mbidHasAlbum.get(artistMbid)
+            ) {
+                return true;
+            }
+            return membership.nameHasAlbum.get(artistName.toLowerCase()) === true;
+        }
+
         // Check by MBID first (most accurate)
         if (artistMbid && !artistMbid.startsWith("temp-")) {
             const byMbid = await discoverWeeklyPrisma.artist.findFirst({
@@ -2047,6 +2077,104 @@ export class DiscoverWeeklyService {
         }
 
         return false;
+    }
+
+    /**
+     * Batch-prefetch library membership for a set of Discover Weekly candidate
+     * artists. Replaces up to 2 DB round trips per candidate
+     * (isArtistInLibrary's MBID + name probes, called once per tier/fill-loop
+     * candidate) with one query for the whole candidate set.
+     *
+     * Semantics MUST mirror isArtistInLibrary exactly -- see that method's
+     * fast path, which this map feeds:
+     *  - MBID probe only considers non-"temp-" mbids (library artists carry
+     *    temp- MBIDs by convention and are deliberately excluded there).
+     *  - An MBID hit with zero albums is NOT a library hit -- it falls through
+     *    to the name probe (two independent probes, not mbid-first-else-name).
+     *  - Name matching is case-insensitive equality against Artist.name (NOT
+     *    normalizedName -- a different column/normalization).
+     *  - "Has an album" mirrors the original `include: { albums: { take: 1 } }`
+     *    existence check.
+     *
+     * Case-insensitive batching: Prisma's `in` filter is case-sensitive, so a
+     * single `name: { in: [...] }` can't reproduce Postgres's insensitive
+     * equals. We OR together one `{ name: { equals, mode: "insensitive" } }`
+     * clause per unique candidate name -- fine at Discover Weekly tier sizes
+     * (tens to low hundreds of candidates per run) -- so Postgres itself does
+     * the insensitive comparison, rather than fetching broadly and
+     * lower-casing in JS. We still key the resulting Map by `.toLowerCase()`
+     * to match returned rows back to candidates, which can in principle
+     * diverge from Postgres's insensitive-equals on exotic locale characters;
+     * acceptable at this library's scale, and the parity test
+     * (discoverWeeklyPrefilterParity.test.ts) is the arbiter of equivalence,
+     * not this comment.
+     *
+     * On any query failure, degrades to empty maps (i.e. every candidate
+     * classifies as not-in-library) -- the same effective default the
+     * original per-candidate try/catch call sites already had.
+     */
+    private async prefetchArtistLibraryMembership(
+        candidates: Array<{ name: string; mbid?: string }>
+    ): Promise<ArtistLibraryMembership> {
+        const mbidHasAlbum = new Map<string, boolean>();
+        const nameHasAlbum = new Map<string, boolean>();
+
+        const nonTempMbids = Array.from(
+            new Set(
+                candidates
+                    .map((c) => c.mbid)
+                    .filter(
+                        (mbid): mbid is string =>
+                            !!mbid && !mbid.startsWith("temp-")
+                    )
+            )
+        );
+        const uniqueNames = Array.from(
+            new Set(
+                candidates
+                    .map((c) => c.name)
+                    .filter((name): name is string => !!name)
+            )
+        );
+
+        if (nonTempMbids.length === 0 && uniqueNames.length === 0) {
+            return { mbidHasAlbum, nameHasAlbum };
+        }
+
+        try {
+            const orClauses: Array<
+                | { mbid: { in: string[] } }
+                | { name: { equals: string; mode: "insensitive" } }
+            > = [];
+            if (nonTempMbids.length > 0) {
+                orClauses.push({ mbid: { in: nonTempMbids } });
+            }
+            for (const name of uniqueNames) {
+                orClauses.push({ name: { equals: name, mode: "insensitive" } });
+            }
+
+            const rows = await discoverWeeklyPrisma.artist.findMany({
+                where: { OR: orClauses },
+                include: { albums: { take: 1 } },
+            });
+
+            for (const row of rows) {
+                const hasAlbum = row.albums.length > 0;
+                mbidHasAlbum.set(
+                    row.mbid,
+                    hasAlbum || mbidHasAlbum.get(row.mbid) === true
+                );
+                const key = row.name.toLowerCase();
+                nameHasAlbum.set(key, hasAlbum || nameHasAlbum.get(key) === true);
+            }
+        } catch (error) {
+            logger.warn(
+                "   Failed to batch-prefetch artist library membership; treating all candidates as not-in-library for this run",
+                error
+            );
+        }
+
+        return { mbidHasAlbum, nameHasAlbum };
     }
 
     /**
@@ -3000,6 +3128,19 @@ export class DiscoverWeeklyService {
         byTier.medium = shuffleArray(byTier.medium);
         byTier.explore = shuffleArray(byTier.explore);
 
+        // Batch-prefetch library membership for every candidate across all three
+        // tiers in one query. The "fill remaining slots" loop below draws from
+        // this same pool (byTier.* minus seenArtists), so this single prefetch
+        // covers both it and the tier loops -- see prefetchArtistLibraryMembership
+        // for the exact semantics reproduced. selectFromTier itself stays serial
+        // (early break + ordered seenArtists/seenAlbums mutation); only its
+        // per-candidate membership check moves off the DB.
+        const artistLibraryMembership = await this.prefetchArtistLibraryMembership([
+            ...byTier.high,
+            ...byTier.medium,
+            ...byTier.explore,
+        ]);
+
         // Helper to select from a tier
         const selectFromTier = async (
             tier: any[],
@@ -3019,7 +3160,8 @@ export class DiscoverWeeklyService {
                 try {
                     artistInLibrary = await this.isArtistInLibrary(
                         artist.name,
-                        artist.mbid
+                        artist.mbid,
+                        artistLibraryMembership
                     );
                 } catch (e) {
                     // Continue on error
@@ -3098,7 +3240,8 @@ export class DiscoverWeeklyService {
                 try {
                     artistInLibrary = await this.isArtistInLibrary(
                         artist.name,
-                        artist.mbid
+                        artist.mbid,
+                        artistLibraryMembership
                     );
                 } catch (e) {
                     // Continue on error
