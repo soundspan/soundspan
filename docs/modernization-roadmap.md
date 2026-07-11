@@ -300,14 +300,24 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 > a forced discontinuity), a decision extracted to the pure, unit-tested
 > `lib/audio-clock-policy.ts`; an authoritative full-precision `currentTimeRef` is
 > written on every accepted tick and by every discontinuity setter, and the former
-> state→ref sync effect was removed — so server-progress persistence
-> (`savePlaybackProgressToServer`) now reads engine-fresh precision rather than a
-> quantized copy. howler-engine's 250ms tick is unchanged. **Render evidence**
+> state→ref sync effect was removed — so persistence now reads engine-fresh
+> precision in BOTH paths: server progress (`savePlaybackProgressToServer`) and
+> the throttled localStorage resume snapshot (`<brand>_current_time`) that
+> `AudioPlaybackOrchestrator` reads to compute the engine's resume `startTime`
+> after a reload/crash. howler-engine's 250ms tick is unchanged. **Known minor
+> trade-off (accepted):** relative-seek actions that compute from the *published*
+> clock — TVLayout ±10s, keyboard-shortcut ±10s, media-session seek handlers
+> (`seekOffset` default 10s), controls `skipForward`/`skipBackward` (default 30s)
+> — now read a value up to ~1s stale instead of ~250ms; these are inherently
+> coarse actions, and precision work on those consumers belongs to item (C)'s
+> leaf-extraction follow-up. **Render evidence**
 > (real provider stack under happy-dom, 8 ticks / 2 simulated seconds): the
 > `UniversalPlayer` subtree re-renders **8 → 0**, and playback-state publishes
-> **8 → 2** (quantized to the 1.0s/2.0s boundaries). Tests:
-> `audioClockPolicy.test.ts` (unit), `universalPlayerSubscription.component.test.ts`
-> and `universalPlayerRenderCount.component.test.ts` (component). **Still open:**
+> **8 → 2** (quantized to the 1.0s/2.0s boundaries; both asserted as exact
+> counts). Tests: `audioClockPolicy.test.ts` (unit),
+> `universalPlayerSubscription.component.test.ts`,
+> `universalPlayerRenderCount.component.test.ts`, and
+> `audioPlaybackStoragePrecision.component.test.ts` (component). **Still open:**
 > leaf extraction in OverlayPlayer/MiniPlayer/TVLayout (item C) and any F5
 > orchestrator work.
 
