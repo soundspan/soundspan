@@ -5,6 +5,23 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## Node 24 everywhere — images and CI (F53)
+
+**Who this affects:** operators running the published `ghcr.io/soundspan/*`
+images — no action; self-builders and anyone running the backend/frontend
+directly on a host (not via the published images).
+
+**What changed.** Every Node-based Docker image (backend, backend-worker,
+frontend, and the root AIO image) now builds `FROM node:24-bookworm-slim`,
+replacing a previous mixed Node 20/24 split. CI's `node-version` pins moved
+to `24` across the board to match.
+
+**Action required:** none for operators running the published images — they
+already bundle their own Node runtime. Self-builders and host-runners should
+build/run with **Node 24** going forward. The package `engines.node` floor is
+intentionally left at `>=20.9.0` (unchanged, operator decision), so this is a
+recommendation, not a hard break — but CI and the shipped images no longer
+test against anything older than 24.
 ## Native `<audio>`-element engine is now the default playback engine (1.8.0)
 
 **Who this affects:** every deployment that does not explicitly set `STREAMING_ENGINE_MODE`.
