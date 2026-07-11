@@ -23,7 +23,7 @@ jobs:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -79,7 +79,7 @@ jobs:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -149,7 +149,7 @@ jobs:
     continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
