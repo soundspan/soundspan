@@ -14,6 +14,8 @@ import {
     Pause,
     SkipBack,
     SkipForward,
+    RotateCcw,
+    RotateCw,
     ChevronDown,
     Music as MusicIcon,
     ListMusic,
@@ -154,6 +156,8 @@ export function OverlayPlayer() {
         setUpcoming,
         removeFromQueue,
         clearQueue,
+        skipForward,
+        skipBackward,
     } = useAudio();
 
     const isMobile = useIsMobile();
@@ -1345,7 +1349,7 @@ export function OverlayPlayer() {
                                     )}
 
                                     <div
-                                        className="mb-3 flex items-center justify-center px-2 gap-5"
+                                        className="mb-3 flex items-center justify-center px-2 gap-4"
                                     >
                                         <button
                                             onClick={toggleShuffle}
@@ -1359,6 +1363,16 @@ export function OverlayPlayer() {
                                             aria-label="Shuffle"
                                         >
                                             <Shuffle className="h-5 w-5" />
+                                        </button>
+
+                                        {/* Skip back 15s — podcast/audiobook-friendly seek, independent of queue length */}
+                                        <button
+                                            onClick={() => skipBackward(15)}
+                                            className="text-white/85 transition-colors hover:text-white"
+                                            title="Skip back 15 seconds"
+                                            aria-label="Skip back 15 seconds"
+                                        >
+                                            <RotateCcw className="h-5 w-5" />
                                         </button>
 
                                         <button
@@ -1416,6 +1430,16 @@ export function OverlayPlayer() {
                                             aria-label="Next"
                                         >
                                             <SkipForward className="h-8 w-8" />
+                                        </button>
+
+                                        {/* Skip forward 15s — podcast/audiobook-friendly seek, independent of queue length */}
+                                        <button
+                                            onClick={() => skipForward(15)}
+                                            className="text-white/85 transition-colors hover:text-white"
+                                            title="Skip forward 15 seconds"
+                                            aria-label="Skip forward 15 seconds"
+                                        >
+                                            <RotateCw className="h-5 w-5" />
                                         </button>
 
                                         <button
