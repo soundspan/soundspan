@@ -3069,6 +3069,36 @@ describe("library catalog list runtime coverage", () => {
         expect(smallRes.body.tracks[0].album.coverArt).toBe("c1.jpg");
     });
 
+    it("routes the totalTracks === limit boundary to the small-library in-memory branch", async () => {
+        // Guards the `totalTracks <= limit` comparison: at exact equality the
+        // handler must fetch-all + shuffle in memory, never pivot-sample (a
+        // future `<=` -> `<` typo would silently flip this to the large path).
+        const five = Array.from({ length: 5 }, (_, i) => ({
+            id: `track-${i + 1}`,
+            title: `Track ${i + 1}`,
+            album: {
+                id: `album-${i + 1}`,
+                title: `A${i + 1}`,
+                coverUrl: `c${i + 1}.jpg`,
+            },
+        }));
+        mockTrackCount.mockResolvedValueOnce(5);
+        mockTrackFindMany.mockResolvedValueOnce(five);
+        const req = { query: { limit: "5" } } as any;
+        const res = createRes();
+
+        await shuffleHandler(req, res);
+
+        // Exactly one findMany — the fetch-all call, which carries no pivot
+        // filter (the sampling query would pass `where: { random: ... }`).
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(1);
+        expect(mockTrackFindMany.mock.calls[0][0]).not.toHaveProperty("where");
+        expect(mockShuffleArray).toHaveBeenCalled();
+        expect(res.statusCode).toBe(200);
+        expect(res.body.total).toBe(5);
+        expect(res.body.tracks).toHaveLength(5);
+    });
+
     it("samples large libraries via the indexed random-pivot query and returns exactly `limit` tracks when the pivot page is full", async () => {
         mockTrackCount.mockResolvedValueOnce(10);
         mockTrackFindMany
