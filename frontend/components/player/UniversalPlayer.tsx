@@ -1,6 +1,6 @@
 "use client";
 
-import { useAudio } from "@/lib/audio-context";
+import { useAudioState } from "@/lib/audio-state-context";
 import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { MiniPlayer } from "./MiniPlayer";
 import { FullPlayer } from "./FullPlayer";
@@ -18,8 +18,14 @@ import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
  * - No full-width player on mobile
  */
 export function UniversalPlayer() {
+    // Subscribe to the granular state context only: this component needs
+    // playerMode + the three "what's loaded" fields, none of which tick. Using
+    // the compat useAudio() here would re-subscribe to the 250ms currentTime
+    // clock and re-render this AnimatePresence/LayoutGroup render root — and the
+    // OverlayPlayer/MiniPlayer/FullPlayer subtree it mounts — 4x/second during
+    // playback (roadmap F12, item A).
     const { playerMode, currentTrack, currentAudiobook, currentPodcast } =
-        useAudio();
+        useAudioState();
     const isMobile = useIsMobile();
     const isTablet = useIsTablet();
     const isMobileOrTablet = isMobile || isTablet;

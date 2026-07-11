@@ -40,6 +40,10 @@ import {
     type ActivePlaybackSelection,
     type PlaybackPersistenceSnapshot,
 } from "@/lib/audio-playback-persistence-guards";
+import {
+    isEngineTickDiscontinuity,
+    shouldPublishClockTime,
+} from "@/lib/audio-clock-policy";
 
 export interface PlaybackStreamProfile {
     mode: "direct" | "dash";
@@ -134,7 +138,15 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const lastSaveTimeRef = useRef<number>(0);
     const lastServerProgressSaveRef = useRef<number>(0);
     const initialIsPlayingRef = useRef(isPlaying);
+    // Authoritative FULL-PRECISION clock. Written on every accepted engine tick
+    // and by every discontinuity publish; read by server-progress persistence
+    // (savePlaybackProgressToServer) and seek-target matching. This must NEVER be
+    // regressed to the coarser published state value (roadmap F12 ref-sync trap).
     const currentTimeRef = useRef<number>(currentTime);
+    // Last value published to React state, tracked at full precision so the
+    // publish gate can compare display-second (Math.floor) boundaries without
+    // reading the (intentionally stale, up-to-1s-behind) currentTime state.
+    const lastPublishedTimeRef = useRef<number>(currentTime);
     const state = useAudioState();
     const initialTrackId =
         state.playbackType === "track" ? state.currentTrack?.id ?? null : null;
@@ -279,10 +291,31 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
-    // setCurrentTimeFromEngine - for timeupdate events from Howler
-    // Respects seek lock to prevent stale updates causing flicker
+    // publishCurrentTime - the discontinuity clock setter exposed to the rest of
+    // the app (seek, updateCurrentTime, track-start / resume in the controls
+    // context and orchestrator). It writes the full-precision ref FIRST (so a
+    // concurrent progress save reads the correct value) and then publishes to
+    // state. Every non-engine setCurrentTime call is a discontinuity, so these
+    // always publish. This replaces the removed state->ref sync effect for all
+    // external callers (roadmap F12 ref-sync trap).
+    const publishCurrentTime = useCallback((time: number) => {
+        currentTimeRef.current = time;
+        lastPublishedTimeRef.current = time;
+        setCurrentTime(time);
+    }, []);
+
+    // setCurrentTimeFromEngine - for timeupdate events from Howler (4x/sec).
+    // Three ORDERED stages (order is correctness-critical, roadmap F12):
+    //   (i)  guard on RAW engine time — a rejected tick writes NEITHER ref NOR
+    //        state (prevents seek-lock flap and post-track-change stale writes);
+    //   (ii) any non-rejected tick (accept OR unlock-accept) updates the
+    //        full-precision ref unconditionally;
+    //   (iii) publish to state only when the displayed second changes, or when a
+    //        discontinuity (seek unlock) forces it — quantizing the 4Hz clock to
+    //        ~1Hz of setState churn while keeping the ref continuously fresh.
     const setCurrentTimeFromEngine = useCallback(
         (time: number, invocationTrackId: string | null = null) => {
+            // Stage (i): reject on RAW time before any write.
             const decision = shouldAcceptEngineTimeUpdate(
                 invocationTrackId,
                 activePlaybackSelectionRef.current,
@@ -300,16 +333,30 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                     seekLockTimeoutRef.current = null;
                 }
             }
-            setCurrentTime(time);
+            // Stage (ii): full-precision ref tracks every accepted tick.
+            currentTimeRef.current = time;
+            // Stage (iii): gated state publish (display-second granularity).
+            if (
+                shouldPublishClockTime({
+                    time,
+                    lastPublishedTime: lastPublishedTimeRef.current,
+                    forcePublish: isEngineTickDiscontinuity(decision),
+                })
+            ) {
+                lastPublishedTimeRef.current = time;
+                setCurrentTime(time);
+            }
         },
         [isSeekLocked],
     );
 
-    // currentTime and isHydrated are initialized via lazy useState from localStorage
-
-    useEffect(() => {
-        currentTimeRef.current = currentTime;
-    }, [currentTime]);
+    // currentTime and isHydrated are initialized via lazy useState from localStorage.
+    // NOTE: the former `currentTimeRef.current = currentTime` sync effect was
+    // removed — it clobbered the fresh full-precision ref with the quantized
+    // (up-to-1s-stale) published state. The ref is now written directly at every
+    // authoritative point instead: init, accepted engine ticks (stage ii),
+    // publishCurrentTime (all discontinuity/external setters), and the
+    // track-change reset below.
 
     useEffect(() => {
         if (!isHydrated || typeof window === "undefined") return;
@@ -360,9 +407,10 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                 ? state.currentAudiobook?.progress?.currentTime
                 : null;
         if (audiobookProgress) {
-            setCurrentTime((prev) =>
-                prev === audiobookProgress ? prev : audiobookProgress
-            );
+            // Discontinuity (resume-from-restore): publishCurrentTime forces the
+            // publish AND keeps the full-precision ref in sync (React bails out of
+            // the state update when the value is unchanged).
+            publishCurrentTime(audiobookProgress);
             return;
         }
 
@@ -371,9 +419,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
                 ? state.currentPodcast?.progress?.currentTime
                 : null;
         if (podcastProgress) {
-            setCurrentTime((prev) =>
-                prev === podcastProgress ? prev : podcastProgress
-            );
+            publishCurrentTime(podcastProgress);
         }
     }, [
         isHydrated,
@@ -381,6 +427,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         state.playbackType,
         state.currentAudiobook?.progress?.currentTime,
         state.currentPodcast?.progress?.currentTime,
+        publishCurrentTime,
     ]);
 
     // Cleanup seek lock timeout on unmount
@@ -404,6 +451,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         if (currentTrackEpoch === lastTrackResetEpochRef.current) return;
         lastTrackResetEpochRef.current = currentTrackEpoch;
         currentTimeRef.current = 0;
+        lastPublishedTimeRef.current = 0;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- must zero local playback state immediately on active track swap
         setCurrentTime((prev) => prev === 0 ? prev : 0);
         lastSaveTimeRef.current = 0;
@@ -600,7 +648,9 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             playbackState,
             streamProfile,
             setIsPlaying,
-            setCurrentTime,
+            // Exposed under the stable public name; routes every external setter
+            // through the ref-syncing full-precision publisher (roadmap F12).
+            setCurrentTime: publishCurrentTime,
             setCurrentTimeFromEngine,
             setDuration,
             setIsBuffering,
@@ -624,6 +674,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
             audioError,
             playbackState,
             streamProfile,
+            publishCurrentTime,
             setCurrentTimeFromEngine,
             lockSeek,
             unlockSeek,
