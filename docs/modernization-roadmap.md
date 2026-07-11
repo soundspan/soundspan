@@ -289,7 +289,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F12 — Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency currentTime context into the heaviest player trees
 
-**🟡 partial (PR #TBD-CYCLE3-C)** · dimension: performance · severity: high · effort: M · risk: medium · epic: #16
+**🟡 partial (PR #109)** · dimension: performance · severity: high · effort: M · risk: medium · epic: #16
 
 > **Fix shipped (partial).** Tightened-plan items (A) + (B) landed, frontend-only.
 > (A) `UniversalPlayer` — the animated render root that mounts
