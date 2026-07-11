@@ -11,6 +11,18 @@ from httpx import ASGITransport, AsyncClient
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 
+# Shared secret the `client` fixture presents on every request so the F31
+# inbound-auth dependency lets the existing behaviour suites through. Tests
+# that exercise the auth gate itself (test_internal_auth.py) build their own
+# clients and manage this env var directly.
+INTERNAL_API_SECRET = "test-internal-secret-value"
+
+
+@pytest.fixture(autouse=True)
+def internal_api_secret(monkeypatch):
+    """Configure a known INTERNAL_API_SECRET for the app under test."""
+    monkeypatch.setenv("INTERNAL_API_SECRET", INTERNAL_API_SECRET)
+
 
 @pytest.fixture(autouse=True)
 def local_app_module():
@@ -33,9 +45,17 @@ def anyio_backend():
 
 @pytest.fixture()
 async def client():
-    """Async HTTP client wired to the FastAPI app under test."""
+    """Async HTTP client wired to the FastAPI app under test.
+
+    Presents the internal-auth header by default so behaviour tests reach the
+    handlers through the F31 `require_internal_secret` dependency.
+    """
     from app import app
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"x-internal-secret": INTERNAL_API_SECRET},
+    ) as ac:
         yield ac
