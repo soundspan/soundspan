@@ -768,7 +768,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F38 — ML model artifacts and Python deps are pulled at build time with no checksum/hash pinning (supply chain)
 
-**✅ complete (PR #TBD)** · dimension: security · severity: medium · effort: M · risk: low · epic: #10
+**✅ complete (PR #120)** · dimension: security · severity: medium · effort: M · risk: low · epic: #10
 
 > **Audit note.** Per audit: internal contradiction with F50 on the Essentia model count. CORRECTED 2026-07-11 — the CLAP-checkpoint clause above was backwards: the measured artifact is 2,352,471,003 bytes (~2.35 GB; HF `x-linked-size`/`Content-Length`, measured 2026-07-11), not ~600MB. The repo's own "~600MB" comment was the wrong figure, not the ~2GB estimate the original audit note dismissed. Now fixed — see the shipped change below.
 >
