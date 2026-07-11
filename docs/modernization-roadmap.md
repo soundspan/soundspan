@@ -32,7 +32,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 1 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 5 / 1 / 8 |
-| #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
+| #13 | Background-job idempotency, retries & reconciler dedup | 2 / 2 / 8 |
 | #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
 | #16 | Frontend consolidation, decomposition & render performance | 0 / 1 / 5 |
@@ -80,7 +80,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F20](#f20) | ⬜ | idempotency | high→medium | M | low |  | #13 | Discover Weekly batch creation has no per-(user, week) idempotency guard — double-trigg… |
 | [F21](#f21) | ⬜ | idempotency | high | M | medium |  | #13 | Audio-analysis / vibe re-queue enqueues BEFORE flipping status and has no per-track ded… |
 | [F22](#f22) | ✅ | idempotency | high | M | low |  | #11 | Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on… |
-| [F23](#f23) | ⬜ | idempotency | high→medium | M | medium |  | #13 | Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade inste… |
+| [F23](#f23) | 🟡 | idempotency | high→medium | M | medium |  | #13 | Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade inste… |
 | [F24](#f24) | 🟡 | idempotency | high→medium | M | low |  | #13 | High-volume scan jobs enqueued from ~15 sites with no coalescing jobId, no attempts/bac… |
 | [F25](#f25) | ⬜ | idempotency | medium | M | medium |  | #13 | Two overlapping download reconcilers (unlocked 30s queueCleaner interval vs claim-locke… |
 | [F26](#f26) | ✅ | idempotency | medium | S | low |  | #13 | Invite-code maxUses check is outside the transaction with an unconditional increment — … |
@@ -487,9 +487,11 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F23 — Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade instead of DB constraints — best-effort idempotency under load
 
-**⬜ open** · dimension: idempotency · severity: high→medium · effort: M · risk: medium · epic: #13
+**🟡 partial** (`fix/f23-grab-webhook-p2002`) · dimension: idempotency · severity: high→medium · effort: M · risk: medium · epic: #13
 
 > **Audit note.** ✓ Severity high→medium: the 'no partial-unique' headline is refuted by migration `20260118000000` (the body says so). Real residual = a missing P2002 catch (a 500, not data corruption) + a seq scan.
+>
+> **Fix shipped** (recommendation (a) only). `onDownloadGrabbed` (`simpleDownloadManager.ts`) now catches P2002 from both the matched-job update and the tracking-job create — the two writes that race the partial-unique index `DownloadJob_targetMbid_active_unique`. The catch is wired via `.catch()` on the *outside* of the `withTransaction(...)` call, not a try/catch inside its callback: Prisma's interactive `$transaction` rolls back and rethrows on a callback rejection, so the `tx` client is already dead by the time recovery runs — re-querying with it would fail with "current transaction is aborted, commands ignored until end of transaction block". The recovery re-find runs against the plain `prisma` singleton (`lidarrRef` OR `metadata.downloadId` match, mirroring Step 1's existing idempotency check) and returns the winner's jobId; if no winner is discoverable (e.g. a different downloadId racing on the same targetMbid — out of this slice's scope) it falls back to the pre-existing non-throwing `{matched:false}` shape rather than fabricating a match. **Still 🟡**: recommendation (b) — backfilling `metadata.downloadId` into the indexed `lidarrRef` column and replacing the Step-1 JSON-path idempotency lookup with an indexed one — is deferred to a later slice. No new `@unique`/`@@unique` or migration was added, per the safety note below (a global unique on `lidarrRef` would 500 normal operation, since download-client ids legitimately repeat). Tests: `simpleDownloadManager.test.ts` (create-path P2002 race, matched-update-path P2002 race, no-winner-found non-throwing fallback, non-P2002 errors still reject) plus a new `webhooksGrabConcurrency.test.ts` proving the HTTP layer now returns an idempotent 2xx instead of 500 for the second (racing) Grab webhook.
 
 **Files:** `backend/src/services/simpleDownloadManager.ts:374`, `backend/src/services/simpleDownloadManager.ts:415`, `backend/src/services/simpleDownloadManager.ts:471`, `backend/prisma/schema.prisma`
 
