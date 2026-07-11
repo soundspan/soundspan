@@ -354,6 +354,12 @@ model Track {
   hasUserOverrides   Boolean                  @default(false)
   analysisStartedAt  DateTime?
 
+  // F15: DB-generated uniform sample key for /tracks/shuffle's indexed
+  // pivot-sampling query (replaces a full-table ORDER BY RANDOM() scan).
+  // The volatile DB-side default means every writer (Prisma upserts in the
+  // scanner, any future inserts) gets a value with zero app-code wiring.
+  random Float @default(dbgenerated("random()"))
+
   // Vibe analysis status tracking
   vibeAnalysisStatus          String? // Analysis status: pending, processing, completed, failed
   vibeAnalysisStartedAt       DateTime?
@@ -398,6 +404,7 @@ model Track {
   @@index([acousticness])
   @@index([instrumentalness])
   @@index([hasUserOverrides])
+  @@index([random])
 }
 
 model Bookmark {
