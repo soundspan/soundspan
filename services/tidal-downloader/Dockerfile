@@ -1,5 +1,5 @@
 # TIDAL Downloader Service - FastAPI sidecar using tiddl for TIDAL downloads
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
