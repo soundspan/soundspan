@@ -1,10 +1,15 @@
+import { fixupConfigRules } from "@eslint/compat";
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  // eslint-config-next bundles plugins (eslint-plugin-react et al.) that still
+  // use context APIs removed in ESLint 10; fixupConfigRules restores them via
+  // the official @eslint/compat shim. Drop once eslint-config-next supports
+  // ESLint 10 natively.
+  ...fixupConfigRules(nextVitals),
+  ...fixupConfigRules(nextTs),
   {
     rules: {
       "@typescript-eslint/no-unused-vars": ["warn", {
@@ -19,6 +24,9 @@ const eslintConfig = defineConfig([
       "react-hooks/preserve-manual-memoization": "warn",
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/immutability": "warn",
+      // New compiler rule in eslint-plugin-react-hooks 7.1; flags Date.now()
+      // in app/discover/page.tsx useMemo. Same debt bucket as the rules above.
+      "react-hooks/purity": "warn",
     },
   },
   // Override default ignores of eslint-config-next.

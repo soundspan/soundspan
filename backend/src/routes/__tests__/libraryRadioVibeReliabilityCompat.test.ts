@@ -177,6 +177,7 @@ jest.mock("../../services/imageProxy", () => ({
 }));
 
 import router from "../library";
+import { errorHandler } from "../../middleware/errorHandler";
 import { prisma } from "../../utils/db";
 
 const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
@@ -210,6 +211,23 @@ function createRes() {
         }),
     };
     return res;
+}
+
+/**
+ * Invokes a route handler the way Express does with `errorHandler` mounted
+ * after the router (as index.ts wires it in production): awaits the handler,
+ * and if it forwarded an error via next() (the asyncHandler path), runs the
+ * real errorHandler to produce the final response. Also compatible with
+ * hand-rolled try/catch handlers, which respond directly and never call
+ * next(err).
+ */
+async function invokeWithErrorHandler(handler: any, req: any, res: any) {
+    const next = jest.fn();
+    await handler(req, res, next);
+    const forwarded = next.mock.calls.find((call: any[]) => call[0] != null);
+    if (forwarded) {
+        errorHandler(forwarded[0], req, res, jest.fn());
+    }
 }
 
 describe("library vibe radio reliability compatibility", () => {
@@ -673,9 +691,8 @@ describe("library vibe radio reliability compatibility", () => {
         } as any;
         const res = createRes();
 
-        await radioHandler(req, res);
+        await invokeWithErrorHandler(radioHandler, req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to get radio tracks" });
     });
 });

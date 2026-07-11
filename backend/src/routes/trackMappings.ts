@@ -30,7 +30,7 @@ const router = Router();
 router.get(
     "/album/:albumId",
     requireAuth,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ albumId: string }>, res: Response) => {
         try {
             const { albumId } = req.params;
             const mappings =

@@ -1307,7 +1307,7 @@ router.delete("/failures", requireAdmin, async (req, res) => {
  * DELETE /enrichment/failures/:id
  * Delete a specific failure record
  */
-router.delete("/failures/:id", requireAdmin, async (req, res) => {
+router.delete<{ id: string }>("/failures/:id", requireAdmin, async (req, res) => {
     try {
         const count = await enrichmentFailureService.deleteFailures([
             req.params.id,

@@ -323,7 +323,7 @@ router.get("/devices", requireAuthOrToken, async (req, res) => {
  *         description: Not authenticated
  */
 // DELETE /device-link/devices/:id - Revoke a device (requires auth)
-router.delete("/devices/:id", requireAuthOrToken, async (req, res) => {
+router.delete<{ id: string }>("/devices/:id", requireAuthOrToken, async (req, res) => {
     try {
         const userId = req.user!.id;
         const { id } = req.params;

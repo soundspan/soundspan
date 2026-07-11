@@ -236,8 +236,9 @@ async function gracefulShutdown(signal: string) {
             await shutdownWorkers();
         }
 
+        // node-redis v5+ replaced quit() with close()
         logger.debug("Closing Redis connection...");
-        await redisClient.quit();
+        await redisClient.close();
 
         logger.debug("Closing database connection...");
         await prisma.$disconnect();

@@ -222,7 +222,7 @@ router.get(
 router.get(
     "/jobs/:jobId",
     requireAuth,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ jobId: string }>, res: Response) => {
         try {
             const job = await importJobStore.getJob(req.params.jobId);
             if (!job) {
@@ -315,7 +315,7 @@ router.post(
 router.post(
     "/jobs/:jobId/cancel",
     requireAuth,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ jobId: string }>, res: Response) => {
         try {
             const job = await importJobStore.getJob(req.params.jobId);
             if (!job) {

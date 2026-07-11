@@ -57,7 +57,7 @@ router.get("/info", requireAuth, async (req: Request, res: Response) => {
         return res.json(info);
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            return res.status(400).json({ error: err.errors[0].message });
+            return res.status(400).json({ error: err.issues[0].message });
         }
         if (err.response?.status === 400) {
             return res
@@ -111,7 +111,7 @@ router.get("/playlist-info", requireAuth, async (req: Request, res: Response) =>
         return res.json(info);
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            return res.status(400).json({ error: err.errors[0].message });
+            return res.status(400).json({ error: err.issues[0].message });
         }
         if (err.response?.status === 422) {
             return res.status(422).json({
@@ -160,7 +160,7 @@ router.get("/playlist-info", requireAuth, async (req: Request, res: Response) =>
 router.get(
     "/stream/:videoId",
     requireAuthOrToken,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ videoId: string }>, res: Response) => {
         try {
             const { videoId } = req.params;
             const quality = (
@@ -299,7 +299,7 @@ router.post("/download", requireAuth, requireAdmin, async (req: Request, res: Re
         return res.status(202).json(job);
     } catch (err: any) {
         if (err instanceof z.ZodError) {
-            return res.status(400).json({ error: err.errors[0].message });
+            return res.status(400).json({ error: err.issues[0].message });
         }
         if (err.response?.status === 400) {
             return res.status(400).json({
@@ -547,7 +547,7 @@ router.get(
     "/download/:jobId",
     requireAuth,
     requireAdmin,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ jobId: string }>, res: Response) => {
         try {
             const { jobId } = req.params;
             const job = await youtubeDownloadService.getDownloadJobStatus(
@@ -631,7 +631,7 @@ router.delete(
     "/downloads/:jobId",
     requireAuth,
     requireAdmin,
-    async (req: Request, res: Response) => {
+    async (req: Request<{ jobId: string }>, res: Response) => {
         try {
             const { jobId } = req.params;
             const job = await youtubeDownloadService.cancelDownload(jobId);

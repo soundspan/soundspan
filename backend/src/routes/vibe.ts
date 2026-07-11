@@ -509,7 +509,7 @@ router.post("/alchemy", requireAuth, async (req, res) => {
  *       401:
  *         description: Not authenticated
  */
-router.get("/similar/:trackId", requireAuth, async (req, res) => {
+router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, res) => {
     try {
         const { trackId } = req.params;
         const userId = req.user?.id;

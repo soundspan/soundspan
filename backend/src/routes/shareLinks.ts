@@ -268,7 +268,7 @@ router.post("/", requireAuth, async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Create share link error:", error);
         res.status(500).json({ error: "Failed to create share link" });
@@ -370,7 +370,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Revoke share link error:", error);
         res.status(500).json({ error: "Failed to revoke share link" });
@@ -453,7 +453,7 @@ router.get("/access/:token", async (req, res) => {
         if (error instanceof z.ZodError) {
             return res
                 .status(400)
-                .json({ error: "Invalid request", details: error.errors });
+                .json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Access share link error:", error);
         res.status(500).json({ error: "Failed to access share link" });
@@ -541,7 +541,7 @@ router.get("/access/:token/stream/:trackId", async (req, res) => {
         }
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request", details: error.errors });
+            return res.status(400).json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Share stream error:", error);
         res.status(500).json({ error: "Failed to stream shared track" });
@@ -688,7 +688,7 @@ router.get("/access/:token/zip", async (req, res) => {
         await archive.finalize();
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request", details: error.errors });
+            return res.status(400).json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Share zip error:", error);
         if (!res.headersSent) {
@@ -758,7 +758,7 @@ router.get("/access/:token/cover", async (req, res) => {
         res.send(result.buffer);
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: "Invalid request", details: error.errors });
+            return res.status(400).json({ error: "Invalid request", details: error.issues });
         }
         logger.error("Share cover proxy error:", error);
         res.status(500).json({ error: "Failed to proxy cover image" });

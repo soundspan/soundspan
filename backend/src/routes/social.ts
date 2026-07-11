@@ -39,7 +39,7 @@ const router = express.Router();
  */
 // Profile picture serving — must be before router-level requireAuth
 // because <img> tags can't send Authorization headers; uses query token instead
-router.get("/profile-picture/:userId", requireAuthOrToken, async (req, res) => {
+router.get<{ userId: string }>("/profile-picture/:userId", requireAuthOrToken, async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.params.userId },
@@ -166,12 +166,15 @@ async function getOnlinePresenceMap(): Promise<Map<string, number>> {
     const keys: string[] = [];
 
     try {
-        for await (const key of redisClient.scanIterator({
+        // node-redis v5+ scanIterator yields one array of keys per SCAN page.
+        for await (const keyBatch of redisClient.scanIterator({
             MATCH: `${PRESENCE_KEY_PREFIX}*`,
             COUNT: 250,
         })) {
-            if (typeof key === "string") {
-                keys.push(key);
+            for (const key of keyBatch) {
+                if (typeof key === "string") {
+                    keys.push(key);
+                }
             }
         }
 
@@ -233,7 +236,7 @@ router.post("/presence/heartbeat", async (req, res) => {
         await redisClient.set(
             `${PRESENCE_KEY_PREFIX}${userId}`,
             timestampMs.toString(),
-            { EX: PRESENCE_TTL_SECONDS }
+            { expiration: { type: "EX", value: PRESENCE_TTL_SECONDS } }
         );
         publishSocialPresenceUpdate({
             userId,
