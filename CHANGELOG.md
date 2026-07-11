@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report is bannered ADOPTED with code evidence; and the remaining phantom file
   references (the `.awm/awm-work-loop.md` feature-plans link, CLAUDE.md's
   assets note, two never-committed ADR links) point at real files or say so.
+- Offline downloads/cache and listening-state ("Continue Listening") endpoints now resolve the acting user correctly. All 8 handlers across `offline.ts` (`:53,196,252,337,387`) and `listeningState.ts` (`:59,127,181`) read `req.session.userId!` as their only source of the user id — always `undefined` in practice, since both routers authenticate via `requireAuth`, which populates `req.user`, never `req.session` — so every one of these handlers ran with `userId === undefined` for every real client. They now read `req.user!.id` (roadmap F11 step 1; the dead session-auth branch itself and the rest of the auth-resolver consolidation remain open).
+
+### Security
+
+- `/api/releases` (`GET /radar`, `/upcoming`, `/recent`, `POST /download/:albumMbid`) now requires authentication end-to-end (`router.use(requireAuth)`), matching what its own `@openapi` docs already claimed (`sessionAuth`/`apiKeyAuth` + a `401` response) but the code never enforced — any anonymous caller could previously read Lidarr/library release-radar data. No known consumer is affected: the frontend does not call this router (`frontend/lib/api.ts`'s only `releases`-named calls hit the separate `/downloads/releases/:albumMbid` route).
 
 ### Admin/Operations
 
