@@ -86,6 +86,12 @@ app = FastAPI(
     title="soundspan TIDAL Downloader & Streamer",
     version="2.0.0",
     dependencies=[Depends(require_internal_secret)],
+    # The docs/openapi routes are registered via add_route(), which app-level
+    # dependencies do NOT cover — left on they'd disclose the full API schema
+    # unauthenticated. Internal M2M service, no docs consumer: disable them.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # ── Paths ───────────────────────────────────────────────────────────

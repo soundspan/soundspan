@@ -67,3 +67,15 @@ async def test_valid_secret_passes(monkeypatch):
         resp = await client.get("/user/auth/status", params={"user_id": "test"})
     assert resp.status_code == 200
     assert resp.json() == {"authenticated": False, "user_id": "test"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/redoc"])
+async def test_schema_docs_routes_disabled(monkeypatch, path):
+    """The docs/openapi routes are add_route()-registered, so app-level
+    dependencies never cover them — they must be disabled outright. 404 (route
+    absent), NOT 403: no route exists for the auth dependency to attach to."""
+    monkeypatch.setenv("INTERNAL_API_SECRET", SECRET)
+    async with _client() as client:
+        resp = await client.get(path)
+    assert resp.status_code == 404
