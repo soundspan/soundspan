@@ -275,7 +275,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F11 — Three near-identical auth resolvers duplicate the credential ladder and carry a permanently-dead express-session branch
 
-**🟡 partial (PR #TBD)** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14
+**🟡 partial (PR #115)** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14
 
 > **Fix shipped (partial — step 1 only).** The Safety/pitfalls paragraph
 > below names 8 sites where `req.session.userId!` was the SOLE source of
