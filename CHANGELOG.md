@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GET /api/library/tracks/shuffle`'s large-library path no longer runs a full-table `ORDER BY RANDOM()` scan+sort per request (roadmap F15). It now samples via a new indexed `Track.random` column: pick a uniform pivot in `[0, 1)`, take the next `limit` rows by `random` ascending from that pivot, and top up with a wrap-around query (`random < pivot`) on shortfall — removing the endpoint's raw-SQL site entirely. On the local 15,230-track corpus: `LIMIT 100` p50 ~2.0ms → ~0.7ms, p95 ~4.1ms → ~1.5ms; `LIMIT 1000` p50 ~2.7ms → ~2.0ms, p95 ~3.3ms → ~2.4ms. The old query's cost is dominated by sorting the whole table and stays roughly flat regardless of `limit`; the new query's cost scales with `limit` via the index, so the win is largest at typical shuffle sizes and grows further as the library grows (the old query gets linearly slower with table size; the new one doesn't).
 - All Node-based Docker images and CI jobs now run Node 24 (`node:24-bookworm-slim` for backend/frontend/root-AIO images), replacing the previous 20/24 split. `@types/node` is bumped to `^24` in backend and frontend to match, and the backend `tsconfig` `lib` is raised `ES2020` → `ES2022` alongside, keeping `tsc` clean under `@types/node` 24 (which dropped the legacy compat declarations for post-ES2020 built-ins like `.at()` that the v20 types carried) — the declared lib now matches what the Node ≥ 20 runtime actually implements; type declarations only, emitted code and `target` unchanged.
 
 ### Fixed
@@ -43,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   references (the `.awm/awm-work-loop.md` feature-plans link, CLAUDE.md's
   assets note, two never-committed ADR links) point at real files or say so.
 
+### Admin/Operations
+
+- Database migration `20260711012100_add_track_random_sample_column` (roadmap F15) adds `Track.random double precision` (DB-generated `random()` default) plus a btree index, backing the new `/tracks/shuffle` sampling query above. Because the default is volatile, this `ADD COLUMN` rewrites the whole table in PostgreSQL 16 (not the metadata-only fast path constant defaults get) — milliseconds at the current 15,230-row corpus. Every writer (Prisma upserts in the scanner, any future inserts) gets a value automatically with zero app-code changes; the Python analyzer sidecars only `UPDATE` existing `Track` rows, so they need no changes either.
 ## [1.8.0] - 2026-07-10
 
 ### Added
