@@ -56,7 +56,7 @@ const listeningStateSchema = z.object({
 // POST /listening-state
 router.post("/", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const data = listeningStateSchema.parse(req.body);
 
         const state = await prisma.listeningState.upsert({
@@ -124,7 +124,7 @@ router.post("/", async (req, res) => {
 // GET /listening-state
 router.get("/", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const { kind, entityId } = req.query;
 
         if (!kind || !entityId) {
@@ -178,7 +178,7 @@ router.get("/", async (req, res) => {
 // GET /listening-state/recent (for "Continue Listening")
 router.get("/recent", async (req, res) => {
     try {
-        const userId = req.session.userId!;
+        const userId = req.user!.id;
         const { limit = "10" } = req.query;
 
         const states = await prisma.listeningState.findMany({

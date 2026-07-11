@@ -11,6 +11,7 @@ import { logger } from "../utils/logger";
 import { Router } from "express";
 import { lidarrService } from "../services/lidarr";
 import { prisma } from "../utils/db";
+import { requireAuth } from "../middleware/auth";
 import {
     mapCalendarReleaseToRadarItem,
     ReleaseRadarItem,
@@ -19,6 +20,12 @@ import {
 } from "../services/releaseContracts";
 
 const router = Router();
+
+// Every @openapi block below already documents sessionAuth/apiKeyAuth + a 401
+// response, but nothing enforced it (roadmap 1.9.0 plan / #59 WS4 item 2).
+// Router-wide guard, matching the apiKeys.ts:11 precedent: every route here
+// needs the same tier (authenticated user), so mount once rather than per-route.
+router.use(requireAuth);
 
 interface ReleaseRadarResponse {
     upcoming: ReleaseRadarItem[];

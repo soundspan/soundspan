@@ -15,17 +15,21 @@ export interface ActivityPanelBadgeState {
     hasActivity: boolean;
 }
 
+// Named on purpose (issue #111) instead of an inline multi-line `{ ... }`
+// type literal — see check-targeted-coverage.mjs / #111 for why.
+export interface GetActivityPanelBadgeStateInput {
+    unreadCount: number;
+    activeDownloadCount: number;
+    socialUserCount: number;
+    isAdmin: boolean;
+}
+
 export function getActivityPanelBadgeState({
     unreadCount,
     activeDownloadCount,
     socialUserCount,
     isAdmin,
-}: {
-    unreadCount: number;
-    activeDownloadCount: number;
-    socialUserCount: number;
-    isAdmin: boolean;
-}): ActivityPanelBadgeState {
+}: GetActivityPanelBadgeStateInput): ActivityPanelBadgeState {
     const notificationBadge = unreadCount > 0 ? unreadCount : null;
     const activeBadge =
         isAdmin && activeDownloadCount > 0 ? activeDownloadCount : null;

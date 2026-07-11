@@ -33,7 +33,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 5 / 1 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 2 / 8 |
-| #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
+| #14 | Backend error-handling unification & route god-file decomposition | 0 / 1 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
 | #16 | Frontend consolidation, decomposition & render performance | 0 / 1 / 5 |
 | #17 | Database & streaming performance | 1 / 3 / 5 |
@@ -68,7 +68,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F8](#f8) | ⬜ | readability | medium | M | low |  | #14 | Manual req.query parsing repeated ~21x with `as string`+parseInt fallbacks instead of t… |
 | [F9](#f9) | ⬜ | readability | medium | M | low |  | #16 | Two parallel frontend systems each duplicated: dual toast renderers (sonner + custom) a… |
 | [F10](#f10) | ⬜ | readability | medium | M | low |  | #16 | Per-page god-components and duplicated cover-art widgets: VibePage (1247 LOC, 16 useSta… |
-| [F11](#f11) | ⬜ | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permane… |
+| [F11](#f11) | 🟡 | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permane… |
 | [F12](#f12) | 🟡 | performance | high | M | medium |  | #16 | Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency cur… |
 | [F13](#f13) | 🟡 | performance | high | L | medium |  | #17 | Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot… |
 | [F14](#f14) | ✅ | performance | high | M | medium |  | #17 | pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query sc… |
@@ -275,7 +275,30 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F11 — Three near-identical auth resolvers duplicate the credential ladder and carry a permanently-dead express-session branch
 
-**⬜ open** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14
+**🟡 partial (PR #115)** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14
+
+> **Fix shipped (partial — step 1 only).** The Safety/pitfalls paragraph
+> below names 8 sites where `req.session.userId!` was the SOLE source of
+> `userId` while the router mounts `requireAuth` (which populates
+> `req.user`, never `req.session`): `routes/offline.ts:53,196,252,337,387`
+> and `routes/listeningState.ts:59,127,181`. All 8 now read `req.user!.id`
+> instead — a genuine correctness fix, not dead-code cleanup: every one of
+> these handlers ran with `userId === undefined` for every real client
+> before this change. Regression tests: `offlineRuntime.test.ts` and
+> `listeningStateRuntime.test.ts` previously passed by injecting
+> `req.session = { userId: "u1" }` directly into a hand-built request,
+> pinning the bug rather than exercising it — both suites now build the
+> request the way `requireAuth` actually does (`req.user` populated, empty
+> `req.session`) and assert the resolved id reaches Prisma, including one
+> new per-file case proving a *second* authenticated user's id flows
+> through rather than a hardcoded literal. Re-running the adjusted suites
+> against the pre-fix handlers reproduced `userId: undefined` in the Prisma
+> call args (8 of 22 cases failed across both suites), confirming the fix is
+> load-bearing.
+> **Still open, none of it touched by this change:** the dead session
+> branch itself (auth.ts:92-102, 219-233), the `|| req.session?.userId`
+> fallback idioms (`apiKeys.ts`, `mixes.ts`), the 3-resolver consolidation,
+> and the express-session/connect-redis removal.
 
 **Files:** `backend/src/middleware/auth.ts`, `backend/src/middleware/subsonicAuth.ts`
 

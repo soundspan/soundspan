@@ -14,6 +14,8 @@ import {
     Pause,
     SkipBack,
     SkipForward,
+    RotateCcw,
+    RotateCw,
     Volume2,
     VolumeX,
     ChevronUp,
@@ -90,6 +92,8 @@ export function FullPlayer() {
         startVibeMode,
         stopVibeMode,
         setUpcoming,
+        skipForward,
+        skipBackward,
     } = useAudioControls();
     const preferenceTrackId =
         playbackType === "track" ? currentTrack?.id : undefined;
@@ -447,6 +451,19 @@ export function FullPlayer() {
                                 <Shuffle className="w-[18px] h-[18px]" />
                             </button>
 
+                            {/* Skip back 15s — a seek, so gated on canSeek like the seek slider
+                                (false while an uncached podcast episode is still caching);
+                                independent of queue length */}
+                            <button
+                                onClick={() => skipBackward(15)}
+                                className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
+                                disabled={!hasMedia || !canSeek}
+                                aria-label="Skip back 15 seconds"
+                                title="Skip back 15 seconds"
+                            >
+                                <RotateCcw className="w-[18px] h-[18px]" />
+                            </button>
+
                             <button
                                 onClick={previous}
                                 className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
@@ -511,6 +528,19 @@ export function FullPlayer() {
                                 title="Next track"
                             >
                                 <SkipForward className="w-6 h-6" />
+                            </button>
+
+                            {/* Skip forward 15s — a seek, so gated on canSeek like the seek slider
+                                (false while an uncached podcast episode is still caching);
+                                independent of queue length */}
+                            <button
+                                onClick={() => skipForward(15)}
+                                className="text-gray-400 hover:text-white transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
+                                disabled={!hasMedia || !canSeek}
+                                aria-label="Skip forward 15 seconds"
+                                title="Skip forward 15 seconds"
+                            >
+                                <RotateCw className="w-[18px] h-[18px]" />
                             </button>
 
                             {/* Repeat */}

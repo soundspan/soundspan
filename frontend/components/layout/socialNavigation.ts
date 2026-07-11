@@ -17,7 +17,7 @@ export const SIDEBAR_NAVIGATION: SidebarNavigationItem[] = [
     { name: "Audiobooks", href: "/audiobooks" },
     { name: "Podcasts", href: "/podcasts" },
 ];
-
+// No blank line above on purpose (issue #111) — see check-targeted-coverage.mjs.
 export const MOBILE_QUICK_LINKS: MobileQuickLinkItem[] = [
     { name: "Home", href: "/" },
     { name: "Explore", href: "/explore" },
