@@ -43,15 +43,17 @@ RUN mkdir -p /app/backend /app/frontend /app/audio-analyzer /app/models \
 # ============================================
 WORKDIR /app/audio-analyzer
 
-# Install Python dependencies for audio analysis
-# Note: TensorFlow must be installed explicitly for Python 3.11+ compatibility
-COPY services/audio-analyzer/requirements.txt /tmp/requirements-aio-audio-analyzer.txt
+# Install ALL Python dependencies (Essentia analyzer + CLAP analyzer) from ONE
+# hash-pinned lock (roadmap F50). requirements-aio.lock is the analyzer + clap
+# manifests resolved JOINTLY for Python 3.11 (this image's system interpreter),
+# so both ML runtimes share one consistent transitive tree — subsuming the
+# former inline TensorFlow/essentia install here AND both `-r requirements.txt`
+# installs (the CLAP one below is now a no-op). Regenerate: see the lock header.
+COPY requirements-aio.lock /tmp/requirements-aio.lock
 RUN pip3 install --no-cache-dir --break-system-packages \
-    'tensorflow>=2.13.0,<2.16.0' \
-    essentia-tensorflow \
-    && pip3 install --no-cache-dir --break-system-packages \
-    -r /tmp/requirements-aio-audio-analyzer.txt \
-    && rm -f /tmp/requirements-aio-audio-analyzer.txt
+    --require-hashes -r /tmp/requirements-aio.lock \
+    && rm -f /tmp/requirements-aio.lock \
+    && python3 -c "import numpy, tensorflow; import importlib.util as i; assert i.find_spec('essentia')"
 
 # Download Essentia ML models (~200MB total) - these enable Enhanced vibe matching
 # IMPORTANT: Using MusiCNN models to match analyzer.py expectations
@@ -92,12 +94,9 @@ COPY services/common /app/services/common
 # ============================================
 WORKDIR /app/audio-analyzer-clap
 
-# Install CLAP Python dependencies
-# Note: torch is large (~2GB) but required for CLAP embeddings
-COPY services/audio-analyzer-clap/requirements.txt /tmp/requirements-aio-clap.txt
-RUN pip3 install --no-cache-dir --break-system-packages \
-    -r /tmp/requirements-aio-clap.txt \
-    && rm -f /tmp/requirements-aio-clap.txt
+# CLAP Python dependencies (torch/laion-clap/transformers) were already installed
+# above from the merged requirements-aio.lock — jointly resolved with the Essentia
+# analyzer deps into this one shared Python 3.11 site-packages (roadmap F50).
 
 # Copy CLAP analyzer script
 COPY services/audio-analyzer-clap/analyzer.py /app/audio-analyzer-clap/

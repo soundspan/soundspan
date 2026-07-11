@@ -22,9 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY services/audio-analyzer-clap/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies from the hash-pinned lock (roadmap F50) so a
+# rebuild of this commit resolves the identical transitive tree. torch /
+# torchaudio / torchvision resolve from plain PyPI (today's source), pinned+hashed.
+COPY services/audio-analyzer-clap/requirements.lock ./requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Create models directory
 RUN mkdir -p /app/models

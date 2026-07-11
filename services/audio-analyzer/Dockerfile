@@ -32,12 +32,14 @@ RUN pip3 install --upgrade pip setuptools wheel
 
 WORKDIR /app
 
-# Install ML dependencies explicitly.
-# Some essentia-tensorflow builds no longer pull a top-level `tensorflow` package.
-# We install TensorFlow directly so analyzer.py's runtime import checks stay valid.
-RUN pip3 install --no-cache-dir \
-    "tensorflow>=2.13.0,<2.16.0" \
-    essentia-tensorflow
+# Install ALL Python dependencies from the hash-pinned lock (roadmap F50) so a
+# rebuild of this commit resolves the identical transitive tree. requirements.lock
+# is compiled from requirements.txt for Python 3.8 (this image's interpreter) and
+# captures TensorFlow + essentia-tensorflow (formerly installed inline here) plus
+# redis/psycopg2-binary/numpy (formerly installed inline below the model downloads).
+# Regenerate: see the header of requirements.lock.
+COPY services/audio-analyzer/requirements.lock ./requirements.lock
+RUN pip3 install --no-cache-dir --require-hashes -r requirements.lock
 
 # Verify TensorFlow is importable and Essentia package is present.
 # Avoid importing `essentia.standard` at build time; some build environments can
@@ -78,8 +80,8 @@ RUN curl -L -o /app/models/danceability-msd-musicnn-1.pb \
 # Verify models downloaded
 RUN echo "Models downloaded:" && ls -lh /app/models/
 
-# Install other dependencies
-RUN pip3 install --no-cache-dir redis psycopg2-binary 'numpy>=1.19.0,<2.0.0'
+# redis / psycopg2-binary / numpy are already installed from requirements.lock
+# above (this formerly-inline install was converted to the lock — roadmap F50).
 
 # Copy application code
 COPY services/audio-analyzer/analyzer.py /app/analyzer.py
