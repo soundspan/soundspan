@@ -205,8 +205,9 @@ describe("discover weekly artist library membership prefilter parity", () => {
         const { prisma } = setupMocks();
 
         // Stand-in Artist table. mbid is unique (schema constraint); name is
-        // not, but no two rows here share a name -- avoids the documented,
-        // out-of-scope edge case of duplicate-name rows.
+        // not, but no two rows here share a name -- the duplicate-name edge
+        // has its own dedicated case below, which pins the deliberate
+        // resolution the batched path applies to it.
         const dbRows = [
             { mbid: "mbid-real-1", name: "Real Hit Artist", albumCount: 1 },
             { mbid: "temp-owned-1", name: "Temp Mbid Artist", albumCount: 1 },
@@ -310,5 +311,55 @@ describe("discover weekly artist library membership prefilter parity", () => {
                 batched: c.expected,
             });
         });
+    });
+
+    it("resolves schema-legal duplicate case-insensitive names deterministically as in-library (OR across duplicate rows)", async () => {
+        const { prisma } = setupMocks();
+
+        // Artist.name carries no unique constraint (only mbid does), so two
+        // rows whose names are case-insensitively equal -- one owning albums,
+        // one not -- are schema-legal, even though the live corpus has zero
+        // such pairs. The OLD per-candidate path decided membership with an
+        // unordered findFirst({ name: insensitive-equals }): WHICH duplicate
+        // row it saw was arbitrary (no orderBy), so the answer was
+        // nondeterministic true-or-false. The batched prefilter deliberately
+        // resolves that ambiguity instead of reproducing it: it ORs the
+        // has->=1-album flag across ALL rows sharing the lowercased name, so
+        // any duplicate owning an album marks the name in-library --
+        // deterministically true. For a discovery feature this is the safe
+        // direction: skip the ambiguous same-named artist rather than
+        // maybe-recommend an artist the user already owns.
+        //
+        // Row order below puts the album-owning row FIRST so a naive
+        // last-write-wins map build (a later albumless row overwriting true
+        // with false) would fail this test -- the build must accumulate with
+        // OR.
+        (prisma.artist.findMany as jest.Mock).mockResolvedValue([
+            {
+                mbid: "mbid-dup-with-album",
+                name: "Duplicate Name",
+                albums: [{ id: "album-dup-1" }],
+            },
+            {
+                mbid: "mbid-dup-without-album",
+                name: "duplicate name",
+                albums: [],
+            },
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { discoverWeeklyService } = require("../discoverWeekly");
+        const service = discoverWeeklyService as any;
+
+        const membership = await service.prefetchArtistLibraryMembership([
+            { name: "DUPLICATE name" },
+        ]);
+
+        // Candidate casing differs from BOTH rows -- the classify step must
+        // still hit via the lowercased name key, and must see the OR-merged
+        // membership, not whichever duplicate happened to come last.
+        await expect(
+            service.isArtistInLibrary("DUPLICATE name", undefined, membership)
+        ).resolves.toBe(true);
     });
 });
