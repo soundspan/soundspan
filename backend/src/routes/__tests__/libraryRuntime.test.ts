@@ -3037,14 +3037,16 @@ describe("library catalog list runtime coverage", () => {
         expect(seenTrackIds.size).toBe(8);
     });
 
-    it("handles shuffle for empty, small, and large libraries", async () => {
+    it("returns an empty result for an empty library", async () => {
         mockTrackCount.mockResolvedValueOnce(0);
         const emptyReq = { query: { limit: "3" } } as any;
         const emptyRes = createRes();
         await shuffleHandler(emptyReq, emptyRes);
         expect(emptyRes.statusCode).toBe(200);
         expect(emptyRes.body).toEqual({ tracks: [], total: 0 });
+    });
 
+    it("shuffles small libraries fully in memory", async () => {
         mockTrackCount.mockResolvedValueOnce(2);
         mockTrackFindMany.mockResolvedValueOnce([
             {
@@ -3065,33 +3067,121 @@ describe("library catalog list runtime coverage", () => {
         expect(smallRes.statusCode).toBe(200);
         expect(smallRes.body.total).toBe(2);
         expect(smallRes.body.tracks[0].album.coverArt).toBe("c1.jpg");
+    });
 
+    it("samples large libraries via the indexed random-pivot query and returns exactly `limit` tracks when the pivot page is full", async () => {
         mockTrackCount.mockResolvedValueOnce(10);
-        mockPrismaQueryRaw.mockResolvedValueOnce([{ id: "track-9" }, { id: "track-8" }]);
-        mockTrackFindMany.mockResolvedValueOnce([
-            {
-                id: "track-9",
-                title: "Track 9",
-                album: { id: "album-9", title: "A9", coverUrl: "c9.jpg" },
-            },
-            {
-                id: "track-8",
-                title: "Track 8",
-                album: { id: "album-8", title: "A8", coverUrl: "c8.jpg" },
-            },
-        ]);
+        mockTrackFindMany
+            // Pivot-sample query (id-only): full page, no top-up needed.
+            .mockResolvedValueOnce([{ id: "track-9" }, { id: "track-8" }])
+            // Hydrate the sampled ids into full track rows.
+            .mockResolvedValueOnce([
+                {
+                    id: "track-9",
+                    title: "Track 9",
+                    album: { id: "album-9", title: "A9", coverUrl: "c9.jpg" },
+                },
+                {
+                    id: "track-8",
+                    title: "Track 8",
+                    album: { id: "album-8", title: "A8", coverUrl: "c8.jpg" },
+                },
+            ]);
         const largeReq = { query: { limit: "2" } } as any;
         const largeRes = createRes();
+
         await shuffleHandler(largeReq, largeRes);
-        expect(mockPrismaQueryRaw).toHaveBeenCalled();
-        expect(mockTrackFindMany).toHaveBeenCalledWith(
+
+        // Pure Prisma now — no raw SQL site left in this handler.
+        expect(mockPrismaQueryRaw).not.toHaveBeenCalled();
+        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                where: { random: { gte: expect.any(Number) } },
+                orderBy: { random: "asc" },
+                take: 2,
+                select: { id: true },
+            })
+        );
+        // The pivot page already had `limit` rows, so no wrap-around top-up
+        // query fired — exactly 2 findMany calls total (sample + hydrate).
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(2);
+        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
+            2,
             expect.objectContaining({
                 where: { id: { in: ["track-9", "track-8"] } },
             })
         );
         expect(largeRes.statusCode).toBe(200);
         expect(largeRes.body.total).toBe(10);
+        expect(largeRes.body.tracks).toHaveLength(2);
+        expect(
+            largeRes.body.tracks.map((t: any) => t.id).sort()
+        ).toEqual(["track-8", "track-9"]);
+    });
 
+    it("tops up with a wrap-around query when the pivot page is short, and still returns exactly `limit` distinct tracks", async () => {
+        mockTrackCount.mockResolvedValueOnce(500);
+        mockTrackFindMany
+            // Pivot lands near 1.0: only 1 of the requested 3 rows sort at/above it.
+            .mockResolvedValueOnce([{ id: "track-1" }])
+            // Top-up wraps to the start of the random range for the other 2.
+            .mockResolvedValueOnce([{ id: "track-2" }, { id: "track-3" }])
+            // Hydrate all 3 sampled ids into full track rows.
+            .mockResolvedValueOnce([
+                {
+                    id: "track-1",
+                    title: "T1",
+                    album: { id: "a1", title: "A1", coverUrl: "c1.jpg" },
+                },
+                {
+                    id: "track-2",
+                    title: "T2",
+                    album: { id: "a2", title: "A2", coverUrl: "c2.jpg" },
+                },
+                {
+                    id: "track-3",
+                    title: "T3",
+                    album: { id: "a3", title: "A3", coverUrl: "c3.jpg" },
+                },
+            ]);
+        const req = { query: { limit: "3" } } as any;
+        const res = createRes();
+
+        await shuffleHandler(req, res);
+
+        expect(mockTrackFindMany).toHaveBeenCalledTimes(3);
+        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                where: { random: { gte: expect.any(Number) } },
+                orderBy: { random: "asc" },
+                take: 3,
+                select: { id: true },
+            })
+        );
+        // Top-up asks for exactly the shortfall (3 requested - 1 already found).
+        expect(mockTrackFindMany).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                where: { random: { lt: expect.any(Number) } },
+                orderBy: { random: "asc" },
+                take: 2,
+                select: { id: true },
+            })
+        );
+        const hydrateArgs = mockTrackFindMany.mock.calls[2][0];
+        const hydratedIds = hydrateArgs.where.id.in as string[];
+        expect([...hydratedIds].sort()).toEqual(["track-1", "track-2", "track-3"]);
+        expect(new Set(hydratedIds).size).toBe(3);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.tracks).toHaveLength(3);
+        const returnedIds = res.body.tracks.map((t: any) => t.id);
+        expect(new Set(returnedIds).size).toBe(3);
+    });
+
+    it("returns 500 when the shuffle handler errors", async () => {
         mockTrackCount.mockRejectedValueOnce(new Error("shuffle failed"));
         const errReq = { query: {} } as any;
         const errRes = createRes();

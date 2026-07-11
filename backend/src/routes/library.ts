@@ -4013,13 +4013,31 @@ router.get("/tracks/shuffle", async (req, res) => {
             });
             tracksData = shuffleArray(tracksData);
         } else {
-            // For large libraries, use database-level randomization
-            // Get random track IDs first (efficient, O(limit) memory)
-            const randomIds = await prisma.$queryRaw<{ id: string }[]>`
-                SELECT id FROM "Track"
-                ORDER BY RANDOM()
-                LIMIT ${limit}
-            `;
+            // For large libraries, sample via the indexed persisted `random`
+            // column (F15) instead of a full-table ORDER BY RANDOM() scan+sort.
+            // Pick a uniform pivot in [0, 1) and take the next `limit` rows by
+            // random value ascending from that pivot — this can use the btree
+            // index on Track.random. If the pivot lands near 1.0, fewer than
+            // `limit` rows sort at/above it; top up by wrapping around to the
+            // start of the range (random < pivot) for the remainder.
+            const pivot = Math.random();
+            const randomIds = await prisma.track.findMany({
+                where: { random: { gte: pivot } },
+                orderBy: { random: "asc" },
+                take: limit,
+                select: { id: true },
+            });
+
+            if (randomIds.length < limit) {
+                const remaining = limit - randomIds.length;
+                const topUpIds = await prisma.track.findMany({
+                    where: { random: { lt: pivot } },
+                    orderBy: { random: "asc" },
+                    take: remaining,
+                    select: { id: true },
+                });
+                randomIds.push(...topUpIds);
+            }
 
             // Then fetch full track data for selected IDs
             tracksData = await prisma.track.findMany({
@@ -4040,7 +4058,11 @@ router.get("/tracks/shuffle", async (req, res) => {
                 },
             });
 
-            // Shuffle the result to maintain randomness (findMany doesn't preserve order)
+            // Shuffle the result: findMany-by-id doesn't preserve the sampled
+            // order anyway, and this also breaks the within-page adjacency
+            // correlation inherent to a persisted random column — two tracks
+            // with nearby `random` values would otherwise co-appear in the
+            // same page more often than chance.
             for (let i = tracksData.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [tracksData[i], tracksData[j]] = [tracksData[j], tracksData[i]];
