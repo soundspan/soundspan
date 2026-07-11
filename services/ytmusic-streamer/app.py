@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Literal, cast
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ytmusicapi import YTMusic, OAuthCredentials
@@ -41,6 +41,8 @@ from common.sidecar_runtime_utils import (
     build_stream_proxy_client,
     env_float,
     env_int,
+    require_internal_secret,
+    validate_user_id,
 )
 from yt_download import (
     PROXY_AUDIO_FORMAT_SELECTORS,
@@ -157,7 +159,11 @@ def _stamp_audio_tags(filepath: str, tags: dict) -> None:
 log = configure_service_logger("ytmusic-streamer")
 
 # ── FastAPI app ─────────────────────────────────────────────────────
-app = FastAPI(title="soundspan YouTube Music Streamer", version="1.0.0")
+app = FastAPI(
+    title="soundspan YouTube Music Streamer",
+    version="1.0.0",
+    dependencies=[Depends(require_internal_secret)],
+)
 
 # ── Paths ───────────────────────────────────────────────────────────
 DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
@@ -290,7 +296,14 @@ class BatchSearchRequest(BaseModel):
 
 def _oauth_file(user_id: str) -> Path:
     """Return the OAuth JSON path for a given user."""
+    validate_user_id(user_id)
     return DATA_PATH / f"oauth_{user_id}.json"
+
+
+def _client_creds_file(user_id: str) -> Path:
+    """Return the OAuth client-credentials JSON path for a given user."""
+    validate_user_id(user_id)
+    return DATA_PATH / f"client_creds_{user_id}.json"
 
 
 def _clear_user_search_fallback(user_id: str):
@@ -471,7 +484,7 @@ def _get_ytmusic(user_id: str) -> YTMusic:
 
             # Build OAuthCredentials if client_id/client_secret are stored alongside
             oauth_creds = None
-            creds_path = DATA_PATH / f"client_creds_{user_id}.json"
+            creds_path = _client_creds_file(user_id)
             if creds_path.exists():
                 creds_data = json.loads(creds_path.read_text())
                 oauth_creds = OAuthCredentials(
@@ -1405,7 +1418,7 @@ async def auth_restore(req: Request, user_id: str = Query(...)):
     client_id = body.get("client_id")
     client_secret = body.get("client_secret")
     if client_id and client_secret:
-        creds_path = DATA_PATH / f"client_creds_{user_id}.json"
+        creds_path = _client_creds_file(user_id)
         creds_path.write_text(json.dumps({
             "client_id": client_id,
             "client_secret": client_secret,
@@ -1425,7 +1438,7 @@ async def auth_clear(user_id: str = Query(...)):
     oauth_path = _oauth_file(user_id)
     if oauth_path.exists():
         oauth_path.unlink()
-    creds_path = DATA_PATH / f"client_creds_{user_id}.json"
+    creds_path = _client_creds_file(user_id)
     if creds_path.exists():
         creds_path.unlink()
     log.info(f"OAuth credentials cleared for user {user_id}")
@@ -1500,7 +1513,7 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
         _oauth_file(user_id).write_text(token_json)
 
         # Save client credentials alongside so _get_ytmusic can use them
-        creds_path = DATA_PATH / f"client_creds_{user_id}.json"
+        creds_path = _client_creds_file(user_id)
         creds_path.write_text(json.dumps({
             "client_id": req.client_id,
             "client_secret": req.client_secret,

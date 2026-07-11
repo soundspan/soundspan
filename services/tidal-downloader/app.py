@@ -25,7 +25,7 @@ from xml.etree.ElementTree import fromstring as xml_fromstring
 
 import httpx
 import tidalapi
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -34,7 +34,11 @@ if str(SERVICES_ROOT) not in sys.path:
     sys.path.append(str(SERVICES_ROOT))
 
 from common.logging_utils import configure_service_logger
-from common.sidecar_runtime_utils import build_stream_proxy_client, env_float
+from common.sidecar_runtime_utils import (
+    build_stream_proxy_client,
+    env_float,
+    require_internal_secret,
+)
 
 # ── tiddl core imports ──────────────────────────────────────────────
 from tiddl.core.auth import AuthAPI, AuthClientError
@@ -78,7 +82,11 @@ class _ThrottlePoolFullWarning(logging.Filter):
 logging.getLogger("urllib3.connectionpool").addFilter(_ThrottlePoolFullWarning())
 
 # ── FastAPI app ─────────────────────────────────────────────────────
-app = FastAPI(title="soundspan TIDAL Downloader & Streamer", version="2.0.0")
+app = FastAPI(
+    title="soundspan TIDAL Downloader & Streamer",
+    version="2.0.0",
+    dependencies=[Depends(require_internal_secret)],
+)
 
 # ── Paths ───────────────────────────────────────────────────────────
 TIDDL_PATH = Path(os.getenv("TIDDL_PATH", "/data/.tiddl"))
