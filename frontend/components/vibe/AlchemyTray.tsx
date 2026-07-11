@@ -1,0 +1,160 @@
+"use client";
+
+/**
+ * AlchemyTray — the Alchemy-mode overlay. Ingredients are gathered by
+ * ctrl/cmd-clicking dots (handled in useVibeMode); this renders each with a
+ * weight slider + remove, blends them (≥2), and lists the results (which also
+ * glow on the map). Presentational — all state lives in the hook.
+ */
+
+import { FlaskConical, Loader2, Play, X } from "lucide-react";
+import { VIBE_PANEL_CLASS } from "./TravelPanel";
+import { MAX_ALCHEMY_INGREDIENTS, MIN_WEIGHT, MAX_WEIGHT } from "./useVibeMode";
+import type { AlchemyView } from "./useVibeMode";
+
+export function AlchemyTray({ view }: { view: AlchemyView }) {
+    const {
+        ingredients,
+        results,
+        loading,
+        error,
+        canBlend,
+        remove,
+        setWeight,
+        blend,
+        play,
+        clear,
+    } = view;
+
+    return (
+        <div className={VIBE_PANEL_CLASS} data-vibe-panel="alchemy">
+            <div className="flex items-center gap-2 mb-2">
+                <FlaskConical className="w-3.5 h-3.5 text-fuchsia-300" />
+                <span className="text-xs font-semibold text-white">Alchemy</span>
+                <span className="text-[10px] text-gray-500 tabular-nums">
+                    {ingredients.length}/{MAX_ALCHEMY_INGREDIENTS}
+                </span>
+                <button
+                    type="button"
+                    onClick={clear}
+                    aria-label="Clear alchemy (Esc)"
+                    title="Clear alchemy (Esc)"
+                    className="ml-auto text-gray-500 hover:text-white transition-colors"
+                >
+                    <X className="w-3.5 h-3.5" />
+                </button>
+            </div>
+
+            <p className="text-[10px] text-gray-500 mb-2">
+                Ctrl/⌘-click dots to add ingredients, then blend.
+            </p>
+
+            <div className="flex flex-col gap-1.5 mb-3">
+                {ingredients.map((ing) => (
+                    <div key={ing.id} className="flex items-center gap-2">
+                        <span className="flex-1 min-w-0">
+                            <span className="block truncate text-xs text-white">
+                                {ing.title}
+                            </span>
+                            <span className="block truncate text-[10px] text-gray-500">
+                                {ing.artist}
+                            </span>
+                        </span>
+                        <input
+                            type="range"
+                            min={MIN_WEIGHT}
+                            max={MAX_WEIGHT}
+                            step={0.1}
+                            value={ing.weight}
+                            aria-label={`Weight for ${ing.title}`}
+                            onChange={(e) =>
+                                setWeight(ing.id, parseFloat(e.target.value))
+                            }
+                            className="w-16 accent-fuchsia-400"
+                        />
+                        <span className="w-6 shrink-0 text-[10px] tabular-nums text-gray-500">
+                            {ing.weight.toFixed(1)}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => remove(ing.id)}
+                            aria-label={`Remove ${ing.title}`}
+                            title="Remove"
+                            className="shrink-0 text-gray-600 hover:text-red-400 transition-colors"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                ))}
+            </div>
+
+            <div className="flex items-center gap-2 mb-3">
+                <button
+                    type="button"
+                    onClick={blend}
+                    disabled={!canBlend || loading}
+                    className="flex-1 flex items-center justify-center gap-2 px-2 py-1.5 rounded bg-fuchsia-500/80 hover:bg-fuchsia-500 text-white text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                    {loading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                        <FlaskConical className="w-3.5 h-3.5" />
+                    )}
+                    Blend
+                </button>
+                <button
+                    type="button"
+                    onClick={clear}
+                    className="px-2 py-1.5 rounded border border-white/10 text-gray-400 hover:bg-white/5 text-xs transition-colors"
+                >
+                    Clear
+                </button>
+            </div>
+
+            {error && <p className="text-[11px] text-red-400 mb-2">{error}</p>}
+
+            {results.length > 0 && (
+                <div>
+                    <div className="flex items-center justify-between mb-1">
+                        <p className="text-[10px] uppercase tracking-wide text-gray-600">
+                            Blend results
+                        </p>
+                        <button
+                            type="button"
+                            onClick={play}
+                            className="flex items-center gap-1 text-[10px] text-fuchsia-300 hover:text-white transition-colors"
+                        >
+                            <Play className="w-3 h-3" />
+                            Play blend
+                        </button>
+                    </div>
+                    <div className="flex flex-col">
+                        {results.map((r) => (
+                            <div
+                                key={`${r.id}-${r.seq}`}
+                                className="flex items-center gap-2 px-1 py-1"
+                            >
+                                <span className="flex-1 min-w-0">
+                                    <span className="block truncate text-xs text-white">
+                                        {r.title}
+                                    </span>
+                                    <span className="block truncate text-[10px] text-gray-500">
+                                        {r.artist.name}
+                                    </span>
+                                </span>
+                                {!r.onMap && (
+                                    <span className="shrink-0 text-[9px] uppercase tracking-wide text-amber-400/80 border border-amber-400/30 rounded px-1 py-0.5">
+                                        not on map
+                                    </span>
+                                )}
+                                <span className="shrink-0 text-[10px] tabular-nums text-fuchsia-300/80">
+                                    {Math.round(r.similarity * 100)}%
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}

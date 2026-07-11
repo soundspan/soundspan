@@ -10,20 +10,32 @@
  * click-vs-drag threshold, transform-aware hit-test) lives here; rendering is
  * delegated to MapCanvas + MapOverlay.
  *
- * `mode` is the F2 extension point: it stays "explore" here; F2 adds travel /
- * journey / alchemy branches and draws into `<MapOverlay decorations>`.
+ * F2 interaction (travel / journey / alchemy) is delegated to `useVibeMode`,
+ * whose views drive the mode panels + `<MapOverlay decorations>` (MapDecorations).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Crosshair, Loader2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import {
+    Crosshair,
+    Loader2,
+    RotateCcw,
+    Route,
+    ZoomIn,
+    ZoomOut,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { MapCanvas } from "./MapCanvas";
 import { MapOverlay } from "./MapOverlay";
+import { MapDecorations } from "./MapDecorations";
 import { SpotlightSearch } from "./SpotlightSearch";
+import { TravelPanel } from "./TravelPanel";
+import { JourneyPanel } from "./JourneyPanel";
+import { AlchemyTray } from "./AlchemyTray";
 import { useMapFilters } from "./useMapFilters";
 import { useSessionTrail } from "./useSessionTrail";
+import { useVibeMode } from "./useVibeMode";
 import {
     fitViewport,
     flyTo,
@@ -33,7 +45,7 @@ import {
     type MapDims,
     type Viewport,
 } from "./mapViewport";
-import type { MapMode, MapTrack } from "./types";
+import type { MapTrack } from "./types";
 import { MOOD_COLORS, getMoodColor, moodLabel } from "./types";
 
 const CLICK_MOVE_THRESHOLD = 4; // px between down/up to still count as a click
@@ -100,9 +112,6 @@ export function VibeMap() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // F2 extension point — only "explore" is implemented in F1.
-    const [mode] = useState<MapMode>("explore");
-
     const [dims, setDims] = useState<MapDims>({ width: 0, height: 0 });
     const [viewport, setViewport] = useState<Viewport | null>(null);
     const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -110,7 +119,7 @@ export function VibeMap() {
     const drag = useRef<DragState>({ active: false, lastX: 0, lastY: 0, moved: 0 });
 
     const { currentTrack } = useAudioState();
-    const { playTrack } = useAudioControls();
+    const { playTrack, playTracks, addToQueue } = useAudioControls();
     const filters = useMapFilters(tracks);
     const trailIds = useSessionTrail();
 
@@ -160,6 +169,12 @@ export function VibeMap() {
         return m;
     }, [tracks]);
 
+    const controls = useMemo(
+        () => ({ playTrack, playTracks, addToQueue }),
+        [playTrack, playTracks, addToQueue]
+    );
+    const vibe = useVibeMode({ trackById, currentTrack, controls });
+
     const beaconTrack = currentTrack ? trackById.get(currentTrack.id) : undefined;
     const beaconOnMap = !!beaconTrack;
 
@@ -172,7 +187,10 @@ export function VibeMap() {
         return pts;
     }, [trailIds, trackById]);
 
-    const dimUnhighlighted = highlightIds !== null;
+    // Alchemy result glow takes over the canvas highlight while blending; the
+    // spotlight owns it otherwise.
+    const effectiveHighlightIds = vibe.highlightIds ?? highlightIds;
+    const effectiveDim = vibe.highlightIds !== null || highlightIds !== null;
 
     // --- Interaction --------------------------------------------------------
     const cursorFromEvent = useCallback((clientX: number, clientY: number) => {
@@ -181,25 +199,6 @@ export function VibeMap() {
         const rect = container.getBoundingClientRect();
         return { x: clientX - rect.left, y: clientY - rect.top };
     }, []);
-
-    const playById = useCallback(
-        (id: string) => {
-            const t = trackById.get(id);
-            if (!t) return;
-            playTrack({
-                id: t.id,
-                title: t.title,
-                artist: { name: t.artist, id: t.artistId },
-                album: {
-                    title: "", // album title is not in the map payload
-                    id: t.albumId,
-                    coverArt: t.coverUrl ?? undefined,
-                },
-                duration: 0,
-            });
-        },
-        [trackById, playTrack]
-    );
 
     const handleWheel = useCallback(
         (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -273,9 +272,14 @@ export function VibeMap() {
             const wasClick = drag.current.active && drag.current.moved < CLICK_MOVE_THRESHOLD;
             drag.current.active = false;
             e.currentTarget.releasePointerCapture?.(e.pointerId);
-            if (wasClick && hoveredId) playById(hoveredId);
+            if (wasClick && hoveredId) {
+                vibe.onDotClick(hoveredId, {
+                    ctrlOrMeta: e.ctrlKey || e.metaKey,
+                    shift: e.shiftKey,
+                });
+            }
         },
-        [hoveredId, playById]
+        [hoveredId, vibe]
     );
 
     const zoomByCenter = useCallback(
@@ -306,11 +310,23 @@ export function VibeMap() {
         );
     }, [viewport, beaconTrack, dims]);
 
+    // Esc always returns to explore, tearing down the active mode's overlay.
+    const vibeMode = vibe.mode;
+    const exitToExplore = vibe.exitToExplore;
+    useEffect(() => {
+        if (vibeMode === "explore") return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") exitToExplore();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [vibeMode, exitToExplore]);
+
     const hoveredTrack = hoveredId ? trackById.get(hoveredId) : undefined;
     const mapReady = viewport !== null && dims.width > 0 && dims.height > 0;
 
     return (
-        <div className="flex flex-col h-full" data-vibe-mode={mode}>
+        <div className="flex flex-col h-full" data-vibe-mode={vibe.mode}>
             {/* Top bar: spotlight + view controls */}
             <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
                 <SpotlightSearch
@@ -322,6 +338,20 @@ export function VibeMap() {
                     {filters.visibleCount} of {tracks.length} visible
                 </p>
                 <div className="flex items-center gap-1">
+                    <button
+                        type="button"
+                        onClick={vibe.startJourney}
+                        disabled={!vibe.canStartJourney}
+                        title={
+                            vibe.canStartJourney
+                                ? "Plan a journey from the current track"
+                                : "Play a track (or pick one in Travel) to start a journey"
+                        }
+                        className="flex items-center gap-1 px-2 py-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                    >
+                        <Route className="w-4 h-4" />
+                        <span className="text-xs">Journey</span>
+                    </button>
                     <button
                         type="button"
                         onClick={locateNowPlaying}
@@ -414,8 +444,8 @@ export function VibeMap() {
                             width={dims.width}
                             height={dims.height}
                             mask={filters.mask}
-                            highlightIds={highlightIds}
-                            dimUnhighlighted={dimUnhighlighted}
+                            highlightIds={effectiveHighlightIds}
+                            dimUnhighlighted={effectiveDim}
                             hoveredId={hoveredId}
                             onWheel={handleWheel}
                             onPointerDown={handlePointerDown}
@@ -433,10 +463,46 @@ export function VibeMap() {
                                     : null
                             }
                             trail={trailPoints}
-                            decorations={null}
+                            decorations={
+                                <MapDecorations
+                                    viewport={viewport}
+                                    trackById={trackById}
+                                    travel={
+                                        vibe.travel
+                                            ? {
+                                                  currentId:
+                                                      vibe.travel.currentId,
+                                                  breadcrumbIds:
+                                                      vibe.travel.breadcrumbTitles.map(
+                                                          (b) => b.id
+                                                      ),
+                                                  onMapNeighbors:
+                                                      vibe.travel.onMapNeighbors,
+                                                  onNavigate:
+                                                      vibe.travel.navigate,
+                                                  onQueue: vibe.travel.queue,
+                                              }
+                                            : null
+                                    }
+                                    journey={
+                                        vibe.journey
+                                            ? {
+                                                  fromId: vibe.journey.fromId,
+                                                  waypoints:
+                                                      vibe.journey.waypoints,
+                                              }
+                                            : null
+                                    }
+                                />
+                            }
                         />
                     </>
                 )}
+
+                {/* Mode panels (compact overlays / mobile bottom-sheet). */}
+                {vibe.travel && <TravelPanel view={vibe.travel} />}
+                {vibe.journey && <JourneyPanel view={vibe.journey} />}
+                {vibe.alchemy && <AlchemyTray view={vibe.alchemy} />}
 
                 {/* Status overlays in the map area (do not hide the controls). */}
                 {isLoading && (

@@ -24,11 +24,11 @@ export interface MapTrack {
 }
 
 /**
- * Map interaction mode. F1 implements only `explore`; F2 (travel / journey /
- * alchemy) extends this union and branches the overlay + panels on it. The
+ * Map interaction mode. F1 implemented only `explore`; F2 adds travel /
+ * journey / alchemy and branches the overlay + panels on it. The
  * `<MapOverlay decorations>` slot is where F2 draws mode-specific map graphics.
  */
-export type MapMode = "explore";
+export type MapMode = "explore" | "travel" | "journey" | "alchemy";
 
 /** Mood key -> dot colour. Keys match the map payload's `dominantMood`. */
 export const MOOD_COLORS: Record<string, string> = {
