@@ -1810,6 +1810,206 @@ describe("simpleDownloadManager", () => {
         );
     });
 
+    // F23: duplicate/concurrent Lidarr Grab webhook hits the partial unique
+    // index (DownloadJob_targetMbid_active_unique) and today surfaces as an
+    // uncaught P2002 -> 500 at the webhook route. These pin the fix: the
+    // loser must resolve coherently instead of throwing.
+    it("onDownloadGrabbed resolves the loser with the winner's jobId when the tracking-job create hits P2002 (F23)", async () => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { Prisma } = require("@prisma/client");
+
+        const winnerTx = makeTx();
+        winnerTx.downloadJob.findFirst
+            .mockResolvedValueOnce(null) // idempotency check (metadata.downloadId)
+            .mockResolvedValueOnce(null) // duplicate check by targetMbid
+            .mockResolvedValueOnce({
+                id: "recent-artist-job",
+                userId: "user-race-1",
+            }); // recentJob (infer userId)
+        winnerTx.downloadJob.findMany
+            .mockResolvedValueOnce([]) // active unassigned jobs
+            .mockResolvedValueOnce([]); // duplicate check by artist+album
+        winnerTx.downloadJob.create.mockResolvedValueOnce({ id: "winner-job-1" });
+
+        const loserTx = makeTx();
+        loserTx.downloadJob.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "recent-artist-job",
+                userId: "user-race-1",
+            });
+        loserTx.downloadJob.findMany
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([]);
+        loserTx.downloadJob.create.mockRejectedValueOnce(
+            new Prisma.PrismaClientKnownRequestError(
+                "Unique constraint failed on the fields: (`targetMbid`)",
+                { code: "P2002", clientVersion: "test" }
+            )
+        );
+
+        mockPrisma.$transaction
+            .mockImplementationOnce(async (operation: (tx: any) => Promise<any>) =>
+                operation(winnerTx)
+            )
+            .mockImplementationOnce(async (operation: (tx: any) => Promise<any>) =>
+                operation(loserTx)
+            );
+
+        // The loser's post-abort re-find must run against the plain `prisma`
+        // singleton (a fresh implicit transaction), never the dead `tx` from
+        // the rolled-back transaction.
+        mockPrisma.downloadJob.findFirst.mockResolvedValueOnce({
+            id: "winner-job-1",
+        });
+
+        const winnerResult = await simpleDownloadManager.onDownloadGrabbed(
+            "dl-race-1",
+            "mbid-race-1",
+            "Album Race",
+            "Artist Race",
+            42
+        );
+        const loserResult = await simpleDownloadManager.onDownloadGrabbed(
+            "dl-race-1",
+            "mbid-race-1",
+            "Album Race",
+            "Artist Race",
+            42
+        );
+
+        expect(winnerResult).toEqual({ matched: true, jobId: "winner-job-1" });
+        expect(loserResult).toEqual({ matched: true, jobId: "winner-job-1" });
+        expect(mockPrisma.downloadJob.findFirst).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.downloadJob.findFirst).toHaveBeenCalledWith({
+            where: {
+                OR: [
+                    { lidarrRef: "dl-race-1" },
+                    {
+                        metadata: {
+                            path: ["downloadId"],
+                            equals: "dl-race-1",
+                        },
+                    },
+                ],
+            },
+        });
+        // Exactly one active row actually got created — the loser's create
+        // was attempted (and rejected by the DB constraint) but produced no
+        // second row.
+        expect(winnerTx.downloadJob.create).toHaveBeenCalledTimes(1);
+        expect(loserTx.downloadJob.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("onDownloadGrabbed resolves via re-find when the matched-job update hits P2002 (F23)", async () => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { Prisma } = require("@prisma/client");
+
+        const tx = makeTx();
+        tx.downloadJob.findFirst.mockResolvedValueOnce(null); // idempotency check
+        tx.downloadJob.findMany.mockResolvedValueOnce([
+            {
+                id: "matched-job-1",
+                status: "pending",
+                lidarrRef: null,
+                targetMbid: null,
+                metadata: {
+                    artistName: "Artist Update",
+                    albumTitle: "Album Update",
+                },
+            },
+        ]);
+        tx.downloadJob.update.mockRejectedValueOnce(
+            new Prisma.PrismaClientKnownRequestError(
+                "Unique constraint failed on the fields: (`targetMbid`)",
+                { code: "P2002", clientVersion: "test" }
+            )
+        );
+        mockPrisma.$transaction.mockImplementationOnce(
+            async (operation: (tx: any) => Promise<any>) => operation(tx)
+        );
+        mockPrisma.downloadJob.findFirst.mockResolvedValueOnce({
+            id: "already-active-job-1",
+        });
+
+        const result = await simpleDownloadManager.onDownloadGrabbed(
+            "dl-update-race-1",
+            "mbid-update-race-1",
+            "Album Update",
+            "Artist Update",
+            77
+        );
+
+        expect(result).toEqual({ matched: true, jobId: "already-active-job-1" });
+        expect(tx.downloadJob.update).toHaveBeenCalledTimes(1);
+    });
+
+    it("onDownloadGrabbed resolves a non-throwing {matched:false} when a P2002 winner can't be found", async () => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { Prisma } = require("@prisma/client");
+
+        const tx = makeTx();
+        tx.downloadJob.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "recent-artist-job",
+                userId: "user-edge-1",
+            });
+        tx.downloadJob.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+        tx.downloadJob.create.mockRejectedValueOnce(
+            new Prisma.PrismaClientKnownRequestError(
+                "Unique constraint failed on the fields: (`targetMbid`)",
+                { code: "P2002", clientVersion: "test" }
+            )
+        );
+        mockPrisma.$transaction.mockImplementationOnce(
+            async (operation: (tx: any) => Promise<any>) => operation(tx)
+        );
+        // No row matches the re-find (edge case, e.g. a different downloadId
+        // raced on the same targetMbid) -- must not throw.
+        mockPrisma.downloadJob.findFirst.mockResolvedValueOnce(null);
+
+        await expect(
+            simpleDownloadManager.onDownloadGrabbed(
+                "dl-orphan-race-1",
+                "mbid-orphan-1",
+                "Album Orphan",
+                "Artist Orphan",
+                11
+            )
+        ).resolves.toEqual({ matched: false });
+    });
+
+    it("onDownloadGrabbed still rejects non-P2002 errors from the grab transaction", async () => {
+        const tx = makeTx();
+        tx.downloadJob.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "recent-artist-job",
+                userId: "user-err-1",
+            });
+        tx.downloadJob.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+        tx.downloadJob.create.mockRejectedValueOnce(new Error("connection reset"));
+        mockPrisma.$transaction.mockImplementationOnce(
+            async (operation: (tx: any) => Promise<any>) => operation(tx)
+        );
+
+        await expect(
+            simpleDownloadManager.onDownloadGrabbed(
+                "dl-other-error-1",
+                "mbid-other-error-1",
+                "Album Err",
+                "Artist Err",
+                5
+            )
+        ).rejects.toThrow("connection reset");
+        // The non-P2002 path must not call the P2002 recovery re-find.
+        expect(mockPrisma.downloadJob.findFirst).not.toHaveBeenCalled();
+    });
+
     it("onDownloadComplete matches by lidarrAlbumId", async () => {
         const tx = makeTx();
         tx.downloadJob.findFirst.mockResolvedValueOnce(null);

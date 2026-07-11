@@ -32,8 +32,8 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #10 | CI security scanning & supply-chain guardrails (Wave 0) | 0 / 1 / 3 |
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 6 / 1 / 8 |
-| #13 | Background-job idempotency, retries & reconciler dedup | 2 / 1 / 8 |
-| #14 | Backend error-handling unification & route god-file decomposition | 0 / 0 / 6 |
+| #13 | Background-job idempotency, retries & reconciler dedup | 2 / 2 / 8 |
+| #14 | Backend error-handling unification & route god-file decomposition | 0 / 1 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
 | #16 | Frontend consolidation, decomposition & render performance | 0 / 1 / 5 |
 | #17 | Database & streaming performance | 1 / 3 / 5 |
@@ -68,7 +68,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F8](#f8) | ⬜ | readability | medium | M | low |  | #14 | Manual req.query parsing repeated ~21x with `as string`+parseInt fallbacks instead of t… |
 | [F9](#f9) | ⬜ | readability | medium | M | low |  | #16 | Two parallel frontend systems each duplicated: dual toast renderers (sonner + custom) a… |
 | [F10](#f10) | ⬜ | readability | medium | M | low |  | #16 | Per-page god-components and duplicated cover-art widgets: VibePage (1247 LOC, 16 useSta… |
-| [F11](#f11) | ⬜ | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permane… |
+| [F11](#f11) | 🟡 | readability | medium | M | medium |  | #14 | Three near-identical auth resolvers duplicate the credential ladder and carry a permane… |
 | [F12](#f12) | 🟡 | performance | high | M | medium |  | #16 | Player UI re-renders 4×/second during playback: useAudio() pipes the high-frequency cur… |
 | [F13](#f13) | 🟡 | performance | high | L | medium |  | #17 | Per-track/per-candidate N+1 query loops dominate Spotify import and Discover Weekly hot… |
 | [F14](#f14) | ✅ | performance | high | M | medium |  | #17 | pgvector ANN searches never set ivfflat.probes — every 'similar tracks' / vibe query sc… |
@@ -80,7 +80,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F20](#f20) | ⬜ | idempotency | high→medium | M | low |  | #13 | Discover Weekly batch creation has no per-(user, week) idempotency guard — double-trigg… |
 | [F21](#f21) | ⬜ | idempotency | high | M | medium |  | #13 | Audio-analysis / vibe re-queue enqueues BEFORE flipping status and has no per-track ded… |
 | [F22](#f22) | ✅ | idempotency | high | M | low |  | #11 | Helm Secret regenerates SESSION_SECRET / SETTINGS_ENCRYPTION_KEY / POSTGRES_PASSWORD on… |
-| [F23](#f23) | ⬜ | idempotency | high→medium | M | medium |  | #13 | Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade inste… |
+| [F23](#f23) | 🟡 | idempotency | high→medium | M | medium |  | #13 | Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade inste… |
 | [F24](#f24) | 🟡 | idempotency | high→medium | M | low |  | #13 | High-volume scan jobs enqueued from ~15 sites with no coalescing jobId, no attempts/bac… |
 | [F25](#f25) | ⬜ | idempotency | medium | M | medium |  | #13 | Two overlapping download reconcilers (unlocked 30s queueCleaner interval vs claim-locke… |
 | [F26](#f26) | ✅ | idempotency | medium | S | low |  | #13 | Invite-code maxUses check is outside the transaction with an unconditional increment — … |
@@ -275,7 +275,30 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F11 — Three near-identical auth resolvers duplicate the credential ladder and carry a permanently-dead express-session branch
 
-**⬜ open** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14
+**🟡 partial (PR #115)** · dimension: readability · severity: medium · effort: M · risk: medium · epic: #14
+
+> **Fix shipped (partial — step 1 only).** The Safety/pitfalls paragraph
+> below names 8 sites where `req.session.userId!` was the SOLE source of
+> `userId` while the router mounts `requireAuth` (which populates
+> `req.user`, never `req.session`): `routes/offline.ts:53,196,252,337,387`
+> and `routes/listeningState.ts:59,127,181`. All 8 now read `req.user!.id`
+> instead — a genuine correctness fix, not dead-code cleanup: every one of
+> these handlers ran with `userId === undefined` for every real client
+> before this change. Regression tests: `offlineRuntime.test.ts` and
+> `listeningStateRuntime.test.ts` previously passed by injecting
+> `req.session = { userId: "u1" }` directly into a hand-built request,
+> pinning the bug rather than exercising it — both suites now build the
+> request the way `requireAuth` actually does (`req.user` populated, empty
+> `req.session`) and assert the resolved id reaches Prisma, including one
+> new per-file case proving a *second* authenticated user's id flows
+> through rather than a hardcoded literal. Re-running the adjusted suites
+> against the pre-fix handlers reproduced `userId: undefined` in the Prisma
+> call args (8 of 22 cases failed across both suites), confirming the fix is
+> load-bearing.
+> **Still open, none of it touched by this change:** the dead session
+> branch itself (auth.ts:92-102, 219-233), the `|| req.session?.userId`
+> fallback idioms (`apiKeys.ts`, `mixes.ts`), the 3-resolver consolidation,
+> and the express-session/connect-redis removal.
 
 **Files:** `backend/src/middleware/auth.ts`, `backend/src/middleware/subsonicAuth.ts`
 
@@ -487,9 +510,11 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F23 — Download dedup rides on a JSON-path findFirst plus a 5-strategy heuristic cascade instead of DB constraints — best-effort idempotency under load
 
-**⬜ open** · dimension: idempotency · severity: high→medium · effort: M · risk: medium · epic: #13
+**🟡 partial (PR #116)** · dimension: idempotency · severity: high→medium · effort: M · risk: medium · epic: #13
 
 > **Audit note.** ✓ Severity high→medium: the 'no partial-unique' headline is refuted by migration `20260118000000` (the body says so). Real residual = a missing P2002 catch (a 500, not data corruption) + a seq scan.
+>
+> **Fix shipped** (recommendation (a) only). `onDownloadGrabbed` (`simpleDownloadManager.ts`) now catches P2002 from both the matched-job update and the tracking-job create — the two writes that race the partial-unique index `DownloadJob_targetMbid_active_unique`. The catch is wired via `.catch()` on the *outside* of the `withTransaction(...)` call, not a try/catch inside its callback: Prisma's interactive `$transaction` rolls back and rethrows on a callback rejection, so the `tx` client is already dead by the time recovery runs — re-querying with it would fail with "current transaction is aborted, commands ignored until end of transaction block". The recovery re-find runs against the plain `prisma` singleton (`lidarrRef` OR `metadata.downloadId` match, mirroring Step 1's existing idempotency check) and returns the winner's jobId; if no winner is discoverable (e.g. a different downloadId racing on the same targetMbid — out of this slice's scope) it falls back to the pre-existing non-throwing `{matched:false}` shape rather than fabricating a match. **Still 🟡**: recommendation (b) — backfilling `metadata.downloadId` into the indexed `lidarrRef` column and replacing the Step-1 JSON-path idempotency lookup with an indexed one — is deferred to a later slice. No new `@unique`/`@@unique` or migration was added, per the safety note below (a global unique on `lidarrRef` would 500 normal operation, since download-client ids legitimately repeat). Tests: `simpleDownloadManager.test.ts` (create-path P2002 race, matched-update-path P2002 race, no-winner-found non-throwing fallback, non-P2002 errors still reject) plus a new `webhooksGrabConcurrency.test.ts` proving the HTTP layer now returns an idempotent 2xx instead of 500 for the second (racing) Grab webhook.
 
 **Files:** `backend/src/services/simpleDownloadManager.ts:374`, `backend/src/services/simpleDownloadManager.ts:415`, `backend/src/services/simpleDownloadManager.ts:471`, `backend/prisma/schema.prisma`
 

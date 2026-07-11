@@ -2,6 +2,12 @@ import { Request, Response } from "express";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) => next(),
+    // releases.ts mounts router.use(requireAuth) at module scope; without this
+    // key the incomplete mock hands Router.use() undefined and the suite dies
+    // at load. Passthrough is correct here — this suite pins the
+    // downloads/releases compat surface, not auth (releasesRuntime.test.ts
+    // owns auth enforcement with the real middleware).
+    requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
 jest.mock("../../utils/logger", () => ({

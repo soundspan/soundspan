@@ -48,6 +48,8 @@ mock.module("lucide-react", {
         Pause: Icon,
         SkipBack: Icon,
         SkipForward: Icon,
+        RotateCcw: Icon,
+        RotateCw: Icon,
         Volume2: Icon,
         VolumeX: Icon,
         ChevronUp: Icon,
@@ -147,6 +149,8 @@ mock.module("@/lib/audio-controls-context", {
             toggleMute: () => undefined,
             toggleShuffle: () => undefined,
             toggleRepeat: () => undefined,
+            skipForward: () => undefined,
+            skipBackward: () => undefined,
         }),
     },
 });
