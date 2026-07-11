@@ -42,7 +42,7 @@ spec:
               containerPort: {{ .Values.tidalSidecar.port }}
               protocol: TCP
           {{- $tidalEnv := .Values.tidalSidecar.env | default (dict) }}
-          {{- $tidalExplicitEnvKeys := dict "TIDDL_PATH" true "MUSIC_PATH" true "TZ" true }}
+          {{- $tidalExplicitEnvKeys := dict "TIDDL_PATH" true "MUSIC_PATH" true "TZ" true "INTERNAL_API_SECRET" true }}
           env:
             {{- if hasKey $tidalEnv "TIDDL_PATH" }}
             - name: TIDDL_PATH
@@ -64,6 +64,16 @@ spec:
             {{- else }}
             - name: TZ
               value: {{ .Values.config.timezone | quote }}
+            {{- end }}
+            {{- if hasKey $tidalEnv "INTERNAL_API_SECRET" }}
+            - name: INTERNAL_API_SECRET
+              value: {{ index $tidalEnv "INTERNAL_API_SECRET" | quote }}
+            {{- else }}
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "soundspan.secretName" . }}
+                  key: INTERNAL_API_SECRET
             {{- end }}
             {{- range $key := keys $tidalEnv | sortAlpha }}
             {{- if not (hasKey $tidalExplicitEnvKeys $key) }}

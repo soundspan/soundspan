@@ -271,6 +271,9 @@ services:
             - MUSIC_PATH=/music
             # Seconds to wait between each track download to avoid TIDAL rate limits (default: 3)
             - TIDAL_TRACK_DELAY=${TIDAL_TRACK_DELAY:-3}
+            # Shared secret authenticating backend→sidecar calls (F31). Must match
+            # the backend's INTERNAL_API_SECRET or the sidecar rejects with 403.
+            - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
         volumes:
             - ${MUSIC_PATH:-./music}:/music
             - tidal_data:/data
@@ -338,6 +341,9 @@ services:
             # Max concurrent YouTube URL downloads (dedicated thread pool so
             # long downloads never starve streaming/search).
             YT_DOWNLOAD_CONCURRENCY: ${YT_DOWNLOAD_CONCURRENCY:-2}
+            # Shared secret authenticating backend→sidecar calls (F31). Must match
+            # the backend's INTERNAL_API_SECRET or the sidecar rejects with 403.
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
         volumes:
             - ytmusic_data:/data
             # Shared with the backend (read-write) so YouTube URL downloads
