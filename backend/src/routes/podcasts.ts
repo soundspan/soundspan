@@ -1401,8 +1401,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
         if (!fileSize) {
             try {
                 const headResponse = await axios.head(episode.audioUrl);
+                // axios >=1.18 types indexed header access as a union; coerce to string.
                 fileSize = parseInt(
-                    headResponse.headers["content-length"] || "0"
+                    String(headResponse.headers["content-length"] ?? "0")
                 );
                 if (Number.isFinite(fileSize) && fileSize > 0) {
                     await prisma.podcastEpisode.update({
@@ -1459,8 +1460,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                     res.writeHead(200, {
                         "Content-Type": episode.mimeType || "audio/mpeg",
                         "Accept-Ranges": "bytes",
-                        "Content-Length":
-                            response.headers["content-length"] || fileSize,
+                        "Content-Length": String(
+                            response.headers["content-length"] || fileSize
+                        ),
                         "Cache-Control": "public, max-age=3600",
                         "Access-Control-Allow-Origin":
                             req.headers.origin || "*",
@@ -1524,7 +1526,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                 res.writeHead(200, {
                     "Content-Type": episode.mimeType || "audio/mpeg",
                     "Accept-Ranges": "bytes",
-                    ...(contentLength && { "Content-Length": contentLength }),
+                    ...(contentLength && {
+                        "Content-Length": String(contentLength),
+                    }),
                     "Cache-Control": "public, max-age=3600",
                     "Access-Control-Allow-Origin": req.headers.origin || "*",
                     "Access-Control-Allow-Credentials": "true",
@@ -1572,7 +1576,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                 res.writeHead(200, {
                     "Content-Type": episode.mimeType || "audio/mpeg",
                     "Accept-Ranges": "bytes",
-                    ...(contentLength && { "Content-Length": contentLength }),
+                    ...(contentLength && {
+                        "Content-Length": String(contentLength),
+                    }),
                     "Cache-Control": "public, max-age=3600",
                     "Access-Control-Allow-Origin": req.headers.origin || "*",
                     "Access-Control-Allow-Credentials": "true",

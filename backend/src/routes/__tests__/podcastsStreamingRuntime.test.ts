@@ -902,7 +902,8 @@ describe("podcasts streaming/runtime behavior", () => {
         await streamHandler(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(res.headers["Content-Length"]).toBe(4000);
+        // Content-Length is stringified for axios >=1.18's union header type.
+        expect(res.headers["Content-Length"]).toBe("4000");
         expect(upstream.pipe).toHaveBeenCalledWith(res);
     });
 

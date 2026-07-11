@@ -878,12 +878,13 @@ router.get("/:id/stream", requireAuthOrToken, async (req, res) => {
         res.status(responseStatus);
 
         // Set content type - ensure it's audio
-        const contentType = headers["content-type"] || "audio/mpeg";
+        // axios >=1.18 types indexed header access as a union; coerce to string.
+        const contentType = String(headers["content-type"] || "audio/mpeg");
         res.setHeader("Content-Type", contentType);
 
         // Set other headers
         if (headers["content-length"]) {
-            res.setHeader("Content-Length", headers["content-length"]);
+            res.setHeader("Content-Length", String(headers["content-length"]));
         }
         if (headers["accept-ranges"]) {
             res.setHeader("Accept-Ranges", headers["accept-ranges"]);

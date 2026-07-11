@@ -281,7 +281,8 @@ async function performDownload(
             decompress: false
         });
         
-        const contentLength = parseInt(response.headers["content-length"] || "0", 10);
+        // axios >=1.18 types indexed header access as a union; coerce to string.
+        const contentLength = parseInt(String(response.headers["content-length"] ?? "0"), 10);
         let expectedBytes = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : 0;
 
         // If the origin provides Content-Length, treat it as ground truth and persist it.
