@@ -99,6 +99,23 @@ export function zoomAt(
     return bounds ? clampViewport(next, bounds) : next;
 }
 
+/** Dot radius bounds (px) for `computeDotRadius`. */
+export const MIN_DOT_RADIUS = 2.2;
+export const MAX_DOT_RADIUS = 9;
+
+/**
+ * Dot radius that scales gently with zoom relative to the fitted ("whole
+ * map visible") scale, so zooming in reveals bigger, more comfortable dots
+ * instead of a swarm of pinpricks. `fitScale` is the current dims' fit
+ * scale (`fitViewport(dims).scale`); at that scale the ratio is 1 and the
+ * radius is the base 3.5px.
+ */
+export function computeDotRadius(scale: number, fitScale: number): number {
+    const ratio = fitScale > 0 ? scale / fitScale : 1;
+    const r = 3.5 * Math.pow(ratio, 0.3);
+    return Math.min(MAX_DOT_RADIUS, Math.max(MIN_DOT_RADIUS, r));
+}
+
 /**
  * Return a viewport that centers `worldPt` on the screen at `targetScale`
  * (falling back to the current scale when `targetScale` is not finite), clamped

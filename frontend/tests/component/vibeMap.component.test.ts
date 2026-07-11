@@ -98,9 +98,9 @@ test("renders the spotlight input, mood chips and visible-count shell", async ()
     assert.match(html, />Party</);
     // "N of M visible" count element (pre-load count is 0 under static render).
     assert.match(html, /of\s+0\s+visible/);
-    // Energy/valence range filters are present.
+    // Energy/mood range filters are present (valence range relabeled "Mood").
     assert.match(html, /Energy/);
-    assert.match(html, /Valence/);
+    assert.match(html, /Mood/);
 });
 
 test("renders its shell without throwing when the map API rejects", async () => {

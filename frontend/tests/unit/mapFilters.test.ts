@@ -3,9 +3,20 @@ import test from "node:test";
 import {
     computeVisibilityMask,
     countVisible,
+    soloMoodSet,
+    toggleMoodInSet,
     type FilterableTrack,
     type MapFilterState,
 } from "../../components/vibe/useMapFilters";
+import { MOOD_COLORS } from "../../components/vibe/types";
+
+/**
+ * Subtractive contract: `activeMoods` starts (hook default) containing every
+ * mood key; a chip click removes/restores just that mood; shift-click solos
+ * one mood; an empty set is a legitimate "nothing visible" state, not a
+ * special "everything passes" case.
+ */
+const ALL_MOODS: ReadonlySet<string> = new Set(Object.keys(MOOD_COLORS));
 
 const tracks: FilterableTrack[] = [
     { dominantMood: "moodHappy", energy: 0.9, valence: 0.8 }, // 0
@@ -17,26 +28,54 @@ const tracks: FilterableTrack[] = [
 
 function filters(overrides: Partial<MapFilterState> = {}): MapFilterState {
     return {
-        activeMoods: new Set(),
+        activeMoods: ALL_MOODS,
         energyRange: [0, 1],
         valenceRange: [0, 1],
         ...overrides,
     };
 }
 
-test("empty activeMoods = all moods pass", () => {
+test("all-on init: every mood active means the mood filter passes everything", () => {
     const mask = computeVisibilityMask(tracks, filters());
     assert.deepEqual(Array.from(mask), [1, 1, 1, 1, 1]);
     assert.equal(countVisible(mask), 5);
 });
 
-test("mood toggle keeps only the selected moods", () => {
+test("empty activeMoods hides everything (legit zero-visible state, NOT 'all pass')", () => {
     const mask = computeVisibilityMask(
         tracks,
-        filters({ activeMoods: new Set(["moodHappy"]) })
+        filters({ activeMoods: new Set() })
     );
+    assert.deepEqual(Array.from(mask), [0, 0, 0, 0, 0]);
+    assert.equal(countVisible(mask), 0);
+});
+
+test("per-chip toggle: removing one mood from the full set hides only that mood, others unaffected", () => {
+    const afterToggleOff = toggleMoodInSet(ALL_MOODS, "moodSad");
+    assert.equal(afterToggleOff.has("moodSad"), false);
+    assert.equal(afterToggleOff.size, ALL_MOODS.size - 1);
+    for (const m of ALL_MOODS) {
+        if (m !== "moodSad") assert.equal(afterToggleOff.has(m), true);
+    }
+
+    const mask = computeVisibilityMask(
+        tracks,
+        filters({ activeMoods: afterToggleOff })
+    );
+    // moodSad tracks (1, 4) drop out; everything else still passes.
+    assert.deepEqual(Array.from(mask), [1, 0, 1, 1, 0]);
+
+    // Toggling the same chip again restores the full set exactly.
+    const afterToggleOn = toggleMoodInSet(afterToggleOff, "moodSad");
+    assert.deepEqual(afterToggleOn, new Set(ALL_MOODS));
+});
+
+test("solo (shift-click): isolates exactly one mood, discarding the rest", () => {
+    const solo = soloMoodSet("moodHappy");
+    assert.deepEqual(Array.from(solo), ["moodHappy"]);
+
+    const mask = computeVisibilityMask(tracks, filters({ activeMoods: solo }));
     assert.deepEqual(Array.from(mask), [1, 0, 1, 0, 0]);
-    assert.equal(countVisible(mask), 2);
 });
 
 test("multiple active moods union", () => {

@@ -13,6 +13,11 @@
  * Off-map neighbours/waypoints are intentionally not drawn — the panels list
  * them. Alchemy needs no decorations; its results glow via the canvas
  * highlight path instead.
+ *
+ * Positions come exclusively through `posOf` (the live natural-or-spread
+ * buffer resolved by index) so decorations never draw from a stale
+ * `track.x/y` while the spread layout is active or animating. `trackById` is
+ * kept around for metadata lookups only.
  */
 
 import { Fragment } from "react";
@@ -27,7 +32,10 @@ const ROUTE_COLOR = "#a78bfa";
 
 export interface MapDecorationsProps {
     viewport: Viewport;
+    /** Metadata-only lookup (title, artist, ...) — NOT for positions. */
     trackById: ReadonlyMap<string, MapTrack>;
+    /** Live position resolver (natural or spread, mid-animation-safe). */
+    posOf: (id: string) => { x: number; y: number } | null;
     travel: {
         currentId: string;
         breadcrumbIds: readonly string[];
@@ -51,21 +59,26 @@ export interface MapDecorationsProps {
 
 export function MapDecorations({
     viewport,
+    // Metadata-only (title, artist, ...); positions come from `posOf`. Not
+    // read by this component today but kept on the props contract for
+    // callers/tests and future decorations that need track metadata.
     trackById,
+    posOf,
     travel,
     journey,
     onHaloPointerDown,
     onHaloAddIngredient,
 }: MapDecorationsProps) {
+    void trackById;
     const nodes: React.ReactNode[] = [];
 
     if (travel) {
-        const origin = trackById.get(travel.currentId);
+        const originPos = posOf(travel.currentId);
         // Breadcrumb: a bolder trail through the on-map nodes visited so far.
         const crumbPts: { x: number; y: number }[] = [];
         for (const id of travel.breadcrumbIds) {
-            const t = trackById.get(id);
-            if (t) crumbPts.push(worldToScreen(viewport, t));
+            const p = posOf(id);
+            if (p) crumbPts.push(worldToScreen(viewport, p));
         }
         if (crumbPts.length >= 2) {
             nodes.push(
@@ -81,12 +94,12 @@ export function MapDecorations({
                 />
             );
         }
-        if (origin) {
-            const o = worldToScreen(viewport, origin);
+        if (originPos) {
+            const o = worldToScreen(viewport, originPos);
             for (const n of travel.onMapNeighbors) {
-                const t = trackById.get(n.id);
-                if (!t) continue;
-                const s = worldToScreen(viewport, t);
+                const p = posOf(n.id);
+                if (!p) continue;
+                const s = worldToScreen(viewport, p);
                 nodes.push(
                     <line
                         key={`edge-${n.id}`}
@@ -102,9 +115,9 @@ export function MapDecorations({
             }
             // Halos drawn after edges so they sit on top and stay clickable.
             for (const n of travel.onMapNeighbors) {
-                const t = trackById.get(n.id);
-                if (!t) continue;
-                const s = worldToScreen(viewport, t);
+                const p = posOf(n.id);
+                if (!p) continue;
+                const s = worldToScreen(viewport, p);
                 nodes.push(
                     <circle
                         key={`halo-${n.id}`}
@@ -145,12 +158,12 @@ export function MapDecorations({
 
     if (journey) {
         const pts: { x: number; y: number }[] = [];
-        const from = trackById.get(journey.fromId);
-        if (from) pts.push(worldToScreen(viewport, from));
+        const fromPos = posOf(journey.fromId);
+        if (fromPos) pts.push(worldToScreen(viewport, fromPos));
         const onMap = journey.waypoints.filter((w) => w.onMap);
         for (const w of onMap) {
-            const t = trackById.get(w.id);
-            if (t) pts.push(worldToScreen(viewport, t));
+            const p = posOf(w.id);
+            if (p) pts.push(worldToScreen(viewport, p));
         }
         if (pts.length >= 2) {
             nodes.push(
@@ -166,9 +179,9 @@ export function MapDecorations({
             );
         }
         for (const w of onMap) {
-            const t = trackById.get(w.id);
-            if (!t) continue;
-            const s = worldToScreen(viewport, t);
+            const p = posOf(w.id);
+            if (!p) continue;
+            const s = worldToScreen(viewport, p);
             nodes.push(
                 <Fragment key={`wp-${w.id}-${w.seq}`}>
                     <circle

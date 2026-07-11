@@ -4,8 +4,10 @@
  * MapCanvas — the 15k-dot canvas renderer.
  *
  * A pure renderer: it repaints only when its data props change (tracks,
- * viewport, dims, mask, highlight/dim, hovered). Animation (beacon pulse) lives
- * in MapOverlay via CSS — the dot canvas is NEVER rAF-repainted.
+ * viewport, dims, mask, highlight/dim, hovered, positions). Animation (beacon
+ * pulse) lives in MapOverlay via CSS — the dot canvas is NEVER rAF-repainted
+ * on its own; when the caller drives a layout-toggle animation it just feeds
+ * a new `positions` buffer each frame like any other prop change.
  *
  * Pointer handlers are pass-through props: the container owns interaction logic
  * (hit-test, zoom-at-cursor, click threshold) and attaches handlers here.
@@ -13,7 +15,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { Viewport } from "./mapViewport";
-import { worldToScreen } from "./mapViewport";
+import { computeDotRadius, fitViewport, worldToScreen } from "./mapViewport";
 import type { MapTrack } from "./types";
 import { getMoodColor } from "./types";
 
@@ -25,6 +27,14 @@ export interface MapCanvasProps {
     height: number;
     /** Index-aligned visibility mask (1 = visible, 0 = filtered out). */
     mask: Uint8Array;
+    /**
+     * Optional index-aligned `[x0,y0,x1,y1,...]` world (0..1) positions that
+     * override `track.x`/`track.y` when present — the single source of truth
+     * for where a dot is drawn once the spread layout is active (or
+     * mid-animation toward/away from it). Must be at least `tracks.length*2`
+     * long; otherwise it is ignored and natural `track.x/y` is used.
+     */
+    positions?: Float32Array;
     /** Spotlight matches: rendered with a radius + alpha boost and a glow ring. */
     highlightIds?: ReadonlySet<string> | null;
     /** When a highlight set is active, dim the non-matching visible dots. */
@@ -43,9 +53,9 @@ const TAU = Math.PI * 2;
 const DIM_ALPHA = 0.05; // filtered-out dots
 const BASE_ALPHA = 0.72;
 const NONMATCH_ALPHA = 0.12; // visible-but-not-a-spotlight-match while spotlighting
-const BASE_RADIUS = 3.5;
-const HOVER_RADIUS = 6;
-const GLOW_RADIUS = 6;
+const HOVER_BOOST = 2.5; // hover radius = r + HOVER_BOOST
+const GLOW_BOOST = 2.5; // spotlight-match radius = r + GLOW_BOOST
+const GLOW_RING_EXTRA = 3.5; // outer glow ring beyond the match radius
 const CULL_MARGIN = 12;
 
 export function MapCanvas(props: MapCanvasProps) {
@@ -55,6 +65,7 @@ export function MapCanvas(props: MapCanvasProps) {
         width,
         height,
         mask,
+        positions,
         highlightIds,
         dimUnhighlighted,
         hoveredId,
@@ -84,10 +95,16 @@ export function MapCanvas(props: MapCanvasProps) {
         ctx.clearRect(0, 0, width, height);
 
         const hasHighlight = !!highlightIds && highlightIds.size > 0;
+        const hasPositions = !!positions && positions.length >= tracks.length * 2;
+        const fitScale = fitViewport({ width, height }).scale;
+        const r = computeDotRadius(viewport.scale, fitScale);
 
         for (let i = 0; i < tracks.length; i++) {
             const t = tracks[i];
-            const s = worldToScreen(viewport, t);
+            const world = hasPositions
+                ? { x: positions![i * 2], y: positions![i * 2 + 1] }
+                : t;
+            const s = worldToScreen(viewport, world);
             if (
                 s.x < -CULL_MARGIN ||
                 s.x > width + CULL_MARGIN ||
@@ -101,16 +118,16 @@ export function MapCanvas(props: MapCanvasProps) {
             const isMatch = hasHighlight && highlightIds!.has(t.id);
             const isHovered = visible && hoveredId === t.id;
 
-            let radius = BASE_RADIUS;
+            let radius = r;
             let alpha: number;
             if (!visible) {
                 alpha = DIM_ALPHA;
             } else if (isHovered) {
-                radius = HOVER_RADIUS;
+                radius = r + HOVER_BOOST;
                 alpha = 1;
             } else if (hasHighlight) {
                 if (isMatch) {
-                    radius = GLOW_RADIUS;
+                    radius = r + GLOW_BOOST;
                     alpha = 1;
                 } else {
                     alpha = dimUnhighlighted ? NONMATCH_ALPHA : BASE_ALPHA;
@@ -124,7 +141,7 @@ export function MapCanvas(props: MapCanvasProps) {
             // Soft glow ring behind spotlight matches.
             if (visible && isMatch) {
                 ctx.beginPath();
-                ctx.arc(s.x, s.y, radius + 3.5, 0, TAU);
+                ctx.arc(s.x, s.y, radius + GLOW_RING_EXTRA, 0, TAU);
                 ctx.fillStyle = color;
                 ctx.globalAlpha = 0.22;
                 ctx.fill();
@@ -143,6 +160,7 @@ export function MapCanvas(props: MapCanvasProps) {
         width,
         height,
         mask,
+        positions,
         highlightIds,
         dimUnhighlighted,
         hoveredId,

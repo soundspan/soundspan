@@ -4,9 +4,15 @@
  * Filters are non-destructive: they produce a Uint8Array mask (1 = visible,
  * 0 = filtered out) that the canvas renders as full vs 0.05-alpha dots. Dots
  * are never removed.
+ *
+ * Mood chips are SUBTRACTIVE: `activeMoods` starts containing every mood
+ * (nothing is filtered out) and each chip click removes/restores just that
+ * mood. An empty set is a legitimate "nothing visible" state, not a special
+ * "all pass" case — the count label simply shows 0.
  */
 
 import { useCallback, useMemo, useState } from "react";
+import { MOOD_COLORS } from "./types";
 import type { MapTrack } from "./types";
 
 /** Minimal shape the pure filter core needs. */
@@ -17,12 +23,18 @@ export interface FilterableTrack {
 }
 
 export interface MapFilterState {
-    /** Empty set = all moods pass. Otherwise a track's dominantMood must be in it. */
+    /**
+     * Subtractive membership set: a track's `dominantMood` must be in this
+     * set to pass. An empty set hides every track (not "all pass").
+     */
     activeMoods: ReadonlySet<string>;
     /** Inclusive [lo, hi], each 0..1. A null feature always passes. */
     energyRange: readonly [number, number];
     valenceRange: readonly [number, number];
 }
+
+/** Every mood key, in payload order — the default "everything on" set. */
+const DEFAULT_MOOD_LIST: readonly string[] = Object.keys(MOOD_COLORS);
 
 function inRange(v: number | null, lo: number, hi: number): boolean {
     if (v == null) return true; // null features pass range filters
@@ -37,13 +49,12 @@ export function computeVisibilityMask(
     filters: MapFilterState
 ): Uint8Array {
     const { activeMoods, energyRange, valenceRange } = filters;
-    const allMoodsPass = activeMoods.size === 0;
     const [eLo, eHi] = energyRange;
     const [vLo, vHi] = valenceRange;
     const mask = new Uint8Array(tracks.length);
     for (let i = 0; i < tracks.length; i++) {
         const t = tracks[i];
-        const moodOk = allMoodsPass || activeMoods.has(t.dominantMood);
+        const moodOk = activeMoods.has(t.dominantMood);
         mask[i] =
             moodOk && inRange(t.energy, eLo, eHi) && inRange(t.valence, vLo, vHi)
                 ? 1
@@ -58,40 +69,70 @@ export function countVisible(mask: Uint8Array): number {
     return n;
 }
 
+/** Pure: toggle `mood`'s membership in `current`; every other mood is untouched. */
+export function toggleMoodInSet(
+    current: ReadonlySet<string>,
+    mood: string
+): Set<string> {
+    const next = new Set(current);
+    if (next.has(mood)) next.delete(mood);
+    else next.add(mood);
+    return next;
+}
+
+/** Pure: solo `mood` — the returned set contains only it. */
+export function soloMoodSet(mood: string): Set<string> {
+    return new Set([mood]);
+}
+
 export interface UseMapFilters {
     activeMoods: ReadonlySet<string>;
     energyRange: [number, number];
     valenceRange: [number, number];
     mask: Uint8Array;
     visibleCount: number;
+    /** Toggle exactly one chip; the rest are unaffected. */
     toggleMood: (mood: string) => void;
+    /** Shift-click behaviour: isolate exactly this mood. */
+    soloMood: (mood: string) => void;
+    /** "All" button: restore every mood. */
+    selectAllMoods: () => void;
     setEnergyRange: (range: [number, number]) => void;
     setValenceRange: (range: [number, number]) => void;
     reset: () => void;
 }
 
-/** Thin hook wrapping the pure core with React state. */
-export function useMapFilters(tracks: readonly MapTrack[]): UseMapFilters {
+/**
+ * Thin hook wrapping the pure core with React state. `moodList` defaults to
+ * every known mood key (`MOOD_COLORS`) and seeds the initial "all on" state.
+ */
+export function useMapFilters(
+    tracks: readonly MapTrack[],
+    moodList: readonly string[] = DEFAULT_MOOD_LIST
+): UseMapFilters {
     const [activeMoods, setActiveMoods] = useState<ReadonlySet<string>>(
-        () => new Set()
+        () => new Set(moodList)
     );
     const [energyRange, setEnergyRange] = useState<[number, number]>([0, 1]);
     const [valenceRange, setValenceRange] = useState<[number, number]>([0, 1]);
 
     const toggleMood = useCallback((mood: string) => {
-        setActiveMoods((prev) => {
-            const next = new Set(prev);
-            if (next.has(mood)) next.delete(mood);
-            else next.add(mood);
-            return next;
-        });
+        setActiveMoods((prev) => toggleMoodInSet(prev, mood));
     }, []);
 
+    const soloMood = useCallback((mood: string) => {
+        setActiveMoods(soloMoodSet(mood));
+    }, []);
+
+    const selectAllMoods = useCallback(() => {
+        setActiveMoods(new Set(moodList));
+    }, [moodList]);
+
     const reset = useCallback(() => {
-        setActiveMoods(new Set());
+        setActiveMoods(new Set(moodList));
         setEnergyRange([0, 1]);
         setValenceRange([0, 1]);
-    }, []);
+    }, [moodList]);
 
     const mask = useMemo(
         () =>
@@ -111,6 +152,8 @@ export function useMapFilters(tracks: readonly MapTrack[]): UseMapFilters {
         mask,
         visibleCount,
         toggleMood,
+        soloMood,
+        selectAllMoods,
         setEnergyRange,
         setValenceRange,
         reset,
