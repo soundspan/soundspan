@@ -494,9 +494,16 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
         lastSaveTimeRef.current = now;
         try {
+            // Write the FULL-PRECISION ref, not the quantized `currentTime`
+            // state: AudioPlaybackOrchestrator reads this key on initial track
+            // load to compute the engine's resume startTime, so writing the
+            // published state would regress resume-after-reload precision from
+            // ~250ms to ~1s. `currentTime` stays in the dep array purely as the
+            // ~1Hz re-check trigger; the ref is fresh at write time. Mirrors
+            // savePlaybackProgressToServer, which reads the same ref.
             writeMigratingStorageItem(
                 STORAGE_KEYS.CURRENT_TIME,
-                currentTime.toString()
+                currentTimeRef.current.toString()
             );
             if (state.playbackType === "track" && invocationTrackId) {
                 writeMigratingStorageItem(

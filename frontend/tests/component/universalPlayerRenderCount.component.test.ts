@@ -24,6 +24,15 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
  * reported 0 while UniversalPlayer actually re-rendered 8x). So the AUTHORITATIVE
  * count is a child-stub render counter (a mocked child re-renders exactly when
  * UniversalPlayer does): pre-fix child-render tick-phase = 8, post-fix = 0.
+ *
+ * The assertions are EXACT (=== 0 subtree renders, === 2 clock publishes), not
+ * bounds: a loose >=1/<=2 band would keep passing if quantization silently
+ * regressed to publishing every tick (8 publishes) while the subscription fix
+ * held. Exactness is deterministic here because the baseline is fully
+ * controlled: localStorage is cleared before mount (initial published clock 0),
+ * the tick sequence 0.25..2.0 crosses exactly two display-second boundaries
+ * (1.0 and 2.0), each tick runs in its own act() flush, and no timers or
+ * real audio are involved.
  */
 
 GlobalRegistrator.register();
@@ -101,7 +110,10 @@ after(() => {
 
 type EngineTickFn = (time: number, invocationTrackId?: string | null) => void;
 
-test("UniversalPlayer commits <= 2 renders across 8 clock ticks (real provider stack)", async (t) => {
+test("UniversalPlayer renders exactly 0 times across 8 clock ticks; clock publishes exactly 2 (real provider stack)", async (t) => {
+    // Deterministic baseline: the playback provider lazily restores currentTime
+    // from localStorage, so start from a clean slate (initial published clock 0).
+    localStorage.clear();
     const { createRoot } = await import("react-dom/client");
     const { AudioStateProvider } = await import("../../lib/audio-state-context");
     const { AudioPlaybackProvider, useAudioPlayback } = await import(
@@ -189,24 +201,30 @@ test("UniversalPlayer commits <= 2 renders across 8 clock ticks (real provider s
             `playback-subscriber tick-phase renders:${tickPlaybackRenders}`,
     );
 
-    // Non-vacuity control: the same 8 ticks DID re-render a real playback
-    // subscriber, so a 0 for UniversalPlayer is a genuine isolation result.
-    assert.ok(
-        tickPlaybackRenders >= 1,
-        `sanity: clock ticks must re-render a playback subscriber (got ${tickPlaybackRenders})`,
+    // Non-vacuity control AND quantization guard (item B): the 8 ticks must
+    // publish to state EXACTLY at the two display-second crossings (1.0, 2.0).
+    // More than 2 means quantization silently regressed toward per-tick
+    // publishing (pre-fix: 8); fewer means ticks stopped reaching state at all.
+    assert.equal(
+        tickPlaybackRenders,
+        2,
+        `clock ticks must publish exactly at the 2 display-second boundaries (got ${tickPlaybackRenders} playback-subscriber renders)`,
     );
 
     // Weak secondary signal (see the header note — the Profiler under-reports
-    // context-only re-renders here, so this passes trivially on both trees).
-    assert.ok(
-        tickCommits <= 2,
-        `UniversalPlayer Profiler commits must be <= 2 across 8 clock ticks (got ${tickCommits})`,
+    // context-only re-renders here; kept as a tripwire for renderer changes).
+    assert.equal(
+        tickCommits,
+        0,
+        `UniversalPlayer Profiler commits must be 0 across 8 clock ticks (got ${tickCommits})`,
     );
-    // AUTHORITATIVE guard: the child stub re-renders exactly when UniversalPlayer
-    // does. Pre-fix this is 8 (re-render every tick) and fails; post-fix it is 0.
-    assert.ok(
-        tickChildRenders <= 2,
-        `UniversalPlayer subtree must render <= 2 times across 8 clock ticks (child-render count ${tickChildRenders})`,
+    // AUTHORITATIVE guard (item A): the child stub re-renders exactly when
+    // UniversalPlayer does. Pre-fix this is 8 (re-render every tick); post-fix
+    // the subtree must not render at all during the tick phase.
+    assert.equal(
+        tickChildRenders,
+        0,
+        `UniversalPlayer subtree must render 0 times across 8 clock ticks (child-render count ${tickChildRenders})`,
     );
 
     await React.act(async () => {
