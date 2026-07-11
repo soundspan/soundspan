@@ -12,6 +12,7 @@
 import axios, { AxiosInstance } from "axios";
 import http from "node:http";
 import https from "node:https";
+import { config } from "../config";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { encrypt } from "../utils/encryption";
@@ -158,7 +159,13 @@ class TidalStreamingService {
         this.client = axios.create({
             baseURL: this.sidecarUrl,
             timeout: 30000,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                // Authenticate to the sidecar (F31); omitted when unset.
+                ...(config.internalApiSecret
+                    ? { "x-internal-secret": config.internalApiSecret }
+                    : {}),
+            },
             httpAgent: SIDE_CAR_HTTP_AGENT,
             httpsAgent: SIDE_CAR_HTTPS_AGENT,
         });
@@ -257,6 +264,20 @@ class TidalStreamingService {
         } catch {
             return { authenticated: false, credentialsConfigured: false };
         }
+    }
+
+    /**
+     * Ask the sidecar whether it already holds an in-memory session for this
+     * user. Goes through the authenticated client (F31) so it carries the
+     * internal secret; a network error propagates to the caller (which then
+     * falls back to restoring credentials from the DB).
+     */
+    async checkSidecarAuthStatus(userId: string): Promise<boolean> {
+        const { data } = await this.client.get(
+            `/user/auth/status?user_id=${encodeURIComponent(userId)}`,
+            { timeout: 5000 }
+        );
+        return data?.authenticated === true;
     }
 
     /**

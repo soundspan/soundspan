@@ -183,6 +183,11 @@ class YouTubeDownloadService {
                 timeout: 30_000,
                 httpAgent: new http.Agent(SIDECAR_AGENT_OPTIONS),
                 httpsAgent: new https.Agent(SIDECAR_AGENT_OPTIONS),
+                // Authenticate to the sidecar (F31). Omitted when unset so the
+                // sidecar rejects fail-closed rather than sending a blank header.
+                ...(config.internalApiSecret
+                    ? { headers: { "x-internal-secret": config.internalApiSecret } }
+                    : {}),
             });
         }
         return this._client;

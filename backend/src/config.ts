@@ -192,6 +192,11 @@ export const config = {
         url: process.env.YTMUSIC_STREAMER_URL || "http://127.0.0.1:8586",
     },
 
+    // Shared secret sent as the `x-internal-secret` header on backend→sidecar
+    // calls (F31). Optional, so booting without it never fails; when unset no
+    // header is sent and the FastAPI sidecars reject the call fail-closed (403).
+    internalApiSecret: process.env.INTERNAL_API_SECRET,
+
     allowedOrigins:
         allowedOriginsFromEnv ||
         (process.env.NODE_ENV === "development" ? true : []),

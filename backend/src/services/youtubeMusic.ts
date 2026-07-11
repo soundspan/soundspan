@@ -13,6 +13,7 @@
 import axios, { AxiosInstance } from "axios";
 import http from "node:http";
 import https from "node:https";
+import { config } from "../config";
 import { logger } from "../utils/logger";
 import type { CanonicalMediaSearchResult } from "@soundspan/media-metadata-contract";
 
@@ -327,6 +328,11 @@ class YouTubeMusicService {
             timeout: 30_000,
             httpAgent: SIDE_CAR_HTTP_AGENT,
             httpsAgent: SIDE_CAR_HTTPS_AGENT,
+            // Authenticate to the sidecar (F31). Omitted when unset so the
+            // sidecar rejects fail-closed rather than us sending a blank header.
+            ...(config.internalApiSecret
+                ? { headers: { "x-internal-secret": config.internalApiSecret } }
+                : {}),
         });
     }
 

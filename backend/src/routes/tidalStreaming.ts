@@ -20,7 +20,6 @@
  */
 
 import { Router, Request, Response } from "express";
-import axios from "axios";
 import { z } from "zod";
 import {
     requireAuth,
@@ -113,13 +112,14 @@ async function ensureUserOAuth(userId: string): Promise<boolean> {
     }
 
     const restorePromise = (async () => {
-        // Check if sidecar already has this user's session
+        // Check if sidecar already has this user's session. Goes through the
+        // authenticated service client (F31) so it carries the internal secret
+        // — a bare axios.get here would 403 forever after auth landed and be
+        // misread as "sidecar has no session".
         try {
-            const { data } = await axios.get(
-                `${process.env.TIDAL_SIDECAR_URL || "http://127.0.0.1:8585"}/user/auth/status?user_id=${encodeURIComponent(userId)}`,
-                { timeout: 5000 }
-            );
-            if (data.authenticated) {
+            const authenticated =
+                await tidalStreamingService.checkSidecarAuthStatus(userId);
+            if (authenticated) {
                 setTidalOAuthCache(userId, true);
                 return true;
             }

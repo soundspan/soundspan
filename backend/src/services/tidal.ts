@@ -8,6 +8,7 @@
  */
 
 import axios, { AxiosInstance } from "axios";
+import { config } from "../config";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
@@ -97,7 +98,13 @@ class TidalService {
         this.client = axios.create({
             baseURL: this.sidecarUrl,
             timeout: 300000, // 5 min — album downloads can be slow
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                // Authenticate to the sidecar (F31); omitted when unset.
+                ...(config.internalApiSecret
+                    ? { "x-internal-secret": config.internalApiSecret }
+                    : {}),
+            },
         });
     }
 
