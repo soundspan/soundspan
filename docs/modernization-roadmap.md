@@ -33,7 +33,7 @@ The audit found **0 true false positives** but several packaging/measurement err
 | #11 | Secrets & credential storage hardening | 4 / 0 / 4 |
 | #12 | Request-path auth & egress hardening | 6 / 1 / 8 |
 | #13 | Background-job idempotency, retries & reconciler dedup | 2 / 2 / 8 |
-| #14 | Backend error-handling unification & route god-file decomposition | 0 / 1 / 6 |
+| #14 | Backend error-handling unification & route god-file decomposition | 0 / 2 / 6 |
 | #15 | Type-safety ratchet (backend any + frontend strict + typed API) | 0 / 1 / 2 |
 | #16 | Frontend consolidation, decomposition & render performance | 0 / 1 / 5 |
 | #17 | Database & streaming performance | 1 / 3 / 5 |
@@ -58,7 +58,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 | ID | St | Dimension | Sev | Eff | Risk | Brk | Epic | Title |
 |----|----|-----------|-----|-----|------|-----|------|-------|
-| [F1](#f1) | ⬜ | readability | high | L | medium |  | #14 | No asyncHandler wrapper: ~130+ hand-rolled try/catch handlers bypass the existing error… |
+| [F1](#f1) | 🟡 | readability | high | L | medium |  | #14 | No asyncHandler wrapper: ~130+ hand-rolled try/catch handlers bypass the existing error… |
 | [F2](#f2) | ⬜ | readability | high | L | medium |  | #14 | library.ts is an 8324-LOC route god-file: 36 handlers, 121 direct prisma calls, 66 `any… |
 | [F3](#f3) | 🟡 | readability | high | L | medium |  | #15 | 888+ `any` across strict:true backend silently defeat the type system, concentrated on … |
 | [F4](#f4) | ⬜ | readability | high | L | medium |  | #15 | frontend `type ApiData = any` erases types on ~90 return slots; strict:false + ES2017 h… |
@@ -117,9 +117,11 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 
 ### F1 — No asyncHandler wrapper: ~130+ hand-rolled try/catch handlers bypass the existing errorHandler/AppError and duplicate the same logger.error+sendInternalRouteError boilerplate
 
-**⬜ open** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14
+**🟡 partial** · dimension: readability · severity: high · effort: L · risk: medium · epic: #14
 
 > **Audit note.** ✓ `ErrorCode` enum is 15-member (not 18); `errorHandler` is registered at index.ts:385 (not 402). Core thesis (asyncHandler 0×, three parallel error paths) holds.
+>
+> **Fix shipped (partial — infra + 31 library.ts tails)** (`refactor/f1-async-error-unification`). Recommendation items (a)+(b) landed as infrastructure with zero behavior change for existing callers: `AppError` gained an optional trailing `httpStatus` param (explicit status wins over the category map — `errorHandler` can now express 401/404/409 etc.; all 14 existing 3/4-arg call sites untouched), `ErrorCode` gained a generic `INTERNAL`, `middleware/asyncHandler.ts` exists (`Promise.resolve(fn(req,res,next)).catch(next)`, generic over express-4 handler type params), and the dead third error path `utils/errors.safeError` (0 production callers) is deleted. Migration tranche 1: all 33 `sendInternalRouteError` tails in `library.ts` were two-pass classified — (a) catch-body purity, (b) try-block AppError-throw reachability — and the 31 PURE tails now delegate via `asyncHandler`; the 2 MIXED tails (`/tracks/:id/stream`, `/tracks/:id/audio-info`) are **deliberately left hand-rolled** because their try blocks reach `audioStreaming.getStreamFilePath`, whose `AppError`s (`TRANSCODE_FAILED`/`DB_QUERY_ERROR` = RECOVERABLE) would be re-mapped 500→400 by `errorHandler` and would expose raw (prod-unredacted) messages — do not migrate them without first deciding those AppErrors' route-level semantics. Log context: the migrated routes' per-site catch strings ("Get tracks error:" etc.) are gone, replaced in the same change by `errorHandler`'s unhandled-error log line carrying `req.method` + `req.path` — route identification in logs is preserved, not genericized. Prod 500 bodies on migrated routes changed from route-specific `{"error":"Failed to …"}` to the errorHandler shape (CHANGELOG'd). Still open under #14: `subsonic.ts` (its `sendSubsonicError` protocol layer needs its own design — Subsonic errors ship as HTTP 200), the remaining `routeErrorResponse.ts` importers (`downloads.ts` 12, `discover.ts` 10, `systemSettings.ts` 3 `sendInternalRouteError` tails), other route files' hand-rolled tails, and the eventual Express-5 upgrade (F49) that retires the wrapper. Tests: `asyncHandler.test.ts` + extended `errorHandler.test.ts` (new infra pins incl. explicit-status precedence and the method+path log line); 27 migration-proof status-500 pins + 6 new uncovered-tail behavior tests across `libraryRuntime` / `libraryCoverArtCompat` / `libraryRadioVibeReliabilityCompat` / `libraryBranchCoverage` / `libraryRemotePreference`.
 
 **Files:** `backend/src/routes/library.ts`, `backend/src/routes/subsonic.ts`, `backend/src/middleware/errorHandler.ts`, `backend/src/routes/routeErrorResponse.ts`
 
