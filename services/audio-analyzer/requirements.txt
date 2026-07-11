@@ -7,4 +7,4 @@ redis>=4.5.0
 psycopg2-binary>=2.9.0
 
 # Numeric operations (compatible with older TensorFlow)
-numpy>=1.19.0,<1.24.0
+numpy>=2.5.1,<2.6.0
