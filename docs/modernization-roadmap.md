@@ -958,7 +958,7 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F50 — Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproducible ML images
 
-**✅ complete (#119)** · dimension: dependencies-build · severity: medium · effort: M · risk: low · epic: #10
+**✅ complete (PR #121)** · dimension: dependencies-build · severity: medium · effort: M · risk: low · epic: #10
 
 > **Audit note.** Per audit: 10 Essentia `.pb` files; CLAP checkpoint ~600MB per the repo comment (not ~2GB). CORRECTED 2026-07-11 — the checkpoint-size clause was backwards: measured 2,352,471,003 bytes ≈ 2.35 GB (HF `x-linked-size`); the repo's ~600MB comment was the wrong figure. See Fix shipped.
 
