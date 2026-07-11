@@ -1,0 +1,384 @@
+import { Request, Response } from "express";
+
+jest.mock("crypto", () => ({
+    randomUUID: jest.fn(() => "req-123"),
+}));
+
+jest.mock("../../middleware/auth", () => ({
+    requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
+}));
+
+jest.mock("../../utils/logger", () => ({
+    logger: {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+    },
+}));
+
+jest.mock("../../utils/db", () => ({
+    prisma: {
+        track: {
+            count: jest.fn(),
+            findUnique: jest.fn(),
+        },
+        moodBucket: {
+            groupBy: jest.fn(),
+        },
+        likedTrack: {
+            findMany: jest.fn(),
+        },
+        dislikedEntity: {
+            findMany: jest.fn(),
+        },
+        $queryRaw: jest.fn(),
+    },
+}));
+
+jest.mock("../../utils/redis", () => ({
+    redisClient: {
+        xAdd: jest.fn(),
+        blPop: jest.fn(),
+        del: jest.fn(),
+    },
+}));
+
+jest.mock("../../services/hybridSimilarity", () => ({
+    findSimilarTracks: jest.fn(),
+}));
+
+// Same boundary as vibeSearchCompat.test.ts: the ANN sites (findNearestToEmbedding)
+// route through the F14 helper, which applies ivfflat.probes in a transaction.
+// Mock it at that boundary so these tests assert route BEHAVIOUR on canned rows.
+// Plain embedding lookups (fetchTrackEmbedding, the mood-bucket join) stay on
+// prisma.$queryRaw.
+jest.mock("../../utils/annQuery", () => ({
+    runAnnQuery: jest.fn(),
+}));
+
+jest.mock("../../services/umapProjection", () => ({
+    computeMapProjection: jest.fn(),
+}));
+
+jest.mock("../../utils/embedding", () => ({
+    parseEmbedding: jest.fn((text: string) => {
+        const values = text.replace(/[\[\]]/g, "").split(",").map(Number);
+        return values;
+    }),
+}));
+
+jest.mock("../../services/vibeVocabulary", () => ({
+    loadVocabulary: jest.fn(),
+    getVocabulary: jest.fn(() => null),
+    expandQueryWithVocabulary: jest.fn((embedding: number[]) => ({
+        embedding,
+        genreConfidence: 0,
+        matchedTerms: [],
+    })),
+    rerankWithFeatures: jest.fn((tracks: unknown[]) => tracks),
+}));
+
+import router from "../vibe";
+import { prisma } from "../../utils/db";
+import { runAnnQuery } from "../../utils/annQuery";
+
+const mockTrackFindUnique = prisma.track.findUnique as jest.Mock;
+const mockMoodBucketGroupBy = prisma.moodBucket.groupBy as jest.Mock;
+const mockQueryRaw = prisma.$queryRaw as jest.Mock;
+const mockRunAnnQuery = runAnnQuery as jest.Mock;
+
+function getGetHandler(path: string) {
+    const layer = (router as any).stack.find(
+        (entry: any) => entry.route?.path === path && entry.route?.methods?.get
+    );
+    if (!layer) {
+        throw new Error(`Route not found: ${path}`);
+    }
+    return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+function getPostHandler(path: string) {
+    const layer = (router as any).stack.find(
+        (entry: any) => entry.route?.path === path && entry.route?.methods?.post
+    );
+    if (!layer) {
+        throw new Error(`Route not found: ${path}`);
+    }
+    return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+function createRes() {
+    const res: any = {
+        statusCode: 200,
+        body: undefined as unknown,
+        status: jest.fn(function (code: number) {
+            res.statusCode = code;
+            return res;
+        }),
+        json: jest.fn(function (payload: unknown) {
+            res.body = payload;
+            return res;
+        }),
+    };
+    return res;
+}
+
+function nearestRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+        id: "row-id",
+        title: "Row Title",
+        distance: 0.1,
+        albumId: "album-id",
+        albumTitle: "Album",
+        albumCoverUrl: null,
+        artistId: "artist-id",
+        artistName: "Artist",
+        ...overrides,
+    };
+}
+
+describe("vibe journey + moods runtime", () => {
+    const journeyHandler = getPostHandler("/journey");
+    const moodsHandler = getGetHandler("/moods");
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockQueryRaw.mockResolvedValue([]);
+        mockRunAnnQuery.mockResolvedValue([]);
+        mockTrackFindUnique.mockResolvedValue(null);
+        mockMoodBucketGroupBy.mockResolvedValue([]);
+    });
+
+    describe("POST /journey", () => {
+        it("returns 400 when both toTrackId and mood are given, and when neither is given", async () => {
+            const bothReq = {
+                body: { fromTrackId: "from-1", toTrackId: "dest-1", mood: "happy" },
+                user: { id: "user-1" },
+            } as any;
+            const bothRes = createRes();
+            await journeyHandler(bothReq, bothRes);
+            expect(bothRes.statusCode).toBe(400);
+
+            const neitherReq = {
+                body: { fromTrackId: "from-1" },
+                user: { id: "user-1" },
+            } as any;
+            const neitherRes = createRes();
+            await journeyHandler(neitherReq, neitherRes);
+            expect(neitherRes.statusCode).toBe(400);
+
+            expect(mockQueryRaw).not.toHaveBeenCalled();
+        });
+
+        it("returns 404 when fromTrackId has no embedding", async () => {
+            mockQueryRaw.mockResolvedValueOnce([]); // fromTrackId embedding lookup
+
+            const req = {
+                body: { fromTrackId: "missing-track", toTrackId: "dest-1" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body.error).toBe("Starting track has no embedding");
+        });
+
+        it("returns 404 when the destination mood has fewer than 5 embedded tracks", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId embedding
+                .mockResolvedValueOnce([
+                    { trackId: "sad-1", embedding: "[0,1,0]" },
+                    { trackId: "sad-2", embedding: "[0,1,0]" },
+                ]); // only 2 qualifying mood-bucket tracks
+
+            const req = {
+                body: { fromTrackId: "from-1", mood: "sad" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(404);
+        });
+
+        it("track mode: returns waypoints ending at the destination track", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]); // toTrackId
+            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
+            mockRunAnnQuery
+                .mockResolvedValueOnce([nearestRow({ id: "mid-1", title: "Mid One" })])
+                .mockResolvedValueOnce([nearestRow({ id: "mid-2", title: "Mid Two" })])
+                .mockResolvedValueOnce([
+                    nearestRow({ id: "dest-1", title: "Destination Song", distance: 0 }),
+                ]);
+
+            const req = {
+                body: { fromTrackId: "from-1", toTrackId: "dest-1", steps: 3 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.mode).toBe("track");
+            expect(res.body.target).toEqual({ trackId: "dest-1", title: "Destination Song" });
+            expect(res.body.waypoints).toHaveLength(3);
+            expect(res.body.waypoints[2]).toEqual(
+                expect.objectContaining({ id: "dest-1" })
+            );
+        });
+
+        it("clamps steps below the minimum up to 2", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]);
+            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
+            mockRunAnnQuery
+                .mockResolvedValueOnce([nearestRow({ id: "mid-1" })])
+                .mockResolvedValueOnce([
+                    nearestRow({ id: "dest-1", title: "Destination Song", distance: 0 }),
+                ]);
+
+            const req = {
+                body: { fromTrackId: "from-1", toTrackId: "dest-1", steps: 1 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.waypoints).toHaveLength(2);
+        });
+
+        it("clamps steps above the maximum down to 20", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]);
+            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
+
+            let call = 0;
+            mockRunAnnQuery.mockImplementation(() => {
+                call += 1;
+                return Promise.resolve([nearestRow({ id: `step-${call}`, title: `Step ${call}` })]);
+            });
+
+            const req = {
+                body: { fromTrackId: "from-1", toTrackId: "dest-1", steps: 50 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.waypoints).toHaveLength(20);
+        });
+
+        it("mood mode: returns waypoints toward the mood centroid", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId embedding
+                .mockResolvedValueOnce([
+                    { trackId: "happy-1", embedding: "[0,1,0]" },
+                    { trackId: "happy-2", embedding: "[0,1,0]" },
+                    { trackId: "happy-3", embedding: "[0,1,0]" },
+                    { trackId: "happy-4", embedding: "[0,1,0]" },
+                    { trackId: "happy-5", embedding: "[0,1,0]" },
+                ]); // mood bucket join, >=5 qualifying tracks
+            mockRunAnnQuery
+                .mockResolvedValueOnce([nearestRow({ id: "way-1", title: "Way One" })])
+                .mockResolvedValueOnce([nearestRow({ id: "way-2", title: "Way Two" })]);
+
+            const req = {
+                body: { fromTrackId: "from-1", mood: "happy", steps: 2 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.mode).toBe("mood");
+            expect(res.body.target).toEqual({ mood: "happy", label: "Happy & Upbeat" });
+            expect(res.body.waypoints).toHaveLength(2);
+            expect(res.body.waypoints[0]).toEqual(expect.objectContaining({ id: "way-1" }));
+        });
+
+        it("never returns an excluded track id as a waypoint", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]); // toTrackId
+            mockTrackFindUnique.mockResolvedValueOnce({ title: "Destination Song" });
+
+            const candidatePool = [
+                nearestRow({ id: "blocked-1", title: "Blocked", distance: 0.05 }),
+                nearestRow({ id: "cand-1", title: "Cand One", distance: 0.1 }),
+                nearestRow({ id: "cand-2", title: "Cand Two", distance: 0.12 }),
+                nearestRow({ id: "cand-3", title: "Cand Three", distance: 0.14 }),
+            ];
+
+            // Simulate the real ANN query's `WHERE te.track_id != ALL(excludeIds)`
+            // at the boundary: honor whichever exclude-id array the route actually
+            // threads through the Prisma.sql template, so a bug that drops
+            // excludeTrackIds surfaces as a blocked id in the response body.
+            mockRunAnnQuery.mockImplementation((sqlObj: any) => {
+                const excluded = new Set(
+                    (sqlObj.values as unknown[])
+                        .filter(
+                            (v): v is string[] =>
+                                Array.isArray(v) && (v.length === 0 || typeof v[0] === "string")
+                        )
+                        .flat()
+                );
+                const remaining = candidatePool.filter((c) => !excluded.has(c.id as string));
+                return Promise.resolve(remaining.length > 0 ? [remaining[0]] : []);
+            });
+
+            const req = {
+                body: {
+                    fromTrackId: "from-1",
+                    toTrackId: "dest-1",
+                    steps: 3,
+                    excludeTrackIds: ["blocked-1"],
+                },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            const ids = res.body.waypoints.map((w: any) => w.id);
+            expect(ids).not.toContain("blocked-1");
+            expect(ids).toEqual(["cand-1", "cand-2", "cand-3"]);
+        });
+    });
+
+    describe("GET /moods", () => {
+        it("returns trackCount for every canonical mood, defaulting missing moods to 0", async () => {
+            mockMoodBucketGroupBy.mockResolvedValueOnce([
+                { mood: "happy", _count: { _all: 42 } },
+                { mood: "chill", _count: { _all: 7 } },
+            ]);
+
+            const req = { user: { id: "user-1" } } as any;
+            const res = createRes();
+            await moodsHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body).toHaveLength(9);
+            expect(res.body).toEqual(
+                expect.arrayContaining([
+                    { mood: "happy", trackCount: 42 },
+                    { mood: "chill", trackCount: 7 },
+                    { mood: "sad", trackCount: 0 },
+                    { mood: "energetic", trackCount: 0 },
+                    { mood: "party", trackCount: 0 },
+                    { mood: "focus", trackCount: 0 },
+                    { mood: "melancholy", trackCount: 0 },
+                    { mood: "aggressive", trackCount: 0 },
+                    { mood: "acoustic", trackCount: 0 },
+                ])
+            );
+        });
+    });
+});

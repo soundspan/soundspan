@@ -3059,6 +3059,41 @@ class ApiClient {
         });
     }
 
+    async getVibeJourney(params: {
+        fromTrackId: string;
+        toTrackId?: string;
+        mood?: string;
+        steps?: number;
+        excludeTrackIds?: string[];
+    }) {
+        return this.request<{
+            mode: "track" | "mood";
+            target:
+                | { trackId: string; title: string }
+                | { mood: string; label: string };
+            waypoints: Array<{
+                id: string;
+                title: string;
+                distance: number;
+                similarity: number;
+                album: { id: string; title: string; coverUrl: string | null };
+                artist: { id: string; name: string };
+            }>;
+        }>("/vibe/journey", {
+            method: "POST",
+            body: JSON.stringify(params),
+        });
+    }
+
+    async getVibeMoods() {
+        return this.request<
+            Array<{
+                mood: string;
+                trackCount: number;
+            }>
+        >("/vibe/moods");
+    }
+
     async refreshAllPodcasts() {
         return this.request<{
             success: boolean;

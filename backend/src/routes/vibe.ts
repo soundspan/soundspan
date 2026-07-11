@@ -22,6 +22,7 @@ import {
     loadVocabulary,
     VocabTerm
 } from "../services/vibeVocabulary";
+import { MOOD_CONFIG, VALID_MOODS, MoodType } from "../services/moodBucketService";
 
 const router = Router();
 
@@ -243,6 +244,38 @@ function formatNearestTrack(row: NearestTrackRow) {
 }
 
 /**
+ * Walk from a starting embedding toward a target embedding, one interpolation
+ * step at a time, picking the nearest not-yet-used track at each step. Shared
+ * by /path (walk between two known tracks) and /journey (walk toward a track
+ * or a mood centroid) so the two never drift out of sync.
+ */
+async function walkEmbeddingSteps(
+    fromEmbed: number[],
+    targetEmbed: number[],
+    tValues: number[],
+    initialExcludeIds: string[]
+): Promise<ReturnType<typeof formatNearestTrack>[]> {
+    const usedIds = new Set(initialExcludeIds);
+    const stepResults: ReturnType<typeof formatNearestTrack>[] = [];
+
+    for (const t of tValues) {
+        const interpolated = lerpEmbedding(fromEmbed, targetEmbed, t);
+        const nearest = await findNearestToEmbedding(
+            interpolated,
+            5,
+            Array.from(usedIds)
+        );
+        if (nearest.length > 0) {
+            const pick = nearest[0];
+            usedIds.add(pick.id);
+            stepResults.push(formatNearestTrack(pick));
+        }
+    }
+
+    return stepResults;
+}
+
+/**
  * @openapi
  * /api/vibe/path:
  *   get:
@@ -315,28 +348,255 @@ router.get("/path", requireAuth, async (req, res) => {
                 .json({ error: "Ending track has no embedding" });
         }
 
-        const usedIds = new Set([fromId, toId]);
-        const stepResults = [];
-
-        for (let i = 1; i <= steps; i++) {
-            const t = i / (steps + 1);
-            const interpolated = lerpEmbedding(fromEmbed, toEmbed, t);
-            const nearest = await findNearestToEmbedding(
-                interpolated,
-                5,
-                Array.from(usedIds)
-            );
-            if (nearest.length > 0) {
-                const pick = nearest[0];
-                usedIds.add(pick.id);
-                stepResults.push(formatNearestTrack(pick));
-            }
-        }
+        const tValues = Array.from(
+            { length: steps },
+            (_, idx) => (idx + 1) / (steps + 1)
+        );
+        const stepResults = await walkEmbeddingSteps(
+            fromEmbed,
+            toEmbed,
+            tValues,
+            [fromId, toId]
+        );
 
         res.json({ from: fromId, to: toId, steps: stepResults });
     } catch (error: any) {
         logger.error("Vibe path error:", error);
         res.status(500).json({ error: "Failed to compute song path" });
+    }
+});
+
+const MIN_JOURNEY_STEPS = 2;
+const MAX_JOURNEY_STEPS = 20;
+const DEFAULT_JOURNEY_STEPS = 8;
+const MAX_JOURNEY_EXCLUDE_TRACK_IDS = 200;
+const MIN_MOOD_BUCKET_TRACKS = 5;
+const MOOD_BUCKET_MIN_SCORE = 0.5;
+const MOOD_BUCKET_POOL_LIMIT = 50;
+
+interface MoodBucketEmbeddingRow {
+    trackId: string;
+    embedding: string;
+}
+
+/**
+ * @openapi
+ * /api/vibe/journey:
+ *   post:
+ *     summary: Walk from a track toward a destination track or mood
+ *     description: Interpolates through CLAP embedding space from a starting track toward either a destination track or the centroid of a mood bucket, returning an ordered list of waypoint tracks.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fromTrackId
+ *             properties:
+ *               fromTrackId:
+ *                 type: string
+ *                 description: Starting track ID
+ *               toTrackId:
+ *                 type: string
+ *                 description: Destination track ID (exactly one of toTrackId/mood is required)
+ *               mood:
+ *                 type: string
+ *                 enum: [happy, sad, chill, energetic, party, focus, melancholy, aggressive, acoustic]
+ *                 description: Destination mood bucket (exactly one of toTrackId/mood is required)
+ *               steps:
+ *                 type: integer
+ *                 default: 8
+ *                 minimum: 2
+ *                 maximum: 20
+ *                 description: Number of waypoints to return
+ *               excludeTrackIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 maxItems: 200
+ *                 description: Track IDs to exclude from waypoints
+ *     responses:
+ *       200:
+ *         description: Ordered list of waypoint tracks toward the destination track or mood centroid
+ *       400:
+ *         description: Missing fromTrackId, not exactly one of toTrackId/mood, invalid mood, or excludeTrackIds invalid/too long
+ *       404:
+ *         description: Starting track has no embedding, destination track has no embedding, or the mood has fewer than 5 embedded tracks
+ *       401:
+ *         description: Not authenticated
+ */
+router.post("/journey", requireAuth, async (req, res) => {
+    try {
+        const { fromTrackId, toTrackId, mood, steps: requestedSteps, excludeTrackIds } = req.body ?? {};
+
+        if (typeof fromTrackId !== "string" || !fromTrackId) {
+            return res.status(400).json({ error: "fromTrackId is required" });
+        }
+
+        const hasToTrackId = typeof toTrackId === "string" && toTrackId.length > 0;
+        const hasMood = typeof mood === "string" && mood.length > 0;
+        if (hasToTrackId === hasMood) {
+            return res.status(400).json({
+                error: "Provide exactly one of toTrackId or mood",
+            });
+        }
+
+        if (hasMood && !VALID_MOODS.includes(mood as MoodType)) {
+            return res.status(400).json({
+                error: `Invalid mood. Must be one of: ${VALID_MOODS.join(", ")}`,
+            });
+        }
+
+        let excludeIds: string[] = [];
+        if (excludeTrackIds !== undefined) {
+            if (
+                !Array.isArray(excludeTrackIds) ||
+                excludeTrackIds.some((id: unknown) => typeof id !== "string")
+            ) {
+                return res.status(400).json({
+                    error: "excludeTrackIds must be an array of strings",
+                });
+            }
+            if (excludeTrackIds.length > MAX_JOURNEY_EXCLUDE_TRACK_IDS) {
+                return res.status(400).json({
+                    error: `excludeTrackIds cannot exceed ${MAX_JOURNEY_EXCLUDE_TRACK_IDS} entries`,
+                });
+            }
+            excludeIds = excludeTrackIds;
+        }
+
+        const steps = Math.min(
+            Math.max(MIN_JOURNEY_STEPS, requestedSteps || DEFAULT_JOURNEY_STEPS),
+            MAX_JOURNEY_STEPS
+        );
+
+        const fromEmbed = await fetchTrackEmbedding(fromTrackId);
+        if (!fromEmbed) {
+            return res
+                .status(404)
+                .json({ error: "Starting track has no embedding" });
+        }
+
+        let mode: "track" | "mood";
+        let targetEmbed: number[];
+        let target: { trackId: string; title: string } | { mood: string; label: string };
+
+        if (hasToTrackId) {
+            mode = "track";
+            const toEmbed = await fetchTrackEmbedding(toTrackId);
+            if (!toEmbed) {
+                return res
+                    .status(404)
+                    .json({ error: "Destination track has no embedding" });
+            }
+            targetEmbed = toEmbed;
+
+            const destinationTrack = await prisma.track.findUnique({
+                where: { id: toTrackId },
+                select: { title: true },
+            });
+            target = { trackId: toTrackId, title: destinationTrack?.title ?? toTrackId };
+        } else {
+            mode = "mood";
+            const moodKey = mood as MoodType;
+
+            // Blessed raw-SQL join beside fetchTrackEmbedding/findNearestToEmbedding:
+            // pulls the top-scoring embedded tracks in this mood bucket so we can
+            // average their vectors into a target centroid via blendEmbeddings.
+            const moodTracks = await prisma.$queryRaw<MoodBucketEmbeddingRow[]>`
+                SELECT mb."trackId", te.embedding::text AS embedding
+                FROM "MoodBucket" mb
+                JOIN track_embeddings te ON te.track_id = mb."trackId"
+                WHERE mb.mood = ${moodKey} AND mb.score >= ${MOOD_BUCKET_MIN_SCORE}
+                ORDER BY mb.score DESC
+                LIMIT ${MOOD_BUCKET_POOL_LIMIT}
+            `;
+
+            if (moodTracks.length < MIN_MOOD_BUCKET_TRACKS) {
+                return res.status(404).json({
+                    error: `Mood '${moodKey}' does not have enough embedded tracks for a journey`,
+                });
+            }
+
+            const moodEmbeddings = moodTracks.map((row) => parseEmbedding(row.embedding));
+            targetEmbed = blendEmbeddings(
+                moodEmbeddings,
+                moodEmbeddings.map(() => 1)
+            );
+            target = { mood: moodKey, label: MOOD_CONFIG[moodKey].name };
+        }
+
+        const tValues = Array.from({ length: steps }, (_, idx) => (idx + 1) / steps);
+        const waypoints = await walkEmbeddingSteps(
+            fromEmbed,
+            targetEmbed,
+            tValues,
+            [fromTrackId, ...excludeIds]
+        );
+
+        res.json({ mode, target, waypoints });
+    } catch (error: any) {
+        logger.error("Vibe journey error:", error);
+        res.status(500).json({ error: "Failed to compute vibe journey" });
+    }
+});
+
+/**
+ * @openapi
+ * /api/vibe/moods:
+ *   get:
+ *     summary: List moods usable as journey/drift anchors
+ *     description: Returns each canonical mood with the count of qualifying bucket tracks that also have a CLAP embedding, so the UI can enable/disable mood-based journey targets.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Moods with embedded-track counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   mood:
+ *                     type: string
+ *                   trackCount:
+ *                     type: integer
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/moods", requireAuth, async (_req, res) => {
+    try {
+        const grouped = await prisma.moodBucket.groupBy({
+            by: ["mood"],
+            where: {
+                score: { gte: MOOD_BUCKET_MIN_SCORE },
+                track: { embedding: { isNot: null } },
+            },
+            _count: { _all: true },
+        });
+
+        const countsByMood = new Map(
+            grouped.map((row) => [row.mood, row._count._all])
+        );
+
+        res.json(
+            VALID_MOODS.map((mood) => ({
+                mood,
+                trackCount: countsByMood.get(mood) ?? 0,
+            }))
+        );
+    } catch (error: any) {
+        logger.error("Vibe moods error:", error);
+        res.status(500).json({ error: "Failed to list moods" });
     }
 });
 
