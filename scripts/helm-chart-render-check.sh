@@ -26,10 +26,11 @@ fi
 tmp_aio="$(mktemp)"
 tmp_individual_ha="$(mktemp)"
 tmp_global_env="$(mktemp)"
+tmp_sidecars="$(mktemp)"
 tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_individual_ha" "$tmp_global_env" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing"' EXIT
+trap 'rm -f "$tmp_aio" "$tmp_individual_ha" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -91,6 +92,34 @@ if ! perl -0777 -ne 'exit((/configMapRef:\s+name:\s+soundspan-global-env/s) ? 0 
   echo "[ERROR] global.env render missing envFrom configMapRef wiring" >&2
   exit 1
 fi
+
+# Sidecar auth (F31): the default renders never enable the HTTP sidecars, so
+# without this check the tidal/ytmusic templates are never exercised at all.
+# Both must consume INTERNAL_API_SECRET from the chart-managed Secret
+# (soundspan.secretName -> fullname, i.e. the release name by default).
+echo "[CHECK] render HTTP sidecars with INTERNAL_API_SECRET secretKeyRef"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  --set tidalSidecar.enabled=true \
+  --set ytmusicStreamer.enabled=true \
+  >"$tmp_sidecars"
+
+for sidecar in tidal ytmusic; do
+  if ! line_match '^  name: '"$RELEASE_NAME"'-'"$sidecar"'$' "$tmp_sidecars"; then
+    echo "[ERROR] sidecar render missing ${sidecar} deployment/service resources" >&2
+    exit 1
+  fi
+  if ! perl -0777 -ne '
+      for my $doc (split /^---/m, $_) {
+          next unless $doc =~ /kind:\s*Deployment/;
+          next unless $doc =~ /^  name: '"$RELEASE_NAME"'-'"$sidecar"'$/m;
+          exit 0 if $doc =~ /name:\s+INTERNAL_API_SECRET\s+valueFrom:\s+secretKeyRef:\s+name:\s+'"$RELEASE_NAME"'\s+key:\s+INTERNAL_API_SECRET/s;
+      }
+      exit 1' "$tmp_sidecars"; then
+    echo "[ERROR] ${sidecar} sidecar Deployment missing INTERNAL_API_SECRET secretKeyRef (name: ${RELEASE_NAME}, key: INTERNAL_API_SECRET)" >&2
+    exit 1
+  fi
+done
 
 # Secret generation (F22): the stable-lookup template must still render a
 # complete Secret on first install / dry-run (where `lookup` returns nil and the
