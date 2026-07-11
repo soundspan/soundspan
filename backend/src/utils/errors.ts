@@ -35,17 +35,29 @@ export enum ErrorCode {
     // Database errors
     DB_CONNECTION_ERROR = "DB_CONNECTION_ERROR",
     DB_QUERY_ERROR = "DB_QUERY_ERROR",
+
+    // Generic route errors (F1: asyncHandler-wrapped route handlers that have
+    // no more specific code — e.g. a plain 401/404/409 thrown as an AppError
+    // with an explicit httpStatus, or a genuinely-unclassified route 500)
+    INTERNAL = "INTERNAL",
 }
 
 /**
  * Custom application error class
  */
 export class AppError extends Error {
+    /**
+     * @param httpStatus Optional explicit HTTP status. When set, it wins over
+     * the ErrorCategory->status mapping in middleware/errorHandler.ts (which
+     * can only express 400/503/500) — use it for anything else, e.g. 401,
+     * 404, 409. Omit it to keep today's category-based mapping unchanged.
+     */
     constructor(
         public code: ErrorCode,
         public category: ErrorCategory,
         message: string,
-        public details?: any
+        public details?: any,
+        public httpStatus?: number
     ) {
         super(message);
         this.name = "AppError";
