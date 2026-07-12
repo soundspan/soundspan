@@ -25,12 +25,18 @@ const DIRECTION_LABEL: Record<CompassDirection, string> = {
 
 /** Shared glass surface for the F2 mode panels: floats over the viz, sits to
  *  the left of the top-right ViewControls stack on desktop, and drops to a
- *  bottom sheet below sm. */
+ *  bottom sheet below sm. Pair with VIBE_PANEL_STYLE, which anchors the sheet
+ *  above the mobile mini player (--vibe-binset, 0px on desktop/fullscreen). */
 export const VIBE_PANEL_CLASS =
-    "absolute z-40 inset-x-0 bottom-0 sm:inset-x-auto sm:right-20 sm:top-3 " +
+    "absolute z-40 inset-x-0 sm:inset-x-auto sm:right-20 sm:top-3 " +
     "sm:w-72 max-h-[75%] sm:max-h-[calc(100%-1.5rem)] overflow-y-auto " +
     "bg-black/60 border border-white/10 rounded-t-xl sm:rounded-xl " +
     "backdrop-blur-md px-3 py-3 shadow-lg";
+
+/** Bottom anchor for the mode panels (was `bottom-0`; see VIBE_PANEL_CLASS). */
+export const VIBE_PANEL_STYLE: React.CSSProperties = {
+    bottom: "var(--vibe-binset, 0px)",
+};
 
 /** Close (✕) button with a humane ≥40px hit area, negatively margined so it
  *  doesn't inflate the panel header. */
@@ -103,7 +109,11 @@ export function TravelPanel({ view }: { view: TravelView }) {
         offMapNeighbors.length === 0;
 
     return (
-        <div className={VIBE_PANEL_CLASS} data-vibe-panel="travel">
+        <div
+            className={VIBE_PANEL_CLASS}
+            style={VIBE_PANEL_STYLE}
+            data-vibe-panel="travel"
+        >
             <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm font-semibold text-white">Travel</span>
                 <button

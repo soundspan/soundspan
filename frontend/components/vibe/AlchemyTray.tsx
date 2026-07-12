@@ -8,7 +8,7 @@
  */
 
 import { FlaskConical, Loader2, Play, X } from "lucide-react";
-import { VIBE_PANEL_CLASS, PANEL_CLOSE_CLASS } from "./TravelPanel";
+import { VIBE_PANEL_CLASS, VIBE_PANEL_STYLE, PANEL_CLOSE_CLASS } from "./TravelPanel";
 import { MAX_ALCHEMY_INGREDIENTS, MIN_WEIGHT, MAX_WEIGHT } from "./useVibeMode";
 import type { AlchemyView } from "./useVibeMode";
 
@@ -27,7 +27,11 @@ export function AlchemyTray({ view }: { view: AlchemyView }) {
     } = view;
 
     return (
-        <div className={VIBE_PANEL_CLASS} data-vibe-panel="alchemy">
+        <div
+            className={VIBE_PANEL_CLASS}
+            style={VIBE_PANEL_STYLE}
+            data-vibe-panel="alchemy"
+        >
             <div className="flex items-center gap-2 mb-2">
                 <FlaskConical className="w-4 h-4 text-fuchsia-300" />
                 <span className="text-sm font-semibold text-white">Alchemy</span>

@@ -9,7 +9,7 @@
  */
 
 import { Loader2, MapPin, Play, Route, X } from "lucide-react";
-import { VIBE_PANEL_CLASS, PANEL_CLOSE_CLASS } from "./TravelPanel";
+import { VIBE_PANEL_CLASS, VIBE_PANEL_STYLE, PANEL_CLOSE_CLASS } from "./TravelPanel";
 import type { JourneyView } from "./useVibeMode";
 
 /** Mood buckets thinner than this can't seed a journey (mirrors the backend). */
@@ -43,7 +43,11 @@ export function JourneyPanel({ view }: { view: JourneyView }) {
     const driftable = moods.filter((m) => m.trackCount >= MIN_MOOD_TRACKS);
 
     return (
-        <div className={VIBE_PANEL_CLASS} data-vibe-panel="journey">
+        <div
+            className={VIBE_PANEL_CLASS}
+            style={VIBE_PANEL_STYLE}
+            data-vibe-panel="journey"
+        >
             <div className="flex items-center gap-2 mb-2">
                 <Route className="w-4 h-4 text-indigo-300" />
                 <span className="text-sm font-semibold text-white">Journey</span>

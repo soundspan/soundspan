@@ -110,12 +110,14 @@ export function NowPlayingCard({
                 </span>
             </button>
 
+            {/* Play/pause renders at every width: in fullscreen the map covers
+                the mini player, making this card the only transport on mobile. */}
             <button
                 type="button"
                 onClick={onTogglePlay}
                 aria-label={isPlaying ? "Pause" : "Play"}
                 title={isPlaying ? "Pause" : "Play"}
-                className="hidden sm:flex flex-shrink-0 items-center justify-center w-10 h-10 rounded-lg text-gray-200 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 transition-colors"
+                className="flex flex-shrink-0 items-center justify-center w-10 h-10 rounded-lg text-gray-200 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 transition-colors"
             >
                 {isPlaying ? (
                     <Pause className="w-5 h-5" />

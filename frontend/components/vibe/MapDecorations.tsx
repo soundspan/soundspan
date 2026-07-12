@@ -84,6 +84,7 @@ export function MapDecorations({
             nodes.push(
                 <polyline
                     key="travel-breadcrumb"
+                    className="vibe-deco-in"
                     points={crumbPts.map((p) => `${p.x},${p.y}`).join(" ")}
                     fill="none"
                     stroke={EDGE_COLOR}
@@ -103,6 +104,7 @@ export function MapDecorations({
                 nodes.push(
                     <line
                         key={`edge-${n.id}`}
+                        className="vibe-deco-in"
                         x1={o.x}
                         y1={o.y}
                         x2={s.x}
@@ -121,6 +123,7 @@ export function MapDecorations({
                 nodes.push(
                     <circle
                         key={`halo-${n.id}`}
+                        className="vibe-deco-in"
                         cx={s.x}
                         cy={s.y}
                         r={8}
@@ -146,6 +149,7 @@ export function MapDecorations({
             nodes.push(
                 <circle
                     key="travel-origin"
+                    className="vibe-deco-in"
                     cx={o.x}
                     cy={o.y}
                     r={5}
@@ -169,6 +173,7 @@ export function MapDecorations({
             nodes.push(
                 <polyline
                     key="journey-line"
+                    className="vibe-deco-in"
                     points={pts.map((p) => `${p.x},${p.y}`).join(" ")}
                     fill="none"
                     stroke={ROUTE_COLOR}
@@ -185,6 +190,7 @@ export function MapDecorations({
             nodes.push(
                 <Fragment key={`wp-${w.id}-${w.seq}`}>
                     <circle
+                        className="vibe-deco-in"
                         cx={s.x}
                         cy={s.y}
                         r={9}
@@ -193,6 +199,7 @@ export function MapDecorations({
                         strokeWidth={1.75}
                     />
                     <text
+                        className="vibe-deco-in"
                         x={s.x}
                         y={s.y + 3}
                         textAnchor="middle"

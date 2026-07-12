@@ -305,6 +305,8 @@ export interface UseVibeMode {
         id: string,
         mods: { ctrlOrMeta: boolean; shift: boolean }
     ) => void;
+    /** A click on clearly-empty canvas: dissolves travel; other modes ignore it. */
+    onEmptyClick: () => void;
     exitToExplore: () => void;
     canStartJourney: boolean;
     startJourney: () => void;
@@ -325,7 +327,16 @@ export function useVibeMode({
     const [state, dispatch] = useReducer(reducer, { mode: "explore" });
 
     // --- async overlay state ------------------------------------------------
-    const [rawNeighbors, setRawNeighbors] = useState<CompassCandidate[]>([]);
+    // Neighbours are tagged with the origin they were fetched for, and every
+    // consumer derives [] unless the tag matches the CURRENT travel origin.
+    // This is what kills the "strings stay behind" bug: navigating to a new
+    // node instantly hides the old node's constellation (no frame ever draws
+    // edges from the new origin to the old origin's neighbours), without any
+    // clear-before-fetch effect-ordering games.
+    const [rawNeighbors, setRawNeighbors] = useState<{
+        originId: string;
+        list: CompassCandidate[];
+    } | null>(null);
     const [travelLoading, setTravelLoading] = useState(false);
     const [travelError, setTravelError] = useState<string | null>(null);
 
@@ -359,7 +370,7 @@ export function useVibeMode({
     const activeMode = state.mode;
     useEffect(() => {
         if (activeMode !== "travel") {
-            setRawNeighbors([]);
+            setRawNeighbors(null);
             setTravelError(null);
         }
         if (activeMode !== "journey") {
@@ -382,8 +393,9 @@ export function useVibeMode({
         api.getVibeSimilarTracks(travelCurrentId, SIMILAR_LIMIT)
             .then((res) => {
                 if (cancelled) return;
-                setRawNeighbors(
-                    res.tracks.map((t) => ({
+                setRawNeighbors({
+                    originId: travelCurrentId,
+                    list: res.tracks.map((t) => ({
                         id: t.id,
                         title: t.title,
                         album: t.album,
@@ -393,8 +405,8 @@ export function useVibeMode({
                         energy: t.audioFeatures?.energy ?? null,
                         valence: t.audioFeatures?.valence ?? null,
                         moods: null,
-                    }))
-                );
+                    })),
+                });
             })
             .catch(() => {
                 if (!cancelled) setTravelError("Couldn't load nearby vibes");
@@ -425,10 +437,10 @@ export function useVibeMode({
     }, [inJourney, moods.length]);
 
     // --- derived: travel neighbours ----------------------------------------
-    const enrichedNeighbors = useMemo(
-        () => enrichFromMap(rawNeighbors, trackById),
-        [rawNeighbors, trackById]
-    );
+    const enrichedNeighbors = useMemo(() => {
+        if (!rawNeighbors || rawNeighbors.originId !== travelCurrentId) return [];
+        return enrichFromMap(rawNeighbors.list, trackById);
+    }, [rawNeighbors, travelCurrentId, trackById]);
     const travelOrigin =
         travelCurrentId != null ? trackById.get(travelCurrentId) : undefined;
     const shownNeighbors = useMemo(() => {
@@ -468,6 +480,15 @@ export function useVibeMode({
 
     // --- actions ------------------------------------------------------------
     const exitToExplore = useCallback(() => dispatch({ type: "RESET" }), []);
+
+    // Click-away: clicking clearly-empty canvas dissolves a travel
+    // constellation (the map idiom for "deselect"). Journey and alchemy keep
+    // their form state — an accidental empty click must never clear a
+    // half-built route or ingredient tray; those exit via Esc / ✕ only.
+    const inTravel = state.mode === "travel";
+    const onEmptyClick = useCallback(() => {
+        if (inTravel) dispatch({ type: "RESET" });
+    }, [inTravel]);
 
     const addIngredient = useCallback(
         (id: string) => {
@@ -754,6 +775,7 @@ export function useVibeMode({
     return {
         mode: state.mode,
         onDotClick,
+        onEmptyClick,
         exitToExplore,
         canStartJourney,
         startJourney,

@@ -42,10 +42,13 @@ export interface MapCanvasProps {
     /** Currently hovered track id (enlarged, opaque). */
     hoveredId?: string | null;
     className?: string;
-    onWheel?: (e: React.WheelEvent<HTMLCanvasElement>) => void;
+    // NOTE: wheel is deliberately NOT a React prop — React attaches wheel
+    // listeners passively (preventDefault is a no-op), so the container owns a
+    // native non-passive listener instead. See VibeMap's wheel effect.
     onPointerDown?: (e: React.PointerEvent<HTMLCanvasElement>) => void;
     onPointerMove?: (e: React.PointerEvent<HTMLCanvasElement>) => void;
     onPointerUp?: (e: React.PointerEvent<HTMLCanvasElement>) => void;
+    onPointerCancel?: (e: React.PointerEvent<HTMLCanvasElement>) => void;
     onPointerLeave?: (e: React.PointerEvent<HTMLCanvasElement>) => void;
 }
 
@@ -70,10 +73,10 @@ export function MapCanvas(props: MapCanvasProps) {
         dimUnhighlighted,
         hoveredId,
         className,
-        onWheel,
         onPointerDown,
         onPointerMove,
         onPointerUp,
+        onPointerCancel,
         onPointerLeave,
     } = props;
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -174,10 +177,10 @@ export function MapCanvas(props: MapCanvasProps) {
         <canvas
             ref={canvasRef}
             className={className ?? "absolute inset-0 touch-none"}
-            onWheel={onWheel}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
             onPointerLeave={onPointerLeave}
         />
     );

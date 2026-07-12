@@ -137,3 +137,77 @@ export function flyTo(
     };
     return clampViewport(next, bounds);
 }
+
+/** Axis-aligned box in world (0..1) space. */
+export interface WorldBounds {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+}
+
+/** Padding (px) kept around a fitted bounds box. */
+export const FIT_BOUNDS_PADDING = 80;
+
+/**
+ * Max zoom-in for `fitBounds`, as a multiple of the whole-map fit scale. Keeps
+ * a degenerate box (all points in one spot) from slamming into MAX_SCALE.
+ */
+export const FIT_BOUNDS_MAX_ZOOM = 8;
+
+/**
+ * Viewport that centers `b` on screen at the largest uniform scale that keeps
+ * the whole box visible inside `padding`, capped at FIT_BOUNDS_MAX_ZOOM × the
+ * whole-map fit scale, then translation-clamped.
+ */
+export function fitBounds(
+    b: WorldBounds,
+    bounds: MapDims,
+    padding: number = FIT_BOUNDS_PADDING
+): Viewport {
+    const w = Math.max(1e-6, b.maxX - b.minX);
+    const h = Math.max(1e-6, b.maxY - b.minY);
+    const boxW = Math.max(1, bounds.width - 2 * padding);
+    const boxH = Math.max(1, bounds.height - 2 * padding);
+    const maxScale = fitViewport(bounds).scale * FIT_BOUNDS_MAX_ZOOM;
+    const scale = clampScale(Math.min(boxW / w, boxH / h, maxScale));
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    return clampViewport(
+        {
+            scale,
+            tx: bounds.width / 2 - cx * scale,
+            ty: bounds.height / 2 - cy * scale,
+        },
+        bounds
+    );
+}
+
+/**
+ * Eased-camera interpolation between two viewports: the world point at screen
+ * center travels linearly while scale interpolates in log space, so combined
+ * pan+zoom flights track a stable focus instead of drifting. `t` is the eased
+ * progress in [0,1]; endpoints are returned exactly. Deliberately unclamped —
+ * callers clamp the endpoints, and transiently exceeding the pan clamp mid-
+ * flight is harmless.
+ */
+export function interpolateViewport(
+    from: Viewport,
+    to: Viewport,
+    t: number,
+    bounds: MapDims
+): Viewport {
+    if (t <= 0) return from;
+    if (t >= 1) return to;
+    const center = { x: bounds.width / 2, y: bounds.height / 2 };
+    const c0 = screenToWorld(from, center);
+    const c1 = screenToWorld(to, center);
+    const scale = from.scale * Math.pow(to.scale / from.scale, t);
+    const cx = c0.x + (c1.x - c0.x) * t;
+    const cy = c0.y + (c1.y - c0.y) * t;
+    return {
+        scale,
+        tx: center.x - cx * scale,
+        ty: center.y - cy * scale,
+    };
+}

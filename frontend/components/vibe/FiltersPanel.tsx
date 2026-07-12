@@ -174,9 +174,16 @@ export function FiltersPanel({
         setValenceRange,
     } = filters;
 
+    // Floating bottom UI clears the mobile mini player via --vibe-binset
+    // (0px on desktop / in fullscreen — set by VibeMap's root).
+    const bottomOffset = "calc(0.75rem + var(--vibe-binset, 0px))";
+
     if (!expanded) {
         return (
-            <div className="pointer-events-none absolute bottom-3 left-3 z-30">
+            <div
+                className="pointer-events-none absolute left-3 z-30"
+                style={{ bottom: bottomOffset }}
+            >
                 <button
                     type="button"
                     onClick={() => onExpandedChange(true)}
@@ -194,11 +201,16 @@ export function FiltersPanel({
     }
 
     const cardPos = compact
-        ? "absolute inset-x-0 bottom-0 z-30 max-h-[75%] overflow-y-auto rounded-t-xl"
-        : "absolute bottom-3 left-3 z-30 w-[min(90vw,300px)] rounded-xl";
+        ? "absolute inset-x-0 z-30 max-h-[75%] overflow-y-auto rounded-t-xl"
+        : "absolute left-3 z-30 w-[min(90vw,300px)] rounded-xl";
 
     return (
-        <div className={`${cardPos} pointer-events-none`}>
+        <div
+            className={`${cardPos} pointer-events-none`}
+            style={{
+                bottom: compact ? "var(--vibe-binset, 0px)" : bottomOffset,
+            }}
+        >
             <div
                 data-vibe-panel="filters"
                 className={`vibe-filters-card pointer-events-auto bg-black/60 backdrop-blur-md border border-white/10 shadow-lg p-3 ${

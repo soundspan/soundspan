@@ -124,8 +124,14 @@ export function MapOverlay({
                     0% { transform: scale(0.5); opacity: 0.9; }
                     100% { transform: scale(2.6); opacity: 0; }
                 }
+                /* Decoration entrance: constellation edges / halos / waypoints
+                   fade in instead of popping (MapDecorations keys elements by
+                   node id, so a new constellation remounts and re-fades). */
+                .vibe-deco-in { animation: vibe-deco-in 200ms ease-out both; }
+                @keyframes vibe-deco-in { from { opacity: 0; } }
                 @media (prefers-reduced-motion: reduce) {
                     .vibe-beacon-ring { animation: none; opacity: 0.6; }
+                    .vibe-deco-in { animation: none; }
                 }
             `}</style>
         </div>

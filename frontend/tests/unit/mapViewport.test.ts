@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     clampViewport,
+    fitBounds,
+    FIT_BOUNDS_MAX_ZOOM,
     fitViewport,
     flyTo,
+    interpolateViewport,
     MAX_SCALE,
     MIN_SCALE,
     screenToWorld,
@@ -116,4 +119,56 @@ test("zoomAt with bounds still clamps translation", () => {
     const next = zoomAt({ scale: 4000, tx: -3000, ty: -3000 }, { x: 0, y: 0 }, 0.1, bounds);
     assert.ok(next.tx <= 800 - 40 + 1e-6 && next.tx >= -next.scale + 40 - 1e-6);
     assert.ok(next.ty <= 600 - 40 + 1e-6 && next.ty >= -next.scale + 40 - 1e-6);
+});
+
+test("fitBounds centers the box and keeps it inside the padding", () => {
+    const bounds = { width: 800, height: 600 };
+    const box = { minX: 0.2, minY: 0.4, maxX: 0.6, maxY: 0.6 };
+    const vp = fitBounds(box, bounds);
+    // Box center lands on screen center.
+    const center = worldToScreen(vp, { x: 0.4, y: 0.5 });
+    approx(center.x, 400);
+    approx(center.y, 300);
+    // The whole box fits within the 80px padded region.
+    const tl = worldToScreen(vp, { x: box.minX, y: box.minY });
+    const br = worldToScreen(vp, { x: box.maxX, y: box.maxY });
+    assert.ok(tl.x >= 80 - 1e-6 && br.x <= 720 + 1e-6);
+    assert.ok(tl.y >= 80 - 1e-6 && br.y <= 520 + 1e-6);
+});
+
+test("fitBounds caps a degenerate (single-point) box at the max-zoom multiple", () => {
+    const bounds = { width: 800, height: 600 };
+    const vp = fitBounds({ minX: 0.5, minY: 0.5, maxX: 0.5, maxY: 0.5 }, bounds);
+    const cap = fitViewport(bounds).scale * FIT_BOUNDS_MAX_ZOOM;
+    assert.ok(vp.scale <= cap + 1e-6, `scale ${vp.scale} exceeds cap ${cap}`);
+});
+
+test("interpolateViewport returns exact endpoints and a stable focus path", () => {
+    const bounds = { width: 800, height: 600 };
+    const from: Viewport = { scale: 520, tx: 140, ty: 40 };
+    const to: Viewport = { scale: 2600, tx: -900, ty: -700 };
+    assert.deepEqual(interpolateViewport(from, to, 0, bounds), from);
+    assert.deepEqual(interpolateViewport(from, to, 1, bounds), to);
+
+    // The world point at screen center travels monotonically from the from-
+    // center to the to-center while scale grows monotonically (log-lerped).
+    const center = { x: 400, y: 300 };
+    const c0 = screenToWorld(from, center);
+    const c1 = screenToWorld(to, center);
+    let prevScale = from.scale;
+    let prevX = c0.x;
+    for (const t of [0.25, 0.5, 0.75]) {
+        const mid = interpolateViewport(from, to, t, bounds);
+        assert.ok(mid.scale > prevScale, "scale must grow monotonically");
+        prevScale = mid.scale;
+        const cMid = screenToWorld(mid, center);
+        // Center-x moves toward c1 without overshooting.
+        const dir = Math.sign(c1.x - c0.x);
+        assert.ok(cMid.x * dir >= prevX * dir - 1e-9);
+        assert.ok(cMid.x * dir <= c1.x * dir + 1e-9);
+        prevX = cMid.x;
+        // And the mid-flight center is the exact linear blend.
+        approx(cMid.x, c0.x + (c1.x - c0.x) * t, 1e-9);
+        approx(cMid.y, c0.y + (c1.y - c0.y) * t, 1e-9);
+    }
 });
