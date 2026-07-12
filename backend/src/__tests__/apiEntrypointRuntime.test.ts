@@ -236,7 +236,7 @@ describe("api entrypoint runtime behavior", () => {
 
         jest.doMock("express", () => expressFn);
         jest.doMock("express-session", () => sessionMiddleware);
-        jest.doMock("connect-redis", () => redisStoreCtor);
+        jest.doMock("connect-redis", () => ({ RedisStore: redisStoreCtor }));
         jest.doMock("cors", () => corsMiddleware);
         jest.doMock("helmet", () => helmetMiddleware);
         jest.doMock("compression", () => compressionMiddleware);
