@@ -1,7 +1,7 @@
 #!/usr/bin/env ts-node
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 interface CliOptions {
     dryRun: boolean;

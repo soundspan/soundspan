@@ -1,7 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 import bcrypt from "bcrypt";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function main() {
     const username = process.env.SOUNDSPAN_TEST_USERNAME || "predeploy";

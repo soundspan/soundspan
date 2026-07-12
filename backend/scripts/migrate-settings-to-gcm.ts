@@ -21,7 +21,7 @@
  *
  * ⚠️  Destructive (rewrites secret columns). Take a database backup first.
  */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 import {
     ENCRYPTED_MODEL_PRIMARY_KEYS,
     ENCRYPTED_SETTINGS_COLUMNS,
@@ -33,7 +33,7 @@ import {
     type ModelMigrationStats,
 } from "../src/utils/settingsCipherMigration";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 function emptyStats(): ModelMigrationStats {
     return { rows: 0, reencrypted: 0, alreadyV2: 0, skippedErrors: 0 };

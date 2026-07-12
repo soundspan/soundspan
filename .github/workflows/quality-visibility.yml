@@ -36,6 +36,11 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      # Prisma 7 no longer auto-generates the client on install
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+
       - name: Run backend tests with coverage
         working-directory: backend
         env:
@@ -173,6 +178,11 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
+
+      # Prisma 7 no longer auto-generates the client on install
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
 
       - name: Run backend typecheck
         working-directory: backend

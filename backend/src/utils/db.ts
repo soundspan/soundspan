@@ -1,4 +1,5 @@
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { createPrismaClient } from "./prismaClientFactory";
 import { logger } from "./logger";
 
 type BackendProcessRole = "api" | "worker" | "all";
@@ -72,19 +73,10 @@ const poolConfigSource =
         "env"
     :   `${backendProcessRoleResolution.source}:role-default(${backendProcessRole})`;
 
-function resolveDatabaseUrlWithPoolConfig(databaseUrl: string): string {
-    const poolParams = `connection_limit=${connectionLimit}&pool_timeout=${poolTimeout}`;
-    try {
-        const parsed = new URL(databaseUrl);
-        parsed.searchParams.set("connection_limit", String(connectionLimit));
-        parsed.searchParams.set("pool_timeout", String(poolTimeout));
-        return parsed.toString();
-    } catch {
-        return `${databaseUrl}${databaseUrl.includes("?") ? "&" : "?"}${poolParams}`;
-    }
-}
-
-export const prisma = new PrismaClient({
+// Prisma 7: pool sizing moved off DATABASE_URL query params
+// (connection_limit/pool_timeout were Rust-engine concepts) onto the pg
+// driver adapter's pool options inside createPrismaClient.
+export const prisma = createPrismaClient({
     log:
         (
             process.env.NODE_ENV === "development" &&
@@ -92,14 +84,8 @@ export const prisma = new PrismaClient({
         ) ?
             ["query", "error", "warn"]
         :   ["error", "warn"],
-    datasources: {
-        db: {
-            url:
-                process.env.DATABASE_URL ?
-                    resolveDatabaseUrlWithPoolConfig(process.env.DATABASE_URL)
-                :   undefined,
-        },
-    },
+    connectionLimit,
+    poolTimeoutSeconds: poolTimeout,
 });
 
 // Log pool configuration on startup

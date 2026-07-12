@@ -17,11 +17,11 @@
  *   --dry-run    Show what would be updated without making changes
  */
 
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 import { parseFile } from "music-metadata";
 import * as path from "path";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 // Music path — must match the container/server config
 const MUSIC_PATH = process.env.MUSIC_PATH || "/music";

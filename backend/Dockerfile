@@ -17,6 +17,8 @@ COPY --from=media-metadata-contract . /packages/media-metadata-contract
 # Copy dependency manifests first for better layer caching
 COPY package*.json ./
 COPY prisma ./prisma/
+# Prisma 7 CLI reads schema/migrations/datasource config from prisma.config.ts
+COPY prisma.config.ts ./
 
 # Install all deps (includes dev deps needed for tsx/prisma CLI)
 RUN npm ci && \
@@ -85,6 +87,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package*.json ./
 COPY --from=deps /app/prisma ./prisma
+# Entrypoint runs `npx prisma migrate deploy` / `npx prisma generate`; the
+# Prisma 7 CLI requires prisma.config.ts for schema + datasource resolution.
+COPY --from=deps /app/prisma.config.ts ./
 COPY --from=deps /packages/media-metadata-contract /packages/media-metadata-contract
 COPY src ./src
 

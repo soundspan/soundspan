@@ -36,7 +36,8 @@
         "@bull-board/api": "^8.1.2",
         "@bull-board/express": "^8.1.2",
         "@ffmpeg-installer/ffmpeg": "^1.1.0",
-        "@prisma/client": "^6.19.2",
+        "@prisma/adapter-pg": "^7.8.0",
+        "@prisma/client": "^7.8.0",
         "@socket.io/redis-adapter": "^8.3.0",
         "@soundspan/media-metadata-contract": "file:../packages/media-metadata-contract",
         "@types/compression": "^1.8.1",
@@ -93,10 +94,13 @@
         "@types/node": "^24",
         "@types/supertest": "^7.2.0",
         "jest": "^30.4.2",
-        "prisma": "^6.19.3",
+        "prisma": "^7.8.0",
         "supertest": "^7.2.2",
         "ts-jest": "^29.4.11",
         "tsx": "^4.23.0",
         "typescript": "^5.3.3"
+    },
+    "overrides": {
+        "@hono/node-server": "^1.19.13"
     }
 }

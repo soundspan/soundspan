@@ -57,8 +57,10 @@ async function createTrackFixture(): Promise<FixtureHandle> {
         "DATABASE_URL is required to create smoke fixtures",
     );
 
-    const { PrismaClient } = await import("@prisma/client");
-    const prisma = new PrismaClient();
+    const { createPrismaClient } = await import(
+        "../src/utils/prismaClientFactory"
+    );
+    const prisma = createPrismaClient();
     const suffix = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 
     try {
@@ -106,7 +108,7 @@ async function createTrackFixture(): Promise<FixtureHandle> {
                 title: track.title,
             },
             cleanup: async () => {
-                const cleanupPrisma = new PrismaClient();
+                const cleanupPrisma = createPrismaClient();
                 try {
                     await cleanupPrisma.track.deleteMany({
                         where: { id: track.id },

@@ -8,6 +8,7 @@ describe("db connection pool config", () => {
         jest.resetModules();
         jest.clearAllMocks();
         jest.unmock("@prisma/client");
+        jest.unmock("@prisma/adapter-pg");
     });
 
     function loadDbModule(options?: {
@@ -44,6 +45,9 @@ describe("db connection pool config", () => {
         const prismaClientCtor = jest.fn().mockImplementation((opts: unknown) => ({
             __opts: opts,
         }));
+        const prismaPgCtor = jest.fn().mockImplementation((config: unknown) => ({
+            __config: config,
+        }));
         const logger = {
             info: jest.fn(),
             warn: jest.fn(),
@@ -53,6 +57,9 @@ describe("db connection pool config", () => {
             PrismaClient: prismaClientCtor,
             Prisma: {},
         }));
+        jest.doMock("@prisma/adapter-pg", () => ({
+            PrismaPg: prismaPgCtor,
+        }));
         jest.doMock("../logger", () => ({ logger }));
 
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -61,43 +68,43 @@ describe("db connection pool config", () => {
         return {
             dbModule,
             prismaClientCtor,
+            prismaPgCtor,
             logger,
         };
     }
 
     it("uses worker-default pool when role is inferred from worker entrypoint", () => {
-        const { prismaClientCtor, logger } = loadDbModule({
+        const { prismaClientCtor, prismaPgCtor, logger } = loadDbModule({
             argv1: "/app/dist/worker.js",
         });
 
-        const prismaOptions = prismaClientCtor.mock.calls[0][0];
-        const resolvedUrl: string = prismaOptions.datasources.db.url;
+        const poolConfig = prismaPgCtor.mock.calls[0][0];
+        expect(poolConfig.max).toBe(4);
+        expect(poolConfig.connectionTimeoutMillis).toBe(30_000);
 
-        expect(resolvedUrl).toContain("connection_limit=4");
-        expect(resolvedUrl).toContain("pool_timeout=30");
+        const prismaOptions = prismaClientCtor.mock.calls[0][0];
+        expect(prismaOptions.adapter).toBe(prismaPgCtor.mock.results[0].value);
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("role=worker"),
         );
     });
 
     it("warns on invalid role and infers api defaults from api entrypoint", () => {
-        const { prismaClientCtor, logger } = loadDbModule({
+        const { prismaPgCtor, logger } = loadDbModule({
             role: "bogus",
             argv1: "/app/dist/index.js",
         });
 
-        const prismaOptions = prismaClientCtor.mock.calls[0][0];
-        const resolvedUrl: string = prismaOptions.datasources.db.url;
-
         expect(logger.warn).toHaveBeenCalledWith(
             expect.stringContaining("Invalid BACKEND_PROCESS_ROLE"),
         );
-        expect(resolvedUrl).toContain("connection_limit=8");
-        expect(resolvedUrl).toContain("pool_timeout=30");
+        const poolConfig = prismaPgCtor.mock.calls[0][0];
+        expect(poolConfig.max).toBe(8);
+        expect(poolConfig.connectionTimeoutMillis).toBe(30_000);
     });
 
-    it("respects explicit pool overrides and preserves existing query params", () => {
-        const { prismaClientCtor } = loadDbModule({
+    it("respects explicit pool overrides and passes DATABASE_URL through untouched", () => {
+        const { prismaPgCtor } = loadDbModule({
             role: "worker",
             poolSize: "9",
             poolTimeout: "15",
@@ -105,38 +112,34 @@ describe("db connection pool config", () => {
                 "postgresql://soundspan:secret@db.example:5432/soundspan?sslmode=require",
         });
 
-        const prismaOptions = prismaClientCtor.mock.calls[0][0];
-        const resolvedUrl: string = prismaOptions.datasources.db.url;
-
-        expect(resolvedUrl).toContain("sslmode=require");
-        expect(resolvedUrl).toContain("connection_limit=9");
-        expect(resolvedUrl).toContain("pool_timeout=15");
+        const poolConfig = prismaPgCtor.mock.calls[0][0];
+        expect(poolConfig.connectionString).toBe(
+            "postgresql://soundspan:secret@db.example:5432/soundspan?sslmode=require",
+        );
+        expect(poolConfig.max).toBe(9);
+        expect(poolConfig.connectionTimeoutMillis).toBe(15_000);
     });
 
     it("falls back to role=all defaults when entrypoint inference is unknown", () => {
-        const { prismaClientCtor, logger } = loadDbModule({
+        const { prismaPgCtor, logger } = loadDbModule({
             argv1: "/app/dist/custom-entry.js",
         });
 
-        const prismaOptions = prismaClientCtor.mock.calls[0][0];
-        const resolvedUrl: string = prismaOptions.datasources.db.url;
-
-        expect(resolvedUrl).toContain("connection_limit=12");
+        const poolConfig = prismaPgCtor.mock.calls[0][0];
+        expect(poolConfig.max).toBe(12);
         expect(logger.info).toHaveBeenCalledWith(
             expect.stringContaining("role=all")
         );
     });
 
-    it("appends pool params to non-URL DATABASE_URL values via fallback path", () => {
-        const { prismaClientCtor } = loadDbModule({
-            databaseUrl: "not-a-valid-url?foo=bar",
-        });
+    it("does not smuggle pool sizing into the connection string", () => {
+        const { prismaPgCtor } = loadDbModule({});
 
-        const prismaOptions = prismaClientCtor.mock.calls[0][0];
-        const resolvedUrl: string = prismaOptions.datasources.db.url;
-
-        expect(resolvedUrl).toBe(
-            "not-a-valid-url?foo=bar&connection_limit=8&pool_timeout=30"
+        const poolConfig = prismaPgCtor.mock.calls[0][0];
+        expect(poolConfig.connectionString).toBe(
+            "postgresql://soundspan:secret@db.example:5432/soundspan",
         );
+        expect(poolConfig.connectionString).not.toContain("connection_limit");
+        expect(poolConfig.connectionString).not.toContain("pool_timeout");
     });
 });

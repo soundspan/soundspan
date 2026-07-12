@@ -16,9 +16,9 @@
  *   --dry-run    Show what would be updated without making changes
  */
 
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function backfillOriginalYear(dryRun: boolean = false) {
     console.log("=== Backfill originalYear Script ===\n");

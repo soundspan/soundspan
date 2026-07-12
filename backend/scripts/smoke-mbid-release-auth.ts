@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -58,7 +58,7 @@ async function ensureTestUserReady(): Promise<void> {
         "DATABASE_URL is required when SMOKE_BOOTSTRAP_USER is enabled",
     );
 
-    const prisma = new PrismaClient();
+    const prisma = createPrismaClient();
     try {
         const passwordHash = await bcrypt.hash(testPassword, 10);
         await prisma.user.upsert({

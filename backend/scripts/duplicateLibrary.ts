@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function duplicateLibrary() {
     console.log("Starting library duplication...");

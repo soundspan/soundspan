@@ -182,6 +182,8 @@ WORKDIR /app/backend
 # Copy backend package files and install dependencies
 COPY backend/package*.json ./
 COPY backend/prisma ./prisma/
+# Prisma 7 CLI reads schema/migrations/datasource config from prisma.config.ts
+COPY backend/prisma.config.ts ./
 RUN echo "=== Migrations copied ===" && ls -la prisma/migrations/ && echo "=== End migrations ==="
 RUN npm ci && npm cache clean --force
 RUN npx prisma generate
@@ -191,11 +193,14 @@ COPY backend/src ./src
 COPY backend/tsconfig.json ./
 RUN npm run build
 
-# Prune backend dev dependencies after build (typescript, jest, tsx, etc.)
-# Install prisma CLI globally first — startup script needs `npx prisma migrate deploy`
-# and prisma is a devDependency that would otherwise be removed by prune.
-RUN npm install -g prisma@$(node -p "require('./node_modules/prisma/package.json').version") && \
+# Prune backend dev dependencies after build (typescript, jest, tsx, etc.),
+# then reinstall the prisma CLI locally: the startup script needs
+# `npx prisma migrate deploy`, and Prisma 7's prisma.config.ts imports
+# "prisma/config", which must resolve from the app's own node_modules —
+# a globally-installed CLI cannot satisfy that import after prune.
+RUN PRISMA_VERSION=$(node -p "require('./node_modules/prisma/package.json').version") && \
     npm prune --omit=dev && \
+    npm install --no-save prisma@"$PRISMA_VERSION" && \
     npm cache clean --force
 
 COPY backend/docker-entrypoint.sh ./

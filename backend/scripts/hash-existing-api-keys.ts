@@ -22,14 +22,14 @@
  * ⚠️  Irreversible (can't un-hash). Take a database backup first. If you ever
  *     change the pepper after running this, all hashed keys stop validating.
  */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/utils/prismaClientFactory";
 import {
     getPepperFingerprint,
     getPepperSource,
     planApiKeyHashing,
 } from "../src/utils/apiKeyHash";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function run(apply: boolean): Promise<void> {
     console.log(
