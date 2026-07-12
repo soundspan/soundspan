@@ -82,6 +82,8 @@ import {
     type SweepPoint,
 } from "./sweepCollect";
 import { SweepChip } from "./SweepChip";
+import { MapHintChip } from "./MapHintChip";
+import { hintForMode, HINTS_DISMISSED_KEY } from "./mapHints";
 import { mapTrackToTrack } from "./journeyTracks";
 import { toast } from "sonner";
 import type { MapTrack } from "./types";
@@ -121,6 +123,15 @@ function readStoredLayoutMode(): LayoutMode {
             : "natural";
     } catch {
         return "natural";
+    }
+}
+
+function readHintsDismissed(): boolean {
+    if (typeof window === "undefined") return false;
+    try {
+        return window.sessionStorage.getItem(HINTS_DISMISSED_KEY) === "1";
+    } catch {
+        return false;
     }
 }
 
@@ -227,6 +238,19 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const [sweepResult, setSweepResult] = useState<{ ids: string[] } | null>(
         null
     );
+
+    // Contextual hint whisper (dismissable per session).
+    const [hintsDismissed, setHintsDismissed] = useState(readHintsDismissed);
+    const dismissHints = useCallback(() => {
+        setHintsDismissed(true);
+        if (typeof window !== "undefined") {
+            try {
+                window.sessionStorage.setItem(HINTS_DISMISSED_KEY, "1");
+            } catch {
+                /* private mode / quota — dismissal is best-effort */
+            }
+        }
+    }, []);
 
     const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
     const isSmall = useMediaQuery("(max-width: 639px)");
@@ -1311,6 +1335,25 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                     onDismiss={() => setSweepResult(null)}
                 />
             )}
+
+            {/* Contextual hint whisper — hidden whenever anything else owns
+                bottom-center (sweep chip, fullscreen Esc hint, a small-screen
+                mode sheet) or while the map is still loading/empty. */}
+            {!hintsDismissed &&
+                !sweepResult &&
+                !sweepLive &&
+                !escHintVisible &&
+                !(isSmall && modePanelOpen) &&
+                !isLoading &&
+                tracks.length > 0 && (
+                    <MapHintChip
+                        text={hintForMode(vibe.mode, {
+                            picking: vibe.journey?.picking,
+                            sweepArmed: brushArmed,
+                        })}
+                        onDismiss={dismissHints}
+                    />
+                )}
 
             {/* Dot-anchored hover tooltip (mouse/trackpad only). */}
             {hoverTip}
