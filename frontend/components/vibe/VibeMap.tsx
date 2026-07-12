@@ -73,6 +73,7 @@ import {
     type Viewport,
 } from "./mapViewport";
 import { buildPositions, computeSpreadPositions, lerpPositions } from "./mapLayout";
+import { upcomingOnMapPoints } from "./flightPlan";
 import type { MapTrack } from "./types";
 import { getMoodColor } from "./types";
 
@@ -201,7 +202,11 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const isSmall = useMediaQuery("(max-width: 639px)");
     const coarsePointer = useMediaQuery("(pointer: coarse)");
 
-    const { currentTrack } = useAudioState();
+    // Note: useAudioState's value never changes on the 250ms playback clock
+    // (that's useAudioPlayback, isolated in NowPlayingConnected) — queue and
+    // currentIndex change on enqueue/advance only, which is exactly when the
+    // flight plan must re-derive.
+    const { currentTrack, queue, currentIndex } = useAudioState();
     const { playTrack, playTracks, addToQueue } = useAudioControls();
     const filters = useMapFilters(tracks);
     const trailIds = useSessionTrail();
@@ -513,6 +518,13 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         }
         return pts;
     }, [trailIds, posOf]);
+
+    // Flight plan: where the queue goes next (`?? []` also guards test mocks
+    // that don't model the queue fields).
+    const planPoints = useMemo(
+        () => upcomingOnMapPoints(queue ?? [], currentIndex ?? -1, posOf),
+        [queue, currentIndex, posOf]
+    );
 
     // Alchemy result glow takes over the canvas highlight while blending; the
     // spotlight owns it otherwise.
@@ -863,6 +875,9 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const modePanelOpen = vibe.mode !== "explore";
     const filtersOpen = filtersExpanded && !modePanelOpen;
     const shownTrail = vibe.mode === "explore" ? trailPoints : EMPTY_TRAIL;
+    // The plan hides with the trail while a mode's own route/constellation is
+    // up — two overlapping line systems on one dot read as leftovers.
+    const shownPlan = vibe.mode === "explore" ? planPoints : EMPTY_TRAIL;
 
     // Dot-anchored hover tooltip (fine pointers only — touch never hovers):
     // sits beside the hovered dot instead of the old bottom-center slot, so
@@ -963,6 +978,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                             height={dims.height}
                             beacon={beaconPos}
                             trail={shownTrail}
+                            plan={shownPlan}
                             decorations={
                                 <MapDecorations
                                     viewport={viewport}

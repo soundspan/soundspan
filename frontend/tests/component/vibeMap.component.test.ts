@@ -72,6 +72,8 @@ mock.module("@/lib/audio-state-context", {
             currentAudiobook: null,
             currentPodcast: null,
             playbackType: "track",
+            queue: [],
+            currentIndex: -1,
         }),
     },
 });

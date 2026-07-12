@@ -10,6 +10,9 @@
  *  - Trail: an SVG polyline through recently-played dots, opacity fading from
  *    oldest (faint) to newest (bright). Callers pass only points that exist in
  *    the current map data.
+ *  - Plan: the flight plan — a DASHED polyline from the now-playing dot
+ *    through the upcoming on-map queue tracks, fading toward the future (the
+ *    forward-looking mirror of the trail). Points come from flightPlan.ts.
  *  - `decorations`: an SVG-children slot in screen-pixel space for F2 to draw
  *    travel constellations / journey routes / selection halos. Use the exported
  *    `worldToScreen(viewport, worldPt)` to place them.
@@ -28,11 +31,14 @@ export interface MapOverlayProps {
     beacon?: Point | null;
     /** Ordered world points (oldest -> newest), already filtered to on-map ids. */
     trail?: readonly Point[];
+    /** Flight plan: now-playing dot -> upcoming on-map queue dots (world coords). */
+    plan?: readonly Point[];
     /** F2 slot: SVG elements in screen-pixel coords, rendered above the trail. */
     decorations?: ReactNode;
 }
 
 const TRAIL_COLOR = "#a5b4fc";
+const PLAN_COLOR = "#c7d2fe";
 
 export function MapOverlay({
     viewport,
@@ -40,6 +46,7 @@ export function MapOverlay({
     height,
     beacon,
     trail,
+    plan,
     decorations,
 }: MapOverlayProps) {
     const beaconScreen = beacon ? worldToScreen(viewport, beacon) : null;
@@ -67,6 +74,31 @@ export function MapOverlay({
         );
     }
 
+    // Flight plan: dashed, brightest leaving the beacon, fading toward the
+    // future — the visual inverse of the trail's oldest-faint gradient.
+    const planScreen = (plan ?? []).map((p) => worldToScreen(viewport, p));
+    const planSegments: ReactNode[] = [];
+    const planDenom = Math.max(1, planScreen.length - 1);
+    for (let i = 1; i < planScreen.length; i++) {
+        const a = planScreen[i - 1];
+        const b = planScreen[i];
+        const opacity = 0.55 - 0.4 * ((i - 1) / planDenom);
+        planSegments.push(
+            <line
+                key={`plan-${i}`}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={PLAN_COLOR}
+                strokeWidth={1.5}
+                strokeOpacity={opacity}
+                strokeDasharray="3 5"
+                strokeLinecap="round"
+            />
+        );
+    }
+
     return (
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
             <svg
@@ -75,6 +107,7 @@ export function MapOverlay({
                 height={height}
                 aria-hidden="true"
             >
+                {planSegments}
                 {segments}
                 {decorations}
             </svg>
