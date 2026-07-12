@@ -74,6 +74,16 @@ import {
 } from "./mapViewport";
 import { buildPositions, computeSpreadPositions, lerpPositions } from "./mapLayout";
 import { upcomingOnMapPoints } from "./flightPlan";
+import {
+    collectHits,
+    sampleSegment,
+    SWEEP_BRUSH_RADIUS,
+    SWEEP_CAP,
+    type SweepPoint,
+} from "./sweepCollect";
+import { SweepChip } from "./SweepChip";
+import { mapTrackToTrack } from "./journeyTracks";
+import { toast } from "sonner";
 import type { MapTrack } from "./types";
 import { getMoodColor } from "./types";
 
@@ -126,6 +136,14 @@ interface CameraFlight {
     to: Viewport;
     start: number;
     dur: number;
+}
+
+/** Live sweep-gesture scratchpad (refs only — state carries render copies). */
+interface SweepScratch {
+    seen: Set<string>;
+    ids: string[];
+    stroke: SweepPoint[];
+    last: SweepPoint;
 }
 
 /**
@@ -197,6 +215,18 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const [filtersExpanded, setFiltersExpanded] = useState(false);
     const [escHintVisible, setEscHintVisible] = useState(false);
     const drag = useRef<DragState>({ active: false, lastX: 0, lastY: 0, moved: 0 });
+
+    // Sweep-to-queue: shift+drag (mouse) or the armed brush (touch) collects
+    // visible dots along the stroke in first-touch order.
+    const [brushArmed, setBrushArmed] = useState(false);
+    const sweepRef = useRef<SweepScratch | null>(null);
+    const [sweepLive, setSweepLive] = useState<{
+        stroke: SweepPoint[];
+        ids: string[];
+    } | null>(null);
+    const [sweepResult, setSweepResult] = useState<{ ids: string[] } | null>(
+        null
+    );
 
     const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
     const isSmall = useMediaQuery("(max-width: 639px)");
@@ -526,10 +556,19 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         [queue, currentIndex, posOf]
     );
 
-    // Alchemy result glow takes over the canvas highlight while blending; the
-    // spotlight owns it otherwise.
-    const effectiveHighlightIds = vibe.highlightIds ?? highlightIds;
-    const effectiveDim = vibe.highlightIds !== null || highlightIds !== null;
+    // Sweep glow wins the canvas highlight while a stroke is live or its chip
+    // is open (no dimming — the sweep is additive, not a filter); alchemy's
+    // result glow is next; the spotlight owns it otherwise.
+    const sweepIds = sweepLive?.ids ?? sweepResult?.ids ?? null;
+    const sweepHighlight = useMemo(
+        () => (sweepIds && sweepIds.length > 0 ? new Set(sweepIds) : null),
+        [sweepIds]
+    );
+    const effectiveHighlightIds =
+        sweepHighlight ?? vibe.highlightIds ?? highlightIds;
+    const effectiveDim = sweepHighlight
+        ? false
+        : vibe.highlightIds !== null || highlightIds !== null;
 
     // --- Interaction --------------------------------------------------------
     const cursorFromEvent = useCallback((clientX: number, clientY: number) => {
@@ -547,6 +586,24 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         null
     );
 
+    // Collect visible dots around one brush sample into the live sweep.
+    const sweepCollectAt = useCallback(
+        (scratch: SweepScratch, cursor: SweepPoint) => {
+            const vp = viewportRef.current;
+            if (!vp) return;
+            collectHits({
+                cursor,
+                ids: tracks,
+                positions,
+                mask: filters.mask,
+                viewport: vp,
+                seen: scratch.seen,
+                out: scratch.ids,
+            });
+        },
+        [tracks, positions, filters.mask]
+    );
+
     const handlePointerDown = useCallback(
         (e: React.PointerEvent<HTMLCanvasElement>) => {
             cameraAnimRef.current = null;
@@ -555,6 +612,9 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                 y: e.clientY,
             });
             if (activePointersRef.current.size === 2) {
+                // A second finger always means pinch — discard a live sweep.
+                sweepRef.current = null;
+                setSweepLive(null);
                 const [p1, p2] = [...activePointersRef.current.values()];
                 pinchRef.current = {
                     dist: Math.hypot(p2.x - p1.x, p2.y - p1.y),
@@ -569,10 +629,30 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                     lastY: e.clientY,
                     moved: 0,
                 };
+                if (brushArmed || e.shiftKey) {
+                    // Arm a sweep. The drag state still tracks `moved`, so a
+                    // stationary shift-click falls through to normal click
+                    // semantics (e.g. travel's shift-click-to-queue) on
+                    // pointerup instead of producing an empty sweep.
+                    const cursor = cursorFromEvent(e.clientX, e.clientY);
+                    const scratch: SweepScratch = {
+                        seen: new Set(),
+                        ids: [],
+                        stroke: [cursor],
+                        last: cursor,
+                    };
+                    sweepCollectAt(scratch, cursor);
+                    sweepRef.current = scratch;
+                    setSweepLive({
+                        stroke: [...scratch.stroke],
+                        ids: [...scratch.ids],
+                    });
+                    setSweepResult(null);
+                }
             }
             e.currentTarget.setPointerCapture?.(e.pointerId);
         },
-        []
+        [brushArmed, cursorFromEvent, sweepCollectAt]
     );
 
     // A neighbour halo (MapDecorations) opts into pointer events so it can be
@@ -656,6 +736,30 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                 return;
             }
 
+            // Live sweep: the stroke collects instead of panning. Sampling
+            // between the previous and current point keeps a fast flick from
+            // skipping over dots.
+            const scratch = sweepRef.current;
+            if (scratch && drag.current.active) {
+                const d = drag.current;
+                const dx = e.clientX - d.lastX;
+                const dy = e.clientY - d.lastY;
+                d.lastX = e.clientX;
+                d.lastY = e.clientY;
+                d.moved += Math.hypot(dx, dy);
+                const cursor = cursorFromEvent(e.clientX, e.clientY);
+                for (const pt of sampleSegment(scratch.last, cursor)) {
+                    sweepCollectAt(scratch, pt);
+                }
+                scratch.last = cursor;
+                scratch.stroke.push(cursor);
+                setSweepLive({
+                    stroke: [...scratch.stroke],
+                    ids: [...scratch.ids],
+                });
+                return;
+            }
+
             const d = drag.current;
             if (d.active) {
                 // Self-heal a drag armed by a halo pointerdown whose matching
@@ -681,7 +785,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
 
             setHoveredId(hitTest(e.clientX, e.clientY));
         },
-        [cursorFromEvent, scheduleCamera, hitTest]
+        [cursorFromEvent, scheduleCamera, hitTest, sweepCollectAt]
     );
 
     const endDrag = useCallback(() => {
@@ -716,12 +820,29 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const handlePointerUp = useCallback(
         (e: React.PointerEvent<HTMLCanvasElement>) => {
             const wasClick = releasePointer(e);
+
+            // A live sweep ends here: a real stroke with catches freezes into
+            // the action chip; a stationary tap falls through to click
+            // semantics; an empty stroke just dissolves.
+            const scratch = sweepRef.current;
+            if (scratch) {
+                sweepRef.current = null;
+                setSweepLive(null);
+                if (!wasClick) {
+                    if (scratch.ids.length > 0) {
+                        setSweepResult({ ids: [...scratch.ids] });
+                    }
+                    return;
+                }
+            }
+
             if (!wasClick) return;
             // Touch taps never set hoveredId (no hover concept on touch, and
             // pointermove during the tap takes the drag branch above), so
             // fall back to hit-testing at the pointerup coordinates.
             const clickedId = hoveredId ?? hitTest(e.clientX, e.clientY);
             if (clickedId) {
+                setSweepResult(null);
                 vibe.onDotClick(clickedId, {
                     ctrlOrMeta: e.ctrlKey || e.metaKey,
                     shift: e.shiftKey,
@@ -731,19 +852,56 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             ) {
                 // Clearly-empty canvas (nothing even within 2× the hit radius
                 // — a near-miss on a small dot must not nuke a travel
-                // session): dissolve the travel constellation.
-                vibe.onEmptyClick();
+                // session): dismiss the sweep chip if one is open, else
+                // dissolve the travel constellation.
+                if (sweepResult) setSweepResult(null);
+                else vibe.onEmptyClick();
             }
         },
-        [releasePointer, hoveredId, hitTest, vibe]
+        [releasePointer, hoveredId, hitTest, vibe, sweepResult]
     );
 
     const handlePointerCancel = useCallback(
         (e: React.PointerEvent<HTMLCanvasElement>) => {
             releasePointer(e);
+            sweepRef.current = null;
+            setSweepLive(null);
         },
         [releasePointer]
     );
+
+    // Sweep chip actions. Queueing is silent per track + one summary toast —
+    // N per-track toasts would bury the screen.
+    const sweepTracks = useCallback(
+        (ids: readonly string[]) => {
+            const list: MapTrack[] = [];
+            for (const id of ids) {
+                const t = trackById.get(id);
+                if (t) list.push(t);
+            }
+            return list;
+        },
+        [trackById]
+    );
+
+    const playSweep = useCallback(() => {
+        if (!sweepResult) return;
+        const list = sweepTracks(sweepResult.ids).map(mapTrackToTrack);
+        if (list.length > 0) playTracks(list, 0, true);
+        setSweepResult(null);
+    }, [sweepResult, sweepTracks, playTracks]);
+
+    const queueSweep = useCallback(() => {
+        if (!sweepResult) return;
+        const list = sweepTracks(sweepResult.ids);
+        for (const t of list) addToQueue(mapTrackToTrack(t), { silent: true });
+        if (list.length > 0) {
+            toast.success(
+                `Queued ${list.length} swept track${list.length === 1 ? "" : "s"}`
+            );
+        }
+        setSweepResult(null);
+    }, [sweepResult, sweepTracks, addToQueue]);
 
     const zoomByCenter = useCallback(
         (factor: number) => {
@@ -836,14 +994,17 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
 
     // Esc priority: (1) spotlight-input clearing swallows the event itself
     // (SpotlightSearch's own onKeyDown + stopPropagation, unchanged); (2) an
-    // active mode (travel/journey/alchemy) exits to explore; (3) only once
-    // back in explore does Esc close fullscreen.
+    // open sweep chip dismisses; (3) an active mode (travel/journey/alchemy)
+    // exits to explore; (4) only then does Esc close fullscreen.
     const vibeMode = vibe.mode;
     const exitToExplore = vibe.exitToExplore;
+    const sweepChipOpen = sweepResult !== null;
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
-            if (vibeMode !== "explore") {
+            if (sweepChipOpen) {
+                setSweepResult(null);
+            } else if (vibeMode !== "explore") {
                 exitToExplore();
             } else if (isFullscreen) {
                 setIsFullscreen(false);
@@ -851,7 +1012,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [vibeMode, exitToExplore, isFullscreen]);
+    }, [sweepChipOpen, vibeMode, exitToExplore, isFullscreen]);
 
     // Fullscreen nicety: a bottom-center "Esc to exit" whisper that fades out
     // after ~2.5s. Under reduced motion the chip is static-then-removed (no
@@ -1014,6 +1175,35 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                                     onHaloAddIngredient={vibe.addIngredient}
                                 />
                             }
+                            sweepStroke={
+                                sweepLive && sweepLive.stroke.length >= 2 ? (
+                                    <>
+                                        {/* Brush-width ghost + thin core line. */}
+                                        <polyline
+                                            points={sweepLive.stroke
+                                                .map((p) => `${p.x},${p.y}`)
+                                                .join(" ")}
+                                            fill="none"
+                                            stroke="#818cf8"
+                                            strokeWidth={SWEEP_BRUSH_RADIUS * 2}
+                                            strokeOpacity={0.1}
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
+                                        <polyline
+                                            points={sweepLive.stroke
+                                                .map((p) => `${p.x},${p.y}`)
+                                                .join(" ")}
+                                            fill="none"
+                                            stroke="#a5b4fc"
+                                            strokeWidth={1.5}
+                                            strokeOpacity={0.7}
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
+                                    </>
+                                ) : null
+                            }
                         />
                     </>
                 )}
@@ -1072,6 +1262,8 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                         layoutMode={layoutMode}
                         layoutDisabled={tracks.length === 0}
                         onToggleLayout={toggleLayoutMode}
+                        brushArmed={brushArmed}
+                        onToggleBrush={() => setBrushArmed((v) => !v)}
                         canLocate={beaconOnMap}
                         locateHint={
                             beaconOnMap
@@ -1108,6 +1300,17 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             {vibe.travel && <TravelPanel view={vibe.travel} />}
             {vibe.journey && <JourneyPanel view={vibe.journey} />}
             {vibe.alchemy && <AlchemyTray view={vibe.alchemy} />}
+
+            {/* Sweep action chip — Play / Queue the collected stroke. */}
+            {sweepResult && (
+                <SweepChip
+                    count={sweepResult.ids.length}
+                    capped={sweepResult.ids.length >= SWEEP_CAP}
+                    onPlay={playSweep}
+                    onQueue={queueSweep}
+                    onDismiss={() => setSweepResult(null)}
+                />
+            )}
 
             {/* Dot-anchored hover tooltip (mouse/trackpad only). */}
             {hoverTip}

@@ -6,13 +6,16 @@
  * targets (min 40×40, 44×44 under a coarse pointer), tooltips, aria-labels and
  * aria-pressed on the toggle-like ones.
  *
- * Buttons: zoom in / zoom out / reset view / spread-cluster toggle /
- * locate-now-playing / start-journey / fullscreen toggle. (Start-journey lives
- * here because removing the old header row removed its only entry point; it is
- * disabled until there's a track to journey from.)
+ * Buttons: zoom in / zoom out / reset view / spread-cluster toggle / sweep
+ * brush / locate-now-playing / start-journey / fullscreen toggle.
+ * (Start-journey lives here because removing the old header row removed its
+ * only entry point; it is disabled until there's a track to journey from. The
+ * brush toggle is the touch-friendly way to arm sweep — mouse users can just
+ * hold Shift and drag.)
  */
 
 import {
+    Brush,
     Crosshair,
     Maximize2,
     Minimize2,
@@ -33,6 +36,9 @@ export interface ViewControlsProps {
     layoutMode: LayoutMode;
     layoutDisabled?: boolean;
     onToggleLayout: () => void;
+    /** Sweep brush armed: dragging collects tracks instead of panning. */
+    brushArmed: boolean;
+    onToggleBrush: () => void;
     canLocate: boolean;
     locateHint: string;
     onLocate: () => void;
@@ -56,6 +62,8 @@ export function ViewControls({
     layoutMode,
     layoutDisabled,
     onToggleLayout,
+    brushArmed,
+    onToggleBrush,
     canLocate,
     locateHint,
     onLocate,
@@ -116,6 +124,20 @@ export function ViewControls({
                 ) : (
                     <Shuffle className="w-5 h-5" />
                 )}
+            </button>
+            <button
+                type="button"
+                onClick={onToggleBrush}
+                aria-pressed={brushArmed}
+                className={`${BTN} ${brushArmed ? "bg-indigo-500/30 text-white" : ""}`}
+                title={
+                    brushArmed
+                        ? "Sweep brush armed — drag over dots to collect a queue (click to disarm)"
+                        : "Sweep brush: drag over dots to collect a queue (or hold Shift and drag)"
+                }
+                aria-label="Sweep brush"
+            >
+                <Brush className="w-5 h-5" />
             </button>
             <button
                 type="button"

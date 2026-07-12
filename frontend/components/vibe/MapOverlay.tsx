@@ -35,6 +35,8 @@ export interface MapOverlayProps {
     plan?: readonly Point[];
     /** F2 slot: SVG elements in screen-pixel coords, rendered above the trail. */
     decorations?: ReactNode;
+    /** Live sweep-brush stroke (screen-pixel SVG), rendered above decorations. */
+    sweepStroke?: ReactNode;
 }
 
 const TRAIL_COLOR = "#a5b4fc";
@@ -48,6 +50,7 @@ export function MapOverlay({
     trail,
     plan,
     decorations,
+    sweepStroke,
 }: MapOverlayProps) {
     const beaconScreen = beacon ? worldToScreen(viewport, beacon) : null;
     const trailScreen = (trail ?? []).map((p) => worldToScreen(viewport, p));
@@ -110,6 +113,7 @@ export function MapOverlay({
                 {planSegments}
                 {segments}
                 {decorations}
+                {sweepStroke}
             </svg>
 
             {beaconScreen && (

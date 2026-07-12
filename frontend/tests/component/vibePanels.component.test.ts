@@ -386,7 +386,7 @@ test("NowPlayingCard renders nothing when there is no track", async () => {
 
 // --- ViewControls ---------------------------------------------------------
 
-test("ViewControls exposes labelled zoom/reset/layout/locate/journey/fullscreen buttons", async () => {
+test("ViewControls exposes labelled zoom/reset/layout/brush/locate/journey/fullscreen buttons", async () => {
     const { ViewControls } = await import(
         "../../components/vibe/ViewControls"
     );
@@ -398,6 +398,8 @@ test("ViewControls exposes labelled zoom/reset/layout/locate/journey/fullscreen 
             layoutMode: "natural",
             layoutDisabled: false,
             onToggleLayout: noop,
+            brushArmed: false,
+            onToggleBrush: noop,
             canLocate: true,
             locateHint: "Fly to now playing",
             onLocate: noop,
@@ -412,11 +414,43 @@ test("ViewControls exposes labelled zoom/reset/layout/locate/journey/fullscreen 
     assert.match(html, /aria-label="Zoom out"/);
     assert.match(html, /aria-label="Reset view"/);
     assert.match(html, /aria-label="Spread layout"/); // natural -> offers spread
+    assert.match(html, /aria-label="Sweep brush"/);
     assert.match(html, /aria-label="Locate now playing"/);
     assert.match(html, /aria-label="Start a journey"/);
     assert.match(html, /aria-label="Enter fullscreen"/);
     // Toggle-like controls carry aria-pressed.
     assert.match(html, /aria-pressed="false"/);
+});
+
+// --- SweepChip --------------------------------------------------------------
+
+test("SweepChip renders the count, cap marker and labelled actions", async () => {
+    const { SweepChip } = await import("../../components/vibe/SweepChip");
+    const html = renderToStaticMarkup(
+        React.createElement(SweepChip, {
+            count: 23,
+            capped: false,
+            onPlay: noop,
+            onQueue: noop,
+            onDismiss: noop,
+        })
+    );
+    assert.match(html, /23 tracks swept/);
+    assert.match(html, /aria-label="Play 23 swept tracks"/);
+    assert.match(html, /aria-label="Queue 23 swept tracks"/);
+    assert.match(html, /aria-label="Dismiss sweep"/);
+    assert.doesNotMatch(html, /\(max\)/);
+
+    const capped = renderToStaticMarkup(
+        React.createElement(SweepChip, {
+            count: 100,
+            capped: true,
+            onPlay: noop,
+            onQueue: noop,
+            onDismiss: noop,
+        })
+    );
+    assert.match(capped, /100 tracks swept \(max\)/);
 });
 
 // --- FiltersPanel ---------------------------------------------------------
