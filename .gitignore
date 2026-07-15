@@ -187,3 +187,6 @@ soularr/
 # Block local AI tool documentation files (covered by .agents/plans/ + archived/)
 **/LLM_SESSION_HANDOFF.md
 **/PROMPT_HISTORY.md
+
+# local DB snapshots (analysis data) — never commit
+backups/
