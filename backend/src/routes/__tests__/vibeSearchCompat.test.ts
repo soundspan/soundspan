@@ -749,5 +749,23 @@ describe("vibe search transport compatibility", () => {
 
             expect(res.statusCode).toBe(404);
         });
+
+        it("returns 400 when weights sum to zero (all-negative weights floored to 0 would otherwise NaN the blend)", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])
+                .mockResolvedValueOnce([{ embedding: "[0,1,0]" }]);
+
+            const req = {
+                body: { trackIds: ["track-a", "track-b"], weights: [0, 0] },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await alchemyHandler(req, res);
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body.error).toBe("weights must sum to a positive value");
+            // Must reject before ever reaching the NaN-bearing blend/ANN query.
+            expect(mockRunAnnQuery).not.toHaveBeenCalled();
+        });
     });
 });

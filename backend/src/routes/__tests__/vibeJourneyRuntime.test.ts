@@ -134,6 +134,10 @@ function nearestRow(overrides: Partial<Record<string, unknown>> = {}) {
         albumCoverUrl: null,
         artistId: "artist-id",
         artistName: "Artist",
+        energy: null,
+        valence: null,
+        danceability: null,
+        arousal: null,
         ...overrides,
     };
 }
@@ -233,6 +237,79 @@ describe("vibe journey + moods runtime", () => {
             expect(res.body.target).toEqual({ trackId: "dest-1", title: "Destination Song" });
             expect(res.body.waypoints).toHaveLength(3);
             expect(res.body.waypoints[res.body.waypoints.length - 1].id).toBe("dest-1");
+        });
+
+        it("track mode: every waypoint (intermediate and destination) carries nullable audioFeatures", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]); // toTrackId
+            mockTrackFindUnique.mockResolvedValueOnce({
+                id: "dest-1",
+                title: "Destination Song",
+                energy: 0.9,
+                valence: 0.4,
+                danceability: 0.6,
+                arousal: 0.5,
+                album: {
+                    id: "album-dest",
+                    title: "Album Dest",
+                    coverUrl: null,
+                    artist: { id: "artist-dest", name: "Artist Dest" },
+                },
+            });
+            mockRunAnnQuery.mockResolvedValueOnce([
+                nearestRow({
+                    id: "mid-1",
+                    title: "Mid One",
+                    energy: 0.2,
+                    valence: null,
+                    danceability: 0.7,
+                    arousal: null,
+                }),
+            ]);
+
+            const req = {
+                body: { fromTrackId: "from-1", toTrackId: "dest-1", steps: 2 },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(res.body.waypoints[0].audioFeatures).toEqual({
+                energy: 0.2,
+                valence: null,
+                danceability: 0.7,
+                arousal: null,
+            });
+            // The literal destination waypoint (built from prisma.track.findUnique,
+            // not the ANN row) carries the destination track's own columns.
+            expect(res.body.waypoints[1].audioFeatures).toEqual({
+                energy: 0.9,
+                valence: 0.4,
+                danceability: 0.6,
+                arousal: 0.5,
+            });
+        });
+
+        it("returns 404 when the destination track is deleted between the embedding lookup and the track fetch (TOCTOU)", async () => {
+            mockQueryRaw
+                .mockResolvedValueOnce([{ embedding: "[1,0,0]" }]) // fromTrackId embedding
+                .mockResolvedValueOnce([{ embedding: "[0,0,1]" }]); // toTrackId embedding still resolves
+            mockTrackFindUnique.mockResolvedValueOnce(null); // but the Track row is gone by the time we look it up
+
+            const req = {
+                body: { fromTrackId: "from-1", toTrackId: "dest-1" },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.body.error).toBe("Destination track not found");
+            // Must not fall through and silently compute a route with a dropped
+            // destination waypoint.
+            expect(mockRunAnnQuery).not.toHaveBeenCalled();
         });
 
         it("returns 400 when fromTrackId equals toTrackId", async () => {

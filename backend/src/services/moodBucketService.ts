@@ -113,6 +113,12 @@ export type MoodType = keyof typeof MOOD_CONFIG;
 export const VALID_MOODS = Object.keys(MOOD_CONFIG) as MoodType[];
 const RELIABLE_ENHANCED_ANALYSIS_VERSION_PREFIX = "2.1b6-enhanced-v3";
 
+// Minimum MoodBucket.score treated as a qualifying assignment. Single source
+// of truth so this threshold can't drift between consumers: the mood-mix
+// pool query below, GET /api/vibe/moods, and the journey mood-centroid pool
+// query all import this rather than hardcoding 0.5 locally.
+export const MOOD_BUCKET_MIN_SCORE = 0.5;
+
 // Mood gradient colors for mix display
 const MOOD_GRADIENTS: Record<MoodType, string> = {
     happy: "linear-gradient(to bottom, rgba(217, 119, 6, 0.5), rgba(161, 98, 7, 0.4), rgba(68, 64, 60, 0.4))",
@@ -159,6 +165,10 @@ export class MoodBucketService {
     private readonly MAX_TRACKS_PER_ARTIST = 2;
     private readonly MAX_RELAXED_TRACKS_PER_ARTIST = 4;
     private readonly PRISMA_RETRY_ATTEMPTS = 3;
+    // Deliberately stricter than the journey pool's MIN_MOOD_BUCKET_TRACKS (5,
+    // routes/vibe.ts) — a mood mix still has to survive per-artist diversity
+    // capping down to a usable playlist, so its source pool needs more headroom.
+    private readonly MOOD_MIX_MIN_POOL_TRACKS = 8;
 
     private isRetryablePrismaError(error: unknown): boolean {
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -488,7 +498,7 @@ export class MoodBucketService {
         // Count tracks per mood in parallel
         const countPromises = VALID_MOODS.map(async (mood) => {
             const count = await prisma.moodBucket.count({
-                where: { mood, score: { gte: 0.5 } },
+                where: { mood, score: { gte: MOOD_BUCKET_MIN_SCORE } },
             });
             const config = MOOD_CONFIG[mood];
             return {
@@ -532,13 +542,13 @@ export class MoodBucketService {
         // bucket every time (GH #46). A wider score band sampled
         // uniformly keeps quality while varying composition.
         const moodBuckets = await prisma.moodBucket.findMany({
-            where: { mood, score: { gte: 0.5 } },
+            where: { mood, score: { gte: MOOD_BUCKET_MIN_SCORE } },
             select: { trackId: true, score: true },
             orderBy: { score: "desc" },
             take: 500, // Quality band to sample from
         });
 
-        if (moodBuckets.length < 8) {
+        if (moodBuckets.length < this.MOOD_MIX_MIN_POOL_TRACKS) {
             logger.debug(
                 `[MoodBucket] Not enough tracks for mood ${mood}: ${moodBuckets.length}`
             );

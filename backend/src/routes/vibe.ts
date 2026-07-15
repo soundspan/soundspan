@@ -22,7 +22,7 @@ import {
     loadVocabulary,
     VocabTerm
 } from "../services/vibeVocabulary";
-import { MOOD_CONFIG, VALID_MOODS, MoodType } from "../services/moodBucketService";
+import { MOOD_CONFIG, VALID_MOODS, MoodType, MOOD_BUCKET_MIN_SCORE } from "../services/moodBucketService";
 
 const router = Router();
 
@@ -194,6 +194,10 @@ interface NearestTrackRow {
     albumCoverUrl: string | null;
     artistId: string;
     artistName: string;
+    energy: number | null;
+    valence: number | null;
+    danceability: number | null;
+    arousal: number | null;
 }
 
 async function findNearestToEmbedding(
@@ -207,7 +211,8 @@ async function findNearestToEmbedding(
                 t.id, t.title,
                 te.embedding <=> ${embedding}::vector AS distance,
                 a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
-                ar.id AS "artistId", ar.name AS "artistName"
+                ar.id AS "artistId", ar.name AS "artistName",
+                t.energy, t.valence, t.danceability, t.arousal
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
             JOIN "Album" a ON t."albumId" = a.id
@@ -222,7 +227,8 @@ async function findNearestToEmbedding(
             t.id, t.title,
             te.embedding <=> ${embedding}::vector AS distance,
             a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
-            ar.id AS "artistId", ar.name AS "artistName"
+            ar.id AS "artistId", ar.name AS "artistName",
+            t.energy, t.valence, t.danceability, t.arousal
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
@@ -240,6 +246,15 @@ function formatNearestTrack(row: NearestTrackRow) {
         similarity: Math.max(0, 1 - row.distance / 2),
         album: { id: row.albumId, title: row.albumTitle, coverUrl: row.albumCoverUrl },
         artist: { id: row.artistId, name: row.artistName },
+        // Mirrors GET /api/vibe/similar/:trackId's audioFeatures shape so the
+        // map/journey/path UI can render the same energy/valence/danceability/
+        // arousal readout for every track surface, not just similar-tracks.
+        audioFeatures: {
+            energy: row.energy,
+            valence: row.valence,
+            danceability: row.danceability,
+            arousal: row.arousal,
+        },
     };
 }
 
@@ -258,6 +273,12 @@ async function walkEmbeddingSteps(
     const usedIds = new Set(initialExcludeIds);
     const stepResults: ReturnType<typeof formatNearestTrack>[] = [];
 
+    // Deliberately sequential (not Promise.all'd): each step's exclusion set
+    // (`usedIds`) accumulates the track picked by every prior step, so step N+1
+    // must see step N's pick before it queries or it can re-offer an
+    // already-used track (or two steps could double-book the same nearest
+    // neighbor). This is an intentional intra-journey dedup dependency, not an
+    // accidental N+1 — parallelizing these queries would break it.
     for (const t of tValues) {
         const interpolated = lerpEmbedding(fromEmbed, targetEmbed, t);
         const nearest = await findNearestToEmbedding(
@@ -371,7 +392,6 @@ const MAX_JOURNEY_STEPS = 20;
 const DEFAULT_JOURNEY_STEPS = 8;
 const MAX_JOURNEY_EXCLUDE_TRACK_IDS = 200;
 const MIN_MOOD_BUCKET_TRACKS = 5;
-const MOOD_BUCKET_MIN_SCORE = 0.5;
 const MOOD_BUCKET_POOL_LIMIT = 50;
 
 interface MoodBucketEmbeddingRow {
@@ -426,7 +446,7 @@ interface MoodBucketEmbeddingRow {
  *       400:
  *         description: Missing fromTrackId, not exactly one of toTrackId/mood, invalid mood, or excludeTrackIds invalid/too long
  *       404:
- *         description: Starting track has no embedding, destination track has no embedding, or the mood has fewer than 5 embedded tracks
+ *         description: Starting track has no embedding, destination track has no embedding, destination track was not found (e.g. deleted between the embedding lookup and the track fetch), or the mood has fewer than 5 embedded tracks
  *       401:
  *         description: Not authenticated
  */
@@ -513,24 +533,39 @@ router.post("/journey", requireAuth, async (req, res) => {
                 where: { id: toTrackId },
                 include: { album: { include: { artist: true } } },
             });
-            target = { trackId: toTrackId, title: destinationTrack?.title ?? toTrackId };
-            destinationWaypoint = destinationTrack
-                ? {
-                      id: destinationTrack.id,
-                      title: destinationTrack.title,
-                      distance: 0,
-                      similarity: 1,
-                      album: {
-                          id: destinationTrack.album.id,
-                          title: destinationTrack.album.title,
-                          coverUrl: destinationTrack.album.coverUrl,
-                      },
-                      artist: {
-                          id: destinationTrack.album.artist.id,
-                          name: destinationTrack.album.artist.name,
-                      },
-                  }
-                : null;
+            if (!destinationTrack) {
+                // TOCTOU: the track_embeddings row fetched above (fetchTrackEmbedding
+                // succeeded) can outlive its Track row for a moment if the track is
+                // deleted between the two queries — TrackEmbedding has onDelete:
+                // Cascade, so this is a genuine race window, not a stale-row bug.
+                // Without this guard, destinationWaypoint stays null and the route
+                // silently drops the destination instead of ever reaching it.
+                return res
+                    .status(404)
+                    .json({ error: "Destination track not found" });
+            }
+            target = { trackId: toTrackId, title: destinationTrack.title };
+            destinationWaypoint = {
+                id: destinationTrack.id,
+                title: destinationTrack.title,
+                distance: 0,
+                similarity: 1,
+                album: {
+                    id: destinationTrack.album.id,
+                    title: destinationTrack.album.title,
+                    coverUrl: destinationTrack.album.coverUrl,
+                },
+                artist: {
+                    id: destinationTrack.album.artist.id,
+                    name: destinationTrack.album.artist.name,
+                },
+                audioFeatures: {
+                    energy: destinationTrack.energy,
+                    valence: destinationTrack.valence,
+                    danceability: destinationTrack.danceability,
+                    arousal: destinationTrack.arousal,
+                },
+            };
         } else {
             mode = "mood";
             const moodKey = mood as MoodType;
@@ -690,7 +725,7 @@ router.get("/moods", requireAuth, async (_req, res) => {
  *       200:
  *         description: Tracks matching the blended vibe
  *       400:
- *         description: Fewer than 2 track IDs provided
+ *         description: Fewer than 2 or more than 10 track IDs provided, or weights do not sum to a positive value
  *       404:
  *         description: One or more ingredient tracks lack embeddings
  *       401:
@@ -731,6 +766,18 @@ router.post("/alchemy", requireAuth, async (req, res) => {
         const effectiveWeights = Array.isArray(weights) && weights.length === trackIds.length
             ? weights.map((w: number) => Math.max(0, w))
             : trackIds.map(() => 1);
+
+        // Flooring negatives at 0 above still allows every weight to be 0 (e.g.
+        // [0, 0]), which makes blendEmbeddings divide by a zero totalWeight and
+        // fill the blended vector with NaN — pgvector rejects a NaN-bearing
+        // vector, so that request would otherwise reach findNearestToEmbedding
+        // and surface as an opaque 500. Reject it explicitly instead.
+        const weightSum = effectiveWeights.reduce((s, w) => s + w, 0);
+        if (!Number.isFinite(weightSum) || weightSum <= 0) {
+            return res
+                .status(400)
+                .json({ error: "weights must sum to a positive value" });
+        }
 
         const blended = blendEmbeddings(embeddings, effectiveWeights);
         const nearest = await findNearestToEmbedding(blended, limit, trackIds);
@@ -1223,6 +1270,145 @@ router.get("/status", requireAuth, async (req, res) => {
     } catch (error: any) {
         logger.error("Vibe status error:", error);
         res.status(500).json({ error: "Failed to get embedding status" });
+    }
+});
+
+const CALIBRATION_SAMPLE_SIZE = 200;
+const CALIBRATION_MIN_EMBEDDED_TRACKS = 10;
+const CALIBRATION_CACHE_TTL_SECONDS = 24 * 60 * 60; // 24h
+const CALIBRATION_CACHE_KEY_PREFIX = "vibe:calibration:v1:";
+const CALIBRATION_QUANTILE_COUNT = 101; // p0..p100 inclusive
+
+interface CalibrationEmbeddingRow {
+    embedding: string;
+}
+
+/**
+ * True cosine distance between two vectors (1 - cosine similarity), matching
+ * pgvector's `<=>` operator semantics used everywhere else in this file.
+ * Embeddings aren't guaranteed unit-norm, so this normalizes explicitly
+ * rather than assuming a dot product is already a cosine distance.
+ */
+function cosineDistance(a: number[], b: number[]): number {
+    let dot = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+    }
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    if (denom === 0) return 1;
+    return 1 - dot / denom;
+}
+
+/**
+ * p0..p100 percentiles (101 values) of a already-sorted-ascending array,
+ * via nearest-rank indexing. Monotonic non-decreasing by construction since
+ * the source is sorted and the index is non-decreasing in p.
+ */
+function computeQuantiles(sortedAscending: number[]): number[] {
+    const n = sortedAscending.length;
+    const quantiles: number[] = [];
+    for (let p = 0; p < CALIBRATION_QUANTILE_COUNT; p++) {
+        const idx = Math.min(n - 1, Math.round((p / 100) * (n - 1)));
+        quantiles.push(sortedAscending[idx]);
+    }
+    return quantiles;
+}
+
+/**
+ * @openapi
+ * /api/vibe/calibration:
+ *   get:
+ *     summary: Get library-calibrated pairwise-distance quantiles
+ *     description: Returns the p0-p100 percentiles of pairwise CLAP cosine distance over a random sample of embedded tracks in this library, so the UI can express match strength as "closer than N% of random pairs in your library" instead of a fixed linear mapping that reads as inflated on libraries where unrelated tracks rarely exceed distance ~1.0.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Distance quantiles, or an empty result when fewer than 10 tracks are embedded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sampleSize:
+ *                   type: integer
+ *                   description: Number of tracks sampled (0 when the library has fewer than 10 embedded tracks)
+ *                 updatedAt:
+ *                   type: string
+ *                   description: ISO timestamp the sample was computed (omitted when sampleSize is 0)
+ *                 quantiles:
+ *                   type: array
+ *                   items:
+ *                     type: number
+ *                   description: p0..p100 percentiles of pairwise cosine distance (101 values), empty when sampleSize is 0
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/calibration", requireAuth, async (_req, res) => {
+    try {
+        const embeddedCountRows = await prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(*) as count FROM track_embeddings
+        `;
+        const embeddedCount = Number(embeddedCountRows[0]?.count || 0);
+
+        if (embeddedCount < CALIBRATION_MIN_EMBEDDED_TRACKS) {
+            return res.json({ sampleSize: 0, quantiles: [] });
+        }
+
+        // Cache keyed on embeddedCount so it self-invalidates as the library
+        // grows (a new track landing changes the key, forcing a recompute)
+        // without needing an explicit invalidation hook.
+        const cacheKey = `${CALIBRATION_CACHE_KEY_PREFIX}${embeddedCount}`;
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            return res.json(JSON.parse(cached));
+        }
+
+        // Blessed raw-SQL extension, same cluster as fetchTrackEmbedding/
+        // findNearestToEmbedding above: `ORDER BY random()` has no pgvector
+        // index to lean on and would be a bad idea as a per-request hot path,
+        // but this is a one-shot calibration sample (<=200 rows) gated by the
+        // 10-embedding floor above and cached 24h keyed on embeddedCount, not
+        // a query that runs per page view.
+        const rows = await prisma.$queryRaw<CalibrationEmbeddingRow[]>`
+            SELECT te.embedding::text AS embedding
+            FROM track_embeddings te
+            JOIN "Track" t ON te.track_id = t.id
+            ORDER BY random()
+            LIMIT ${CALIBRATION_SAMPLE_SIZE}
+        `;
+
+        const embeddings = rows.map((row) => parseEmbedding(row.embedding));
+        const distances: number[] = [];
+        for (let i = 0; i < embeddings.length; i++) {
+            for (let j = i + 1; j < embeddings.length; j++) {
+                distances.push(cosineDistance(embeddings[i], embeddings[j]));
+            }
+        }
+        distances.sort((a, b) => a - b);
+
+        const payload = {
+            sampleSize: embeddings.length,
+            updatedAt: new Date().toISOString(),
+            quantiles: computeQuantiles(distances),
+        };
+
+        await redisClient.setEx(
+            cacheKey,
+            CALIBRATION_CACHE_TTL_SECONDS,
+            JSON.stringify(payload)
+        );
+
+        res.json(payload);
+    } catch (error: any) {
+        logger.error("Vibe calibration error:", error);
+        res.status(500).json({ error: "Failed to compute vibe calibration" });
     }
 });
 
