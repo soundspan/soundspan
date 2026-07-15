@@ -108,6 +108,11 @@ const EMPTY_CLICK_FORGIVENESS = 2;
 const TRAIL_DRAW_LIMIT = 12;
 /** Travel auto-follow: recenter when the origin leaves the central band. */
 const FOLLOW_EDGE_FRACTION = 0.2;
+/**
+ * Zoom level (× fit scale) a spotlight search pick flies to — a real
+ * close-up on the picked song, vs. locate-now-playing's gentler 3×.
+ */
+const SEARCH_LOCATE_ZOOM = 8;
 
 /**
  * How far (px) the mobile mini player intrudes into the map's bottom edge —
@@ -1047,8 +1052,12 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/viewportRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
     }, [beaconTrack, currentTrack, posOf, animateCameraTo]);
 
-    // Spotlight local-search pick: fly to the matched dot (same flight
-    // pattern as locateNowPlaying) and glow it as a single-id highlight.
+    // Spotlight local-search pick: fly INTO the matched dot and glow it as a
+    // single-id highlight. Unlike locateNowPlaying (an orientation nudge that
+    // never zooms past 3× fit), search is a "take me to this song" action —
+    // it always lands at a close-up (8× fit) so the picked dot and its
+    // immediate neighborhood fill the view, keeping a deeper zoom if the user
+    // is already in tighter than that.
     const locateTrack = useCallback(
         (id: string) => {
             const vp = viewportRef.current;
@@ -1056,7 +1065,10 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             if (!vp) return;
             const pos = posOf(id);
             if (!pos) return;
-            const targetScale = Math.max(vp.scale, fitViewport(d).scale * 3);
+            const targetScale = Math.max(
+                vp.scale,
+                fitViewport(d).scale * SEARCH_LOCATE_ZOOM
+            );
             animateCameraTo(flyTo(vp, pos, targetScale, d), 600);
             setHighlightIds(new Set([id]));
         },
