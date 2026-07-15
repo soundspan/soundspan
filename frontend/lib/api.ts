@@ -3094,6 +3094,21 @@ class ApiClient {
         >("/vibe/moods");
     }
 
+    /**
+     * Library-calibrated pairwise-distance quantiles (p0..p100, 101 values,
+     * ascending) for scoring match percentages as "closer than N% of random
+     * pairs in your library" instead of the fixed `1 - distance/2` mapping.
+     * `sampleSize: 0` / `quantiles: []` on a library with fewer than 10
+     * embedded tracks — callers fall back to the old linear mapping.
+     */
+    async getVibeCalibration() {
+        return this.request<{
+            sampleSize: number;
+            updatedAt?: string;
+            quantiles: number[];
+        }>("/vibe/calibration");
+    }
+
     async refreshAllPodcasts() {
         return this.request<{
             success: boolean;

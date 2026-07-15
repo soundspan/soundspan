@@ -8,12 +8,21 @@
  *
  * Clicking a neighbour navigates (play + becomes current); shift-click queues
  * it without moving. Loading + error states render inline.
+ *
+ * Each neighbour row also has a chevron/info toggle expanding an inline
+ * "why this match" breakdown: the calibrated match sentence plus per-feature
+ * (Energy/Mood/Groove/Intensity) origin-vs-candidate bars. Purely
+ * presentational and local (which row is expanded) — no extra HTTP, the
+ * feature values are already in the candidate payload / origin lookup.
  */
 
-import { ChevronRight, Loader2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
+import { useState } from "react";
 import { COMPASS_DIRECTIONS, type CompassDirection } from "./travelCompass";
 import type { CompassCandidate } from "./travelCompass";
-import type { TravelView } from "./useVibeMode";
+import type { TravelView, VibeFeatures } from "./useVibeMode";
+import { VibeTrackRow } from "./VibeTrackRow";
+import { calibratedMatch, featureMatchPercent } from "./vibeMatch";
 
 const DIRECTION_LABEL: Record<CompassDirection, string> = {
     any: "Any",
@@ -45,45 +54,146 @@ export const PANEL_CLOSE_CLASS =
     "rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors " +
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60";
 
-function NeighborRow({
+const FEATURE_LABELS: ReadonlyArray<{ key: keyof VibeFeatures; label: string }> = [
+    { key: "energy", label: "Energy" },
+    { key: "valence", label: "Mood" },
+    { key: "danceability", label: "Groove" },
+    { key: "arousal", label: "Intensity" },
+];
+
+/** One origin-vs-candidate feature bar, skipped entirely when either side is null. */
+function FeatureBar({
+    label,
+    origin,
+    candidate,
+}: {
+    label: string;
+    origin: number | null;
+    candidate: number | null;
+}) {
+    const matchPct = featureMatchPercent(origin, candidate);
+    if (matchPct == null) return null;
+    const originPct = Math.round(origin! * 100);
+    const candidatePct = Math.round(candidate! * 100);
+    return (
+        <div className="mb-1.5 last:mb-0">
+            <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
+                <span>{label}</span>
+                <span className="tabular-nums">{matchPct}% match</span>
+            </div>
+            <div className="relative h-1 rounded-full bg-white/10 overflow-hidden">
+                <span
+                    className="absolute inset-y-0 left-0 rounded-full bg-indigo-400/80"
+                    style={{ width: `${originPct}%` }}
+                />
+            </div>
+            <div className="relative h-1 rounded-full bg-white/10 overflow-hidden mt-0.5">
+                <span
+                    className="absolute inset-y-0 left-0 rounded-full bg-indigo-300/40"
+                    style={{ width: `${candidatePct}%` }}
+                />
+            </div>
+        </div>
+    );
+}
+
+/** The expanded "why this match" breakdown below a neighbour row. */
+function MatchBreakdown({
+    n,
+    originFeatures,
+    quantiles,
+}: {
+    n: CompassCandidate;
+    originFeatures: VibeFeatures | null;
+    quantiles: readonly number[] | null;
+}) {
+    const { percent, label } = calibratedMatch(n.distance, quantiles);
+    return (
+        <div className="mx-2 mb-1.5 px-2.5 py-2 rounded-lg bg-white/5 border border-white/5">
+            <p className="text-xs text-gray-300 mb-2">
+                {label
+                    ? `Closer than ${percent}% of your library — ${label}.`
+                    : `${percent}% match.`}
+            </p>
+            {FEATURE_LABELS.map(({ key, label: featureLabel }) => (
+                <FeatureBar
+                    key={key}
+                    label={featureLabel}
+                    origin={originFeatures ? originFeatures[key] : null}
+                    candidate={n[key] ?? null}
+                />
+            ))}
+        </div>
+    );
+}
+
+/** Exported for direct testing of the expanded "why this match" breakdown —
+ *  `expanded` is a plain prop (state lives in the parent TravelPanel), so
+ *  static-render tests can force it open without simulating a click. */
+export function NeighborRow({
     n,
     offMap,
     onNavigate,
     onQueue,
+    quantiles,
+    originFeatures,
+    expanded,
+    onToggleExpand,
 }: {
     n: CompassCandidate;
     offMap: boolean;
     onNavigate: (id: string) => void;
     onQueue: (id: string) => void;
+    quantiles: readonly number[] | null;
+    originFeatures: VibeFeatures | null;
+    expanded: boolean;
+    onToggleExpand: () => void;
 }) {
     return (
-        <button
-            type="button"
-            onClick={(e) => (e.shiftKey ? onQueue(n.id) : onNavigate(n.id))}
-            title={
-                offMap
-                    ? "Not on the map — click to play, shift-click to queue"
-                    : "Click to travel here, shift-click to queue"
-            }
-            className="w-full min-h-[44px] text-left flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors"
-        >
-            <span className="flex-1 min-w-0">
-                <span className="block truncate text-[13px] text-white">
-                    {n.title}
-                </span>
-                <span className="block truncate text-xs text-gray-400">
-                    {n.artist.name}
-                </span>
-            </span>
-            {offMap && (
-                <span className="shrink-0 text-xs uppercase tracking-wide text-amber-400/80 border border-amber-400/30 rounded px-1 py-0.5">
-                    not on map
-                </span>
+        <div className="flex flex-col">
+            <div className="flex items-center gap-0.5">
+                <VibeTrackRow
+                    title={n.title}
+                    artistName={n.artist.name}
+                    onMap={!offMap}
+                    distance={n.distance}
+                    quantiles={quantiles}
+                    accentClass="text-indigo-300/80"
+                    onClick={(e) => (e.shiftKey ? onQueue(n.id) : onNavigate(n.id))}
+                    hint={
+                        offMap
+                            ? "Not on the map — click to play, shift-click to queue"
+                            : "Click to travel here, shift-click to queue"
+                    }
+                    className="flex-1"
+                />
+                <button
+                    type="button"
+                    onClick={onToggleExpand}
+                    aria-expanded={expanded}
+                    aria-label={
+                        expanded
+                            ? `Hide why ${n.title} matches`
+                            : `Show why ${n.title} matches`
+                    }
+                    title={expanded ? "Hide match breakdown" : "Why this match?"}
+                    className="shrink-0 inline-flex items-center justify-center w-8 h-8 -ml-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
+                >
+                    {expanded ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                    ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                    )}
+                </button>
+            </div>
+            {expanded && (
+                <MatchBreakdown
+                    n={n}
+                    originFeatures={originFeatures}
+                    quantiles={quantiles}
+                />
             )}
-            <span className="shrink-0 text-xs tabular-nums text-indigo-300/80">
-                {Math.round(n.similarity * 100)}%
-            </span>
-        </button>
+        </div>
     );
 }
 
@@ -96,11 +206,17 @@ export function TravelPanel({ view }: { view: TravelView }) {
         offMapNeighbors,
         loading,
         error,
+        quantiles,
+        originFeatures,
         setDirection,
         navigate,
         queue,
         close,
     } = view;
+
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const toggleExpanded = (id: string) =>
+        setExpandedId((prev) => (prev === id ? null : id));
 
     const empty =
         !loading &&
@@ -196,6 +312,10 @@ export function TravelPanel({ view }: { view: TravelView }) {
                         offMap={false}
                         onNavigate={navigate}
                         onQueue={queue}
+                        quantiles={quantiles}
+                        originFeatures={originFeatures}
+                        expanded={expandedId === n.id}
+                        onToggleExpand={() => toggleExpanded(n.id)}
                     />
                 ))}
                 {offMapNeighbors.map((n) => (
@@ -205,6 +325,10 @@ export function TravelPanel({ view }: { view: TravelView }) {
                         offMap
                         onNavigate={navigate}
                         onQueue={queue}
+                        quantiles={quantiles}
+                        originFeatures={originFeatures}
+                        expanded={expandedId === n.id}
+                        onToggleExpand={() => toggleExpanded(n.id)}
                     />
                 ))}
             </div>

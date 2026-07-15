@@ -11,6 +11,7 @@ import { FlaskConical, Loader2, Play, X } from "lucide-react";
 import { VIBE_PANEL_CLASS, VIBE_PANEL_STYLE, PANEL_CLOSE_CLASS } from "./TravelPanel";
 import { MAX_ALCHEMY_INGREDIENTS, MIN_WEIGHT, MAX_WEIGHT } from "./useVibeMode";
 import type { AlchemyView } from "./useVibeMode";
+import { VibeTrackRow } from "./VibeTrackRow";
 
 export function AlchemyTray({ view }: { view: AlchemyView }) {
     const {
@@ -19,6 +20,7 @@ export function AlchemyTray({ view }: { view: AlchemyView }) {
         loading,
         error,
         canBlend,
+        quantiles,
         remove,
         setWeight,
         blend,
@@ -134,27 +136,15 @@ export function AlchemyTray({ view }: { view: AlchemyView }) {
                     </div>
                     <div className="flex flex-col">
                         {results.map((r) => (
-                            <div
+                            <VibeTrackRow
                                 key={`${r.id}-${r.seq}`}
-                                className="flex items-center gap-2 px-1 py-1.5"
-                            >
-                                <span className="flex-1 min-w-0">
-                                    <span className="block truncate text-[13px] text-white">
-                                        {r.title}
-                                    </span>
-                                    <span className="block truncate text-xs text-gray-400">
-                                        {r.artist.name}
-                                    </span>
-                                </span>
-                                {!r.onMap && (
-                                    <span className="shrink-0 text-xs uppercase tracking-wide text-amber-400/80 border border-amber-400/30 rounded px-1 py-0.5">
-                                        not on map
-                                    </span>
-                                )}
-                                <span className="shrink-0 text-xs tabular-nums text-fuchsia-300/80">
-                                    {Math.round(r.similarity * 100)}%
-                                </span>
-                            </div>
+                                title={r.title}
+                                artistName={r.artist.name}
+                                onMap={r.onMap}
+                                distance={r.distance}
+                                quantiles={quantiles}
+                                accentClass="text-fuchsia-300/80"
+                            />
                         ))}
                     </div>
                 </div>

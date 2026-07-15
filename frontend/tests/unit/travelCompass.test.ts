@@ -25,6 +25,9 @@ function candidate(
         album: { id: `al-${id}`, title: "", coverUrl: null },
         artist: { id: `ar-${id}`, name: `Artist ${id}` },
         similarity,
+        // Mirrors the backend's Math.max(0, 1 - distance/2) so fixtures built
+        // from a target similarity stay internally consistent.
+        distance: Math.max(0, 2 * (1 - similarity)),
         energy,
         valence,
         moods: moods ?? null,

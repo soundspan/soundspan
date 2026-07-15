@@ -8,7 +8,13 @@ import {
     type FilterableTrack,
     type MapFilterState,
 } from "../../components/vibe/useMapFilters";
-import { MOOD_COLORS } from "../../components/vibe/types";
+import {
+    MOOD_COLORS,
+    FILTERABLE_MOODS,
+    NEUTRAL_MOOD,
+    moodLabel,
+    getMoodColor,
+} from "../../components/vibe/types";
 
 /**
  * Subtractive contract: `activeMoods` starts (hook default) containing every
@@ -130,4 +136,78 @@ test("mask length matches track count and countVisible sums it", () => {
     assert.equal(mask.length, tracks.length);
     assert.equal(countVisible(mask), 5);
     assert.equal(countVisible(new Uint8Array([1, 0, 1, 0, 0])), 2);
+});
+
+// --- Neutral fallback mood -------------------------------------------------
+//
+// Backend `getDominantMood` (backend/src/services/umapProjection.ts) returns
+// "neutral" when no mood is confident. It must be a first-class, filterable
+// mood key — not silently excluded from the default whitelist or the chip
+// list. FILTERABLE_MOODS is the single source both useMapFilters' default
+// moodList and FiltersPanel's chip list are built from.
+
+test("FILTERABLE_MOODS includes the backend's neutral fallback alongside every named mood", () => {
+    assert.equal(NEUTRAL_MOOD, "neutral");
+    assert.ok(FILTERABLE_MOODS.includes(NEUTRAL_MOOD));
+    for (const m of Object.keys(MOOD_COLORS)) {
+        assert.ok(FILTERABLE_MOODS.includes(m));
+    }
+    assert.equal(FILTERABLE_MOODS.length, Object.keys(MOOD_COLORS).length + 1);
+});
+
+test("neutral mood label renders capitalised 'Neutral'", () => {
+    assert.equal(moodLabel(NEUTRAL_MOOD), "Neutral");
+});
+
+test("neutral mood falls back to the shared gray dot color", () => {
+    assert.equal(getMoodColor(NEUTRAL_MOOD), "#6b7280");
+});
+
+const tracksWithNeutral: FilterableTrack[] = [
+    ...tracks,
+    { dominantMood: "neutral", energy: 0.5, valence: 0.5 }, // 5
+];
+
+test("a neutral-mood track is visible by default (default whitelist includes neutral)", () => {
+    // Mirrors useMapFilters' initial useState(() => new Set(moodList)) where
+    // moodList defaults to FILTERABLE_MOODS.
+    const defaultActive = new Set(FILTERABLE_MOODS);
+    const mask = computeVisibilityMask(
+        tracksWithNeutral,
+        filters({ activeMoods: defaultActive })
+    );
+    assert.equal(mask[5], 1);
+});
+
+test("the neutral chip is hideable via toggle and re-showable by toggling again", () => {
+    const defaultActive = new Set(FILTERABLE_MOODS);
+    const afterHide = toggleMoodInSet(defaultActive, NEUTRAL_MOOD);
+    assert.equal(afterHide.has(NEUTRAL_MOOD), false);
+    const maskHidden = computeVisibilityMask(
+        tracksWithNeutral,
+        filters({ activeMoods: afterHide })
+    );
+    assert.equal(maskHidden[5], 0);
+    // every other mood is untouched
+    assert.deepEqual(Array.from(maskHidden).slice(0, 5), [1, 1, 1, 1, 1]);
+
+    const afterReshow = toggleMoodInSet(afterHide, NEUTRAL_MOOD);
+    assert.equal(afterReshow.has(NEUTRAL_MOOD), true);
+    const maskReshown = computeVisibilityMask(
+        tracksWithNeutral,
+        filters({ activeMoods: afterReshow })
+    );
+    assert.equal(maskReshown[5], 1);
+});
+
+test("neutral is included after a reset/selectAll-style restore (new Set(FILTERABLE_MOODS))", () => {
+    // Mirrors useMapFilters' reset()/selectAllMoods(), which both do
+    // `new Set(moodList)` with moodList defaulting to FILTERABLE_MOODS.
+    const restored = new Set(FILTERABLE_MOODS);
+    assert.ok(restored.has(NEUTRAL_MOOD));
+    const mask = computeVisibilityMask(
+        tracksWithNeutral,
+        filters({ activeMoods: restored })
+    );
+    assert.equal(mask[5], 1);
 });

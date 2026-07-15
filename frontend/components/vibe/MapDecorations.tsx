@@ -16,24 +16,28 @@
  *
  * Positions come exclusively through `posOf` (the live natural-or-spread
  * buffer resolved by index) so decorations never draw from a stale
- * `track.x/y` while the spread layout is active or animating. `trackById` is
- * kept around for metadata lookups only.
+ * `track.x/y` while the spread layout is active or animating.
+ *
+ * Travel edges also encode true similarity: strokeOpacity/width scale with
+ * each neighbour's calibrated match percent (`quantiles`, from
+ * `api.getVibeCalibration`) via `matchEdgeStyle` — the map's ~75%-strength
+ * look is the unchanged anchor, so this is a purely additive visual cue (see
+ * "About this map").
  */
 
 import { Fragment } from "react";
 import type { Viewport } from "./mapViewport";
 import { worldToScreen } from "./mapViewport";
-import type { MapTrack } from "./types";
+import { VIBE_ACCENTS } from "./types";
 import type { VibeListItem } from "./useVibeMode";
 import type { CompassCandidate } from "./travelCompass";
+import { calibratedMatch, matchEdgeStyle } from "./vibeMatch";
 
-const EDGE_COLOR = "#818cf8";
-const ROUTE_COLOR = "#a78bfa";
+const EDGE_COLOR = VIBE_ACCENTS.edge;
+const ROUTE_COLOR = VIBE_ACCENTS.route;
 
 export interface MapDecorationsProps {
     viewport: Viewport;
-    /** Metadata-only lookup (title, artist, ...) — NOT for positions. */
-    trackById: ReadonlyMap<string, MapTrack>;
     /** Live position resolver (natural or spread, mid-animation-safe). */
     posOf: (id: string) => { x: number; y: number } | null;
     travel: {
@@ -48,6 +52,13 @@ export interface MapDecorationsProps {
         waypoints: readonly VibeListItem[];
     } | null;
     /**
+     * Library-calibrated distance quantiles (`api.getVibeCalibration`), or
+     * null before it loads / on a too-small library. Drives the travel edges'
+     * match-strength styling; null falls back to the pre-calibration linear
+     * mapping via `calibratedMatch`, same as the panels.
+     */
+    quantiles?: readonly number[] | null;
+    /**
      * A halo opts into pointer events (the overlay root is pointer-events-none),
      * which otherwise swallows a pointerdown that starts a pan. Wire this to arm
      * the same drag state the canvas's own pointerdown does.
@@ -59,17 +70,13 @@ export interface MapDecorationsProps {
 
 export function MapDecorations({
     viewport,
-    // Metadata-only (title, artist, ...); positions come from `posOf`. Not
-    // read by this component today but kept on the props contract for
-    // callers/tests and future decorations that need track metadata.
-    trackById,
     posOf,
     travel,
     journey,
+    quantiles = null,
     onHaloPointerDown,
     onHaloAddIngredient,
 }: MapDecorationsProps) {
-    void trackById;
     const nodes: React.ReactNode[] = [];
 
     if (travel) {
@@ -101,6 +108,8 @@ export function MapDecorations({
                 const p = posOf(n.id);
                 if (!p) continue;
                 const s = worldToScreen(viewport, p);
+                const { percent } = calibratedMatch(n.distance, quantiles);
+                const { opacity, width } = matchEdgeStyle(percent);
                 nodes.push(
                     <line
                         key={`edge-${n.id}`}
@@ -110,8 +119,8 @@ export function MapDecorations({
                         x2={s.x}
                         y2={s.y}
                         stroke={EDGE_COLOR}
-                        strokeWidth={1.25}
-                        strokeOpacity={0.5}
+                        strokeWidth={width}
+                        strokeOpacity={opacity}
                     />
                 );
             }

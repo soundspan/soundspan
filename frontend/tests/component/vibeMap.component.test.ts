@@ -60,6 +60,7 @@ mock.module("@/lib/api", {
                     computedAt: new Date().toISOString(),
                 };
             },
+            getVibeCalibration: async () => ({ sampleSize: 0, quantiles: [] }),
             vibeSearch: async () => ({ query: "", tracks: [] }),
         },
     },

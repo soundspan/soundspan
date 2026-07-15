@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { MOOD_COLORS } from "./types";
+import { FILTERABLE_MOODS } from "./types";
 import type { MapTrack } from "./types";
 
 /** Minimal shape the pure filter core needs. */
@@ -33,8 +33,15 @@ export interface MapFilterState {
     valenceRange: readonly [number, number];
 }
 
-/** Every mood key, in payload order — the default "everything on" set. */
-const DEFAULT_MOOD_LIST: readonly string[] = Object.keys(MOOD_COLORS);
+/**
+ * Every filterable mood key, in payload order plus the neutral fallback —
+ * the default "everything on" set. Sourced from types.ts's FILTERABLE_MOODS
+ * so this hook's default, `selectAllMoods()`, and `reset()` all agree with
+ * FiltersPanel's chip list on what "every mood" means (see F1 postmortem:
+ * neutral-mood tracks used to be excluded from this list and were therefore
+ * permanently invisible/un-interactive on the map).
+ */
+const DEFAULT_MOOD_LIST: readonly string[] = FILTERABLE_MOODS;
 
 function inRange(v: number | null, lo: number, hi: number): boolean {
     if (v == null) return true; // null features pass range filters

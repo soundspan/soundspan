@@ -8,9 +8,10 @@
  * "drift toward <mood>" button per mood that journeys 12 steps from now-playing.
  */
 
-import { Loader2, MapPin, Play, Route, X } from "lucide-react";
+import { ListPlus, Loader2, MapPin, Play, Route, X } from "lucide-react";
 import { VIBE_PANEL_CLASS, VIBE_PANEL_STYLE, PANEL_CLOSE_CLASS } from "./TravelPanel";
 import type { JourneyView } from "./useVibeMode";
+import { VibeTrackRow } from "./VibeTrackRow";
 
 /** Mood buckets thinner than this can't seed a journey (mirrors the backend). */
 const MIN_MOOD_TRACKS = 5;
@@ -31,12 +32,15 @@ export function JourneyPanel({ view }: { view: JourneyView }) {
         loading,
         error,
         canSubmit,
+        quantiles,
         togglePick,
         chooseMood,
         setSteps,
         submit,
         drift,
         play,
+        save,
+        saving,
         close,
     } = view;
 
@@ -160,40 +164,44 @@ export function JourneyPanel({ view }: { view: JourneyView }) {
                                 ? `Route to ${targetLabel}`
                                 : "Route"}
                         </p>
-                        <button
-                            type="button"
-                            onClick={play}
-                            className="inline-flex items-center gap-1 min-h-[36px] px-2 rounded-lg text-xs text-indigo-300 hover:text-white hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
-                        >
-                            <Play className="w-3.5 h-3.5" />
-                            Play journey
-                        </button>
+                        <div className="flex items-center">
+                            <button
+                                type="button"
+                                onClick={play}
+                                className="inline-flex items-center gap-1 min-h-[36px] px-2 rounded-lg text-xs text-indigo-300 hover:text-white hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
+                            >
+                                <Play className="w-3.5 h-3.5" />
+                                Play journey
+                            </button>
+                            <button
+                                type="button"
+                                onClick={save}
+                                disabled={saving}
+                                title="Save this journey as a playlist"
+                                aria-label="Save journey as playlist"
+                                className="inline-flex items-center gap-1 min-h-[36px] px-2 rounded-lg text-xs text-indigo-300 hover:text-white hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                                {saving ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <ListPlus className="w-3.5 h-3.5" />
+                                )}
+                                Save
+                            </button>
+                        </div>
                     </div>
                     <ol className="flex flex-col">
                         {waypoints.map((w) => (
-                            <li
-                                key={`${w.id}-${w.seq}`}
-                                className="flex items-center gap-2 px-1 py-1.5"
-                            >
-                                <span className="shrink-0 w-5 h-5 grid place-items-center rounded-full bg-indigo-500/30 text-xs tabular-nums text-indigo-200">
-                                    {w.seq}
-                                </span>
-                                <span className="flex-1 min-w-0">
-                                    <span className="block truncate text-[13px] text-white">
-                                        {w.title}
-                                    </span>
-                                    <span className="block truncate text-xs text-gray-400">
-                                        {w.artist.name}
-                                    </span>
-                                </span>
-                                {!w.onMap && (
-                                    <span className="shrink-0 text-xs uppercase tracking-wide text-amber-400/80 border border-amber-400/30 rounded px-1 py-0.5">
-                                        not on map
-                                    </span>
-                                )}
-                                <span className="shrink-0 text-xs tabular-nums text-indigo-300/80">
-                                    {Math.round(w.similarity * 100)}%
-                                </span>
+                            <li key={`${w.id}-${w.seq}`}>
+                                <VibeTrackRow
+                                    title={w.title}
+                                    artistName={w.artist.name}
+                                    onMap={w.onMap}
+                                    distance={w.distance}
+                                    quantiles={quantiles}
+                                    accentClass="text-indigo-300/80"
+                                    seq={w.seq}
+                                />
                             </li>
                         ))}
                     </ol>

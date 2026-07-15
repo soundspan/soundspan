@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { Viewport } from "./mapViewport";
-import { computeDotRadius, fitViewport, worldToScreen } from "./mapViewport";
+import { computeDotRadius, fitViewport } from "./mapViewport";
 import type { MapTrack } from "./types";
 import { getMoodColor } from "./types";
 
@@ -102,17 +102,27 @@ export function MapCanvas(props: MapCanvasProps) {
         const fitScale = fitViewport({ width, height }).scale;
         const r = computeDotRadius(viewport.scale, fitScale);
 
+        // Scalar transform, inlined from mapViewport's worldToScreen
+        // (screen = world * scale + t): this loop runs for up to ~15,000 dots
+        // per repaint, at up to 60fps while panning/zooming, so it deliberately
+        // allocates NOTHING per dot — no world-point object, no worldToScreen
+        // result object, just two local numbers. Pixel-identical to calling
+        // worldToScreen(viewport, world) per dot.
+        const scale = viewport.scale;
+        const tx = viewport.tx;
+        const ty = viewport.ty;
+
         for (let i = 0; i < tracks.length; i++) {
             const t = tracks[i];
-            const world = hasPositions
-                ? { x: positions![i * 2], y: positions![i * 2 + 1] }
-                : t;
-            const s = worldToScreen(viewport, world);
+            const wx = hasPositions ? positions![i * 2] : t.x;
+            const wy = hasPositions ? positions![i * 2 + 1] : t.y;
+            const sx = wx * scale + tx;
+            const sy = wy * scale + ty;
             if (
-                s.x < -CULL_MARGIN ||
-                s.x > width + CULL_MARGIN ||
-                s.y < -CULL_MARGIN ||
-                s.y > height + CULL_MARGIN
+                sx < -CULL_MARGIN ||
+                sx > width + CULL_MARGIN ||
+                sy < -CULL_MARGIN ||
+                sy > height + CULL_MARGIN
             ) {
                 continue;
             }
@@ -144,14 +154,14 @@ export function MapCanvas(props: MapCanvasProps) {
             // Soft glow ring behind spotlight matches.
             if (visible && isMatch) {
                 ctx.beginPath();
-                ctx.arc(s.x, s.y, radius + GLOW_RING_EXTRA, 0, TAU);
+                ctx.arc(sx, sy, radius + GLOW_RING_EXTRA, 0, TAU);
                 ctx.fillStyle = color;
                 ctx.globalAlpha = 0.22;
                 ctx.fill();
             }
 
             ctx.beginPath();
-            ctx.arc(s.x, s.y, radius, 0, TAU);
+            ctx.arc(sx, sy, radius, 0, TAU);
             ctx.fillStyle = color;
             ctx.globalAlpha = alpha;
             ctx.fill();

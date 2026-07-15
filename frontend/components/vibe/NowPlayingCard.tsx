@@ -14,6 +14,7 @@
  */
 
 import { Music, Pause, Play } from "lucide-react";
+import { VIBE_ACCENTS } from "./types";
 
 export interface NowPlayingCardTrack {
     id: string;
@@ -36,7 +37,7 @@ export interface NowPlayingCardProps {
     onTogglePlay: () => void;
 }
 
-const DEFAULT_COLOR = "#818cf8";
+const DEFAULT_COLOR = VIBE_ACCENTS.edge;
 
 export function NowPlayingCard({
     track,

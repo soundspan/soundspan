@@ -22,6 +22,7 @@ import {
     useRef,
     useState,
 } from "react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Track } from "@/lib/audio-state-context";
 import type { MapTrack } from "./types";
@@ -39,6 +40,7 @@ import {
     waypointToTrack,
     type WithOnMap,
 } from "./journeyTracks";
+import { formatPlaylistDate, saveTracksAsPlaylist } from "./savePlaylist";
 
 export type VibeMode = "explore" | "travel" | "journey" | "alchemy";
 
@@ -152,10 +154,10 @@ function reducer(state: ModeState, action: Action): ModeState {
         case "ADD_ALCHEMY": {
             const prev = state.mode === "alchemy" ? state.ingredients : [];
             if (prev.some((i) => i.id === action.id)) return state;
-            if (prev.length >= MAX_ALCHEMY_INGREDIENTS)
-                return state.mode === "alchemy"
-                    ? state
-                    : { mode: "alchemy", ingredients: prev };
+            // prev is only ever non-empty when already in alchemy mode (it's []
+            // otherwise), so hitting the cap implies state.mode === "alchemy"
+            // already — the state is just returned as-is.
+            if (prev.length >= MAX_ALCHEMY_INGREDIENTS) return state;
             return {
                 mode: "alchemy",
                 ingredients: [...prev, { id: action.id, weight: DEFAULT_WEIGHT }],
@@ -189,7 +191,17 @@ export type VibeListItem = WithOnMap<{
     album: { id: string; title: string; coverUrl: string | null };
     artist: { id: string; name: string };
     similarity: number;
+    /** Raw pairwise CLAP cosine distance — the calibrated-% display source. */
+    distance: number;
 }> & { seq: number };
+
+/** The four audio features the Travel explainability breakdown compares. */
+export interface VibeFeatures {
+    energy: number | null;
+    valence: number | null;
+    danceability: number | null;
+    arousal: number | null;
+}
 
 export interface TravelView {
     currentId: string;
@@ -200,6 +212,10 @@ export interface TravelView {
     offMapNeighbors: CompassCandidate[];
     loading: boolean;
     error: string | null;
+    /** Library-calibrated distance quantiles, or null (uncalibrated fallback). */
+    quantiles: readonly number[] | null;
+    /** The current origin's own audio features, for the explainability breakdown. */
+    originFeatures: VibeFeatures | null;
     setDirection: (d: CompassDirection) => void;
     navigate: (id: string) => void;
     queue: (id: string) => void;
@@ -225,12 +241,17 @@ export interface JourneyView {
     loading: boolean;
     error: string | null;
     canSubmit: boolean;
+    /** Library-calibrated distance quantiles, or null (uncalibrated fallback). */
+    quantiles: readonly number[] | null;
     togglePick: () => void;
     chooseMood: (mood: string) => void;
     setSteps: (n: number) => void;
     submit: () => void;
     drift: (mood: string) => void;
     play: () => void;
+    /** Save the journey's queue (origin + waypoints, playJourney's own order) as a playlist. */
+    save: () => Promise<void>;
+    saving: boolean;
     close: () => void;
 }
 
@@ -248,6 +269,8 @@ export interface AlchemyView {
     loading: boolean;
     error: string | null;
     canBlend: boolean;
+    /** Library-calibrated distance quantiles, or null (uncalibrated fallback). */
+    quantiles: readonly number[] | null;
     remove: (id: string) => void;
     setWeight: (id: string, w: number) => void;
     blend: () => void;
@@ -297,6 +320,13 @@ export interface UseVibeModeArgs {
         ) => void;
         addToQueue: (track: Track, options?: { silent?: boolean }) => void;
     };
+    /**
+     * Library-calibrated distance quantiles (`api.getVibeCalibration`, fetched
+     * once by VibeMap), or null before it loads / on a too-small library —
+     * threaded into every view so the panels' match percentages can be
+     * calibrated without each doing its own fetch.
+     */
+    quantiles?: readonly number[] | null;
 }
 
 export interface UseVibeMode {
@@ -319,10 +349,21 @@ export interface UseVibeMode {
     alchemy: AlchemyView | null;
 }
 
+/**
+ * Owns the vibe map's F2 interaction state machine — explore / travel /
+ * journey / alchemy — plus each mode's async data (similar neighbours,
+ * journey route, blend results) and the derived, ready-to-render `travel` /
+ * `journey` / `alchemy` view objects. Mode switches are exclusive: entering
+ * one mode tears down the others' overlay state (see the teardown effect and
+ * `startJourney`'s explicit re-entry clear). Callers feed it the map index,
+ * now-playing track, playback controls and (optionally) library-calibrated
+ * match quantiles; they render whichever view comes back non-null.
+ */
 export function useVibeMode({
     trackById,
     currentTrack,
     controls,
+    quantiles = null,
 }: UseVibeModeArgs): UseVibeMode {
     const [state, dispatch] = useReducer(reducer, { mode: "explore" });
 
@@ -336,6 +377,13 @@ export function useVibeMode({
     const [rawNeighbors, setRawNeighbors] = useState<{
         originId: string;
         list: CompassCandidate[];
+        /** The origin's own danceability/arousal, from the /similar response. */
+        sourceFeatures: {
+            energy: number | null;
+            valence: number | null;
+            danceability: number | null;
+            arousal: number | null;
+        } | null;
     } | null>(null);
     const [travelLoading, setTravelLoading] = useState(false);
     const [travelError, setTravelError] = useState<string | null>(null);
@@ -343,6 +391,7 @@ export function useVibeMode({
     const [route, setRoute] = useState<JourneyRoute | null>(null);
     const [journeyLoading, setJourneyLoading] = useState(false);
     const [journeyError, setJourneyError] = useState<string | null>(null);
+    const [journeySaving, setJourneySaving] = useState(false);
     const [moods, setMoods] = useState<JourneyMoodOption[]>([]);
 
     const [blend, setBlend] = useState<VibeResultRow[] | null>(null);
@@ -395,6 +444,7 @@ export function useVibeMode({
                 if (cancelled) return;
                 setRawNeighbors({
                     originId: travelCurrentId,
+                    sourceFeatures: res.sourceFeatures ?? null,
                     list: res.tracks.map((t) => ({
                         id: t.id,
                         title: t.title,
@@ -402,8 +452,11 @@ export function useVibeMode({
                         artist: t.artist,
                         // client type omits similarity; derive from cosine distance.
                         similarity: Math.max(0, 1 - t.distance / 2),
+                        distance: t.distance,
                         energy: t.audioFeatures?.energy ?? null,
                         valence: t.audioFeatures?.valence ?? null,
+                        danceability: t.audioFeatures?.danceability ?? null,
+                        arousal: t.audioFeatures?.arousal ?? null,
                         moods: null,
                     })),
                 });
@@ -443,6 +496,24 @@ export function useVibeMode({
     }, [rawNeighbors, travelCurrentId, trackById]);
     const travelOrigin =
         travelCurrentId != null ? trackById.get(travelCurrentId) : undefined;
+    // Origin features for the explainability breakdown: energy/valence come
+    // from the map projection (always present for an on-map origin);
+    // danceability/arousal aren't in the map payload, so they come from the
+    // /similar fetch's sourceFeatures — guarded to the matching origin so a
+    // stale fetch for a previous node never mislabels the new one's features.
+    const originFeatures: VibeFeatures | null = useMemo(() => {
+        if (!travelOrigin) return null;
+        const sourceFeatures =
+            rawNeighbors && rawNeighbors.originId === travelCurrentId
+                ? rawNeighbors.sourceFeatures
+                : null;
+        return {
+            energy: travelOrigin.energy,
+            valence: travelOrigin.valence,
+            danceability: sourceFeatures?.danceability ?? null,
+            arousal: sourceFeatures?.arousal ?? null,
+        };
+    }, [travelOrigin, rawNeighbors, travelCurrentId]);
     const shownNeighbors = useMemo(() => {
         if (!travelOrigin || state.mode !== "travel") return [];
         return compassNeighbors(
@@ -542,6 +613,14 @@ export function useVibeMode({
                 return;
             }
             if (mods.ctrlOrMeta) {
+                // Journey is a half-built route the user is actively
+                // constructing — silently switching it into alchemy would
+                // destroy it. Explore/travel ctrl-click still enters alchemy
+                // unchanged (a travel constellation is cheap to rebuild).
+                if (state.mode === "journey") {
+                    toast("Close the journey (Esc) to start blending");
+                    return;
+                }
                 addIngredient(id);
                 return;
             }
@@ -571,12 +650,24 @@ export function useVibeMode({
     const currentTrackId = currentTrack?.id ?? null;
     const travelCurrentForJourney =
         state.mode === "travel" ? state.currentId : null;
-    const canStartJourney = !!(travelCurrentForJourney || currentTrackId);
+    // Disabled while alchemy is active (a half-built blend must not be
+    // silently destroyed by starting a journey) — VibeMap surfaces this via
+    // `vibe.mode === "alchemy"` for the "Close alchemy (Esc) first" hint.
+    const inAlchemy = state.mode === "alchemy";
+    const canStartJourney =
+        !inAlchemy && !!(travelCurrentForJourney || currentTrackId);
     const startJourney = useCallback(() => {
         const fromId = travelCurrentForJourney ?? currentTrackId;
         if (!fromId) return;
+        // Re-entering journey (already in journey mode, picking a new
+        // fromId) does NOT change `state.mode`, so the mode-teardown effect
+        // below never fires for it — clear the previous route/error and
+        // invalidate the generation here too, or a stale route stays
+        // displayed for the new origin.
+        clearJourneyResults();
+        journeyGen.current++;
         dispatch({ type: "ENTER_JOURNEY", fromId });
-    }, [travelCurrentForJourney, currentTrackId]);
+    }, [travelCurrentForJourney, currentTrackId, clearJourneyResults]);
 
     const runJourney = useCallback(
         async (
@@ -648,6 +739,34 @@ export function useVibeMode({
         if (queue.length) controls.playTracks(queue, 0, true);
     }, [state, route, journeyFromTrack, controls]);
 
+    /**
+     * Save the journey's queue as a playlist — the exact same track list
+     * `playJourney` queues (origin prepended unless it's already the first
+     * waypoint), reused via `journeyTracks` rather than re-derived.
+     */
+    const saveJourney = useCallback(async () => {
+        if (state.mode !== "journey" || !route) return;
+        const queue = journeyTracks(
+            journeyFromTrack(state.fromId),
+            route.waypoints
+        );
+        if (queue.length === 0) return;
+        const label = route.target?.label ?? route.target?.title ?? "Journey";
+        const name = `Journey to ${label} — ${formatPlaylistDate()}`;
+        setJourneySaving(true);
+        try {
+            const result = await saveTracksAsPlaylist(
+                name,
+                queue.map((t) => t.id)
+            );
+            toast.success(`Saved ${result.added} tracks to ${name}`);
+        } catch {
+            toast.error("Couldn't save that playlist");
+        } finally {
+            setJourneySaving(false);
+        }
+    }, [state, route, journeyFromTrack]);
+
     const runBlend = useCallback(() => {
         if (state.mode !== "alchemy" || state.ingredients.length < 2) return;
         const ings = state.ingredients;
@@ -703,6 +822,8 @@ export function useVibeMode({
                   offMapNeighbors,
                   loading: travelLoading,
                   error: travelError,
+                  quantiles,
+                  originFeatures,
                   setDirection: (d) =>
                       dispatch({ type: "SET_DIRECTION", direction: d }),
                   navigate: navigateTravel,
@@ -730,13 +851,21 @@ export function useVibeMode({
                   loading: journeyLoading,
                   error: journeyError,
                   canSubmit: !!(state.destTrackId || state.moodTarget),
+                  quantiles,
                   togglePick: () => dispatch({ type: "TOGGLE_PICK" }),
-                  chooseMood: (mood) =>
-                      dispatch({ type: "SET_MOOD_TARGET", mood }),
+                  chooseMood: (mood) => {
+                      dispatch({ type: "SET_MOOD_TARGET", mood });
+                      // Pairs with every other destination-mutating dispatch
+                      // (SET_DEST above) — without this, picking a new mood
+                      // leaves the previous target's route displayed.
+                      clearJourneyResults();
+                  },
                   setSteps: (n) => dispatch({ type: "SET_STEPS", steps: n }),
                   submit: submitJourney,
                   drift,
                   play: playJourney,
+                  save: saveJourney,
+                  saving: journeySaving,
                   close: exitToExplore,
               }
             : null;
@@ -758,6 +887,7 @@ export function useVibeMode({
                   loading: alchemyLoading,
                   error: alchemyError,
                   canBlend: state.ingredients.length >= 2,
+                  quantiles,
                   remove: (id) => {
                       dispatch({ type: "REMOVE_ALCHEMY", id });
                       clearAlchemyResults();

@@ -15,7 +15,7 @@
  */
 
 import { SlidersHorizontal, X } from "lucide-react";
-import { MOOD_COLORS, getMoodColor, moodLabel } from "./types";
+import { FILTERABLE_MOODS, VIBE_ACCENTS, getMoodColor, moodLabel } from "./types";
 import type { UseMapFilters } from "./useMapFilters";
 
 type FiltersSlice = Pick<
@@ -41,7 +41,7 @@ export interface FiltersPanelProps {
     reducedMotion?: boolean;
     /** Small-screen bottom-sheet styling for the expanded card. */
     compact?: boolean;
-    /** Mood keys to render; defaults to every known mood. */
+    /** Mood keys to render; defaults to every filterable mood (incl. neutral). */
     moods?: readonly string[];
 }
 
@@ -131,7 +131,7 @@ function DualRange({
                     width: 18px;
                     height: 18px;
                     border-radius: 9999px;
-                    background: #818cf8;
+                    background: ${VIBE_ACCENTS.edge};
                     border: 2px solid #0a0a0a;
                     cursor: pointer;
                 }
@@ -141,7 +141,7 @@ function DualRange({
                     height: 18px;
                     border: 2px solid #0a0a0a;
                     border-radius: 9999px;
-                    background: #818cf8;
+                    background: ${VIBE_ACCENTS.edge};
                     cursor: pointer;
                 }
                 @media (pointer: coarse) {
@@ -160,7 +160,7 @@ export function FiltersPanel({
     onExpandedChange,
     reducedMotion,
     compact,
-    moods = Object.keys(MOOD_COLORS),
+    moods = FILTERABLE_MOODS,
 }: FiltersPanelProps) {
     const {
         activeMoods,

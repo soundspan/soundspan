@@ -58,7 +58,17 @@ import { TravelPanel } from "./TravelPanel";
 import { JourneyPanel } from "./JourneyPanel";
 import { AlchemyTray } from "./AlchemyTray";
 import { useMapFilters } from "./useMapFilters";
-import { useSessionTrail } from "./useSessionTrail";
+import {
+    fadeAlphaForAge,
+    readStoredString,
+    readStoredTrailMode,
+    sessionStorageSafe,
+    useSessionTrail,
+    writeStoredString,
+    writeStoredTrailMode,
+    type TrailMode,
+} from "./useSessionTrail";
+import { useLatest } from "./useLatest";
 import { useVibeMode } from "./useVibeMode";
 import {
     computeDotRadius,
@@ -85,6 +95,7 @@ import { SweepChip } from "./SweepChip";
 import { MapHintChip } from "./MapHintChip";
 import { hintForMode, HINTS_DISMISSED_KEY } from "./mapHints";
 import { mapTrackToTrack } from "./journeyTracks";
+import { formatPlaylistDate, saveTracksAsPlaylist } from "./savePlaylist";
 import { toast } from "sonner";
 import type { MapTrack } from "./types";
 import { getMoodColor } from "./types";
@@ -108,31 +119,23 @@ export const MOBILE_PLAYER_CLEARANCE_PX = 64;
 type LayoutMode = "natural" | "spread";
 const LAYOUT_STORAGE_KEY = "vibe:layout-mode";
 const LAYOUT_ANIM_MS = 400;
+/** Recompute "fade" trail-mode opacity on this cadence while mounted. */
+const TRAIL_FADE_RECOMPUTE_MS = 60_000;
 
-const EMPTY_TRAIL: { x: number; y: number }[] = [];
+const EMPTY_TRAIL: { x: number; y: number; alpha: number }[] = [];
 
 function easeInOutCubic(t: number): number {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 function readStoredLayoutMode(): LayoutMode {
-    if (typeof window === "undefined") return "natural";
-    try {
-        return window.sessionStorage.getItem(LAYOUT_STORAGE_KEY) === "spread"
-            ? "spread"
-            : "natural";
-    } catch {
-        return "natural";
-    }
+    return readStoredString(sessionStorageSafe(), LAYOUT_STORAGE_KEY) === "spread"
+        ? "spread"
+        : "natural";
 }
 
 function readHintsDismissed(): boolean {
-    if (typeof window === "undefined") return false;
-    try {
-        return window.sessionStorage.getItem(HINTS_DISMISSED_KEY) === "1";
-    } catch {
-        return false;
-    }
+    return readStoredString(sessionStorageSafe(), HINTS_DISMISSED_KEY) === "1";
 }
 
 interface DragState {
@@ -243,13 +246,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const [hintsDismissed, setHintsDismissed] = useState(readHintsDismissed);
     const dismissHints = useCallback(() => {
         setHintsDismissed(true);
-        if (typeof window !== "undefined") {
-            try {
-                window.sessionStorage.setItem(HINTS_DISMISSED_KEY, "1");
-            } catch {
-                /* private mode / quota — dismissal is best-effort */
-            }
-        }
+        writeStoredString(sessionStorageSafe(), HINTS_DISMISSED_KEY, "1");
     }, []);
 
     const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
@@ -263,17 +260,64 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const { currentTrack, queue, currentIndex } = useAudioState();
     const { playTrack, playTracks, addToQueue } = useAudioControls();
     const filters = useMapFilters(tracks);
-    const trailIds = useSessionTrail();
+    const { trailIds, entries: trailEntries, clear: clearTrail } = useSessionTrail();
+
+    // Trail display mode (on / fade / off), persisted across the session.
+    const [trailMode, setTrailModeState] = useState<TrailMode>(() =>
+        readStoredTrailMode(sessionStorageSafe())
+    );
+    const setTrailMode = useCallback((mode: TrailMode) => {
+        setTrailModeState(mode);
+        writeStoredTrailMode(sessionStorageSafe(), mode);
+    }, []);
+    const [trailPopoverOpen, setTrailPopoverOpen] = useState(false);
+    const toggleTrailPopover = useCallback(
+        () => setTrailPopoverOpen((v) => !v),
+        []
+    );
+    const handleClearTrail = useCallback(() => {
+        clearTrail();
+        toast.success("Trail cleared");
+    }, [clearTrail]);
+
+    // Save the full stored trail (all entries, oldest -> newest — not just the
+    // drawn tail, which is capped at TRAIL_DRAW_LIMIT for legibility) as a
+    // playlist.
+    const [trailSaving, setTrailSaving] = useState(false);
+    const saveTrail = useCallback(async () => {
+        if (trailIds.length === 0) return;
+        setTrailSaving(true);
+        try {
+            const name = `Vibe history — ${formatPlaylistDate()}`;
+            const result = await saveTracksAsPlaylist(name, trailIds);
+            toast.success(`Saved ${result.added} tracks to ${name}`);
+        } catch {
+            toast.error("Couldn't save that playlist");
+        } finally {
+            setTrailSaving(false);
+        }
+    }, [trailIds]);
+
+    // "Fade" mode ages trail entries out over time even when nothing else
+    // changes — recompute periodically while it's the active mode (and the
+    // map is mounted) so a segment keeps fading instead of only updating on
+    // the next track change.
+    const [trailFadeTick, setTrailFadeTick] = useState(0);
+    useEffect(() => {
+        if (trailMode !== "fade") return;
+        const id = setInterval(
+            () => setTrailFadeTick((t) => t + 1),
+            TRAIL_FADE_RECOMPUTE_MS
+        );
+        return () => clearInterval(id);
+    }, [trailMode]);
 
     // --- Layout (natural vs spread) — single source of positions -----------
     const naturalPositions = useMemo(() => buildPositions(tracks), [tracks]);
     const spreadPositions = useMemo(() => computeSpreadPositions(tracks), [tracks]);
 
     const [layoutMode, setLayoutMode] = useState<LayoutMode>(readStoredLayoutMode);
-    const layoutModeRef = useRef(layoutMode);
-    useEffect(() => {
-        layoutModeRef.current = layoutMode;
-    }, [layoutMode]);
+    const layoutModeRef = useLatest(layoutMode);
 
     const [rawPositions, setRawPositions] = useState<Float32Array>(
         () => new Float32Array(0)
@@ -297,6 +341,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         setRawPositions(
             layoutModeRef.current === "spread" ? spreadPositions : naturalPositions
         );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- layoutModeRef comes from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this effect only re-snaps on a track-list/positions change, not a layout toggle.
     }, [tracks, naturalPositions, spreadPositions]);
 
     useEffect(() => {
@@ -319,13 +364,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         const to = next === "spread" ? spreadPositions : naturalPositions;
 
         setLayoutMode(next);
-        if (typeof window !== "undefined") {
-            try {
-                window.sessionStorage.setItem(LAYOUT_STORAGE_KEY, next);
-            } catch {
-                /* private mode / quota — layout choice is best-effort */
-            }
-        }
+        writeStoredString(sessionStorageSafe(), LAYOUT_STORAGE_KEY, next);
 
         if (layoutRafRef.current != null) {
             cancelAnimationFrame(layoutRafRef.current);
@@ -381,10 +420,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     );
     // Ref mirror so camera effects (auto-follow, journey framing) can resolve
     // positions without re-running on every layout-animation frame.
-    const posOfRef = useRef(posOf);
-    useEffect(() => {
-        posOfRef.current = posOf;
-    }, [posOf]);
+    const posOfRef = useLatest(posOf);
 
     // --- Data load (accepted raw useEffect + api pattern) -------------------
     useEffect(() => {
@@ -400,6 +436,26 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             }
         }
         void load();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Library-calibrated match quantiles: fetched once on mount, same
+    // accepted raw-useEffect+api pattern as the map load above. Failure (or
+    // a too-small library, sampleSize 0) is silent — every consumer falls
+    // back to the pre-calibration linear mapping via calibratedMatch.
+    const [quantiles, setQuantiles] = useState<readonly number[] | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        api.getVibeCalibration()
+            .then((data) => {
+                if (cancelled) return;
+                setQuantiles(data.sampleSize > 0 ? data.quantiles : null);
+            })
+            .catch(() => {
+                /* calibration is best-effort; the uncalibrated fallback still works */
+            });
         return () => {
             cancelled = true;
         };
@@ -426,18 +482,9 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     }, [dims]);
 
     // --- Camera: single rAF owner for every viewport write ------------------
-    const viewportRef = useRef<Viewport | null>(null);
-    useEffect(() => {
-        viewportRef.current = viewport;
-    }, [viewport]);
-    const dimsRef = useRef(dims);
-    useEffect(() => {
-        dimsRef.current = dims;
-    }, [dims]);
-    const reducedMotionRef = useRef(reducedMotion);
-    useEffect(() => {
-        reducedMotionRef.current = reducedMotion;
-    }, [reducedMotion]);
+    const viewportRef = useLatest(viewport);
+    const dimsRef = useLatest(dims);
+    const reducedMotionRef = useLatest(reducedMotion);
 
     const panPendingRef = useRef({ dx: 0, dy: 0 });
     const zoomPendingRef = useRef<{ cx: number; cy: number; logf: number } | null>(
@@ -483,6 +530,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             viewportRef.current = vp;
             setViewport(vp);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/viewportRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this camera rAF tick does not re-subscribe.
     }, []);
 
     const scheduleCamera = useCallback(() => {
@@ -520,6 +568,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             };
             scheduleCamera();
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/reducedMotionRef/viewportRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
         [scheduleCamera]
     );
 
@@ -558,20 +607,27 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         () => ({ playTrack, playTracks, addToQueue }),
         [playTrack, playTracks, addToQueue]
     );
-    const vibe = useVibeMode({ trackById, currentTrack, controls });
+    const vibe = useVibeMode({ trackById, currentTrack, controls, quantiles });
 
     const beaconTrack = currentTrack ? trackById.get(currentTrack.id) : undefined;
     const beaconOnMap = !!beaconTrack;
     const beaconPos = currentTrack ? posOf(currentTrack.id) : null;
 
     const trailPoints = useMemo(() => {
-        const pts: { x: number; y: number }[] = [];
-        for (const id of trailIds.slice(-TRAIL_DRAW_LIMIT)) {
-            const p = posOf(id);
-            if (p) pts.push(p);
+        if (trailMode === "off") return EMPTY_TRAIL;
+        const now = Date.now();
+        const pts: { x: number; y: number; alpha: number }[] = [];
+        for (const entry of trailEntries.slice(-TRAIL_DRAW_LIMIT)) {
+            const p = posOf(entry.trackId);
+            if (!p) continue;
+            const alpha =
+                trailMode === "fade" ? fadeAlphaForAge(now - entry.at) : 1;
+            if (alpha <= 0) continue; // fully aged out — drop from the drawn set
+            pts.push({ x: p.x, y: p.y, alpha });
         }
         return pts;
-    }, [trailIds, posOf]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- trailFadeTick is intentionally unused in the body: it exists purely to force this memo to recompute every 60s while "fade" mode ages trail entries out.
+    }, [trailEntries, posOf, trailMode, trailFadeTick]);
 
     // Flight plan: where the queue goes next (`?? []` also guards test mocks
     // that don't model the queue fields).
@@ -625,6 +681,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                 out: scratch.ids,
             });
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- viewportRef comes from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
         [tracks, positions, filters.mask]
     );
 
@@ -712,11 +769,21 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             let closest: string | null = null;
             let closestDist = hitRadius;
             const mask = filters.mask;
+            // Scalar transform, inlined from mapViewport's worldToScreen (screen
+            // = world * scale + t), matching MapCanvas's draw loop: this runs
+            // for up to ~15,000 dots per pointermove, so it deliberately
+            // allocates nothing per dot — no world-point object, no
+            // worldToScreen result object, just local numbers.
+            const scale = viewport.scale;
+            const tx = viewport.tx;
+            const ty = viewport.ty;
             for (let i = 0; i < tracks.length; i++) {
                 if (mask[i] === 0) continue;
-                const world = { x: positions[i * 2], y: positions[i * 2 + 1] };
-                const s = worldToScreen(viewport, world);
-                const dist = Math.hypot(cursor.x - s.x, cursor.y - s.y);
+                const sx = positions[i * 2] * scale + tx;
+                const sy = positions[i * 2 + 1] * scale + ty;
+                const dx = cursor.x - sx;
+                const dy = cursor.y - sy;
+                const dist = Math.hypot(dx, dy);
                 if (dist < closestDist) {
                     closest = tracks[i].id;
                     closestDist = dist;
@@ -809,6 +876,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
 
             setHoveredId(hitTest(e.clientX, e.clientY));
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- viewportRef comes from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
         [cursorFromEvent, scheduleCamera, hitTest, sweepCollectAt]
     );
 
@@ -927,6 +995,27 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         setSweepResult(null);
     }, [sweepResult, sweepTracks, addToQueue]);
 
+    const [sweepSaving, setSweepSaving] = useState(false);
+    const saveSweep = useCallback(async () => {
+        if (!sweepResult) return;
+        const ids = sweepResult.ids;
+        if (ids.length === 0) {
+            setSweepResult(null);
+            return;
+        }
+        setSweepSaving(true);
+        try {
+            const name = `Vibe sweep — ${formatPlaylistDate()}`;
+            const result = await saveTracksAsPlaylist(name, ids);
+            toast.success(`Saved ${result.added} tracks to ${name}`);
+        } catch {
+            toast.error("Couldn't save that playlist");
+        } finally {
+            setSweepSaving(false);
+            setSweepResult(null);
+        }
+    }, [sweepResult]);
+
     const zoomByCenter = useCallback(
         (factor: number) => {
             const vp = viewportRef.current;
@@ -937,12 +1026,14 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                 220
             );
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/viewportRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
         [animateCameraTo]
     );
 
     const resetView = useCallback(() => {
         const d = dimsRef.current;
         if (d.width > 0) animateCameraTo(fitViewport(d), 500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef comes from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
     }, [animateCameraTo]);
 
     const locateNowPlaying = useCallback(() => {
@@ -953,7 +1044,25 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         if (!pos) return;
         const targetScale = Math.max(vp.scale, fitViewport(d).scale * 3);
         animateCameraTo(flyTo(vp, pos, targetScale, d), 600);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/viewportRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
     }, [beaconTrack, currentTrack, posOf, animateCameraTo]);
+
+    // Spotlight local-search pick: fly to the matched dot (same flight
+    // pattern as locateNowPlaying) and glow it as a single-id highlight.
+    const locateTrack = useCallback(
+        (id: string) => {
+            const vp = viewportRef.current;
+            const d = dimsRef.current;
+            if (!vp) return;
+            const pos = posOf(id);
+            if (!pos) return;
+            const targetScale = Math.max(vp.scale, fitViewport(d).scale * 3);
+            animateCameraTo(flyTo(vp, pos, targetScale, d), 600);
+            setHighlightIds(new Set([id]));
+        },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/viewportRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this callback is not re-created every render.
+        [posOf, animateCameraTo]
+    );
 
     // Travel auto-follow: when the origin hops (click a neighbour / dot), keep
     // it comfortably in view — recenter with a short flight only when it left
@@ -973,6 +1082,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         const inside =
             s.x >= mx && s.x <= d.width - mx && s.y >= my && s.y <= d.height - my;
         if (!inside) animateCameraTo(flyTo(vp, pos, vp.scale, d), 450);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/posOfRef/viewportRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this effect does not re-run every render.
     }, [travelOriginId, animateCameraTo]);
 
     // Journey framing: when a route lands, fly to fit its on-map waypoints
@@ -1014,6 +1124,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         const d = dimsRef.current;
         if (d.width <= 0) return;
         animateCameraTo(fitBounds({ minX, minY, maxX, maxY }, d), 600);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/posOfRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this effect does not re-run every render.
     }, [journeyWaypoints, journeyFromId, animateCameraTo]);
 
     // Esc priority: (1) spotlight-input clearing swallows the event itself
@@ -1167,8 +1278,8 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                             decorations={
                                 <MapDecorations
                                     viewport={viewport}
-                                    trackById={trackById}
                                     posOf={posOf}
+                                    quantiles={quantiles}
                                     travel={
                                         vibe.travel
                                             ? {
@@ -1272,6 +1383,8 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                 {/* TOP-CENTER — spotlight. */}
                 <div className="absolute top-3 left-1/2 -translate-x-1/2">
                     <SpotlightSearch
+                        tracks={tracks}
+                        onLocate={locateTrack}
                         onResults={(ids) => setHighlightIds(ids)}
                         onClear={() => setHighlightIds(null)}
                     />
@@ -1301,9 +1414,19 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                         journeyHint={
                             vibe.canStartJourney
                                 ? "Plan a journey from the current track"
-                                : "Play a track (or pick one in Travel) to start a journey"
+                                : vibe.mode === "alchemy"
+                                  ? "Close alchemy (Esc) first"
+                                  : "Play a track (or pick one in Travel) to start a journey"
                         }
                         onStartJourney={vibe.startJourney}
+                        trailMode={trailMode}
+                        onSetTrailMode={setTrailMode}
+                        trailPopoverOpen={trailPopoverOpen}
+                        onToggleTrailPopover={toggleTrailPopover}
+                        trailEmpty={trailIds.length === 0}
+                        onClearTrail={handleClearTrail}
+                        onSaveTrail={saveTrail}
+                        trailSaving={trailSaving}
                         isFullscreen={isFullscreen}
                         onToggleFullscreen={() => setIsFullscreen((v) => !v)}
                     />
@@ -1332,6 +1455,8 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                     capped={sweepResult.ids.length >= SWEEP_CAP}
                     onPlay={playSweep}
                     onQueue={queueSweep}
+                    onSave={saveSweep}
+                    saving={sweepSaving}
                     onDismiss={() => setSweepResult(null)}
                 />
             )}

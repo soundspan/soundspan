@@ -53,10 +53,15 @@ export interface VibeTrackRef {
 export interface CompassCandidate extends VibeTrackRef {
     /** 0..1 hybrid similarity; higher = closer. Used for ranking. */
     similarity: number;
+    /** Raw pairwise CLAP cosine distance — the calibrated-% display source. */
+    distance: number;
     energy: number | null;
     valence: number | null;
     /** Per-mood scores (from the map payload) used as the null-valence fallback. */
     moods?: Record<string, number> | null;
+    /** Groove/intensity features for the Travel explainability breakdown. */
+    danceability?: number | null;
+    arousal?: number | null;
 }
 
 /** The origin node the compass measures deltas against (a `MapTrack` satisfies this). */

@@ -9,7 +9,7 @@
  * (the same clearance var the filter pill and mode sheets use).
  */
 
-import { ListPlus, Play, X } from "lucide-react";
+import { ListPlus, Loader2, Play, X } from "lucide-react";
 
 export interface SweepChipProps {
     count: number;
@@ -17,19 +17,26 @@ export interface SweepChipProps {
     capped: boolean;
     onPlay: () => void;
     onQueue: () => void;
+    /** Save the swept tracks as a new playlist. */
+    onSave: () => void;
+    /** True while the save is in flight — disables Play/Queue/Save. */
+    saving?: boolean;
     onDismiss: () => void;
 }
 
 const ACTION_CLASS =
     "flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-medium " +
     "text-gray-200 hover:text-white hover:bg-white/10 transition-colors " +
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60";
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 " +
+    "disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-200";
 
 export function SweepChip({
     count,
     capped,
     onPlay,
     onQueue,
+    onSave,
+    saving,
     onDismiss,
 }: SweepChipProps) {
     return (
@@ -46,6 +53,7 @@ export function SweepChip({
                 <button
                     type="button"
                     onClick={onPlay}
+                    disabled={saving}
                     className={ACTION_CLASS}
                     aria-label={`Play ${count} swept tracks`}
                 >
@@ -55,11 +63,27 @@ export function SweepChip({
                 <button
                     type="button"
                     onClick={onQueue}
+                    disabled={saving}
                     className={ACTION_CLASS}
                     aria-label={`Queue ${count} swept tracks`}
                 >
                     <ListPlus className="w-4 h-4" />
                     Queue
+                </button>
+                <button
+                    type="button"
+                    onClick={onSave}
+                    disabled={saving}
+                    className={ACTION_CLASS}
+                    aria-label={`Save ${count} swept tracks as a playlist`}
+                    title="Save as playlist"
+                >
+                    {saving ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                        <ListPlus className="w-4 h-4" />
+                    )}
+                    Save
                 </button>
                 <button
                     type="button"
