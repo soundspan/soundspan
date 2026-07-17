@@ -415,6 +415,10 @@ test("NowPlayingCard shows the playing track's title, artist and pause control",
     // Playing -> the pause affordance is shown, and the card offers fly-to.
     assert.match(html, /aria-label="Pause"/);
     assert.match(html, /Fly to Playing Title on the map/);
+    // The explicit labeled find-me chip renders for on-map tracks (the
+    // cover/title click alone doesn't read as a fly-to affordance).
+    assert.match(html, /Find on map/);
+    assert.match(html, /aria-label="Find Playing Title on the map"/);
 });
 
 test("NowPlayingCard disables fly-to when the track isn't on the map", async () => {
@@ -438,6 +442,8 @@ test("NowPlayingCard disables fly-to when the track isn't on the map", async () 
     assert.match(html, /not on the map/i);
     assert.match(html, /disabled=""/); // fly-to disabled off-map
     assert.match(html, /aria-label="Play"/); // paused -> play affordance
+    // No find-me chip when the track has no dot to fly to.
+    assert.doesNotMatch(html, /Find on map/);
 });
 
 test("NowPlayingCard renders nothing when there is no track", async () => {

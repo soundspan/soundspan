@@ -306,11 +306,20 @@ export function ViewControls({
             >
                 <Brush className="w-5 h-5" />
             </button>
+            {/* Accent-tinted when usable: with 15k dots this is the one
+                button people actually hunt for, so it must not read as just
+                another gray icon in the stack. */}
             <button
                 type="button"
                 onClick={onLocate}
                 disabled={!canLocate}
-                className={BTN}
+                className={
+                    canLocate
+                        ? "vibe-ctrl-btn flex items-center justify-center w-10 h-10 rounded-lg " +
+                          "text-indigo-300 bg-indigo-500/15 hover:text-white hover:bg-indigo-500/30 transition-colors " +
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
+                        : BTN
+                }
                 title={locateHint}
                 aria-label="Locate now playing"
             >

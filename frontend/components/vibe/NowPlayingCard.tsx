@@ -13,7 +13,7 @@
  * colour logic) and goes static under prefers-reduced-motion via CSS.
  */
 
-import { Music, Pause, Play } from "lucide-react";
+import { Crosshair, Music, Pause, Play } from "lucide-react";
 import { VIBE_ACCENTS } from "./types";
 
 export interface NowPlayingCardTrack {
@@ -110,6 +110,28 @@ export function NowPlayingCard({
                     )}
                 </span>
             </button>
+
+            {/* The explicit find-me affordance. The cover/title click above
+                also flies, but nothing about it LOOKS clickable — with 15k
+                dots, "where is this song?" needs a labeled, mood-tinted
+                button you can spot without knowing the map's grammar.
+                Icon-only below sm (the card competes with the search pill
+                for width there); tooltip/aria carry the label everywhere. */}
+            {onMapPresent && (
+                <button
+                    type="button"
+                    onClick={onFlyTo}
+                    title={`Fly to "${track.title}" on the map`}
+                    aria-label={`Find ${track.title} on the map`}
+                    className="flex flex-shrink-0 items-center gap-1.5 h-10 px-2.5 sm:px-3 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
+                    style={{ backgroundColor: `${color}26`, color }}
+                >
+                    <Crosshair className="w-4 h-4" />
+                    <span className="hidden sm:inline whitespace-nowrap">
+                        Find on map
+                    </span>
+                </button>
+            )}
 
             {/* Play/pause renders at every width: in fullscreen the map covers
                 the mini player, making this card the only transport on mobile. */}
