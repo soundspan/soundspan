@@ -268,11 +268,14 @@ export function TravelPanel({ view }: { view: TravelView }) {
                 </div>
             )}
 
-            {/* Compass segmented control */}
+            {/* Compass direction chips. Wrapping pills, not a 5-column grid:
+                five labels in a ~16rem panel gave each button ~50px and
+                "Energetic" crushed into its neighbours. Same chip idiom as
+                JourneyPanel's mood picker, so the two panels read alike. */}
             <div
                 role="group"
                 aria-label="Compass direction"
-                className="grid grid-cols-5 gap-0.5 mb-2 rounded-lg bg-white/5 p-0.5"
+                className="flex flex-wrap gap-1.5 mb-2"
             >
                 {COMPASS_DIRECTIONS.map((d) => (
                     <button
@@ -280,10 +283,10 @@ export function TravelPanel({ view }: { view: TravelView }) {
                         type="button"
                         onClick={() => setDirection(d)}
                         aria-pressed={direction === d}
-                        className={`min-h-[40px] px-1 py-1.5 rounded-md text-xs leading-tight flex items-center justify-center text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 ${
+                        className={`inline-flex items-center min-h-[36px] px-3 py-1.5 rounded-full border text-xs whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 ${
                             direction === d
-                                ? "bg-indigo-500/80 text-white"
-                                : "text-gray-300 hover:text-white hover:bg-white/5"
+                                ? "border-indigo-400/60 bg-indigo-500/30 text-white"
+                                : "border-white/10 text-gray-300 hover:bg-white/5 hover:text-white"
                         }`}
                     >
                         {DIRECTION_LABEL[d]}
