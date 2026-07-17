@@ -33,6 +33,6 @@ export function hintForMode(mode: VibeMode, ctx: HintContext = {}): string {
             return "Click dots to add ingredients · blend 2–10 tracks";
         case "explore":
         default:
-            return "Click a dot to play & travel · Shift-drag sweeps a queue · Ctrl-click blends";
+            return "Click a dot to play & travel · Shift-click queues · Ctrl-click blends";
     }
 }

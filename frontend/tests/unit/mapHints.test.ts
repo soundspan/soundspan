@@ -4,7 +4,7 @@ import { hintForMode } from "../../components/vibe/mapHints";
 
 test("each mode gets its own verb hint", () => {
     assert.match(hintForMode("explore"), /Click a dot to play & travel/);
-    assert.match(hintForMode("explore"), /Shift-drag sweeps a queue/);
+    assert.match(hintForMode("explore"), /Shift-click queues/);
     assert.match(hintForMode("travel"), /halo/);
     assert.match(hintForMode("travel"), /Esc exits/);
     assert.match(hintForMode("journey"), /destination track or mood/);

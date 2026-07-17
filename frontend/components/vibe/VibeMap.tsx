@@ -43,16 +43,18 @@ import {
 } from "react";
 import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useAudioState } from "@/lib/audio-state-context";
+import { useAudioState, type Track } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
 import { useListenTogether } from "@/lib/listen-together-context";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { TrackPreferenceButtons } from "@/components/player/TrackPreferenceButtons";
+import { buildPreferenceMetadata } from "@/hooks/useTrackPreference";
 import { MapCanvas } from "./MapCanvas";
 import { MapOverlay } from "./MapOverlay";
 import { MapDecorations } from "./MapDecorations";
 import { SpotlightSearch } from "./SpotlightSearch";
-import { NowPlayingCard, type NowPlayingCardTrack } from "./NowPlayingCard";
+import { NowPlayingCard } from "./NowPlayingCard";
 import { ViewControls } from "./ViewControls";
 import { FiltersPanel } from "./FiltersPanel";
 import { TravelPanel } from "./TravelPanel";
@@ -129,6 +131,20 @@ const LAYOUT_ANIM_MS = 400;
 /** Recompute "fade" trail-mode opacity on this cadence while mounted. */
 const TRAIL_FADE_RECOMPUTE_MS = 60_000;
 
+/**
+ * The top-right auxiliary surfaces — the queue panel, the trail popover and
+ * the about popover — share one exclusive owner (`null` = none open).
+ * Before this they were three independent booleans: the trail/about
+ * popovers had no z-index of their own and rendered UNDER the queue panel's
+ * z-40 (POPOVER_CLASS sat in the z-30 controls layer), and the queue panel
+ * used a `!modePanelOpen` VISIBILITY gate rather than actually closing, so it
+ * ghosted back open after leaving a mode. One `auxSurface` slot fixes both:
+ * opening one surface always closes the other two (see `setAuxSurface`
+ * below), and entering any vibe mode / a sweep chip appearing genuinely
+ * closes it instead of merely hiding it.
+ */
+type AuxSurface = "queue" | "trail" | "about" | null;
+
 const EMPTY_TRAIL: { x: number; y: number; alpha: number }[] = [];
 
 function easeInOutCubic(t: number): number {
@@ -173,6 +189,14 @@ interface SweepScratch {
  * several times a second) to just the card, so VibeMap — the 15k-dot canvas
  * host — never re-renders on the playback clock. Play/pause uses the verified
  * real controls (`pause()` / `play()`, matching the MiniPlayer toggle).
+ *
+ * Also wires the like heart: `track` is the full audio-state `Track` (a
+ * superset of `NowPlayingCardTrack`, which stays narrow so NowPlayingCard's
+ * own tests don't need the whole Track shape), and `preferenceTrackId`
+ * mirrors FullPlayer/MiniPlayer's own `playbackType === "track"` gate so a
+ * podcast/audiobook episode (which can be "now playing" here too, just
+ * off-map) disables the heart via TrackPreferenceButtons' existing
+ * `canSetTrackPreference` rather than adding bespoke podcast detection.
  */
 function NowPlayingConnected({
     track,
@@ -180,17 +204,20 @@ function NowPlayingConnected({
     moodColor,
     onFlyTo,
 }: {
-    track: NowPlayingCardTrack | null;
+    track: Track | null;
     onMapPresent: boolean;
     moodColor: string | null;
     onFlyTo: () => void;
 }) {
     const { isPlaying, currentTime, duration } = useAudioPlayback();
     const { pause, play } = useAudioControls();
+    const { playbackType } = useAudioState();
     const onTogglePlay = useCallback(
         () => (isPlaying ? pause() : play()),
         [isPlaying, pause, play]
     );
+    const preferenceTrackId =
+        playbackType === "track" ? track?.id : undefined;
     return (
         <NowPlayingCard
             track={track}
@@ -201,6 +228,16 @@ function NowPlayingConnected({
             onTogglePlay={onTogglePlay}
             currentTime={currentTime}
             duration={duration}
+            likeSlot={
+                <TrackPreferenceButtons
+                    trackId={preferenceTrackId}
+                    mode="up-only"
+                    resolveFromQuery
+                    buttonSizeClassName="h-10 w-10"
+                    iconSizeClassName="w-5 h-5"
+                    metadata={buildPreferenceMetadata(track)}
+                />
+            }
         />
     );
 }
@@ -236,7 +273,13 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const [highlightIds, setHighlightIds] = useState<Set<string> | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [filtersExpanded, setFiltersExpanded] = useState(false);
-    const [queuePanelOpen, setQueuePanelOpen] = useState(false);
+    const [auxSurface, setAuxSurface] = useState<AuxSurface>(null);
+    /** Toggle semantics: opening a surface closes whichever other one (if
+     *  any) was open; clicking the currently-open surface's own button closes
+     *  it. */
+    const toggleAuxSurface = useCallback((surface: Exclude<AuxSurface, null>) => {
+        setAuxSurface((cur) => (cur === surface ? null : surface));
+    }, []);
     const [escHintVisible, setEscHintVisible] = useState(false);
     const drag = useRef<DragState>({ active: false, lastX: 0, lastY: 0, moved: 0 });
 
@@ -282,11 +325,6 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         setTrailModeState(mode);
         writeStoredTrailMode(sessionStorageSafe(), mode);
     }, []);
-    const [trailPopoverOpen, setTrailPopoverOpen] = useState(false);
-    const toggleTrailPopover = useCallback(
-        () => setTrailPopoverOpen((v) => !v),
-        []
-    );
     const handleClearTrail = useCallback(() => {
         clearTrail();
         toast.success("Trail cleared");
@@ -725,8 +763,9 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                 if (brushArmed || e.shiftKey) {
                     // Arm a sweep. The drag state still tracks `moved`, so a
                     // stationary shift-click falls through to normal click
-                    // semantics (e.g. travel's shift-click-to-queue) on
-                    // pointerup instead of producing an empty sweep.
+                    // semantics (shift-click-to-queue, every mode — see
+                    // useVibeMode's onDotClick) on pointerup instead of
+                    // producing an empty sweep.
                     const cursor = cursorFromEvent(e.clientX, e.clientY);
                     const scratch: SweepScratch = {
                         seen: new Set(),
@@ -1146,21 +1185,40 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dimsRef/posOfRef come from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this effect does not re-run every render.
     }, [journeyWaypoints, journeyFromId, animateCameraTo]);
 
-    // Esc priority: (1) spotlight-input clearing swallows the event itself
-    // (SpotlightSearch's own onKeyDown + stopPropagation, unchanged); (2) an
-    // open sweep chip dismisses; (3) an open queue panel closes; (4) an active
-    // mode (travel/journey/alchemy) exits to explore; (5) only then does Esc
-    // close fullscreen.
     const vibeMode = vibe.mode;
     const exitToExplore = vibe.exitToExplore;
     const sweepChipOpen = sweepResult !== null;
+
+    // Aux exclusivity, part 1: entering (or switching) any vibe mode
+    // genuinely CLOSES whichever aux surface (queue/trail/about) was open —
+    // not just hides it, so it can't ghost back once the mode exits. Opening
+    // an aux surface WHILE a mode is already active is still allowed (the
+    // mode panel just yields to it visually below); this effect only fires
+    // on a `vibe.mode` transition, not on that deliberate reopen.
+    useEffect(() => {
+        if (vibeMode !== "explore") setAuxSurface(null);
+    }, [vibeMode]);
+
+    // Aux exclusivity, part 2: a live sweep chip claims the same
+    // bottom-center / mobile-sheet slot the queue panel can occupy — close
+    // aux (not hide) the moment the chip appears, same "genuinely closed"
+    // rule as above.
+    useEffect(() => {
+        if (sweepChipOpen) setAuxSurface(null);
+    }, [sweepChipOpen]);
+
+    // Esc priority: (1) spotlight-input clearing swallows the event itself
+    // (SpotlightSearch's own onKeyDown + stopPropagation, unchanged); (2) an
+    // open sweep chip dismisses; (3) an open aux surface (queue/trail/about)
+    // closes; (4) an active mode (travel/journey/alchemy) exits to explore;
+    // (5) only then does Esc close fullscreen.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
             if (sweepChipOpen) {
                 setSweepResult(null);
-            } else if (queuePanelOpen && vibeMode === "explore") {
-                setQueuePanelOpen(false);
+            } else if (auxSurface !== null) {
+                setAuxSurface(null);
             } else if (vibeMode !== "explore") {
                 exitToExplore();
             } else if (isFullscreen) {
@@ -1169,7 +1227,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [sweepChipOpen, queuePanelOpen, vibeMode, exitToExplore, isFullscreen]);
+    }, [sweepChipOpen, auxSurface, vibeMode, exitToExplore, isFullscreen]);
 
     // Fullscreen nicety: a bottom-center "Esc to exit" whisper that fades out
     // after ~2.5s. Under reduced motion the chip is static-then-removed (no
@@ -1192,10 +1250,20 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     // while a mode is active — two overlapping line systems read as leftovers.
     const modePanelOpen = vibe.mode !== "explore";
     const filtersOpen = filtersExpanded && !modePanelOpen;
-    // Same auto-hide as filters, plus a guard against the sweep chip: both
-    // the panel's mobile bottom-sheet and the chip anchor bottom-center, so
-    // showing both at once would collide.
-    const queuePanelVisible = queuePanelOpen && !modePanelOpen && !sweepChipOpen;
+    // An open aux surface (queue/trail/about) takes over the same right-side
+    // slot the mode panels use — hide the mode panel's JSX while one is open
+    // (mode.vibe state itself is untouched: journey/alchemy state and the
+    // travel constellation on the map all survive) rather than gating aux on
+    // `!modePanelOpen`, which was the old ghosting bug (the queue panel was
+    // only ever hidden, never closed, so it reappeared on mode exit).
+    const auxOpen = auxSurface !== null;
+    // Queue panel visibility: NOT gated on modePanelOpen anymore — opening
+    // the queue while a mode is active is now a deliberate, supported "peek"
+    // (see auxOpen above). Still guarded against the sweep chip, which claims
+    // the same bottom-center / mobile-sheet slot — belt-and-braces alongside
+    // the sweepChipOpen->setAuxSurface(null) effect above, which closes it
+    // eagerly but leaves one render where both could otherwise coexist.
+    const queuePanelVisible = auxSurface === "queue" && !sweepChipOpen;
     const shownTrail = vibe.mode === "explore" ? trailPoints : EMPTY_TRAIL;
     // The plan hides with the trail while a mode's own route/constellation is
     // up — two overlapping line systems on one dot read as leftovers.
@@ -1445,20 +1513,22 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                                   : "Play a track (or pick one in Travel) to start a journey"
                         }
                         onStartJourney={vibe.startJourney}
-                        queueOpen={queuePanelOpen}
-                        onToggleQueue={() => setQueuePanelOpen((v) => !v)}
+                        queueOpen={auxSurface === "queue"}
+                        onToggleQueue={() => toggleAuxSurface("queue")}
                         queueCount={Math.max(
                             0,
                             (queue?.length ?? 0) - (currentIndex ?? -1) - 1
                         )}
                         trailMode={trailMode}
                         onSetTrailMode={setTrailMode}
-                        trailPopoverOpen={trailPopoverOpen}
-                        onToggleTrailPopover={toggleTrailPopover}
+                        trailPopoverOpen={auxSurface === "trail"}
+                        onToggleTrailPopover={() => toggleAuxSurface("trail")}
                         trailEmpty={trailIds.length === 0}
                         onClearTrail={handleClearTrail}
                         onSaveTrail={saveTrail}
                         trailSaving={trailSaving}
+                        aboutPopoverOpen={auxSurface === "about"}
+                        onToggleAboutPopover={() => toggleAuxSurface("about")}
                         isFullscreen={isFullscreen}
                         onToggleFullscreen={() => setIsFullscreen((v) => !v)}
                     />
@@ -1475,18 +1545,23 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                 />
             </div>
 
-            {/* Mode panels (right side / mobile bottom-sheet), above controls. */}
-            {vibe.travel && <TravelPanel view={vibe.travel} />}
-            {vibe.journey && <JourneyPanel view={vibe.journey} />}
-            {vibe.alchemy && <AlchemyTray view={vibe.alchemy} />}
+            {/* Mode panels (right side / mobile bottom-sheet), above controls.
+                Yield visually (not torn down — mode.vibe state, incl. the
+                travel constellation on the map, survives) while an aux
+                surface (queue/trail/about) is open: see `auxOpen` above. */}
+            {vibe.travel && !auxOpen && <TravelPanel view={vibe.travel} />}
+            {vibe.journey && !auxOpen && <JourneyPanel view={vibe.journey} />}
+            {vibe.alchemy && !auxOpen && <AlchemyTray view={vibe.alchemy} />}
 
-            {/* Queue panel — same slot as the mode panels; auto-hides while
-                one of them is open or the sweep chip is showing. */}
+            {/* Queue panel — same slot as the mode panels; genuinely CLOSED
+                (auxSurface set back to null, see the effects above) rather
+                than merely hidden while a mode/sweep chip is showing, so it
+                never ghosts back open on its own. */}
             {queuePanelVisible && (
                 <QueuePanel
                     queue={queue ?? []}
                     currentIndex={currentIndex ?? -1}
-                    onClose={() => setQueuePanelOpen(false)}
+                    onClose={() => setAuxSurface(null)}
                     onReorder={moveQueueItem}
                     onRemove={removeFromQueue}
                     reorderDisabled={isInGroup}

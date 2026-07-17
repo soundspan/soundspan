@@ -624,17 +624,23 @@ export function useVibeMode({
                 addIngredient(id);
                 return;
             }
+            // Plain shift-click on a dot always queues the track — never
+            // changes playback, never changes mode — in EVERY mode. This is
+            // the one rule (was previously travel-only; explore/alchemy/
+            // journey-not-picking used to fall through to their normal click
+            // behaviour and stop the current song).
+            if (mods.shift) {
+                controls.addToQueue(mapTrackToTrack(t));
+                return;
+            }
             switch (state.mode) {
                 case "explore":
                     dispatch({ type: "ENTER_TRAVEL", id });
                     controls.playTrack(mapTrackToTrack(t));
                     break;
                 case "travel":
-                    if (mods.shift) controls.addToQueue(mapTrackToTrack(t));
-                    else {
-                        dispatch({ type: "TRAVEL_TO", id });
-                        controls.playTrack(mapTrackToTrack(t));
-                    }
+                    dispatch({ type: "TRAVEL_TO", id });
+                    controls.playTrack(mapTrackToTrack(t));
                     break;
                 case "alchemy":
                     addIngredient(id);

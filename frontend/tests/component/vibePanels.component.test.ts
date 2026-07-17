@@ -43,6 +43,18 @@ mock.module("@/lib/api", {
     },
 });
 
+// NowPlayingCard's title/artist are next/link Links (album/artist pages).
+mock.module("next/link", {
+    defaultExport: ({
+        href,
+        children,
+        ...rest
+    }: {
+        href: string;
+        children: React.ReactNode;
+    }) => React.createElement("a", { href, ...rest }, children),
+});
+
 const noop = () => undefined;
 
 beforeEach(() => {
@@ -528,6 +540,104 @@ test("NowPlayingCard hides the progress strip when duration is 0/unknown", async
     assert.doesNotMatch(nanDuration, /role="progressbar"/);
 });
 
+test("NowPlayingCard links the title to the album page and the artist to the artist page, as siblings of the fly-to button", async () => {
+    const NowPlayingCard = await nowPlayingCard();
+    const html = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            track: {
+                id: "t1",
+                title: "Linked Title",
+                artist: { name: "Linked Artist", id: "ar-1" },
+                album: { coverArt: null, id: "al-1" },
+            },
+            isPlaying: true,
+            onMapPresent: true,
+            moodColor: "#facc15",
+            onFlyTo: noop,
+            onTogglePlay: noop,
+        })
+    );
+    assert.match(html, /<a href="\/album\/al-1"[^>]*>Linked Title<\/a>/);
+    assert.match(html, /<a href="\/artist\/ar-1"[^>]*>Linked Artist<\/a>/);
+    // Links must be SIBLINGS of the fly-to button, never nested inside it —
+    // the fly-to button closes before either link opens.
+    const buttonClose = html.indexOf("</button>");
+    const albumLinkOpen = html.indexOf('<a href="/album/al-1"');
+    assert.ok(buttonClose !== -1 && albumLinkOpen !== -1);
+    assert.ok(
+        buttonClose < albumLinkOpen,
+        "album link must not be nested inside the fly-to button"
+    );
+});
+
+test("NowPlayingCard renders plain text (not a link) for title/artist when ids are empty", async () => {
+    const NowPlayingCard = await nowPlayingCard();
+    const html = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            track: {
+                id: "t2",
+                title: "No Link Title",
+                artist: { name: "No Link Artist", id: "" },
+                album: { coverArt: null, id: "" },
+            },
+            isPlaying: false,
+            onMapPresent: false,
+            moodColor: null,
+            onFlyTo: noop,
+            onTogglePlay: noop,
+        })
+    );
+    assert.match(html, /No Link Title/);
+    assert.match(html, /No Link Artist/);
+    assert.doesNotMatch(html, /<a href="\/album\//);
+    assert.doesNotMatch(html, /<a href="\/artist\//);
+});
+
+test("NowPlayingCard renders the likeSlot content when provided", async () => {
+    const NowPlayingCard = await nowPlayingCard();
+    const html = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            track: {
+                id: "t1",
+                title: "Playing Title",
+                artist: { name: "Playing Artist" },
+                album: { coverArt: null },
+            },
+            isPlaying: true,
+            onMapPresent: true,
+            moodColor: "#facc15",
+            onFlyTo: noop,
+            onTogglePlay: noop,
+            likeSlot: React.createElement(
+                "button",
+                { "data-testid": "np-like" },
+                "heart"
+            ),
+        })
+    );
+    assert.match(html, /data-testid="np-like"/);
+});
+
+test("NowPlayingCard renders no like control when likeSlot is omitted", async () => {
+    const NowPlayingCard = await nowPlayingCard();
+    const html = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            track: {
+                id: "t1",
+                title: "Playing Title",
+                artist: { name: "Playing Artist" },
+                album: { coverArt: null },
+            },
+            isPlaying: true,
+            onMapPresent: true,
+            moodColor: "#facc15",
+            onFlyTo: noop,
+            onTogglePlay: noop,
+        })
+    );
+    assert.doesNotMatch(html, /data-testid="np-like"/);
+});
+
 // --- ViewControls ---------------------------------------------------------
 
 function viewControlsBaseProps() {
@@ -553,6 +663,8 @@ function viewControlsBaseProps() {
         trailEmpty: false,
         onClearTrail: noop,
         onSaveTrail: noop,
+        aboutPopoverOpen: false,
+        onToggleAboutPopover: noop,
         isFullscreen: false,
         onToggleFullscreen: noop,
         queueOpen: false,
@@ -584,6 +696,39 @@ test("ViewControls exposes labelled zoom/reset/layout/brush/locate/journey/trail
     assert.match(html, /aria-pressed="true"/);
     // Popover closed by default -> no segmented control markup rendered.
     assert.doesNotMatch(html, /Clear history/);
+    // About popover closed by default (aboutPopoverOpen: false) -> its
+    // content is absent and the button reports aria-expanded="false".
+    assert.doesNotMatch(html, /neighborhoods are/i);
+    const aboutButtonClosed = html.match(
+        /<button[^>]*aria-label="About this map"[^>]*>/
+    )?.[0];
+    assert.ok(aboutButtonClosed, "expected the About this map button markup");
+    assert.match(aboutButtonClosed!, /aria-expanded="false"/);
+});
+
+test("ViewControls about popover follows the lifted aboutPopoverOpen/onToggleAboutPopover props (VibeMap's auxSurface)", async () => {
+    const { ViewControls } = await import(
+        "../../components/vibe/ViewControls"
+    );
+    const closed = renderToStaticMarkup(
+        React.createElement(ViewControls, viewControlsBaseProps())
+    );
+    assert.doesNotMatch(closed, /Mood colors/);
+
+    const open = renderToStaticMarkup(
+        React.createElement(ViewControls, {
+            ...viewControlsBaseProps(),
+            aboutPopoverOpen: true,
+        })
+    );
+    // The popover's content (AboutMapPopover) renders when the prop is true.
+    assert.match(open, /neighborhoods are/i);
+    assert.match(open, /Mood colors/);
+    const aboutButtonOpen = open.match(
+        /<button[^>]*aria-label="About this map"[^>]*>/
+    )?.[0];
+    assert.ok(aboutButtonOpen, "expected the About this map button markup");
+    assert.match(aboutButtonOpen!, /aria-expanded="true"/);
 });
 
 test("ViewControls trail popover renders the segmented mode control and a disabled Clear history when the trail is empty", async () => {

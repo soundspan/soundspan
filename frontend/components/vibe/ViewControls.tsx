@@ -27,11 +27,13 @@
  * similarity, but long distances aren't a proportional "twice as different"
  * scale, and shown percentages are calibrated against the library, not fixed.
  * Both are purely presentational: this component renders them when their
- * `*PopoverOpen` prop is true and reports every action back up — VibeMap owns
- * the trail popover's open/closed state (its mode interacts with real trail
- * state); the about popover is self-contained local state since it has no
- * external side effects, same pattern FiltersPanel uses for its own
- * expanded/collapsed state.
+ * `*PopoverOpen` prop is true and reports every action back up. VibeMap owns
+ * ALL of queue/trail/about as one exclusive `auxSurface` state — opening one
+ * closes the other two, so they can never z-fight or ghost against each
+ * other or the mode panels (F2 travel/journey/alchemy). The about popover
+ * used to be self-contained local state (no external side effects, same
+ * pattern FiltersPanel's own expanded/collapsed state still uses) but is now
+ * lifted for that exclusivity, exactly like the trail popover already was.
  */
 
 import {
@@ -51,7 +53,7 @@ import {
     ZoomIn,
     ZoomOut,
 } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment } from "react";
 import { FILTERABLE_MOODS, VIBE_ACCENTS, getMoodColor, moodLabel } from "./types";
 
 export type LayoutMode = "natural" | "spread";
@@ -99,6 +101,10 @@ export interface ViewControlsProps {
     onSaveTrail: () => void;
     /** True while the trail save is in flight — disables the save button. */
     trailSaving?: boolean;
+    /** About-this-map popover open state + toggle — lifted into VibeMap's
+     *  exclusive `auxSurface`, same prop pattern as the trail popover. */
+    aboutPopoverOpen: boolean;
+    onToggleAboutPopover: () => void;
     isFullscreen: boolean;
     onToggleFullscreen: () => void;
 }
@@ -109,8 +115,11 @@ const BTN =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 " +
     "disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-300";
 
+// z-50: explicit belt-and-braces so these popovers always paint above the
+// VIBE_PANEL_CLASS mode/queue panels (z-40) even though `auxSurface`
+// exclusivity (VibeMap) means they should never actually coexist with one.
 const POPOVER_CLASS =
-    "absolute right-full top-0 mr-2 p-2 flex flex-col gap-2 " +
+    "absolute right-full top-0 mr-2 p-2 flex flex-col gap-2 z-50 " +
     "bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg";
 
 function MoodLegend() {
@@ -250,11 +259,12 @@ export function ViewControls({
     onClearTrail,
     onSaveTrail,
     trailSaving,
+    aboutPopoverOpen,
+    onToggleAboutPopover,
     isFullscreen,
     onToggleFullscreen,
 }: ViewControlsProps) {
     const spread = layoutMode === "spread";
-    const [aboutOpen, setAboutOpen] = useState(false);
     return (
         <div className="pointer-events-auto flex flex-col gap-1 p-1 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg">
             <button
@@ -436,15 +446,15 @@ export function ViewControls({
             <div className="relative">
                 <button
                     type="button"
-                    onClick={() => setAboutOpen((v) => !v)}
-                    aria-expanded={aboutOpen}
-                    className={`${BTN} ${aboutOpen ? "bg-white/10 text-white" : ""}`}
+                    onClick={onToggleAboutPopover}
+                    aria-expanded={aboutPopoverOpen}
+                    className={`${BTN} ${aboutPopoverOpen ? "bg-white/10 text-white" : ""}`}
                     title="About this map"
                     aria-label="About this map"
                 >
                     <HelpCircle className="w-5 h-5" />
                 </button>
-                {aboutOpen && <AboutMapPopover />}
+                {aboutPopoverOpen && <AboutMapPopover />}
             </div>
 
             <span className="mx-2 my-0.5 h-px bg-white/10" aria-hidden="true" />

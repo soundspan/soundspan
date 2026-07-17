@@ -7,23 +7,27 @@
  *
  * Deliberately (mostly) presentational so it renders + tests in static markup:
  * the live audio subscriptions (isPlaying, currentTime/duration, play/pause,
- * on-map lookup) are wired by a thin connected wrapper in VibeMap. Clicking
- * the cover/title flies the viewport to the track's dot (disabled with a
- * tooltip when it isn't on the map). The pulsing dot uses the track's
- * dominant-mood colour (the map's beacon colour logic) and goes static under
+ * on-map lookup, the like control) are wired by a thin connected wrapper in
+ * VibeMap. Clicking the cover flies the viewport to the track's dot (disabled
+ * with a tooltip when it isn't on the map) — title/artist are separate
+ * navigation links (album/artist pages), siblings of the cover button rather
+ * than nested inside it. The pulsing dot uses the track's dominant-mood
+ * colour (the map's beacon colour logic) and goes static under
  * prefers-reduced-motion via CSS. A hairline progress strip along the bottom
  * edge (fill = the mood colour) gives "how far along is this" at a glance —
  * purely indicative, hidden when duration is unknown/0, no seek interaction.
  */
 
+import type { ReactNode } from "react";
+import Link from "next/link";
 import { Crosshair, Music, Pause, Play } from "lucide-react";
 import { VIBE_ACCENTS } from "./types";
 
 export interface NowPlayingCardTrack {
     id: string;
     title: string;
-    artist?: { name?: string | null } | null;
-    album?: { coverArt?: string | null } | null;
+    artist?: { name?: string | null; id?: string | null } | null;
+    album?: { coverArt?: string | null; id?: string | null } | null;
 }
 
 export interface NowPlayingCardProps {
@@ -46,6 +50,11 @@ export interface NowPlayingCardProps {
     /** Track duration in seconds. The strip is hidden entirely when this is
      *  0, NaN, or unset — there's nothing meaningful to show. */
     duration?: number;
+    /** Optional like-heart control, supplied by the connected wrapper
+     *  (VibeMap's TrackPreferenceButtons instance) so this component stays
+     *  presentational/static-markup-testable — it renders whatever is passed,
+     *  nothing when omitted. */
+    likeSlot?: ReactNode;
 }
 
 const DEFAULT_COLOR = VIBE_ACCENTS.edge;
@@ -59,11 +68,14 @@ export function NowPlayingCard({
     onTogglePlay,
     currentTime,
     duration,
+    likeSlot,
 }: NowPlayingCardProps) {
     if (!track) return null;
     const cover = track.album?.coverArt ?? null;
     const color = moodColor ?? DEFAULT_COLOR;
     const artist = track.artist?.name ?? "";
+    const albumId = track.album?.id ?? "";
+    const artistId = track.artist?.id ?? "";
 
     const hasProgress =
         typeof duration === "number" && Number.isFinite(duration) && duration > 0;
@@ -73,7 +85,12 @@ export function NowPlayingCard({
     const progressPct = hasProgress ? (safeCurrentTime / duration!) * 100 : 0;
 
     return (
-        <div className="pointer-events-auto relative flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg p-2">
+        <div className="pointer-events-auto relative flex items-center gap-1.5 sm:gap-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg p-2">
+            {/* Cover-only fly-to affordance. Title/artist used to be nested
+                inside this button as plain spans; they're now sibling Links
+                (see below) — buttons can't contain interactive descendants,
+                so the DOM is restructured to keep cover (button) and
+                title/artist (links) as siblings instead of nesting. */}
             <button
                 type="button"
                 onClick={onMapPresent ? onFlyTo : undefined}
@@ -89,9 +106,9 @@ export function NowPlayingCard({
                         ? `Fly to ${track.title} on the map`
                         : `${track.title} — not on the map`
                 }
-                className="group flex items-center gap-2 min-w-0 max-w-[min(60vw,15rem)] text-left rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 disabled:cursor-default"
+                className="group flex-shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 disabled:cursor-default"
             >
-                <span className="relative flex-shrink-0">
+                <span className="relative flex-shrink-0 block">
                     {cover ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -119,20 +136,48 @@ export function NowPlayingCard({
                         />
                     )}
                 </span>
-                <span className="min-w-0 flex flex-col">
+            </button>
+
+            {/* Title -> album page, artist -> artist page (same targets the
+                explore tab's TrackRow links to). Plain text (not a dead
+                link) when the track has no id for that target — remote/
+                podcast items carry "" ids. */}
+            <span className="min-w-0 max-w-[min(38vw,9rem)] flex flex-col">
+                {albumId ? (
+                    <Link
+                        href={`/album/${albumId}`}
+                        className="truncate text-sm text-gray-100 hover:underline"
+                    >
+                        {track.title}
+                    </Link>
+                ) : (
                     <span className="truncate text-sm text-gray-100">
                         {track.title}
                     </span>
-                    {artist && (
+                )}
+                {artist &&
+                    (artistId ? (
+                        <Link
+                            href={`/artist/${artistId}`}
+                            className="hidden sm:block truncate text-xs text-gray-400 hover:underline"
+                        >
+                            {artist}
+                        </Link>
+                    ) : (
                         <span className="hidden sm:block truncate text-xs text-gray-400">
                             {artist}
                         </span>
-                    )}
-                </span>
-            </button>
+                    ))}
+            </span>
 
-            {/* The explicit find-me affordance. The cover/title click above
-                also flies, but nothing about it LOOKS clickable — with 15k
+            {/* Like heart, supplied by the connected wrapper (reuses the
+                player bar's TrackPreferenceButtons) — presentational slot.
+                flex-shrink-0 so it can't get squeezed by title truncation,
+                matching the other fixed-size controls in this row. */}
+            {likeSlot && <span className="flex-shrink-0">{likeSlot}</span>}
+
+            {/* The explicit find-me affordance. The cover click above also
+                flies, but nothing about it LOOKS clickable — with 15k
                 dots, "where is this song?" needs a labeled, mood-tinted
                 button you can spot without knowing the map's grammar.
                 Icon-only below sm (the card competes with the search pill

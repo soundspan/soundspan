@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI now runs non-blocking security scanning and weekly dependency automation (#59 WS2.4, roadmap F45): Trivy filesystem + image scans (`CRITICAL,HIGH`, `ignore-unfixed`, findings triaged in `.trivyignore`), a gitleaks secret scan via the OSS binary directly (not the licensed `gitleaks-action`), CodeQL (`javascript-typescript` + `python`), `dependency-review-action` on PRs, and a `pip-audit` sweep of the four sidecar services' requirements files. `.github/dependabot.yml` opens weekly, grouped minor/patch PRs across the 4 npm manifests, 4 pip services, 7 Dockerfile directories, and GitHub Actions (`open-pull-requests-limit: 5` per ecosystem; yt-dlp/ytmusicapi are deliberately never excluded). Every check runs `continue-on-error: true` day one so findings are visible without blocking a PR; the blocking ratchet and Dependabot security-updates (separate from the version-updates this ships) are tracked for 1.10.0.
 - 15-second skip back/forward buttons in the player transport controls (#20), for scrubbing past commercials/recaps during podcast and audiobook playback. Added to `FullPlayer` (desktop bottom bar) and `OverlayPlayer`'s mobile full-screen transport row, flanking the existing Previous/Next-track buttons (which are unchanged in behavior and in their adjacency to Play/Pause); `MiniPlayer`'s compact bar was deliberately left alone to avoid crowding an already-minimal control set. Wired to the existing `skipBackward`/`skipForward` actions on the audio-controls context (`lib/audio-controls-context.tsx`), called with a fixed 15s regardless of the functions' own 30s default; new `RotateCcw`/`RotateCw` icons with `aria-label`s "Skip back 15 seconds" / "Skip forward 15 seconds". Because these are seeks, both buttons respect the existing `canSeek` gate and disable — like the seek slider — while an uncached podcast episode is still caching.
 - The vibe map's floating now-playing card grows a hairline playback-progress strip along its bottom edge (fill = the track's mood color, hidden entirely when duration is unknown — purely indicative, no seek interaction). A new Queue panel (ListMusic button in the view-controls stack, with an upcoming-count badge capped at "99+") shows the current track pinned above the upcoming queue and supports drag-to-reorder, sharing the exact drop math and `moveQueueItem`/`removeFromQueue` primitives the `/queue` page uses (so Listen Together's server-owned-queue guard and shuffle-index remapping apply here too); it auto-hides while a Travel/Journey/Alchemy panel or the sweep chip is showing, and Esc now closes it before falling through to the existing mode/fullscreen chain.
+- The vibe map's now-playing card is more actionable: the title now links to that track's album page and the artist to its artist page (the same destinations the explore tab's track rows use), letting you jump straight to "more from this artist" instead of hunting for it on the map — the cover keeps its fly-to-dot behavior, now a sibling control instead of wrapping the title/artist links inside it. The card also grows a like heart, reusing the exact `TrackPreferenceButtons` control (and its optimistic like/unlike state) the player bar already uses, so you can like what's playing without leaving the map; it naturally disables for podcast/audiobook episodes the way the player bar's does.
 
 ### Changed
 
@@ -122,6 +123,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Esc) first" hint while Alchemy is active — neither half-built flow can
   destroy the other anymore (explore/travel ctrl-click still enters Alchemy
   unchanged).
+- Fixed two more vibe-map interaction bugs. Shift-clicking a dot now queues
+  the track in every mode (explore/travel/alchemy/journey) instead of just
+  Travel — Explore, Alchemy and non-picking Journey used to fall through to
+  their normal click handling and stop the current song to play the clicked
+  one, contradicting the map's own "Shift-click queues it" hint; the
+  journey-picking destination intercept and the ctrl/⌘-click alchemy-add
+  still take priority over shift, unchanged. The top-right auxiliary
+  surfaces — the queue panel, the session-trail popover and the About-this-map
+  popover — now share one exclusive `auxSurface` owner instead of three
+  independent open states: the trail/about popovers no longer render UNDER
+  the queue panel (they had no z-index of their own and sat in the z-30
+  controls layer below the z-40 mode/queue panels; `POPOVER_CLASS` now also
+  carries an explicit z-50 belt-and-braces), and the queue panel no longer
+  ghosts back open after leaving a mode (it used to be visibility-gated on
+  `!modePanelOpen` rather than actually closed). Entering any vibe mode, or a
+  sweep stroke ending in its action chip, now genuinely closes whichever aux
+  surface was open; opening one while a mode is already active is a
+  supported "peek" — the mode panel yields visually (its state, including an
+  in-progress journey/alchemy tray or the travel constellation on the map,
+  is untouched) and reappears once the aux surface closes. The Esc chain is
+  unchanged in shape, just re-slotted: sweep chip, then aux surface, then
+  active mode, then fullscreen.
 
 ### Security
 
