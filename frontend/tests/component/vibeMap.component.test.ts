@@ -85,6 +85,8 @@ mock.module("@/lib/audio-controls-context", {
             playTrack: () => undefined,
             playTracks: () => undefined,
             addToQueue: () => undefined,
+            moveQueueItem: () => undefined,
+            removeFromQueue: () => undefined,
             pause: () => undefined,
             play: () => undefined,
         }),
@@ -93,7 +95,13 @@ mock.module("@/lib/audio-controls-context", {
 
 mock.module("@/lib/audio-playback-context", {
     namedExports: {
-        useAudioPlayback: () => ({ isPlaying: false }),
+        useAudioPlayback: () => ({ isPlaying: false, currentTime: 0, duration: 0 }),
+    },
+});
+
+mock.module("@/lib/listen-together-context", {
+    namedExports: {
+        useListenTogether: () => ({ isInGroup: false }),
     },
 });
 

@@ -460,6 +460,74 @@ test("NowPlayingCard renders nothing when there is no track", async () => {
     assert.equal(html, "");
 });
 
+test("NowPlayingCard renders a progress strip sized from currentTime/duration", async () => {
+    const NowPlayingCard = await nowPlayingCard();
+    const html = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            track: {
+                id: "t1",
+                title: "Playing Title",
+                artist: { name: "Playing Artist" },
+                album: { coverArt: null },
+            },
+            isPlaying: true,
+            onMapPresent: true,
+            moodColor: "#facc15",
+            onFlyTo: noop,
+            onTogglePlay: noop,
+            currentTime: 90,
+            duration: 180,
+        })
+    );
+    assert.match(html, /role="progressbar"/);
+    assert.match(html, /aria-valuemin="0"/);
+    assert.match(html, /aria-valuemax="100"/);
+    assert.match(html, /aria-valuenow="50"/);
+    assert.match(html, /aria-label="Playback progress"/);
+    assert.match(html, /width:50%/);
+    // Fill uses the card's mood color, not a fixed accent.
+    assert.match(html, /#facc15/);
+});
+
+test("NowPlayingCard hides the progress strip when duration is 0/unknown", async () => {
+    const NowPlayingCard = await nowPlayingCard();
+    const baseProps = {
+        track: {
+            id: "t1",
+            title: "Playing Title",
+            artist: { name: "Playing Artist" },
+            album: { coverArt: null },
+        },
+        isPlaying: true,
+        onMapPresent: true,
+        moodColor: "#facc15",
+        onFlyTo: noop,
+        onTogglePlay: noop,
+    };
+    const zeroDuration = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            ...baseProps,
+            currentTime: 0,
+            duration: 0,
+        })
+    );
+    assert.doesNotMatch(zeroDuration, /role="progressbar"/);
+
+    const noDuration = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, baseProps)
+    );
+    assert.doesNotMatch(noDuration, /role="progressbar"/);
+
+    const nanDuration = renderToStaticMarkup(
+        React.createElement(NowPlayingCard, {
+            ...baseProps,
+            currentTime: 10,
+            duration: NaN,
+        })
+    );
+    assert.doesNotMatch(nanDuration, /role="progressbar"/);
+});
+
 // --- ViewControls ---------------------------------------------------------
 
 function viewControlsBaseProps() {
@@ -487,6 +555,9 @@ function viewControlsBaseProps() {
         onSaveTrail: noop,
         isFullscreen: false,
         onToggleFullscreen: noop,
+        queueOpen: false,
+        onToggleQueue: noop,
+        queueCount: 0,
     };
 }
 
@@ -556,6 +627,45 @@ test("ViewControls: trail mode 'off' un-presses the Footprints button", async ()
     )?.[0];
     assert.ok(footprintsButton, "expected the Footprints button markup");
     assert.match(footprintsButton!, /aria-pressed="false"/);
+});
+
+test("ViewControls: queue toggle exposes aria-pressed and a count badge capped at 99+", async () => {
+    const { ViewControls } = await import(
+        "../../components/vibe/ViewControls"
+    );
+    const closedNoBadge = renderToStaticMarkup(
+        React.createElement(ViewControls, viewControlsBaseProps())
+    );
+    assert.match(closedNoBadge, /aria-label="Show queue"/);
+    const queueButton = closedNoBadge.match(
+        /<button[^>]*aria-label="Show queue"[^>]*>/
+    )?.[0];
+    assert.ok(queueButton, "expected the queue toggle button markup");
+    assert.match(queueButton!, /aria-pressed="false"/);
+    // Empty queue -> no count badge rendered.
+    assert.doesNotMatch(closedNoBadge, />99\+</);
+
+    const openWithCount = renderToStaticMarkup(
+        React.createElement(ViewControls, {
+            ...viewControlsBaseProps(),
+            queueOpen: true,
+            queueCount: 7,
+        })
+    );
+    const openQueueButton = openWithCount.match(
+        /<button[^>]*aria-label="Show queue"[^>]*>/
+    )?.[0];
+    assert.ok(openQueueButton, "expected the queue toggle button markup");
+    assert.match(openQueueButton!, /aria-pressed="true"/);
+    assert.match(openWithCount, />7</);
+
+    const cappedCount = renderToStaticMarkup(
+        React.createElement(ViewControls, {
+            ...viewControlsBaseProps(),
+            queueCount: 140,
+        })
+    );
+    assert.match(cappedCount, />99\+</);
 });
 
 // --- SweepChip --------------------------------------------------------------
@@ -1022,4 +1132,99 @@ test("AboutMapPopover explains map distance semantics and renders the mood/glyph
     // Gesture cheat-sheet.
     assert.match(html, /Sweep-to-queue/);
     assert.match(html, /Add to alchemy/);
+});
+
+// --- QueuePanel ---------------------------------------------------------
+
+async function queuePanel() {
+    const { QueuePanel, resolveQueueDropIndices } = await import(
+        "../../components/vibe/QueuePanel"
+    );
+    return { QueuePanel, resolveQueueDropIndices };
+}
+
+function queueTrack(id: string, title: string, artistName: string) {
+    return {
+        id,
+        title,
+        artist: { name: artistName },
+        album: { title: "" },
+        duration: 200,
+    };
+}
+
+const episodeQueueItem = {
+    itemType: "episode" as const,
+    id: "podcastA:ep1",
+    title: "Episode Title",
+    podcastTitle: "Podcast Name",
+    podcastId: "podcastA",
+    episodeId: "ep1",
+    coverUrl: null,
+    duration: 600,
+};
+
+test("QueuePanel marks the current track, lists upcoming rows (incl. episodes) with drag handles, and hides history", async () => {
+    const { QueuePanel } = await queuePanel();
+    const queue = [
+        queueTrack("t0", "Past Song", "Past Artist"),
+        queueTrack("t1", "Current Song", "Current Artist"),
+        queueTrack("t2", "Next Song", "Next Artist"),
+        episodeQueueItem,
+    ];
+    const html = renderToStaticMarkup(
+        React.createElement(QueuePanel, {
+            queue,
+            currentIndex: 1,
+            onClose: noop,
+            onReorder: noop,
+            onRemove: noop,
+        })
+    );
+    assert.match(html, />Queue</);
+    assert.match(html, /Current Song/);
+    assert.match(html, /Now playing/i);
+    assert.match(html, /Next Song/);
+    // Podcast episode in the queue renders its title + podcast, not a crash.
+    assert.match(html, /Episode Title/);
+    assert.match(html, /Podcast Name/);
+    // History (before currentIndex) is not shown in the panel.
+    assert.doesNotMatch(html, /Past Song/);
+    // One drag handle per upcoming row (2 upcoming: Next Song + the episode).
+    const dragHandles = html.match(/draggable="true"/g) ?? [];
+    assert.equal(dragHandles.length, 2);
+    assert.match(html, /aria-label="Remove Next Song from queue"/);
+});
+
+test("QueuePanel hides drag handles during Listen Together and omits remove when no primitive is passed", async () => {
+    const { QueuePanel } = await queuePanel();
+    const queue = [
+        queueTrack("t1", "Current Song", "Current Artist"),
+        queueTrack("t2", "Next Song", "Next Artist"),
+    ];
+    const html = renderToStaticMarkup(
+        React.createElement(QueuePanel, {
+            queue,
+            currentIndex: 0,
+            onClose: noop,
+            onReorder: noop,
+            reorderDisabled: true,
+            // onRemove intentionally omitted.
+        })
+    );
+    assert.doesNotMatch(html, /draggable="true"/);
+    assert.doesNotMatch(html, /aria-label="Remove Next Song from queue"/);
+});
+
+test("QueuePanel shows the empty state when nothing is queued", async () => {
+    const { QueuePanel } = await queuePanel();
+    const html = renderToStaticMarkup(
+        React.createElement(QueuePanel, {
+            queue: [queueTrack("t1", "Current Song", "Current Artist")],
+            currentIndex: 0,
+            onClose: noop,
+            onReorder: noop,
+        })
+    );
+    assert.match(html, /Nothing queued — sweep some dots or play a journey\./);
 });

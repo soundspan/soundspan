@@ -7,12 +7,17 @@
  * aria-pressed on the toggle-like ones.
  *
  * Buttons: zoom in / zoom out / reset view / spread-cluster toggle / sweep
- * brush / locate-now-playing / start-journey / session-trail settings /
- * about-this-map / fullscreen toggle. (Start-journey lives here because
- * removing the old header row removed its only entry point; it is disabled
- * until there's a track to journey from, or while alchemy is active — a
- * half-built blend must not be silently destroyed. The brush toggle is the
- * touch-friendly way to arm sweep — mouse users can just hold Shift and drag.)
+ * brush / locate-now-playing / start-journey / show-queue / session-trail
+ * settings / about-this-map / fullscreen toggle. (Start-journey lives here
+ * because removing the old header row removed its only entry point; it is
+ * disabled until there's a track to journey from, or while alchemy is active
+ * — a half-built blend must not be silently destroyed. The brush toggle is
+ * the touch-friendly way to arm sweep — mouse users can just hold Shift and
+ * drag.)
+ *
+ * The queue button carries a small corner badge (count of upcoming queue
+ * items, capped at "99+") — VibeMap owns the open/closed state (like
+ * filtersExpanded) and the QueuePanel it toggles.
  *
  * The trail button opens a small anchored popover (three-way On/Fade/Off
  * segmented control + "Clear history" + "Save history as playlist").
@@ -34,6 +39,7 @@ import {
     Crosshair,
     Footprints,
     HelpCircle,
+    ListMusic,
     ListPlus,
     Loader2,
     Maximize2,
@@ -76,6 +82,11 @@ export interface ViewControlsProps {
     canStartJourney: boolean;
     journeyHint: string;
     onStartJourney: () => void;
+    /** Queue panel open state + toggle, and a count of upcoming queue items
+     *  (badge, capped display at "99+"; hidden entirely at 0). */
+    queueOpen: boolean;
+    onToggleQueue: () => void;
+    queueCount: number;
     /** Session trail: display mode + the settings popover's open state. */
     trailMode: TrailMode;
     onSetTrailMode: (mode: TrailMode) => void;
@@ -228,6 +239,9 @@ export function ViewControls({
     canStartJourney,
     journeyHint,
     onStartJourney,
+    queueOpen,
+    onToggleQueue,
+    queueCount,
     trailMode,
     onSetTrailMode,
     trailPopoverOpen,
@@ -335,6 +349,26 @@ export function ViewControls({
             >
                 <Route className="w-5 h-5" />
             </button>
+            <div className="relative">
+                <button
+                    type="button"
+                    onClick={onToggleQueue}
+                    aria-pressed={queueOpen}
+                    className={`${BTN} ${queueOpen ? "bg-white/10 text-white" : ""}`}
+                    title="Show queue"
+                    aria-label="Show queue"
+                >
+                    <ListMusic className="w-5 h-5" />
+                </button>
+                {queueCount > 0 && (
+                    <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+                    >
+                        {queueCount > 99 ? "99+" : queueCount}
+                    </span>
+                )}
+            </div>
             <div className="relative">
                 <button
                     type="button"

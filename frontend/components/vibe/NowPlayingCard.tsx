@@ -6,11 +6,14 @@
  * viz so the track is always readable, in normal and fullscreen alike.
  *
  * Deliberately (mostly) presentational so it renders + tests in static markup:
- * the live audio subscriptions (isPlaying, play/pause, on-map lookup) are wired
- * by a thin connected wrapper in VibeMap. Clicking the cover/title flies the
- * viewport to the track's dot (disabled with a tooltip when it isn't on the
- * map). The pulsing dot uses the track's dominant-mood colour (the map's beacon
- * colour logic) and goes static under prefers-reduced-motion via CSS.
+ * the live audio subscriptions (isPlaying, currentTime/duration, play/pause,
+ * on-map lookup) are wired by a thin connected wrapper in VibeMap. Clicking
+ * the cover/title flies the viewport to the track's dot (disabled with a
+ * tooltip when it isn't on the map). The pulsing dot uses the track's
+ * dominant-mood colour (the map's beacon colour logic) and goes static under
+ * prefers-reduced-motion via CSS. A hairline progress strip along the bottom
+ * edge (fill = the mood colour) gives "how far along is this" at a glance —
+ * purely indicative, hidden when duration is unknown/0, no seek interaction.
  */
 
 import { Crosshair, Music, Pause, Play } from "lucide-react";
@@ -35,6 +38,14 @@ export interface NowPlayingCardProps {
     onFlyTo: () => void;
     /** Toggle play/pause using the real audio controls. */
     onTogglePlay: () => void;
+    /** Elapsed playback seconds — pairs with `duration` to draw the tiny
+     *  progress strip along the card's bottom edge. Purely indicative (no
+     *  seek interaction — a 2px hit target over a pan surface would misfire;
+     *  the full player owns seeking). */
+    currentTime?: number;
+    /** Track duration in seconds. The strip is hidden entirely when this is
+     *  0, NaN, or unset — there's nothing meaningful to show. */
+    duration?: number;
 }
 
 const DEFAULT_COLOR = VIBE_ACCENTS.edge;
@@ -46,14 +57,23 @@ export function NowPlayingCard({
     moodColor,
     onFlyTo,
     onTogglePlay,
+    currentTime,
+    duration,
 }: NowPlayingCardProps) {
     if (!track) return null;
     const cover = track.album?.coverArt ?? null;
     const color = moodColor ?? DEFAULT_COLOR;
     const artist = track.artist?.name ?? "";
 
+    const hasProgress =
+        typeof duration === "number" && Number.isFinite(duration) && duration > 0;
+    const safeCurrentTime = hasProgress
+        ? Math.min(Math.max(currentTime ?? 0, 0), duration!)
+        : 0;
+    const progressPct = hasProgress ? (safeCurrentTime / duration!) * 100 : 0;
+
     return (
-        <div className="pointer-events-auto flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg p-2">
+        <div className="pointer-events-auto relative flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl shadow-lg p-2">
             <button
                 type="button"
                 onClick={onMapPresent ? onFlyTo : undefined}
@@ -148,6 +168,29 @@ export function NowPlayingCard({
                     <Play className="w-5 h-5" />
                 )}
             </button>
+
+            {/* Tiny playback-progress strip along the bottom edge, inset from
+                the rounded corners. Purely indicative — no seek interaction;
+                the full player owns seeking. Hidden entirely when duration is
+                0/NaN/unset (nothing meaningful to show). */}
+            {hasProgress && (
+                <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(progressPct)}
+                    aria-label="Playback progress"
+                    className="absolute inset-x-2 bottom-1 h-[2px] rounded-full bg-white/10 overflow-hidden"
+                >
+                    <div
+                        className="h-full rounded-full"
+                        style={{
+                            width: `${progressPct}%`,
+                            backgroundColor: color,
+                        }}
+                    />
+                </div>
+            )}
 
             <style>{`
                 .vibe-np-dot {

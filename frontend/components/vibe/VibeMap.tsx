@@ -46,6 +46,7 @@ import { api } from "@/lib/api";
 import { useAudioState } from "@/lib/audio-state-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { useListenTogether } from "@/lib/listen-together-context";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { MapCanvas } from "./MapCanvas";
 import { MapOverlay } from "./MapOverlay";
@@ -57,6 +58,7 @@ import { FiltersPanel } from "./FiltersPanel";
 import { TravelPanel } from "./TravelPanel";
 import { JourneyPanel } from "./JourneyPanel";
 import { AlchemyTray } from "./AlchemyTray";
+import { QueuePanel } from "./QueuePanel";
 import { useMapFilters } from "./useMapFilters";
 import {
     fadeAlphaForAge,
@@ -183,7 +185,7 @@ function NowPlayingConnected({
     moodColor: string | null;
     onFlyTo: () => void;
 }) {
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying, currentTime, duration } = useAudioPlayback();
     const { pause, play } = useAudioControls();
     const onTogglePlay = useCallback(
         () => (isPlaying ? pause() : play()),
@@ -197,6 +199,8 @@ function NowPlayingConnected({
             moodColor={moodColor}
             onFlyTo={onFlyTo}
             onTogglePlay={onTogglePlay}
+            currentTime={currentTime}
+            duration={duration}
         />
     );
 }
@@ -232,6 +236,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     const [highlightIds, setHighlightIds] = useState<Set<string> | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [filtersExpanded, setFiltersExpanded] = useState(false);
+    const [queuePanelOpen, setQueuePanelOpen] = useState(false);
     const [escHintVisible, setEscHintVisible] = useState(false);
     const drag = useRef<DragState>({ active: false, lastX: 0, lastY: 0, moved: 0 });
 
@@ -263,7 +268,9 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     // currentIndex change on enqueue/advance only, which is exactly when the
     // flight plan must re-derive.
     const { currentTrack, queue, currentIndex } = useAudioState();
-    const { playTrack, playTracks, addToQueue } = useAudioControls();
+    const { playTrack, playTracks, addToQueue, moveQueueItem, removeFromQueue } =
+        useAudioControls();
+    const { isInGroup } = useListenTogether();
     const filters = useMapFilters(tracks);
     const { trailIds, entries: trailEntries, clear: clearTrail } = useSessionTrail();
 
@@ -1141,8 +1148,9 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
 
     // Esc priority: (1) spotlight-input clearing swallows the event itself
     // (SpotlightSearch's own onKeyDown + stopPropagation, unchanged); (2) an
-    // open sweep chip dismisses; (3) an active mode (travel/journey/alchemy)
-    // exits to explore; (4) only then does Esc close fullscreen.
+    // open sweep chip dismisses; (3) an open queue panel closes; (4) an active
+    // mode (travel/journey/alchemy) exits to explore; (5) only then does Esc
+    // close fullscreen.
     const vibeMode = vibe.mode;
     const exitToExplore = vibe.exitToExplore;
     const sweepChipOpen = sweepResult !== null;
@@ -1151,6 +1159,8 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             if (e.key !== "Escape") return;
             if (sweepChipOpen) {
                 setSweepResult(null);
+            } else if (queuePanelOpen && vibeMode === "explore") {
+                setQueuePanelOpen(false);
             } else if (vibeMode !== "explore") {
                 exitToExplore();
             } else if (isFullscreen) {
@@ -1159,7 +1169,7 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [sweepChipOpen, vibeMode, exitToExplore, isFullscreen]);
+    }, [sweepChipOpen, queuePanelOpen, vibeMode, exitToExplore, isFullscreen]);
 
     // Fullscreen nicety: a bottom-center "Esc to exit" whisper that fades out
     // after ~2.5s. Under reduced motion the chip is static-then-removed (no
@@ -1182,6 +1192,10 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
     // while a mode is active — two overlapping line systems read as leftovers.
     const modePanelOpen = vibe.mode !== "explore";
     const filtersOpen = filtersExpanded && !modePanelOpen;
+    // Same auto-hide as filters, plus a guard against the sweep chip: both
+    // the panel's mobile bottom-sheet and the chip anchor bottom-center, so
+    // showing both at once would collide.
+    const queuePanelVisible = queuePanelOpen && !modePanelOpen && !sweepChipOpen;
     const shownTrail = vibe.mode === "explore" ? trailPoints : EMPTY_TRAIL;
     // The plan hides with the trail while a mode's own route/constellation is
     // up — two overlapping line systems on one dot read as leftovers.
@@ -1431,6 +1445,12 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
                                   : "Play a track (or pick one in Travel) to start a journey"
                         }
                         onStartJourney={vibe.startJourney}
+                        queueOpen={queuePanelOpen}
+                        onToggleQueue={() => setQueuePanelOpen((v) => !v)}
+                        queueCount={Math.max(
+                            0,
+                            (queue?.length ?? 0) - (currentIndex ?? -1) - 1
+                        )}
                         trailMode={trailMode}
                         onSetTrailMode={setTrailMode}
                         trailPopoverOpen={trailPopoverOpen}
@@ -1459,6 +1479,19 @@ export function VibeMap({ headerSlot, bottomInset }: VibeMapProps = {}) {
             {vibe.travel && <TravelPanel view={vibe.travel} />}
             {vibe.journey && <JourneyPanel view={vibe.journey} />}
             {vibe.alchemy && <AlchemyTray view={vibe.alchemy} />}
+
+            {/* Queue panel — same slot as the mode panels; auto-hides while
+                one of them is open or the sweep chip is showing. */}
+            {queuePanelVisible && (
+                <QueuePanel
+                    queue={queue ?? []}
+                    currentIndex={currentIndex ?? -1}
+                    onClose={() => setQueuePanelOpen(false)}
+                    onReorder={moveQueueItem}
+                    onRemove={removeFromQueue}
+                    reorderDisabled={isInGroup}
+                />
+            )}
 
             {/* Sweep action chip — Play / Queue the collected stroke. */}
             {sweepResult && (
