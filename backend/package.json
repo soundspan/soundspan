@@ -47,7 +47,7 @@
         "@types/speakeasy": "^2.0.10",
         "@types/swagger-jsdoc": "^6.0.4",
         "@types/swagger-ui-express": "^4.1.8",
-        "archiver": "^7.0.1",
+        "archiver": "^8.0.0",
         "axios": "^1.18.1",
         "bcrypt": "^6.0.0",
         "bull": "^4.16.5",
@@ -82,7 +82,7 @@
         "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@types/archiver": "^7.0.0",
+        "@types/archiver": "^8.0.0",
         "@types/bcrypt": "^6.0.0",
         "@types/bull": "^4.10.4",
         "@types/cors": "^2.8.19",
