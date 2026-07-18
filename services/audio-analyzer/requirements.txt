@@ -6,7 +6,7 @@
 
 # TensorFlow + Essentia (MusiCNN). essentia-tensorflow links against the
 # TF 2.13–2.15 ABI; on Python 3.8 this resolves to the last TF 2.13.x wheel.
-tensorflow>=2.13.0,<2.16.0
+tensorflow>=2.21.0,<2.22.0
 essentia-tensorflow
 
 # Queue and database
