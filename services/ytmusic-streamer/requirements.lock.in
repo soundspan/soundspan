@@ -16,4 +16,4 @@ uvicorn>=0.51.0
 mutagen>=1.48.1
 pydantic>=2.13.4
 httpx>=0.28.1
-requests>=2.22.0
+requests>=2.34.2
