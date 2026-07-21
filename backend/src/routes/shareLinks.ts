@@ -648,8 +648,9 @@ router.get("/access/:token/zip", async (req, res) => {
             return res.status(404).json({ error: "No streamable tracks found" });
         }
 
-        const archiver = (await import("archiver")).default;
-        const archive = archiver("zip", { zlib: { level: 0 } });
+        // archiver v8 is ESM-only with named class exports; node 24 loads it via require(esm)
+        const { ZipArchive } = await import("archiver");
+        const archive = new ZipArchive({ zlib: { level: 0 } });
 
         res.setHeader("Content-Type", "application/zip");
         res.setHeader(
