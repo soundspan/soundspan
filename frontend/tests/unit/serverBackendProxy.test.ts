@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
 import {
     buildBackendProxyOptions,
@@ -44,7 +45,7 @@ function createFakeResponse(headersSent = false) {
     };
 }
 
-function createFakeProxyReq() {
+function createFakeProxyReq(): ClientRequest {
     const proxyReq = new EventEmitter() as EventEmitter & {
         destroyed: boolean;
         destroy: () => void;
@@ -53,7 +54,12 @@ function createFakeProxyReq() {
     proxyReq.destroy = () => {
         proxyReq.destroyed = true;
     };
-    return proxyReq;
+    // Test double: createFirstByteTimeoutProxyReqHandler only ever touches
+    // .destroy()/.destroyed and the EventEmitter surface (.on/.emit) on the
+    // real http.ClientRequest it receives, so a bare EventEmitter with those
+    // two fields is a faithful fake. Cast at this single call boundary
+    // rather than widening the handler's real ClientRequest param type.
+    return proxyReq as unknown as ClientRequest;
 }
 
 test("buildBackendProxyOptions registers the error handler via the v3+ on.error API", () => {
@@ -267,7 +273,18 @@ test("first-byte timeout answers 504 UPSTREAM_TIMEOUT and aborts the upstream re
     const proxyReq = createFakeProxyReq();
     const res = createFakeResponse();
 
-    handler(proxyReq, { method: "GET", url: "/api/library" }, res);
+    handler(
+        proxyReq,
+        { method: "GET", url: "/api/library" },
+        // Test double: the handler only ever touches writeHead/headersSent/
+        // writableEnded/on("close") on the real http.ServerResponse it
+        // receives, so this fake implements just that surface. Cast at this
+        // call boundary rather than widening the handler's real
+        // ServerResponse param type or the fake's own return type (later
+        // assertions in this test read back the fake's own writeHeadCalls/
+        // body fields, which aren't part of ServerResponse).
+        res as unknown as ServerResponse<IncomingMessage>
+    );
 
     t.mock.timers.tick(19_999);
     assert.equal(res.writeHeadCalls.length, 0);
@@ -303,7 +320,11 @@ test("first-byte timeout uses the import-preview budget for import preview paths
     const proxyReq = createFakeProxyReq();
     const res = createFakeResponse();
 
-    handler(proxyReq, { method: "POST", url: "/api/import/preview?src=x" }, res);
+    handler(
+        proxyReq,
+        { method: "POST", url: "/api/import/preview?src=x" },
+        res as unknown as ServerResponse<IncomingMessage>
+    );
 
     t.mock.timers.tick(20_000);
     assert.equal(res.writeHeadCalls.length, 0);
@@ -325,7 +346,11 @@ test("first-byte timeout is cancelled once the upstream response starts streamin
     const proxyReq = createFakeProxyReq();
     const res = createFakeResponse();
 
-    handler(proxyReq, { method: "GET", url: "/api/stream/track-1" }, res);
+    handler(
+        proxyReq,
+        { method: "GET", url: "/api/stream/track-1" },
+        res as unknown as ServerResponse<IncomingMessage>
+    );
     proxyReq.emit("response");
 
     t.mock.timers.tick(600_000);
@@ -344,7 +369,11 @@ test("first-byte timeout is cancelled when the client response closes first", (t
     const proxyReq = createFakeProxyReq();
     const res = createFakeResponse();
 
-    handler(proxyReq, { method: "GET", url: "/api/library" }, res);
+    handler(
+        proxyReq,
+        { method: "GET", url: "/api/library" },
+        res as unknown as ServerResponse<IncomingMessage>
+    );
     for (const close of res.closeHandlers) close();
 
     t.mock.timers.tick(600_000);

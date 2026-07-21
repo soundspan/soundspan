@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { YouTubePlaylistPreviewCard } from "../../features/search/components/YouTubePlaylistPreviewCard.tsx";
-import type { YouTubePlaylistInfo } from "../../lib/youtube-bulk-download.ts";
+import { YouTubePlaylistPreviewCard } from "../../features/search/components/YouTubePlaylistPreviewCard";
+import type { YouTubePlaylistInfo } from "../../lib/youtube-bulk-download";
 
 const PLAYLIST: YouTubePlaylistInfo = {
     kind: "playlist",

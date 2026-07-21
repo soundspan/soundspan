@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { beforeEach, mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type {
+    DiscoverConfig,
+    DiscoverPlaylist,
+    DiscoverTrack,
+} from "../../features/discover/types";
 
 const Icon = (props: Record<string, unknown> = {}) =>
     React.createElement("svg", props);
@@ -43,16 +48,58 @@ mock.module("@/hooks/usePlayButtonFeedback", {
 
 const noop = () => undefined;
 
-const baseProps = {
-    playlist: {
-        id: "discover-1",
-        name: "Discover Weekly",
+// DiscoverActionBar only ever reads playlist.tracks.length and
+// config.enabled, but its props type is the full DiscoverPlaylist/
+// DiscoverConfig contract (other real callers pass genuine API payloads), so
+// fixtures here need every required field, not just the ones this component
+// happens to branch on.
+function buildTrack(overrides: Partial<DiscoverTrack> = {}): DiscoverTrack {
+    return {
+        id: "t1",
+        title: "Song 1",
+        artist: "Discover Artist",
+        album: "Discover Album",
+        albumId: "album-1",
+        isLiked: false,
+        likedAt: null,
+        similarity: 0.9,
+        tier: "high",
+        coverUrl: null,
+        available: true,
+        duration: 200,
+        ...overrides,
+    };
+}
+
+function buildPlaylist(overrides: Partial<DiscoverPlaylist> = {}): DiscoverPlaylist {
+    return {
+        weekStart: "2026-02-16",
+        weekEnd: "2026-02-23",
         tracks: [
-            { id: "t1", title: "Song 1" },
-            { id: "t2", title: "Song 2" },
+            buildTrack({ id: "t1", title: "Song 1" }),
+            buildTrack({ id: "t2", title: "Song 2" }),
         ],
-    },
-    config: { enabled: true },
+        unavailable: [],
+        totalCount: 2,
+        unavailableCount: 0,
+        ...overrides,
+    };
+}
+
+function buildConfig(overrides: Partial<DiscoverConfig> = {}): DiscoverConfig {
+    return {
+        playlistSize: 30,
+        exclusionMonths: 6,
+        downloadRatio: 1.2,
+        enabled: true,
+        lastGeneratedAt: null,
+        ...overrides,
+    };
+}
+
+const baseProps = {
+    playlist: buildPlaylist(),
+    config: buildConfig(),
     isPlaylistPlaying: false,
     isPlaying: false,
     onPlayToggle: noop,
@@ -111,7 +158,7 @@ test("DiscoverActionBar hides play-related buttons when playlist has no tracks",
     const html = renderToStaticMarkup(
         React.createElement(DiscoverActionBar, {
             ...baseProps,
-            playlist: { id: "empty", name: "Empty", tracks: [] },
+            playlist: buildPlaylist({ tracks: [], totalCount: 0 }),
         })
     );
 

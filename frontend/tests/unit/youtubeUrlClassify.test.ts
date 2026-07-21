@@ -3,7 +3,7 @@ import test from "node:test";
 import {
     classifyYouTubeUrl,
     isYouTubePlaylistOrChannelUrl,
-} from "../../lib/youtube-url.ts";
+} from "../../lib/youtube-url";
 
 const VIDEO_ID = "dQw4w9WgXcQ";
 const PLAYLIST_ID = "PL-TQY69MwxBRttHQST4uYTaFs4RQPLuOH";

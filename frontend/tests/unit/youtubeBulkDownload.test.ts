@@ -7,7 +7,7 @@ import {
     youtubeJobToDownloadItem,
     type BulkItemStatus,
     type YouTubeDownloadJob,
-} from "../../lib/youtube-bulk-download.ts";
+} from "../../lib/youtube-bulk-download";
 
 const NOW_ISO = "2026-06-16T00:00:00.000Z";
 

@@ -4,7 +4,7 @@ import {
     MAX_CONSECUTIVE_POLL_FAILURES,
     resolveYouTubeDownloadPoll,
     shouldAbandonYouTubeDownloadPolling,
-} from "../../lib/youtube-download-poll.ts";
+} from "../../lib/youtube-download-poll";
 
 test("queued job keeps polling with zero progress", () => {
     const result = resolveYouTubeDownloadPoll({ status: "queued" });
