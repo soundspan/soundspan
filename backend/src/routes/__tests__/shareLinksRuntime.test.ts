@@ -72,7 +72,7 @@ jest.mock("../../services/audioStreaming", () => ({
 
 jest.mock("archiver", () => ({
     __esModule: true,
-    default: jest.fn(() => ({
+    ZipArchive: jest.fn(() => ({
         file: mockArchiveFile,
         pipe: mockArchivePipe,
         finalize: mockArchiveFinalize,
