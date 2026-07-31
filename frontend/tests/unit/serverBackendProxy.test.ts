@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import type { ClientRequest, ServerResponse } from "node:http";
 import test from "node:test";
 import {
     buildBackendProxyOptions,
@@ -14,6 +15,12 @@ interface FakeLogger {
     error(...args: string[]): void;
 }
 
+type FakeResponse = ServerResponse & {
+    writeHeadCalls: Array<{ statusCode: number; headers: unknown }>;
+    body: string | null;
+    closeHandlers: Array<() => void>;
+};
+
 function createFakeLogger(): FakeLogger {
     return {
         errors: [],
@@ -23,8 +30,8 @@ function createFakeLogger(): FakeLogger {
     };
 }
 
-function createFakeResponse(headersSent = false) {
-    return {
+function createFakeResponse(headersSent = false): FakeResponse {
+    const response = {
         headersSent,
         writeHeadCalls: [] as Array<{ statusCode: number; headers: unknown }>,
         body: null as string | null,
@@ -42,9 +49,14 @@ function createFakeResponse(headersSent = false) {
             }
         },
     };
+
+    return response as unknown as FakeResponse;
 }
 
-function createFakeProxyReq() {
+function createFakeProxyReq(): ClientRequest & {
+    destroyed: boolean;
+    destroy: () => void;
+} {
     const proxyReq = new EventEmitter() as EventEmitter & {
         destroyed: boolean;
         destroy: () => void;
@@ -53,7 +65,10 @@ function createFakeProxyReq() {
     proxyReq.destroy = () => {
         proxyReq.destroyed = true;
     };
-    return proxyReq;
+    return proxyReq as unknown as ClientRequest & {
+        destroyed: boolean;
+        destroy: () => void;
+    };
 }
 
 test("buildBackendProxyOptions registers the error handler via the v3+ on.error API", () => {

@@ -14,7 +14,7 @@ It defines:
 | Component | Framework | Primary command(s) | Notes |
 | --- | --- | --- | --- |
 | Backend (`backend/`) | Jest + ts-jest | `npm --prefix backend test`, `npm --prefix backend run test:coverage` | Unit/integration/contract/runtime tests under `backend/src/**/__tests__` |
-| Frontend (`frontend/`) | Node test runner (unit + component + coverage), Playwright (E2E), ESLint | `npm --prefix frontend run test:unit`, `npm --prefix frontend run test:coverage`, `npm --prefix frontend run test:component`, `npm --prefix frontend run test:component:coverage`, `npm --prefix frontend run test:component:coverage:changed`, `npm --prefix frontend run test:coverage:social`, `npm --prefix frontend run test:config:runtime`, `npm --prefix frontend run test:e2e`, `npm --prefix frontend run test:predeploy`, `npm --prefix frontend run lint` | Unit specs under `frontend/tests/unit`; component specs under `frontend/tests/component`; E2E specs under `frontend/tests/e2e`; the runtime-config smoke reloads production Next.js config after dependency pruning in the AIO image |
+| Frontend (`frontend/`) | Node test runner (unit + component + coverage), Playwright (E2E), ESLint, TypeScript | `npm --prefix frontend run typecheck`, `npm --prefix frontend run test:unit`, `npm --prefix frontend run test:coverage`, `npm --prefix frontend run test:component`, `npm --prefix frontend run test:component:coverage`, `npm --prefix frontend run test:component:coverage:changed`, `npm --prefix frontend run test:coverage:social`, `npm --prefix frontend run test:config:runtime`, `npm --prefix frontend run test:e2e`, `npm --prefix frontend run test:predeploy`, `npm --prefix frontend run lint` | Standalone typecheck covers source and test files; unit specs live under `frontend/tests/unit`; component specs under `frontend/tests/component`; E2E specs under `frontend/tests/e2e`; the runtime-config smoke reloads production Next.js config after dependency pruning in the AIO image |
 | Python sidecars (`services/*`) | `pytest` | N/A | Real `pytest` suites exist under `services/*/tests/` — 141 test functions total (tidal-downloader 55, ytmusic-streamer 81, audio-analyzer 3, audio-analyzer-clap 2); `pytest` is a declared dependency (`requirements-test.txt`) for tidal-downloader and ytmusic-streamer, each with its own `tests/conftest.py` |
 
 ## Directory Structure (Canonical)
@@ -110,6 +110,7 @@ npm --prefix backend run test:analyzer:phase4
 ```bash
 npm --prefix frontend ci
 npm --prefix frontend run lint
+npm --prefix frontend run typecheck
 npm --prefix frontend run build
 npm --prefix frontend run test:unit
 npm --prefix frontend run test:coverage
@@ -124,7 +125,8 @@ npm --prefix frontend run test:predeploy
 
 Notes:
 
-- `test:unit` and `test:coverage` use Node's built-in TypeScript strip-types path and require Node `24+`.
+- `test:unit` and `test:coverage` use the `tsx` loader with Node's test runner.
+- `typecheck` disables incremental state so local verification matches a clean CI checkout and includes standalone `tests/**` files.
 
 ### Frontend E2E on host-run +1 ports (recommended)
 
@@ -159,6 +161,7 @@ Current behavior:
 
 - backend Jest tests + coverage summary/artifacts,
 - frontend lint/build + targeted unit coverage and E2E inventory visibility,
+- standalone backend and frontend TypeScript checks,
 - Helm chart lint/render visibility,
 - non-blocking by default (configurable to blocking via repo vars).
 

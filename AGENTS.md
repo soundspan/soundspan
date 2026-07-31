@@ -42,7 +42,7 @@ There is **no root install** — `backend/`, `frontend/`, and `packages/media-me
 
 ### Prerequisites
 
-- **Node.js ≥ 20.9** — the frontend is Next.js 16 and will not build on older Node (Node 18 fails with `Node.js version ">=20.9.0" is required`). CI uses Node **20** for the backend job and Node **24** for the frontend job. Match ≥ 20.9 locally.
+- **Node.js ≥ 20.9** — the frontend is Next.js 16 and will not build on older Node (Node 18 fails with `Node.js version ">=20.9.0" is required`). CI uses Node **24** for both backend and frontend jobs. Match ≥ 20.9 locally.
 - **npm 9+** — each package commits its own lockfile; use `npm ci` for reproducible installs.
 - **Python 3.11+** — only when changing the `services/**` sidecars.
 
@@ -76,14 +76,14 @@ One command reproduces every CI gate: **`npm run verify`** (from the repo root).
 | CI check (`quality-visibility.yml`) | Local command | Catches |
 | --- | --- | --- |
 | Backend Tests + Coverage | `npm run verify:backend` (= `npm --prefix backend run test:coverage`) | backend Jest unit/runtime tests + coverage |
-| Frontend Quality Visibility | `npm run verify:frontend` (= frontend `lint` + `build` + `test:coverage`) | ESLint, **TypeScript type-check (the `build` step)**, targeted unit coverage |
+| Frontend Quality Visibility + Typecheck | `npm run verify:frontend` (= frontend `lint` + `build` + `test:coverage` + `test:component` + `typecheck`) | ESLint, Next build/type-check, targeted unit coverage, component tests, and standalone source/test TypeScript checking |
 | Helm Chart Visibility | `npm run verify:helm` (= `./scripts/helm-chart-render-check.sh`) | chart lint + render assertions |
 
 Notes:
 
-- **The frontend `npm run build` is the type-check gate.** `next build` runs `tsc` over the build graph (`app/`, `lib/`, `components/`, `hooks/`, `features/`). `npm run lint` (ESLint) and the `node --test`/`tsx` unit runners transpile without type-checking, so they will **not** catch a type error — `build` is what fails CI for one. Always run `build` (needs Node ≥ 20.9) before pushing.
+- **The frontend has two type-check gates.** `next build` checks the Next build graph (`app/`, `lib/`, `components/`, `hooks/`, `features/`), while `npm run typecheck` checks the complete frontend TypeScript project, including standalone `tests/**` files, without reusing incremental state. `npm run lint` and the `node --test`/`tsx` runners transpile without type-checking.
 - **RAM:** per the targeted-testing rule above, iterate with `npm --prefix backend test -- <file>`; run the full `test:coverage` once before opening the PR.
-- **No Node ≥ 20.9 handy?** At minimum type-check the frontend directly: `(cd frontend && npx tsc --noEmit -p tsconfig.json)`. Only errors under `app/`, `lib/`, `components/`, `hooks/`, `features/` gate the build — `next build` does not type-check standalone `tests/**` files, which may carry pre-existing fixture type-noise.
+- **No Node ≥ 20.9 handy?** Type-checking still requires the repository's supported Node/npm toolchain and installed frontend dependencies; use `npm --prefix frontend run typecheck` for the standalone gate.
 
 ## Verification Evidence Protocol
 

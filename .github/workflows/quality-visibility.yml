@@ -191,11 +191,7 @@ jobs:
   frontend-typecheck:
     name: Frontend Typecheck
     runs-on: ubuntu-latest
-    # Pinned advisory (exempt from the CI_NON_BLOCKING_TEST_VISIBILITY
-    # ratchet) until the 92 pre-existing test-file tsc errors are burned
-    # down (#59 1.10.0 error budget) — otherwise every run goes red for a
-    # known, already-tracked backlog. Re-join the ratchet when it's clean.
-    continue-on-error: true
+    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
     steps:
@@ -219,7 +215,7 @@ jobs:
 
       - name: Run frontend typecheck
         working-directory: frontend
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
   helm-chart-visibility:
     name: Helm Chart Visibility

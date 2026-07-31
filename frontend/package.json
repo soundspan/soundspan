@@ -19,6 +19,7 @@
     "start": "node server.js",
     "prelint": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit --incremental false",
     "pretest:unit": "tsc -p ../packages/media-metadata-contract/tsconfig.json",
     "test:unit": "node --test --import tsx tests/unit/**/*.test.ts",
     "test:coverage": "bash -lc 'npm run test:coverage:raw 2>&1 | node scripts/check-targeted-coverage.mjs'",
