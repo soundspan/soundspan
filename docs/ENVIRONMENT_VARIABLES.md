@@ -176,6 +176,7 @@ Experimental feature note:
 | `AUDIO_ANALYSIS_BATCH_SIZE` | compose host variable mapping to `audio-analyzer:BATCH_SIZE` | Optional | `10` | Batch size for MusicCNN analyzer. |
 | `AUDIO_ANALYSIS_INTERVAL` | compose host variable mapping to `audio-analyzer:SLEEP_INTERVAL` | Optional | `5` | Loop interval between analyzer cycles (seconds). |
 | `AUDIO_BRPOP_TIMEOUT` | compose host variable mapping to `audio-analyzer:BRPOP_TIMEOUT` | Optional | `30` | Redis blocking pop timeout for analyzer worker (seconds). |
+| `AUDIO_REDIS_SOCKET_TIMEOUT` | `soundspan` (AIO) and `audio-analyzer` | Optional | `35` | Redis socket read timeout for the MusicCNN queue worker (seconds). The runtime enforces an effective minimum of `BRPOP_TIMEOUT + 5` so blocking queue polls complete before the socket deadline. |
 | `AUDIO_MODEL_IDLE_TIMEOUT` | compose host variable mapping to `audio-analyzer:MODEL_IDLE_TIMEOUT` | Optional | `300` | Idle timeout before unloading analyzer ML models (seconds). |
 | `AUDIO_ANALYSIS_WORKERS` | compose host variable mapping to `audio-analyzer:NUM_WORKERS` | Optional | `2` | Parallel MusicCNN analyzer workers. |
 | `AUDIO_ANALYSIS_THREADS_PER_WORKER` | compose host variable mapping to `audio-analyzer:THREADS_PER_WORKER` | Optional | `1` | CPU threads per MusicCNN analyzer worker. |
@@ -242,6 +243,7 @@ Used primarily with `docker-compose.local.yml` (host-run backend/frontend; conta
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
 | `BACKEND_URL` | `audio-analyzer-clap-local` | Optional | `http://host.docker.internal:3007` | Local CLAP callback target to host-run backend. |
+| `AUDIO_REDIS_SOCKET_TIMEOUT` | `audio-analyzer-local` | Optional | `15` | MusicCNN Redis socket read timeout; effective minimum is local `BRPOP_TIMEOUT + 5` seconds. |
 | `CLAP_SLEEP_INTERVAL` | `audio-analyzer-clap-local` | Optional | `5` | CLAP local analyzer loop interval. |
 | `CLAP_REDIS_SOCKET_TIMEOUT` | `audio-analyzer-clap-local` | Optional | `10` | CLAP Redis socket read timeout; effective minimum is `CLAP_SLEEP_INTERVAL + 5` seconds. |
 | `CLAP_WORKERS` | `audio-analyzer-clap-local` | Optional | `2` | CLAP local worker count. |

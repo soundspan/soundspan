@@ -19,7 +19,11 @@ for _root in _POTENTIAL_PROJECT_ROOTS:
         break
 
 from services.common.logging_utils import configure_service_logger
-from services.common.analyzer_env import configure_thread_env, get_int_env
+from services.common.analyzer_env import (
+    configure_thread_env,
+    get_blocking_socket_timeout,
+    get_int_env,
+)
 
 # Get thread configuration from environment (default to 1 for safety)
 THREADS_PER_WORKER = get_int_env('THREADS_PER_WORKER', 1)
@@ -128,6 +132,11 @@ SLEEP_INTERVAL = get_int_env('SLEEP_INTERVAL', 5)
 # Also serves as the DB reconciliation interval
 # Uses SLEEP_INTERVAL for backward compatibility, minimum 5s
 BRPOP_TIMEOUT = max(5, get_int_env('BRPOP_TIMEOUT', SLEEP_INTERVAL))
+REDIS_SOCKET_TIMEOUT = get_blocking_socket_timeout(
+    'AUDIO_REDIS_SOCKET_TIMEOUT',
+    BRPOP_TIMEOUT + 5,
+    blocking_timeout=BRPOP_TIMEOUT,
+)
 
 # DB reconciliation cadence (adaptive backoff while idle)
 DB_RECONCILE_MIN_INTERVAL_SECONDS = max(
@@ -1084,7 +1093,10 @@ class AnalysisWorker:
 
     def __init__(self):
         """Initialize Redis/DB clients and runtime state for batch processing."""
-        self.redis = redis.from_url(REDIS_URL)
+        self.redis = redis.from_url(
+            REDIS_URL,
+            socket_timeout=REDIS_SOCKET_TIMEOUT,
+        )
         self.db = DatabaseConnection(DATABASE_URL)
         self.running = False
         self.executor = None
@@ -1589,6 +1601,7 @@ class AnalysisWorker:
         logger.info(f"  CPU cores: {cpu_count}")
         logger.info(f"  Worker processes: {NUM_WORKERS}")
         logger.info(f"  BRPOP timeout: {BRPOP_TIMEOUT}s")
+        logger.info(f"  Redis socket timeout: {REDIS_SOCKET_TIMEOUT}s")
         logger.info(f"  Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
         logger.info(f"  Max retries per track: {MAX_RETRIES}")
         logger.info(f"  Stale processing timeout: {STALE_PROCESSING_MINUTES} minutes")

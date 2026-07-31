@@ -366,7 +366,9 @@ test("pencil icon is rendered inside rename button for owner", async () => {
     const html = await renderPage();
     // The mock Icon renders an <svg> element. The rename button contains the Pencil icon.
     // Check that a button with aria-label contains an svg child.
-    const btnMatch = html.match(/<button[^>]*aria-label="Rename playlist"[^>]*>.*?<\/button>/s);
+    const btnMatch = html.match(
+        /<button[^>]*aria-label="Rename playlist"[^>]*>[\s\S]*?<\/button>/
+    );
     assert.ok(btnMatch, "Should find rename button");
     assert.match(btnMatch![0], /<svg/, "Rename button should contain an SVG icon (Pencil)");
 });

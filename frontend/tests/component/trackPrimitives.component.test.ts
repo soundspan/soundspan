@@ -85,10 +85,12 @@ async function loadTrackExports(): Promise<TrackExports> {
     const mod = await import("../../components/track");
     const named = mod as Record<string, unknown>;
     const cjsDefault = (mod as { default?: Record<string, unknown> }).default ?? {};
-    const read = (name: keyof TrackExports) => {
+    const read = <Name extends keyof TrackExports>(
+        name: Name
+    ): TrackExports[Name] => {
         const value = named[name] ?? cjsDefault[name];
         assert.ok(value, `${name} export is available`);
-        return value as TrackExports[typeof name];
+        return value as TrackExports[Name];
     };
 
     return {

@@ -234,7 +234,8 @@ RUN npm run build
 # and remove Next.js build cache (not needed at runtime)
 RUN npm prune --omit=dev && \
     npm cache clean --force && \
-    rm -rf .next/cache
+    rm -rf .next/cache && \
+    npm run test:config:runtime
 
 # ============================================
 # SECURITY HARDENING
