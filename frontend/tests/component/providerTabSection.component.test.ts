@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { PlaylistPreview } from "../../hooks/useQueries";
 
 const marker = (label: string) => {
     const Component = (_props?: Record<string, unknown>) =>
@@ -95,7 +96,16 @@ const baseProps = {
     genreCategories: [],
     isMoodsLoading: false,
     homeShelves: [],
-    chartPlaylists: [{ id: "c1", title: "Chart 1" }],
+    chartPlaylists: [{
+        id: "c1",
+        source: "youtube",
+        type: "playlist",
+        title: "Chart 1",
+        description: null,
+        creator: "Test Creator",
+        imageUrl: null,
+        url: "https://music.youtube.com/playlist?list=c1",
+    } satisfies PlaylistPreview],
     tidalMixes: [],
     tidalMoods: [],
     tidalGenres: [],

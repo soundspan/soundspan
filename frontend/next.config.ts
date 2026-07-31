@@ -1,10 +1,5 @@
 import path from "node:path";
 import type { NextConfig } from "next";
-import bundleAnalyzer from '@next/bundle-analyzer';
-
-const withBundleAnalyzer = bundleAnalyzer({
-    enabled: process.env.ANALYZE === 'true',
-});
 
 const nextConfig: NextConfig = {
     // Allow dev origins for local network testing
@@ -123,4 +118,13 @@ const nextConfig: NextConfig = {
     },
 };
 
-export default withBundleAnalyzer(nextConfig);
+async function createNextConfig(): Promise<NextConfig> {
+    if (process.env.ANALYZE !== "true") {
+        return nextConfig;
+    }
+
+    const { default: bundleAnalyzer } = await import("@next/bundle-analyzer");
+    return bundleAnalyzer({ enabled: true })(nextConfig);
+}
+
+export default createNextConfig;

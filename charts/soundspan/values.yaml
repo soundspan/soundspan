@@ -111,6 +111,7 @@ aio:
     AUDIO_ANALYSIS_THREADS_PER_WORKER: "1"
     AUDIO_ANALYSIS_BATCH_SIZE: "10"
     AUDIO_BRPOP_TIMEOUT: "30"
+    AUDIO_REDIS_SOCKET_TIMEOUT: "35"
     AUDIO_MODEL_IDLE_TIMEOUT: "300"
     CLAP_REDIS_SOCKET_TIMEOUT: "10"
   # -- Additional environment variable sources for AIO container.
@@ -495,6 +496,7 @@ audioAnalyzer:
     BATCH_SIZE: "10"
     SLEEP_INTERVAL: "5"
     BRPOP_TIMEOUT: "30"
+    AUDIO_REDIS_SOCKET_TIMEOUT: "35"
     MODEL_IDLE_TIMEOUT: "300"
     NUM_WORKERS: "2"
     THREADS_PER_WORKER: "1"
@@ -736,7 +738,6 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-
 
 
 

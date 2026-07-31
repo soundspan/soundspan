@@ -34,6 +34,8 @@ services:
       - AUDIO_ANALYSIS_ENABLED=${AUDIO_ANALYSIS_ENABLED:-true}
       - DISCOVERY_ENABLED=${DISCOVERY_ENABLED:-true}
       - AUTO_PLAYLISTS_ENABLED=${AUTO_PLAYLISTS_ENABLED:-true}
+      # MusicCNN queue socket timeout; runtime enforces at least BRPOP timeout + 5s
+      - AUDIO_REDIS_SOCKET_TIMEOUT=${AUDIO_REDIS_SOCKET_TIMEOUT:-35}
       # CLAP queue socket timeout; runtime enforces at least poll interval + 5s
       - CLAP_REDIS_SOCKET_TIMEOUT=${CLAP_REDIS_SOCKET_TIMEOUT:-10}
       # Lidarr webhook callback URL - how Lidarr reaches soundspan when downloads complete

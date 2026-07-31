@@ -85,6 +85,7 @@ describe("config module", () => {
         });
 
         expect(mockDotenvConfig).toHaveBeenCalledTimes(1);
+        expect(mockDotenvConfig).toHaveBeenCalledWith({ quiet: true });
         expect(mockLoggerDebug).toHaveBeenCalledWith(
             "Environment variables validated"
         );

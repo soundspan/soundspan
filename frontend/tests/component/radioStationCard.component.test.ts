@@ -59,7 +59,9 @@ const baseStation: Station = {
 
 async function loadCardComponent() {
     const mod = await import("../../components/ui/RadioStationCard");
-    const named = mod as { RadioStationCard?: (props: Record<string, unknown>) => React.ReactElement };
+    const named = mod as unknown as {
+        RadioStationCard?: (props: Record<string, unknown>) => React.ReactElement;
+    };
     const cjsDefault = (mod as { default?: { RadioStationCard?: (props: Record<string, unknown>) => React.ReactElement } }).default;
     const RadioStationCard = named.RadioStationCard ?? cjsDefault?.RadioStationCard;
     assert.ok(RadioStationCard, "RadioStationCard export is available");
