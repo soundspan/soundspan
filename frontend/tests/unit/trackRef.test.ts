@@ -218,6 +218,7 @@ test("toAddToPlaylistRef rejects remote refs missing required metadata", () => {
         artist: { name: "Artist" },
         album: { title: "Album" },
     });
+    assert.ok("duration" in noDuration);
     assert.equal(noDuration.duration, 0);
 
     // Missing album defaults to "Single" instead of throwing
@@ -229,6 +230,7 @@ test("toAddToPlaylistRef rejects remote refs missing required metadata", () => {
         artist: { name: "Artist" },
         duration: 180,
     });
+    assert.ok("album" in noAlbum);
     assert.equal(noAlbum.album, "Single");
 });
 
