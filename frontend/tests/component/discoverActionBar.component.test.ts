@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { beforeEach, mock, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type {
+    DiscoverConfig,
+    DiscoverPlaylist,
+    DiscoverTrack,
+} from "../../features/discover/types";
 
 const Icon = (props: Record<string, unknown> = {}) =>
     React.createElement("svg", props);
@@ -43,16 +48,44 @@ mock.module("@/hooks/usePlayButtonFeedback", {
 
 const noop = () => undefined;
 
+const makeTrack = (id: string, title: string): DiscoverTrack => ({
+    id,
+    title,
+    artist: "Test Artist",
+    album: "Test Album",
+    albumId: "album-1",
+    isLiked: false,
+    likedAt: null,
+    similarity: 0.9,
+    tier: "high",
+    coverUrl: null,
+    available: true,
+    duration: 180,
+});
+
+const playlist: DiscoverPlaylist = {
+    weekStart: "2026-07-20",
+    weekEnd: "2026-07-26",
+    tracks: [
+        makeTrack("t1", "Song 1"),
+        makeTrack("t2", "Song 2"),
+    ],
+    unavailable: [],
+    totalCount: 2,
+    unavailableCount: 0,
+};
+
+const config: DiscoverConfig = {
+    playlistSize: 30,
+    exclusionMonths: 3,
+    downloadRatio: 1.5,
+    enabled: true,
+    lastGeneratedAt: null,
+};
+
 const baseProps = {
-    playlist: {
-        id: "discover-1",
-        name: "Discover Weekly",
-        tracks: [
-            { id: "t1", title: "Song 1" },
-            { id: "t2", title: "Song 2" },
-        ],
-    },
-    config: { enabled: true },
+    playlist,
+    config,
     isPlaylistPlaying: false,
     isPlaying: false,
     onPlayToggle: noop,
@@ -111,7 +144,7 @@ test("DiscoverActionBar hides play-related buttons when playlist has no tracks",
     const html = renderToStaticMarkup(
         React.createElement(DiscoverActionBar, {
             ...baseProps,
-            playlist: { id: "empty", name: "Empty", tracks: [] },
+            playlist: { ...playlist, tracks: [], totalCount: 0 },
         })
     );
 

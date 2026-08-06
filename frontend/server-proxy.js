@@ -175,6 +175,9 @@ function createProxyErrorHandler({ name, logger, errorMessage, errorCode }) {
  * time-to-first-byte budget (see {@link resolveProxyTimeoutMs}) answered
  * with the 504 UPSTREAM_TIMEOUT contract, and the socket timeouts are
  * widened so a configured budget larger than 120s can actually elapse.
+ * Only the upstream proxy request gets this timeout: httpxy attaches a new
+ * listener whenever its downstream `timeout` option is used, which accumulates
+ * listeners on keep-alive client sockets.
  *
  * @param {{ name: string, target: string, ws?: boolean, logger: { error: Function }, errorMessage: string, errorCode: string, firstByteTimeout?: boolean, env?: Record<string, string | undefined> }} config
  * @returns {import("http-proxy-middleware").Options}
@@ -214,7 +217,6 @@ function buildBackendProxyOptions({
         changeOrigin: true,
         ws: Boolean(ws),
         xfwd: true,
-        timeout: socketTimeoutMs,
         proxyTimeout: socketTimeoutMs,
         on,
     };

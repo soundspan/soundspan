@@ -11,7 +11,8 @@ import {
     parseEnvInt,
 } from "./utils/envParsers";
 
-dotenv.config();
+// quiet is a no-op on dotenv 16 and silences v17's per-boot injection tip line
+dotenv.config({ quiet: true });
 
 // Validate critical environment variables on startup
 const envSchema = z.object({

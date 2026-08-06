@@ -12,7 +12,7 @@
         "build:contract": "npm --prefix packages/media-metadata-contract run build",
         "verify": "npm run verify:backend && npm run verify:frontend && npm run verify:helm",
         "verify:backend": "npm --prefix backend run test:coverage",
-        "verify:frontend": "npm --prefix frontend run lint && npm --prefix frontend run build && npm --prefix frontend run test:coverage",
+        "verify:frontend": "npm --prefix frontend run lint && npm --prefix frontend run build && npm --prefix frontend run test:coverage && npm --prefix frontend run test:component && npm --prefix frontend run typecheck",
         "verify:helm": "./scripts/helm-chart-render-check.sh",
         "test:backend": "npm --prefix backend test --",
         "test:frontend": "npm --prefix frontend run test:unit"

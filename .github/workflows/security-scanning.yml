@@ -55,7 +55,7 @@ jobs:
         # hashFiles guard: if the scan step failed before writing the SARIF,
         # skip the upload instead of cascading a second, confusing red step.
         if: always() && hashFiles('trivy-fs-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.3
         with:
           sarif_file: trivy-fs-results.sarif
           category: trivy-fs
@@ -145,7 +145,7 @@ jobs:
         # hashFiles guard: if the scan step failed before writing the SARIF,
         # skip the upload instead of cascading a second, confusing red step.
         if: always() && hashFiles('gitleaks-report/results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.3
         with:
           sarif_file: gitleaks-report/results.sarif
           category: gitleaks
@@ -224,7 +224,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip

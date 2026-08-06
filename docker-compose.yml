@@ -380,6 +380,8 @@ services:
             SLEEP_INTERVAL: ${AUDIO_ANALYSIS_INTERVAL:-5}
             # BRPOP timeout for blocking wait (seconds). Also controls DB reconciliation interval.
             BRPOP_TIMEOUT: ${AUDIO_BRPOP_TIMEOUT:-30}
+            # Redis socket timeout; runtime enforces at least BRPOP_TIMEOUT + 5s.
+            AUDIO_REDIS_SOCKET_TIMEOUT: ${AUDIO_REDIS_SOCKET_TIMEOUT:-35}
             # Idle timeout before unloading ML models to free memory (seconds)
             MODEL_IDLE_TIMEOUT: ${AUDIO_MODEL_IDLE_TIMEOUT:-300}
             # Default workers reduced from 8 to 2 for stability (Issue #26 fix)

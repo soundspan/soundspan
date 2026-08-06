@@ -61,6 +61,7 @@ services:
             BATCH_SIZE: 10
             SLEEP_INTERVAL: 5
             BRPOP_TIMEOUT: 10
+            AUDIO_REDIS_SOCKET_TIMEOUT: ${AUDIO_REDIS_SOCKET_TIMEOUT:-15}
             MODEL_IDLE_TIMEOUT: 60
         volumes:
             # Host music path; override MUSIC_PATH in your shell/.env as needed.
