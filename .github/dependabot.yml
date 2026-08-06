@@ -48,8 +48,8 @@ updates:
       # the image bump.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
-      # ts-jest peers `typescript >=4.3 <7` (29.4.11, latest as of
-      # 2026-07-21), so TS 7 is un-installable: npm ci fails ERESOLVE before
+      # ts-jest 29.4.12 peers `typescript >=4.3 <7`, so TS 7 is
+      # un-installable: npm ci fails ERESOLVE before
       # any job runs (Dependabot #180). TS 6.x stays allowed. Drop this when
       # ts-jest ships TypeScript-7 support.
       - dependency-name: "typescript"
@@ -65,6 +65,11 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Runtime images + CI are node:24. Keep declarations aligned with that
+      # runtime; move this ceiling with the coordinated Node image upgrade.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/packages/media-metadata-contract"
@@ -90,18 +95,6 @@ updates:
         update-types:
           - minor
           - patch
-    ignore:
-      # This image is Ubuntu 20.04 / Python 3.8, held there by
-      # essentia-tensorflow (links the TF 2.13–2.15 ABI; the last cp38 TF
-      # wheel is 2.13.x). Both floors below are unresolvable, verified with
-      # `uv pip compile --python-version 3.8` (Dependabot #165/#167):
-      # redis-py ≥7 requires newer Python (the py3.8 ceiling is 6.x), and
-      # TF ≥2.16 breaks the essentia ABI and ships no cp38 wheels. Revisit
-      # only if the analyzer ever leaves py3.8.
-      - dependency-name: "redis"
-        versions: [">= 7"]
-      - dependency-name: "tensorflow"
-        versions: [">= 2.16"]
 
   - package-ecosystem: pip
     directory: "/services/audio-analyzer-clap"
@@ -191,15 +184,6 @@ updates:
         update-types:
           - minor
           - patch
-    ignore:
-      # The clap requirements.lock pins cp310 wheel hashes, so a python base
-      # bump without a lock regen breaks the image build (`--require-hashes`
-      # can't install cp310 torch on 3.14 — Dependabot #164; note Dependabot
-      # classes 3.10 → 3.14 as *minor*). The py3.14 move happens deliberately
-      # as base + lock regen + CLAP smoke in one PR. Patch updates of the
-      # current base stay allowed.
-      - dependency-name: "python"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: "/services/tidal-downloader"
