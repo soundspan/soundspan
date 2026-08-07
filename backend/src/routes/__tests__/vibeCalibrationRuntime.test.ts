@@ -210,6 +210,28 @@ describe("vibe calibration runtime", () => {
         expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
 
+    it("rejects an invalid cached payload and recomputes calibration", async () => {
+        mockEmbeddingCount.mockResolvedValueOnce(50);
+        mockRedisGet.mockResolvedValueOnce(
+            JSON.stringify({
+                sampleSize: 12,
+                updatedAt: "2026-08-07T00:00:00.000Z",
+                quantiles: [null],
+            })
+        );
+        mockEmbeddingFindMany.mockResolvedValueOnce(idRows(12));
+        mockQueryRaw.mockResolvedValueOnce(embeddingRows(12));
+
+        const res = createRes();
+        await calibrationHandler({ user: { id: "user-1" } } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.quantiles).toHaveLength(101);
+        expect(res.body.quantiles.every(Number.isFinite)).toBe(true);
+        expect(mockEmbeddingFindMany).toHaveBeenCalledTimes(1);
+        expect(mockRedisSetEx).toHaveBeenCalledTimes(1);
+    });
+
     it("returns sampleSize 0 and empty quantiles when fewer than 10 tracks are embedded", async () => {
         mockEmbeddingCount.mockResolvedValueOnce(9);
 
@@ -283,5 +305,18 @@ describe("vibe calibration runtime", () => {
         await calibrationHandler(req, retryRes);
         expect(retryRes.statusCode).toBe(200);
         expect(retryRes.body.sampleSize).toBe(12);
+    });
+
+    it("fails explicitly when the sampled embeddings disappear mid-compute", async () => {
+        mockEmbeddingCount.mockResolvedValueOnce(50);
+        mockEmbeddingFindMany.mockResolvedValueOnce(idRows(12));
+        mockQueryRaw.mockResolvedValueOnce(embeddingRows(5));
+
+        const res = createRes();
+        await calibrationHandler({ user: { id: "user-1" } } as any, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual({ error: "Failed to compute vibe calibration" });
+        expect(mockRedisSetEx).not.toHaveBeenCalled();
     });
 });

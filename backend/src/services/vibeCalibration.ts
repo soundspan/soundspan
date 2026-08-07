@@ -40,6 +40,59 @@ export interface CalibrationPayload {
     quantiles: number[];
 }
 
+function isValidQuantileLadder(value: unknown): value is number[] {
+    if (!Array.isArray(value) || value.length !== CALIBRATION_QUANTILE_COUNT) {
+        return false;
+    }
+    return value.every(
+        (entry, index) =>
+            typeof entry === "number" &&
+            Number.isFinite(entry) &&
+            (index === 0 || entry >= value[index - 1])
+    );
+}
+
+/**
+ * Parse and validate a cached calibration payload. Cache contents are treated
+ * as untrusted: malformed JSON, an out-of-range sample size, a missing
+ * timestamp, or a non-finite/non-monotonic quantile ladder returns `null` so
+ * the caller recomputes instead of forwarding corrupt data to clients.
+ */
+export function parseCachedCalibration(value: string): CalibrationPayload | null {
+    try {
+        const parsed = JSON.parse(value) as Record<string, unknown>;
+        if (
+            !parsed ||
+            typeof parsed !== "object" ||
+            !Number.isInteger(parsed.sampleSize) ||
+            (parsed.sampleSize as number) < CALIBRATION_MIN_EMBEDDED_TRACKS ||
+            (parsed.sampleSize as number) > CALIBRATION_SAMPLE_SIZE ||
+            typeof parsed.updatedAt !== "string" ||
+            parsed.updatedAt.length === 0 ||
+            !isValidQuantileLadder(parsed.quantiles)
+        ) {
+            return null;
+        }
+        return parsed as unknown as CalibrationPayload;
+    } catch {
+        return null;
+    }
+}
+
+function validateEmbeddings(embeddings: number[][]): void {
+    const dimensions = embeddings[0]?.length ?? 0;
+    const valid =
+        embeddings.length >= CALIBRATION_MIN_EMBEDDED_TRACKS &&
+        dimensions > 0 &&
+        embeddings.every(
+            (embedding) =>
+                embedding.length === dimensions && embedding.every(Number.isFinite)
+        );
+    if (!valid) {
+        throw new Error("Calibration sample contains insufficient or invalid embeddings");
+    }
+}
+
 /** Number of tracks with a CLAP embedding row (pure Prisma count). */
 export async function countEmbeddedTracks(): Promise<number> {
     return prisma.trackEmbedding.count();
@@ -113,6 +166,7 @@ export async function computeCalibration(): Promise<CalibrationPayload> {
     `;
 
     const embeddings = rows.map((row) => parseEmbedding(row.embedding));
+    validateEmbeddings(embeddings);
     const distances: number[] = [];
     for (let i = 0; i < embeddings.length; i++) {
         for (let j = i + 1; j < embeddings.length; j++) {

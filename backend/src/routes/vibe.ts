@@ -26,6 +26,7 @@ import {
     CALIBRATION_MIN_EMBEDDED_TRACKS,
     computeCalibration,
     countEmbeddedTracks,
+    parseCachedCalibration,
     type CalibrationPayload,
 } from "../services/vibeCalibration";
 
@@ -935,6 +936,46 @@ const CALIBRATION_CACHE_KEY_PREFIX = "vibe:calibration:v1:";
  */
 const calibrationInFlight = new Map<string, Promise<CalibrationPayload>>();
 
+async function getCachedOrComputeCalibration(
+    cacheKey: string
+): Promise<CalibrationPayload> {
+    const cached = await redisClient.get(cacheKey);
+    if (cached) {
+        const payload = parseCachedCalibration(cached);
+        if (payload) return payload;
+        logger.warn("Ignoring invalid vibe calibration cache payload", {
+            cacheKey,
+        });
+    }
+
+    let compute = calibrationInFlight.get(cacheKey);
+    if (!compute) {
+        compute = computeCalibration()
+            .then(async (payload) => {
+                await redisClient.setEx(
+                    cacheKey,
+                    CALIBRATION_CACHE_TTL_SECONDS,
+                    JSON.stringify(payload)
+                );
+                return payload;
+            })
+            .finally(() => {
+                calibrationInFlight.delete(cacheKey);
+            });
+        calibrationInFlight.set(cacheKey, compute);
+    }
+    return compute;
+}
+
+async function getCalibrationResponse() {
+    const embeddedCount = await countEmbeddedTracks();
+    if (embeddedCount < CALIBRATION_MIN_EMBEDDED_TRACKS) {
+        return { sampleSize: 0, quantiles: [] };
+    }
+    const cacheKey = `${CALIBRATION_CACHE_KEY_PREFIX}${embeddedCount}`;
+    return getCachedOrComputeCalibration(cacheKey);
+}
+
 /**
  * @openapi
  * /api/vibe/calibration:
@@ -969,41 +1010,12 @@ const calibrationInFlight = new Map<string, Promise<CalibrationPayload>>();
  */
 router.get("/calibration", requireAuth, async (_req, res) => {
     try {
-        const embeddedCount = await countEmbeddedTracks();
-        if (embeddedCount < CALIBRATION_MIN_EMBEDDED_TRACKS) {
-            return res.json({ sampleSize: 0, quantiles: [] });
-        }
-
-        // Cache keyed on embeddedCount so it self-invalidates as the library
-        // grows (a new track landing changes the key, forcing a recompute)
-        // without needing an explicit invalidation hook.
-        const cacheKey = `${CALIBRATION_CACHE_KEY_PREFIX}${embeddedCount}`;
-        const cached = await redisClient.get(cacheKey);
-        if (cached) {
-            return res.json(JSON.parse(cached));
-        }
-
-        let compute = calibrationInFlight.get(cacheKey);
-        if (!compute) {
-            compute = computeCalibration()
-                .then(async (payload) => {
-                    await redisClient.setEx(
-                        cacheKey,
-                        CALIBRATION_CACHE_TTL_SECONDS,
-                        JSON.stringify(payload)
-                    );
-                    return payload;
-                })
-                .finally(() => {
-                    calibrationInFlight.delete(cacheKey);
-                });
-            calibrationInFlight.set(cacheKey, compute);
-        }
-
-        res.json(await compute);
+        return res.json(await getCalibrationResponse());
     } catch (error: any) {
         logger.error("Vibe calibration error:", error);
-        res.status(500).json({ error: "Failed to compute vibe calibration" });
+        return res
+            .status(500)
+            .json({ error: "Failed to compute vibe calibration" });
     }
 });
 
