@@ -40,6 +40,20 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Runtime images + CI are node:24 (backend/frontend/AIO Dockerfiles,
+      # setup-node). @types/node majors ride along with the base-image move,
+      # not ahead of it — types-25 lets Node-25-only APIs typecheck and then
+      # crash on the node:24 images (Dependabot #181). Raise together with
+      # the image bump.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # ts-jest 29.4.12 peers `typescript >=4.3 <7`, so TS 7 is
+      # un-installable: npm ci fails ERESOLVE before
+      # any job runs (Dependabot #180). TS 6.x stays allowed. Drop this when
+      # ts-jest ships TypeScript-7 support.
+      - dependency-name: "typescript"
+        versions: [">= 7"]
 
   - package-ecosystem: npm
     directory: "/frontend"
@@ -51,6 +65,11 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Runtime images + CI are node:24. Keep declarations aligned with that
+      # runtime; move this ceiling with the coordinated Node image upgrade.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/packages/media-metadata-contract"
