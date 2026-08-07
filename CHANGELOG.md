@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Backend and frontend transitive dependencies with published same-major
+  security fixes are now constrained to patched releases. The overrides cover
+  the active YAML/glob/URI/IP/WebSocket/Socket.IO/parser utility advisories
+  without forcing breaking direct-dependency downgrades.
 - The MusicCNN audio analyzer now lets its normal 30-second Redis queue poll finish instead of failing after redis-py's shorter socket deadline. Its socket timeout defaults to 35 seconds, stays at least five seconds above `BRPOP_TIMEOUT`, and can be tuned with `AUDIO_REDIS_SOCKET_TIMEOUT` (#183).
 - The frontend proxy no longer adds a new timeout listener to a reused browser connection for every API request. This removes the repeated `MaxListenersExceededWarning` messages while preserving the existing backend response deadlines and streaming behavior (#183).
 - The AIO frontend now starts after its build-only dependencies are pruned. `next.config.ts` no longer imports the development-only `@next/bundle-analyzer` package during normal production startup; it loads the plugin only for explicit `ANALYZE=true` builds. The AIO image build now reloads the production Next.js config after pruning so missing runtime config dependencies fail the image build instead of causing a restart loop after deployment (#183).
