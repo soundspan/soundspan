@@ -75,6 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Direct Soulseek downloads now require an administrator, matching the existing
+  server-side authorization on YouTube acquisition and preventing ordinary
+  authenticated users from writing downloaded files into the shared library.
 - Backend and frontend transitive dependencies with published same-major
   security fixes are now constrained to patched releases. The overrides cover
   the active YAML/glob/URI/IP/WebSocket/Socket.IO/parser utility advisories

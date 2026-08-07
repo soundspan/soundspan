@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
+    requireAdmin: (_req: Request, _res: Response, next: () => void) => next(),
 }));
 
 jest.mock("../../utils/logger", () => ({
@@ -35,6 +36,7 @@ jest.mock("crypto", () => ({
 jest.useFakeTimers();
 
 import router from "../soulseek";
+import { requireAdmin } from "../../middleware/auth";
 import { logger } from "../../utils/logger";
 import { soulseekService } from "../../services/soulseek";
 import { getSystemSettings } from "../../utils/systemSettings";
@@ -130,6 +132,14 @@ describe("soulseek runtime routes", () => {
 
     afterAll(() => {
         jest.useRealTimers();
+    });
+
+    it("requires admin authorization for direct downloads", () => {
+        const middlewares = getRouteLayer("/download", "post").route.stack.map(
+            (entry: { handle: unknown }) => entry.handle
+        );
+
+        expect(middlewares).toContain(requireAdmin);
     });
 
     it("returns configured and unconfigured status responses", async () => {
