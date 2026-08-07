@@ -22,6 +22,12 @@ import {
     loadVocabulary,
     VocabTerm
 } from "../services/vibeVocabulary";
+import {
+    CALIBRATION_MIN_EMBEDDED_TRACKS,
+    computeCalibration,
+    countEmbeddedTracks,
+    type CalibrationPayload,
+} from "../services/vibeCalibration";
 
 const router = Router();
 
@@ -913,6 +919,91 @@ router.get("/status", requireAuth, async (req, res) => {
     } catch (error: any) {
         logger.error("Vibe status error:", error);
         res.status(500).json({ error: "Failed to get embedding status" });
+    }
+});
+
+const CALIBRATION_CACHE_TTL_SECONDS = 24 * 60 * 60; // 24h
+const CALIBRATION_CACHE_KEY_PREFIX = "vibe:calibration:v1:";
+
+/**
+ * Single-flight for cold-cache calibration computes, keyed by cache key.
+ * The pairwise-distance compute is O(sample²); without this, N concurrent
+ * cold-cache requests (e.g. several map tabs opening after the TTL lapses)
+ * would each run the full sample + compute. The first request computes and
+ * caches; concurrent callers await the same promise. Entries clear in
+ * `finally`, so a failed compute is retriable immediately.
+ */
+const calibrationInFlight = new Map<string, Promise<CalibrationPayload>>();
+
+/**
+ * @openapi
+ * /api/vibe/calibration:
+ *   get:
+ *     summary: Get library-calibrated pairwise-distance quantiles
+ *     description: Returns the p0-p100 percentiles of pairwise CLAP cosine distance over a bounded random sample of embedded tracks in this library, so the UI can express match strength as "closer than N% of random pairs in your library" instead of a fixed linear mapping that reads as inflated on libraries where unrelated tracks rarely exceed distance ~1.0. The sample is drawn via an id-only indexed scan plus a primary-key fetch (never a full-table random sort), cached for 24h keyed on the embedded-track count, and concurrent cold-cache requests collapse into a single compute.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Distance quantiles, or an empty result when fewer than 10 tracks are embedded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sampleSize:
+ *                   type: integer
+ *                   description: Number of tracks sampled (0 when the library has fewer than 10 embedded tracks)
+ *                 updatedAt:
+ *                   type: string
+ *                   description: ISO timestamp the sample was computed (omitted when sampleSize is 0)
+ *                 quantiles:
+ *                   type: array
+ *                   items:
+ *                     type: number
+ *                   description: p0..p100 percentiles of pairwise cosine distance (101 values), empty when sampleSize is 0
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/calibration", requireAuth, async (_req, res) => {
+    try {
+        const embeddedCount = await countEmbeddedTracks();
+        if (embeddedCount < CALIBRATION_MIN_EMBEDDED_TRACKS) {
+            return res.json({ sampleSize: 0, quantiles: [] });
+        }
+
+        // Cache keyed on embeddedCount so it self-invalidates as the library
+        // grows (a new track landing changes the key, forcing a recompute)
+        // without needing an explicit invalidation hook.
+        const cacheKey = `${CALIBRATION_CACHE_KEY_PREFIX}${embeddedCount}`;
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            return res.json(JSON.parse(cached));
+        }
+
+        let compute = calibrationInFlight.get(cacheKey);
+        if (!compute) {
+            compute = computeCalibration()
+                .then(async (payload) => {
+                    await redisClient.setEx(
+                        cacheKey,
+                        CALIBRATION_CACHE_TTL_SECONDS,
+                        JSON.stringify(payload)
+                    );
+                    return payload;
+                })
+                .finally(() => {
+                    calibrationInFlight.delete(cacheKey);
+                });
+            calibrationInFlight.set(cacheKey, compute);
+        }
+
+        res.json(await compute);
+    } catch (error: any) {
+        logger.error("Vibe calibration error:", error);
+        res.status(500).json({ error: "Failed to compute vibe calibration" });
     }
 });
 
