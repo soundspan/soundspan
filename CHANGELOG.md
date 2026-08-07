@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The CLAP sidecar and all-in-one hash locks now satisfy the CLAP manifest's
+  redis-py 8.1.0 floor. Regenerating the shared lock also corrects its stale
+  transformers 5.13.1 pin to the manifest's existing 5.14.1 floor, and a
+  focused regression test keeps both deployed locks synchronized with future
+  Redis floor changes.
 - The CLAP analyzer image now runs Python 3.12 instead of 3.10. Its hash-pinned
   dependency lock is resolved for the same interpreter, removing the
   Python-3.10-only `async-timeout` and `exceptiongroup` backports.
