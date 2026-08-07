@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Request, Response, Router } from "express";
 import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
@@ -22,6 +22,16 @@ import {
     loadVocabulary,
     VocabTerm
 } from "../services/vibeVocabulary";
+import {
+    CALIBRATION_MIN_EMBEDDED_TRACKS,
+    computeCalibration,
+    countEmbeddedTracks,
+    parseCachedCalibration,
+    type CalibrationPayload,
+} from "../services/vibeCalibration";
+import { MOOD_CONFIG, VALID_MOODS, MoodType, MOOD_BUCKET_MIN_SCORE } from "../services/moodBucketService";
+import { fetchEmbeddingsByTrackIds } from "../services/trackEmbeddings";
+import { parseJourneyRequest } from "./vibeJourneyRequest";
 
 const router = Router();
 
@@ -193,6 +203,10 @@ interface NearestTrackRow {
     albumCoverUrl: string | null;
     artistId: string;
     artistName: string;
+    energy: number | null;
+    valence: number | null;
+    danceability: number | null;
+    arousal: number | null;
 }
 
 async function findNearestToEmbedding(
@@ -206,7 +220,8 @@ async function findNearestToEmbedding(
                 t.id, t.title,
                 te.embedding <=> ${embedding}::vector AS distance,
                 a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
-                ar.id AS "artistId", ar.name AS "artistName"
+                ar.id AS "artistId", ar.name AS "artistName",
+                t.energy, t.valence, t.danceability, t.arousal
             FROM track_embeddings te
             JOIN "Track" t ON te.track_id = t.id
             JOIN "Album" a ON t."albumId" = a.id
@@ -221,7 +236,8 @@ async function findNearestToEmbedding(
             t.id, t.title,
             te.embedding <=> ${embedding}::vector AS distance,
             a.id AS "albumId", a.title AS "albumTitle", a."coverUrl" AS "albumCoverUrl",
-            ar.id AS "artistId", ar.name AS "artistName"
+            ar.id AS "artistId", ar.name AS "artistName",
+            t.energy, t.valence, t.danceability, t.arousal
         FROM track_embeddings te
         JOIN "Track" t ON te.track_id = t.id
         JOIN "Album" a ON t."albumId" = a.id
@@ -239,7 +255,54 @@ function formatNearestTrack(row: NearestTrackRow) {
         similarity: Math.max(0, 1 - row.distance / 2),
         album: { id: row.albumId, title: row.albumTitle, coverUrl: row.albumCoverUrl },
         artist: { id: row.artistId, name: row.artistName },
+        // Mirrors GET /api/vibe/similar/:trackId's audioFeatures shape so the
+        // map/journey/path UI can render the same energy/valence/danceability/
+        // arousal readout for every track surface, not just similar-tracks.
+        audioFeatures: {
+            energy: row.energy,
+            valence: row.valence,
+            danceability: row.danceability,
+            arousal: row.arousal,
+        },
     };
+}
+
+/**
+ * Walk from a starting embedding toward a target embedding, one interpolation
+ * step at a time, picking the nearest not-yet-used track at each step. Shared
+ * by /path (walk between two known tracks) and /journey (walk toward a track
+ * or a mood centroid) so the two never drift out of sync.
+ */
+async function walkEmbeddingSteps(
+    fromEmbed: number[],
+    targetEmbed: number[],
+    tValues: number[],
+    initialExcludeIds: string[]
+): Promise<ReturnType<typeof formatNearestTrack>[]> {
+    const usedIds = new Set(initialExcludeIds);
+    const stepResults: ReturnType<typeof formatNearestTrack>[] = [];
+
+    // Deliberately sequential (not Promise.all'd): each step's exclusion set
+    // (`usedIds`) accumulates the track picked by every prior step, so step N+1
+    // must see step N's pick before it queries or it can re-offer an
+    // already-used track (or two steps could double-book the same nearest
+    // neighbor). This is an intentional intra-journey dedup dependency, not an
+    // accidental N+1 — parallelizing these queries would break it.
+    for (const t of tValues) {
+        const interpolated = lerpEmbedding(fromEmbed, targetEmbed, t);
+        const nearest = await findNearestToEmbedding(
+            interpolated,
+            5,
+            Array.from(usedIds)
+        );
+        if (nearest.length > 0) {
+            const pick = nearest[0];
+            usedIds.add(pick.id);
+            stepResults.push(formatNearestTrack(pick));
+        }
+    }
+
+    return stepResults;
 }
 
 /**
@@ -315,28 +378,365 @@ router.get("/path", requireAuth, async (req, res) => {
                 .json({ error: "Ending track has no embedding" });
         }
 
-        const usedIds = new Set([fromId, toId]);
-        const stepResults = [];
-
-        for (let i = 1; i <= steps; i++) {
-            const t = i / (steps + 1);
-            const interpolated = lerpEmbedding(fromEmbed, toEmbed, t);
-            const nearest = await findNearestToEmbedding(
-                interpolated,
-                5,
-                Array.from(usedIds)
-            );
-            if (nearest.length > 0) {
-                const pick = nearest[0];
-                usedIds.add(pick.id);
-                stepResults.push(formatNearestTrack(pick));
-            }
-        }
+        const tValues = Array.from(
+            { length: steps },
+            (_, idx) => (idx + 1) / (steps + 1)
+        );
+        const stepResults = await walkEmbeddingSteps(
+            fromEmbed,
+            toEmbed,
+            tValues,
+            [fromId, toId]
+        );
 
         res.json({ from: fromId, to: toId, steps: stepResults });
     } catch (error: any) {
         logger.error("Vibe path error:", error);
         res.status(500).json({ error: "Failed to compute song path" });
+    }
+});
+
+const MIN_MOOD_BUCKET_TRACKS = 5;
+const MOOD_BUCKET_POOL_LIMIT = 50;
+
+interface JourneyTrackDestination {
+    embedding: number[];
+    target: { trackId: string; title: string };
+    /** The literal final waypoint — never re-derived from an ANN query. */
+    waypoint: ReturnType<typeof formatNearestTrack>;
+}
+
+type JourneyTrackDestinationResult =
+    | { ok: true; value: JourneyTrackDestination }
+    | { ok: false; status: number; error: string };
+
+/**
+ * Resolve a track-mode journey destination: its embedding plus the literal
+ * final waypoint built from the Track row itself.
+ */
+async function resolveTrackDestination(
+    toTrackId: string
+): Promise<JourneyTrackDestinationResult> {
+    const toEmbed = await fetchTrackEmbedding(toTrackId);
+    if (!toEmbed) {
+        return {
+            ok: false,
+            status: 404,
+            error: "Destination track has no embedding",
+        };
+    }
+
+    const destinationTrack = await prisma.track.findUnique({
+        where: { id: toTrackId },
+        include: { album: { include: { artist: true } } },
+    });
+    if (!destinationTrack) {
+        // TOCTOU: the track_embeddings row fetched above (fetchTrackEmbedding
+        // succeeded) can outlive its Track row for a moment if the track is
+        // deleted between the two queries — TrackEmbedding has onDelete:
+        // Cascade, so this is a genuine race window, not a stale-row bug.
+        // Without this guard the route would silently drop the destination
+        // instead of ever reaching it.
+        return { ok: false, status: 404, error: "Destination track not found" };
+    }
+
+    return {
+        ok: true,
+        value: {
+            embedding: toEmbed,
+            target: { trackId: toTrackId, title: destinationTrack.title },
+            waypoint: {
+                id: destinationTrack.id,
+                title: destinationTrack.title,
+                distance: 0,
+                similarity: 1,
+                album: {
+                    id: destinationTrack.album.id,
+                    title: destinationTrack.album.title,
+                    coverUrl: destinationTrack.album.coverUrl,
+                },
+                artist: {
+                    id: destinationTrack.album.artist.id,
+                    name: destinationTrack.album.artist.name,
+                },
+                audioFeatures: {
+                    energy: destinationTrack.energy,
+                    valence: destinationTrack.valence,
+                    danceability: destinationTrack.danceability,
+                    arousal: destinationTrack.arousal,
+                },
+            },
+        },
+    };
+}
+
+/**
+ * Average the embeddings of the top-scoring qualifying tracks in a mood
+ * bucket into a journey target centroid. The pool comes from Prisma (bucket
+ * membership is relational data); only the pgvector column read goes through
+ * the service-layer `fetchEmbeddingsByTrackIds`. Returns null when fewer
+ * than MIN_MOOD_BUCKET_TRACKS embedded tracks qualify — the mood isn't
+ * journeyable yet.
+ */
+async function resolveMoodCentroid(mood: MoodType): Promise<number[] | null> {
+    const pool = await prisma.moodBucket.findMany({
+        where: {
+            mood,
+            score: { gte: MOOD_BUCKET_MIN_SCORE },
+            track: { embedding: { isNot: null } },
+        },
+        orderBy: { score: "desc" },
+        take: MOOD_BUCKET_POOL_LIMIT,
+        select: { trackId: true },
+    });
+    if (pool.length < MIN_MOOD_BUCKET_TRACKS) return null;
+
+    const rows = await fetchEmbeddingsByTrackIds(pool.map((p) => p.trackId));
+    // Re-check after the embedding fetch: a track can lose its embedding row
+    // between the two queries (same cascade-delete race as the track-mode
+    // destination), and a centroid from too few vectors isn't a mood anymore.
+    if (rows.length < MIN_MOOD_BUCKET_TRACKS) return null;
+
+    const embeddings = rows.map((row) => row.embedding);
+    return blendEmbeddings(
+        embeddings,
+        embeddings.map(() => 1)
+    );
+}
+
+type JourneyComputation =
+    | { ok: true; body: Record<string, unknown> }
+    | { ok: false; status: number; error: string };
+
+async function computeTrackJourney(
+    fromTrackId: string,
+    toTrackId: string,
+    fromEmbed: number[],
+    steps: number,
+    excludeTrackIds: string[]
+): Promise<JourneyComputation> {
+    const destination = await resolveTrackDestination(toTrackId);
+    if (!destination.ok) return destination;
+    const tValues = Array.from(
+        { length: steps - 1 },
+        (_, index) => (index + 1) / steps
+    );
+    const intermediate = await walkEmbeddingSteps(
+        fromEmbed,
+        destination.value.embedding,
+        tValues,
+        [fromTrackId, toTrackId, ...excludeTrackIds]
+    );
+    return {
+        ok: true,
+        body: {
+            mode: "track",
+            target: destination.value.target,
+            waypoints: [...intermediate, destination.value.waypoint],
+        },
+    };
+}
+
+type AlchemyEmbeddingResult =
+    | { ok: true; embeddings: number[][] }
+    | { ok: false; missingTrackId: string };
+
+async function fetchAlchemyEmbeddings(
+    trackIds: string[]
+): Promise<AlchemyEmbeddingResult> {
+    const embeddings: number[][] = [];
+    for (const trackId of trackIds) {
+        const embedding = await fetchTrackEmbedding(trackId);
+        if (!embedding) return { ok: false, missingTrackId: trackId };
+        embeddings.push(embedding);
+    }
+    return { ok: true, embeddings };
+}
+
+function resolveAlchemyWeights(trackIds: string[], weights: unknown): number[] {
+    if (!Array.isArray(weights) || weights.length !== trackIds.length) {
+        return trackIds.map(() => 1);
+    }
+    return weights.map((weight) => Math.max(0, weight as number));
+}
+
+async function computeMoodJourney(
+    fromTrackId: string,
+    mood: MoodType,
+    fromEmbed: number[],
+    steps: number,
+    excludeTrackIds: string[]
+): Promise<JourneyComputation> {
+    const centroid = await resolveMoodCentroid(mood);
+    if (!centroid) {
+        return {
+            ok: false,
+            status: 404,
+            error: `Mood '${mood}' does not have enough embedded tracks for a journey`,
+        };
+    }
+    const tValues = Array.from(
+        { length: steps },
+        (_, index) => (index + 1) / steps
+    );
+    const waypoints = await walkEmbeddingSteps(fromEmbed, centroid, tValues, [
+        fromTrackId,
+        ...excludeTrackIds,
+    ]);
+    return {
+        ok: true,
+        body: {
+            mode: "mood",
+            target: { mood, label: MOOD_CONFIG[mood].name },
+            waypoints,
+        },
+    };
+}
+
+async function handleJourney(req: Request, res: Response) {
+    try {
+        const parsed = parseJourneyRequest(req.body);
+        if (!parsed.ok) {
+            return res.status(parsed.status).json({ error: parsed.error });
+        }
+        const { fromTrackId, toTrackId, mood, steps, excludeTrackIds } =
+            parsed.value;
+        const fromEmbed = await fetchTrackEmbedding(fromTrackId);
+        if (!fromEmbed) {
+            return res
+                .status(404)
+                .json({ error: "Starting track has no embedding" });
+        }
+        const result =
+            toTrackId !== null
+                ? await computeTrackJourney(
+                      fromTrackId,
+                      toTrackId,
+                      fromEmbed,
+                      steps,
+                      excludeTrackIds
+                  )
+                : await computeMoodJourney(
+                      fromTrackId,
+                      mood as MoodType,
+                      fromEmbed,
+                      steps,
+                      excludeTrackIds
+                  );
+        if (!result.ok) {
+            return res.status(result.status).json({ error: result.error });
+        }
+        return res.json(result.body);
+    } catch (error: any) {
+        logger.error("Vibe journey error:", error);
+        return res.status(500).json({ error: "Failed to compute vibe journey" });
+    }
+}
+
+/**
+ * @openapi
+ * /api/vibe/journey:
+ *   post:
+ *     summary: Walk from a track toward a destination track or mood
+ *     description: Interpolates through CLAP embedding space from a starting track toward either a destination track or the centroid of a mood bucket, returning an ordered list of waypoint tracks.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fromTrackId
+ *             properties:
+ *               fromTrackId:
+ *                 type: string
+ *                 description: Starting track ID
+ *               toTrackId:
+ *                 type: string
+ *                 description: Destination track ID (exactly one of toTrackId/mood is required)
+ *               mood:
+ *                 type: string
+ *                 enum: [happy, sad, chill, energetic, party, focus, melancholy, aggressive, acoustic]
+ *                 description: Destination mood bucket (exactly one of toTrackId/mood is required)
+ *               steps:
+ *                 type: integer
+ *                 default: 8
+ *                 minimum: 2
+ *                 maximum: 20
+ *                 description: Number of waypoints to return
+ *               excludeTrackIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 maxItems: 200
+ *                 description: Track IDs to exclude from waypoints
+ *     responses:
+ *       200:
+ *         description: Ordered list of waypoint tracks toward the destination track or mood centroid
+ *       400:
+ *         description: Missing fromTrackId, not exactly one of toTrackId/mood, invalid mood, or excludeTrackIds invalid/too long
+ *       404:
+ *         description: Starting track has no embedding, destination track has no embedding, destination track was not found (e.g. deleted between the embedding lookup and the track fetch), or the mood has fewer than 5 embedded tracks
+ *       401:
+ *         description: Not authenticated
+ */
+router.post("/journey", requireAuth, handleJourney);
+
+/**
+ * @openapi
+ * /api/vibe/moods:
+ *   get:
+ *     summary: List moods usable as journey/drift anchors
+ *     description: Returns each canonical mood with the count of qualifying bucket tracks that also have a CLAP embedding, so the UI can enable/disable mood-based journey targets.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Moods with embedded-track counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   mood:
+ *                     type: string
+ *                   trackCount:
+ *                     type: integer
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/moods", requireAuth, async (_req, res) => {
+    try {
+        const grouped = await prisma.moodBucket.groupBy({
+            by: ["mood"],
+            where: {
+                score: { gte: MOOD_BUCKET_MIN_SCORE },
+                track: { embedding: { isNot: null } },
+            },
+            _count: { _all: true },
+        });
+
+        const countsByMood = new Map(
+            grouped.map((row) => [row.mood, row._count._all])
+        );
+
+        res.json(
+            VALID_MOODS.map((mood) => ({
+                mood,
+                trackCount: countsByMood.get(mood) ?? 0,
+            }))
+        );
+    } catch (error: any) {
+        logger.error("Vibe moods error:", error);
+        res.status(500).json({ error: "Failed to list moods" });
     }
 });
 
@@ -380,7 +780,7 @@ router.get("/path", requireAuth, async (req, res) => {
  *       200:
  *         description: Tracks matching the blended vibe
  *       400:
- *         description: Fewer than 2 track IDs provided
+ *         description: Fewer than 2 or more than 10 track IDs provided, or weights do not sum to a positive value
  *       404:
  *         description: One or more ingredient tracks lack embeddings
  *       401:
@@ -407,22 +807,30 @@ router.post("/alchemy", requireAuth, async (req, res) => {
             100
         );
 
-        const embeddings: number[][] = [];
-        for (const tid of trackIds) {
-            const emb = await fetchTrackEmbedding(tid);
-            if (!emb) {
-                return res
-                    .status(404)
-                    .json({ error: `Track ${tid} has no embedding` });
-            }
-            embeddings.push(emb);
+        const embeddingResult = await fetchAlchemyEmbeddings(trackIds);
+        if (!embeddingResult.ok) {
+            return res.status(404).json({
+                error: `Track ${embeddingResult.missingTrackId} has no embedding`,
+            });
+        }
+        const effectiveWeights = resolveAlchemyWeights(trackIds, weights);
+
+        // Flooring negatives at 0 above still allows every weight to be 0 (e.g.
+        // [0, 0]), which makes blendEmbeddings divide by a zero totalWeight and
+        // fill the blended vector with NaN — pgvector rejects a NaN-bearing
+        // vector, so that request would otherwise reach findNearestToEmbedding
+        // and surface as an opaque 500. Reject it explicitly instead.
+        const weightSum = effectiveWeights.reduce((s, w) => s + w, 0);
+        if (!Number.isFinite(weightSum) || weightSum <= 0) {
+            return res
+                .status(400)
+                .json({ error: "weights must sum to a positive value" });
         }
 
-        const effectiveWeights = Array.isArray(weights) && weights.length === trackIds.length
-            ? weights.map((w: number) => Math.max(0, w))
-            : trackIds.map(() => 1);
-
-        const blended = blendEmbeddings(embeddings, effectiveWeights);
+        const blended = blendEmbeddings(
+            embeddingResult.embeddings,
+            effectiveWeights
+        );
         const nearest = await findNearestToEmbedding(blended, limit, trackIds);
 
         res.json({
@@ -435,6 +843,66 @@ router.post("/alchemy", requireAuth, async (req, res) => {
         res.status(500).json({ error: "Failed to compute alchemy blend" });
     }
 });
+
+type SimilarTrack = Awaited<ReturnType<typeof findSimilarTracks>>[number];
+
+async function applySimilarTrackPreferenceWeighting(
+    userId: string | undefined,
+    tracks: SimilarTrack[]
+): Promise<SimilarTrack[]> {
+    const scores = await buildTrackPreferenceScoreMapForUser(
+        userId,
+        tracks.map((track) => track.id)
+    );
+    if (scores.size === 0) return tracks;
+    const ordering = applyTrackPreferenceOrderBias(
+        tracks.map((track) => track.id),
+        scores
+    );
+    const trackById = new Map(tracks.map((track) => [track.id, track]));
+    const weighted = ordering
+        .map((id) => trackById.get(id))
+        .filter((track): track is SimilarTrack => Boolean(track))
+        .map((track) => ({
+            ...track,
+            similarity: Math.max(
+                0,
+                Math.min(
+                    1,
+                    applyTrackPreferenceSimilarityBias(
+                        track.similarity,
+                        scores.get(track.id) ?? 0
+                    )
+                )
+            ),
+        }));
+    logger.debug(
+        `[Vibe] Applied light preference weighting using ${scores.size} track preferences`
+    );
+    return weighted;
+}
+
+function formatSimilarTrack(track: SimilarTrack) {
+    return {
+        id: track.id,
+        title: track.title,
+        duration: track.duration,
+        distance: track.distance,
+        similarity: track.similarity,
+        album: {
+            id: track.albumId,
+            title: track.albumTitle,
+            coverUrl: track.albumCoverUrl,
+        },
+        artist: { id: track.artistId, name: track.artistName },
+        audioFeatures: {
+            energy: track.energy,
+            valence: track.valence,
+            danceability: track.danceability,
+            arousal: track.arousal,
+        },
+    };
+}
 
 /**
  * @openapi
@@ -519,38 +987,10 @@ router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, re
         );
 
         const tracks = await findSimilarTracks(trackId, limit);
-        let weightedTracks = tracks;
-
-        const preferenceScores = await buildTrackPreferenceScoreMapForUser(
+        const weightedTracks = await applySimilarTrackPreferenceWeighting(
             userId,
-            tracks.map((track) => track.id)
+            tracks
         );
-        if (preferenceScores.size > 0) {
-            const ordering = applyTrackPreferenceOrderBias(
-                tracks.map((track) => track.id),
-                preferenceScores
-            );
-            const trackById = new Map(tracks.map((track) => [track.id, track]));
-            weightedTracks = ordering
-                .map((id) => trackById.get(id))
-                .filter((track): track is (typeof tracks)[number] => Boolean(track))
-                .map((track) => ({
-                    ...track,
-                    similarity: Math.max(
-                        0,
-                        Math.min(
-                            1,
-                            applyTrackPreferenceSimilarityBias(
-                                track.similarity,
-                                preferenceScores.get(track.id) ?? 0
-                            )
-                        )
-                    ),
-                }));
-            logger.debug(
-                `[Vibe] Applied light preference weighting using ${preferenceScores.size} track preferences`
-            );
-        }
 
         if (weightedTracks.length === 0) {
             return res.status(404).json({
@@ -573,28 +1013,7 @@ router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, re
                 danceability: sourceTrack.danceability,
                 arousal: sourceTrack.arousal,
             } : null,
-            tracks: weightedTracks.map((t) => ({
-                id: t.id,
-                title: t.title,
-                duration: t.duration,
-                distance: t.distance,
-                similarity: t.similarity,
-                album: {
-                    id: t.albumId,
-                    title: t.albumTitle,
-                    coverUrl: t.albumCoverUrl,
-                },
-                artist: {
-                    id: t.artistId,
-                    name: t.artistName,
-                },
-                audioFeatures: {
-                    energy: t.energy,
-                    valence: t.valence,
-                    danceability: t.danceability,
-                    arousal: t.arousal,
-                },
-            })),
+            tracks: weightedTracks.map(formatSimilarTrack),
         });
     } catch (error: any) {
         logger.error("Hybrid similarity error:", error);
@@ -913,6 +1332,102 @@ router.get("/status", requireAuth, async (req, res) => {
     } catch (error: any) {
         logger.error("Vibe status error:", error);
         res.status(500).json({ error: "Failed to get embedding status" });
+    }
+});
+
+const CALIBRATION_CACHE_TTL_SECONDS = 24 * 60 * 60; // 24h
+const CALIBRATION_CACHE_KEY_PREFIX = "vibe:calibration:v1:";
+
+/**
+ * Single-flight for cold-cache calibration computes, keyed by cache key.
+ * The pairwise-distance compute is O(sample²); without this, N concurrent
+ * cold-cache requests (e.g. several map tabs opening after the TTL lapses)
+ * would each run the full sample + compute. The first request computes and
+ * caches; concurrent callers await the same promise. Entries clear in
+ * `finally`, so a failed compute is retriable immediately.
+ */
+const calibrationInFlight = new Map<string, Promise<CalibrationPayload>>();
+
+async function getCachedOrComputeCalibration(
+    cacheKey: string
+): Promise<CalibrationPayload> {
+    const cached = await redisClient.get(cacheKey);
+    if (cached) {
+        const payload = parseCachedCalibration(cached);
+        if (payload) return payload;
+        logger.warn("Ignoring invalid vibe calibration cache payload", {
+            cacheKey,
+        });
+    }
+
+    let compute = calibrationInFlight.get(cacheKey);
+    if (!compute) {
+        compute = computeCalibration()
+            .then(async (payload) => {
+                await redisClient.setEx(
+                    cacheKey,
+                    CALIBRATION_CACHE_TTL_SECONDS,
+                    JSON.stringify(payload)
+                );
+                return payload;
+            })
+            .finally(() => {
+                calibrationInFlight.delete(cacheKey);
+            });
+        calibrationInFlight.set(cacheKey, compute);
+    }
+    return compute;
+}
+
+async function getCalibrationResponse() {
+    const embeddedCount = await countEmbeddedTracks();
+    if (embeddedCount < CALIBRATION_MIN_EMBEDDED_TRACKS) {
+        return { sampleSize: 0, quantiles: [] };
+    }
+    const cacheKey = `${CALIBRATION_CACHE_KEY_PREFIX}${embeddedCount}`;
+    return getCachedOrComputeCalibration(cacheKey);
+}
+
+/**
+ * @openapi
+ * /api/vibe/calibration:
+ *   get:
+ *     summary: Get library-calibrated pairwise-distance quantiles
+ *     description: Returns the p0-p100 percentiles of pairwise CLAP cosine distance over a bounded random sample of embedded tracks in this library, so the UI can express match strength as "closer than N% of random pairs in your library" instead of a fixed linear mapping that reads as inflated on libraries where unrelated tracks rarely exceed distance ~1.0. The sample is drawn via an id-only indexed scan plus a primary-key fetch (never a full-table random sort), cached for 24h keyed on the embedded-track count, and concurrent cold-cache requests collapse into a single compute.
+ *     tags: [Vibe]
+ *     security:
+ *       - sessionAuth: []
+ *       - apiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Distance quantiles, or an empty result when fewer than 10 tracks are embedded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sampleSize:
+ *                   type: integer
+ *                   description: Number of tracks sampled (0 when the library has fewer than 10 embedded tracks)
+ *                 updatedAt:
+ *                   type: string
+ *                   description: ISO timestamp the sample was computed (omitted when sampleSize is 0)
+ *                 quantiles:
+ *                   type: array
+ *                   items:
+ *                     type: number
+ *                   description: p0..p100 percentiles of pairwise cosine distance (101 values), empty when sampleSize is 0
+ *       401:
+ *         description: Not authenticated
+ */
+router.get("/calibration", requireAuth, async (_req, res) => {
+    try {
+        return res.json(await getCalibrationResponse());
+    } catch (error: any) {
+        logger.error("Vibe calibration error:", error);
+        return res
+            .status(500)
+            .json({ error: "Failed to compute vibe calibration" });
     }
 });
 
