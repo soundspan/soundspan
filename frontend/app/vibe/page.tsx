@@ -21,7 +21,11 @@ import {
     AudioWaveform,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
-import { VibeMap } from "@/components/vibe/VibeMap";
+import {
+    VibeMap,
+    MOBILE_PLAYER_CLEARANCE_PX,
+} from "@/components/vibe/VibeMap";
+import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
 import { Map } from "lucide-react";
 
 interface TrackFeatures {
@@ -591,6 +595,8 @@ function VibePageContent() {
     const [vibeStatus, setVibeStatus] = useState<{ totalTracks: number; embeddedTracks: number } | null>(null);
     const [viewMode, setViewMode] = useState<ViewMode>("comparison");
     const [vibeTab, setVibeTab] = useState<VibeTab>("explore");
+    const isMobile = useIsMobile();
+    const isTablet = useIsTablet();
     const [searchQuery, setSearchQuery] = useState<string | null>(null);
     const [inputValue, setInputValue] = useState("");
     const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -895,6 +901,48 @@ function VibePageContent() {
         }
     }, [sourceTrack, loadSimilarTracks]);
 
+    // MAP TAB — full-bleed immersive surface. `main#main-content` is the
+    // nearest positioned ancestor, so with no other in-flow page content this
+    // box equals the visible scrollport exactly: on desktop the layout's flex
+    // column already ends above the player bar, and on mobile the map's
+    // floating bottom UI clears the mini player via `bottomInset`. The page
+    // header/search stay explore-only; the floating chip in headerSlot is the
+    // way back.
+    if (vibeTab === "map") {
+        return (
+            <div className="absolute inset-0 overflow-hidden bg-[#0a0a0a]">
+                <VibeMap
+                    headerSlot={
+                        <div className="pointer-events-auto flex gap-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 p-1 shadow-lg">
+                            <button
+                                type="button"
+                                onClick={() => setVibeTab("explore")}
+                                className="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
+                            >
+                                <AudioWaveform className="w-3.5 h-3.5" />
+                                Explore
+                            </button>
+                            <button
+                                type="button"
+                                aria-pressed
+                                aria-label="Map view (current)"
+                                className="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-medium bg-white/15 text-white"
+                            >
+                                <Map className="w-3.5 h-3.5" />
+                                Map
+                            </button>
+                        </div>
+                    }
+                    bottomInset={
+                        (isMobile || isTablet) && currentTrack
+                            ? MOBILE_PLAYER_CLEARANCE_PX
+                            : 0
+                    }
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen relative">
             {/* Subtle ambient gradient - responsive to selection */}
@@ -961,28 +1009,20 @@ function VibePageContent() {
                         </p>
                     )}
 
-                    {/* Explore / Map tab bar */}
+                    {/* Explore / Map tab bar. The map tab early-returns the
+                        full-bleed surface above, so within this header the
+                        Explore tab is always the active one. */}
                     <div className="flex gap-1 mt-4 bg-white/5 rounded-lg p-1 max-w-xs">
                         <button
                             onClick={() => setVibeTab("explore")}
-                            className={cn(
-                                "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors",
-                                vibeTab === "explore"
-                                    ? "bg-white/10 text-white"
-                                    : "text-gray-500 hover:text-gray-300"
-                            )}
+                            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors bg-white/10 text-white"
                         >
                             <AudioWaveform className="w-4 h-4" />
                             Explore
                         </button>
                         <button
                             onClick={() => setVibeTab("map")}
-                            className={cn(
-                                "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors",
-                                vibeTab === "map"
-                                    ? "bg-white/10 text-white"
-                                    : "text-gray-500 hover:text-gray-300"
-                            )}
+                            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-300"
                         >
                             <Map className="w-4 h-4" />
                             Map
@@ -1032,12 +1072,6 @@ function VibePageContent() {
                     </div>
                 </>)}
                 </div>
-
-                {vibeTab === "map" && (
-                    <div className="mt-4 h-[60vh] rounded-lg border border-white/5 overflow-hidden bg-[#0a0a0a]">
-                        <VibeMap />
-                    </div>
-                )}
 
                 {vibeTab === "explore" && <>
                 {/* Error */}

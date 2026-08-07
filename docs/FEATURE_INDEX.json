@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "soundspan-feature-index",
-    "version": "2026-07-10.01",
+    "version": "2026-08-07.01",
     "description": "Machine-readable feature-to-code mapping for rapid codebase navigation and targeted verification.",
     "update_expectation": "When a feature is introduced, changed significantly, or removed, update impacted entries."
   },
@@ -262,7 +262,7 @@
         "services": ["hybridSimilarity.ts", "vibeVocabulary.ts", "vibeAnalysisCleanup.ts", "audioAnalysisCleanup.ts"]
       },
       "tests": {
-        "backend_route": ["analysisRuntime.test.ts", "vibeSearchCompat.test.ts"],
+        "backend_route": ["analysisRuntime.test.ts", "vibeSearchCompat.test.ts", "vibeJourneyRuntime.test.ts", "vibeCalibrationRuntime.test.ts"],
         "backend_contract": ["audioAnalyzerClassColumnContract.test.ts", "audioAnalyzerFailureResolutionContract.test.ts", "audioAnalyzerPoolRecoveryContract.test.ts", "audioAnalyzerQueueContract.test.ts", "clapTextEmbedRecoveryContract.test.ts"]
       }
     },
@@ -366,6 +366,24 @@
       "tests": {
         "backend_route": ["playlistsRuntime.test.ts"],
         "backend_contract": []
+      }
+    },
+    {
+      "id": "vibe-map",
+      "name": "Vibe Map Navigator",
+      "description": "Full-bleed interactive map of the library's CLAP-embedding space (frontend/components/vibe: VibeMap.tsx container composing useMapLayout/useMapCamera/useMapGestures/useMapSweep/useAuxSurface/useTrailDisplay plus the useVibeMode travel/journey/alchemy orchestrator over the pure vibeModeMachine reducer) with mood filter chips, energy/valence range sliders, a spotlight text search, and four interaction modes - Travel (click-to-explore neighbors with a mood compass), Journey (route to a destination track or mood, POST /api/vibe/journey), Drift (one-click mood-slide preset), and Alchemy (blend 2-10 tracks, POST /api/vibe/alchemy) - plus sweep-to-queue, save-as-playlist, calibrated match percentages (GET /api/vibe/calibration), and a flight-plan queue preview; served at /vibe (frontend/app/vibe/page.tsx)",
+      "frontend": {
+        "feature_dirs": [],
+        "routes": ["/vibe"]
+      },
+      "backend": {
+        "routes": ["vibe.ts"],
+        "services": ["umapProjection.ts", "trackEmbeddings.ts", "vibeCalibration.ts"]
+      },
+      "tests": {
+        "backend_route": ["vibeJourneyRuntime.test.ts", "vibeCalibrationRuntime.test.ts", "vibeSearchCompat.test.ts"],
+        "backend_contract": [],
+        "frontend": ["flightPlan.test.ts", "journeyQueue.test.ts", "mapFilters.test.ts", "mapHints.test.ts", "mapLayout.test.ts", "mapSearch.test.ts", "mapViewport.test.ts", "sessionTrail.test.ts", "sweepCollect.test.ts", "travelCompass.test.ts", "vibeMatch.test.ts", "vibeModeMachine.test.ts", "queuePanelReorder.test.ts", "useVibeMode.component.test.ts", "useMapCamera.component.test.ts", "useMapGestures.component.test.ts", "useMapSweep.component.test.ts", "useAuxSurface.component.test.ts", "savePlaylist.component.test.ts", "spotlightSearch.component.test.ts", "mapOverlay.component.test.ts", "vibeMap.component.test.ts", "vibePanels.component.test.ts"]
       }
     }
   ]

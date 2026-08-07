@@ -176,8 +176,15 @@ function runUmapInWorker(
     nNeighbors: number
 ): Promise<number[][]> {
     return new Promise((resolve, reject) => {
-        const worker = new Worker(resolveUmapWorkerPath(), {
+        const workerPath = resolveUmapWorkerPath();
+        const worker = new Worker(workerPath, {
             workerData: { embeddings, nNeighbors },
+            // tsx's loader hooks don't propagate into worker_threads, so a
+            // .ts worker (tsx dev mode — no compiled dist/) must register tsx
+            // in its own execArgv or Node rejects the file extension.
+            ...(workerPath.endsWith(".ts")
+                ? { execArgv: ["--import", "tsx"] }
+                : {}),
         });
 
         let settled = false;
