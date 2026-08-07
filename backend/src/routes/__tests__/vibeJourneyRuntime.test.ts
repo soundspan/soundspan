@@ -374,6 +374,26 @@ describe("vibe journey + moods runtime", () => {
             expect(mockQueryRaw).not.toHaveBeenCalled();
         });
 
+        it("returns 400 when excludeTrackIds contains an empty identifier", async () => {
+            const req = {
+                body: {
+                    fromTrackId: "from-1",
+                    toTrackId: "dest-1",
+                    excludeTrackIds: ["valid-id", ""],
+                },
+                user: { id: "user-1" },
+            } as any;
+            const res = createRes();
+
+            await journeyHandler(req, res);
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body.error).toBe(
+                "excludeTrackIds must contain non-empty strings"
+            );
+            expect(mockQueryRaw).not.toHaveBeenCalled();
+        });
+
         it("clamps steps below the minimum up to 2", async () => {
             mockQueryRaw
                 .mockResolvedValueOnce([{ embedding: "[1,0,0]" }])

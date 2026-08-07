@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Request, Response, Router } from "express";
 import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import { logger } from "../utils/logger";
@@ -497,6 +497,135 @@ async function resolveMoodCentroid(mood: MoodType): Promise<number[] | null> {
     );
 }
 
+type JourneyComputation =
+    | { ok: true; body: Record<string, unknown> }
+    | { ok: false; status: number; error: string };
+
+async function computeTrackJourney(
+    fromTrackId: string,
+    toTrackId: string,
+    fromEmbed: number[],
+    steps: number,
+    excludeTrackIds: string[]
+): Promise<JourneyComputation> {
+    const destination = await resolveTrackDestination(toTrackId);
+    if (!destination.ok) return destination;
+    const tValues = Array.from(
+        { length: steps - 1 },
+        (_, index) => (index + 1) / steps
+    );
+    const intermediate = await walkEmbeddingSteps(
+        fromEmbed,
+        destination.value.embedding,
+        tValues,
+        [fromTrackId, toTrackId, ...excludeTrackIds]
+    );
+    return {
+        ok: true,
+        body: {
+            mode: "track",
+            target: destination.value.target,
+            waypoints: [...intermediate, destination.value.waypoint],
+        },
+    };
+}
+
+type AlchemyEmbeddingResult =
+    | { ok: true; embeddings: number[][] }
+    | { ok: false; missingTrackId: string };
+
+async function fetchAlchemyEmbeddings(
+    trackIds: string[]
+): Promise<AlchemyEmbeddingResult> {
+    const embeddings: number[][] = [];
+    for (const trackId of trackIds) {
+        const embedding = await fetchTrackEmbedding(trackId);
+        if (!embedding) return { ok: false, missingTrackId: trackId };
+        embeddings.push(embedding);
+    }
+    return { ok: true, embeddings };
+}
+
+function resolveAlchemyWeights(trackIds: string[], weights: unknown): number[] {
+    if (!Array.isArray(weights) || weights.length !== trackIds.length) {
+        return trackIds.map(() => 1);
+    }
+    return weights.map((weight) => Math.max(0, weight as number));
+}
+
+async function computeMoodJourney(
+    fromTrackId: string,
+    mood: MoodType,
+    fromEmbed: number[],
+    steps: number,
+    excludeTrackIds: string[]
+): Promise<JourneyComputation> {
+    const centroid = await resolveMoodCentroid(mood);
+    if (!centroid) {
+        return {
+            ok: false,
+            status: 404,
+            error: `Mood '${mood}' does not have enough embedded tracks for a journey`,
+        };
+    }
+    const tValues = Array.from(
+        { length: steps },
+        (_, index) => (index + 1) / steps
+    );
+    const waypoints = await walkEmbeddingSteps(fromEmbed, centroid, tValues, [
+        fromTrackId,
+        ...excludeTrackIds,
+    ]);
+    return {
+        ok: true,
+        body: {
+            mode: "mood",
+            target: { mood, label: MOOD_CONFIG[mood].name },
+            waypoints,
+        },
+    };
+}
+
+async function handleJourney(req: Request, res: Response) {
+    try {
+        const parsed = parseJourneyRequest(req.body);
+        if (!parsed.ok) {
+            return res.status(parsed.status).json({ error: parsed.error });
+        }
+        const { fromTrackId, toTrackId, mood, steps, excludeTrackIds } =
+            parsed.value;
+        const fromEmbed = await fetchTrackEmbedding(fromTrackId);
+        if (!fromEmbed) {
+            return res
+                .status(404)
+                .json({ error: "Starting track has no embedding" });
+        }
+        const result =
+            toTrackId !== null
+                ? await computeTrackJourney(
+                      fromTrackId,
+                      toTrackId,
+                      fromEmbed,
+                      steps,
+                      excludeTrackIds
+                  )
+                : await computeMoodJourney(
+                      fromTrackId,
+                      mood as MoodType,
+                      fromEmbed,
+                      steps,
+                      excludeTrackIds
+                  );
+        if (!result.ok) {
+            return res.status(result.status).json({ error: result.error });
+        }
+        return res.json(result.body);
+    } catch (error: any) {
+        logger.error("Vibe journey error:", error);
+        return res.status(500).json({ error: "Failed to compute vibe journey" });
+    }
+}
+
 /**
  * @openapi
  * /api/vibe/journey:
@@ -548,73 +677,7 @@ async function resolveMoodCentroid(mood: MoodType): Promise<number[] | null> {
  *       401:
  *         description: Not authenticated
  */
-router.post("/journey", requireAuth, async (req, res) => {
-    try {
-        const parsed = parseJourneyRequest(req.body);
-        if (!parsed.ok) {
-            return res.status(parsed.status).json({ error: parsed.error });
-        }
-        const { fromTrackId, toTrackId, mood, steps, excludeTrackIds } =
-            parsed.value;
-
-        const fromEmbed = await fetchTrackEmbedding(fromTrackId);
-        if (!fromEmbed) {
-            return res
-                .status(404)
-                .json({ error: "Starting track has no embedding" });
-        }
-
-        if (toTrackId !== null) {
-            const dest = await resolveTrackDestination(toTrackId);
-            if (!dest.ok) {
-                return res.status(dest.status).json({ error: dest.error });
-            }
-            // Walk only the intermediate steps (t = i/steps for i in
-            // 1..steps-1); the destination itself is appended as the literal
-            // final waypoint, so it is never re-derived from a possibly-
-            // drifted ANN query.
-            const tValues = Array.from(
-                { length: steps - 1 },
-                (_, idx) => (idx + 1) / steps
-            );
-            const intermediate = await walkEmbeddingSteps(
-                fromEmbed,
-                dest.value.embedding,
-                tValues,
-                [fromTrackId, toTrackId, ...excludeTrackIds]
-            );
-            return res.json({
-                mode: "track",
-                target: dest.value.target,
-                waypoints: [...intermediate, dest.value.waypoint],
-            });
-        }
-
-        const moodKey = mood as MoodType;
-        const centroid = await resolveMoodCentroid(moodKey);
-        if (!centroid) {
-            return res.status(404).json({
-                error: `Mood '${moodKey}' does not have enough embedded tracks for a journey`,
-            });
-        }
-        const tValues = Array.from(
-            { length: steps },
-            (_, idx) => (idx + 1) / steps
-        );
-        const waypoints = await walkEmbeddingSteps(fromEmbed, centroid, tValues, [
-            fromTrackId,
-            ...excludeTrackIds,
-        ]);
-        res.json({
-            mode: "mood",
-            target: { mood: moodKey, label: MOOD_CONFIG[moodKey].name },
-            waypoints,
-        });
-    } catch (error: any) {
-        logger.error("Vibe journey error:", error);
-        res.status(500).json({ error: "Failed to compute vibe journey" });
-    }
-});
+router.post("/journey", requireAuth, handleJourney);
 
 /**
  * @openapi
@@ -737,20 +800,13 @@ router.post("/alchemy", requireAuth, async (req, res) => {
             100
         );
 
-        const embeddings: number[][] = [];
-        for (const tid of trackIds) {
-            const emb = await fetchTrackEmbedding(tid);
-            if (!emb) {
-                return res
-                    .status(404)
-                    .json({ error: `Track ${tid} has no embedding` });
-            }
-            embeddings.push(emb);
+        const embeddingResult = await fetchAlchemyEmbeddings(trackIds);
+        if (!embeddingResult.ok) {
+            return res.status(404).json({
+                error: `Track ${embeddingResult.missingTrackId} has no embedding`,
+            });
         }
-
-        const effectiveWeights = Array.isArray(weights) && weights.length === trackIds.length
-            ? weights.map((w: number) => Math.max(0, w))
-            : trackIds.map(() => 1);
+        const effectiveWeights = resolveAlchemyWeights(trackIds, weights);
 
         // Flooring negatives at 0 above still allows every weight to be 0 (e.g.
         // [0, 0]), which makes blendEmbeddings divide by a zero totalWeight and
@@ -764,7 +820,10 @@ router.post("/alchemy", requireAuth, async (req, res) => {
                 .json({ error: "weights must sum to a positive value" });
         }
 
-        const blended = blendEmbeddings(embeddings, effectiveWeights);
+        const blended = blendEmbeddings(
+            embeddingResult.embeddings,
+            effectiveWeights
+        );
         const nearest = await findNearestToEmbedding(blended, limit, trackIds);
 
         res.json({
@@ -777,6 +836,66 @@ router.post("/alchemy", requireAuth, async (req, res) => {
         res.status(500).json({ error: "Failed to compute alchemy blend" });
     }
 });
+
+type SimilarTrack = Awaited<ReturnType<typeof findSimilarTracks>>[number];
+
+async function applySimilarTrackPreferenceWeighting(
+    userId: string | undefined,
+    tracks: SimilarTrack[]
+): Promise<SimilarTrack[]> {
+    const scores = await buildTrackPreferenceScoreMapForUser(
+        userId,
+        tracks.map((track) => track.id)
+    );
+    if (scores.size === 0) return tracks;
+    const ordering = applyTrackPreferenceOrderBias(
+        tracks.map((track) => track.id),
+        scores
+    );
+    const trackById = new Map(tracks.map((track) => [track.id, track]));
+    const weighted = ordering
+        .map((id) => trackById.get(id))
+        .filter((track): track is SimilarTrack => Boolean(track))
+        .map((track) => ({
+            ...track,
+            similarity: Math.max(
+                0,
+                Math.min(
+                    1,
+                    applyTrackPreferenceSimilarityBias(
+                        track.similarity,
+                        scores.get(track.id) ?? 0
+                    )
+                )
+            ),
+        }));
+    logger.debug(
+        `[Vibe] Applied light preference weighting using ${scores.size} track preferences`
+    );
+    return weighted;
+}
+
+function formatSimilarTrack(track: SimilarTrack) {
+    return {
+        id: track.id,
+        title: track.title,
+        duration: track.duration,
+        distance: track.distance,
+        similarity: track.similarity,
+        album: {
+            id: track.albumId,
+            title: track.albumTitle,
+            coverUrl: track.albumCoverUrl,
+        },
+        artist: { id: track.artistId, name: track.artistName },
+        audioFeatures: {
+            energy: track.energy,
+            valence: track.valence,
+            danceability: track.danceability,
+            arousal: track.arousal,
+        },
+    };
+}
 
 /**
  * @openapi
@@ -861,38 +980,10 @@ router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, re
         );
 
         const tracks = await findSimilarTracks(trackId, limit);
-        let weightedTracks = tracks;
-
-        const preferenceScores = await buildTrackPreferenceScoreMapForUser(
+        const weightedTracks = await applySimilarTrackPreferenceWeighting(
             userId,
-            tracks.map((track) => track.id)
+            tracks
         );
-        if (preferenceScores.size > 0) {
-            const ordering = applyTrackPreferenceOrderBias(
-                tracks.map((track) => track.id),
-                preferenceScores
-            );
-            const trackById = new Map(tracks.map((track) => [track.id, track]));
-            weightedTracks = ordering
-                .map((id) => trackById.get(id))
-                .filter((track): track is (typeof tracks)[number] => Boolean(track))
-                .map((track) => ({
-                    ...track,
-                    similarity: Math.max(
-                        0,
-                        Math.min(
-                            1,
-                            applyTrackPreferenceSimilarityBias(
-                                track.similarity,
-                                preferenceScores.get(track.id) ?? 0
-                            )
-                        )
-                    ),
-                }));
-            logger.debug(
-                `[Vibe] Applied light preference weighting using ${preferenceScores.size} track preferences`
-            );
-        }
 
         if (weightedTracks.length === 0) {
             return res.status(404).json({
@@ -915,28 +1006,7 @@ router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, re
                 danceability: sourceTrack.danceability,
                 arousal: sourceTrack.arousal,
             } : null,
-            tracks: weightedTracks.map((t) => ({
-                id: t.id,
-                title: t.title,
-                duration: t.duration,
-                distance: t.distance,
-                similarity: t.similarity,
-                album: {
-                    id: t.albumId,
-                    title: t.albumTitle,
-                    coverUrl: t.albumCoverUrl,
-                },
-                artist: {
-                    id: t.artistId,
-                    name: t.artistName,
-                },
-                audioFeatures: {
-                    energy: t.energy,
-                    valence: t.valence,
-                    danceability: t.danceability,
-                    arousal: t.arousal,
-                },
-            })),
+            tracks: weightedTracks.map(formatSimilarTrack),
         });
     } catch (error: any) {
         logger.error("Hybrid similarity error:", error);

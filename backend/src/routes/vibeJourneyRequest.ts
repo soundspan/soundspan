@@ -29,8 +29,75 @@ export type JourneyRequestResult =
     | { ok: true; value: JourneyRequest }
     | { ok: false; status: number; error: string };
 
+type ParsedTarget = Pick<JourneyRequest, "toTrackId" | "mood">;
+type FieldResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
 function reject(status: number, error: string): JourneyRequestResult {
     return { ok: false, status, error };
+}
+
+function parseTarget(
+    fromTrackId: string,
+    toTrackId: unknown,
+    mood: unknown
+): FieldResult<ParsedTarget> {
+    const hasTrack = typeof toTrackId === "string" && toTrackId.length > 0;
+    const hasMood = typeof mood === "string" && mood.length > 0;
+    if (hasTrack === hasMood) {
+        return { ok: false, error: "Provide exactly one of toTrackId or mood" };
+    }
+    if (hasMood && !VALID_MOODS.includes(mood as MoodType)) {
+        return {
+            ok: false,
+            error: `Invalid mood. Must be one of: ${VALID_MOODS.join(", ")}`,
+        };
+    }
+    if (hasTrack && toTrackId === fromTrackId) {
+        return { ok: false, error: "Origin and destination are the same track" };
+    }
+    return {
+        ok: true,
+        value: {
+            toTrackId: hasTrack ? (toTrackId as string) : null,
+            mood: hasMood ? (mood as MoodType) : null,
+        },
+    };
+}
+
+function parseExcludeTrackIds(value: unknown): FieldResult<string[]> {
+    if (value === undefined) return { ok: true, value: [] };
+    if (!Array.isArray(value)) {
+        return { ok: false, error: "excludeTrackIds must be an array of strings" };
+    }
+    if (value.length > MAX_JOURNEY_EXCLUDE_TRACK_IDS) {
+        return {
+            ok: false,
+            error: `excludeTrackIds cannot exceed ${MAX_JOURNEY_EXCLUDE_TRACK_IDS} entries`,
+        };
+    }
+    if (value.some((id) => typeof id !== "string" || id.length === 0)) {
+        return {
+            ok: false,
+            error: "excludeTrackIds must contain non-empty strings",
+        };
+    }
+    return { ok: true, value };
+}
+
+function parseSteps(value: unknown): FieldResult<number> {
+    if (value === undefined) {
+        return { ok: true, value: DEFAULT_JOURNEY_STEPS };
+    }
+    if (!Number.isInteger(value)) {
+        return { ok: false, error: "steps must be an integer" };
+    }
+    return {
+        ok: true,
+        value: Math.min(
+            Math.max(MIN_JOURNEY_STEPS, value as number),
+            MAX_JOURNEY_STEPS
+        ),
+    };
 }
 
 /**
@@ -42,71 +109,36 @@ function reject(status: number, error: string): JourneyRequestResult {
  * a UI slider quirk, not a protocol violation).
  */
 export function parseJourneyRequest(body: unknown): JourneyRequestResult {
+    const record =
+        typeof body === "object" && body !== null && !Array.isArray(body)
+            ? (body as Record<string, unknown>)
+            : {};
     const {
         fromTrackId,
         toTrackId,
         mood,
         steps: requestedSteps,
         excludeTrackIds,
-    } = (body ?? {}) as Record<string, unknown>;
+    } = record;
 
     if (typeof fromTrackId !== "string" || !fromTrackId) {
         return reject(400, "fromTrackId is required");
     }
 
-    const hasToTrackId = typeof toTrackId === "string" && toTrackId.length > 0;
-    const hasMood = typeof mood === "string" && mood.length > 0;
-    if (hasToTrackId === hasMood) {
-        return reject(400, "Provide exactly one of toTrackId or mood");
-    }
-
-    if (hasMood && !VALID_MOODS.includes(mood as MoodType)) {
-        return reject(
-            400,
-            `Invalid mood. Must be one of: ${VALID_MOODS.join(", ")}`
-        );
-    }
-
-    if (hasToTrackId && toTrackId === fromTrackId) {
-        return reject(400, "Origin and destination are the same track");
-    }
-
-    let excludeIds: string[] = [];
-    if (excludeTrackIds !== undefined) {
-        if (
-            !Array.isArray(excludeTrackIds) ||
-            excludeTrackIds.some((id: unknown) => typeof id !== "string")
-        ) {
-            return reject(400, "excludeTrackIds must be an array of strings");
-        }
-        if (excludeTrackIds.length > MAX_JOURNEY_EXCLUDE_TRACK_IDS) {
-            return reject(
-                400,
-                `excludeTrackIds cannot exceed ${MAX_JOURNEY_EXCLUDE_TRACK_IDS} entries`
-            );
-        }
-        excludeIds = excludeTrackIds;
-    }
-
-    let steps = DEFAULT_JOURNEY_STEPS;
-    if (requestedSteps !== undefined) {
-        if (!Number.isInteger(requestedSteps)) {
-            return reject(400, "steps must be an integer");
-        }
-        steps = Math.min(
-            Math.max(MIN_JOURNEY_STEPS, requestedSteps as number),
-            MAX_JOURNEY_STEPS
-        );
-    }
+    const target = parseTarget(fromTrackId, toTrackId, mood);
+    if (!target.ok) return reject(400, target.error);
+    const excludes = parseExcludeTrackIds(excludeTrackIds);
+    if (!excludes.ok) return reject(400, excludes.error);
+    const steps = parseSteps(requestedSteps);
+    if (!steps.ok) return reject(400, steps.error);
 
     return {
         ok: true,
         value: {
             fromTrackId,
-            toTrackId: hasToTrackId ? (toTrackId as string) : null,
-            mood: hasMood ? (mood as MoodType) : null,
-            steps,
-            excludeTrackIds: excludeIds,
+            ...target.value,
+            steps: steps.value,
+            excludeTrackIds: excludes.value,
         },
     };
 }
