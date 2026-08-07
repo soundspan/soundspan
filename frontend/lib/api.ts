@@ -3059,6 +3059,56 @@ class ApiClient {
         });
     }
 
+    async getVibeJourney(params: {
+        fromTrackId: string;
+        toTrackId?: string;
+        mood?: string;
+        steps?: number;
+        excludeTrackIds?: string[];
+    }) {
+        return this.request<{
+            mode: "track" | "mood";
+            target:
+                | { trackId: string; title: string }
+                | { mood: string; label: string };
+            waypoints: Array<{
+                id: string;
+                title: string;
+                distance: number;
+                similarity: number;
+                album: { id: string; title: string; coverUrl: string | null };
+                artist: { id: string; name: string };
+            }>;
+        }>("/vibe/journey", {
+            method: "POST",
+            body: JSON.stringify(params),
+        });
+    }
+
+    async getVibeMoods() {
+        return this.request<
+            Array<{
+                mood: string;
+                trackCount: number;
+            }>
+        >("/vibe/moods");
+    }
+
+    /**
+     * Library-calibrated pairwise-distance quantiles (p0..p100, 101 values,
+     * ascending) for scoring match percentages as "closer than N% of random
+     * pairs in your library" instead of the fixed `1 - distance/2` mapping.
+     * `sampleSize: 0` / `quantiles: []` on a library with fewer than 10
+     * embedded tracks — callers fall back to the old linear mapping.
+     */
+    async getVibeCalibration() {
+        return this.request<{
+            sampleSize: number;
+            updatedAt?: string;
+            quantiles: number[];
+        }>("/vibe/calibration");
+    }
+
     async refreshAllPodcasts() {
         return this.request<{
             success: boolean;
