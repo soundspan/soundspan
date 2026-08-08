@@ -1,24 +1,13 @@
 "use client";
 
-/**
- * useTravelMode — the travel constellation's async data + derived view.
- *
- * Owns the similar-neighbours fetch for the current travel origin, the
- * map-enrichment + compass filtering derivations, and the ready-to-render
- * `TravelView`. Returns null outside travel mode. One of the three focused
- * per-mode hooks composed by `useVibeMode` (the mode transitions themselves
- * live in `vibeModeMachine`).
- */
+/** Async neighbor data and derived compass view for travel mode. */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { MapTrack } from "./types";
 import {
-    compassNeighbors,
-    enrichFromMap,
-    DEFAULT_COMPASS_COUNT,
-    type CompassCandidate,
-    type CompassDirection,
+    compassNeighbors, enrichFromMap, DEFAULT_COMPASS_COUNT,
+    type CompassCandidate, type CompassDirection,
 } from "./travelCompass";
 import { waypointToTrack } from "./journeyTracks";
 import type { ModeAction, ModeState } from "./vibeModeMachine";
@@ -26,7 +15,6 @@ import type { VibeControls } from "./useVibeMode";
 
 const SIMILAR_LIMIT = 24;
 
-/** The four audio features the Travel explainability breakdown compares. */
 export interface VibeFeatures {
     energy: number | null;
     valence: number | null;
@@ -43,11 +31,9 @@ export interface TravelView {
     offMapNeighbors: CompassCandidate[];
     loading: boolean;
     error: string | null;
-    /** Library-calibrated distance quantiles, or null (uncalibrated fallback). */
     quantiles: readonly number[] | null;
-    /** The current origin's own audio features, for the explainability breakdown. */
     originFeatures: VibeFeatures | null;
-    setDirection: (d: CompassDirection) => void;
+    setDirection: (direction: CompassDirection) => void;
     navigate: (id: string) => void;
     queue: (id: string) => void;
     close: () => void;
@@ -63,66 +49,47 @@ export interface UseTravelModeArgs {
     exitToExplore: () => void;
 }
 
-export function useTravelMode({
-    state,
-    dispatch,
-    trackById,
-    controls,
-    quantiles,
-    titleOf,
-    exitToExplore,
-}: UseTravelModeArgs): TravelView | null {
-    // Neighbours are tagged with the origin they were fetched for, and every
-    // consumer derives [] unless the tag matches the CURRENT travel origin.
-    // This is what kills the "strings stay behind" bug: navigating to a new
-    // node instantly hides the old node's constellation (no frame ever draws
-    // edges from the new origin to the old origin's neighbours), without any
-    // clear-before-fetch effect-ordering games.
-    const [rawNeighbors, setRawNeighbors] = useState<{
-        originId: string;
-        list: CompassCandidate[];
-        /** The origin's own danceability/arousal, from the /similar response. */
-        sourceFeatures: VibeFeatures | null;
-    } | null>(null);
+interface NeighborState {
+    originId: string;
+    list: CompassCandidate[];
+    sourceFeatures: VibeFeatures | null;
+}
+
+type SimilarTrack = Awaited<ReturnType<typeof api.getVibeSimilarTracks>>["tracks"][number];
+
+function toCompassCandidate(track: SimilarTrack): CompassCandidate {
+    return {
+        id: track.id, title: track.title, album: track.album, artist: track.artist,
+        similarity: Math.max(0, 1 - track.distance / 2), distance: track.distance,
+        energy: track.audioFeatures?.energy ?? null,
+        valence: track.audioFeatures?.valence ?? null,
+        danceability: track.audioFeatures?.danceability ?? null,
+        arousal: track.audioFeatures?.arousal ?? null, moods: null,
+    };
+}
+
+function useNeighborRequest(currentId: string | null, inTravel: boolean) {
+    const [neighbors, setNeighbors] = useState<NeighborState | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    // Mode exclusivity: leaving travel drops its overlay state.
-    const inTravel = state.mode === "travel";
     useEffect(() => {
         if (!inTravel) {
-            setRawNeighbors(null);
+            setNeighbors(null);
             setError(null);
+            setLoading(false);
         }
     }, [inTravel]);
-
-    // Fetch similar tracks for the current origin.
-    const travelCurrentId = state.mode === "travel" ? state.currentId : null;
     useEffect(() => {
-        if (!travelCurrentId) return;
+        if (!currentId) return;
         let cancelled = false;
         setLoading(true);
         setError(null);
-        api.getVibeSimilarTracks(travelCurrentId, SIMILAR_LIMIT)
-            .then((res) => {
-                if (cancelled) return;
-                setRawNeighbors({
-                    originId: travelCurrentId,
-                    sourceFeatures: res.sourceFeatures ?? null,
-                    list: res.tracks.map((t) => ({
-                        id: t.id,
-                        title: t.title,
-                        album: t.album,
-                        artist: t.artist,
-                        // client type omits similarity; derive from cosine distance.
-                        similarity: Math.max(0, 1 - t.distance / 2),
-                        distance: t.distance,
-                        energy: t.audioFeatures?.energy ?? null,
-                        valence: t.audioFeatures?.valence ?? null,
-                        danceability: t.audioFeatures?.danceability ?? null,
-                        arousal: t.audioFeatures?.arousal ?? null,
-                        moods: null,
-                    })),
+        api.getVibeSimilarTracks(currentId, SIMILAR_LIMIT)
+            .then((response) => {
+                if (!cancelled) setNeighbors({
+                    originId: currentId,
+                    sourceFeatures: response.sourceFeatures ?? null,
+                    list: response.tracks.map(toCompassCandidate),
                 });
             })
             .catch(() => {
@@ -131,105 +98,70 @@ export function useTravelMode({
             .finally(() => {
                 if (!cancelled) setLoading(false);
             });
-        return () => {
-            cancelled = true;
-        };
-    }, [travelCurrentId]);
+        return () => { cancelled = true; };
+    }, [currentId]);
+    return { neighbors, loading, error };
+}
 
-    // --- derivations --------------------------------------------------------
-    const enrichedNeighbors = useMemo(() => {
-        if (!rawNeighbors || rawNeighbors.originId !== travelCurrentId) return [];
-        return enrichFromMap(rawNeighbors.list, trackById);
-    }, [rawNeighbors, travelCurrentId, trackById]);
+function originFeatures(
+    origin: MapTrack | undefined,
+    neighbors: NeighborState | null,
+    currentId: string | null
+): VibeFeatures | null {
+    if (!origin) return null;
+    const source = neighbors?.originId === currentId ? neighbors.sourceFeatures : null;
+    return { energy: origin.energy, valence: origin.valence,
+        danceability: source?.danceability ?? null, arousal: source?.arousal ?? null };
+}
 
-    const travelOrigin =
-        travelCurrentId != null ? trackById.get(travelCurrentId) : undefined;
+function useTravelDerivations(args: UseTravelModeArgs, currentId: string | null,
+    neighbors: NeighborState | null) {
+    const enriched = useMemo(() => neighbors?.originId === currentId
+        ? enrichFromMap(neighbors.list, args.trackById) : [],
+    [neighbors, currentId, args.trackById]);
+    const origin = currentId ? args.trackById.get(currentId) : undefined;
+    const shown = useMemo(() => origin && args.state.mode === "travel"
+        ? compassNeighbors(origin, enriched, args.state.direction, DEFAULT_COMPASS_COUNT) : [],
+    [origin, enriched, args.state]);
+    const onMap = useMemo(() => shown.filter((item) => args.trackById.has(item.id)),
+        [shown, args.trackById]);
+    const offMap = useMemo(() => shown.filter((item) => !args.trackById.has(item.id)),
+        [shown, args.trackById]);
+    const byId = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
+    return { onMap, offMap, byId,
+        features: originFeatures(origin, neighbors, currentId) };
+}
 
-    // Origin features for the explainability breakdown: energy/valence come
-    // from the map projection (always present for an on-map origin);
-    // danceability/arousal aren't in the map payload, so they come from the
-    // /similar fetch's sourceFeatures — guarded to the matching origin so a
-    // stale fetch for a previous node never mislabels the new one's features.
-    const originFeatures: VibeFeatures | null = useMemo(() => {
-        if (!travelOrigin) return null;
-        const sourceFeatures =
-            rawNeighbors && rawNeighbors.originId === travelCurrentId
-                ? rawNeighbors.sourceFeatures
-                : null;
-        return {
-            energy: travelOrigin.energy,
-            valence: travelOrigin.valence,
-            danceability: sourceFeatures?.danceability ?? null,
-            arousal: sourceFeatures?.arousal ?? null,
-        };
-    }, [travelOrigin, rawNeighbors, travelCurrentId]);
+function useTravelActions(args: UseTravelModeArgs,
+    byId: ReadonlyMap<string, CompassCandidate>) {
+    const navigate = useCallback((id: string) => {
+        const candidate = byId.get(id);
+        if (candidate) args.controls.playTrack(waypointToTrack(candidate));
+        if (args.trackById.has(id)) args.dispatch({ type: "TRAVEL_TO", id });
+    }, [byId, args]);
+    const queue = useCallback((id: string) => {
+        const candidate = byId.get(id);
+        if (candidate) args.controls.addToQueue(waypointToTrack(candidate));
+    }, [byId, args.controls]);
+    return { navigate, queue };
+}
 
-    const shownNeighbors = useMemo(() => {
-        if (!travelOrigin || state.mode !== "travel") return [];
-        return compassNeighbors(
-            travelOrigin,
-            enrichedNeighbors,
-            state.direction,
-            DEFAULT_COMPASS_COUNT
-        );
-    }, [travelOrigin, enrichedNeighbors, state]);
-
-    const onMapNeighbors = useMemo(
-        () => shownNeighbors.filter((n) => trackById.has(n.id)),
-        [shownNeighbors, trackById]
-    );
-    const offMapNeighbors = useMemo(
-        () => shownNeighbors.filter((n) => !trackById.has(n.id)),
-        [shownNeighbors, trackById]
-    );
-
-    // Lookup by id over the full (on-map + off-map) shown neighbours, so
-    // navigate/queue can build a playable Track from the candidate payload
-    // itself even when the neighbour isn't plotted on this map sample.
-    const shownNeighborById = useMemo(() => {
-        const m = new Map<string, CompassCandidate>();
-        for (const n of shownNeighbors) m.set(n.id, n);
-        return m;
-    }, [shownNeighbors]);
-
-    const navigate = useCallback(
-        (id: string) => {
-            const candidate = shownNeighborById.get(id);
-            if (candidate) controls.playTrack(waypointToTrack(candidate));
-            // Only move `currentId` (and trigger the neighbours refetch) when the
-            // target is actually on the map — off-map neighbours play/queue but
-            // never become the new travel origin.
-            if (trackById.has(id)) dispatch({ type: "TRAVEL_TO", id });
-        },
-        [shownNeighborById, trackById, controls, dispatch]
-    );
-
-    const queue = useCallback(
-        (id: string) => {
-            const candidate = shownNeighborById.get(id);
-            if (candidate) controls.addToQueue(waypointToTrack(candidate));
-        },
-        [shownNeighborById, controls]
-    );
-
-    if (state.mode !== "travel") return null;
+/** Derive the travel panel view, returning null outside travel mode. */
+export function useTravelMode(args: UseTravelModeArgs): TravelView | null {
+    const currentId = args.state.mode === "travel" ? args.state.currentId : null;
+    const request = useNeighborRequest(currentId, args.state.mode === "travel");
+    const derived = useTravelDerivations(args, currentId, request.neighbors);
+    const actions = useTravelActions(args, derived.byId);
+    if (args.state.mode !== "travel") return null;
     return {
-        currentId: state.currentId,
-        currentTitle: titleOf(state.currentId),
-        breadcrumbTitles: state.breadcrumb.map((id) => ({
-            id,
-            title: titleOf(id),
-        })),
-        direction: state.direction,
-        onMapNeighbors,
-        offMapNeighbors,
-        loading,
-        error,
-        quantiles,
-        originFeatures,
-        setDirection: (d) => dispatch({ type: "SET_DIRECTION", direction: d }),
-        navigate,
-        queue,
-        close: exitToExplore,
+        currentId: args.state.currentId,
+        currentTitle: args.titleOf(args.state.currentId),
+        breadcrumbTitles: args.state.breadcrumb.map((id) => ({ id, title: args.titleOf(id) })),
+        direction: args.state.direction,
+        onMapNeighbors: derived.onMap, offMapNeighbors: derived.offMap,
+        loading: request.loading, error: request.error, quantiles: args.quantiles,
+        originFeatures: derived.features,
+        setDirection: (direction) => args.dispatch({ type: "SET_DIRECTION", direction }),
+        navigate: actions.navigate, queue: actions.queue, close: args.exitToExplore,
     };
 }

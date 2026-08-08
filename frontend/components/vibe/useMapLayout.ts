@@ -1,29 +1,11 @@
 "use client";
 
-/**
- * useMapLayout — SINGLE SOURCE OF POSITIONS for the vibe map.
- *
- * Owns the natural (raw UMAP) vs spread (rank-redistributed) layout toggle,
- * its sessionStorage persistence, and the rAF morph between the two buffers.
- * Once tracks are loaded, the returned `positions` (a flat, index-aligned
- * Float32Array) is the only place any consumer reads a track's on-map
- * coordinates from — never `track.x`/`track.y` directly. `posOf(id)`
- * resolves by id (via `indexById`) for consumers that only have an id
- * (beacon, trail, decorations); the canvas and hit-test read by index.
- */
+/** Persistent natural/spread layout with one animated position source. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapTrack } from "./types";
-import {
-    buildPositions,
-    computeSpreadPositions,
-    lerpPositions,
-} from "./mapLayout";
-import {
-    readStoredString,
-    sessionStorageSafe,
-    writeStoredString,
-} from "./useSessionTrail";
+import { buildPositions, computeSpreadPositions, lerpPositions } from "./mapLayout";
+import { readStoredString, sessionStorageSafe, writeStoredString } from "./useSessionTrail";
 import { useLatest } from "./useLatest";
 import { easeInOutCubic } from "./useMapCamera";
 
@@ -31,139 +13,107 @@ export type LayoutMode = "natural" | "spread";
 export const LAYOUT_STORAGE_KEY = "vibe:layout-mode";
 const LAYOUT_ANIM_MS = 400;
 
+/** Read the persisted layout mode, defaulting safely to the natural layout. */
 export function readStoredLayoutMode(): LayoutMode {
     return readStoredString(sessionStorageSafe(), LAYOUT_STORAGE_KEY) === "spread"
-        ? "spread"
-        : "natural";
+        ? "spread" : "natural";
 }
 
 export interface UseMapLayout {
-    /** The live, index-aligned [x0,y0,x1,y1,...] buffer every renderer reads. */
     positions: Float32Array;
     layoutMode: LayoutMode;
     toggleLayoutMode: () => void;
-    /** Track id → buffer index. */
     indexById: ReadonlyMap<string, number>;
-    /** Live position resolver — the single source id-based consumers read through. */
     posOf: (id: string) => { x: number; y: number } | null;
 }
 
-export interface UseMapLayoutArgs {
-    tracks: readonly MapTrack[];
-    reducedMotion: boolean;
+export interface UseMapLayoutArgs { tracks: readonly MapTrack[]; reducedMotion: boolean }
+
+function animatePositions(
+    from: Float32Array,
+    to: Float32Array,
+    rafRef: React.MutableRefObject<number | null>,
+    buffersRef: React.MutableRefObject<[Float32Array, Float32Array]>,
+    flipRef: React.MutableRefObject<number>,
+    update: (positions: Float32Array) => void
+): void {
+    if (buffersRef.current[0].length !== to.length) {
+        buffersRef.current = [new Float32Array(to.length), new Float32Array(to.length)];
+    }
+    const start = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const tick = (now: number) => {
+        const progress = Math.min(1, (now - start) / LAYOUT_ANIM_MS);
+        const output = buffersRef.current[flipRef.current % 2];
+        flipRef.current += 1;
+        update(lerpPositions(from, to, easeInOutCubic(progress), output));
+        rafRef.current = progress < 1 ? requestAnimationFrame(tick) : null;
+    };
+    rafRef.current = requestAnimationFrame(tick);
 }
 
-export function useMapLayout({
-    tracks,
-    reducedMotion,
-}: UseMapLayoutArgs): UseMapLayout {
-    const naturalPositions = useMemo(() => buildPositions(tracks), [tracks]);
-    const spreadPositions = useMemo(
-        () => computeSpreadPositions(tracks),
-        [tracks]
-    );
+function cancelLayoutFrame(ref: React.MutableRefObject<number | null>): void {
+    if (ref.current != null) cancelAnimationFrame(ref.current);
+    ref.current = null;
+}
 
-    const [layoutMode, setLayoutMode] = useState<LayoutMode>(readStoredLayoutMode);
-    const layoutModeRef = useLatest(layoutMode);
-
-    const [rawPositions, setRawPositions] = useState<Float32Array>(
-        () => new Float32Array(0)
-    );
-    const layoutRafRef = useRef<number | null>(null);
-    const layoutBuffersRef = useRef<[Float32Array, Float32Array]>([
-        new Float32Array(0),
-        new Float32Array(0),
+function usePositionBuffer(args: {
+    tracks: readonly MapTrack[];
+    natural: Float32Array;
+    spread: Float32Array;
+    mode: LayoutMode;
+    setMode: (mode: LayoutMode) => void;
+    reducedMotion: boolean;
+}): { positions: Float32Array; toggle: () => void } {
+    const [raw, setRaw] = useState<Float32Array>(() => new Float32Array(0));
+    const modeRef = useLatest(args.mode);
+    const rafRef = useRef<number | null>(null);
+    const buffersRef = useRef<[Float32Array, Float32Array]>([
+        new Float32Array(0), new Float32Array(0),
     ]);
-    const layoutFlipRef = useRef(0);
-
-    // Hard-snap to the current mode's buffer whenever the track list changes
-    // (initial load / reload) — no animation. Toggling layoutMode itself is
-    // handled by toggleLayoutMode's own rAF loop, so this intentionally does
-    // NOT depend on layoutMode (only on tracks / the buffers derived from it).
+    const flipRef = useRef<number>(0);
     useEffect(() => {
-        if (layoutRafRef.current != null) {
-            cancelAnimationFrame(layoutRafRef.current);
-            layoutRafRef.current = null;
-        }
-        setRawPositions(
-            layoutModeRef.current === "spread" ? spreadPositions : naturalPositions
-        );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- layoutModeRef comes from useLatest(), a stable ref identity (same guarantee useRef gets automatically); intentionally excluded so this effect only re-snaps on a track-list/positions change, not a layout toggle.
-    }, [tracks, naturalPositions, spreadPositions]);
-
-    useEffect(() => {
-        return () => {
-            if (layoutRafRef.current != null) {
-                cancelAnimationFrame(layoutRafRef.current);
-            }
-        };
-    }, []);
-
-    // Guard against the one-render gap between `tracks` changing and the
-    // snap effect committing: fall back to the (always correctly-sized)
-    // natural buffer rather than ever exposing a mismatched positions array.
-    const positions =
-        rawPositions.length === tracks.length * 2 ? rawPositions : naturalPositions;
-
-    const toggleLayoutMode = useCallback(() => {
-        const next: LayoutMode = layoutMode === "spread" ? "natural" : "spread";
-        const from = positions;
-        const to = next === "spread" ? spreadPositions : naturalPositions;
-
-        setLayoutMode(next);
+        cancelLayoutFrame(rafRef);
+        setRaw(modeRef.current === "spread" ? args.spread : args.natural);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- modeRef and rafRef are stable.
+    }, [args.tracks, args.natural, args.spread]);
+    useEffect(() => () => cancelLayoutFrame(rafRef), []);
+    const positions = raw.length === args.tracks.length * 2 ? raw : args.natural;
+    const toggle = useCallback(() => {
+        const next: LayoutMode = args.mode === "spread" ? "natural" : "spread";
+        const target = next === "spread" ? args.spread : args.natural;
+        args.setMode(next);
         writeStoredString(sessionStorageSafe(), LAYOUT_STORAGE_KEY, next);
+        cancelLayoutFrame(rafRef);
+        if (args.reducedMotion) setRaw(target);
+        else animatePositions(positions, target, rafRef, buffersRef, flipRef, setRaw);
+    }, [args, positions]);
+    return { positions, toggle };
+}
 
-        if (layoutRafRef.current != null) {
-            cancelAnimationFrame(layoutRafRef.current);
-            layoutRafRef.current = null;
-        }
+function buildTrackIndex(tracks: readonly MapTrack[]): ReadonlyMap<string, number> {
+    const index = new Map<string, number>();
+    for (let position = 0; position < tracks.length; position++) {
+        index.set(tracks[position].id, position);
+    }
+    return index;
+}
 
-        // Reduced motion: snap straight to the target buffer in a single
-        // setState — no rAF loop, no interpolation.
-        if (reducedMotion) {
-            setRawPositions(to);
-            return;
-        }
-
-        if (layoutBuffersRef.current[0].length !== to.length) {
-            layoutBuffersRef.current = [
-                new Float32Array(to.length),
-                new Float32Array(to.length),
-            ];
-        }
-
-        const start =
-            typeof performance !== "undefined" ? performance.now() : Date.now();
-        const tick = (now: number) => {
-            const elapsed = now - start;
-            const t = Math.min(1, elapsed / LAYOUT_ANIM_MS);
-            const eased = easeInOutCubic(t);
-            const outBuf = layoutBuffersRef.current[layoutFlipRef.current % 2];
-            layoutFlipRef.current += 1;
-            setRawPositions(lerpPositions(from, to, eased, outBuf));
-            if (t < 1) {
-                layoutRafRef.current = requestAnimationFrame(tick);
-            } else {
-                layoutRafRef.current = null;
-            }
+/** Own the current layout buffer and id-based position resolver. */
+export function useMapLayout({ tracks, reducedMotion }: UseMapLayoutArgs): UseMapLayout {
+    const natural = useMemo(() => buildPositions(tracks), [tracks]);
+    const spread = useMemo(() => computeSpreadPositions(tracks), [tracks]);
+    const [layoutMode, setLayoutMode] = useState<LayoutMode>(readStoredLayoutMode);
+    const buffer = usePositionBuffer({
+        tracks, natural, spread, mode: layoutMode,
+        setMode: setLayoutMode, reducedMotion,
+    });
+    const indexById = useMemo(() => buildTrackIndex(tracks), [tracks]);
+    const posOf = useCallback((id: string) => {
+        const index = indexById.get(id);
+        return index == null ? null : {
+            x: buffer.positions[index * 2], y: buffer.positions[index * 2 + 1],
         };
-        layoutRafRef.current = requestAnimationFrame(tick);
-    }, [layoutMode, positions, spreadPositions, naturalPositions, reducedMotion]);
-
-    const indexById = useMemo(() => {
-        const m = new Map<string, number>();
-        for (let i = 0; i < tracks.length; i++) m.set(tracks[i].id, i);
-        return m;
-    }, [tracks]);
-
-    const posOf = useCallback(
-        (id: string): { x: number; y: number } | null => {
-            const idx = indexById.get(id);
-            if (idx == null) return null;
-            return { x: positions[idx * 2], y: positions[idx * 2 + 1] };
-        },
-        [indexById, positions]
-    );
-
-    return { positions, layoutMode, toggleLayoutMode, indexById, posOf };
+    }, [indexById, buffer.positions]);
+    return { positions: buffer.positions, layoutMode,
+        toggleLayoutMode: buffer.toggle, indexById, posOf };
 }

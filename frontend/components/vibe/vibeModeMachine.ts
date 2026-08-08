@@ -64,93 +64,68 @@ export const clampSteps = (n: number): number =>
 export const clampWeight = (n: number): number =>
     Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, n));
 
-export function vibeModeReducer(
-    state: ModeState,
-    action: ModeAction
-): ModeState {
+type TravelState = Extract<ModeState, { mode: "travel" }>;
+type JourneyState = Extract<ModeState, { mode: "journey" }>;
+type AlchemyState = Extract<ModeState, { mode: "alchemy" }>;
+
+function reduceTravel(state: TravelState, action: ModeAction): ModeState {
+    if (action.type === "SET_DIRECTION") {
+        return { ...state, direction: action.direction };
+    }
+    if (action.type !== "TRAVEL_TO" || state.currentId === action.id) return state;
+    const lastId = state.breadcrumb[state.breadcrumb.length - 1];
+    return { ...state, currentId: action.id,
+        breadcrumb: lastId === action.id ? state.breadcrumb : [...state.breadcrumb, action.id] };
+}
+
+function reduceJourney(state: JourneyState, action: ModeAction): ModeState {
     switch (action.type) {
-        case "RESET":
-            return { mode: "explore" };
-
-        case "ENTER_TRAVEL":
-            return {
-                mode: "travel",
-                currentId: action.id,
-                breadcrumb: [action.id],
-                direction: "any",
-            };
-        case "TRAVEL_TO": {
-            if (state.mode !== "travel") return state;
-            if (state.currentId === action.id) return state;
-            return {
-                ...state,
-                currentId: action.id,
-                breadcrumb:
-                    state.breadcrumb[state.breadcrumb.length - 1] === action.id
-                        ? state.breadcrumb
-                        : [...state.breadcrumb, action.id],
-            };
-        }
-        case "SET_DIRECTION":
-            if (state.mode !== "travel") return state;
-            return { ...state, direction: action.direction };
-
-        case "ENTER_JOURNEY":
-            return {
-                mode: "journey",
-                fromId: action.fromId,
-                picking: false,
-                destTrackId: null,
-                moodTarget: null,
-                steps: DEFAULT_JOURNEY_STEPS,
-            };
         case "TOGGLE_PICK":
-            if (state.mode !== "journey") return state;
             return { ...state, picking: !state.picking };
         case "SET_DEST":
-            if (state.mode !== "journey") return state;
-            return {
-                ...state,
-                destTrackId: action.id,
-                moodTarget: null,
-                picking: false,
-            };
+            return { ...state, destTrackId: action.id, moodTarget: null, picking: false };
         case "SET_MOOD_TARGET":
-            if (state.mode !== "journey") return state;
             return { ...state, moodTarget: action.mood, destTrackId: null };
         case "SET_STEPS":
-            if (state.mode !== "journey") return state;
             return { ...state, steps: clampSteps(action.steps) };
-
-        case "ADD_ALCHEMY": {
-            const prev = state.mode === "alchemy" ? state.ingredients : [];
-            if (prev.some((i) => i.id === action.id)) return state;
-            // prev is only ever non-empty when already in alchemy mode (it's []
-            // otherwise), so hitting the cap implies state.mode === "alchemy"
-            // already — the state is just returned as-is.
-            if (prev.length >= MAX_ALCHEMY_INGREDIENTS) return state;
-            return {
-                mode: "alchemy",
-                ingredients: [...prev, { id: action.id, weight: DEFAULT_WEIGHT }],
-            };
-        }
-        case "REMOVE_ALCHEMY": {
-            if (state.mode !== "alchemy") return state;
-            const next = state.ingredients.filter((i) => i.id !== action.id);
-            if (next.length === 0) return { mode: "explore" };
-            return { mode: "alchemy", ingredients: next };
-        }
-        case "SET_WEIGHT":
-            if (state.mode !== "alchemy") return state;
-            return {
-                mode: "alchemy",
-                ingredients: state.ingredients.map((i) =>
-                    i.id === action.id
-                        ? { ...i, weight: clampWeight(action.weight) }
-                        : i
-                ),
-            };
         default:
             return state;
     }
+}
+
+function addAlchemy(state: ModeState, id: string): ModeState {
+    const ingredients = state.mode === "alchemy" ? state.ingredients : [];
+    if (ingredients.some((ingredient) => ingredient.id === id) ||
+        ingredients.length >= MAX_ALCHEMY_INGREDIENTS) return state;
+    return { mode: "alchemy",
+        ingredients: [...ingredients, { id, weight: DEFAULT_WEIGHT }] };
+}
+
+function reduceAlchemy(state: AlchemyState, action: ModeAction): ModeState {
+    if (action.type === "REMOVE_ALCHEMY") {
+        const ingredients = state.ingredients.filter((ingredient) => ingredient.id !== action.id);
+        return ingredients.length === 0 ? { mode: "explore" } : { mode: "alchemy", ingredients };
+    }
+    if (action.type !== "SET_WEIGHT") return state;
+    return { mode: "alchemy", ingredients: state.ingredients.map((ingredient) =>
+        ingredient.id === action.id
+            ? { ...ingredient, weight: clampWeight(action.weight) } : ingredient) };
+}
+
+/** Apply one exclusive-mode transition. */
+export function vibeModeReducer(state: ModeState, action: ModeAction): ModeState {
+    if (action.type === "RESET") return { mode: "explore" };
+    if (action.type === "ENTER_TRAVEL") {
+        return { mode: "travel", currentId: action.id,
+            breadcrumb: [action.id], direction: "any" };
+    }
+    if (action.type === "ENTER_JOURNEY") {
+        return { mode: "journey", fromId: action.fromId, picking: false,
+            destTrackId: null, moodTarget: null, steps: DEFAULT_JOURNEY_STEPS };
+    }
+    if (action.type === "ADD_ALCHEMY") return addAlchemy(state, action.id);
+    if (state.mode === "travel") return reduceTravel(state, action);
+    if (state.mode === "journey") return reduceJourney(state, action);
+    if (state.mode === "alchemy") return reduceAlchemy(state, action);
+    return state;
 }

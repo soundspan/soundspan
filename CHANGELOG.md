@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Vibe-map journey and alchemy requests now invalidate in-flight work when their
+  mode closes, so reopening a mode cannot inherit stale loading or saving state.
+  The slice-5 map controls and hooks were also split into focused functions to
+  satisfy the repository's 60-line review gate without changing their public
+  behavior.
 - YouTube Music streamer Uvicorn raised from 0.51.0 to 0.52.1, with the
   hash-pinned runtime lock regenerated alongside its `>=0.52.0` manifest floor.
 - TIDAL downloader Uvicorn raised from 0.51.0 to 0.52.1, with the hash-pinned

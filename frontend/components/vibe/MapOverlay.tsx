@@ -49,6 +49,35 @@ export interface MapOverlayProps {
 const TRAIL_COLOR = VIBE_ACCENTS.trail;
 const PLAN_COLOR = VIBE_ACCENTS.plan;
 
+const MAP_OVERLAY_STYLES = (
+    <style>{`
+        .vibe-beacon {
+            position: absolute; top: 0; left: 0; width: 0; height: 0;
+            will-change: transform;
+        }
+        .vibe-beacon-core {
+            position: absolute; left: -4px; top: -4px; width: 8px; height: 8px;
+            border-radius: 9999px; background: #818cf8;
+            box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.9);
+        }
+        .vibe-beacon-ring {
+            position: absolute; left: -9px; top: -9px; width: 18px; height: 18px;
+            border-radius: 9999px; border: 2px solid #818cf8;
+            animation: vibe-beacon-pulse 1.8s ease-out infinite;
+        }
+        @keyframes vibe-beacon-pulse {
+            0% { transform: scale(0.5); opacity: 0.9; }
+            100% { transform: scale(2.6); opacity: 0; }
+        }
+        .vibe-deco-in { animation: vibe-deco-in 200ms ease-out both; }
+        @keyframes vibe-deco-in { from { opacity: 0; } }
+        @media (prefers-reduced-motion: reduce) {
+            .vibe-beacon-ring { animation: none; opacity: 0.6; }
+            .vibe-deco-in { animation: none; }
+        }
+    `}</style>
+);
+
 /** A screen-space point with an optional extra opacity multiplier (default 1). */
 interface FadeSegmentPoint extends Point {
     alpha?: number;
@@ -99,6 +128,17 @@ function buildFadeSegments(
         );
     }
     return segments;
+}
+
+function Beacon({ point }: { point: Point | null }) {
+    if (!point) return null;
+    return (
+        <div className="vibe-beacon"
+            style={{ transform: `translate(${point.x}px, ${point.y}px)` }}>
+            <span className="vibe-beacon-ring" />
+            <span className="vibe-beacon-core" />
+        </div>
+    );
 }
 
 export function MapOverlay({
@@ -152,61 +192,9 @@ export function MapOverlay({
                 {sweepStroke}
             </svg>
 
-            {beaconScreen && (
-                <div
-                    className="vibe-beacon"
-                    style={{
-                        transform: `translate(${beaconScreen.x}px, ${beaconScreen.y}px)`,
-                    }}
-                >
-                    <span className="vibe-beacon-ring" />
-                    <span className="vibe-beacon-core" />
-                </div>
-            )}
+            <Beacon point={beaconScreen} />
 
-            <style>{`
-                .vibe-beacon {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 0;
-                    height: 0;
-                    will-change: transform;
-                }
-                .vibe-beacon-core {
-                    position: absolute;
-                    left: -4px;
-                    top: -4px;
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 9999px;
-                    background: #818cf8;
-                    box-shadow: 0 0 8px 1px rgba(129, 140, 248, 0.9);
-                }
-                .vibe-beacon-ring {
-                    position: absolute;
-                    left: -9px;
-                    top: -9px;
-                    width: 18px;
-                    height: 18px;
-                    border-radius: 9999px;
-                    border: 2px solid #818cf8;
-                    animation: vibe-beacon-pulse 1.8s ease-out infinite;
-                }
-                @keyframes vibe-beacon-pulse {
-                    0% { transform: scale(0.5); opacity: 0.9; }
-                    100% { transform: scale(2.6); opacity: 0; }
-                }
-                /* Decoration entrance: constellation edges / halos / waypoints
-                   fade in instead of popping (MapDecorations keys elements by
-                   node id, so a new constellation remounts and re-fades). */
-                .vibe-deco-in { animation: vibe-deco-in 200ms ease-out both; }
-                @keyframes vibe-deco-in { from { opacity: 0; } }
-                @media (prefers-reduced-motion: reduce) {
-                    .vibe-beacon-ring { animation: none; opacity: 0.6; }
-                    .vibe-deco-in { animation: none; }
-                }
-            `}</style>
+            {MAP_OVERLAY_STYLES}
         </div>
     );
 }

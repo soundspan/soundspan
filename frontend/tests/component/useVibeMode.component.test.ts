@@ -19,9 +19,31 @@ GlobalRegistrator.register();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
 
-const apiCalls: { getVibeSimilarTracks: unknown[][]; getVibeMoods: number } = {
+interface Deferred<T> {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => {
+        resolve = done;
+    });
+    return { promise, resolve };
+}
+
+const apiCalls: {
+    getVibeSimilarTracks: unknown[][];
+    getVibeMoods: number;
+    journey: Deferred<unknown>[];
+    alchemy: Deferred<unknown>[];
+    playlists: Deferred<{ id: string }>[];
+} = {
     getVibeSimilarTracks: [],
     getVibeMoods: 0,
+    journey: [],
+    alchemy: [],
+    playlists: [],
 };
 
 mock.module("@/lib/api", {
@@ -35,6 +57,22 @@ mock.module("@/lib/api", {
                 apiCalls.getVibeMoods++;
                 return [];
             },
+            getVibeJourney: () => {
+                const request = deferred<unknown>();
+                apiCalls.journey.push(request);
+                return request.promise;
+            },
+            vibeAlchemy: () => {
+                const request = deferred<unknown>();
+                apiCalls.alchemy.push(request);
+                return request.promise;
+            },
+            createPlaylist: () => {
+                const request = deferred<{ id: string }>();
+                apiCalls.playlists.push(request);
+                return request.promise;
+            },
+            addTrackToPlaylist: async () => undefined,
         },
     },
 });
@@ -75,6 +113,9 @@ beforeEach(() => {
     controlsCalls.addToQueue.length = 0;
     apiCalls.getVibeSimilarTracks.length = 0;
     apiCalls.getVibeMoods = 0;
+    apiCalls.journey.length = 0;
+    apiCalls.alchemy.length = 0;
+    apiCalls.playlists.length = 0;
 });
 
 function mapTrack(id: string) {
@@ -283,5 +324,80 @@ test("ctrl+shift on a dot: ctrl/alchemy-add still wins over shift (ordering cons
     );
     assert.deepEqual(controlsCalls.addToQueue, []);
 
+    await h.unmount();
+});
+
+test("journey teardown resets loading before the mode is re-entered", async () => {
+    const h = await mountVibe();
+    await h.act(() => h.latest().startJourney());
+    await h.act(() => h.latest().journey?.chooseMood("moodHappy"));
+    await h.act(() => h.latest().journey?.submit());
+    assert.equal(h.latest().journey?.loading, true);
+    assert.equal(apiCalls.journey.length, 1);
+
+    await h.act(() => h.latest().exitToExplore());
+    await h.act(() => h.latest().startJourney());
+
+    assert.equal(h.latest().journey?.loading, false);
+    apiCalls.journey[0].resolve({ target: {}, waypoints: [] });
+    await h.act(async () => { await apiCalls.journey[0].promise; });
+    assert.equal(h.latest().journey?.loading, false);
+    await h.unmount();
+});
+
+test("alchemy teardown resets loading before the mode is re-entered", async () => {
+    const h = await mountVibe();
+    await h.act(() =>
+        h.latest().onDotClick("t2", { ctrlOrMeta: true, shift: false })
+    );
+    await h.act(() =>
+        h.latest().onDotClick("t3", { ctrlOrMeta: true, shift: false })
+    );
+    await h.act(() => h.latest().alchemy?.blend());
+    assert.equal(h.latest().alchemy?.loading, true);
+    assert.equal(apiCalls.alchemy.length, 1);
+
+    await h.act(() => h.latest().exitToExplore());
+    await h.act(() =>
+        h.latest().onDotClick("t4", { ctrlOrMeta: true, shift: false })
+    );
+
+    assert.equal(h.latest().alchemy?.loading, false);
+    apiCalls.alchemy[0].resolve({ tracks: [] });
+    await h.act(async () => { await apiCalls.alchemy[0].promise; });
+    assert.equal(h.latest().alchemy?.loading, false);
+    await h.unmount();
+});
+
+test("journey teardown resets saving before the mode is re-entered", async () => {
+    const h = await mountVibe();
+    await h.act(() => h.latest().startJourney());
+    await h.act(() => h.latest().journey?.chooseMood("moodHappy"));
+    await h.act(() => h.latest().journey?.submit());
+    apiCalls.journey[0].resolve({
+        target: { label: "Happy" },
+        waypoints: [
+            {
+                ...mapTrack("t2"),
+                distance: 0.2,
+                similarity: 0.8,
+                artist: { id: "ar-t2", name: "t2 artist" },
+                album: { id: "al-t2", title: "", coverUrl: null },
+            },
+        ],
+    });
+    await h.act(async () => { await apiCalls.journey[0].promise; });
+    await h.act(() => {
+        void h.latest().journey?.save();
+    });
+    assert.equal(h.latest().journey?.saving, true);
+
+    await h.act(() => h.latest().exitToExplore());
+    await h.act(() => h.latest().startJourney());
+
+    assert.equal(h.latest().journey?.saving, false);
+    apiCalls.playlists[0].resolve({ id: "playlist-1" });
+    await h.act(async () => { await apiCalls.playlists[0].promise; });
+    assert.equal(h.latest().journey?.saving, false);
     await h.unmount();
 });

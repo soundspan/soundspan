@@ -39,6 +39,34 @@ export interface VibeTrackRowProps {
     className?: string;
 }
 
+function TrackRowContent({
+    title, artistName, onMap, percent, label, accentClass, seq,
+}: Pick<VibeTrackRowProps, "title" | "artistName" | "onMap" | "accentClass" | "seq"> & {
+    percent: number;
+    label: string;
+}) {
+    return (
+        <>
+            {seq != null && (
+                <span className="shrink-0 w-5 h-5 grid place-items-center rounded-full bg-indigo-500/30 text-xs tabular-nums text-indigo-200">
+                    {seq}
+                </span>
+            )}
+            <span className="flex-1 min-w-0">
+                <span className="block truncate text-[13px] text-white">{title}</span>
+                <span className="block truncate text-xs text-gray-400">{artistName}</span>
+            </span>
+            {!onMap && (
+                <span className="shrink-0 text-xs uppercase tracking-wide text-amber-400/80 border border-amber-400/30 rounded px-1 py-0.5">
+                    not on map
+                </span>
+            )}
+            <span className={`shrink-0 text-xs tabular-nums ${accentClass}`}
+                title={label || undefined}>{percent}%</span>
+        </>
+    );
+}
+
 export function VibeTrackRow({
     title,
     artistName,
@@ -53,34 +81,8 @@ export function VibeTrackRow({
 }: VibeTrackRowProps) {
     const { percent, label } = calibratedMatch(distance, quantiles);
 
-    const inner = (
-        <>
-            {seq != null && (
-                <span className="shrink-0 w-5 h-5 grid place-items-center rounded-full bg-indigo-500/30 text-xs tabular-nums text-indigo-200">
-                    {seq}
-                </span>
-            )}
-            <span className="flex-1 min-w-0">
-                <span className="block truncate text-[13px] text-white">
-                    {title}
-                </span>
-                <span className="block truncate text-xs text-gray-400">
-                    {artistName}
-                </span>
-            </span>
-            {!onMap && (
-                <span className="shrink-0 text-xs uppercase tracking-wide text-amber-400/80 border border-amber-400/30 rounded px-1 py-0.5">
-                    not on map
-                </span>
-            )}
-            <span
-                className={`shrink-0 text-xs tabular-nums ${accentClass}`}
-                title={label || undefined}
-            >
-                {percent}%
-            </span>
-        </>
-    );
+    const inner = <TrackRowContent title={title} artistName={artistName}
+        onMap={onMap} percent={percent} label={label} accentClass={accentClass} seq={seq} />;
 
     if (onClick) {
         return (
