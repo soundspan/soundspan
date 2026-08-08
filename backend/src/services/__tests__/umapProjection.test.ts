@@ -445,3 +445,18 @@ describe("computeMapProjection", () => {
         expect(pipeline.exec).not.toHaveBeenCalled();
     });
 });
+
+describe("umapWorkerOptions", () => {
+    it("registers tsx only for the development TypeScript worker", () => {
+        const { umapWorkerOptions } = loadModule();
+        const embeddings = [[1, 2, 3]];
+
+        expect(umapWorkerOptions("/workers/umapWorker.ts", embeddings, 2)).toEqual({
+            workerData: { embeddings, nNeighbors: 2 },
+            execArgv: ["--import", "tsx"],
+        });
+        expect(umapWorkerOptions("/workers/umapWorker.js", embeddings, 2)).toEqual({
+            workerData: { embeddings, nNeighbors: 2 },
+        });
+    });
+});

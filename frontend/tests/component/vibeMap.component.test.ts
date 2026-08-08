@@ -105,6 +105,14 @@ mock.module("@/lib/listen-together-context", {
     },
 });
 
+mock.module("@/hooks/useMediaQuery", {
+    namedExports: {
+        useMediaQuery: () => false,
+        useIsMobile: () => true,
+        useIsTablet: () => false,
+    },
+});
+
 beforeEach(() => {
     state.rejectMap = false;
 });
@@ -138,4 +146,16 @@ test("renders its shell without throwing when the map API rejects", async () => 
     assert.match(html, /Spotlight a vibe/);
     assert.match(html, /aria-label="Zoom in"/);
     assert.match(html, /Filters/);
+});
+
+test("map tab renders full-bleed and clears the mobile player", async () => {
+    const { VibeMapTab } = await import("../../components/vibe/VibeMapTab");
+    const html = renderToStaticMarkup(React.createElement(VibeMapTab, {
+        currentTrackPresent: true,
+        onExplore: () => undefined,
+    }));
+
+    assert.match(html, /absolute inset-0 overflow-hidden/);
+    assert.match(html, /aria-label="Map view \(current\)"/);
+    assert.match(html, /--vibe-binset:64px/);
 });

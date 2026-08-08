@@ -94,11 +94,13 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/tidal.ts` | Core |
 | `backend/src/services/tidalStreaming.ts` | Core |
 | `backend/src/services/trackMappingService.ts` | Core |
+| `backend/src/services/trackEmbeddings.ts` | Vibe embedding reads |
 | `backend/src/services/trackPreference.ts` | Core |
 | `backend/src/services/trackReconciliation.ts` | Core |
 | `backend/src/services/umapProjection.ts` | Core |
 | `backend/src/services/unifiedTrackResponse.ts` | Core |
 | `backend/src/services/vibeAnalysisCleanup.ts` | Core |
+| `backend/src/services/vibeCalibration.ts` | Vibe distance calibration |
 | `backend/src/services/vibeVocabulary.ts` | Core |
 | `backend/src/services/wikidata.ts` | Core |
 | `backend/src/services/workerEventLoopMonitor.ts` | Core |

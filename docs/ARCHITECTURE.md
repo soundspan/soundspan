@@ -150,6 +150,12 @@ Analyzers run as independent workers. MusiCNN analyzer writes mood/feature colum
 
 The API process also serves `/api/vibe/map` by reading CLAP embeddings from PostgreSQL, projecting them through an in-process Node worker thread, and caching the normalized coordinates in Redis. That worker entrypoint must resolve in both tsx `src/` runtime and compiled `dist/` runtime layouts.
 
+The same authenticated vibe router builds track- or mood-targeted journeys from
+service-layer embedding reads (`trackEmbeddings.ts`) and reports library-relative
+distance calibration from a bounded sample (`vibeCalibration.ts`). Calibration
+results use the existing Redis cache; these services add no new runtime process
+or network boundary.
+
 ### Enrichment Pipeline
 
 ```

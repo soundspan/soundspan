@@ -21,11 +21,7 @@ import {
     AudioWaveform,
 } from "lucide-react";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
-import {
-    VibeMap,
-    MOBILE_PLAYER_CLEARANCE_PX,
-} from "@/components/vibe/VibeMap";
-import { useIsMobile, useIsTablet } from "@/hooks/useMediaQuery";
+import { VibeMapTab } from "@/components/vibe/VibeMapTab";
 import { Map } from "lucide-react";
 
 interface TrackFeatures {
@@ -595,8 +591,6 @@ function VibePageContent() {
     const [vibeStatus, setVibeStatus] = useState<{ totalTracks: number; embeddedTracks: number } | null>(null);
     const [viewMode, setViewMode] = useState<ViewMode>("comparison");
     const [vibeTab, setVibeTab] = useState<VibeTab>("explore");
-    const isMobile = useIsMobile();
-    const isTablet = useIsTablet();
     const [searchQuery, setSearchQuery] = useState<string | null>(null);
     const [inputValue, setInputValue] = useState("");
     const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -909,38 +903,8 @@ function VibePageContent() {
     // header/search stay explore-only; the floating chip in headerSlot is the
     // way back.
     if (vibeTab === "map") {
-        return (
-            <div className="absolute inset-0 overflow-hidden bg-[#0a0a0a]">
-                <VibeMap
-                    headerSlot={
-                        <div className="pointer-events-auto flex gap-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 p-1 shadow-lg">
-                            <button
-                                type="button"
-                                onClick={() => setVibeTab("explore")}
-                                className="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60"
-                            >
-                                <AudioWaveform className="w-3.5 h-3.5" />
-                                Explore
-                            </button>
-                            <button
-                                type="button"
-                                aria-pressed
-                                aria-label="Map view (current)"
-                                className="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-medium bg-white/15 text-white"
-                            >
-                                <Map className="w-3.5 h-3.5" />
-                                Map
-                            </button>
-                        </div>
-                    }
-                    bottomInset={
-                        (isMobile || isTablet) && currentTrack
-                            ? MOBILE_PLAYER_CLEARANCE_PX
-                            : 0
-                    }
-                />
-            </div>
-        );
+        return <VibeMapTab currentTrackPresent={!!currentTrack}
+            onExplore={() => setVibeTab("explore")} />;
     }
 
     return (

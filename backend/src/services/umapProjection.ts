@@ -67,6 +67,24 @@ const MOOD_FIELDS = [
 
 let computePromise: Promise<VibeMapResponse> | null = null;
 
+/** Worker data plus the optional development loader registration. */
+export interface UmapWorkerOptions {
+    workerData: { embeddings: number[][]; nNeighbors: number };
+    execArgv?: string[];
+}
+
+/** Build worker options, registering tsx only for an uncompiled TypeScript worker. */
+export function umapWorkerOptions(
+    workerPath: string,
+    embeddings: number[][],
+    nNeighbors: number
+): UmapWorkerOptions {
+    const workerData = { embeddings, nNeighbors };
+    return workerPath.endsWith(".ts")
+        ? { workerData, execArgv: ["--import", "tsx"] }
+        : { workerData };
+}
+
 function resolveUmapWorkerPath(): string {
     const candidatePaths = [
         path.join(__dirname, "../workers/umapWorker.js"),
@@ -171,80 +189,49 @@ async function buildCircularLayout(rows: Array<TrackRow & { embedding: string }>
     return result;
 }
 
-function runUmapInWorker(
-    embeddings: number[][],
-    nNeighbors: number
-): Promise<number[][]> {
+function monitorUmapWorker(worker: Worker, trackCount: number,
+    resolve: (value: number[][]) => void, reject: (reason: Error) => void): void {
+    let settled = false;
+    const warnTimer = setTimeout(() => logger.warn(
+        `[VIBE-MAP] UMAP worker running for 5+ minutes (${trackCount} tracks)`), UMAP_WARN_MS);
+    const timeoutTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(warnTimer);
+        void worker.terminate();
+        reject(new Error(`UMAP worker timed out after ${UMAP_TIMEOUT_MS / 60000} minutes`));
+    }, UMAP_TIMEOUT_MS);
+    const clearTimers = () => {
+        clearTimeout(warnTimer);
+        clearTimeout(timeoutTimer);
+    };
+    worker.on("message", (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimers();
+        const payload = result as { error?: string } | number[][];
+        if (!Array.isArray(payload) && payload?.error) reject(new Error(payload.error));
+        else resolve(payload as number[][]);
+    });
+    worker.on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimers();
+        reject(error);
+    });
+    worker.on("exit", (code) => {
+        if (settled || code === 0) return;
+        settled = true;
+        clearTimers();
+        reject(new Error(`UMAP worker exited with code ${code}`));
+    });
+}
+
+function runUmapInWorker(embeddings: number[][], nNeighbors: number): Promise<number[][]> {
     return new Promise((resolve, reject) => {
         const workerPath = resolveUmapWorkerPath();
-        const worker = new Worker(workerPath, {
-            workerData: { embeddings, nNeighbors },
-            // tsx's loader hooks don't propagate into worker_threads, so a
-            // .ts worker (tsx dev mode — no compiled dist/) must register tsx
-            // in its own execArgv or Node rejects the file extension.
-            ...(workerPath.endsWith(".ts")
-                ? { execArgv: ["--import", "tsx"] }
-                : {}),
-        });
-
-        let settled = false;
-
-        const warnTimer = setTimeout(() => {
-            logger.warn(
-                `[VIBE-MAP] UMAP worker running for 5+ minutes (${embeddings.length} tracks)`
-            );
-        }, UMAP_WARN_MS);
-
-        const timeoutTimer = setTimeout(() => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            clearTimeout(warnTimer);
-            worker.terminate();
-            reject(
-                new Error(
-                    `UMAP worker timed out after ${UMAP_TIMEOUT_MS / 60000} minutes`
-                )
-            );
-        }, UMAP_TIMEOUT_MS);
-
-        worker.on("message", (result) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            clearTimeout(warnTimer);
-            clearTimeout(timeoutTimer);
-
-            const payload = result as { error?: string } | number[][];
-            if (!Array.isArray(payload) && payload?.error) {
-                reject(new Error(payload.error));
-                return;
-            }
-
-            resolve(payload as number[][]);
-        });
-
-        worker.on("error", (error) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            clearTimeout(warnTimer);
-            clearTimeout(timeoutTimer);
-            reject(error);
-        });
-
-        worker.on("exit", (code) => {
-            if (settled || code === 0) {
-                return;
-            }
-            settled = true;
-            clearTimeout(warnTimer);
-            clearTimeout(timeoutTimer);
-            reject(new Error(`UMAP worker exited with code ${code}`));
-        });
+        const worker = new Worker(workerPath, umapWorkerOptions(workerPath, embeddings, nNeighbors));
+        monitorUmapWorker(worker, embeddings.length, resolve, reject);
     });
 }
 
