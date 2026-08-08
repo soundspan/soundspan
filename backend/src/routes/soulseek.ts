@@ -6,7 +6,7 @@ import { logger } from "../utils/logger";
  */
 
 import { Router } from "express";
-import { requireAuth } from "../middleware/auth";
+import { requireAdmin, requireAuth } from "../middleware/auth";
 import { soulseekService, SearchResult } from "../services/soulseek";
 import { getSystemSettings } from "../utils/systemSettings";
 import { randomUUID } from "crypto";
@@ -352,7 +352,7 @@ router.get<{ searchId: string }>("/search/:searchId", requireAuth, async (req, r
  * @openapi
  * /api/soulseek/download:
  *   post:
- *     summary: Download a track from Soulseek
+ *     summary: Download a track from Soulseek (admin only)
  *     tags: [Soulseek]
  *     security:
  *       - sessionAuth: []
@@ -381,7 +381,7 @@ router.get<{ searchId: string }>("/search/:searchId", requireAuth, async (req, r
  *       401:
  *         description: Not authenticated
  *       403:
- *         description: Soulseek credentials not configured
+ *         description: Authenticated but not an admin, or Soulseek credentials not configured
  *       404:
  *         description: Download failed or file not found
  */
@@ -392,6 +392,7 @@ router.get<{ searchId: string }>("/search/:searchId", requireAuth, async (req, r
 router.post(
     "/download",
     requireAuth,
+    requireAdmin,
     requireSoulseekConfigured,
     async (req, res) => {
         try {

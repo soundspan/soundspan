@@ -1,13 +1,6 @@
 "use client";
 
-/**
- * useAlchemyMode — the alchemy tray's async blend + derived view.
- *
- * Owns the blend fetch (generation-guarded), the result highlight set, the
- * ingredient add entry point, and the ready-to-render `AlchemyView`. Returns
- * a null view outside alchemy mode. One of the three focused per-mode hooks
- * composed by `useVibeMode`.
- */
+/** Async blend data and derived view for alchemy mode. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
@@ -33,10 +26,9 @@ export interface AlchemyView {
     loading: boolean;
     error: string | null;
     canBlend: boolean;
-    /** Library-calibrated distance quantiles, or null (uncalibrated fallback). */
     quantiles: readonly number[] | null;
     remove: (id: string) => void;
-    setWeight: (id: string, w: number) => void;
+    setWeight: (id: string, weight: number) => void;
     blend: () => void;
     play: () => void;
     clear: () => void;
@@ -53,125 +45,84 @@ export interface UseAlchemyModeArgs {
 
 export interface UseAlchemyMode {
     alchemy: AlchemyView | null;
-    /** Add a track to the alchemy tray (ctrl/⌘-click anywhere, incl. halos). */
     addIngredient: (id: string) => void;
-    /** Alchemy result ids to glow on the canvas (else null → spotlight owns it). */
     highlightIds: ReadonlySet<string> | null;
 }
 
-export function useAlchemyMode({
-    state,
-    dispatch,
-    trackById,
-    controls,
-    quantiles,
-    exitToExplore,
-}: UseAlchemyModeArgs): UseAlchemyMode {
-    const [blendRows, setBlendRows] = useState<VibeResultRow[] | null>(null);
+function useBlendRequest(state: ModeState) {
+    const [rows, setRows] = useState<VibeResultRow[] | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    const clearResults = useCallback(() => {
-        setBlendRows(null);
+    const generation = useRef(0);
+    const clear = useCallback(() => {
+        setRows(null);
         setError(null);
     }, []);
-
-    // Generation counter for the blend fetch: bumped on every new request AND
-    // on mode teardown, so a stale response can't apply its result.
-    const gen = useRef(0);
-
-    // Mode exclusivity: leaving alchemy drops its overlay state.
     const inAlchemy = state.mode === "alchemy";
     useEffect(() => {
         if (!inAlchemy) {
-            clearResults();
-            gen.current++;
+            clear();
+            generation.current++;
+            setLoading(false);
         }
-    }, [inAlchemy, clearResults]);
-
-    const addIngredient = useCallback(
-        (id: string) => {
-            dispatch({ type: "ADD_ALCHEMY", id });
-            clearResults();
-        },
-        [dispatch, clearResults]
-    );
-
-    const runBlend = useCallback(() => {
+    }, [inAlchemy, clear]);
+    const run = useCallback(() => {
         if (state.mode !== "alchemy" || state.ingredients.length < 2) return;
-        const ings = state.ingredients;
-        const g = ++gen.current;
+        const request = ++generation.current;
         setLoading(true);
         setError(null);
-        setBlendRows(null);
-        api.vibeAlchemy(
-            ings.map((i) => i.id),
-            ings.map((i) => i.weight),
-            BLEND_LIMIT
-        )
-            .then((res) => {
-                if (g === gen.current) setBlendRows(res.tracks);
+        setRows(null);
+        api.vibeAlchemy(state.ingredients.map((item) => item.id),
+            state.ingredients.map((item) => item.weight), BLEND_LIMIT)
+            .then((response) => {
+                if (request === generation.current) setRows(response.tracks);
             })
             .catch(() => {
-                if (g === gen.current)
-                    setError("Couldn't blend those tracks");
+                if (request === generation.current) setError("Couldn't blend those tracks");
             })
             .finally(() => {
-                if (g === gen.current) setLoading(false);
+                if (request === generation.current) setLoading(false);
             });
     }, [state]);
+    return { rows, loading, error, clear, run };
+}
 
+function ingredientViews(state: ModeState,
+    trackById: ReadonlyMap<string, MapTrack>): AlchemyIngredientView[] {
+    if (state.mode !== "alchemy") return [];
+    return state.ingredients.map((ingredient) => {
+        const track = trackById.get(ingredient.id);
+        return { id: ingredient.id, title: track?.title ?? ingredient.id,
+            artist: track?.artist ?? "", weight: ingredient.weight, onMap: !!track };
+    });
+}
+
+/** Derive the alchemy tray and its result highlight set. */
+export function useAlchemyMode(args: UseAlchemyModeArgs): UseAlchemyMode {
+    const blend = useBlendRequest(args.state);
+    const addIngredient = useCallback((id: string) => {
+        args.dispatch({ type: "ADD_ALCHEMY", id });
+        blend.clear();
+    }, [args.dispatch, blend.clear]);
     const play = useCallback(() => {
-        if (!blendRows || blendRows.length === 0) return;
-        controls.playTracks(blendRows.map(waypointToTrack), 0, true);
-    }, [blendRows, controls]);
-
-    const resultItems: VibeListItem[] = useMemo(
-        () => annotateOnMap(blendRows ?? [], trackById),
-        [blendRows, trackById]
-    );
-
-    const resultIds = useMemo(
-        () => new Set((blendRows ?? []).map((t) => t.id)),
-        [blendRows]
-    );
-
-    const alchemy: AlchemyView | null =
-        state.mode === "alchemy"
-            ? {
-                  ingredients: state.ingredients.map((i) => {
-                      const t = trackById.get(i.id);
-                      return {
-                          id: i.id,
-                          title: t?.title ?? i.id,
-                          artist: t?.artist ?? "",
-                          weight: i.weight,
-                          onMap: !!t,
-                      };
-                  }),
-                  results: resultItems,
-                  loading,
-                  error,
-                  canBlend: state.ingredients.length >= 2,
-                  quantiles,
-                  remove: (id) => {
-                      dispatch({ type: "REMOVE_ALCHEMY", id });
-                      clearResults();
-                  },
-                  setWeight: (id, w) => {
-                      dispatch({ type: "SET_WEIGHT", id, weight: w });
-                      clearResults();
-                  },
-                  blend: runBlend,
-                  play,
-                  clear: exitToExplore,
-              }
-            : null;
-
-    return {
-        alchemy,
-        addIngredient,
-        highlightIds:
-            state.mode === "alchemy" && resultIds.size > 0 ? resultIds : null,
-    };
+        if (blend.rows?.length) {
+            args.controls.playTracks(blend.rows.map(waypointToTrack), 0, true);
+        }
+    }, [blend.rows, args.controls]);
+    const results = useMemo(() => annotateOnMap(blend.rows ?? [], args.trackById),
+        [blend.rows, args.trackById]);
+    const resultIds = useMemo(() => new Set((blend.rows ?? []).map((track) => track.id)),
+        [blend.rows]);
+    const alchemy = args.state.mode === "alchemy" ? {
+        ingredients: ingredientViews(args.state, args.trackById), results,
+        loading: blend.loading, error: blend.error,
+        canBlend: args.state.ingredients.length >= 2, quantiles: args.quantiles,
+        remove: (id: string) => { args.dispatch({ type: "REMOVE_ALCHEMY", id }); blend.clear(); },
+        setWeight: (id: string, weight: number) => {
+            args.dispatch({ type: "SET_WEIGHT", id, weight }); blend.clear();
+        },
+        blend: blend.run, play, clear: args.exitToExplore,
+    } : null;
+    return { alchemy, addIngredient,
+        highlightIds: args.state.mode === "alchemy" && resultIds.size ? resultIds : null };
 }

@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import type { Track } from "@/lib/audio-state-context";
 import type { MapTrack } from "./types";
 import { mapTrackToTrack } from "./journeyTracks";
-import { vibeModeReducer, type ModeState, type VibeMode } from "./vibeModeMachine";
+import { vibeModeReducer, type ModeAction, type ModeState, type VibeMode } from "./vibeModeMachine";
 import { useTravelMode, type TravelView } from "./useTravelMode";
 import { useJourneyMode, type JourneyView } from "./useJourneyMode";
 import { useAlchemyMode, type AlchemyView } from "./useAlchemyMode";
@@ -87,27 +87,58 @@ export interface UseVibeMode {
 
 const INITIAL_STATE: ModeState = { mode: "explore" };
 
-export function useVibeMode({
-    trackById,
-    currentTrack,
-    controls,
-    quantiles = null,
-}: UseVibeModeArgs): UseVibeMode {
+interface DotActionContext {
+    state: ModeState;
+    trackById: ReadonlyMap<string, MapTrack>;
+    controls: VibeControls;
+    dispatch: React.Dispatch<ModeAction>;
+    addIngredient: (id: string) => void;
+    pickDestination: (id: string) => void;
+}
+
+function routeDotClick(
+    id: string,
+    mods: { ctrlOrMeta: boolean; shift: boolean },
+    context: DotActionContext
+): void {
+    const track = context.trackById.get(id);
+    if (!track) return;
+    if (context.state.mode === "journey" && context.state.picking) {
+        context.pickDestination(id);
+        return;
+    }
+    if (mods.ctrlOrMeta) {
+        if (context.state.mode === "journey") {
+            toast("Close the journey (Esc) to start blending");
+        } else {
+            context.addIngredient(id);
+        }
+        return;
+    }
+    if (mods.shift) {
+        context.controls.addToQueue(mapTrackToTrack(track));
+        return;
+    }
+    if (context.state.mode === "explore") {
+        context.dispatch({ type: "ENTER_TRAVEL", id });
+        context.controls.playTrack(mapTrackToTrack(track));
+    } else if (context.state.mode === "travel") {
+        context.dispatch({ type: "TRAVEL_TO", id });
+        context.controls.playTrack(mapTrackToTrack(track));
+    } else if (context.state.mode === "alchemy") {
+        context.addIngredient(id);
+    }
+}
+
+export function useVibeMode({ trackById, currentTrack, controls,
+    quantiles = null }: UseVibeModeArgs): UseVibeMode {
     const [state, dispatch] = useReducer(vibeModeReducer, INITIAL_STATE);
-
     const exitToExplore = useCallback(() => dispatch({ type: "RESET" }), []);
-
-    const titleOf = useCallback(
-        (id: string | null): string => {
-            if (!id) return "";
-            return (
-                trackById.get(id)?.title ??
-                (currentTrack?.id === id ? currentTrack.title : id)
-            );
-        },
-        [trackById, currentTrack]
-    );
-
+    const titleOf = useCallback((id: string | null): string => {
+        if (!id) return "";
+        return trackById.get(id)?.title ??
+            (currentTrack?.id === id ? currentTrack.title : id);
+    }, [trackById, currentTrack]);
     const travel = useTravelMode({
         state,
         dispatch,
@@ -117,96 +148,22 @@ export function useVibeMode({
         titleOf,
         exitToExplore,
     });
-    const { journey, canStartJourney, startJourney, pickDestination } =
-        useJourneyMode({
-            state,
-            dispatch,
-            trackById,
-            currentTrack,
-            controls,
-            quantiles,
-            titleOf,
-            exitToExplore,
-        });
+    const journeyMode = useJourneyMode({ state, dispatch, trackById,
+        currentTrack, controls, quantiles, titleOf, exitToExplore });
     const { alchemy, addIngredient, highlightIds } = useAlchemyMode({
-        state,
-        dispatch,
-        trackById,
-        controls,
-        quantiles,
-        exitToExplore,
+        state, dispatch, trackById, controls, quantiles, exitToExplore,
     });
-
-    // Click-away: clicking clearly-empty canvas dissolves a travel
-    // constellation (the map idiom for "deselect"). Journey and alchemy keep
-    // their form state — an accidental empty click must never clear a
-    // half-built route or ingredient tray; those exit via Esc / ✕ only.
     const inTravel = state.mode === "travel";
     const onEmptyClick = useCallback(() => {
         if (inTravel) dispatch({ type: "RESET" });
     }, [inTravel]);
-
-    const onDotClick = useCallback(
-        (id: string, mods: { ctrlOrMeta: boolean; shift: boolean }) => {
-            const t = trackById.get(id);
-            if (!t) return;
-            // Ordering constraint #1: journey "pick on map" intercepts the
-            // next dot for the destination, shift or not. (Picking the
-            // journey's own origin is a no-op inside pickDestination.)
-            if (state.mode === "journey" && state.picking) {
-                pickDestination(id);
-                return;
-            }
-            // Ordering constraint #2: ctrl/alchemy-add beats shift.
-            if (mods.ctrlOrMeta) {
-                // Journey is a half-built route the user is actively
-                // constructing — silently switching it into alchemy would
-                // destroy it. Explore/travel ctrl-click still enters alchemy
-                // unchanged (a travel constellation is cheap to rebuild).
-                if (state.mode === "journey") {
-                    toast("Close the journey (Esc) to start blending");
-                    return;
-                }
-                addIngredient(id);
-                return;
-            }
-            // Plain shift-click on a dot always queues the track — never
-            // changes playback, never changes mode — in EVERY mode.
-            if (mods.shift) {
-                controls.addToQueue(mapTrackToTrack(t));
-                return;
-            }
-            switch (state.mode) {
-                case "explore":
-                    dispatch({ type: "ENTER_TRAVEL", id });
-                    controls.playTrack(mapTrackToTrack(t));
-                    break;
-                case "travel":
-                    dispatch({ type: "TRAVEL_TO", id });
-                    controls.playTrack(mapTrackToTrack(t));
-                    break;
-                case "alchemy":
-                    addIngredient(id);
-                    break;
-                case "journey":
-                    // plain click while not picking: no-op
-                    break;
-            }
-        },
-        [state, trackById, controls, addIngredient, pickDestination]
-    );
-
-    return {
-        mode: state.mode,
-        onDotClick,
-        onEmptyClick,
-        exitToExplore,
-        canStartJourney,
-        startJourney,
-        highlightIds,
-        addIngredient,
-        travel,
-        journey,
-        alchemy,
-    };
+    const onDotClick = useCallback((id: string,
+        mods: { ctrlOrMeta: boolean; shift: boolean }) => routeDotClick(id, mods, {
+            state, trackById, controls, dispatch, addIngredient,
+            pickDestination: journeyMode.pickDestination,
+        }), [state, trackById, controls, addIngredient, journeyMode.pickDestination]);
+    return { mode: state.mode, onDotClick, onEmptyClick, exitToExplore,
+        canStartJourney: journeyMode.canStartJourney,
+        startJourney: journeyMode.startJourney, highlightIds, addIngredient,
+        travel, journey: journeyMode.journey, alchemy };
 }

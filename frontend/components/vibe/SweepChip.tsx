@@ -30,6 +30,29 @@ const ACTION_CLASS =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 " +
     "disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-200";
 
+function SweepActions({ count, saving, onPlay, onQueue, onSave }: Pick<
+    SweepChipProps, "count" | "saving" | "onPlay" | "onQueue" | "onSave"
+>) {
+    return (
+        <>
+            <button type="button" onClick={onPlay} disabled={saving}
+                className={ACTION_CLASS} aria-label={`Play ${count} swept tracks`}>
+                <Play className="w-4 h-4" /> Play
+            </button>
+            <button type="button" onClick={onQueue} disabled={saving}
+                className={ACTION_CLASS} aria-label={`Queue ${count} swept tracks`}>
+                <ListPlus className="w-4 h-4" /> Queue
+            </button>
+            <button type="button" onClick={onSave} disabled={saving}
+                className={ACTION_CLASS} aria-label={`Save ${count} swept tracks as a playlist`}
+                title="Save as playlist">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListPlus className="w-4 h-4" />}
+                Save
+            </button>
+        </>
+    );
+}
+
 export function SweepChip({
     count,
     capped,
@@ -50,41 +73,8 @@ export function SweepChip({
                     {count} track{count === 1 ? "" : "s"} swept
                     {capped ? " (max)" : ""}
                 </span>
-                <button
-                    type="button"
-                    onClick={onPlay}
-                    disabled={saving}
-                    className={ACTION_CLASS}
-                    aria-label={`Play ${count} swept tracks`}
-                >
-                    <Play className="w-4 h-4" />
-                    Play
-                </button>
-                <button
-                    type="button"
-                    onClick={onQueue}
-                    disabled={saving}
-                    className={ACTION_CLASS}
-                    aria-label={`Queue ${count} swept tracks`}
-                >
-                    <ListPlus className="w-4 h-4" />
-                    Queue
-                </button>
-                <button
-                    type="button"
-                    onClick={onSave}
-                    disabled={saving}
-                    className={ACTION_CLASS}
-                    aria-label={`Save ${count} swept tracks as a playlist`}
-                    title="Save as playlist"
-                >
-                    {saving ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                        <ListPlus className="w-4 h-4" />
-                    )}
-                    Save
-                </button>
+                <SweepActions count={count} saving={saving} onPlay={onPlay}
+                    onQueue={onQueue} onSave={onSave} />
                 <button
                     type="button"
                     onClick={onDismiss}

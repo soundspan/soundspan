@@ -1,31 +1,8 @@
 "use client";
 
-/**
- * MapDecorations — the SVG children handed to `<MapOverlay decorations>`. Draws
- * mode-specific map graphics in screen-pixel space via `worldToScreen`:
- *
- *  - Travel: edges from the current node to each on-map neighbour + clickable
- *    neighbour halos (they opt back into pointer events; the overlay root is
- *    pointer-events-none).
- *  - Journey: a connecting polyline through the on-map waypoints (origin first)
- *    plus a numbered circle at each.
- *
- * Off-map neighbours/waypoints are intentionally not drawn — the panels list
- * them. Alchemy needs no decorations; its results glow via the canvas
- * highlight path instead.
- *
- * Positions come exclusively through `posOf` (the live natural-or-spread
- * buffer resolved by index) so decorations never draw from a stale
- * `track.x/y` while the spread layout is active or animating.
- *
- * Travel edges also encode true similarity: strokeOpacity/width scale with
- * each neighbour's calibrated match percent (`quantiles`, from
- * `api.getVibeCalibration`) via `matchEdgeStyle` — the map's ~75%-strength
- * look is the unchanged anchor, so this is a purely additive visual cue (see
- * "About this map").
- */
+/** Map mode graphics rendered in screen-pixel space over the dot canvas. */
 
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { Viewport } from "./mapViewport";
 import { worldToScreen } from "./mapViewport";
 import { VIBE_ACCENTS } from "./types";
@@ -47,180 +24,144 @@ export interface MapDecorationsProps {
         onNavigate: (id: string) => void;
         onQueue: (id: string) => void;
     } | null;
-    journey: {
-        fromId: string;
-        waypoints: readonly VibeListItem[];
-    } | null;
-    /**
-     * Library-calibrated distance quantiles (`api.getVibeCalibration`), or
-     * null before it loads / on a too-small library. Drives the travel edges'
-     * match-strength styling; null falls back to the pre-calibration linear
-     * mapping via `calibratedMatch`, same as the panels.
-     */
+    journey: { fromId: string; waypoints: readonly VibeListItem[] } | null;
+    /** Library-calibrated distance quantiles, or null for linear fallback. */
     quantiles?: readonly number[] | null;
-    /**
-     * A halo opts into pointer events (the overlay root is pointer-events-none),
-     * which otherwise swallows a pointerdown that starts a pan. Wire this to arm
-     * the same drag state the canvas's own pointerdown does.
-     */
-    onHaloPointerDown?: (e: React.PointerEvent<SVGCircleElement>) => void;
-    /** ctrl/⌘-click on a halo adds the neighbour to the alchemy tray. */
+    onHaloPointerDown?: (event: React.PointerEvent<SVGCircleElement>) => void;
     onHaloAddIngredient?: (id: string) => void;
 }
 
-export function MapDecorations({
-    viewport,
-    posOf,
-    travel,
-    journey,
-    quantiles = null,
-    onHaloPointerDown,
-    onHaloAddIngredient,
-}: MapDecorationsProps) {
-    const nodes: React.ReactNode[] = [];
+type Travel = NonNullable<MapDecorationsProps["travel"]>;
+type PositionResolver = MapDecorationsProps["posOf"];
 
-    if (travel) {
-        const originPos = posOf(travel.currentId);
-        // Breadcrumb: a bolder trail through the on-map nodes visited so far.
-        const crumbPts: { x: number; y: number }[] = [];
-        for (const id of travel.breadcrumbIds) {
-            const p = posOf(id);
-            if (p) crumbPts.push(worldToScreen(viewport, p));
-        }
-        if (crumbPts.length >= 2) {
-            nodes.push(
-                <polyline
-                    key="travel-breadcrumb"
-                    className="vibe-deco-in"
-                    points={crumbPts.map((p) => `${p.x},${p.y}`).join(" ")}
-                    fill="none"
-                    stroke={EDGE_COLOR}
-                    strokeWidth={3}
-                    strokeOpacity={0.55}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                />
-            );
-        }
-        if (originPos) {
-            const o = worldToScreen(viewport, originPos);
-            for (const n of travel.onMapNeighbors) {
-                const p = posOf(n.id);
-                if (!p) continue;
-                const s = worldToScreen(viewport, p);
-                const { percent } = calibratedMatch(n.distance, quantiles);
-                const { opacity, width } = matchEdgeStyle(percent);
-                nodes.push(
-                    <line
-                        key={`edge-${n.id}`}
-                        className="vibe-deco-in"
-                        x1={o.x}
-                        y1={o.y}
-                        x2={s.x}
-                        y2={s.y}
-                        stroke={EDGE_COLOR}
-                        strokeWidth={width}
-                        strokeOpacity={opacity}
-                    />
-                );
-            }
-            // Halos drawn after edges so they sit on top and stay clickable.
-            for (const n of travel.onMapNeighbors) {
-                const p = posOf(n.id);
-                if (!p) continue;
-                const s = worldToScreen(viewport, p);
-                nodes.push(
-                    <circle
-                        key={`halo-${n.id}`}
-                        className="vibe-deco-in"
-                        cx={s.x}
-                        cy={s.y}
-                        r={8}
-                        fill="transparent"
-                        stroke={EDGE_COLOR}
-                        strokeWidth={2}
-                        style={{ pointerEvents: "auto", cursor: "pointer" }}
-                        onPointerDown={onHaloPointerDown}
-                        onClick={(e) => {
-                            if (e.ctrlKey || e.metaKey) {
-                                onHaloAddIngredient?.(n.id);
-                                return;
-                            }
-                            if (e.shiftKey) travel.onQueue(n.id);
-                            else travel.onNavigate(n.id);
-                        }}
-                    >
-                        <title>{n.title}</title>
-                    </circle>
-                );
-            }
-            // Current-node marker.
-            nodes.push(
-                <circle
-                    key="travel-origin"
-                    className="vibe-deco-in"
-                    cx={o.x}
-                    cy={o.y}
-                    r={5}
-                    fill={EDGE_COLOR}
-                    fillOpacity={0.9}
-                />
-            );
-        }
+function breadcrumbNode(viewport: Viewport, posOf: PositionResolver, travel: Travel): ReactNode {
+    const points = travel.breadcrumbIds.flatMap((id) => {
+        const point = posOf(id);
+        return point ? [worldToScreen(viewport, point)] : [];
+    });
+    if (points.length < 2) return null;
+    return (
+        <polyline key="travel-breadcrumb" className="vibe-deco-in"
+            points={points.map((point) => `${point.x},${point.y}`).join(" ")}
+            fill="none" stroke={EDGE_COLOR} strokeWidth={3} strokeOpacity={0.55}
+            strokeLinejoin="round" strokeLinecap="round" />
+    );
+}
+
+function travelEdgeNodes(
+    viewport: Viewport,
+    posOf: PositionResolver,
+    travel: Travel,
+    quantiles: readonly number[] | null
+): ReactNode[] {
+    const origin = posOf(travel.currentId);
+    if (!origin) return [];
+    const screenOrigin = worldToScreen(viewport, origin);
+    return travel.onMapNeighbors.flatMap((neighbor) => {
+        const point = posOf(neighbor.id);
+        if (!point) return [];
+        const screen = worldToScreen(viewport, point);
+        const { percent } = calibratedMatch(neighbor.distance, quantiles);
+        const { opacity, width } = matchEdgeStyle(percent);
+        return [
+            <line key={`edge-${neighbor.id}`} className="vibe-deco-in"
+                x1={screenOrigin.x} y1={screenOrigin.y} x2={screen.x} y2={screen.y}
+                stroke={EDGE_COLOR} strokeWidth={width} strokeOpacity={opacity} />,
+        ];
+    });
+}
+
+function handleHaloClick(
+    event: React.MouseEvent<SVGCircleElement>,
+    neighbor: CompassCandidate,
+    travel: Travel,
+    addIngredient?: (id: string) => void
+): void {
+    if (event.ctrlKey || event.metaKey) {
+        addIngredient?.(neighbor.id);
+    } else if (event.shiftKey) {
+        travel.onQueue(neighbor.id);
+    } else {
+        travel.onNavigate(neighbor.id);
     }
+}
 
-    if (journey) {
-        const pts: { x: number; y: number }[] = [];
-        const fromPos = posOf(journey.fromId);
-        if (fromPos) pts.push(worldToScreen(viewport, fromPos));
-        const onMap = journey.waypoints.filter((w) => w.onMap);
-        for (const w of onMap) {
-            const p = posOf(w.id);
-            if (p) pts.push(worldToScreen(viewport, p));
-        }
-        if (pts.length >= 2) {
-            nodes.push(
-                <polyline
-                    key="journey-line"
-                    className="vibe-deco-in"
-                    points={pts.map((p) => `${p.x},${p.y}`).join(" ")}
-                    fill="none"
-                    stroke={ROUTE_COLOR}
-                    strokeWidth={1.75}
-                    strokeOpacity={0.7}
-                    strokeLinejoin="round"
-                />
-            );
-        }
-        for (const w of onMap) {
-            const p = posOf(w.id);
-            if (!p) continue;
-            const s = worldToScreen(viewport, p);
-            nodes.push(
-                <Fragment key={`wp-${w.id}-${w.seq}`}>
-                    <circle
-                        className="vibe-deco-in"
-                        cx={s.x}
-                        cy={s.y}
-                        r={9}
-                        fill="#1e1b4b"
-                        stroke={ROUTE_COLOR}
-                        strokeWidth={1.75}
-                    />
-                    <text
-                        className="vibe-deco-in"
-                        x={s.x}
-                        y={s.y + 3}
-                        textAnchor="middle"
-                        fontSize={9}
-                        fill="#e0e7ff"
-                    >
-                        {w.seq}
-                    </text>
-                </Fragment>
-            );
-        }
+function travelHaloNodes(
+    viewport: Viewport,
+    posOf: PositionResolver,
+    travel: Travel,
+    pointerDown?: MapDecorationsProps["onHaloPointerDown"],
+    addIngredient?: (id: string) => void
+): ReactNode[] {
+    return travel.onMapNeighbors.flatMap((neighbor) => {
+        const point = posOf(neighbor.id);
+        if (!point) return [];
+        const screen = worldToScreen(viewport, point);
+        return [
+            <circle key={`halo-${neighbor.id}`} className="vibe-deco-in"
+                cx={screen.x} cy={screen.y} r={8} fill="transparent"
+                stroke={EDGE_COLOR} strokeWidth={2}
+                style={{ pointerEvents: "auto", cursor: "pointer" }}
+                onPointerDown={pointerDown}
+                onClick={(event) => handleHaloClick(event, neighbor, travel, addIngredient)}>
+                <title>{neighbor.title}</title>
+            </circle>,
+        ];
+    });
+}
+
+function travelNodes(props: MapDecorationsProps): ReactNode[] {
+    if (!props.travel) return [];
+    const origin = props.posOf(props.travel.currentId);
+    const nodes: ReactNode[] = [breadcrumbNode(props.viewport, props.posOf, props.travel)];
+    nodes.push(...travelEdgeNodes(props.viewport, props.posOf, props.travel, props.quantiles ?? null));
+    nodes.push(...travelHaloNodes(
+        props.viewport, props.posOf, props.travel,
+        props.onHaloPointerDown, props.onHaloAddIngredient
+    ));
+    if (origin) {
+        const screen = worldToScreen(props.viewport, origin);
+        nodes.push(
+            <circle key="travel-origin" className="vibe-deco-in" cx={screen.x}
+                cy={screen.y} r={5} fill={EDGE_COLOR} fillOpacity={0.9} />
+        );
     }
+    return nodes;
+}
 
-    return <>{nodes}</>;
+function journeyNodes(props: MapDecorationsProps): ReactNode[] {
+    if (!props.journey) return [];
+    const onMap = props.journey.waypoints.filter((waypoint) => waypoint.onMap);
+    const points = [props.journey.fromId, ...onMap.map((waypoint) => waypoint.id)]
+        .flatMap((id) => {
+            const point = props.posOf(id);
+            return point ? [worldToScreen(props.viewport, point)] : [];
+        });
+    const nodes: ReactNode[] = [];
+    if (points.length >= 2) {
+        nodes.push(
+            <polyline key="journey-line" className="vibe-deco-in"
+                points={points.map((point) => `${point.x},${point.y}`).join(" ")}
+                fill="none" stroke={ROUTE_COLOR} strokeWidth={1.75}
+                strokeOpacity={0.7} strokeLinejoin="round" />
+        );
+    }
+    for (const waypoint of onMap) {
+        const point = props.posOf(waypoint.id);
+        if (!point) continue;
+        const screen = worldToScreen(props.viewport, point);
+        nodes.push(
+            <Fragment key={`wp-${waypoint.id}-${waypoint.seq}`}>
+                <circle className="vibe-deco-in" cx={screen.x} cy={screen.y} r={9}
+                    fill="#1e1b4b" stroke={ROUTE_COLOR} strokeWidth={1.75} />
+                <text className="vibe-deco-in" x={screen.x} y={screen.y + 3}
+                    textAnchor="middle" fontSize={9} fill="#e0e7ff">{waypoint.seq}</text>
+            </Fragment>
+        );
+    }
+    return nodes;
+}
+
+export function MapDecorations(props: MapDecorationsProps) {
+    return <>{[...travelNodes(props), ...journeyNodes(props)]}</>;
 }
