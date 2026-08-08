@@ -1,5 +1,5 @@
 fastapi>=0.141.1
-uvicorn>=0.52.0
+uvicorn>=0.52.1
 ytmusicapi>=1.12.1
 yt-dlp>=2026.7.4
 # Required by yt-dlp's EmbedThumbnail postprocessor to write cover art into

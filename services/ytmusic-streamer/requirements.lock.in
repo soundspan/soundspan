@@ -12,7 +12,7 @@
 #
 # Regenerate the lock: see the header of requirements.lock.
 fastapi>=0.141.1
-uvicorn>=0.52.0
+uvicorn>=0.52.1
 mutagen>=1.48.1
 pydantic>=2.13.4
 httpx>=0.28.1
