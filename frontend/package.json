@@ -76,7 +76,7 @@
     "eslint-config-next": "16.3.0",
     "happy-dom": "20.11.1",
     "tailwindcss": "^4",
-    "tsx": "^4.23.5",
+    "tsx": "^4.23.7",
     "typescript": "^6.0.3"
   },
   "overrides": {
