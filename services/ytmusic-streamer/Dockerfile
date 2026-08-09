@@ -1,6 +1,6 @@
 # YouTube Music Streamer — FastAPI sidecar for soundspan
 # Streams audio from YouTube Music via ytmusicapi + yt-dlp (no files saved to disk)
-FROM python:3.14-slim
+FROM python:3.14-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive

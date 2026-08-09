@@ -5,6 +5,28 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## ⚠️ Breaking: frontend image runtime UID changed from 1001 to 1000
+
+**Who this affects:** operators who bind-mount or persist frontend paths that
+were created by the previous production image's UID/GID 1001 user.
+
+**What changed.** The frontend production image now runs as the base Node
+image's built-in `node` user (UID/GID 1000), matching the Helm chart's
+`runAsUser: 1000`, `runAsGroup: 1000`, and `fsGroup: 1000` settings.
+
+**Action required:** reassign existing persistent frontend paths before upgrade:
+
+```sh
+chown -R 1000:1000 /path/to/frontend-volume
+```
+
+Alternatively, delete an ephemeral `.next/cache` so the image can recreate it.
+The backend `api-runtime` now runs compiled JavaScript with
+`node dist/index.js`; no operator action is required unless a custom entrypoint
+override invoked `tsx`, in which case switch it to `node dist/index.js`.
+
+---
+
 ## ⚠️ Breaking: Subsonic account passwords are no longer stored reversibly (token-auth clients re-authenticate once)
 
 **Who this affects:** users whose OpenSubsonic/Subsonic client authenticates with

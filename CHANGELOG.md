@@ -203,6 +203,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AUDIOBOOKSHELF_TOKEN` variable instead of the `AUDIOBOOKSHELF_API_KEY` the live
   Audiobookshelf service actually consumes; `AUDIOBOOKSHELF_TOKEN` (never read by
   any code path) is removed from the environment-variable reference.
+- Digest-pinned all base images by `@sha256:` alongside their existing tags:
+  the backend, frontend, tidal-downloader, ytmusic-streamer, and
+  audio-analyzer-clap Dockerfiles plus the pgvector/redis images in
+  `docker-compose.yml` and `docker-bake.json`. Dependabot's Docker ecosystem
+  keeps the pins fresh.
+- **BREAKING (frontend image runtime UID changed 1001 -> 1000):** the frontend
+  production image now runs as the base Node image's built-in `node` user
+  (UID/GID 1000), matching the chart's `runAsUser: 1000`. Existing `.next/cache`
+  or other frontend volumes owned by UID 1001 must be re-chowned to 1000 (or
+  recreated). See `docs/UPGRADING.md`.
+- The backend `api-runtime` image now ships compiled JavaScript
+  (`node dist/index.js`) with pruned production dependencies instead of the full
+  development tree plus `tsx`; the entrypoint still runs
+  `npx prisma migrate deploy` via a locally reinstalled Prisma CLI.
+- Backend and frontend runtime artifacts now use `COPY --chown` instead of a
+  duplicated recursive `chown -R /app` layer.
 - Backend: introduced a single consolidated, typed Lidarr HTTP client
   (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
   for outbound Lidarr calls. It wraps one reusable axios instance with bounded

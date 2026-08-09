@@ -1,5 +1,5 @@
 # Stage 1: Dependencies
-FROM node:24-bookworm-slim AS deps
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS deps
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ RUN npm ci && \
 RUN npx tsc -p /packages/media-metadata-contract/tsconfig.json
 
 # Stage 2: Builder
-FROM node:24-bookworm-slim AS builder
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS builder
 
 WORKDIR /app
 
@@ -45,7 +45,7 @@ ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 RUN npm run build
 
 # Stage 3: Production (Hardened)
-FROM node:24-bookworm-slim
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
 
 WORKDIR /app
 
@@ -56,31 +56,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf 
 ENV NODE_ENV=production
 
 # Copy necessary files from builder
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/server.js ./server.js
-COPY --from=builder /app/server-proxy.js ./server-proxy.js
-COPY --from=builder /packages/media-metadata-contract /packages/media-metadata-contract
+COPY --from=builder --chown=node:node /app/package*.json ./
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/.next ./.next
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/server.js ./server.js
+COPY --from=builder --chown=node:node /app/server-proxy.js ./server-proxy.js
+COPY --from=builder --chown=node:node /packages/media-metadata-contract /packages/media-metadata-contract
 
 # Copy healthcheck and entrypoint scripts
-COPY healthcheck.js ./
+COPY --chown=node:node healthcheck.js ./
 COPY docker-entrypoint.sh /usr/local/bin/
 
-# Create non-root user, fix line endings, set permissions, then remove dangerous tools
+# Fix line endings, set entrypoint permissions, then remove dangerous tools
 # NOTE: We keep /bin/sh because npm requires it to spawn processes
-RUN groupadd -g 1001 nodejs && \
-    useradd -u 1001 -g nodejs -s /bin/sh nextjs && \
-    sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh && \
-    chown -R nextjs:nodejs /app && \
     # Remove download/network utilities (prevents downloading malware)
     rm -f /usr/bin/wget /usr/bin/curl /bin/wget /bin/curl 2>/dev/null || true && \
     rm -f /usr/bin/nc /bin/nc /usr/bin/ncat /usr/bin/netcat 2>/dev/null || true && \
     rm -f /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet 2>/dev/null || true
 
-USER nextjs
+USER node
 
 EXPOSE 3030
 
