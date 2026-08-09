@@ -133,9 +133,9 @@ export function AboutMapPopover() {
                 away. Percentages shown in panels are calibrated against random pairs
                 from your own library.
             </p>
-            <div><p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Mood colors</p><MoodLegend /></div>
-            <div><p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Lines &amp; glyphs</p><GlyphLegend /></div>
-            <div><p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Gestures</p><GestureCheatSheet /></div>
+            <div><p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Mood colors</p><MoodLegend /></div>
+            <div><p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Lines &amp; glyphs</p><GlyphLegend /></div>
+            <div><p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Gestures</p><GestureCheatSheet /></div>
         </div>
     );
 }

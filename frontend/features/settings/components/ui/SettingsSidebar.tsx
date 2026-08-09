@@ -33,7 +33,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                         className={`
                             w-full text-left px-3 py-2 rounded-md text-sm transition-colors
                             ${activeSection === item.id 
-                                ? 'text-white bg-[#282828]' 
+                                ? 'text-white bg-surface-highlight' 
                                 : 'text-gray-400 hover:text-white'
                             }
                         `}
@@ -45,7 +45,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                 {adminItems.length > 0 && (
                     <>
                         <div className="pt-4 pb-2 px-3">
-                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
                                 Admin
                             </span>
                         </div>
@@ -56,7 +56,7 @@ export function SettingsSidebar({ items, activeSection, onSectionClick, isAdmin 
                                 className={`
                                     w-full text-left px-3 py-2 rounded-md text-sm transition-colors
                                     ${activeSection === item.id 
-                                        ? 'text-white bg-[#282828]' 
+                                        ? 'text-white bg-surface-highlight' 
                                         : 'text-gray-400 hover:text-white'
                                     }
                                 `}

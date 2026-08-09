@@ -80,13 +80,13 @@ function CoverThumb({
         return (
             <div
                 className={cn(
-                    "flex items-center justify-center bg-[#1a1a1a] rounded flex-shrink-0",
+                    "flex items-center justify-center bg-surface-hover rounded flex-shrink-0",
                     className
                 )}
                 style={{ width: size, height: size }}
             >
                 <Disc3
-                    className="text-[#525252]"
+                    className="text-content-disabled"
                     style={{ width: size * 0.45, height: size * 0.45 }}
                 />
             </div>
@@ -95,7 +95,7 @@ function CoverThumb({
 
     return (
         <div
-            className={cn("relative overflow-hidden bg-[#1a1a1a] rounded flex-shrink-0", className)}
+            className={cn("relative overflow-hidden bg-surface-hover rounded flex-shrink-0", className)}
             style={{ width: size, height: size }}
         >
             <Image
@@ -257,8 +257,8 @@ function LobbyView() {
             )}
 
             {routeChecking && !routeBlocked && (
-                <div className="flex items-center gap-2 text-sm text-[#a3a3a3] px-1">
-                    <Wifi className="h-3.5 w-3.5 animate-pulse text-[#3b82f6]" />
+                <div className="flex items-center gap-2 text-sm text-content-secondary px-1">
+                    <Wifi className="h-3.5 w-3.5 animate-pulse text-brand" />
                     Verifying socket route...
                 </div>
             )}
@@ -272,7 +272,7 @@ function LobbyView() {
                         <h3 className="text-sm font-medium text-white mb-1">
                             Create a Group
                         </h3>
-                        <p className="text-xs text-[#737373] mb-4">
+                        <p className="text-xs text-content-muted mb-4">
                             Start a session and invite friends
                         </p>
 
@@ -283,14 +283,14 @@ function LobbyView() {
                                 onChange={(e) => setGroupName(e.target.value)}
                             />
 
-                            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[#0f0f0f] border border-[#1c1c1c]">
+                            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-surface-raised border border-surface-active">
                                 <div className="flex items-center gap-2">
                                     {isPublic ? (
-                                        <Globe className="w-4 h-4 text-[#3b82f6]" />
+                                        <Globe className="w-4 h-4 text-brand" />
                                     ) : (
-                                        <Lock className="w-4 h-4 text-[#525252]" />
+                                        <Lock className="w-4 h-4 text-content-disabled" />
                                     )}
-                                    <span className="text-sm text-[#e5e5e5]">
+                                    <span className="text-sm text-content-body">
                                         {isPublic
                                             ? "Public Group"
                                             : "Private Group"}
@@ -304,7 +304,7 @@ function LobbyView() {
                                     className={cn(
                                         "relative h-6 w-11 rounded-full transition-colors",
                                         isPublic
-                                            ? "bg-[#3b82f6]"
+                                            ? "bg-brand"
                                             : "bg-[#3a3a3a]"
                                     )}
                                 >
@@ -319,10 +319,10 @@ function LobbyView() {
                                 </button>
                             </div>
 
-                            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[#0f0f0f] border border-[#1c1c1c]">
+                            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-surface-raised border border-surface-active">
                                 <div className="flex items-center gap-2">
-                                    <Music className="w-4 h-4 text-[#3b82f6]" />
-                                    <span className="text-sm text-[#e5e5e5]">
+                                    <Music className="w-4 h-4 text-brand" />
+                                    <span className="text-sm text-content-body">
                                         Use current queue
                                     </span>
                                 </div>
@@ -336,7 +336,7 @@ function LobbyView() {
                                     className={cn(
                                         "relative h-6 w-11 rounded-full transition-colors",
                                         useCurrentQueue
-                                            ? "bg-[#3b82f6]"
+                                            ? "bg-brand"
                                             : "bg-[#3a3a3a]"
                                     )}
                                 >
@@ -352,7 +352,7 @@ function LobbyView() {
                             </div>
 
                             <button
-                                className="w-full inline-flex items-center justify-center rounded-sm font-medium px-4 py-2.5 transition-colors bg-[#60a5fa] hover:bg-[#3b82f6] text-black shadow-lg shadow-[#3b82f6]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full inline-flex items-center justify-center rounded-sm font-medium px-4 py-2.5 transition-colors bg-brand-hover hover:bg-brand text-black shadow-lg shadow-brand/10 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onClick={handleCreate}
                                 disabled={
                                     isCreating ||
@@ -375,7 +375,7 @@ function LobbyView() {
                         <h3 className="text-sm font-medium text-white mb-1">
                             Join a Group
                         </h3>
-                        <p className="text-xs text-[#737373] mb-4">
+                        <p className="text-xs text-content-muted mb-4">
                             Enter an invite code to join
                         </p>
 
@@ -392,7 +392,7 @@ function LobbyView() {
                                 className="font-mono tracking-wider text-center uppercase"
                             />
                             <button
-                                className="sm:min-w-[120px] inline-flex items-center justify-center rounded-sm font-medium px-4 py-2.5 transition-colors bg-[#60a5fa] hover:bg-[#3b82f6] text-black shadow-lg shadow-[#3b82f6]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="sm:min-w-[120px] inline-flex items-center justify-center rounded-sm font-medium px-4 py-2.5 transition-colors bg-brand-hover hover:bg-brand text-black shadow-lg shadow-brand/10 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onClick={handleJoin}
                                 disabled={
                                     isJoining ||
@@ -421,7 +421,7 @@ function LobbyView() {
                             <h3 className="text-sm font-medium text-white mb-0.5">
                                 Public Groups
                             </h3>
-                            <p className="text-xs text-[#737373]">
+                            <p className="text-xs text-content-muted">
                                 Join an open session
                             </p>
                         </div>
@@ -430,7 +430,7 @@ function LobbyView() {
                                 void fetchDiscover(false);
                             }}
                             disabled={isLoadingDiscover}
-                            className="p-1.5 text-[#525252] hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
+                            className="p-1.5 text-content-disabled hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
                         >
                             {isLoadingDiscover ? (
                                 <GradientSpinner size="sm" />
@@ -446,10 +446,10 @@ function LobbyView() {
                         </div>
                     ) : discoverGroups.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-14 text-center">
-                            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-amber-600/10 flex items-center justify-center">
-                                <Users className="w-6 h-6 text-[#525252]" />
+                            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-gradient-to-br from-brand/10 to-amber-600/10 flex items-center justify-center">
+                                <Users className="w-6 h-6 text-content-disabled" />
                             </div>
-                            <p className="text-sm text-[#525252]">
+                            <p className="text-sm text-content-disabled">
                                 No public groups right now
                             </p>
                         </div>
@@ -464,23 +464,23 @@ function LobbyView() {
                                         !canUseListenTogether ||
                                         routeChecking
                                     }
-                                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-[#141414] transition-colors text-left group"
+                                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-surface-overlay transition-colors text-left group"
                                 >
                                     <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-8 h-8 rounded-full bg-[#3b82f6]/10 flex items-center justify-center flex-shrink-0">
-                                            <Users className="w-3.5 h-3.5 text-[#3b82f6]" />
+                                        <div className="w-8 h-8 rounded-full bg-brand/10 flex items-center justify-center flex-shrink-0">
+                                            <Users className="w-3.5 h-3.5 text-brand" />
                                         </div>
                                         <div className="min-w-0">
                                             <p className="text-sm font-medium text-white truncate">
                                                 {group.name}
                                             </p>
-                                            <p className="text-xs text-[#525252]">
+                                            <p className="text-xs text-content-disabled">
                                                 {group.memberCount} listener
                                                 {group.memberCount === 1
                                                     ? ""
                                                     : "s"}
                                                 {group.currentTrack && (
-                                                    <span className="text-[#737373]">
+                                                    <span className="text-content-muted">
                                                         {" "}
                                                         &middot;{" "}
                                                         {
@@ -492,7 +492,7 @@ function LobbyView() {
                                             </p>
                                         </div>
                                     </div>
-                                    <span className="text-xs text-[#525252] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                    <span className="text-xs text-content-disabled opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                                         Join
                                     </span>
                                 </button>
@@ -593,8 +593,8 @@ function ActiveGroupView() {
                             className="rounded-lg"
                         />
                     ) : (
-                        <div className="w-12 h-12 rounded-lg bg-[#3b82f6]/10 flex items-center justify-center flex-shrink-0">
-                            <Radio className="w-5 h-5 text-[#3b82f6]" />
+                        <div className="w-12 h-12 rounded-lg bg-brand/10 flex items-center justify-center flex-shrink-0">
+                            <Radio className="w-5 h-5 text-brand" />
                         </div>
                     )}
                     <div className="min-w-0">
@@ -605,7 +605,7 @@ function ActiveGroupView() {
                             <Badge variant="ai">
                                 {isHost ? "Host" : "Follower"}
                             </Badge>
-                            <span className="flex items-center gap-1 text-xs text-[#525252]">
+                            <span className="flex items-center gap-1 text-xs text-content-disabled">
                                 {routeBlocked ? (
                                     <>
                                         <WifiOff className="w-3 h-3 text-red-500" />{" "}
@@ -623,21 +623,21 @@ function ActiveGroupView() {
                                     </>
                                 ) : (
                                     <>
-                                        <Wifi className="w-3 h-3 text-[#3b82f6] animate-pulse" />{" "}
+                                        <Wifi className="w-3 h-3 text-brand animate-pulse" />{" "}
                                         Connecting...
                                     </>
                                 )}
                             </span>
                         </div>
                         {currentTrack ? (
-                            <p className="mt-1.5 text-sm text-[#a3a3a3] truncate">
+                            <p className="mt-1.5 text-sm text-content-secondary truncate">
                                 {currentTrack.title}{" "}
-                                <span className="text-[#525252]">
+                                <span className="text-content-disabled">
                                     &middot; {currentTrack.artist.name}
                                 </span>
                             </p>
                         ) : (
-                            <p className="mt-1.5 text-sm text-[#525252]">
+                            <p className="mt-1.5 text-sm text-content-disabled">
                                 Nothing playing yet
                             </p>
                         )}
@@ -646,30 +646,30 @@ function ActiveGroupView() {
 
                 <button
                     onClick={copyCode}
-                    className="flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-[#0f0f0f] border border-[#1c1c1c] hover:border-[#3b82f6]/30 transition-colors self-start md:self-center"
+                    className="flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-surface-raised border border-surface-active hover:border-brand/30 transition-colors self-start md:self-center"
                     title="Copy join code"
                 >
-                    <span className="font-mono text-sm font-bold text-[#3b82f6] tracking-widest">
+                    <span className="font-mono text-sm font-bold text-brand tracking-widest">
                         {joinCode}
                     </span>
-                    <Copy className="w-3.5 h-3.5 text-[#525252]" />
+                    <Copy className="w-3.5 h-3.5 text-content-disabled" />
                 </button>
             </div>
 
             {/* Separator */}
-            <div className="h-px bg-[#1c1c1c]" />
+            <div className="h-px bg-surface-active" />
 
             {/* Queue + Members grid */}
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-6 items-start">
                 {/* Queue */}
                 <section>
                     <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-xs font-medium text-[#737373] uppercase tracking-wider">
+                        <h3 className="text-xs font-medium text-content-muted uppercase tracking-wider">
                             Queue ({playback.queue.length})
                         </h3>
                         {canEditQueue && playback.queue.length > 0 && (
                             <button
-                                className="flex items-center gap-1 text-xs text-[#525252] hover:text-white transition-colors"
+                                className="flex items-center gap-1 text-xs text-content-disabled hover:text-white transition-colors"
                                 onClick={syncClearQueue}
                             >
                                 <Trash2 className="w-3 h-3" />
@@ -680,10 +680,10 @@ function ActiveGroupView() {
 
                     {playback.queue.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 text-center">
-                            <div className="w-14 h-14 mb-3 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-amber-600/10 flex items-center justify-center">
-                                <Music className="w-6 h-6 text-[#525252]" />
+                            <div className="w-14 h-14 mb-3 rounded-full bg-gradient-to-br from-brand/10 to-amber-600/10 flex items-center justify-center">
+                                <Music className="w-6 h-6 text-content-disabled" />
                             </div>
-                            <p className="text-sm text-[#525252]">
+                            <p className="text-sm text-content-disabled">
                                 Queue is empty
                             </p>
                             <p className="text-xs text-[#3f3f3f] mt-1">
@@ -717,18 +717,18 @@ function ActiveGroupView() {
                 {/* Members + Leave */}
                 <div className="space-y-6">
                     <section>
-                        <h3 className="text-xs font-medium text-[#737373] uppercase tracking-wider mb-3">
+                        <h3 className="text-xs font-medium text-content-muted uppercase tracking-wider mb-3">
                             Listeners ({members.length})
                         </h3>
                         <div className="space-y-1">
                             {members.map((member) => (
                                 <div
                                     key={member.userId}
-                                    className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[#141414] transition-colors"
+                                    className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-surface-overlay transition-colors"
                                 >
                                     <div className="flex items-center gap-3">
-                                        <div className="w-7 h-7 rounded-full bg-[#3b82f6]/10 flex items-center justify-center">
-                                            <span className="text-[10px] font-bold text-[#3b82f6]">
+                                        <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center">
+                                            <span className="text-[10px] font-bold text-brand">
                                                 {member.username?.[0]?.toUpperCase() ??
                                                     "?"}
                                             </span>
@@ -749,7 +749,7 @@ function ActiveGroupView() {
                                                 "w-2 h-2 rounded-full",
                                                 member.isConnected
                                                     ? "bg-green-500"
-                                                    : "bg-[#525252]"
+                                                    : "bg-content-disabled"
                                             )}
                                             title={
                                                 member.isConnected
@@ -803,8 +803,8 @@ function QueueItem({
             className={cn(
                 "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group",
                 isCurrentTrack
-                    ? "bg-[#3b82f6]/8 border-l-2 border-[#3b82f6]"
-                    : "hover:bg-[#141414]"
+                    ? "bg-brand/8 border-l-2 border-brand"
+                    : "hover:bg-surface-overlay"
             )}
         >
             {/* Track Number / EQ / Play */}
@@ -814,12 +814,12 @@ function QueueItem({
                 ) : canStartPlayback ? (
                     <button
                         onClick={onPlay}
-                        className="text-[#525252] group-hover:text-white transition-colors"
+                        className="text-content-disabled group-hover:text-white transition-colors"
                     >
                         <span className="text-xs">{index + 1}</span>
                     </button>
                 ) : (
-                    <span className="text-xs text-[#525252]">{index + 1}</span>
+                    <span className="text-xs text-content-disabled">{index + 1}</span>
                 )}
             </div>
 
@@ -838,7 +838,7 @@ function QueueItem({
                         className={cn(
                             "text-sm truncate",
                             isCurrentTrack
-                                ? "text-[#3b82f6] font-medium"
+                                ? "text-brand font-medium"
                                 : "text-white"
                         )}
                     >
@@ -847,13 +847,13 @@ function QueueItem({
                     {item.streamSource === "tidal" && <TidalBadge />}
                     {item.streamSource === "youtube" && <YouTubeBadge />}
                 </div>
-                <p className="text-xs text-[#525252] truncate">
+                <p className="text-xs text-content-disabled truncate">
                     {item.artist.name} &middot; {item.album.title}
                 </p>
             </div>
 
             {/* Duration */}
-            <span className="text-xs text-[#525252] flex-shrink-0 tabular-nums">
+            <span className="text-xs text-content-disabled flex-shrink-0 tabular-nums">
                 {formatTime(item.duration)}
             </span>
 
@@ -912,10 +912,10 @@ export default function ListenTogetherPage() {
         <div className="min-h-screen relative">
             {/* Ambient background */}
             <div className="fixed inset-0 pointer-events-none overflow-hidden">
-                <div className="absolute -top-20 -right-20 w-[600px] h-[600px] rounded-full bg-[#3b82f6]/8 blur-[140px]" />
+                <div className="absolute -top-20 -right-20 w-[600px] h-[600px] rounded-full bg-brand/8 blur-[140px]" />
                 <div className="absolute -bottom-40 -left-40 w-[400px] h-[400px] rounded-full bg-[#1d4ed8]/6 blur-[100px]" />
             </div>
-            <div className="absolute inset-x-0 top-0 h-[220px] bg-gradient-to-b from-[#3b82f6]/12 via-[#1d4ed8]/6 to-transparent pointer-events-none" />
+            <div className="absolute inset-x-0 top-0 h-[220px] bg-gradient-to-b from-brand/12 via-[#1d4ed8]/6 to-transparent pointer-events-none" />
 
             {/* Content */}
             <div className="relative px-4 md:px-8 py-6 pb-32">
@@ -933,7 +933,7 @@ export default function ListenTogetherPage() {
                             {...fadeSlide}
                         >
                             <GradientSpinner size="lg" />
-                            <p className="text-sm text-[#525252] mt-4">
+                            <p className="text-sm text-content-disabled mt-4">
                                 Loading...
                             </p>
                         </motion.div>

@@ -20,18 +20,18 @@ const Button = memo(forwardRef<HTMLButtonElement, ButtonProps>(
         ref
     ) => {
         const baseStyles =
-            "inline-flex items-center justify-center rounded-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2323FF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a0a] disabled:opacity-50 disabled:cursor-not-allowed";
+            "inline-flex items-center justify-center rounded-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ai focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-50 disabled:cursor-not-allowed";
 
         // soundspan brand color: #3b82f6
         const variantStyles = {
             primary:
                 "bg-brand hover:bg-brand-hover text-black px-4 py-2 shadow-lg shadow-brand/10",
             secondary:
-                "bg-[#1a1a1a] hover:bg-[#222] text-white px-4 py-2 border border-[#262626]",
-            ghost: "text-gray-400 hover:text-white hover:bg-[#1a1a1a] px-4 py-2",
+                "bg-surface-hover hover:bg-[#222] text-white px-4 py-2 border border-line",
+            ghost: "text-gray-400 hover:text-white hover:bg-surface-hover px-4 py-2",
             danger: "text-red-500 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 px-4 py-2",
-            ai: "bg-[#1a1a1a] hover:bg-brand/10 text-brand border border-[#1c1c1c] hover:border-brand/30 px-4 py-2",
-            icon: "w-8 h-8 text-gray-400 hover:text-white hover:bg-[#1a1a1a]",
+            ai: "bg-surface-hover hover:bg-brand/10 text-brand border border-surface-active hover:border-brand/30 px-4 py-2",
+            icon: "w-8 h-8 text-gray-400 hover:text-white hover:bg-surface-hover",
         };
 
         return (

@@ -189,7 +189,7 @@ export default function LoginPage() {
             {/* Animated Background with Artist Images */}
             <div className="absolute inset-0 bg-[#000]">
                 {/* Subtle accent gradient */}
-                <div className="absolute inset-0 bg-gradient-to-br from-[#3b82f6]/5 via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-br from-brand/5 via-transparent to-transparent" />
 
                 {/* Ultra-subtle starfield texture (dialed down vs the main app) */}
                 <div className="opacity-[0.08]">
@@ -420,7 +420,7 @@ export default function LoginPage() {
                             <button
                                 type="submit"
                                 disabled={isLoading}
-                                className="w-full py-3 bg-[#3b82f6] text-black font-bold rounded-lg hover:bg-[#2563eb] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full py-3 bg-brand text-black font-bold rounded-lg hover:bg-brand-dark transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <span className="flex items-center justify-center gap-2">
                                     {isLoading ? (
@@ -454,7 +454,7 @@ export default function LoginPage() {
                             Have an invite code?{" "}
                             <Link
                                 href="/register"
-                                className="text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+                                className="text-brand hover:text-brand-hover transition-colors"
                             >
                                 Create an account
                             </Link>

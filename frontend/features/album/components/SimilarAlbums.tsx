@@ -26,7 +26,7 @@ export function SimilarAlbums({ similarAlbums, colors, onNavigate }: SimilarAlbu
             coverArt={album.coverArt ? api.getCoverArtUrl(album.coverArt, 300) : album.coverUrl}
             title={album.title}
             subtitle={album.artist?.name}
-            placeholderIcon={<Disc3 className="w-12 h-12 text-gray-600" />}
+            placeholderIcon={<Disc3 className="w-12 h-12 text-gray-400" />}
             circular={false}
             badge={album.owned ? "owned" : undefined}
             colors={colors}

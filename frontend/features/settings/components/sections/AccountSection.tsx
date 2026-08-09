@@ -325,8 +325,8 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
                         
                         {twoFactorSecret && (
                             <div className="text-center">
-                                <p className="text-xs text-gray-500 mb-1">Manual entry code:</p>
-                                <code className="text-sm text-white bg-[#282828] px-3 py-1 rounded font-mono">
+                                <p className="text-xs text-gray-400 mb-1">Manual entry code:</p>
+                                <code className="text-sm text-white bg-surface-highlight px-3 py-1 rounded font-mono">
                                     {twoFactorSecret}
                                 </code>
                             </div>
@@ -419,7 +419,7 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                         {recoveryCodes.map((code, i) => (
-                            <code key={i} className="text-sm text-white bg-[#282828] px-3 py-2 rounded font-mono">
+                            <code key={i} className="text-sm text-white bg-surface-highlight px-3 py-2 rounded font-mono">
                                 {code}
                             </code>
                         ))}
@@ -427,7 +427,7 @@ export function AccountSection({ settings, onUpdate }: AccountSectionProps) {
                     <div className="flex gap-2">
                         <button
                             onClick={() => navigator.clipboard.writeText(recoveryCodes.join("\n"))}
-                            className="px-4 py-2 bg-[#333] text-white text-sm rounded-full hover:bg-[#404040]"
+                            className="px-4 py-2 bg-line-strong text-white text-sm rounded-full hover:bg-line-muted"
                         >
                             Copy
                         </button>

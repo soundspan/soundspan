@@ -34,9 +34,9 @@ export function KeyboardShortcutsTooltip() {
             </button>
 
             {isVisible && (
-                <div className="absolute bottom-full right-0 mb-2 w-64 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-4 z-50 backdrop-blur-xl">
+                <div className="absolute bottom-full right-0 mb-2 w-64 bg-surface-hover border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-4 z-50 backdrop-blur-xl">
                     {/* Pointer arrow */}
-                    <div className="absolute -bottom-1 right-3 w-2 h-2 bg-[#1a1a1a] border-r border-b border-white/10 rotate-45" />
+                    <div className="absolute -bottom-1 right-3 w-2 h-2 bg-surface-hover border-r border-b border-white/10 rotate-45" />
 
                     <h3 className="text-white font-bold text-sm mb-3 flex items-center gap-2">
                         <Info className="w-4 h-4" />
@@ -60,7 +60,7 @@ export function KeyboardShortcutsTooltip() {
                     </div>
 
                     <div className="mt-3 pt-3 border-t border-white/10">
-                        <p className="text-[10px] text-gray-500 leading-relaxed">
+                        <p className="text-[10px] text-gray-400 leading-relaxed">
                             Shortcuts work anywhere except when typing in text fields.
                         </p>
                     </div>

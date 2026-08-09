@@ -22,7 +22,7 @@ export function SettingsToggle({ id, checked, onChange, disabled }: SettingsTogg
             <div className={`
                 w-10 h-6 rounded-full transition-colors
                 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
-                ${checked ? 'bg-[#1DB954]' : 'bg-[#404040]'}
+                ${checked ? 'bg-[#1DB954]' : 'bg-line-muted'}
                 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#1DB954]/30
                 after:content-[''] after:absolute after:top-[2px] after:left-[2px]
                 after:bg-white after:rounded-full after:h-5 after:w-5

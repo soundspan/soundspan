@@ -128,7 +128,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
                                 new CustomEvent("toggle-mobile-menu")
                             );
                         }}
-                        className="w-10 h-10 flex items-center justify-center bg-[#0f0f0f] border border-[#262626] rounded-md text-white hover:bg-[#141414] transition-colors mr-2 flex-shrink-0"
+                        className="w-10 h-10 flex items-center justify-center bg-surface-raised border border-line rounded-md text-white hover:bg-surface-overlay transition-colors mr-2 flex-shrink-0"
                         aria-label="Open menu"
                     >
                         <Menu className="w-5 h-5" />
@@ -139,7 +139,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
                         {pathname !== "/" ? (
                             <button
                                 onClick={() => router.back()}
-                                className="w-10 h-10 rounded-full flex items-center justify-center transition-all bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white"
+                                className="w-10 h-10 rounded-full flex items-center justify-center transition-all bg-surface text-gray-400 hover:bg-surface-hover hover:text-white"
                                 aria-label="Go back"
                                 title="Go back"
                             >
@@ -157,7 +157,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
                             "w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-1",
                             pathname === "/"
                                 ? "bg-white text-black"
-                                : "bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white"
+                                : "bg-surface text-gray-400 hover:bg-surface-hover hover:text-white"
                         )}
                         aria-label="Home"
                         title="Home"
@@ -181,7 +181,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
                                 autoCapitalize="none"
                                 autoCorrect="off"
                                 tabIndex={0}
-                                className="w-full h-10 pl-10 pr-3 bg-[#1a1a1a] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
+                                className="w-full h-10 pl-10 pr-3 bg-surface-hover hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
                             />
                         </div>
                     </form>
@@ -231,7 +231,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
                                 {pathname !== "/" && (
                                     <button
                                         onClick={() => router.back()}
-                                        className="w-12 h-12 rounded-full flex items-center justify-center transition-all flex-shrink-0 bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white hover:scale-105"
+                                        className="w-12 h-12 rounded-full flex items-center justify-center transition-all flex-shrink-0 bg-surface text-gray-400 hover:bg-surface-hover hover:text-white hover:scale-105"
                                         aria-label="Go back"
                                         title="Go back"
                                     >
@@ -245,7 +245,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
                                         "w-12 h-12 rounded-full flex items-center justify-center transition-all flex-shrink-0",
                                         pathname === "/"
                                             ? "bg-white text-black"
-                                            : "bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-white hover:scale-105"
+                                            : "bg-surface text-gray-400 hover:bg-surface-hover hover:text-white hover:scale-105"
                                     )}
                                     aria-label="Home"
                                     title="Home"
@@ -275,7 +275,7 @@ export function TopBar({ isActivityPanelOpen = false }: TopBarProps = {}) {
                                         autoCapitalize="none"
                                         autoCorrect="off"
                                         tabIndex={0}
-                                        className="w-full h-12 pl-12 pr-4 bg-[#1a1a1a] hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
+                                        className="w-full h-12 pl-12 pr-4 bg-surface-hover hover:bg-[#242424] border-2 border-transparent focus:border-white/20 rounded-full text-sm text-white placeholder-gray-400 transition-all outline-none"
                                     />
                                 </div>
                             </form>

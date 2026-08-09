@@ -77,9 +77,9 @@ export function LibraryTracksList({ tracks, limit = 10 }: LibraryTracksListProps
                 leadingColumn: (
                     <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
                         {isPlayingThis ? (
-                            <Pause className="w-4 h-4 text-[#3b82f6]" />
+                            <Pause className="w-4 h-4 text-brand" />
                         ) : isCurrentTrack ? (
-                            <Play className="w-4 h-4 text-[#3b82f6] ml-0.5" />
+                            <Play className="w-4 h-4 text-brand ml-0.5" />
                         ) : (
                             <>
                                 <span className="text-sm text-gray-400 group-hover:hidden">

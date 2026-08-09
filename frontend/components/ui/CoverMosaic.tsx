@@ -74,7 +74,7 @@ function CoverMosaic({
                     className,
                 )}
             >
-                {emptyState ?? <Music className="w-10 h-10 text-gray-600" />}
+                {emptyState ?? <Music className="w-10 h-10 text-gray-400" />}
             </div>
         );
     }
@@ -116,7 +116,7 @@ function CoverMosaic({
             )}
         >
             {filledUrls.map((url, i) => (
-                <div key={`${url}-${i}`} className="relative bg-[#181818]">
+                <div key={`${url}-${i}`} className="relative bg-surface-elevated">
                     <Image
                         src={url}
                         alt=""
@@ -133,10 +133,10 @@ function CoverMosaic({
             {Array.from({ length: emptyCellCount }).map((_, i) => (
                 <div
                     key={`empty-${i}`}
-                    className="relative bg-[#282828] flex items-center justify-center"
+                    className="relative bg-surface-highlight flex items-center justify-center"
                 >
                     {showEmptyCellIcon && (
-                        <Music className="w-5 h-5 text-gray-600" />
+                        <Music className="w-5 h-5 text-gray-400" />
                     )}
                 </div>
             ))}

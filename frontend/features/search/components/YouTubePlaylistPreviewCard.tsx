@@ -47,7 +47,7 @@ export function YouTubePlaylistPreviewCard({
         return (
             <section className="mb-8">
                 <h2 className="text-2xl font-bold text-white mb-4">YouTube</h2>
-                <div className="bg-[#121212] rounded-lg p-6 animate-pulse">
+                <div className="bg-surface-sunken rounded-lg p-6 animate-pulse">
                     <div className="space-y-3">
                         <div className="h-5 bg-white/10 rounded w-1/2" />
                         <div className="h-4 bg-white/10 rounded w-1/3" />
@@ -62,7 +62,7 @@ export function YouTubePlaylistPreviewCard({
         return (
             <section className="mb-8">
                 <h2 className="text-2xl font-bold text-white mb-4">YouTube</h2>
-                <div className="bg-[#121212] rounded-lg p-5">
+                <div className="bg-surface-sunken rounded-lg p-5">
                     <p className="text-sm text-gray-400">{error}</p>
                 </div>
             </section>
@@ -96,7 +96,7 @@ export function YouTubePlaylistPreviewCard({
     return (
         <section className="mb-8">
             <h2 className="text-2xl font-bold text-white mb-4">{heading}</h2>
-            <div className="bg-[#121212] hover:bg-[#181818] transition-colors rounded-lg p-5">
+            <div className="bg-surface-sunken hover:bg-surface-elevated transition-colors rounded-lg p-5">
                 <div className="flex items-start gap-3">
                     <ListVideo className="w-6 h-6 text-green-500 shrink-0 mt-0.5" />
                     <div className="min-w-0 flex-1">
@@ -108,10 +108,10 @@ export function YouTubePlaylistPreviewCard({
                                 {playlistInfo.uploader}
                             </p>
                         )}
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-sm text-gray-400 mt-1">
                             {countLabel}
                             {playlistInfo.truncated && (
-                                <span className="text-gray-600">
+                                <span className="text-gray-400">
                                     {" "}
                                     — paste with a smaller list to get them all
                                 </span>
@@ -128,14 +128,14 @@ export function YouTubePlaylistPreviewCard({
                                 key={entry.videoId}
                                 className="flex gap-3 text-gray-300"
                             >
-                                <span className="text-gray-600 w-5 shrink-0 text-right">
+                                <span className="text-gray-400 w-5 shrink-0 text-right">
                                     {index + 1}
                                 </span>
                                 <span className="truncate">{entry.title}</span>
                             </li>
                         ))}
                         {remaining > 0 && (
-                            <li className="flex gap-3 text-gray-500">
+                            <li className="flex gap-3 text-gray-400">
                                 <span className="w-5 shrink-0" />
                                 <span>+{remaining} more</span>
                             </li>
@@ -169,7 +169,7 @@ export function YouTubePlaylistPreviewCard({
                         </button>
 
                         {showFormatMenu && !isDownloading && (
-                            <div className="absolute top-full left-0 mt-2 w-44 bg-[#282828] rounded-lg shadow-xl border border-white/10 overflow-hidden z-50">
+                            <div className="absolute top-full left-0 mt-2 w-44 bg-surface-highlight rounded-lg shadow-xl border border-white/10 overflow-hidden z-50">
                                 {FORMAT_OPTIONS.map((opt) => (
                                     <button
                                         key={opt.format}
@@ -210,7 +210,7 @@ export function YouTubePlaylistPreviewCard({
                             />
                         </div>
                         {progress.failed > 0 && (
-                            <p className="text-xs text-gray-500 mt-1.5">
+                            <p className="text-xs text-gray-400 mt-1.5">
                                 {progress.failed} unfinished (continuing in the
                                 background)
                             </p>

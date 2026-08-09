@@ -119,7 +119,7 @@ export default function ReleasesPage() {
             {/* Hero Section */}
             <div className="relative h-64 md:h-80 overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 via-orange-600/10 to-transparent" />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent" />
                 
                 <div className="relative h-full flex flex-col justify-end p-6 md:p-8">
                     <div className="flex items-center gap-3 mb-2">

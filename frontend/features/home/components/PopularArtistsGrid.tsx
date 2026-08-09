@@ -44,7 +44,7 @@ const PopularArtistCard = memo(function PopularArtistCard({
                 tabIndex={0}
             >
                 <div className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors">
-                    <div className="aspect-square bg-[#282828] rounded-full mb-3 flex items-center justify-center overflow-hidden relative shadow-lg">
+                    <div className="aspect-square bg-surface-highlight rounded-full mb-3 flex items-center justify-center overflow-hidden relative shadow-lg">
                         {imageUrl ? (
                             <Image
                                 src={imageUrl}
@@ -55,7 +55,7 @@ const PopularArtistCard = memo(function PopularArtistCard({
                                 unoptimized
                             />
                         ) : (
-                            <Music className="w-10 h-10 text-gray-600" />
+                            <Music className="w-10 h-10 text-gray-400" />
                         )}
                     </div>
                     <h3 className="text-sm font-semibold text-white truncate">

@@ -99,7 +99,7 @@ export function MobileSidebar({ isOpen, onClose, hasActiveSessions }: MobileSide
 
             {/* Sidebar Drawer */}
             <div
-                className="fixed inset-y-0 left-0 w-[280px] bg-[#0a0a0a] z-50 flex flex-col overflow-hidden transform transition-transform border-r border-white/[0.06] z-100"
+                className="fixed inset-y-0 left-0 w-[280px] bg-surface z-50 flex flex-col overflow-hidden transform transition-transform border-r border-white/[0.06] z-100"
                 style={{
                     paddingTop: "env(safe-area-inset-top)",
                 }}
@@ -125,7 +125,7 @@ export function MobileSidebar({ isOpen, onClose, hasActiveSessions }: MobileSide
                     </Link>
                     <button
                         onClick={onClose}
-                        className="w-9 h-9 flex items-center justify-center text-gray-500 hover:text-white transition-colors rounded-full hover:bg-white/10"
+                        className="w-9 h-9 flex items-center justify-center text-gray-400 hover:text-white transition-colors rounded-full hover:bg-white/10"
                         aria-label="Close menu"
                     >
                         <X className="w-5 h-5" />
@@ -140,7 +140,7 @@ export function MobileSidebar({ isOpen, onClose, hasActiveSessions }: MobileSide
                 >
                     {/* Quick Links Section */}
                     <div className="px-3 mb-6">
-                        <div className="text-[10px] font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
+                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">
                             Quick Links
                         </div>
                         {MOBILE_QUICK_LINKS.map((link) => {
@@ -173,7 +173,7 @@ export function MobileSidebar({ isOpen, onClose, hasActiveSessions }: MobileSide
 
                     {/* Actions Section */}
                     <div className="px-3">
-                        <div className="text-[10px] font-semibold text-gray-600 uppercase tracking-widest px-3 mb-2">
+                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-2">
                             Actions
                         </div>
 

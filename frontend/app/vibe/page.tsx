@@ -156,16 +156,16 @@ function CoverImage({
     if (!imgSrc || hasError) {
         return (
             <div
-                className={cn("bg-[#282828] flex items-center justify-center", className)}
+                className={cn("bg-surface-highlight flex items-center justify-center", className)}
                 style={{ width: size, height: size }}
             >
-                <Disc3 className="text-[#525252]" style={{ width: size * 0.3, height: size * 0.3 }} />
+                <Disc3 className="text-content-disabled" style={{ width: size * 0.3, height: size * 0.3 }} />
             </div>
         );
     }
 
     return (
-        <div className={cn("relative overflow-hidden bg-[#1a1a1a]", className)} style={{ width: size, height: size }}>
+        <div className={cn("relative overflow-hidden bg-surface-hover", className)} style={{ width: size, height: size }}>
             <Image
                 src={imgSrc}
                 alt={title}
@@ -192,7 +192,7 @@ function SimilarityBadge({ similarity, size = "md" }: { similarity: number; size
         <div className={cn(
             "relative flex items-center justify-center rounded-full font-semibold",
             sizeClasses[size],
-            percent >= 80 ? "text-[#22c55e]" : percent >= 60 ? "text-[#2323FF]" : "text-[#737373]"
+            percent >= 80 ? "text-success" : percent >= 60 ? "text-ai" : "text-content-muted"
         )}>
             {/* Outer ring */}
             <svg className="absolute inset-0 w-full h-full -rotate-90">
@@ -239,28 +239,28 @@ function FeatureComparison({
                 return (
                     <div key={key} className="group">
                         <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-[#737373] uppercase tracking-wide">{label}</span>
+                            <span className="text-xs text-content-muted uppercase tracking-wide">{label}</span>
                             <span className={cn(
                                 "text-xs tabular-nums transition-colors",
-                                matchPct >= 80 ? "text-[#22c55e]" : "text-[#525252] group-hover:text-[#737373]"
+                                matchPct >= 80 ? "text-success" : "text-content-disabled group-hover:text-content-muted"
                             )}>
                                 {matchPct}%
                             </span>
                         </div>
-                        <div className="relative h-1.5 bg-[#1a1a1a] rounded-full overflow-hidden">
+                        <div className="relative h-1.5 bg-surface-hover rounded-full overflow-hidden">
                             {/* Source bar */}
                             <motion.div
                                 initial={{ width: 0 }}
                                 animate={{ width: `${sVal * 100}%` }}
                                 transition={{ duration: 0.5, ease: "easeOut" }}
-                                className="absolute h-full bg-[#3b82f6]/50 rounded-full"
+                                className="absolute h-full bg-brand/50 rounded-full"
                             />
                             {/* Match indicator */}
                             <motion.div
                                 initial={{ left: 0 }}
                                 animate={{ left: `calc(${mVal * 100}% - 4px)` }}
                                 transition={{ duration: 0.5, ease: "easeOut" }}
-                                className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[#2323FF] shadow-[0_0_8px_rgba(35,35,255,0.5)]"
+                                className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-ai shadow-[0_0_8px_rgba(35,35,255,0.5)]"
                             />
                         </div>
                     </div>
@@ -291,13 +291,13 @@ function MoodGrid({ source, match }: { source: TrackData; match: TrackData }) {
                         key={key}
                         className={cn(
                             "px-2.5 py-2 rounded-md text-center transition-colors",
-                            matchPct >= 80 ? "bg-[#22c55e]/10" : "bg-[#1a1a1a]"
+                            matchPct >= 80 ? "bg-success/10" : "bg-surface-hover"
                         )}
                     >
-                        <div className="text-xs text-[#737373] mb-0.5">{label}</div>
+                        <div className="text-xs text-content-muted mb-0.5">{label}</div>
                         <div className={cn(
                             "text-sm font-medium tabular-nums",
-                            matchPct >= 80 ? "text-[#22c55e]" : "text-[#a3a3a3]"
+                            matchPct >= 80 ? "text-success" : "text-content-secondary"
                         )}>
                             {matchPct}%
                         </div>
@@ -319,9 +319,9 @@ function TagPills({ source, match }: { source: TrackData; match: TrackData }) {
     return (
         <div>
             <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs text-[#737373] uppercase tracking-wide">Tags</span>
+                <span className="text-xs text-content-muted uppercase tracking-wide">Tags</span>
                 {sharedTags.length > 0 && (
-                    <span className="text-xs text-[#22c55e]">{sharedTags.length} shared</span>
+                    <span className="text-xs text-success">{sharedTags.length} shared</span>
                 )}
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -333,8 +333,8 @@ function TagPills({ source, match }: { source: TrackData; match: TrackData }) {
                             className={cn(
                                 "px-2 py-0.5 text-xs rounded-full transition-colors",
                                 isShared
-                                    ? "bg-[#22c55e]/15 text-[#22c55e] ring-1 ring-[#22c55e]/30"
-                                    : "bg-[#1a1a1a] text-[#737373]"
+                                    ? "bg-success/15 text-success ring-1 ring-success/30"
+                                    : "bg-surface-hover text-content-muted"
                             )}
                         >
                             {tag}
@@ -362,58 +362,58 @@ function ComparisonPanel({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-xl overflow-hidden"
+            className="bg-surface-raised border border-surface-active rounded-xl overflow-hidden"
         >
             {/* Header with gradient accent */}
             <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-[#3b82f6]/10 via-transparent to-[#2323FF]/10" />
+                <div className="absolute inset-0 bg-gradient-to-r from-brand/10 via-transparent to-ai/10" />
                 <div className="relative flex items-center justify-between px-4 py-3">
-                    <span className="text-xs font-medium text-[#737373] uppercase tracking-wider">Vibe Match</span>
+                    <span className="text-xs font-medium text-content-muted uppercase tracking-wider">Vibe Match</span>
                     <button
                         onClick={onClose}
                         className="p-1 hover:bg-white/5 rounded transition-colors"
                     >
-                        <X className="w-4 h-4 text-[#737373]" />
+                        <X className="w-4 h-4 text-content-muted" />
                     </button>
                 </div>
             </div>
 
             {/* Central similarity display */}
-            <div className="flex items-center justify-center py-6 border-b border-[#1c1c1c]">
+            <div className="flex items-center justify-center py-6 border-b border-surface-active">
                 <div className="flex items-center gap-6">
                     <CoverImage
                         coverUrl={source.coverUrl}
                         title={source.title}
                         size={56}
-                        className="rounded-md ring-2 ring-[#3b82f6]/30"
+                        className="rounded-md ring-2 ring-brand/30"
                     />
                     <SimilarityBadge similarity={similarity} size="lg" />
                     <CoverImage
                         coverUrl={match.coverUrl}
                         title={match.title}
                         size={56}
-                        className="rounded-md ring-2 ring-[#2323FF]/30"
+                        className="rounded-md ring-2 ring-ai/30"
                     />
                 </div>
             </div>
 
             {/* Track details */}
-            <div className="grid grid-cols-2 divide-x divide-[#1c1c1c] border-b border-[#1c1c1c]">
+            <div className="grid grid-cols-2 divide-x divide-surface-active border-b border-surface-active">
                 <div className="p-4">
                     <div className="flex items-center gap-2 mb-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />
-                        <span className="text-[10px] text-[#737373] uppercase tracking-wider">Source</span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-brand" />
+                        <span className="text-[10px] text-content-muted uppercase tracking-wider">Source</span>
                     </div>
                     <p className="font-medium text-white text-sm truncate">{source.title}</p>
-                    <p className="text-xs text-[#a3a3a3] truncate">{source.artist}</p>
+                    <p className="text-xs text-content-secondary truncate">{source.artist}</p>
                     <div className="flex gap-1.5 mt-2">
                         {source.features.bpm && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#1a1a1a] rounded text-[#525252]">
+                            <span className="text-[10px] px-1.5 py-0.5 bg-surface-hover rounded text-content-disabled">
                                 {Math.round(source.features.bpm)} BPM
                             </span>
                         )}
                         {source.features.key && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#1a1a1a] rounded text-[#525252]">
+                            <span className="text-[10px] px-1.5 py-0.5 bg-surface-hover rounded text-content-disabled">
                                 {source.features.key}
                             </span>
                         )}
@@ -421,19 +421,19 @@ function ComparisonPanel({
                 </div>
                 <div className="p-4">
                     <div className="flex items-center gap-2 mb-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#2323FF]" />
-                        <span className="text-[10px] text-[#737373] uppercase tracking-wider">Match</span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-ai" />
+                        <span className="text-[10px] text-content-muted uppercase tracking-wider">Match</span>
                     </div>
                     <p className="font-medium text-white text-sm truncate">{match.title}</p>
-                    <p className="text-xs text-[#a3a3a3] truncate">{match.artist}</p>
+                    <p className="text-xs text-content-secondary truncate">{match.artist}</p>
                     <div className="flex gap-1.5 mt-2">
                         {match.features.bpm && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#1a1a1a] rounded text-[#525252]">
+                            <span className="text-[10px] px-1.5 py-0.5 bg-surface-hover rounded text-content-disabled">
                                 {Math.round(match.features.bpm)} BPM
                             </span>
                         )}
                         {match.features.key && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#1a1a1a] rounded text-[#525252]">
+                            <span className="text-[10px] px-1.5 py-0.5 bg-surface-hover rounded text-content-disabled">
                                 {match.features.key}
                             </span>
                         )}
@@ -442,14 +442,14 @@ function ComparisonPanel({
             </div>
 
             {/* Audio features */}
-            <div className="p-4 border-b border-[#1c1c1c]">
-                <h4 className="text-[10px] font-medium text-[#737373] uppercase tracking-wider mb-4">Audio DNA</h4>
+            <div className="p-4 border-b border-surface-active">
+                <h4 className="text-[10px] font-medium text-content-muted uppercase tracking-wider mb-4">Audio DNA</h4>
                 <FeatureComparison source={source} match={match} />
             </div>
 
             {/* Mood profile */}
-            <div className="p-4 border-b border-[#1c1c1c]">
-                <h4 className="text-[10px] font-medium text-[#737373] uppercase tracking-wider mb-3">Mood Profile</h4>
+            <div className="p-4 border-b border-surface-active">
+                <h4 className="text-[10px] font-medium text-content-muted uppercase tracking-wider mb-3">Mood Profile</h4>
                 <MoodGrid source={source} match={match} />
             </div>
 
@@ -485,13 +485,13 @@ function TrackRow({
             className={cn(
                 "group grid grid-cols-[auto_1fr_auto_auto] gap-4 px-4 py-2.5 rounded-lg cursor-pointer transition-all items-center",
                 isSelected
-                    ? "bg-gradient-to-r from-[#3b82f6]/5 to-[#2323FF]/5 ring-1 ring-[#2323FF]/20"
-                    : "hover:bg-[#141414]"
+                    ? "bg-gradient-to-r from-brand/5 to-ai/5 ring-1 ring-ai/20"
+                    : "hover:bg-surface-overlay"
             )}
         >
             {/* Index / Play */}
             <div className="w-8 text-center">
-                <span className="text-sm text-[#525252] tabular-nums group-hover:hidden">
+                <span className="text-sm text-content-disabled tabular-nums group-hover:hidden">
                     {index + 1}
                 </span>
                 <button
@@ -512,20 +512,20 @@ function TrackRow({
                         className="rounded flex-shrink-0"
                     />
                     {isSelected && (
-                        <div className="absolute inset-0 rounded ring-2 ring-[#2323FF]/50" />
+                        <div className="absolute inset-0 rounded ring-2 ring-ai/50" />
                     )}
                 </div>
                 <div className="min-w-0">
                     <p className={cn(
                         "text-sm font-medium truncate transition-colors",
-                        isSelected ? "text-[#2323FF]" : "text-white"
+                        isSelected ? "text-ai" : "text-white"
                     )}>
                         {track.title}
                     </p>
                     <Link
                         href={`/artist/${track.artistId}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="text-xs text-[#737373] hover:text-[#a3a3a3] hover:underline truncate block transition-colors"
+                        className="text-xs text-content-muted hover:text-content-secondary hover:underline truncate block transition-colors"
                     >
                         {track.artist}
                     </Link>
@@ -536,7 +536,7 @@ function TrackRow({
             <Link
                 href={`/album/${track.albumId}`}
                 onClick={(e) => e.stopPropagation()}
-                className="text-sm text-[#525252] hover:text-[#737373] hover:underline truncate hidden md:block max-w-[180px] transition-colors"
+                className="text-sm text-content-disabled hover:text-content-muted hover:underline truncate hidden md:block max-w-[180px] transition-colors"
             >
                 {track.album}
             </Link>
@@ -556,7 +556,7 @@ export default function VibePage() {
     if (featuresLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <Loader2 className="w-6 h-6 animate-spin text-[#525252]" />
+                <Loader2 className="w-6 h-6 animate-spin text-content-disabled" />
             </div>
         );
     }
@@ -565,9 +565,9 @@ export default function VibePage() {
         return (
             <div className="p-6">
                 <h1 className="text-xl font-semibold text-white mb-4">Vibe</h1>
-                <div className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-lg p-6">
-                    <p className="text-[#a3a3a3] mb-2">Feature not available</p>
-                    <p className="text-sm text-[#737373]">
+                <div className="bg-surface-raised border border-surface-active rounded-lg p-6">
+                    <p className="text-content-secondary mb-2">Feature not available</p>
+                    <p className="text-sm text-content-muted">
                         Vibe similarity requires the CLAP analyzer service.
                     </p>
                 </div>
@@ -916,14 +916,14 @@ function VibePageContent() {
                         opacity: selectedMatch ? 0.6 : 0.3,
                     }}
                     transition={{ duration: 1 }}
-                    className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full bg-[#2323FF]/5 blur-[100px]"
+                    className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full bg-ai/5 blur-[100px]"
                 />
                 <motion.div
                     animate={{
                         opacity: sourceTrack ? 0.5 : 0.2,
                     }}
                     transition={{ duration: 1 }}
-                    className="absolute -bottom-40 -left-40 w-[400px] h-[400px] rounded-full bg-[#3b82f6]/5 blur-[100px]"
+                    className="absolute -bottom-40 -left-40 w-[400px] h-[400px] rounded-full bg-brand/5 blur-[100px]"
                 />
             </div>
 
@@ -941,8 +941,8 @@ function VibePageContent() {
                                     className={cn(
                                         "flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors disabled:opacity-50",
                                         sourceTrack?.id === currentTrack.id
-                                            ? "text-[#3b82f6] bg-[#3b82f6]/10"
-                                            : "text-[#737373] hover:text-white hover:bg-white/5"
+                                            ? "text-brand bg-brand/10"
+                                            : "text-content-muted hover:text-white hover:bg-white/5"
                                     )}
                                     title={`Find tracks similar to "${currentTrack.title}"`}
                                 >
@@ -953,7 +953,7 @@ function VibePageContent() {
                             <button
                                 onClick={handleRandomTrack}
                                 disabled={isLoading || libraryTracks.length === 0}
-                                className="flex items-center gap-2 px-3 py-1.5 text-sm text-[#737373] hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
+                                className="flex items-center gap-2 px-3 py-1.5 text-sm text-content-muted hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
                             >
                                 <Shuffle className="w-4 h-4" />
                                 <span className="hidden sm:inline">Random</span>
@@ -961,14 +961,14 @@ function VibePageContent() {
                             <button
                                 onClick={handleRefresh}
                                 disabled={isLoading}
-                                className="p-1.5 text-[#737373] hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
+                                className="p-1.5 text-content-muted hover:text-white hover:bg-white/5 rounded-md transition-colors disabled:opacity-50"
                             >
                                 <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
                             </button>
                         </div>
                     </div>
                     {vibeStatus && (
-                        <p className="text-sm text-[#525252]">
+                        <p className="text-sm text-content-disabled">
                             {vibeStatus.embeddedTracks.toLocaleString()} tracks with audio fingerprints
                         </p>
                     )}
@@ -986,7 +986,7 @@ function VibePageContent() {
                         </button>
                         <button
                             onClick={() => setVibeTab("map")}
-                            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-300"
+                            className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-sm font-medium transition-colors text-gray-400 hover:text-gray-300"
                         >
                             <Map className="w-4 h-4" />
                             Map
@@ -995,16 +995,16 @@ function VibePageContent() {
 
                     {/* Search — only visible in explore tab */}
                     {vibeTab === "explore" && (<><form onSubmit={handleSearch} className="relative max-w-lg mt-5">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#525252]" />
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-disabled" />
                         <input
                             type="text"
                             placeholder="Search by vibe... try 'dark atmospheric' or 'upbeat dance'"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2.5 bg-[#0f0f0f] border border-[#1c1c1c] focus:border-[#333] rounded-lg text-sm text-white placeholder-[#525252] focus:outline-none transition-colors"
+                            className="w-full pl-10 pr-4 py-2.5 bg-surface-raised border border-surface-active focus:border-line-strong rounded-lg text-sm text-white placeholder-content-disabled focus:outline-none transition-colors"
                         />
                         {isSearching && (
-                            <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#525252] animate-spin" />
+                            <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-content-disabled animate-spin" />
                         )}
                     </form>
 
@@ -1014,19 +1014,19 @@ function VibePageContent() {
                             <button
                                 key={preset.id}
                                 onClick={() => handleVibeSearch(preset.query)}
-                                className="px-3 py-1.5 text-xs text-[#737373] bg-[#0f0f0f] border border-[#1c1c1c] hover:border-[#333] hover:text-white rounded-full transition-all hover:scale-[1.02]"
+                                className="px-3 py-1.5 text-xs text-content-muted bg-surface-raised border border-surface-active hover:border-line-strong hover:text-white rounded-full transition-all hover:scale-[1.02]"
                             >
                                 {preset.name}
                             </button>
                         ))}
                         {recentSearches.length > 0 && (
                             <>
-                                <div className="w-px h-5 bg-[#1c1c1c] mx-1" />
+                                <div className="w-px h-5 bg-surface-active mx-1" />
                                 {recentSearches.slice(0, 3).map((query) => (
                                     <button
                                         key={query}
                                         onClick={() => handleVibeSearch(query)}
-                                        className="text-xs text-[#525252] hover:text-[#737373] transition-colors"
+                                        className="text-xs text-content-disabled hover:text-content-muted transition-colors"
                                     >
                                         {query}
                                     </button>
@@ -1040,9 +1040,9 @@ function VibePageContent() {
                 {vibeTab === "explore" && <>
                 {/* Error */}
                 {error && (
-                    <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-[#ef4444]/5 border border-[#ef4444]/20 rounded-lg">
-                        <AlertCircle className="w-4 h-4 text-[#ef4444] flex-shrink-0" />
-                        <span className="text-sm text-[#ef4444]">{error}</span>
+                    <div className="mb-6 flex items-center gap-3 px-4 py-3 bg-error/5 border border-error/20 rounded-lg">
+                        <AlertCircle className="w-4 h-4 text-error flex-shrink-0" />
+                        <span className="text-sm text-error">{error}</span>
                     </div>
                 )}
 
@@ -1050,7 +1050,7 @@ function VibePageContent() {
                 {(isLoading || isSearching) && !error && (
                     <div className="flex items-center justify-center py-24">
                         <div className="relative">
-                            <div className="w-12 h-12 rounded-full border-2 border-[#1c1c1c] border-t-[#2323FF] animate-spin" />
+                            <div className="w-12 h-12 rounded-full border-2 border-surface-active border-t-[#2323FF] animate-spin" />
                         </div>
                     </div>
                 )}
@@ -1063,7 +1063,7 @@ function VibePageContent() {
                                 <h2 className="text-lg font-medium text-white">
                                     &ldquo;{searchQuery}&rdquo;
                                 </h2>
-                                <p className="text-sm text-[#525252]">
+                                <p className="text-sm text-content-disabled">
                                     {similarTracks.length} tracks found - double-click to explore similar
                                 </p>
                             </div>
@@ -1104,11 +1104,11 @@ function VibePageContent() {
                                             size={56}
                                             className="rounded-lg"
                                         />
-                                        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#3b82f6] ring-2 ring-[#0a0a0a]" />
+                                        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-brand ring-2 ring-surface" />
                                     </div>
                                     <div>
                                         <h2 className="font-medium text-white">Similar to</h2>
-                                        <p className="text-sm text-[#a3a3a3]">{sourceTrack.title}</p>
+                                        <p className="text-sm text-content-secondary">{sourceTrack.title}</p>
                                     </div>
                                 </div>
                                 <button
@@ -1149,12 +1149,12 @@ function VibePageContent() {
                                         <motion.div
                                             initial={{ opacity: 0 }}
                                             animate={{ opacity: 1 }}
-                                            className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-xl p-8 text-center"
+                                            className="bg-surface-raised border border-surface-active rounded-xl p-8 text-center"
                                         >
-                                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-[#2323FF]/10 flex items-center justify-center">
-                                                <Disc3 className="w-8 h-8 text-[#333]" />
+                                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-brand/10 to-ai/10 flex items-center justify-center">
+                                                <Disc3 className="w-8 h-8 text-line-strong" />
                                             </div>
-                                            <p className="text-sm text-[#525252]">
+                                            <p className="text-sm text-content-disabled">
                                                 Select a track to compare audio DNA
                                             </p>
                                         </motion.div>
@@ -1168,11 +1168,11 @@ function VibePageContent() {
                 {/* Empty state - prompt user to start */}
                 {!isLoading && !isSearching && !error && !sourceTrack && similarTracks.length === 0 && viewMode === "comparison" && (
                     <div className="max-w-md mx-auto text-center py-16">
-                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-[#3b82f6]/10 to-[#2323FF]/10 flex items-center justify-center">
-                            <AudioWaveform className="w-12 h-12 text-[#525252]" />
+                        <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-brand/10 to-ai/10 flex items-center justify-center">
+                            <AudioWaveform className="w-12 h-12 text-content-disabled" />
                         </div>
                         <h2 className="text-xl font-medium text-white mb-2">Explore by Vibe</h2>
-                        <p className="text-[#737373] mb-8">
+                        <p className="text-content-muted mb-8">
                             Find tracks that sound similar to each other based on their audio characteristics.
                         </p>
 
@@ -1181,16 +1181,16 @@ function VibePageContent() {
                             {currentTrack && (
                                 <button
                                     onClick={handleUseCurrentTrack}
-                                    className="w-full flex items-center gap-4 px-4 py-3 bg-[#0f0f0f] border border-[#1c1c1c] hover:border-[#333] rounded-lg transition-all text-left group"
+                                    className="w-full flex items-center gap-4 px-4 py-3 bg-surface-raised border border-surface-active hover:border-line-strong rounded-lg transition-all text-left group"
                                 >
-                                    <div className="w-12 h-12 rounded bg-[#1a1a1a] flex items-center justify-center flex-shrink-0">
-                                        <AudioWaveform className="w-5 h-5 text-[#3b82f6]" />
+                                    <div className="w-12 h-12 rounded bg-surface-hover flex items-center justify-center flex-shrink-0">
+                                        <AudioWaveform className="w-5 h-5 text-brand" />
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <p className="text-sm font-medium text-white truncate">
                                             Find tracks like &ldquo;{currentTrack.title}&rdquo;
                                         </p>
-                                        <p className="text-xs text-[#525252]">Use the currently playing track</p>
+                                        <p className="text-xs text-content-disabled">Use the currently playing track</p>
                                     </div>
                                 </button>
                             )}
@@ -1199,22 +1199,22 @@ function VibePageContent() {
                             <button
                                 onClick={handleRandomTrack}
                                 disabled={libraryTracks.length === 0}
-                                className="w-full flex items-center gap-4 px-4 py-3 bg-[#0f0f0f] border border-[#1c1c1c] hover:border-[#333] rounded-lg transition-all text-left group disabled:opacity-50"
+                                className="w-full flex items-center gap-4 px-4 py-3 bg-surface-raised border border-surface-active hover:border-line-strong rounded-lg transition-all text-left group disabled:opacity-50"
                             >
-                                <div className="w-12 h-12 rounded bg-[#1a1a1a] flex items-center justify-center flex-shrink-0">
-                                    <Shuffle className="w-5 h-5 text-[#2323FF]" />
+                                <div className="w-12 h-12 rounded bg-surface-hover flex items-center justify-center flex-shrink-0">
+                                    <Shuffle className="w-5 h-5 text-ai" />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <p className="text-sm font-medium text-white">Surprise me</p>
-                                    <p className="text-xs text-[#525252]">Pick a random track from your library</p>
+                                    <p className="text-xs text-content-disabled">Pick a random track from your library</p>
                                 </div>
                             </button>
 
                             {/* Divider */}
                             <div className="flex items-center gap-3 py-2">
-                                <div className="flex-1 h-px bg-[#1c1c1c]" />
-                                <span className="text-xs text-[#525252]">or search above</span>
-                                <div className="flex-1 h-px bg-[#1c1c1c]" />
+                                <div className="flex-1 h-px bg-surface-active" />
+                                <span className="text-xs text-content-disabled">or search above</span>
+                                <div className="flex-1 h-px bg-surface-active" />
                             </div>
 
                             {/* Preset chips */}
@@ -1223,7 +1223,7 @@ function VibePageContent() {
                                     <button
                                         key={preset.id}
                                         onClick={() => handleVibeSearch(preset.query)}
-                                        className="px-3 py-1.5 text-xs text-[#737373] bg-[#0f0f0f] border border-[#1c1c1c] hover:border-[#333] hover:text-white rounded-full transition-all"
+                                        className="px-3 py-1.5 text-xs text-content-muted bg-surface-raised border border-surface-active hover:border-line-strong hover:text-white rounded-full transition-all"
                                     >
                                         {preset.name}
                                     </button>
@@ -1232,7 +1232,7 @@ function VibePageContent() {
                         </div>
 
                         {vibeStatus && vibeStatus.embeddedTracks === 0 && (
-                            <p className="text-xs text-[#ef4444] mt-6">
+                            <p className="text-xs text-error mt-6">
                                 No tracks analyzed yet. Run the CLAP analyzer to enable vibe search.
                             </p>
                         )}

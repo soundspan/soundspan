@@ -8,7 +8,7 @@
  */
 export function InQueueBadge() {
     return (
-        <span className="shrink-0 text-[10px] bg-[#3b82f6]/15 text-[#93c5fd] px-1.5 py-0.5 rounded border border-[#3b82f6]/30 font-medium">
+        <span className="shrink-0 text-[10px] bg-brand/15 text-brand-light px-1.5 py-0.5 rounded border border-brand/30 font-medium">
             IN QUEUE
         </span>
     );

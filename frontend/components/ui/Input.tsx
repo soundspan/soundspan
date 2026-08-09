@@ -27,9 +27,9 @@ export function Input({
             <div className="relative">
                 <input
                     className={cn(
-                        "w-full bg-[#1a1a1a] border border-[#1c1c1c] rounded-md px-4 py-2 text-white",
-                        "placeholder:text-gray-500",
-                        "focus:outline-none focus:ring-2 focus:ring-[#2323FF]/50 focus:border-[#2323FF]",
+                        "w-full bg-surface-hover border border-surface-active rounded-md px-4 py-2 text-white",
+                        "placeholder:text-gray-400",
+                        "focus:outline-none focus:ring-2 focus:ring-ai/50 focus:border-ai",
                         "transition-all duration-200",
                         error &&
                             "border-red-500/50 focus:ring-red-500/50 focus:border-red-500",

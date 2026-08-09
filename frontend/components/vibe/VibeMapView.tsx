@@ -14,7 +14,7 @@ export function VibeMapView({ model, containerRef }: {
     containerRef: RefObject<HTMLDivElement | null>;
 }) {
     const className = model.shell.fullscreen ?
-        "fixed inset-0 z-[10005] bg-[#0a0a0a] overflow-hidden" :
+        "fixed inset-0 z-[10005] bg-surface overflow-hidden" :
         "relative w-full h-full overflow-hidden";
     const bottomInset = model.shell.fullscreen ? 0 : model.props.bottomInset ?? 0;
     return (

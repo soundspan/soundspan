@@ -54,9 +54,9 @@ export default function MixPage() {
         return (
             <div className="p-6">
                 <h1 className="text-xl font-semibold text-white mb-4">Mix</h1>
-                <div className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-lg p-6">
-                    <p className="text-[#a3a3a3] mb-2">Feature not available</p>
-                    <p className="text-sm text-[#737373]">
+                <div className="bg-surface-raised border border-surface-active rounded-lg p-6">
+                    <p className="text-content-secondary mb-2">Feature not available</p>
+                    <p className="text-sm text-content-muted">
                         Auto-generated mixes are disabled on this server.
                     </p>
                 </div>
@@ -216,7 +216,7 @@ function MixPageContent() {
     if (!mix) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <p className="text-gray-500">Mix not found</p>
+                <p className="text-gray-400">Mix not found</p>
             </div>
         );
     }
@@ -234,11 +234,11 @@ function MixPageContent() {
             >
                 <div className="flex items-end gap-6">
                         {/* Cover Art Mosaic */}
-                        <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
+                        <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-surface-highlight rounded shadow-2xl shrink-0 overflow-hidden">
                             <CoverMosaic
                                 coverUrls={(mix.coverUrls || []).slice(0, 4).map((url: string) => api.getCoverArtUrl(url, 200))}
                                 imageSizes="96px"
-                                emptyState={<Music className="w-16 h-16 text-gray-600" />}
+                                emptyState={<Music className="w-16 h-16 text-gray-400" />}
                             />
                         </div>
 
@@ -264,13 +264,13 @@ function MixPageContent() {
             </div>
 
             {/* Action Bar */}
-            <div className="bg-gradient-to-b from-[#1a1a1a]/60 to-transparent px-4 md:px-8 py-4">
+            <div className="bg-gradient-to-b from-surface-hover/60 to-transparent px-4 md:px-8 py-4">
                 <div className="flex items-center gap-4">
                     {/* Play Button */}
                     {mix.tracks && mix.tracks.length > 0 && (
                         <button
                             onClick={handlePlayMix}
-                            className="h-12 w-12 rounded-full bg-[#60a5fa] hover:bg-[#3b82f6] hover:scale-105 flex items-center justify-center shadow-lg transition-all"
+                            className="h-12 w-12 rounded-full bg-brand-hover hover:bg-brand hover:scale-105 flex items-center justify-center shadow-lg transition-all"
                         >
                             {showPlaySpinner ? (
                                 <Loader2 className="w-5 h-5 animate-spin text-black" />
@@ -333,7 +333,7 @@ function MixPageContent() {
                                             isCurrentlyPlaying && "bg-white/10",
                                             isInQueue &&
                                                 !isCurrentlyPlaying &&
-                                                "bg-[#3b82f6]/[0.06]"
+                                                "bg-brand/[0.06]"
                                         )}
                                     >
                                         {/* Track Number / Play Icon */}
@@ -341,11 +341,11 @@ function MixPageContent() {
                                             <span
                                                 className={cn(
                                                     "text-sm group-hover:hidden",
-                                                    isCurrentlyPlaying ? "text-[#3b82f6]" : "text-gray-400"
+                                                    isCurrentlyPlaying ? "text-brand" : "text-gray-400"
                                                 )}
                                             >
                                                 {isCurrentlyPlaying && isPlaying ? (
-                                                    <Music className="w-4 h-4 text-[#3b82f6] animate-pulse" />
+                                                    <Music className="w-4 h-4 text-brand animate-pulse" />
                                                 ) : (
                                                     index + 1
                                                 )}
@@ -355,7 +355,7 @@ function MixPageContent() {
 
                                         {/* Title + Artist */}
                                         <div className="flex items-center gap-3 min-w-0">
-                                            <div className="relative w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden">
+                                            <div className="relative w-10 h-10 bg-surface-highlight rounded shrink-0 overflow-hidden">
                                                 {track.album?.coverUrl ? (
                                                     <Image
                                                         src={api.getCoverArtUrl(track.album.coverUrl, 100)}
@@ -367,7 +367,7 @@ function MixPageContent() {
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center">
-                                                        <Music className="w-5 h-5 text-gray-600" />
+                                                        <Music className="w-5 h-5 text-gray-400" />
                                                     </div>
                                                 )}
                                             </div>
@@ -375,14 +375,14 @@ function MixPageContent() {
                                                 <p
                                                     className={cn(
                                                         "text-sm font-medium flex items-center gap-2 min-w-0",
-                                                        isCurrentlyPlaying ? "text-[#3b82f6]" : "text-white"
+                                                        isCurrentlyPlaying ? "text-brand" : "text-white"
                                                     )}
                                                 >
                                                     <span className="truncate">
                                                         {track.title}
                                                     </span>
                                                     {isInQueue && (
-                                                        <span className="shrink-0 text-[10px] bg-[#3b82f6]/15 text-[#93c5fd] px-1.5 py-0.5 rounded border border-[#3b82f6]/30 font-medium">
+                                                        <span className="shrink-0 text-[10px] bg-brand/15 text-brand-light px-1.5 py-0.5 rounded border border-brand/30 font-medium">
                                                             IN QUEUE
                                                         </span>
                                                     )}
@@ -421,11 +421,11 @@ function MixPageContent() {
                     </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center py-24 text-center">
-                        <div className="w-20 h-20 bg-[#282828] rounded-full flex items-center justify-center mb-4">
-                            <Music className="w-10 h-10 text-gray-500" />
+                        <div className="w-20 h-20 bg-surface-highlight rounded-full flex items-center justify-center mb-4">
+                            <Music className="w-10 h-10 text-gray-400" />
                         </div>
                         <h3 className="text-lg font-medium text-white mb-1">No tracks</h3>
-                        <p className="text-sm text-gray-500">This mix is empty</p>
+                        <p className="text-sm text-gray-400">This mix is empty</p>
                     </div>
                 )}
             </div>

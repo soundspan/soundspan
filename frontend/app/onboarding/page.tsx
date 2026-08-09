@@ -196,7 +196,7 @@ export default function OnboardingPage() {
         <div className="min-h-screen relative overflow-hidden">
             {/* Dark background (matches login) */}
             <div className="absolute inset-0 bg-[#000]">
-                <div className="absolute inset-0 bg-gradient-to-br from-[#3b82f6]/5 via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-br from-brand/5 via-transparent to-transparent" />
             </div>
 
             {/* Show loading spinner while checking session */}
@@ -246,7 +246,7 @@ export default function OnboardingPage() {
                                         <div
                                             className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-sm transition-all ${
                                                 s.num === step
-                                                    ? "bg-[#3b82f6] text-black shadow-lg shadow-[#3b82f6]/20 scale-110"
+                                                    ? "bg-brand text-black shadow-lg shadow-brand/20 scale-110"
                                                     : s.num < step
                                                     ? "bg-white/5 text-white/80 border border-white/10"
                                                     : "bg-white/5 text-white/40 border border-white/10"
@@ -268,7 +268,7 @@ export default function OnboardingPage() {
                                         <div
                                             className={`w-16 h-0.5 mx-4 mb-6 transition-all ${
                                                 s.num < step
-                                                    ? "bg-[#3b82f6]/25"
+                                                    ? "bg-brand/25"
                                                     : "bg-white/10"
                                             }`}
                                         />
@@ -369,7 +369,7 @@ export default function OnboardingPage() {
                                             <button
                                                 type="submit"
                                                 disabled={loading}
-                                                className="w-full py-3.5 bg-[#3b82f6] text-black font-bold rounded-lg hover:bg-[#2563eb] transition-all disabled:opacity-50 disabled:cursor-not-allowed relative group overflow-hidden mt-8 focus:outline-none focus:ring-2 focus:ring-brand/30"
+                                                className="w-full py-3.5 bg-brand text-black font-bold rounded-lg hover:bg-brand-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed relative group overflow-hidden mt-8 focus:outline-none focus:ring-2 focus:ring-brand/30"
                                             >
                                                 <span className="relative z-10 flex items-center justify-center gap-2">
                                                     {loading ? (
@@ -554,7 +554,7 @@ export default function OnboardingPage() {
                                                 onKeyDown={(e) => e.key === 'Enter' && !loading && handleNextStep()}
                                                 disabled={loading}
                                                 tabIndex={0}
-                                                className="flex-1 py-3.5 bg-[#3b82f6] text-black font-bold rounded-lg hover:bg-[#2563eb] transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30"
+                                                className="flex-1 py-3.5 bg-brand text-black font-bold rounded-lg hover:bg-brand-dark transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30"
                                             >
                                                 {loading
                                                     ? "Saving..."
@@ -575,7 +575,7 @@ export default function OnboardingPage() {
                                             </p>
                                         </div>
 
-                                        <div className="bg-[#0f0f0f] border border-white/10 rounded-lg p-6 mt-8">
+                                        <div className="bg-surface-raised border border-white/10 rounded-lg p-6 mt-8">
                                             <h3 className="text-lg font-semibold text-white mb-4">
                                                 Detected Analysis Features
                                             </h3>
@@ -589,10 +589,10 @@ export default function OnboardingPage() {
                                                 <div className="space-y-4">
                                                     <div className={`p-4 rounded-lg border ${musicCNN ? "bg-green-500/5 border-green-500/20" : "bg-white/5 border-white/10"}`}>
                                                         <div className="flex items-center gap-3 mb-2">
-                                                            <span className={musicCNN ? "text-green-400" : "text-gray-500"}>
+                                                            <span className={musicCNN ? "text-green-400" : "text-gray-400"}>
                                                                 {musicCNN ? "\u2713" : "\u2014"}
                                                             </span>
-                                                            <span className={`font-medium ${musicCNN ? "text-white" : "text-gray-500"}`}>
+                                                            <span className={`font-medium ${musicCNN ? "text-white" : "text-gray-400"}`}>
                                                                 MusicCNN Audio Analysis
                                                             </span>
                                                         </div>
@@ -602,10 +602,10 @@ export default function OnboardingPage() {
                                                     </div>
                                                     <div className={`p-4 rounded-lg border ${vibeEmbeddings ? "bg-green-500/5 border-green-500/20" : "bg-white/5 border-white/10"}`}>
                                                         <div className="flex items-center gap-3 mb-2">
-                                                            <span className={vibeEmbeddings ? "text-green-400" : "text-gray-500"}>
+                                                            <span className={vibeEmbeddings ? "text-green-400" : "text-gray-400"}>
                                                                 {vibeEmbeddings ? "\u2713" : "\u2014"}
                                                             </span>
-                                                            <span className={`font-medium ${vibeEmbeddings ? "text-white" : "text-gray-500"}`}>
+                                                            <span className={`font-medium ${vibeEmbeddings ? "text-white" : "text-gray-400"}`}>
                                                                 CLAP Vibe Embeddings
                                                             </span>
                                                         </div>
@@ -639,11 +639,11 @@ export default function OnboardingPage() {
                                             </div>
                                         </div>
 
-                                        <div className="bg-[#0f0f0f] border border-white/10 rounded-lg p-6">
+                                        <div className="bg-surface-raised border border-white/10 rounded-lg p-6">
                                             <div className="flex items-start gap-4">
-                                                <div className="w-12 h-12 bg-[#3b82f6]/10 border border-[#3b82f6]/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                                                <div className="w-12 h-12 bg-brand/10 border border-brand/20 rounded-lg flex items-center justify-center flex-shrink-0">
                                                     <svg
-                                                        className="w-6 h-6 text-[#3b82f6]"
+                                                        className="w-6 h-6 text-brand"
                                                         fill="none"
                                                         stroke="currentColor"
                                                         viewBox="0 0 24 24"
@@ -683,7 +683,7 @@ export default function OnboardingPage() {
                                                 onClick={handleNextStep}
                                                 onKeyDown={(e) => e.key === 'Enter' && !loading && handleNextStep()}
                                                 disabled={loading}
-                                                className="w-full py-3.5 bg-[#3b82f6] text-black font-bold rounded-lg hover:bg-[#2563eb] transition-all duration-200 disabled:opacity-50 disabled:hover:scale-100 relative group overflow-hidden focus:outline-none focus:ring-2 focus:ring-brand/30"
+                                                className="w-full py-3.5 bg-brand text-black font-bold rounded-lg hover:bg-brand-dark transition-all duration-200 disabled:opacity-50 disabled:hover:scale-100 relative group overflow-hidden focus:outline-none focus:ring-2 focus:ring-brand/30"
                                             >
                                                 <span className="relative z-10 flex items-center justify-center gap-2">
                                                     {loading ? (
@@ -756,7 +756,7 @@ function IntegrationCard({
         <div
             className={`border rounded-lg transition-all ${
                 enabled
-                    ? "bg-[#0f0f0f] border-brand/25"
+                    ? "bg-surface-raised border-brand/25"
                     : "bg-white/5 border-white/10"
             }`}
         >
@@ -766,7 +766,7 @@ function IntegrationCard({
                         <div
                             className={`w-9 h-9 rounded-lg flex items-center justify-center ${
                                 enabled
-                                    ? "bg-[#3b82f6]/10 border border-[#3b82f6]/20 text-[#3b82f6]"
+                                    ? "bg-brand/10 border border-brand/20 text-brand"
                                     : "bg-white/5 border border-white/10 text-white/40"
                             }`}
                         >
@@ -784,11 +784,11 @@ function IntegrationCard({
                         onKeyDown={(e) => e.key === 'Enter' && onToggle()}
                         tabIndex={0}
                         className={`relative w-11 h-6 rounded-lg transition-all ${
-                            enabled ? "bg-[#3b82f6]" : "bg-white/20"
+                            enabled ? "bg-brand" : "bg-white/20"
                         } focus:outline-none focus:ring-2 focus:ring-brand/30`}
                     >
                         <div
-                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-[#3b82f6] rounded-lg transition-all shadow-lg ${
+                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-brand rounded-lg transition-all shadow-lg ${
                                 enabled ? "translate-x-5" : ""
                             }`}
                         />
@@ -889,7 +889,7 @@ function SoulseekCard({
         <div
             className={`border rounded-lg transition-all ${
                 enabled
-                    ? "bg-[#0f0f0f] border-brand/25"
+                    ? "bg-surface-raised border-brand/25"
                     : "bg-white/5 border-white/10"
             }`}
         >
@@ -899,7 +899,7 @@ function SoulseekCard({
                         <div
                             className={`w-9 h-9 rounded-lg flex items-center justify-center ${
                                 enabled
-                                    ? "bg-[#3b82f6]/10 border border-[#3b82f6]/20 text-[#3b82f6]"
+                                    ? "bg-brand/10 border border-brand/20 text-brand"
                                     : "bg-white/5 border border-white/10 text-white/40"
                             }`}
                         >
@@ -929,11 +929,11 @@ function SoulseekCard({
                         onKeyDown={(e) => e.key === 'Enter' && onToggle()}
                         tabIndex={0}
                         className={`relative w-11 h-6 rounded-lg transition-all ${
-                            enabled ? "bg-[#3b82f6]" : "bg-white/20"
+                            enabled ? "bg-brand" : "bg-white/20"
                         } focus:outline-none focus:ring-2 focus:ring-brand/30`}
                     >
                         <div
-                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-[#3b82f6] rounded-lg transition-all shadow-lg ${
+                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-brand rounded-lg transition-all shadow-lg ${
                                 enabled ? "translate-x-5" : ""
                             }`}
                         />
@@ -962,7 +962,7 @@ function SoulseekCard({
                                 href="https://www.slsknet.org/news/node/1"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-[#3b82f6] hover:underline"
+                                className="text-brand hover:underline"
                             >
                                 slsknet.org
                             </a>

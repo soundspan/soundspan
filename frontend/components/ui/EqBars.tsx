@@ -13,9 +13,9 @@ interface EqBarsProps {
 export function EqBars({ className }: EqBarsProps) {
     return (
         <div className={cn("inline-flex items-end gap-0.5 h-3", className)}>
-            <span className="h-2 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.2s] motion-reduce:animate-none" />
-            <span className="h-2.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa] motion-reduce:animate-none" />
-            <span className="h-1.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.35s] motion-reduce:animate-none" />
+            <span className="h-2 w-0.5 animate-bounce rounded-full bg-brand-hover [animation-delay:-0.2s] motion-reduce:animate-none" />
+            <span className="h-2.5 w-0.5 animate-bounce rounded-full bg-brand-hover motion-reduce:animate-none" />
+            <span className="h-1.5 w-0.5 animate-bounce rounded-full bg-brand-hover [animation-delay:-0.35s] motion-reduce:animate-none" />
         </div>
     );
 }

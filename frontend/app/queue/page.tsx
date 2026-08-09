@@ -245,14 +245,14 @@ export default function QueuePage() {
     const isCurrentUnavailable = currentAvailability?.available === false;
 
     return (
-        <div className="min-h-screen bg-[#0a0a0a]">
+        <div className="min-h-screen bg-surface">
             <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-6">
                 {/* Header */}
                 <PageHeader
                     title={isInGroup ? "Listen Together Queue" : "Queue"}
                     subtitle={`${queue.length} item${queue.length !== 1 ? "s" : ""} in queue`}
                     icon={ListMusic}
-                    iconClassName="text-[#3b82f6]"
+                    iconClassName="text-brand"
                     className="mb-8"
                     actions={
                         queue.length > 0 ? (
@@ -296,7 +296,7 @@ export default function QueuePage() {
                             Now Playing
                         </h2>
                         <Card>
-                            <div className={`flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-[#2323FF] group ${isCurrentUnavailable ? "opacity-50" : ""}`}>
+                            <div className={`flex items-center gap-4 p-4 bg-surface-hover border-l-2 border-ai group ${isCurrentUnavailable ? "opacity-50" : ""}`}>
                                 <div className="relative flex-shrink-0 w-16 h-16">
                                     {currentTrack.album?.coverArt ? (
                                         <Image
@@ -311,16 +311,16 @@ export default function QueuePage() {
                                             unoptimized
                                         />
                                     ) : (
-                                        <div className="w-16 h-16 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                                            <Music className="w-6 h-6 text-gray-600" />
+                                        <div className="w-16 h-16 bg-surface rounded-sm flex items-center justify-center">
+                                            <Music className="w-6 h-6 text-gray-400" />
                                         </div>
                                     )}
                                     <div className="absolute inset-0 flex items-center justify-center">
-                                        <Play className="w-6 h-6 text-[#5b5bff] fill-[#5b5bff] animate-pulse" />
+                                        <Play className="w-6 h-6 text-ai-hover fill-ai-hover animate-pulse" />
                                     </div>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <h3 className="text-sm font-medium text-[#5b5bff] truncate">
+                                    <h3 className="text-sm font-medium text-ai-hover truncate">
                                         {currentTrack.displayTitle ??
                                             currentTrack.title}
                                     </h3>
@@ -340,12 +340,12 @@ export default function QueuePage() {
                                             <YouTubeBadge />
                                         ) : null}
                                     </div>
-                                    <p className="text-xs text-gray-500 truncate">
+                                    <p className="text-xs text-gray-400 truncate">
                                         {currentTrack.album?.title}
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                    <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                    <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                                         {formatTime(currentTrack.duration)}
                                     </span>
                                     <TrackPreferenceButtons
@@ -373,7 +373,7 @@ export default function QueuePage() {
                             Now Playing
                         </h2>
                         <Card>
-                            <div className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-2 border-[#2323FF]">
+                            <div className="flex items-center gap-4 p-4 bg-surface-hover border-l-2 border-ai">
                                 <div className="relative flex-shrink-0 w-16 h-16">
                                     {currentEpisode.coverUrl ? (
                                         <Image
@@ -385,23 +385,23 @@ export default function QueuePage() {
                                             unoptimized
                                         />
                                     ) : (
-                                        <div className="w-16 h-16 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                                            <Music className="w-6 h-6 text-gray-600" />
+                                        <div className="w-16 h-16 bg-surface rounded-sm flex items-center justify-center">
+                                            <Music className="w-6 h-6 text-gray-400" />
                                         </div>
                                     )}
                                     <div className="absolute inset-0 flex items-center justify-center">
-                                        <Play className="w-6 h-6 text-[#5b5bff] fill-[#5b5bff] animate-pulse" />
+                                        <Play className="w-6 h-6 text-ai-hover fill-ai-hover animate-pulse" />
                                     </div>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <h3 className="text-sm font-medium text-[#5b5bff] truncate">
+                                    <h3 className="text-sm font-medium text-ai-hover truncate">
                                         {currentEpisode.title}
                                     </h3>
                                     <p className="text-sm text-gray-400 truncate">
                                         {currentEpisode.podcastTitle}
                                     </p>
                                 </div>
-                                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                                <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                                     {formatTime(currentEpisode.duration)}
                                 </span>
                             </div>
@@ -523,7 +523,7 @@ export default function QueuePage() {
                     onClick={() => setShowSaveDialog(false)}
                 >
                     <div
-                        className="bg-[#121212] rounded-xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl"
+                        className="bg-surface-sunken rounded-xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="p-6">
@@ -541,7 +541,7 @@ export default function QueuePage() {
                                 onChange={(e) => setPlaylistName(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && handleSaveAsPlaylist()}
                                 placeholder={`Queue — ${new Date().toLocaleDateString()}`}
-                                className="w-full px-3 py-2 bg-[#1a1a1a] border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#3b82f6]/50"
+                                className="w-full px-3 py-2 bg-surface-hover border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-brand/50"
                                 autoFocus
                             />
                         </div>
@@ -555,7 +555,7 @@ export default function QueuePage() {
                             <button
                                 onClick={handleSaveAsPlaylist}
                                 disabled={isSaving}
-                                className="flex-1 px-4 py-2.5 bg-[#3b82f6] hover:bg-[#2563eb] text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                                className="flex-1 px-4 py-2.5 bg-brand hover:bg-brand-dark text-white font-medium rounded-lg transition-colors disabled:opacity-50"
                             >
                                 {isSaving ? "Saving..." : "Save"}
                             </button>
@@ -585,12 +585,12 @@ function EpisodeQueueRow({
 }) {
     return (
         <div
-            className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group border-b border-[#1c1c1c] ${played ? "opacity-50" : ""}`}
+            className={`flex items-center gap-4 p-4 hover:bg-surface-hover transition-colors group border-b border-surface-active ${played ? "opacity-50" : ""}`}
         >
             {dragHandleProps && (
                 <button
                     {...dragHandleProps}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-white cursor-grab active:cursor-grabbing"
                     title="Drag to reorder"
                     aria-label="Drag to reorder"
                 >
@@ -608,8 +608,8 @@ function EpisodeQueueRow({
                         unoptimized
                     />
                 ) : (
-                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                        <Music className="w-5 h-5 text-gray-600" />
+                    <div className="w-12 h-12 bg-surface rounded-sm flex items-center justify-center">
+                        <Music className="w-5 h-5 text-gray-400" />
                     </div>
                 )}
             </div>
@@ -620,14 +620,14 @@ function EpisodeQueueRow({
                 <p className="text-sm text-gray-400 truncate">
                     {episode.podcastTitle}
                 </p>
-                <p className="text-[11px] text-gray-500 truncate">Podcast episode</p>
+                <p className="text-[11px] text-gray-400 truncate">Podcast episode</p>
             </div>
             {(onPlay || onRemove) && (
                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     {onPlay && (
                         <button
                             onClick={onPlay}
-                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors"
+                            className="p-2 hover:bg-surface rounded-md transition-colors"
                             title="Play now"
                             aria-label="Play now"
                         >
@@ -637,7 +637,7 @@ function EpisodeQueueRow({
                     {onRemove && (
                         <button
                             onClick={onRemove}
-                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors text-red-400 hover:text-red-300"
+                            className="p-2 hover:bg-surface rounded-md transition-colors text-red-400 hover:text-red-300"
                             title="Remove from queue"
                         >
                             <X className="w-4 h-4" />
@@ -645,7 +645,7 @@ function EpisodeQueueRow({
                     )}
                 </div>
             )}
-            <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+            <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                 {formatTime(episode.duration)}
             </span>
         </div>
@@ -688,12 +688,12 @@ function NextTrackRow({
 
     return (
         <div
-            className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group border-b border-[#1c1c1c] ${isUnavailable ? "opacity-50" : ""}`}
+            className={`flex items-center gap-4 p-4 hover:bg-surface-hover transition-colors group border-b border-surface-active ${isUnavailable ? "opacity-50" : ""}`}
         >
             {!isInGroup && dragHandleProps && (
                 <button
                     {...dragHandleProps}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-white cursor-grab active:cursor-grabbing"
                     title="Drag to reorder"
                     aria-label="Drag to reorder"
                 >
@@ -711,8 +711,8 @@ function NextTrackRow({
                         unoptimized
                     />
                 ) : (
-                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                        <Music className="w-5 h-5 text-gray-600" />
+                    <div className="w-12 h-12 bg-surface rounded-sm flex items-center justify-center">
+                        <Music className="w-5 h-5 text-gray-400" />
                     </div>
                 )}
             </div>
@@ -731,7 +731,7 @@ function NextTrackRow({
                     {isInGroup && resolvedSource === "youtube" ? <YouTubeBadge /> : null}
                 </div>
                 {track.album?.title && (
-                    <p className="text-[11px] text-gray-500 truncate">{track.album.title}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{track.album.title}</p>
                 )}
             </div>
             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -740,7 +740,7 @@ function NextTrackRow({
                         <button
                             onClick={() => onMoveUp(queueIndex)}
                             disabled={queueIndex <= currentIndex + 1}
-                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            className="p-2 hover:bg-surface rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                             title="Move up"
                             aria-label="Move up"
                         >
@@ -749,7 +749,7 @@ function NextTrackRow({
                         <button
                             onClick={() => onMoveDown(queueIndex)}
                             disabled={queueIndex >= queueLength - 1}
-                            className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            className="p-2 hover:bg-surface rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                             title="Move down"
                             aria-label="Move down"
                         >
@@ -760,7 +760,7 @@ function NextTrackRow({
                 <button
                     onClick={() => onPlay(queueIndex)}
                     disabled={isUnavailable}
-                    className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="p-2 hover:bg-surface rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Play now"
                     aria-label="Play now"
                 >
@@ -768,7 +768,7 @@ function NextTrackRow({
                 </button>
             </div>
             <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                     {formatTime(track.duration)}
                 </span>
                 <TrackPreferenceButtons
@@ -819,7 +819,7 @@ function PreviousTrackRow({
 
     return (
         <div
-            className={`flex items-center gap-4 p-4 hover:bg-[#1a1a1a] transition-colors group opacity-50 border-b border-[#1c1c1c] ${isUnavailable ? "opacity-30" : ""}`}
+            className={`flex items-center gap-4 p-4 hover:bg-surface-hover transition-colors group opacity-50 border-b border-surface-active ${isUnavailable ? "opacity-30" : ""}`}
         >
             <div className="relative flex-shrink-0 w-12 h-12">
                 {track.album?.coverArt ? (
@@ -832,8 +832,8 @@ function PreviousTrackRow({
                         unoptimized
                     />
                 ) : (
-                    <div className="w-12 h-12 bg-[#0a0a0a] rounded-sm flex items-center justify-center">
-                        <Music className="w-5 h-5 text-gray-600" />
+                    <div className="w-12 h-12 bg-surface rounded-sm flex items-center justify-center">
+                        <Music className="w-5 h-5 text-gray-400" />
                     </div>
                 )}
             </div>
@@ -850,11 +850,11 @@ function PreviousTrackRow({
                     {isInGroup && resolvedSource === "youtube" ? <YouTubeBadge /> : null}
                 </div>
                 {track.album?.title && (
-                    <p className="text-[11px] text-gray-500 truncate">{track.album.title}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{track.album.title}</p>
                 )}
             </div>
             <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                     {formatTime(track.duration)}
                 </span>
                 <TrackPreferenceButtons

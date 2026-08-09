@@ -135,7 +135,7 @@ export function PlaybackHistorySection() {
                         checked={confirmClear}
                         onChange={(e) => setConfirmClear(e.target.checked)}
                         disabled={clearing}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-[#282828] text-red-500 focus:ring-red-500/40"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-surface-highlight text-red-500 focus:ring-red-500/40"
                     />
                     <span>
                         I understand this will affect personalization based on my listening history.
@@ -146,7 +146,7 @@ export function PlaybackHistorySection() {
                 </label>
 
                 <div className="flex items-center gap-3">
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-400">
                         {summaryLoading
                             ? "Loading history totals..."
                             : `Estimated events to remove: ${(impactedCount ?? 0).toLocaleString()}`}

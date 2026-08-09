@@ -218,7 +218,7 @@ export function FullPlayer() {
             if (result.success && result.trackCount > 0) {
                 toast.success("Vibe mode on", {
                     description: `${result.trackCount} similar tracks queued`,
-                    icon: <AudioWaveform className="w-4 h-4 text-[#60a5fa]" />,
+                    icon: <AudioWaveform className="w-4 h-4 text-brand-hover" />,
                 });
             } else {
                 toast.error("Couldn't find matching tracks");
@@ -341,7 +341,7 @@ export function FullPlayer() {
                                 className="relative w-14 h-14 flex-shrink-0 group"
                             >
                                 <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent rounded-lg blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
+                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-surface-hover rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
                                     {coverUrl ? (
                                         <Image
                                             key={coverUrl}
@@ -354,14 +354,14 @@ export function FullPlayer() {
                                             unoptimized
                                         />
                                     ) : (
-                                        <MusicIcon className="w-6 h-6 text-gray-500" />
+                                        <MusicIcon className="w-6 h-6 text-gray-400" />
                                     )}
                                 </div>
                             </Link>
                         ) : (
                             <div className="relative w-14 h-14 flex-shrink-0">
-                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
-                                    <MusicIcon className="w-6 h-6 text-gray-500" />
+                                <div className="relative w-full h-full bg-gradient-to-br from-[#2a2a2a] to-surface-hover rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
+                                    <MusicIcon className="w-6 h-6 text-gray-400" />
                                 </div>
                             </div>
                         )}
@@ -484,7 +484,7 @@ export function FullPlayer() {
                                         ? "bg-white text-black hover:scale-110 shadow-lg shadow-white/20 hover:shadow-white/30"
                                         : isBuffering
                                         ? "bg-white/80 text-black"
-                                        : "bg-gray-700 text-gray-500 cursor-not-allowed"
+                                        : "bg-gray-700 text-gray-400 cursor-not-allowed"
                                 )}
                                 disabled={!hasMedia || isBuffering}
                                 aria-label={
@@ -595,7 +595,7 @@ export function FullPlayer() {
                         <span
                             className={cn(
                                 "text-sm font-medium tabular-nums whitespace-nowrap",
-                                hasMedia ? "text-gray-300" : "text-gray-600"
+                                hasMedia ? "text-gray-300" : "text-gray-400"
                             )}
                         >
                             {formatTime(displayTime)}{" / "}
@@ -629,7 +629,7 @@ export function FullPlayer() {
                                     className={cn(
                                         "flex items-center justify-center w-8 h-8 transition-all duration-200 hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100",
                                         vibeMode
-                                            ? "text-[#60a5fa] hover:text-[#60a5fa]"
+                                            ? "text-brand-hover hover:text-brand-hover"
                                             : "text-gray-400 hover:text-white"
                                     )}
                                     title={vibeMode ? "Turn off vibe mode" : "Match this vibe"}
@@ -683,7 +683,7 @@ export function FullPlayer() {
                                 {/* Vertical volume slider popup */}
                                 <div
                                     className={cn(
-                                        "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-3 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl transition-all duration-200 overflow-hidden",
+                                        "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-3 bg-surface-hover border border-white/10 rounded-lg shadow-xl transition-all duration-200 overflow-hidden",
                                         showVolumePopup ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"
                                     )}
                                 >
@@ -725,7 +725,7 @@ export function FullPlayer() {
                                     "flex items-center justify-center w-8 h-8 transition-all duration-200",
                                     hasMedia
                                         ? "text-gray-400 hover:text-white hover:scale-110"
-                                        : "text-gray-600 cursor-not-allowed"
+                                        : "text-gray-400 cursor-not-allowed"
                                 )}
                                 disabled={!hasMedia}
                                 aria-label={playerMode === "overlay" ? "Close overlay player" : "Open overlay player"}

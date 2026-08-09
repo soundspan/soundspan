@@ -50,12 +50,12 @@ export function IntegrationCard({
     ) : statusColor === "red" ? (
         <XCircle className="w-4 h-4 text-red-400" />
     ) : (
-        <XCircle className="w-4 h-4 text-gray-500" />
+        <XCircle className="w-4 h-4 text-gray-400" />
     );
 
     return (
         <div
-            className={`rounded-lg border border-white/[0.06] bg-[#1a1a1a] overflow-hidden transition-opacity ${
+            className={`rounded-lg border border-white/[0.06] bg-surface-hover overflow-hidden transition-opacity ${
                 disabled ? "opacity-50" : ""
             }`}
         >
@@ -63,7 +63,7 @@ export function IntegrationCard({
             <div className="flex items-center justify-between px-4 py-3.5">
                 <div className="flex items-center gap-3">
                     {/* Icon */}
-                    <div className="w-9 h-9 rounded-full bg-[#282828] flex items-center justify-center shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-surface-highlight flex items-center justify-center shrink-0">
                         {icon}
                     </div>
 

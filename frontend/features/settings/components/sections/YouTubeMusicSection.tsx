@@ -62,7 +62,7 @@ export function YouTubeMusicAdminSection({ settings, onUpdate }: YouTubeMusicAdm
                         }
                         <span>Account Linking (Optional)</span>
                     </button>
-                    <p className="text-xs text-gray-500 ml-6 mb-2">
+                    <p className="text-xs text-gray-400 ml-6 mb-2">
                         Configure Google OAuth credentials to allow users to link their personal YouTube Music
                         accounts for library access. Not required for search, browse, or streaming.
                     </p>
@@ -322,7 +322,7 @@ export function YouTubeMusicCard({ settings, onUpdate }: YouTubeMusicCardProps) 
         >
             {/* Account linking hint when OAuth is available but not linked */}
             {!isConnected && canLinkAccount && status?.available && !polling && !authError && !error && !success && (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-400">
                     Link your Google account for personal library access (optional).
                 </p>
             )}

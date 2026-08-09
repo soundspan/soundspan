@@ -119,7 +119,7 @@ export default function GenrePage() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-black to-[#121212] text-white p-6 md:p-8">
+        <div className="min-h-screen bg-gradient-to-b from-black to-surface-sunken text-white p-6 md:p-8">
             {/* Header */}
             <div className="mb-8">
                 <button
@@ -141,9 +141,9 @@ export default function GenrePage() {
                     <div
                         key={podcast.id}
                         onClick={() => handlePodcastClick(podcast)}
-                        className="bg-gradient-to-br from-[#121212] to-[#121212] hover:from-[#181818] hover:to-[#1a1a1a] transition-all p-4 rounded-lg cursor-pointer group border border-[#1c1c1c]"
+                        className="bg-gradient-to-br from-surface-sunken to-surface-sunken hover:from-surface-elevated hover:to-surface-hover transition-all p-4 rounded-lg cursor-pointer group border border-surface-active"
                     >
-                        <div className="relative w-full aspect-square bg-[#181818] rounded-full mb-3 overflow-hidden">
+                        <div className="relative w-full aspect-square bg-surface-elevated rounded-full mb-3 overflow-hidden">
                             {podcast.coverUrl ? (
                                 <Image
                                     src={podcast.coverUrl}
@@ -155,7 +155,7 @@ export default function GenrePage() {
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
-                                    <Mic2 className="w-16 h-16 text-gray-700" />
+                                    <Mic2 className="w-16 h-16 text-gray-400" />
                                 </div>
                             )}
                         </div>
@@ -189,7 +189,7 @@ export default function GenrePage() {
             {/* No results */}
             {!loading && podcasts.length === 0 && (
                 <div className="text-center py-20">
-                    <Mic2 className="w-16 h-16 text-gray-700 mx-auto mb-4" />
+                    <Mic2 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                     <p className="text-gray-400">No podcasts found</p>
                 </div>
             )}

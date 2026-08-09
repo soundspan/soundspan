@@ -52,7 +52,7 @@ export function RadioStationCard({ station, onPlay, isLoading }: RadioStationCar
             className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left w-full"
         >
             {/* Square cover art */}
-            <div className="relative aspect-square bg-[#282828] rounded-lg mb-3 overflow-hidden shadow-lg">
+            <div className="relative aspect-square bg-surface-highlight rounded-lg mb-3 overflow-hidden shadow-lg">
                 <RadioStationMosaic filter={station.filter} className="absolute inset-0" />
                 {/* Gradient tint overlay */}
                 <div
@@ -67,7 +67,7 @@ export function RadioStationCard({ station, onPlay, isLoading }: RadioStationCar
                             : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 translate-y-2 group-hover:translate-y-0 group-focus-visible:translate-y-0"
                     )}
                 >
-                    <div className="w-10 h-10 rounded-full bg-[#60a5fa] flex items-center justify-center shadow-xl hover:scale-105 transition-transform">
+                    <div className="w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl hover:scale-105 transition-transform">
                         {isLoading || showSpinner ? (
                             <Loader2 className="w-4 h-4 text-black animate-spin" />
                         ) : (

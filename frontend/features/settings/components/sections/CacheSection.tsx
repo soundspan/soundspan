@@ -37,7 +37,7 @@ interface CacheSectionProps {
 // Progress bar component
 function ProgressBar({
     progress,
-    color = "bg-[#3b82f6]",
+    color = "bg-brand",
     showPercentage = true,
 }: {
     progress: number;
@@ -97,7 +97,7 @@ function EnrichmentStage({
                 {isComplete ? (
                     <CheckCircle className="w-4 h-4 text-green-400" />
                 ) : hasActivity ? (
-                    <Loader2 className="w-4 h-4 text-[#3b82f6] animate-spin" />
+                    <Loader2 className="w-4 h-4 text-brand animate-spin" />
                 ) : (
                     <Icon className="w-4 h-4 text-white/40" />
                 )}
@@ -121,8 +121,8 @@ function EnrichmentStage({
                             isComplete
                                 ? "bg-green-500"
                                 : isBackground
-                                ? "bg-[#2323FF]"
-                                : "bg-[#3b82f6]"
+                                ? "bg-ai"
+                                : "bg-brand"
                         }
                     />
                 </div>
@@ -131,7 +131,7 @@ function EnrichmentStage({
                         {completed} / {total}
                     </span>
                     {processing > 0 && (
-                        <span className="text-[#3b82f6]">
+                        <span className="text-brand">
                             {processing} processing
                         </span>
                     )}
@@ -619,7 +619,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             </h3>
                             {enrichmentProgress.coreComplete &&
                                 !enrichmentProgress.isFullyComplete && (
-                                    <span className="text-xs text-[#5b5bff] flex items-center gap-1">
+                                    <span className="text-xs text-ai-hover flex items-center gap-1">
                                         <Loader2 className="w-3 h-3 animate-spin" />
                                         Audio analysis running
                                     </span>
@@ -714,8 +714,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             ) : !featuresLoading ? (
                                 <div className="opacity-50 py-2">
                                     <h4 className="text-sm font-medium text-gray-300">Audio Analysis</h4>
-                                    <p className="text-sm text-gray-500">Analyzer not detected right now</p>
-                                    <p className="text-xs text-gray-600 mt-1">
+                                    <p className="text-sm text-gray-400">Analyzer not detected right now</p>
+                                    <p className="text-xs text-gray-400 mt-1">
                                         If services just started, wait about 60 seconds and refresh. In lite mode, this is expected.
                                     </p>
                                 </div>
@@ -751,8 +751,8 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                             ) : !featuresLoading ? (
                                 <div className="opacity-50 py-2">
                                     <h4 className="text-sm font-medium text-gray-300">Vibe Similarity</h4>
-                                    <p className="text-sm text-gray-500">Analyzer not detected right now</p>
-                                    <p className="text-xs text-gray-600 mt-1">
+                                    <p className="text-sm text-gray-400">Analyzer not detected right now</p>
+                                    <p className="text-xs text-gray-400 mt-1">
                                         If services just started, wait about 60 seconds and refresh. In lite mode, this is expected.
                                     </p>
                                 </div>
@@ -845,7 +845,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                             reEnriching ||
                                             isEnrichmentActive
                                         }
-                                        className="h-3.5 w-3.5 rounded border-white/30 bg-transparent accent-[#3b82f6] disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="h-3.5 w-3.5 rounded border-white/30 bg-transparent accent-brand disabled:opacity-50 disabled:cursor-not-allowed"
                                     />
                                     Backfill mood buckets after full enrich
                                 </label>
@@ -864,7 +864,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                                 reEnriching ||
                                                 isEnrichmentActive
                                             }
-                                            className="h-3.5 w-3.5 rounded border-white/30 bg-transparent accent-[#3b82f6] disabled:opacity-50 disabled:cursor-not-allowed"
+                                            className="h-3.5 w-3.5 rounded border-white/30 bg-transparent accent-brand disabled:opacity-50 disabled:cursor-not-allowed"
                                         />
                                         Rebuild CLAP embeddings
                                     </label>
@@ -879,7 +879,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     <div className="flex items-center gap-2">
                                         {enrichmentState.status ===
                                             "running" && (
-                                            <Loader2 className="w-3 h-3 animate-spin text-[#3b82f6]" />
+                                            <Loader2 className="w-3 h-3 animate-spin text-brand" />
                                         )}
                                         {enrichmentState.status ===
                                             "paused" && (
@@ -947,7 +947,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     maxCacheSizeMb: parseInt(e.target.value),
                                 })
                             }
-                            className="w-32 h-1 bg-[#404040] rounded-lg appearance-none cursor-pointer
+                            className="w-32 h-1 bg-line-muted rounded-lg appearance-none cursor-pointer
                             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
                             [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                         />
@@ -974,7 +974,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     ),
                                 })
                             }
-                            className="w-32 h-1 bg-[#404040] rounded-lg appearance-none cursor-pointer
+                            className="w-32 h-1 bg-line-muted rounded-lg appearance-none cursor-pointer
                             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
                             [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                         />
@@ -1028,7 +1028,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     const newSpeed = parseInt(e.target.value);
                                     setConcurrencyMutation.mutate(newSpeed);
                                 }}
-                                className="w-32 h-1 bg-[#404040] rounded-lg appearance-none cursor-pointer
+                                className="w-32 h-1 bg-line-muted rounded-lg appearance-none cursor-pointer
                                 disabled:opacity-50 disabled:cursor-not-allowed
                                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
                                 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
@@ -1086,7 +1086,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                         newWorkers
                                     );
                                 }}
-                                className="w-32 h-1 bg-[#404040] rounded-lg appearance-none cursor-pointer
+                                className="w-32 h-1 bg-line-muted rounded-lg appearance-none cursor-pointer
                                 disabled:opacity-50 disabled:cursor-not-allowed
                                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
                                 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
@@ -1132,7 +1132,7 @@ export function CacheSection({ settings, onUpdate }: CacheSectionProps) {
                                     const newWorkers = parseInt(e.target.value);
                                     setClapWorkersMutation.mutate(newWorkers);
                                 }}
-                                className="w-32 h-1 bg-[#404040] rounded-lg appearance-none cursor-pointer
+                                className="w-32 h-1 bg-line-muted rounded-lg appearance-none cursor-pointer
                                 disabled:opacity-50 disabled:cursor-not-allowed
                                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
                                 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"

@@ -85,7 +85,7 @@ function LikedTrackList({ tracks, likedTrackIds, removingTrackId, onPlay, onUnli
                 ),
                 trailingActions: (
                     <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        <span className="hidden sm:inline text-xs text-gray-500 w-10 text-right tabular-nums">
+                        <span className="hidden sm:inline text-xs text-gray-400 w-10 text-right tabular-nums">
                             {formatTime(track.duration)}
                         </span>
                         <TrackPreferenceButtons
@@ -350,17 +350,17 @@ export default function MyLikedPlaylistPage() {
             <div className="relative pt-16 pb-10 px-4 md:px-8">
                 <div className="absolute inset-0 pointer-events-none">
                     <div
-                        className="absolute inset-0 bg-gradient-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
+                        className="absolute inset-0 bg-gradient-to-b from-brand/15 via-blue-900/10 to-transparent"
                         style={{ height: "35vh" }}
                     />
                     <div
-                        className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-[#3b82f6]/8 via-transparent to-transparent"
+                        className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-brand/8 via-transparent to-transparent"
                         style={{ height: "25vh" }}
                     />
                 </div>
                 <div className="relative flex items-end gap-6">
                     {/* Cover Art / Icon */}
-                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden relative">
+                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-surface-highlight rounded shadow-2xl shrink-0 overflow-hidden relative">
                         {coverUrl ? (
                             <CachedImage
                                 src={coverUrl}
@@ -370,8 +370,8 @@ export default function MyLikedPlaylistPage() {
                                 sizes="192px"
                             />
                         ) : (
-                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#3b82f6]/20 to-[#1e3a5f]/30">
-                                <Heart className="h-16 w-16 text-[#60a5fa]" />
+                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/20 to-[#1e3a5f]/30">
+                                <Heart className="h-16 w-16 text-brand-hover" />
                             </div>
                         )}
                         <div className="absolute bottom-2 right-2 drop-shadow-lg">
@@ -404,12 +404,12 @@ export default function MyLikedPlaylistPage() {
             </div>
 
             {/* Action Bar */}
-            <div className="bg-gradient-to-b from-[#1a1a1a]/60 to-transparent px-4 md:px-8 py-4">
+            <div className="bg-gradient-to-b from-surface-hover/60 to-transparent px-4 md:px-8 py-4">
                 <div className="flex items-center gap-4">
                     {likedTracks.length > 0 && (
                         <button
                             onClick={handlePlayAll}
-                            className="flex items-center gap-2 rounded-full bg-[#60a5fa] px-5 py-2.5 text-sm font-semibold text-black shadow-lg transition-all hover:bg-[#3b82f6] hover:scale-105"
+                            className="flex items-center gap-2 rounded-full bg-brand-hover px-5 py-2.5 text-sm font-semibold text-black shadow-lg transition-all hover:bg-brand hover:scale-105"
                         >
                             {showPlaySpinner ? (
                                 <Loader2 className="h-5 w-5 animate-spin" />

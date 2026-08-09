@@ -162,7 +162,7 @@ export function EnrichmentFailuresModal({
 
     return (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-            <div className="bg-[#1a1a1a] rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col border border-white/10">
+            <div className="bg-surface-hover rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col border border-white/10">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-white/10">
                     <div>
@@ -230,7 +230,7 @@ export function EnrichmentFailuresModal({
                             }}
                             className={`px-5 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                                 selectedType === tab.key
-                                    ? "bg-[#3b82f6] text-black"
+                                    ? "bg-brand text-black"
                                     : "bg-white/5 text-white/70 hover:bg-white/10"
                             }`}
                         >
@@ -406,7 +406,7 @@ export function EnrichmentFailuresModal({
             {/* Clear All Confirmation Dialog */}
             {showClearConfirm && (
                 <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
-                    <div className="bg-[#1a1a1a] rounded-lg p-6 max-w-md border border-white/10">
+                    <div className="bg-surface-hover rounded-lg p-6 max-w-md border border-white/10">
                         <h3 className="text-lg font-bold text-white mb-2">
                             Clear All Failures?
                         </h3>

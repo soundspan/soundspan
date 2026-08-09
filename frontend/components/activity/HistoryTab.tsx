@@ -237,7 +237,7 @@ function HistoryItem({
                             title="Retry download"
                         >
                             <RotateCcw className={cn(
-                                "w-3.5 h-3.5 text-white/40 hover:text-[#3b82f6]",
+                                "w-3.5 h-3.5 text-white/40 hover:text-brand",
                                 isRetrying && "animate-spin"
                             )} />
                         </button>

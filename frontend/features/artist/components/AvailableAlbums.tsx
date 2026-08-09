@@ -144,7 +144,7 @@ function LazyAlbumCard({
                 title={album.title}
                 subtitle={subtitle}
                 placeholderIcon={
-                    <Disc3 className="w-12 h-12 text-gray-600" />
+                    <Disc3 className="w-12 h-12 text-gray-400" />
                 }
                 circular={false}
                 badge={downloadsEnabled ? "download" : null}

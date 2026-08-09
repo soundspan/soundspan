@@ -96,7 +96,7 @@ export function SettingsLayout({ children, sidebarItems, isAdmin, title = "Setti
     }, [sidebarItems, isAdmin]);
     
     return (
-        <div className="min-h-screen bg-[#0a0a0a] relative">
+        <div className="min-h-screen bg-surface relative">
             {/* Subtle grey gradient for systems page feel */}
             <div 
                 className="absolute inset-0 pointer-events-none"

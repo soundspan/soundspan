@@ -189,7 +189,7 @@ export function ShareLinkModal({
                                 className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand/50"
                                 style={{ colorScheme: "dark" }}
                             />
-                            <p className="mt-2 text-xs text-gray-500">
+                            <p className="mt-2 text-xs text-gray-400">
                                 Leave empty to keep the link active until you revoke it.
                             </p>
                         </div>
@@ -207,9 +207,9 @@ export function ShareLinkModal({
                                 value={maxPlays}
                                 onChange={(event) => setMaxPlays(event.target.value)}
                                 placeholder="Unlimited"
-                                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand/50"
+                                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand/50"
                             />
-                            <p className="mt-2 text-xs text-gray-500">
+                            <p className="mt-2 text-xs text-gray-400">
                                 Leave empty to allow unlimited opens.
                             </p>
                         </div>

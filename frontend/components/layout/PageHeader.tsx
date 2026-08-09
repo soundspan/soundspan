@@ -35,7 +35,7 @@ export function PageHeader({
                     <div className="flex items-center gap-3 mb-1">
                         <Icon
                             className={cn(
-                                "w-8 h-8 text-[#3b82f6] shrink-0",
+                                "w-8 h-8 text-brand shrink-0",
                                 iconClassName
                             )}
                         />

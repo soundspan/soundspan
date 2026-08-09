@@ -96,7 +96,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                 trailingActions: (
                     <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                         {track.duration > 0 && (
-                            <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                            <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                                 {formatTime(track.duration)}
                             </span>
                         )}
@@ -134,7 +134,7 @@ export const PopularTracks: React.FC<PopularTracksProps> = ({
                     {popularHref ? (
                         <Link
                             href={popularHref}
-                            className="inline-flex items-center hover:text-[#3b82f6] transition-colors"
+                            className="inline-flex items-center hover:text-brand transition-colors"
                         >
                             Popular
                         </Link>

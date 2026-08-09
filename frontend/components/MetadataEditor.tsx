@@ -265,7 +265,7 @@ export function MetadataEditor({
             {/* Modal */}
             {isOpen && (
                 <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-                    <div className="bg-[#121212] rounded-lg max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                    <div className="bg-surface-sunken rounded-lg max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                         {/* Header */}
                         <div className="flex items-center justify-between p-6 border-b border-white/10">
                             <h2 className="text-2xl font-bold text-white">
@@ -315,13 +315,13 @@ export function MetadataEditor({
                                             e.target.value
                                         )
                                     }
-                                    className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
+                                    className="w-full px-4 py-2 bg-surface-elevated border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
                                 />
                                 {type === "artist" &&
                                     currentData._originalName &&
                                     currentData._originalName !==
                                         (formData.name || "") && (
-                                        <p className="mt-1 text-xs text-gray-500">
+                                        <p className="mt-1 text-xs text-gray-400">
                                             Original:{" "}
                                             {currentData._originalName}
                                         </p>
@@ -330,7 +330,7 @@ export function MetadataEditor({
                                     currentData._originalTitle &&
                                     currentData._originalTitle !==
                                         (formData.title || "") && (
-                                        <p className="mt-1 text-xs text-gray-500">
+                                        <p className="mt-1 text-xs text-gray-400">
                                             Original:{" "}
                                             {currentData._originalTitle}
                                         </p>
@@ -349,12 +349,12 @@ export function MetadataEditor({
                                             handleChange("bio", e.target.value)
                                         }
                                         rows={6}
-                                        className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none resize-none"
+                                        className="w-full px-4 py-2 bg-surface-elevated border border-white/10 rounded text-white focus:border-white/30 focus:outline-none resize-none"
                                     />
                                     {currentData._originalBio &&
                                         currentData._originalBio !==
                                             (formData.bio || "") && (
-                                            <p className="mt-1 text-xs text-gray-500">
+                                            <p className="mt-1 text-xs text-gray-400">
                                                 Original:{" "}
                                                 {currentData._originalBio.substring(
                                                     0,
@@ -381,12 +381,12 @@ export function MetadataEditor({
                                                 parseInt(e.target.value)
                                             )
                                         }
-                                        className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
+                                        className="w-full px-4 py-2 bg-surface-elevated border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
                                     />
                                     {currentData._originalYear &&
                                         currentData._originalYear !==
                                             (formData.year || null) && (
-                                            <p className="mt-1 text-xs text-gray-500">
+                                            <p className="mt-1 text-xs text-gray-400">
                                                 Original:{" "}
                                                 {currentData._originalYear}
                                             </p>
@@ -415,7 +415,7 @@ export function MetadataEditor({
                                         )
                                     }
                                     placeholder="Rock, Alternative, Indie"
-                                    className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
+                                    className="w-full px-4 py-2 bg-surface-elevated border border-white/10 rounded text-white focus:border-white/30 focus:outline-none"
                                 />
                                 {currentData._originalGenres &&
                                     currentData._originalGenres.length > 0 &&
@@ -425,7 +425,7 @@ export function MetadataEditor({
                                         JSON.stringify(
                                             (formData.genres || []).sort()
                                         ) && (
-                                        <p className="mt-1 text-xs text-gray-500">
+                                        <p className="mt-1 text-xs text-gray-400">
                                             Original:{" "}
                                             {currentData._originalGenres.join(
                                                 ", "
@@ -452,7 +452,7 @@ export function MetadataEditor({
                                             handleChange("mbid", e.target.value)
                                         }
                                         placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                                        className={`w-full px-4 py-2 bg-[#181818] border rounded text-white focus:outline-none font-mono text-sm ${
+                                        className={`w-full px-4 py-2 bg-surface-elevated border rounded text-white focus:outline-none font-mono text-sm ${
                                             mbidFieldError
                                                 ? "border-red-500/60 focus:border-red-500"
                                                 : "border-white/10 focus:border-white/30"
@@ -517,13 +517,13 @@ export function MetadataEditor({
                                         )
                                     }
                                     placeholder="https://..."
-                                    className="w-full px-4 py-2 bg-[#181818] border border-white/10 rounded text-white focus:border-white/30 focus:outline-none text-sm"
+                                    className="w-full px-4 py-2 bg-surface-elevated border border-white/10 rounded text-white focus:border-white/30 focus:outline-none text-sm"
                                 />
                                 {type === "artist" &&
                                     currentData._originalHeroUrl &&
                                     currentData._originalHeroUrl !==
                                         (formData.heroUrl || "") && (
-                                        <p className="mt-1 text-xs text-gray-500 truncate">
+                                        <p className="mt-1 text-xs text-gray-400 truncate">
                                             Original:{" "}
                                             {currentData._originalHeroUrl}
                                         </p>
@@ -532,7 +532,7 @@ export function MetadataEditor({
                                     currentData._originalCoverUrl &&
                                     currentData._originalCoverUrl !==
                                         (formData.coverUrl || "") && (
-                                        <p className="mt-1 text-xs text-gray-500 truncate">
+                                        <p className="mt-1 text-xs text-gray-400 truncate">
                                             Original:{" "}
                                             {currentData._originalCoverUrl}
                                         </p>
@@ -589,7 +589,7 @@ export function MetadataEditor({
                             <button
                                 onClick={handleSave}
                                 disabled={isSaving}
-                                className="px-6 py-2 rounded-full bg-[#60a5fa] hover:bg-[#3b82f6] text-black font-bold transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="px-6 py-2 rounded-full bg-brand-hover hover:bg-brand text-black font-bold transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {isSaving ? (
                                     <>

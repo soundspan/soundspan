@@ -64,7 +64,7 @@ export function TrackRow({
                 "grid items-center gap-2 px-1 md:gap-4 md:px-4 py-3 rounded-md hover:bg-white/5 transition-colors group cursor-pointer",
                 className,
                 isPlaying && "bg-white/5",
-                isInQueue && !isPlaying && "bg-[#3b82f6]/[0.06]",
+                isInQueue && !isPlaying && "bg-brand/[0.06]",
                 rowClassName,
             )}
         >
@@ -76,7 +76,7 @@ export function TrackRow({
                     <span
                         className={cn(
                             "text-sm group-hover:hidden",
-                            isPlaying ? "font-bold" : "text-gray-500",
+                            isPlaying ? "font-bold" : "text-gray-400",
                         )}
                         style={isPlaying ? { color: accentColor } : undefined}
                     >
@@ -96,7 +96,7 @@ export function TrackRow({
             {/* Cover art + Title/Artist */}
             <div className="flex items-center gap-3 min-w-0">
                 {showCoverArt && (
-                    <div className="relative w-10 h-10 bg-[#282828] rounded flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="relative w-10 h-10 bg-surface-highlight rounded flex items-center justify-center overflow-hidden shrink-0">
                         {item.coverArtUrl ? (
                             <CachedImage
                                 src={item.coverArtUrl}
@@ -106,7 +106,7 @@ export function TrackRow({
                                 className="object-cover"
                             />
                         ) : (
-                            <Music className="w-4 h-4 text-gray-600" />
+                            <Music className="w-4 h-4 text-gray-400" />
                         )}
                     </div>
                 )}
@@ -143,7 +143,7 @@ export function TrackRow({
                 trailingActions
             ) : (
                 <div className="flex items-center gap-1">
-                    <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                    <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                         {formatTime(item.duration)}
                     </span>
                     {preferenceMode && (

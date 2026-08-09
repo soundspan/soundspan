@@ -110,7 +110,7 @@ export function SubsonicRows() {
                         <Info className="h-3.5 w-3.5" />
                     </button>
                     {showTooltip && (
-                        <span className="absolute left-0 top-full z-30 mt-1 w-72 rounded-md border border-white/15 bg-[#141414] p-2 text-[11px] leading-relaxed text-gray-300 shadow-2xl">
+                        <span className="absolute left-0 top-full z-30 mt-1 w-72 rounded-md border border-white/15 bg-surface-overlay p-2 text-[11px] leading-relaxed text-gray-300 shadow-2xl">
                             Using an app password is recommended so you do not share your main
                             {BRAND_NAME} login with third-party clients. If a device is lost, you can
                             rotate this password without changing your main account password.
@@ -134,7 +134,7 @@ export function SubsonicRows() {
                                 type="text"
                                 value="••••••••"
                                 disabled
-                                className="w-full bg-[#333] text-white text-sm px-3 py-2 rounded-md border-0 outline-none opacity-50 cursor-not-allowed"
+                                className="w-full bg-line-strong text-white text-sm px-3 py-2 rounded-md border-0 outline-none opacity-50 cursor-not-allowed"
                             />
                         </div>
                         <button

@@ -90,7 +90,7 @@ const SyncBadge = memo(function SyncBadge({ compact = false }: SyncBadgeProps) {
 
     const memberCount = activeGroup.members.length;
     const accentClass = isConnected
-        ? "bg-[#2323FF]/20 text-[#5b5bff] hover:bg-[#2323FF]/30"
+        ? "bg-ai/20 text-ai-hover hover:bg-ai/30"
         : "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30";
 
     // Compact mode: simple link, no popup
@@ -141,18 +141,18 @@ const SyncBadge = memo(function SyncBadge({ compact = false }: SyncBadgeProps) {
 
             {/* Members popup */}
             <div
-                className={`absolute bottom-full left-0 mb-2 w-64 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-3 backdrop-blur-xl z-[10002] transition-all duration-200 ${
+                className={`absolute bottom-full left-0 mb-2 w-64 bg-surface-hover border border-white/10 rounded-lg shadow-2xl shadow-black/50 p-3 backdrop-blur-xl z-[10002] transition-all duration-200 ${
                     isOpen
                         ? "opacity-100 scale-100 pointer-events-auto"
                         : "opacity-0 scale-95 pointer-events-none"
                 }`}
             >
                 {/* Pointer arrow */}
-                <div className="absolute -bottom-1 left-4 w-2 h-2 bg-[#1a1a1a] border-r border-b border-white/10 rotate-45" />
+                <div className="absolute -bottom-1 left-4 w-2 h-2 bg-surface-hover border-r border-b border-white/10 rotate-45" />
 
                 {/* Title */}
                 <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-bold text-xs text-[#5b5bff]">
+                    <h3 className="font-bold text-xs text-ai-hover">
                         {activeGroup.name || "Listen Together"}
                     </h3>
                     {isMobile && (
@@ -184,7 +184,7 @@ const SyncBadge = memo(function SyncBadge({ compact = false }: SyncBadgeProps) {
                             {member.isConnected ? (
                                 <Wifi className="w-3 h-3 text-emerald-400 shrink-0" />
                             ) : (
-                                <WifiOff className="w-3 h-3 text-gray-500 shrink-0" />
+                                <WifiOff className="w-3 h-3 text-gray-400 shrink-0" />
                             )}
                         </div>
                     ))}
@@ -194,7 +194,7 @@ const SyncBadge = memo(function SyncBadge({ compact = false }: SyncBadgeProps) {
                 <Link
                     href="/listen-together"
                     prefetch={false}
-                    className="block mt-3 pt-2 border-t border-white/10 text-[11px] text-gray-400 hover:text-[#5b5bff] transition-colors text-center"
+                    className="block mt-3 pt-2 border-t border-white/10 text-[11px] text-gray-400 hover:text-ai-hover transition-colors text-center"
                 >
                     Go to Listen Together
                 </Link>

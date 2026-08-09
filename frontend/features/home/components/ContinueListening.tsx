@@ -97,7 +97,7 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                 tabIndex={0}
             >
                 <div className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors h-full flex flex-col">
-                    <div className="aspect-square bg-[#282828] rounded-full mb-3 flex items-center justify-center overflow-hidden relative shadow-lg shrink-0">
+                    <div className="aspect-square bg-surface-highlight rounded-full mb-3 flex items-center justify-center overflow-hidden relative shadow-lg shrink-0">
                         {imageSrc ? (
                             <Image
                                 src={imageSrc}
@@ -109,16 +109,16 @@ const ContinueListeningCard = memo(function ContinueListeningCard({
                                 unoptimized
                             />
                         ) : isPodcast ? (
-                            <Disc className="w-10 h-10 text-gray-600" />
+                            <Disc className="w-10 h-10 text-gray-400" />
                         ) : isAudiobook ? (
-                            <BookOpen className="w-10 h-10 text-gray-600" />
+                            <BookOpen className="w-10 h-10 text-gray-400" />
                         ) : (
-                            <Music className="w-10 h-10 text-gray-600" />
+                            <Music className="w-10 h-10 text-gray-400" />
                         )}
                         {hasProgress && (
                             <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
                                 <div
-                                    className="h-full bg-[#3b82f6]"
+                                    className="h-full bg-brand"
                                     style={{
                                         width: `${item.progress}%`,
                                     }}

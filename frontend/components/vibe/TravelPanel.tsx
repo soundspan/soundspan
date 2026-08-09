@@ -77,7 +77,7 @@ function FeatureBar({
     const candidatePct = Math.round(candidate! * 100);
     return (
         <div className="mb-1.5 last:mb-0">
-            <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
+            <div className="flex items-center justify-between text-[10px] text-gray-400 mb-0.5">
                 <span>{label}</span>
                 <span className="tabular-nums">{matchPct}% match</span>
             </div>
@@ -218,7 +218,7 @@ function TravelBreadcrumb({ items }: { items: TravelView["breadcrumbTitles"] }) 
         <div className="flex items-center flex-wrap gap-0.5 mb-2 text-xs text-gray-400">
             {items.map((item, index) => (
                 <span key={`${item.id}-${index}`} className="flex items-center">
-                    {index > 0 && <ChevronRight className="w-3 h-3 text-gray-600" />}
+                    {index > 0 && <ChevronRight className="w-3 h-3 text-gray-400" />}
                     <span className={index === items.length - 1 ? "text-indigo-300" : ""}>
                         {item.title}
                     </span>

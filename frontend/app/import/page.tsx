@@ -148,7 +148,7 @@ export function PreviewTrackResolutionList({
 }) {
     if (tracks.length === 0) {
         return (
-            <div className="p-4 text-sm text-gray-500">
+            <div className="p-4 text-sm text-gray-400">
                 No tracks found in this playlist.
             </div>
         );
@@ -162,7 +162,7 @@ export function PreviewTrackResolutionList({
                     className="px-4 py-3 hover:bg-white/5"
                 >
                     <div className="flex items-start gap-3">
-                        <span className="text-xs text-gray-600 w-6 text-right pt-0.5">
+                        <span className="text-xs text-gray-400 w-6 text-right pt-0.5">
                             {idx + 1}
                         </span>
                         <div className="flex-1 min-w-0">
@@ -173,7 +173,7 @@ export function PreviewTrackResolutionList({
                                 {track.artist}
                                 {track.album ? ` • ${track.album}` : ""}
                             </div>
-                            <div className="text-[11px] text-gray-500 mt-1">
+                            <div className="text-[11px] text-gray-400 mt-1">
                                 {getResolutionSubtitle(track)}
                             </div>
                         </div>
@@ -181,7 +181,7 @@ export function PreviewTrackResolutionList({
                             <ImportResolutionBadge source={track.source} />
                             {typeof track.duration === "number" &&
                                 track.duration > 0 && (
-                                    <span className="text-[11px] text-gray-600">
+                                    <span className="text-[11px] text-gray-400">
                                         {formatTime(track.duration)}
                                     </span>
                                 )}
@@ -367,11 +367,11 @@ function ImportPageContent() {
         <div className="min-h-screen relative">
             <div className="absolute inset-0 pointer-events-none">
                 <div
-                    className="absolute inset-0 bg-linear-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
+                    className="absolute inset-0 bg-linear-to-b from-brand/15 via-blue-900/10 to-transparent"
                     style={{ height: "35vh" }}
                 />
                 <div
-                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-[#3b82f6]/8 via-transparent to-transparent"
+                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-brand/8 via-transparent to-transparent"
                     style={{ height: "25vh" }}
                 />
             </div>
@@ -435,13 +435,13 @@ function ImportPageContent() {
                                             setUrl(event.target.value)
                                         }
                                         placeholder="Paste a Spotify, Deezer, YouTube Music, or TIDAL playlist URL"
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/50 focus:border-[#3b82f6] transition-colors"
+                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand transition-colors"
                                         onKeyDown={(event) =>
                                             event.key === "Enter" &&
                                             void fetchPreview(url)
                                         }
                                     />
-                                    <p className="text-xs text-gray-500 mt-2">
+                                    <p className="text-xs text-gray-400 mt-2">
                                         Paste a{" "}
                                         <span className="text-[#1DB954]">Spotify</span>,{" "}
                                         <span className="text-[#AD47FF]">Deezer</span>,{" "}
@@ -454,7 +454,7 @@ function ImportPageContent() {
                                 <button
                                     onClick={() => void fetchPreview(url)}
                                     disabled={isPreviewLoading || !url.trim()}
-                                    className="w-full py-3 rounded-full font-medium bg-[#3b82f6] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                    className="w-full py-3 rounded-full font-medium bg-brand text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                                 >
                                     {isPreviewLoading ? (
                                         <>
@@ -478,7 +478,7 @@ function ImportPageContent() {
                                         onClick={() => fileInputRef.current?.click()}
                                         className="w-full bg-white/5 border border-dashed border-white/20 rounded-lg px-4 py-8 text-center cursor-pointer hover:border-white/40 hover:bg-white/[0.07] transition-colors"
                                     >
-                                        <FileUp className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+                                        <FileUp className="w-8 h-8 text-gray-400 mx-auto mb-2" />
                                         {m3uFileName ? (
                                             <p className="text-sm text-white">{m3uFileName}</p>
                                         ) : (
@@ -494,7 +494,7 @@ function ImportPageContent() {
                                         className="hidden"
                                         onChange={handleM3uFileSelect}
                                     />
-                                    <p className="text-xs text-gray-500 mt-2">
+                                    <p className="text-xs text-gray-400 mt-2">
                                         Tracks are matched against your local library using file paths and metadata
                                     </p>
                                 </div>
@@ -510,14 +510,14 @@ function ImportPageContent() {
                                                 setM3uPlaylistName(event.target.value)
                                             }
                                             placeholder="Enter playlist name"
-                                            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/50 focus:border-[#3b82f6] transition-colors"
+                                            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand transition-colors"
                                         />
                                     </div>
                                 )}
                                 <button
                                     onClick={() => void fetchM3uPreview()}
                                     disabled={isPreviewLoading || !m3uContent}
-                                    className="w-full py-3 rounded-full font-medium bg-[#3b82f6] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                    className="w-full py-3 rounded-full font-medium bg-brand text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                                 >
                                     {isPreviewLoading ? (
                                         <>
@@ -552,7 +552,7 @@ function ImportPageContent() {
                                     href={url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-gray-400 hover:text-[#3b82f6] transition-colors"
+                                    className="text-gray-400 hover:text-brand transition-colors"
                                 >
                                     <ExternalLink className="w-4 h-4" />
                                 </a>
@@ -564,7 +564,7 @@ function ImportPageContent() {
                                 <div className="text-xl font-bold text-white">
                                     {preview.summary.total}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-gray-400">
                                     Total
                                 </div>
                             </div>
@@ -572,7 +572,7 @@ function ImportPageContent() {
                                 <div className="text-xl font-bold text-emerald-300">
                                     {preview.summary.local}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-gray-400">
                                     Local
                                 </div>
                             </div>
@@ -580,7 +580,7 @@ function ImportPageContent() {
                                 <div className="text-xl font-bold text-red-300">
                                     {preview.summary.youtube}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-gray-400">
                                     YouTube
                                 </div>
                             </div>
@@ -588,7 +588,7 @@ function ImportPageContent() {
                                 <div className="text-xl font-bold text-[#00BFFF]">
                                     {preview.summary.tidal}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-gray-400">
                                     TIDAL
                                 </div>
                             </div>
@@ -596,7 +596,7 @@ function ImportPageContent() {
                                 <div className="text-xl font-bold text-red-400">
                                     {preview.summary.unresolved}
                                 </div>
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-gray-400">
                                     Unresolved
                                 </div>
                             </div>
@@ -624,7 +624,7 @@ function ImportPageContent() {
                                     setPlaylistName(event.target.value)
                                 }
                                 placeholder="Enter playlist name"
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1DB954]/50 focus:border-[#1DB954] transition-colors"
+                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1DB954]/50 focus:border-[#1DB954] transition-colors"
                             />
                         </div>
 
@@ -727,7 +727,7 @@ export default function ImportPage() {
         <Suspense
             fallback={
                 <div className="min-h-screen flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 text-[#3b82f6] animate-spin" />
+                    <Loader2 className="w-8 h-8 text-brand animate-spin" />
                 </div>
             }
         >

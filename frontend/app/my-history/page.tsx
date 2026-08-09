@@ -176,10 +176,10 @@ export default function MyHistoryPage() {
                             {streamSource === "tidal" ? <TidalBadge /> : <YouTubeBadge />}
                         </div>
                     )}
-                    <p className="text-[11px] text-gray-500 truncate">
+                    <p className="text-[11px] text-gray-400 truncate">
                         {track.album?.title || "Unknown Album"}
                     </p>
-                    <p className="text-[11px] text-gray-500 mt-1">
+                    <p className="text-[11px] text-gray-400 mt-1">
                         Played {formatPlayedAt(entry.playedAt)}
                     </p>
                 </>
@@ -196,7 +196,7 @@ export default function MyHistoryPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#0a0a0a]">
+        <div className="min-h-screen bg-surface">
             <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-6">
                 <PageHeader
                     title="My History"
@@ -258,9 +258,9 @@ export default function MyHistoryPage() {
                                 onPlay={handlePlayFromHistory}
                                 rowSlots={historyRowSlots}
                                 rowOverflow={historyRowOverflow}
-                                rowClassName="grid-cols-[1fr_auto] p-4 hover:bg-[#1a1a1a]"
+                                rowClassName="grid-cols-[1fr_auto] p-4 hover:bg-surface-hover"
                                 preferenceMode="up-only"
-                                className="divide-y divide-[#1c1c1c]"
+                                className="divide-y divide-surface-active"
                             />
                         </Card>
                     </section>

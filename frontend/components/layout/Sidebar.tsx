@@ -225,7 +225,7 @@ export function Sidebar() {
                                     Stream Your Way
                                 </p>
                             :   <div className="text-xs text-gray-400 truncate">
-                                    <span className="text-gray-500">
+                                    <span className="text-gray-400">
                                         Listening to:{" "}
                                     </span>
                                     <span className="text-white font-medium">
@@ -318,7 +318,7 @@ export function Sidebar() {
                                     {item.name}
                                 </span>
                                 {badge && (
-                                    <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-[#3b82f6]/20 text-[#3b82f6] border border-[#3b82f6]/30">
+                                    <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-brand/20 text-brand border border-brand/30">
                                         {badge}
                                     </span>
                                 )}
@@ -344,14 +344,14 @@ export function Sidebar() {
                         prefetch={false}
                         className="relative group/link"
                     >
-                        <span className="text-[10px] font-black text-gray-500 group-hover/link:text-transparent group-hover/link:bg-clip-text group-hover/link:bg-gradient-to-r group-hover/link:from-[#5b5bff] group-hover/link:to-[#00c8ff] transition-all duration-300 uppercase tracking-[0.15em]">
+                        <span className="text-[10px] font-black text-gray-400 group-hover/link:text-transparent group-hover/link:bg-clip-text group-hover/link:bg-gradient-to-r group-hover/link:from-ai-hover group-hover/link:to-[#00c8ff] transition-all duration-300 uppercase tracking-[0.15em]">
                             {playlistFilter === "others"
                                 ? "Shared playlists"
                                 : playlistFilter === "mine"
                                   ? "Your playlists"
                                   : "All playlists"}
                         </span>
-                        <div className="absolute -bottom-0.5 left-0 right-0 h-px bg-gradient-to-r from-[#2323FF]/0 via-[#2323FF]/50 to-[#2323FF]/0 opacity-0 group-hover/link:opacity-100 transition-opacity duration-300" />
+                        <div className="absolute -bottom-0.5 left-0 right-0 h-px bg-gradient-to-r from-ai/0 via-ai/50 to-ai/0 opacity-0 group-hover/link:opacity-100 transition-opacity duration-300" />
                     </Link>
                     <div className="flex items-center gap-1">
                         <div ref={sortFilterRef} className="relative">
@@ -369,8 +369,8 @@ export function Sidebar() {
                                 className={cn(
                                     "w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 border border-white/5",
                                     isFiltered
-                                        ? "bg-[#2323FF]/20 text-[#5b5bff] border-[#2323FF]/30"
-                                        : "bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-[#2323FF] hover:to-[#00c8ff] hover:scale-110 shadow-lg shadow-transparent hover:shadow-[#2323FF]/30 hover:border-transparent"
+                                        ? "bg-ai/20 text-ai-hover border-ai/30"
+                                        : "bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-ai hover:to-[#00c8ff] hover:scale-110 shadow-lg shadow-transparent hover:shadow-ai/30 hover:border-transparent"
                                 )}
                                 aria-label="Sort and filter playlists"
                                 title="Sort & Filter"
@@ -380,10 +380,10 @@ export function Sidebar() {
 
                             {isSortFilterOpen && sortFilterPos && (
                                 <div
-                                    className="fixed w-44 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl shadow-black/40 py-1 z-[10000]"
+                                    className="fixed w-44 bg-surface-hover border border-white/10 rounded-lg shadow-xl shadow-black/40 py-1 z-[10000]"
                                     style={{ top: sortFilterPos.top, left: sortFilterPos.left }}
                                 >
-                                    <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                    <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
                                         Sort
                                     </div>
                                     {([
@@ -407,7 +407,7 @@ export function Sidebar() {
 
                                     <div className="mx-2 my-1 border-t border-white/10" />
 
-                                    <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                    <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
                                         Show
                                     </div>
                                     {([
@@ -435,7 +435,7 @@ export function Sidebar() {
                         <Link
                             href="/playlists"
                             prefetch={false}
-                            className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-[#2323FF] hover:to-[#00c8ff] hover:scale-110 transition-all duration-300 shadow-lg shadow-transparent hover:shadow-[#2323FF]/30 border border-white/5 hover:border-transparent"
+                            className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 text-gray-400 hover:text-white hover:bg-gradient-to-br hover:from-ai hover:to-[#00c8ff] hover:scale-110 transition-all duration-300 shadow-lg shadow-transparent hover:shadow-ai/30 border border-white/5 hover:border-transparent"
                             aria-label="Create playlist"
                             title="Create Playlist"
                         >
@@ -459,15 +459,15 @@ export function Sidebar() {
                                 className={cn(
                                     "block px-3 py-2.5 rounded-lg transition-all duration-300 group relative overflow-hidden",
                                     isLikedActive
-                                        ? "bg-gradient-to-r from-[#2323FF]/10 to-transparent text-white border-l-2 border-[#2323FF] shadow-md shadow-[#2323FF]/5"
-                                        : "text-gray-400 hover:text-white hover:bg-white/[0.05] border-l-2 border-transparent hover:border-l-2 hover:border-[#2323FF]/30",
+                                        ? "bg-gradient-to-r from-ai/10 to-transparent text-white border-l-2 border-ai shadow-md shadow-ai/5"
+                                        : "text-gray-400 hover:text-white hover:bg-white/[0.05] border-l-2 border-transparent hover:border-l-2 hover:border-ai/30",
                                 )}
                             >
                                 {!isLikedActive && (
-                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2323FF]/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-ai/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                                 )}
                                 <div className="flex items-center gap-1.5">
-                                    <Heart className="w-3.5 h-3.5 shrink-0 text-[#3b82f6] fill-[#3b82f6] relative z-10" />
+                                    <Heart className="w-3.5 h-3.5 shrink-0 text-brand fill-brand relative z-10" />
                                     <div
                                         className={cn(
                                             "text-sm font-medium truncate relative z-10 transition-all duration-200 flex-1",
@@ -480,7 +480,7 @@ export function Sidebar() {
                                 <div
                                     className={cn(
                                         "text-xs truncate relative z-10 mt-0.5 transition-colors duration-200",
-                                        isLikedActive ? "text-gray-400" : "text-gray-500 group-hover:text-gray-400",
+                                        isLikedActive ? "text-gray-400" : "text-gray-400 group-hover:text-gray-400",
                                     )}
                                 >
                                     Playlist &bull; {likedTotal} track{likedTotal !== 1 ? "s" : ""}
@@ -497,7 +497,7 @@ export function Sidebar() {
                                     className="px-3 py-2.5 rounded-lg relative overflow-hidden bg-white/[0.02] border-l-2 border-transparent"
                                 >
                                     <div
-                                        className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2323FF]/10 to-transparent"
+                                        className="absolute inset-0 bg-gradient-to-r from-transparent via-ai/10 to-transparent"
                                         style={{
                                             animation: "shimmer 2s infinite",
                                         }}
@@ -521,13 +521,13 @@ export function Sidebar() {
                                         className={cn(
                                             "block px-3 py-2.5 rounded-lg transition-all duration-300 group relative overflow-hidden",
                                             isActive ?
-                                                "bg-gradient-to-r from-[#2323FF]/10 to-transparent text-white border-l-2 border-[#2323FF] shadow-md shadow-[#2323FF]/5"
-                                            :   "text-gray-400 hover:text-white hover:bg-white/[0.05] border-l-2 border-transparent hover:border-l-2 hover:border-[#2323FF]/30",
+                                                "bg-gradient-to-r from-ai/10 to-transparent text-white border-l-2 border-ai shadow-md shadow-ai/5"
+                                            :   "text-gray-400 hover:text-white hover:bg-white/[0.05] border-l-2 border-transparent hover:border-l-2 hover:border-ai/30",
                                         )}
                                     >
                                         {/* Hover shimmer effect */}
                                         {!isActive && (
-                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2323FF]/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-ai/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                                         )}
 
                                         <div className="flex items-center gap-1.5">
@@ -542,7 +542,7 @@ export function Sidebar() {
                                             </div>
                                             {isShared && (
                                                 <span
-                                                    className="shrink-0 w-1.5 h-1.5 rounded-full bg-[#2323FF]"
+                                                    className="shrink-0 w-1.5 h-1.5 rounded-full bg-ai"
                                                     title={`Shared by ${
                                                         playlist.user
                                                             ?.username ||
@@ -555,7 +555,7 @@ export function Sidebar() {
                                             className={cn(
                                                 "text-xs truncate relative z-10 mt-0.5 transition-colors duration-200",
                                                 isActive ? "text-gray-400" : (
-                                                    "text-gray-500 group-hover:text-gray-400"
+                                                    "text-gray-400 group-hover:text-gray-400"
                                                 ),
                                             )}
                                         >
@@ -574,10 +574,10 @@ export function Sidebar() {
                                 );
                             })
                     :   <div className="px-4 py-8 text-center">
-                            <div className="text-sm text-gray-500 mb-2">
+                            <div className="text-sm text-gray-400 mb-2">
                                 {isFiltered ? "No matching playlists" : "No playlists yet"}
                             </div>
-                            <div className="text-xs text-gray-600">
+                            <div className="text-xs text-gray-400">
                                 {isFiltered
                                     ? "Try changing your filter"
                                     : "Create your first playlist to get started"}
@@ -602,7 +602,7 @@ export function Sidebar() {
 
             {/* Desktop Sidebar */}
             {!isMobileOrTablet && (
-                <aside className="w-64 bg-[#0f0f0f] rounded-lg flex flex-col overflow-hidden relative z-10 border border-white/[0.03]">
+                <aside className="w-64 bg-surface-raised rounded-lg flex flex-col overflow-hidden relative z-10 border border-white/[0.03]">
                     {sidebarContent}
                 </aside>
             )}

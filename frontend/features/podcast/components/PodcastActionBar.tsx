@@ -33,7 +33,7 @@ export function PodcastActionBar({
                 <button
                     onClick={onSubscribe}
                     disabled={isSubscribing}
-                    className="h-12 px-6 rounded-full bg-[#60a5fa] hover:bg-[#93c5fd] hover:scale-105 transition-all flex items-center gap-2 font-semibold text-black disabled:opacity-50"
+                    className="h-12 px-6 rounded-full bg-brand-hover hover:bg-brand-light hover:scale-105 transition-all flex items-center gap-2 font-semibold text-black disabled:opacity-50"
                 >
                     {isSubscribing ? (
                         <>

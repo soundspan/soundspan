@@ -84,7 +84,7 @@ function BlendResults({ view }: { view: AlchemyView }) {
     return (
         <div>
             <div className="flex items-center justify-between mb-1">
-                <p className="text-xs uppercase tracking-wide text-gray-500">Blend results</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400">Blend results</p>
                 <button type="button" onClick={view.play}
                     className="inline-flex items-center gap-1 min-h-[36px] px-2 rounded-lg text-xs text-fuchsia-300 hover:text-white hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60">
                     <Play className="w-3.5 h-3.5" /> Play blend

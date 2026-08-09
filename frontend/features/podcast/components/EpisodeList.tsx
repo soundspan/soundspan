@@ -70,7 +70,7 @@ export function EpisodeList({
                             {episode.progress && episode.progress.progress > 0 && (
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/5 rounded-full overflow-hidden">
                                     <div
-                                        className="h-full bg-[#3b82f6]/60 transition-all"
+                                        className="h-full bg-brand/60 transition-all"
                                         style={{
                                             width: `${episode.progress.progress}%`,
                                         }}
@@ -99,7 +99,7 @@ export function EpisodeList({
                                                         ? "hidden"
                                                         : "group-hover:hidden",
                                                     isCurrentEpisode
-                                                        ? "text-[#3b82f6] font-bold"
+                                                        ? "text-brand font-bold"
                                                         : "text-white/40"
                                                 )}
                                             >
@@ -107,7 +107,7 @@ export function EpisodeList({
                                             </span>
                                             {isCurrentEpisode && isPlaying ? (
                                                 <Pause
-                                                    className="w-4 h-4 text-[#3b82f6] cursor-pointer"
+                                                    className="w-4 h-4 text-brand cursor-pointer"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         onPlayPause(episode);
@@ -118,7 +118,7 @@ export function EpisodeList({
                                                     className={cn(
                                                         "w-4 h-4 cursor-pointer",
                                                         isCurrentEpisode
-                                                            ? "text-[#3b82f6]"
+                                                            ? "text-brand"
                                                             : "text-white hidden group-hover:block"
                                                     )}
                                                     onClick={(e) => {
@@ -137,7 +137,7 @@ export function EpisodeList({
                                         className={cn(
                                             "font-medium truncate text-sm",
                                             isCurrentEpisode
-                                                ? "text-[#3b82f6]"
+                                                ? "text-brand"
                                                 : "text-white"
                                         )}
                                     >
@@ -166,7 +166,7 @@ export function EpisodeList({
                                         {isInProgress && episode.progress && (
                                             <>
                                                 <span>•</span>
-                                                <span className="text-[#3b82f6]">
+                                                <span className="text-brand">
                                                     {Math.floor(episode.progress.progress)}%
                                                 </span>
                                             </>

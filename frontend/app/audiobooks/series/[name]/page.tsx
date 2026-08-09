@@ -88,7 +88,7 @@ export default function SeriesDetailPage() {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <Loader2 className="w-8 h-8 text-[#2323FF] animate-spin" />
+                <Loader2 className="w-8 h-8 text-ai animate-spin" />
             </div>
         );
     }
@@ -96,7 +96,7 @@ export default function SeriesDetailPage() {
     if (books.length === 0) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <p className="text-gray-500">No books found in this series</p>
+                <p className="text-gray-400">No books found in this series</p>
             </div>
         );
     }
@@ -113,7 +113,7 @@ export default function SeriesDetailPage() {
                 <div className="max-w-7xl mx-auto px-8 py-12">
                     <div className="flex flex-col md:flex-row gap-8 items-start">
                         {/* Series Cover */}
-                        <div className="relative w-64 h-64 flex-shrink-0 rounded-lg overflow-hidden shadow-2xl bg-[#181818]">
+                        <div className="relative w-64 h-64 flex-shrink-0 rounded-lg overflow-hidden shadow-2xl bg-surface-elevated">
                             {firstBook.coverUrl &&
                             getCoverUrl(firstBook.coverUrl, 500) ? (
                                 <Image
@@ -126,7 +126,7 @@ export default function SeriesDetailPage() {
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
-                                    <Book className="w-24 h-24 text-gray-600" />
+                                    <Book className="w-24 h-24 text-gray-400" />
                                 </div>
                             )}
                         </div>
@@ -190,7 +190,7 @@ export default function SeriesDetailPage() {
                         return (
                             <Card
                                 key={book.id}
-                                className="p-4 hover:bg-[#181818] transition-colors group"
+                                className="p-4 hover:bg-surface-elevated transition-colors group"
                             >
                                 <div className="flex items-center gap-4">
                                     {/* Book Number */}
@@ -199,8 +199,8 @@ export default function SeriesDetailPage() {
                                             <div className="flex items-center justify-center">
                                                 <div className="w-4 h-4 flex items-center justify-center">
                                                     <div className="grid grid-cols-2 gap-0.5">
-                                                        <div className="w-1 h-3 bg-[#2323FF] animate-pulse" />
-                                                        <div className="w-1 h-3 bg-[#2323FF] animate-pulse delay-75" />
+                                                        <div className="w-1 h-3 bg-ai animate-pulse" />
+                                                        <div className="w-1 h-3 bg-ai animate-pulse delay-75" />
                                                     </div>
                                                 </div>
                                             </div>
@@ -214,7 +214,7 @@ export default function SeriesDetailPage() {
 
                                     {/* Book Cover (small) */}
                                     <Link href={`/audiobooks/${book.id}`}>
-                                        <div className="relative w-12 h-12 rounded overflow-hidden bg-[#181818] flex-shrink-0 cursor-pointer">
+                                        <div className="relative w-12 h-12 rounded overflow-hidden bg-surface-elevated flex-shrink-0 cursor-pointer">
                                             {book.coverUrl &&
                                             getCoverUrl(book.coverUrl, 100) ? (
                                                 <Image
@@ -227,7 +227,7 @@ export default function SeriesDetailPage() {
                                                 />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">
-                                                    <Book className="w-6 h-6 text-gray-600" />
+                                                    <Book className="w-6 h-6 text-gray-400" />
                                                 </div>
                                             )}
                                         </div>
@@ -252,9 +252,9 @@ export default function SeriesDetailPage() {
                                     ) : book.progress &&
                                       book.progress.progress > 0 ? (
                                         <div className="flex items-center gap-2 flex-shrink-0">
-                                            <div className="w-24 h-1 bg-[#181818] rounded-full overflow-hidden">
+                                            <div className="w-24 h-1 bg-surface-elevated rounded-full overflow-hidden">
                                                 <div
-                                                    className="h-full bg-[#2323FF]"
+                                                    className="h-full bg-ai"
                                                     style={{
                                                         width: `${book.progress.progress}%`,
                                                     }}

@@ -25,11 +25,11 @@ const MediaCard = memo(function MediaCard({
 }: MediaCardProps) {
     const content = (
         <div
-            className="bg-[#121212] hover:bg-[#181818] p-4 rounded-lg cursor-pointer transition-colors group"
+            className="bg-surface-sunken hover:bg-surface-elevated p-4 rounded-lg cursor-pointer transition-colors group"
             onClick={onClick}
         >
             <div
-                className={`aspect-square bg-[#181818] ${
+                className={`aspect-square bg-surface-elevated ${
                     imageShape === "circle" ? "rounded-full" : "rounded-md"
                 } mb-4 flex items-center justify-center overflow-hidden relative shadow-lg`}
                 style={{ contain: "content" }}

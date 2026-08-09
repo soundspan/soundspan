@@ -64,7 +64,7 @@ export default function PodcastDetailPage() {
     if (!podcast && !previewData) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <p className="text-gray-500">Podcast not found</p>
+                <p className="text-gray-400">Podcast not found</p>
             </div>
         );
     }

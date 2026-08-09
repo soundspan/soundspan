@@ -152,7 +152,7 @@ export const APIKeysSection: React.FC = () => {
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-[#1c1c1c]">
+            <tr className="border-b border-surface-active">
               <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">
                 Device Name
               </th>
@@ -187,7 +187,7 @@ export const APIKeysSection: React.FC = () => {
               apiKeys.map((key) => (
                 <tr
                   key={key.id}
-                  className="border-b border-[#1c1c1c] hover:bg-[#0a0a0a]"
+                  className="border-b border-surface-active hover:bg-surface"
                 >
                   <td className="py-3 px-4 text-sm text-white">
                     {key.name}
@@ -238,7 +238,7 @@ export const APIKeysSection: React.FC = () => {
                 value={newApiKeyName}
                 onChange={(e) => setNewApiKeyName(e.target.value)}
                 placeholder="e.g., My Laptop, Production Server"
-                className="w-full bg-[#0a0a0a] border border-[#1c1c1c] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full bg-surface border border-surface-active rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 autoFocus
               />
             </div>

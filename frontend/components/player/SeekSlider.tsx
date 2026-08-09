@@ -241,7 +241,7 @@ export function SeekSlider({
                     container: "h-1",
                     track: "bg-white/20",
                     progress: isActive
-                        ? "bg-gradient-to-r from-[#3b82f6] to-[#38bdf8]"
+                        ? "bg-gradient-to-r from-brand to-[#38bdf8]"
                         : "bg-white/40",
                 };
             default:

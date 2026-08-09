@@ -35,7 +35,7 @@ export const StaticPlaylistCard = memo(function StaticPlaylistCard({
     return (
         <Link href={href} data-tv-card data-tv-card-index={index} tabIndex={0}>
             <div className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors">
-                <div className="aspect-square bg-[#282828] rounded-lg mb-3 overflow-hidden relative shadow-lg">
+                <div className="aspect-square bg-surface-highlight rounded-lg mb-3 overflow-hidden relative shadow-lg">
                     {coverUrl ? (
                         <CachedImage
                             src={coverUrl}

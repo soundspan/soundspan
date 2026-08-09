@@ -169,7 +169,7 @@ export function DownloadNotifications() {
                 ref={containerRef}
                 className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-auto max-w-[90vw]"
             >
-                <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                <div className="bg-surface-hover/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden">
                     {/* Compact Header */}
                     <div className="flex items-center justify-between px-3 py-2 gap-3">
                         <div className="flex items-center gap-2">
@@ -254,7 +254,7 @@ export function DownloadNotifications() {
                 transition: isDragging ? "none" : "transform 0.2s ease-out",
             }}
         >
-            <div className="bg-[#1a1a1a] border border-white/10 rounded-lg shadow-2xl overflow-hidden">
+            <div className="bg-surface-hover border border-white/10 rounded-lg shadow-2xl overflow-hidden">
                 {/* Header */}
                 <div
                     className={cn(
@@ -376,7 +376,7 @@ function DownloadJobItem({
         if (!job.metadata?.currentSource) return "text-white/60";
         switch (job.metadata.currentSource) {
             case "lidarr":
-                return "text-[#5b5bff]";
+                return "text-ai-hover";
             case "soulseek":
                 return "text-teal-400";
             case "tidal":
@@ -500,7 +500,7 @@ function DownloadJobItemCompact({
         if (!job.metadata?.currentSource) return "text-white/60";
         switch (job.metadata.currentSource) {
             case "lidarr":
-                return "text-[#5b5bff]";
+                return "text-ai-hover";
             case "soulseek":
                 return "text-teal-400";
             case "tidal":

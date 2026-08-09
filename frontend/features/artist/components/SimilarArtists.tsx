@@ -65,7 +65,7 @@ export function SimilarArtists({
                             className="bg-transparent hover:bg-white/5 transition-all p-3 rounded-md cursor-pointer group"
                         >
                             {/* Circular Artist Image */}
-                            <div className="w-full aspect-square bg-[#282828] rounded-full mb-2.5 overflow-hidden relative shadow-lg">
+                            <div className="w-full aspect-square bg-surface-highlight rounded-full mb-2.5 overflow-hidden relative shadow-lg">
                                 {imageUrl ? (
                                     <Image
                                         src={imageUrl}
@@ -77,13 +77,13 @@ export function SimilarArtists({
                                     />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center">
-                                        <Music className="w-12 h-12 text-gray-600" />
+                                        <Music className="w-12 h-12 text-gray-400" />
                                     </div>
                                 )}
                                 {/* Library indicator badge */}
                                 {artist.inLibrary && (
                                     <div
-                                        className="absolute bottom-1 right-1 bg-[#3b82f6] rounded-full p-1"
+                                        className="absolute bottom-1 right-1 bg-brand rounded-full p-1"
                                         title="In your library"
                                     >
                                         <Library className="w-3 h-3 text-black" />
@@ -108,7 +108,7 @@ export function SimilarArtists({
 
                             {/* Match Percentage */}
                             {matchPercentage !== null && (
-                                <p className="text-xs text-[#3b82f6] mt-1">
+                                <p className="text-xs text-brand mt-1">
                                     {matchPercentage}% match
                                 </p>
                             )}

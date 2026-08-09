@@ -58,7 +58,7 @@ export function AudiobookHero({
                 : "linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.7) 40%, #0a0a0a 100%)",
             }}
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent" />
         </div>
       ) : (
         <div
@@ -75,7 +75,7 @@ export function AudiobookHero({
       <div className="relative px-4 md:px-8 pt-16 pb-6">
         <div className="flex items-end gap-6">
           {/* Cover Art - Square for audiobooks */}
-          <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded-lg shadow-2xl shrink-0 overflow-hidden relative">
+          <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-surface-highlight rounded-lg shadow-2xl shrink-0 overflow-hidden relative">
             {heroImage ? (
               <Image
                 src={heroImage}
@@ -88,7 +88,7 @@ export function AudiobookHero({
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
-                <Book className="w-16 h-16 text-gray-600" />
+                <Book className="w-16 h-16 text-gray-400" />
               </div>
             )}
           </div>
@@ -114,7 +114,7 @@ export function AudiobookHero({
               <span className="mx-1">•</span>
               <span>{formatTime(audiobook.duration)}</span>
               <span className="mx-1">•</span>
-              <span className={isFinished ? "text-green-400" : "text-[#3b82f6]"}>
+              <span className={isFinished ? "text-green-400" : "text-brand"}>
                 {isFinished ? "Finished" : `${Math.round(progressPercent)}% complete`}
               </span>
             </div>

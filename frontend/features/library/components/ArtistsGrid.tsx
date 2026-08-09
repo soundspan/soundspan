@@ -84,7 +84,7 @@ const ArtistCardItem = memo(
             >
                 <div className="p-3 rounded-md cursor-pointer hover:bg-white/5 transition-colors" style={{ transform: "translateZ(0)" }}>
                     <div className="relative aspect-square mb-3">
-                        <div className="w-full h-full bg-[#282828] rounded-full flex items-center justify-center overflow-hidden" style={{ contain: "content" }}>
+                        <div className="w-full h-full bg-surface-highlight rounded-full flex items-center justify-center overflow-hidden" style={{ contain: "content" }}>
                             {coverArtUrl ? (
                                 <CachedImage
                                     src={coverArtUrl}
@@ -94,14 +94,14 @@ const ArtistCardItem = memo(
                                     sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
                                 />
                             ) : (
-                                <Music className="w-10 h-10 text-gray-600" />
+                                <Music className="w-10 h-10 text-gray-400" />
                             )}
                         </div>
                         {/* Play button */}
                         {!hidePlayButtons && (
                             <button
                                 onClick={handlePlay}
-                                className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-[#60a5fa] flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="absolute bottom-1 right-1 w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                                 {showPlaySpinner ? (
                                     <Loader2 className="w-4 h-4 animate-spin text-black" />

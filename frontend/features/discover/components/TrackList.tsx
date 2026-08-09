@@ -13,9 +13,9 @@ const tierColors: Record<string, string> = {
     high: "text-green-400",
     medium: "text-yellow-400",
     explore: "text-orange-400",
-    wildcard: "text-[#5b5bff]",
+    wildcard: "text-ai-hover",
     low: "text-orange-400",
-    wild: "text-[#5b5bff]",
+    wild: "text-ai-hover",
 };
 
 const tierLabels: Record<string, string> = {

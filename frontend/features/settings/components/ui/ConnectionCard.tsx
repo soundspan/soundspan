@@ -26,10 +26,10 @@ export function ConnectionCard({
     isLoading
 }: ConnectionCardProps) {
     return (
-        <div className="flex items-center justify-between py-4 px-4 bg-[#1a1a1a] rounded-lg">
+        <div className="flex items-center justify-between py-4 px-4 bg-surface-hover rounded-lg">
             <div className="flex items-center gap-3">
                 {/* Icon */}
-                <div className="w-10 h-10 rounded-full bg-[#282828] flex items-center justify-center overflow-hidden">
+                <div className="w-10 h-10 rounded-full bg-surface-highlight flex items-center justify-center overflow-hidden">
                     {typeof icon === "string" ? (
                         <Image 
                             src={icon} 
@@ -52,7 +52,7 @@ export function ConnectionCard({
                             Connected as <span className="text-white">{connectedAs}</span>
                         </div>
                     ) : description ? (
-                        <div className="text-xs text-gray-500">{description}</div>
+                        <div className="text-xs text-gray-400">{description}</div>
                     ) : null}
                 </div>
             </div>

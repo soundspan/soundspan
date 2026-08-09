@@ -70,10 +70,10 @@ function PlaylistMosaic({
             showEmptyCellIcon
             emptyState={
                 <div className={cn(
-                    "w-full h-full flex items-center justify-center bg-gradient-to-br from-[#282828] to-[#181818]",
+                    "w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-highlight to-surface-elevated",
                     greyed && "opacity-50"
                 )}>
-                    <Music className="w-10 h-10 text-gray-600" />
+                    <Music className="w-10 h-10 text-gray-400" />
                 </div>
             }
         />
@@ -121,7 +121,7 @@ function PlaylistCard({
                 tabIndex={0}
             >
                 {/* Cover Image */}
-                <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-[#282828] shadow-lg">
+                <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-surface-highlight shadow-lg">
                     <PlaylistMosaic
                         items={playlist.items}
                         greyed={isHiddenView}
@@ -191,7 +191,7 @@ function PlaylistCard({
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5 truncate">
                     {isShared && playlist.user?.username ? (
-                        <span className="text-gray-500">
+                        <span className="text-gray-400">
                             By {playlist.user.username} ·{" "}
                         </span>
                     ) : null}
@@ -307,11 +307,11 @@ export default function PlaylistsPage() {
             {/* Quick gradient fade - yellow to purple */}
             <div className="absolute inset-0 pointer-events-none">
                 <div
-                    className="absolute inset-0 bg-gradient-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
+                    className="absolute inset-0 bg-gradient-to-b from-brand/15 via-blue-900/10 to-transparent"
                     style={{ height: "35vh" }}
                 />
                 <div
-                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-[#3b82f6]/8 via-transparent to-transparent"
+                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-brand/8 via-transparent to-transparent"
                     style={{ height: "25vh" }}
                 />
             </div>
@@ -336,7 +336,7 @@ export default function PlaylistsPage() {
                             </Link>
                             <Link
                                 href="/explore"
-                                className="px-4 py-2 rounded-full text-sm font-medium bg-[#3b82f6] text-black hover:brightness-110 transition-all"
+                                className="px-4 py-2 rounded-full text-sm font-medium bg-brand text-black hover:brightness-110 transition-all"
                             >
                                 Explore Playlists
                             </Link>
@@ -387,7 +387,7 @@ export default function PlaylistsPage() {
                                     data-tv-card-index={0}
                                     tabIndex={0}
                                 >
-                                    <div className="relative aspect-square mb-3 rounded-md overflow-hidden shadow-lg bg-gradient-to-br from-[#3b82f6] to-[#1d4ed8] flex items-center justify-center">
+                                    <div className="relative aspect-square mb-3 rounded-md overflow-hidden shadow-lg bg-gradient-to-br from-brand to-[#1d4ed8] flex items-center justify-center">
                                         <Heart className="w-12 h-12 text-white fill-white/80" />
                                     </div>
                                     <h3 className="text-sm font-semibold truncate text-white">
@@ -415,7 +415,7 @@ export default function PlaylistsPage() {
                 ) : (
                     <div className="flex flex-col items-center justify-center py-24 text-center">
                         <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
-                            <Music className="w-8 h-8 text-gray-500" />
+                            <Music className="w-8 h-8 text-gray-400" />
                         </div>
                         <h2 className="text-lg font-semibold text-white mb-1">
                             {showHiddenTab
@@ -430,7 +430,7 @@ export default function PlaylistsPage() {
                         {!showHiddenTab && (
                             <Link
                                 href="/explore"
-                                className="mt-6 px-5 py-2.5 rounded-full text-sm font-medium bg-[#3b82f6] text-black hover:brightness-110 transition-all"
+                                className="mt-6 px-5 py-2.5 rounded-full text-sm font-medium bg-brand text-black hover:brightness-110 transition-all"
                             >
                                 Explore Playlists
                             </Link>

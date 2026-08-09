@@ -40,7 +40,7 @@ function DestinationPicker({ view }: { view: JourneyView }) {
     const { picking, destTrackId, destLabel, togglePick } = view;
     return (
         <>
-            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Destination</p>
+            <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Destination</p>
             <button type="button" onClick={togglePick} aria-pressed={picking}
                 className={`w-full min-h-[40px] flex items-center gap-2 px-2 py-2 mb-2 rounded-lg border text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 ${picking ? "border-indigo-400/60 bg-indigo-500/20 text-white" : "border-white/10 text-gray-300 hover:bg-white/5"}`}>
                 <MapPin className="w-4 h-4 shrink-0" />
@@ -114,7 +114,7 @@ function JourneyRoute({ view }: { view: JourneyView }) {
     return (
         <div className="mb-3">
             <div className="flex items-center justify-between mb-1">
-                <p className="text-xs uppercase tracking-wide text-gray-500">
+                <p className="text-xs uppercase tracking-wide text-gray-400">
                     {view.targetLabel ? `Route to ${view.targetLabel}` : "Route"}
                 </p>
                 <RouteActions view={view} />
@@ -137,7 +137,7 @@ function DriftChoices({ view }: { view: JourneyView }) {
     if (choices.length === 0) return null;
     return (
         <div className="border-t border-white/10 pt-2">
-            <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Drift toward…</p>
+            <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Drift toward…</p>
             <div className="flex flex-wrap gap-1.5">
                 {choices.map((m) => (
                     <button key={m.mood} type="button" onClick={() => view.drift(m.mood)}

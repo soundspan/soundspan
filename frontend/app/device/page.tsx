@@ -175,7 +175,7 @@ export default function DeviceLinkPage() {
         <div className="min-h-screen relative pb-24">
             {/* Header gradient */}
             <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute inset-0 bg-gradient-to-b from-[#2323FF]/10 via-transparent to-transparent" style={{ height: "50vh" }} />
+                <div className="absolute inset-0 bg-gradient-to-b from-ai/10 via-transparent to-transparent" style={{ height: "50vh" }} />
             </div>
 
             <div className="relative max-w-4xl mx-auto px-6 md:px-8 py-8">
@@ -187,7 +187,7 @@ export default function DeviceLinkPage() {
                     <p className="text-gray-400">
                         Scan the QR code or enter the code in a compatible client to link your device
                     </p>
-                    <p className="text-gray-500 text-sm mt-2">
+                    <p className="text-gray-400 text-sm mt-2">
                         Mobile direction is PWA-first. For native mobile clients, use Subsonic-compatible apps.
                     </p>
                 </div>
@@ -214,7 +214,7 @@ export default function DeviceLinkPage() {
                                 </p>
                                 <button
                                     onClick={generateCode}
-                                    className="px-6 py-3 bg-[#60a5fa] hover:bg-[#3b82f6] text-black font-medium rounded-full transition-all hover:scale-105"
+                                    className="px-6 py-3 bg-brand-hover hover:bg-brand text-black font-medium rounded-full transition-all hover:scale-105"
                                 >
                                     Generate Code
                                 </button>
@@ -260,7 +260,7 @@ export default function DeviceLinkPage() {
                                         </p>
                                         <button
                                             onClick={generateCode}
-                                            className="px-4 py-2 bg-[#60a5fa] hover:bg-[#3b82f6] text-black font-medium rounded-full transition-all"
+                                            className="px-4 py-2 bg-brand-hover hover:bg-brand text-black font-medium rounded-full transition-all"
                                         >
                                             <RefreshCw className="w-4 h-4 inline mr-2" />
                                             Generate New Code
@@ -273,7 +273,7 @@ export default function DeviceLinkPage() {
                                                 Client link URI scheme:
                                             </p>
                                             <div className="inline-flex rounded-lg border border-white/10 bg-white/5 p-1 gap-1">
-                                                <span className="px-3 py-1.5 rounded-md text-xs font-medium bg-[#3b82f6] text-black">
+                                                <span className="px-3 py-1.5 rounded-md text-xs font-medium bg-brand text-black">
                                                     {BRAND_DEEP_LINK_SCHEME}://
                                                 </span>
                                             </div>
@@ -353,14 +353,14 @@ export default function DeviceLinkPage() {
                                         className="flex items-center justify-between p-3 bg-white/5 rounded-lg"
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-full bg-[#2323FF]/20 flex items-center justify-center">
-                                                <Smartphone className="w-5 h-5 text-[#5b5bff]" />
+                                            <div className="w-10 h-10 rounded-full bg-ai/20 flex items-center justify-center">
+                                                <Smartphone className="w-5 h-5 text-ai-hover" />
                                             </div>
                                             <div>
                                                 <p className="text-white font-medium">
                                                     {device.name}
                                                 </p>
-                                                <p className="text-gray-500 text-sm">
+                                                <p className="text-gray-400 text-sm">
                                                     Last used:{" "}
                                                     {new Date(device.lastUsed).toLocaleDateString()}
                                                 </p>
@@ -387,25 +387,25 @@ export default function DeviceLinkPage() {
                     </h2>
                     <ol className="space-y-3 text-gray-400">
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand/20 text-brand text-sm font-bold flex items-center justify-center">
                                 1
                             </span>
                             <span>Open a compatible mobile client on your device</span>
                         </li>
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand/20 text-brand text-sm font-bold flex items-center justify-center">
                                 2
                             </span>
                             <span>Tap &quot;Scan QR Code&quot; or &quot;Enter Code&quot; if that client supports this flow</span>
                         </li>
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand/20 text-brand text-sm font-bold flex items-center justify-center">
                                 3
                             </span>
                             <span>Scan the QR code above, or manually enter the 6-digit code</span>
                         </li>
                         <li className="flex gap-3">
-                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#3b82f6]/20 text-[#3b82f6] text-sm font-bold flex items-center justify-center">
+                            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-brand/20 text-brand text-sm font-bold flex items-center justify-center">
                                 4
                             </span>
                             <span>Your device will be linked to your account after the client completes verification</span>

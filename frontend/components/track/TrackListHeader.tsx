@@ -11,7 +11,7 @@ export function TrackListHeader({ columns, className }: TrackListHeaderProps) {
     return (
         <div
             className={cn(
-                "hidden md:grid items-center text-xs text-gray-500 uppercase tracking-wider border-b border-white/10 px-3 py-2",
+                "hidden md:grid items-center text-xs text-gray-400 uppercase tracking-wider border-b border-white/10 px-3 py-2",
                 className,
             )}
         >

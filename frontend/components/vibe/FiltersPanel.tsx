@@ -142,7 +142,7 @@ function DualRange({
                     className="vibe-range-input"
                 />
             </div>
-            <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
+            <div className="flex items-center justify-between mt-1 text-xs text-gray-400">
                 <span>{lowLabel}</span>
                 <span>{highLabel}</span>
             </div>
@@ -214,7 +214,7 @@ function MoodFilters({ filters, moods }: { filters: FiltersSlice; moods: readonl
                     All
                 </button>
             </div>
-            <p className="mt-1.5 text-xs text-gray-500">shift-click to solo</p>
+            <p className="mt-1.5 text-xs text-gray-400">shift-click to solo</p>
         </>
     );
 }

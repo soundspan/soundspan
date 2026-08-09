@@ -94,7 +94,7 @@ export const TrackList = memo(function TrackList({
                         <span
                             className={cn(
                                 "group-hover:hidden text-sm",
-                                state.isPlaying ? "text-[#5b5bff] font-bold" : "text-gray-500",
+                                state.isPlaying ? "text-ai-hover font-bold" : "text-gray-400",
                             )}
                         >
                             {track.trackNumber || track.trackNo || track.displayTrackNo || index + 1}
@@ -118,7 +118,7 @@ export const TrackList = memo(function TrackList({
                 trailingActions: (
                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         {isPlayable && track.playCount !== undefined && track.playCount > 0 && (
-                            <div className="hidden lg:flex items-center gap-1.5 text-xs text-gray-400 bg-[#1a1a1a] px-2 py-1 rounded-full">
+                            <div className="hidden lg:flex items-center gap-1.5 text-xs text-gray-400 bg-surface-hover px-2 py-1 rounded-full">
                                 <Play className="w-3 h-3" />
                                 <span>{formatNumber(track.playCount)}</span>
                             </div>
@@ -126,13 +126,13 @@ export const TrackList = memo(function TrackList({
                         {isPreviewOnly && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onPreview(track, e); }}
-                                className="p-2 rounded-full bg-[#1a1a1a] hover:bg-[#2a2a2a] transition-colors text-white"
+                                className="p-2 rounded-full bg-surface-hover hover:bg-[#2a2a2a] transition-colors text-white"
                                 aria-label={isPreviewPlaying ? "Pause preview" : "Play preview"}
                             >
                                 {isPreviewPlaying ? <Pause className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                             </button>
                         )}
-                        <span className="text-xs text-gray-500 w-10 text-right tabular-nums">
+                        <span className="text-xs text-gray-400 w-10 text-right tabular-nums">
                             {track.duration ? formatTime(track.duration) : ""}
                         </span>
                         <TrackPreferenceButtons
@@ -158,7 +158,7 @@ export const TrackList = memo(function TrackList({
                     </div>
                 ),
                 rowClassName: cn(
-                    state.isPlaying && "bg-[#1a1a1a] border-l-2",
+                    state.isPlaying && "bg-surface-hover border-l-2",
                     isPreviewOnly && "opacity-70 hover:opacity-90",
                 ),
             };
@@ -173,8 +173,8 @@ export const TrackList = memo(function TrackList({
             const prevDisc = prevTrack ? (prevTrack.discNumber ?? prevTrack.discNo ?? 1) : 0;
             if (index === 0 || currentDisc !== prevDisc) {
                 return (
-                    <div className="flex items-center gap-2 px-3 md:px-4 py-2.5 bg-[#0d0d0d] border-b border-[#1c1c1c]">
-                        <Disc className="w-3.5 h-3.5 text-gray-500" />
+                    <div className="flex items-center gap-2 px-3 md:px-4 py-2.5 bg-[#0d0d0d] border-b border-surface-active">
+                        <Disc className="w-3.5 h-3.5 text-gray-400" />
                         <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
                             Disc {currentDisc}
                         </span>
@@ -199,7 +199,7 @@ export const TrackList = memo(function TrackList({
                     rowClassName="grid-cols-[32px_1fr_auto] md:grid-cols-[40px_1fr_auto]"
                     accentColor={colors?.vibrant || "#5b5bff"}
                     tvSection="tracks"
-                    className="divide-y divide-[#1c1c1c]"
+                    className="divide-y divide-surface-active"
                 />
             </Card>
         </section>

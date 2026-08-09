@@ -133,7 +133,7 @@ function QueueRow({ item, idx, absoluteIndex, drag, remove, disabled }: {
                     <button type="button" draggable onClick={(event) => event.stopPropagation()}
                         onDragStart={(event) => drag.start(idx, event)} onDragEnd={drag.clear}
                         aria-label={`Drag to reorder ${title}`} title="Drag to reorder"
-                        className="shrink-0 w-6 h-6 grid place-items-center rounded text-gray-500 hover:text-white cursor-grab active:cursor-grabbing">
+                        className="shrink-0 w-6 h-6 grid place-items-center rounded text-gray-400 hover:text-white cursor-grab active:cursor-grabbing">
                         <GripVertical className="w-4 h-4" />
                     </button>
                 )}
@@ -144,7 +144,7 @@ function QueueRow({ item, idx, absoluteIndex, drag, remove, disabled }: {
                 {remove && (
                     <button type="button" onClick={() => remove(absoluteIndex)}
                         aria-label={`Remove ${title} from queue`} title="Remove from queue"
-                        className="shrink-0 w-7 h-7 grid place-items-center rounded-lg text-gray-500 hover:text-red-400 hover:bg-white/10 transition-colors">
+                        className="shrink-0 w-7 h-7 grid place-items-center rounded-lg text-gray-400 hover:text-red-400 hover:bg-white/10 transition-colors">
                         <X className="w-3.5 h-3.5" />
                     </button>
                 )}

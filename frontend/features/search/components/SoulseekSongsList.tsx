@@ -22,7 +22,7 @@ export const formatFileSize = (bytes: number): string => {
 export const getQualityBadge = (result: SoulseekResult) => {
     if (result.format === "flac") {
         return (
-            <span className="px-2 py-1 text-xs font-semibold bg-[#1a1acc]/20 text-[#5b5bff] rounded">
+            <span className="px-2 py-1 text-xs font-semibold bg-ai-dark/20 text-ai-hover rounded">
                 FLAC
             </span>
         );
@@ -102,9 +102,9 @@ export function SoulseekSongsList({
                     return (
                         <div
                             key={`${result.username}-${result.filename}-${index}`}
-                            className="flex items-center gap-4 p-3 rounded hover:bg-[#1a1a1a] group"
+                            className="flex items-center gap-4 p-3 rounded hover:bg-surface-hover group"
                         >
-                            <div className="w-10 h-10 bg-[#181818] rounded flex items-center justify-center flex-shrink-0">
+                            <div className="w-10 h-10 bg-surface-elevated rounded flex items-center justify-center flex-shrink-0">
                                 <Music className="w-5 h-5 text-gray-400" />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -127,7 +127,7 @@ export function SoulseekSongsList({
                                         "px-4 py-2 rounded-full font-bold transition-all flex items-center gap-2 text-sm",
                                         isDownloading
                                             ? "bg-green-600/20 text-green-400 cursor-not-allowed"
-                                            : "bg-[#3b82f6] text-black hover:bg-[#2563eb] hover:scale-105"
+                                            : "bg-brand text-black hover:bg-brand-dark hover:scale-105"
                                     )}
                                 >
                                     {isDownloading ? (

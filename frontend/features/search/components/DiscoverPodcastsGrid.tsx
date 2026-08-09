@@ -40,8 +40,8 @@ export function DiscoverPodcastsGrid({
                         data-tv-card-index={index}
                         tabIndex={0}
                     >
-                        <div className="bg-[#121212] hover:bg-[#181818] transition-all p-4 rounded-lg group cursor-pointer">
-                            <div className="aspect-square bg-[#181818] rounded-md mb-4 flex items-center justify-center overflow-hidden relative">
+                        <div className="bg-surface-sunken hover:bg-surface-elevated transition-all p-4 rounded-lg group cursor-pointer">
+                            <div className="aspect-square bg-surface-elevated rounded-md mb-4 flex items-center justify-center overflow-hidden relative">
                                 {imageUrl ? (
                                     <Image
                                         src={imageUrl}
@@ -53,7 +53,7 @@ export function DiscoverPodcastsGrid({
                                         unoptimized
                                     />
                                 ) : (
-                                    <Music className="w-12 h-12 text-gray-600" />
+                                    <Music className="w-12 h-12 text-gray-400" />
                                 )}
                             </div>
                             <h3 className="text-base font-bold text-white line-clamp-1 mb-1">
@@ -64,7 +64,7 @@ export function DiscoverPodcastsGrid({
                             </p>
                             {typeof podcast.trackCount === "number" &&
                                 podcast.trackCount > 0 && (
-                                    <p className="text-xs text-gray-500 mt-1">
+                                    <p className="text-xs text-gray-400 mt-1">
                                         {podcast.trackCount} episodes
                                     </p>
                                 )}

@@ -338,7 +338,7 @@ export function ReleaseSelectionModal({
                                 onChange={(event) =>
                                     setSortBy(event.target.value as ReleaseSortOption)
                                 }
-                                className="mt-1 w-full rounded border border-white/15 bg-[#181818] px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
+                                className="mt-1 w-full rounded border border-white/15 bg-surface-elevated px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
                             >
                                 <option value="best">Best Match</option>
                                 <option value="quality">Quality</option>
@@ -353,7 +353,7 @@ export function ReleaseSelectionModal({
                             <select
                                 value={qualityFilter}
                                 onChange={(event) => setQualityFilter(event.target.value)}
-                                className="mt-1 w-full rounded border border-white/15 bg-[#181818] px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
+                                className="mt-1 w-full rounded border border-white/15 bg-surface-elevated px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
                             >
                                 <option value="all">All</option>
                                 {qualityOptions.map((quality) => (
@@ -369,7 +369,7 @@ export function ReleaseSelectionModal({
                             <select
                                 value={indexerFilter}
                                 onChange={(event) => setIndexerFilter(event.target.value)}
-                                className="mt-1 w-full rounded border border-white/15 bg-[#181818] px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
+                                className="mt-1 w-full rounded border border-white/15 bg-surface-elevated px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
                             >
                                 <option value="all">All</option>
                                 {indexerOptions.map((indexer) => (
@@ -387,7 +387,7 @@ export function ReleaseSelectionModal({
                                 onChange={(event) =>
                                     setSeederFilter(event.target.value as "all" | "1" | "10")
                                 }
-                                className="mt-1 w-full rounded border border-white/15 bg-[#181818] px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
+                                className="mt-1 w-full rounded border border-white/15 bg-surface-elevated px-2 py-1.5 text-sm text-white focus:border-white/30 focus:outline-none"
                             >
                                 <option value="all">All</option>
                                 <option value="1">At least 1</option>

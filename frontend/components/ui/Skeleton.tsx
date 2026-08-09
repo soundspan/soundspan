@@ -12,7 +12,7 @@ interface SkeletonProps {
 export function Skeleton({ className }: SkeletonProps) {
     return (
         <div
-            className={cn("animate-pulse bg-[#1a1a1a] rounded-sm", className)}
+            className={cn("animate-pulse bg-surface-hover rounded-sm", className)}
         />
     );
 }
@@ -26,7 +26,7 @@ export function ArtistCardSkeleton({ count = 6 }: { count?: number }) {
             {Array.from({ length: count }).map((_, i) => (
                 <div
                     key={i}
-                    className="bg-gradient-to-br from-[#121212] to-[#0f0f0f] border border-[#1c1c1c] rounded-sm p-4"
+                    className="bg-gradient-to-br from-surface-sunken to-surface-raised border border-surface-active rounded-sm p-4"
                 >
                     <Skeleton className="aspect-square w-full mb-3" />
                     <Skeleton className="h-4 w-3/4 mb-2" />
@@ -46,7 +46,7 @@ export function AlbumCardSkeleton({ count = 6 }: { count?: number }) {
             {Array.from({ length: count }).map((_, i) => (
                 <div
                     key={i}
-                    className="bg-gradient-to-br from-[#121212] to-[#0f0f0f] border border-[#1c1c1c] rounded-sm p-4"
+                    className="bg-gradient-to-br from-surface-sunken to-surface-raised border border-surface-active rounded-sm p-4"
                 >
                     <Skeleton className="aspect-square w-full mb-3" />
                     <Skeleton className="h-4 w-full mb-2" />
@@ -63,7 +63,7 @@ export function AlbumCardSkeleton({ count = 6 }: { count?: number }) {
  */
 export function TrackListSkeleton({ count = 10 }: { count?: number }) {
     return (
-        <div className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-sm divide-y divide-[#1c1c1c]">
+        <div className="bg-surface-raised border border-surface-active rounded-sm divide-y divide-surface-active">
             {Array.from({ length: count }).map((_, i) => (
                 <div key={i} className="flex items-center gap-4 px-4 py-3">
                     <Skeleton className="w-8 h-4" />

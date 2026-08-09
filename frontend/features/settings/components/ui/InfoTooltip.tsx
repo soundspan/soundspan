@@ -27,7 +27,7 @@ export function InfoTooltip({ text }: InfoTooltipProps) {
                 <Info className="h-3.5 w-3.5" />
             </button>
             {showTooltip && (
-                <span className="absolute left-0 top-full z-30 mt-1 w-72 rounded-md border border-white/15 bg-[#141414] p-2 text-[11px] leading-relaxed text-gray-300 shadow-2xl">
+                <span className="absolute left-0 top-full z-30 mt-1 w-72 rounded-md border border-white/15 bg-surface-overlay p-2 text-[11px] leading-relaxed text-gray-300 shadow-2xl">
                     {text}
                 </span>
             )}

@@ -22,7 +22,7 @@ const STATIC_STATIONS: RadioStation[] = [
         id: "all",
         name: "Shuffle All",
         description: "Your entire library",
-        color: "from-[#3b82f6]/60 to-amber-600/40",
+        color: "from-brand/60 to-amber-600/40",
         filter: { type: "all" },
         minTracks: 10,
     },

@@ -153,7 +153,7 @@ export function TidalCard({ settings, onUpdate, onTest, isTesting }: TidalCardPr
                                     href="https://tidal.com"
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-[#3b82f6] hover:underline"
+                                    className="inline-flex items-center gap-1 text-brand hover:underline"
                                 >
                                     <ExternalLink className="w-3 h-3" />
                                     TIDAL
@@ -193,7 +193,7 @@ export function TidalCard({ settings, onUpdate, onTest, isTesting }: TidalCardPr
                                     href={authUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-[#3b82f6] hover:underline break-all"
+                                    className="text-brand hover:underline break-all"
                                 >
                                     {authUrl}
                                 </a>
@@ -250,7 +250,7 @@ export function TidalCard({ settings, onUpdate, onTest, isTesting }: TidalCardPr
                                 How downloaded files are organized. Use <code className="text-xs text-white/60">/</code> to create folders.
                             </span>
                             <details className="text-xs">
-                                <summary className="cursor-pointer text-[#3b82f6] hover:underline select-none">
+                                <summary className="cursor-pointer text-brand hover:underline select-none">
                                     Show available variables
                                 </summary>
                                 <div className="mt-2 space-y-2 text-white/60">

@@ -42,7 +42,7 @@ export function YouTubePreviewCard({
         return (
             <section className="mb-8">
                 <h2 className="text-2xl font-bold text-white mb-4">YouTube</h2>
-                <div className="bg-[#121212] rounded-lg p-6 animate-pulse">
+                <div className="bg-surface-sunken rounded-lg p-6 animate-pulse">
                     <div className="flex gap-5">
                         <div className="w-64 h-36 rounded bg-white/10 shrink-0" />
                         <div className="flex-1 space-y-3 py-1">
@@ -66,7 +66,7 @@ export function YouTubePreviewCard({
     return (
         <section className="mb-8">
             <h2 className="text-2xl font-bold text-white mb-4">YouTube</h2>
-            <div className="bg-[#121212] hover:bg-[#181818] transition-colors rounded-lg p-5">
+            <div className="bg-surface-sunken hover:bg-surface-elevated transition-colors rounded-lg p-5">
                 <div className="flex flex-col sm:flex-row gap-5">
                     {/* Thumbnail */}
                     {videoInfo.thumbnail && (
@@ -90,7 +90,7 @@ export function YouTubePreviewCard({
                             <p className="text-sm text-gray-400 mt-1">
                                 {videoInfo.uploader}
                             </p>
-                            <p className="text-sm text-gray-500 mt-1">
+                            <p className="text-sm text-gray-400 mt-1">
                                 {formatTime(videoInfo.duration)}
                             </p>
                         </div>
@@ -133,7 +133,7 @@ export function YouTubePreviewCard({
                                 </button>
 
                                 {showFormatMenu && !isDownloading && (
-                                    <div className="absolute top-full left-0 mt-2 w-44 bg-[#282828] rounded-lg shadow-xl border border-white/10 overflow-hidden z-50">
+                                    <div className="absolute top-full left-0 mt-2 w-44 bg-surface-highlight rounded-lg shadow-xl border border-white/10 overflow-hidden z-50">
                                         {FORMAT_OPTIONS.map((opt) => (
                                             <button
                                                 key={opt.format}

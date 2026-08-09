@@ -49,9 +49,9 @@ export default function DiscoverWeeklyPage() {
                 <h1 className="text-xl font-semibold text-white mb-4">
                     Discover Weekly
                 </h1>
-                <div className="bg-[#0f0f0f] border border-[#1c1c1c] rounded-lg p-6">
-                    <p className="text-[#a3a3a3] mb-2">Feature not available</p>
-                    <p className="text-sm text-[#737373]">
+                <div className="bg-surface-raised border border-surface-active rounded-lg p-6">
+                    <p className="text-content-secondary mb-2">Feature not available</p>
+                    <p className="text-sm text-content-muted">
                         Discovery is disabled on this server.
                     </p>
                 </div>
@@ -249,20 +249,20 @@ function DiscoverWeeklyPageContent() {
                             <h3 className="mt-4 text-lg font-medium text-white">
                                 Loading your latest Discover Weekly
                             </h3>
-                            <p className="mt-1 text-sm text-gray-500 max-w-md">
+                            <p className="mt-1 text-sm text-gray-400 max-w-md">
                                 Your playlist has been generated and can take a few
                                 seconds to fully appear.
                             </p>
                         </div>
                     ) : (
                         <div className="flex flex-col items-center justify-center py-24 text-center">
-                            <div className="w-20 h-20 bg-gradient-to-br from-[#1a1acc]/20 to-yellow-600/20 rounded-full flex items-center justify-center mb-4 shadow-xl border border-white/10">
-                                <Music2 className="w-10 h-10 text-[#5b5bff]" />
+                            <div className="w-20 h-20 bg-gradient-to-br from-ai-dark/20 to-yellow-600/20 rounded-full flex items-center justify-center mb-4 shadow-xl border border-white/10">
+                                <Music2 className="w-10 h-10 text-ai-hover" />
                             </div>
                             <h3 className="text-lg font-medium text-white mb-1">
                                 No Discover Weekly Yet
                             </h3>
-                            <p className="text-sm text-gray-500 mb-6 max-w-md">
+                            <p className="text-sm text-gray-400 mb-6 max-w-md">
                                 Generate your first playlist based on your
                                 listening history!
                             </p>
@@ -273,7 +273,7 @@ function DiscoverWeeklyPageContent() {
                                     "flex items-center gap-2 px-6 py-3 rounded-full text-white font-semibold transition-all",
                                     isGenerating
                                         ? "bg-white/5 cursor-not-allowed opacity-50"
-                                        : "bg-[#1a1acc]/20 hover:bg-[#1a1acc]/30 border border-[#2323FF]/30 hover:scale-105"
+                                        : "bg-ai-dark/20 hover:bg-ai-dark/30 border border-ai/30 hover:scale-105"
                                 )}
                             >
                                 {isGenerating ? (

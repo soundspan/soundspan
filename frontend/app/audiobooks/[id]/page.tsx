@@ -45,7 +45,7 @@ export default function AudiobookDetailPage() {
     if (!audiobook) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <p className="text-gray-500">Audiobook not found</p>
+                <p className="text-gray-400">Audiobook not found</p>
             </div>
         );
     }
@@ -113,7 +113,7 @@ export default function AudiobookDetailPage() {
                         <section>
                             <h2 className="text-xl font-bold mb-4">Series</h2>
                             <div className="flex items-center gap-3 text-sm">
-                                <span className="text-[#3b82f6] font-medium">
+                                <span className="text-brand font-medium">
                                     {audiobook.series.name}
                                 </span>
                                 <span className="text-white/40">•</span>

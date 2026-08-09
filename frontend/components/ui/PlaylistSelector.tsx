@@ -153,7 +153,7 @@ export function PlaylistSelector({
             onClick={onClose}
         >
             <div
-                className="bg-linear-to-b from-[#121212] to-[#121212] rounded-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col border border-white/10 shadow-2xl"
+                className="bg-linear-to-b from-surface-sunken to-surface-sunken rounded-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col border border-white/10 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between p-6 border-b border-white/10">
@@ -188,9 +188,9 @@ export function PlaylistSelector({
                         </div>
                     ) : playlists.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
-                            <Music2 className="w-12 h-12 text-gray-600 mb-3" />
+                            <Music2 className="w-12 h-12 text-gray-400 mb-3" />
                             <p className="text-gray-400">No playlists yet</p>
-                            <p className="text-gray-500 text-sm mt-1">
+                            <p className="text-gray-400 text-sm mt-1">
                                 Create one below to get started
                             </p>
                         </div>
@@ -205,7 +205,7 @@ export function PlaylistSelector({
                                     }
                                     className={`w-full text-left px-4 py-4 rounded-lg transition-all border group ${
                                         isSelected
-                                            ? "bg-[#3b82f6]/10 border-[#3b82f6]/30"
+                                            ? "bg-brand/10 border-brand/30"
                                             : "bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/10"
                                     }`}
                                     disabled={isProcessing}
@@ -214,8 +214,8 @@ export function PlaylistSelector({
                                         <div className="flex-1 min-w-0">
                                             <p className={`font-semibold truncate transition-colors ${
                                                 isSelected
-                                                    ? "text-[#3b82f6]"
-                                                    : "text-white group-hover:text-[#3b82f6]"
+                                                    ? "text-brand"
+                                                    : "text-white group-hover:text-brand"
                                             }`}>
                                                 {playlist.name}
                                             </p>
@@ -227,11 +227,11 @@ export function PlaylistSelector({
                                             </p>
                                         </div>
                                         {multiSelect && isSelected ? (
-                                            <div className="w-5 h-5 rounded-full bg-[#3b82f6] flex items-center justify-center ml-2 shrink-0">
+                                            <div className="w-5 h-5 rounded-full bg-brand flex items-center justify-center ml-2 shrink-0">
                                                 <Check className="w-3 h-3 text-white" />
                                             </div>
                                         ) : (
-                                            <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#3b82f6] transition-colors ml-2 shrink-0" />
+                                            <Plus className="w-5 h-5 text-gray-400 group-hover:text-brand transition-colors ml-2 shrink-0" />
                                         )}
                                     </div>
                                 </button>
@@ -245,7 +245,7 @@ export function PlaylistSelector({
                         <button
                             onClick={() => void handleConfirmMulti()}
                             disabled={isProcessing}
-                            className="w-full py-3 rounded-full font-medium bg-[#3b82f6] text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                            className="w-full py-3 rounded-full font-medium bg-brand text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                         >
                             {isConfirming ? (
                                 <>
@@ -259,7 +259,7 @@ export function PlaylistSelector({
                     </div>
                 )}
 
-                <div className="p-6 border-t border-white/10 bg-[#0a0a0a]/50">
+                <div className="p-6 border-t border-white/10 bg-surface/50">
                     <p className="text-sm text-gray-400 mb-3 font-medium">
                         Create New Playlist
                     </p>
@@ -272,7 +272,7 @@ export function PlaylistSelector({
                             onKeyDown={(e) =>
                                 e.key === "Enter" && handleCreatePlaylist()
                             }
-                            className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-[#3b82f6] focus:bg-white/10 transition-all"
+                            className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-brand focus:bg-white/10 transition-all"
                         />
                         <button
                             onClick={handleCreatePlaylist}
@@ -281,7 +281,7 @@ export function PlaylistSelector({
                                 isCreating ||
                                 isProcessing
                             }
-                            className="px-5 py-3 bg-[#60a5fa] hover:bg-[#3b82f6] disabled:bg-gray-700 disabled:cursor-not-allowed text-black font-bold rounded-lg transition-all flex items-center gap-2 disabled:text-gray-500"
+                            className="px-5 py-3 bg-brand-hover hover:bg-brand disabled:bg-gray-700 disabled:cursor-not-allowed text-black font-bold rounded-lg transition-all flex items-center gap-2 disabled:text-gray-400"
                         >
                             <Plus className="w-5 h-5" />
                             <span className="hidden sm:inline">Create</span>
@@ -295,7 +295,7 @@ export function PlaylistSelector({
                                 onChange={(e) => setIsPublic(e.target.checked)}
                                 className="sr-only peer"
                             />
-                            <div className="w-10 h-5 bg-white/10 rounded-full peer-checked:bg-[#3b82f6] transition-colors" />
+                            <div className="w-10 h-5 bg-white/10 rounded-full peer-checked:bg-brand transition-colors" />
                             <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5" />
                         </div>
                         <span className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">

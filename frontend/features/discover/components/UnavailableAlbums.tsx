@@ -8,10 +8,10 @@ const tierColors: Record<string, string> = {
     high: "text-green-400",
     medium: "text-yellow-400",
     explore: "text-orange-400",
-    wildcard: "text-[#5b5bff]",
+    wildcard: "text-ai-hover",
     // Legacy mappings
     low: "text-orange-400",
-    wild: "text-[#5b5bff]",
+    wild: "text-ai-hover",
 };
 
 const tierLabels: Record<string, string> = {
@@ -48,7 +48,7 @@ export function UnavailableAlbums({
         <Card>
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full p-4 flex items-center justify-between hover:bg-[#1a1a1a] transition-colors rounded-lg"
+                className="w-full p-4 flex items-center justify-between hover:bg-surface-hover transition-colors rounded-lg"
             >
                 <div className="flex items-center gap-2">
                     <Music className="w-5 h-5 text-orange-400" />
@@ -57,9 +57,9 @@ export function UnavailableAlbums({
                     </span>
                 </div>
                 {isExpanded ? (
-                    <ChevronUp className="w-4 h-4 text-gray-500" />
+                    <ChevronUp className="w-4 h-4 text-gray-400" />
                 ) : (
-                    <ChevronDown className="w-4 h-4 text-gray-500" />
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
                 )}
             </button>
             {isExpanded && (
@@ -70,7 +70,7 @@ export function UnavailableAlbums({
                             Listen to 30-second previews below!
                         </p>
                     </div>
-                    <div className="divide-y divide-[#1c1c1c]">
+                    <div className="divide-y divide-surface-active">
                 {unavailable.map((album) => {
                     const isPreviewPlaying = currentPreview === album.id;
                     const attemptLabel =
@@ -82,9 +82,9 @@ export function UnavailableAlbums({
                         <div
                             key={album.id}
                             className={cn(
-                                "flex items-center gap-4 px-4 py-3 hover:bg-[#1a1a1a] transition-colors group",
+                                "flex items-center gap-4 px-4 py-3 hover:bg-surface-hover transition-colors group",
                                 album.attemptNumber > 0 &&
-                                    "pl-12 bg-[#1a1a1a]/30"
+                                    "pl-12 bg-surface-hover/30"
                             )}
                         >
                             <div className="w-8 flex items-center justify-center">
@@ -105,12 +105,12 @@ export function UnavailableAlbums({
                                         )}
                                     </button>
                                 ) : (
-                                    <Music className="w-4 h-4 text-gray-600" />
+                                    <Music className="w-4 h-4 text-gray-400" />
                                 )}
                             </div>
 
-                            <div className="w-12 h-12 bg-[#181818] rounded flex items-center justify-center shrink-0">
-                                <Music className="w-6 h-6 text-gray-600" />
+                            <div className="w-12 h-12 bg-surface-elevated rounded flex items-center justify-center shrink-0">
+                                <Music className="w-6 h-6 text-gray-400" />
                             </div>
 
                             <div className="flex-1 min-w-0">

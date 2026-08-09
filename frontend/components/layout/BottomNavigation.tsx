@@ -67,7 +67,7 @@ export function BottomNavigation() {
                                 "flex flex-col items-center justify-center flex-1 h-full py-2 transition-colors",
                                 isActive
                                     ? "text-white"
-                                    : "text-gray-500 active:text-gray-300"
+                                    : "text-gray-400 active:text-gray-300"
                             )}
                             aria-label={item.name}
                             aria-current={isActive ? "page" : undefined}

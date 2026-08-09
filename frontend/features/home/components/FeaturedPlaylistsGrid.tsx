@@ -40,7 +40,7 @@ const PlaylistCard = memo(function PlaylistCard({
                 tabIndex={0}
                 className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors"
             >
-                <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-[#282828] shadow-lg">
+                <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-surface-highlight shadow-lg">
                     {playlist.imageUrl ? (
                         <img
                             src={playlist.imageUrl}
@@ -49,12 +49,12 @@ const PlaylistCard = memo(function PlaylistCard({
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#AD47FF]/30 to-[#AD47FF]/10">
-                            <Music2 className="w-10 h-10 text-gray-600" />
+                            <Music2 className="w-10 h-10 text-gray-400" />
                         </div>
                     )}
                     {/* Play button on hover */}
                     <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-200">
-                        <div className="w-10 h-10 rounded-full bg-[#60a5fa] flex items-center justify-center shadow-xl hover:scale-105 transition-transform">
+                        <div className="w-10 h-10 rounded-full bg-brand-hover flex items-center justify-center shadow-xl hover:scale-105 transition-transform">
                             {showSpinner ? (
                                 <Loader2 className="w-4 h-4 text-black animate-spin" />
                             ) : (

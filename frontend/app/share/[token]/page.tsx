@@ -447,9 +447,9 @@ export default function SharePage() {
 
 	if (loading) {
 		return (
-			<main className="flex min-h-screen items-center justify-center bg-[#0a0a0a] px-4 text-white">
+			<main className="flex min-h-screen items-center justify-center bg-surface px-4 text-white">
 				<div className="flex items-center gap-3 text-gray-300">
-					<Loader2 className="h-5 w-5 animate-spin text-[#3b82f6]" />
+					<Loader2 className="h-5 w-5 animate-spin text-brand" />
 					<span>Loading shared link...</span>
 				</div>
 			</main>
@@ -458,8 +458,8 @@ export default function SharePage() {
 
 	if (error || !data) {
 		return (
-			<main className="flex min-h-screen items-center justify-center bg-[#0a0a0a] px-4 text-white">
-				<div className="w-full max-w-2xl rounded-xl border border-[#262626] bg-[#111111]/60 p-8 text-center">
+			<main className="flex min-h-screen items-center justify-center bg-surface px-4 text-white">
+				<div className="w-full max-w-2xl rounded-xl border border-line bg-[#111111]/60 p-8 text-center">
 					<div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10">
 						<AlertCircle className="h-7 w-7 text-red-400" />
 					</div>
@@ -467,7 +467,7 @@ export default function SharePage() {
 					<p className="mt-2 text-sm text-gray-400">
 						This share link is invalid, expired, or no longer available.
 					</p>
-					<p className="mt-8 text-xs text-gray-600">soundspan™</p>
+					<p className="mt-8 text-xs text-gray-400">soundspan™</p>
 				</div>
 			</main>
 		);
@@ -514,30 +514,30 @@ export default function SharePage() {
 			<div className="flex h-full flex-col md:flex-row">
 					<div className="flex flex-col items-center justify-center overflow-y-auto px-8 py-12 md:h-full md:w-1/2 md:pl-12 md:pr-6">
 						{data.resourceType === "track" ? (
-							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
+							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-brand-hover/30 bg-brand-hover/10 px-2.5 py-1 text-xs uppercase tracking-widest text-brand-hover">
 								<Disc3 className="h-3 w-3" />
 								Shared Track
 							</span>
 						) : data.resourceType === "album" ? (
-							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
+							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-brand-hover/30 bg-brand-hover/10 px-2.5 py-1 text-xs uppercase tracking-widest text-brand-hover">
 								<Disc3 className="h-3 w-3" />
 								Shared Album
 							</span>
 						) : (
-							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-[#60a5fa]/30 bg-[#60a5fa]/10 px-2.5 py-1 text-xs uppercase tracking-widest text-[#60a5fa]">
+							<span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-brand-hover/30 bg-brand-hover/10 px-2.5 py-1 text-xs uppercase tracking-widest text-brand-hover">
 								<ListMusic className="h-3 w-3" />
 								Shared Playlist
 							</span>
 						)}
 
 						<div className="relative mx-auto mb-6 w-full max-w-[min(92vw,52vh)] md:max-w-[min(40vw,calc(100vh-20rem))]">
-							<div className="absolute inset-0 rounded-2xl blur-2xl opacity-50 bg-gradient-to-br from-[#60a5fa]/20 via-transparent to-[#3b82f6]/20" />
-							<div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] shadow-2xl">
+							<div className="absolute inset-0 rounded-2xl blur-2xl opacity-50 bg-gradient-to-br from-brand-hover/20 via-transparent to-brand/20" />
+							<div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-surface-hover shadow-2xl">
 								{leftPanelCoverUrl ? (
 									<img src={leftPanelCoverUrl} alt="Cover art" className="h-full w-full object-cover" />
 								) : (
 									<div className="flex h-full w-full items-center justify-center">
-										<Music className="h-24 w-24 text-gray-600" />
+										<Music className="h-24 w-24 text-gray-400" />
 									</div>
 								)}
 							</div>
@@ -550,18 +550,18 @@ export default function SharePage() {
 							{leftPanelSubtitle}
 						</p>
 						{!currentTrack && data.resourceType === "album" && (
-							<p className="mt-1 text-sm text-gray-500 text-center">{trackQueue.length} tracks</p>
+							<p className="mt-1 text-sm text-gray-400 text-center">{trackQueue.length} tracks</p>
 						)}
 						{!currentTrack && data.resourceType === "playlist" && (
 							<>
-								<p className="mt-1 text-sm text-gray-500 text-center">{trackQueue.length} items</p>
-								<p className="mt-0.5 text-sm text-gray-500 text-center">
+								<p className="mt-1 text-sm text-gray-400 text-center">{trackQueue.length} items</p>
+								<p className="mt-0.5 text-sm text-gray-400 text-center">
 									by {(data.resource as PlaylistResource).user?.username ?? "Unknown user"}
 								</p>
 							</>
 						)}
 						{!currentTrack && data.resourceType === "track" && (
-							<p className="mt-0.5 text-sm text-gray-500 text-center">
+							<p className="mt-0.5 text-sm text-gray-400 text-center">
 								{(data.resource as TrackResource).album.title}
 							</p>
 						)}
@@ -573,9 +573,9 @@ export default function SharePage() {
 					<div className="flex h-full flex-col overflow-hidden">
 							<div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
 								<div className="flex items-center gap-2">
-									<ListMusic className="h-4 w-4 text-[#60a5fa]" />
+									<ListMusic className="h-4 w-4 text-brand-hover" />
 									<h2 className="text-sm font-semibold text-white">Up Next</h2>
-									<span className="text-xs text-gray-500">
+									<span className="text-xs text-gray-400">
 										{trackQueue.length} {data.resourceType === "playlist" ? "items" : "tracks"}
 									</span>
 								</div>
@@ -612,35 +612,35 @@ export default function SharePage() {
 											className={cn(
 												"mb-1.5 flex items-center gap-2 rounded-md px-2 py-2 transition-colors cursor-pointer",
 												isCurrentTrack
-													? "bg-[#60a5fa]/10"
+													? "bg-brand-hover/10"
 													: "hover:bg-white/[0.06]",
 											)}
 										>
 											<button type="button" onClick={() => playTrack(track)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-												<span className={cn("w-5 flex-shrink-0 text-center text-[11px] tabular-nums", isCurrentTrack ? "text-[#60a5fa]" : "text-gray-500")}>
+												<span className={cn("w-5 flex-shrink-0 text-center text-[11px] tabular-nums", isCurrentTrack ? "text-brand-hover" : "text-gray-400")}>
 													{index + 1}
 												</span>
 
-												<div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-[#1a1a1a]">
+												<div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-surface-hover">
 													{track.coverUrl ? (
 														<img src={track.coverUrl} alt={track.title} className="h-full w-full object-cover" />
 													) : (
 														<div className="flex h-full w-full items-center justify-center">
-															<Music className="h-4 w-4 text-gray-600" />
+															<Music className="h-4 w-4 text-gray-400" />
 														</div>
 													)}
 												</div>
 
 												<div className="min-w-0 flex-1">
-													<p className={cn("min-w-0 truncate text-sm", isCurrentTrack ? "text-[#60a5fa]" : "text-white")}>{track.title}</p>
+													<p className={cn("min-w-0 truncate text-sm", isCurrentTrack ? "text-brand-hover" : "text-white")}>{track.title}</p>
 													<div className="mt-0.5 flex min-w-0 items-center gap-1.5">
 														<p className="min-w-0 truncate text-xs text-gray-400">{track.artist}</p>
 														{isCurrentTrack && (
-															<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#60a5fa]/40 bg-[#60a5fa]/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
+															<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-hover/40 bg-brand-hover/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-hover">
 																<span className="inline-flex items-end gap-0.5">
-																	<span className="h-2 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.2s]" />
-																	<span className="h-2.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa]" />
-																	<span className="h-1.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.35s]" />
+																	<span className="h-2 w-0.5 animate-bounce rounded-full bg-brand-hover [animation-delay:-0.2s]" />
+																	<span className="h-2.5 w-0.5 animate-bounce rounded-full bg-brand-hover" />
+																	<span className="h-1.5 w-0.5 animate-bounce rounded-full bg-brand-hover [animation-delay:-0.35s]" />
 																</span>
 																Playing
 															</span>
@@ -648,7 +648,7 @@ export default function SharePage() {
 													</div>
 												</div>
 
-												<span className={cn("text-[11px] tabular-nums", isCurrentTrack ? "text-[#60a5fa]" : "text-gray-500")}>
+												<span className={cn("text-[11px] tabular-nums", isCurrentTrack ? "text-brand-hover" : "text-gray-400")}>
 													{formatTime(track.duration)}
 												</span>
 											</button>
@@ -656,7 +656,7 @@ export default function SharePage() {
 											<a
 												href={getDownloadUrl(track.id)}
 												download
-												className="ml-1 flex-shrink-0 p-1 text-gray-500 transition-colors hover:text-white"
+												className="ml-1 flex-shrink-0 p-1 text-gray-400 transition-colors hover:text-white"
 												onClick={(e) => e.stopPropagation()}
 												title="Download track"
 											>
@@ -666,7 +666,7 @@ export default function SharePage() {
 									);
 								})}
 							</div>
-							<p className="flex-shrink-0 py-3 text-center text-xs text-gray-700">soundspan™</p>
+							<p className="flex-shrink-0 py-3 text-center text-xs text-gray-400">soundspan™</p>
 							</div>
 					</div>
 				</div>
@@ -703,7 +703,7 @@ export default function SharePage() {
 
 						<div className="flex min-w-0 items-center gap-3 mr-4">
 							<div className="relative h-14 w-14 shrink-0">
-								<div className="relative h-full w-full overflow-hidden rounded-lg bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] shadow-lg flex items-center justify-center">
+								<div className="relative h-full w-full overflow-hidden rounded-lg bg-gradient-to-br from-[#2a2a2a] to-surface-hover shadow-lg flex items-center justify-center">
 									{currentTrack.coverUrl ? (
 										<img
 											src={currentTrack.coverUrl}
@@ -711,7 +711,7 @@ export default function SharePage() {
 											className="h-full w-full object-cover"
 										/>
 									) : (
-										<Music className="h-6 w-6 text-gray-500" />
+										<Music className="h-6 w-6 text-gray-400" />
 									)}
 								</div>
 							</div>
@@ -781,7 +781,7 @@ export default function SharePage() {
 						<div
 								ref={volumePopupRef}
 								className={cn(
-									"absolute bottom-full left-1/2 mb-2 -translate-x-1/2 overflow-hidden rounded-lg border border-white/10 bg-[#1a1a1a] px-1.5 py-3 shadow-xl transition-all duration-200",
+									"absolute bottom-full left-1/2 mb-2 -translate-x-1/2 overflow-hidden rounded-lg border border-white/10 bg-surface-hover px-1.5 py-3 shadow-xl transition-all duration-200",
 									showVolumePopup ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0",
 								)}
 							>

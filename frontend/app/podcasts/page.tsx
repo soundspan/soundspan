@@ -220,11 +220,11 @@ export default function PodcastsPage() {
             {/* Quick gradient fade - yellow to purple */}
             <div className="absolute inset-0 pointer-events-none">
                 <div
-                    className="absolute inset-0 bg-gradient-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
+                    className="absolute inset-0 bg-gradient-to-b from-brand/15 via-blue-900/10 to-transparent"
                     style={{ height: "35vh" }}
                 />
                 <div
-                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-[#3b82f6]/8 via-transparent to-transparent"
+                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-brand/8 via-transparent to-transparent"
                     style={{ height: "25vh" }}
                 />
             </div>
@@ -244,13 +244,13 @@ export default function PodcastsPage() {
                         className="relative w-full md:w-96 md:ml-auto"
                         ref={dropdownRef}
                     >
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 z-10" />
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 z-10" />
                         <input
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Quick add..."
-                            className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-[#2323FF] focus:bg-white/10 transition-all text-sm"
+                            className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-ai focus:bg-white/10 transition-all text-sm"
                         />
                         {isSearching && (
                             <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
@@ -260,7 +260,7 @@ export default function PodcastsPage() {
 
                         {/* Dropdown Results */}
                         {showDropdown && searchResults.length > 0 && (
-                            <div className="absolute top-full left-0 mt-2 w-full bg-[#121212] border border-white/10 rounded-lg shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto">
+                            <div className="absolute top-full left-0 mt-2 w-full bg-surface-sunken border border-white/10 rounded-lg shadow-2xl overflow-hidden z-50 max-h-96 overflow-y-auto">
                                 {searchResults.map((result) => {
                                     const imageUrl = getProxiedImageUrl(result.coverUrl);
                                     return (
@@ -275,7 +275,7 @@ export default function PodcastsPage() {
                                             }}
                                         >
                                             {/* Cover Art */}
-                                            <div className="w-12 h-12 rounded-full bg-[#181818] flex-shrink-0 overflow-hidden relative">
+                                            <div className="w-12 h-12 rounded-full bg-surface-elevated flex-shrink-0 overflow-hidden relative">
                                                 {imageUrl ? (
                                                     <Image
                                                         src={imageUrl}
@@ -287,7 +287,7 @@ export default function PodcastsPage() {
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center">
-                                                        <Mic2 className="w-6 h-6 text-gray-600" />
+                                                        <Mic2 className="w-6 h-6 text-gray-400" />
                                                     </div>
                                                 )}
                                             </div>
@@ -304,7 +304,7 @@ export default function PodcastsPage() {
 
                                             {/* Add Button */}
                                             <div className="flex-shrink-0">
-                                                <div className="w-8 h-8 rounded-full bg-[#2323FF] hover:bg-[#5b5bff] flex items-center justify-center transition-colors">
+                                                <div className="w-8 h-8 rounded-full bg-ai hover:bg-ai-hover flex items-center justify-center transition-colors">
                                                     <Plus className="w-4 h-4 text-white" />
                                                 </div>
                                             </div>
@@ -319,7 +319,7 @@ export default function PodcastsPage() {
                             searchResults.length === 0 &&
                             !isSearching &&
                             searchQuery.length >= 2 && (
-                                <div className="absolute top-full left-0 mt-2 w-full bg-[#121212] border border-white/10 rounded-lg shadow-2xl p-4 z-50">
+                                <div className="absolute top-full left-0 mt-2 w-full bg-surface-sunken border border-white/10 rounded-lg shadow-2xl p-4 z-50">
                                     <p className="text-gray-400 text-sm text-center">
                                         No podcasts found for &quot;{searchQuery}&quot;
                                     </p>
@@ -331,7 +331,7 @@ export default function PodcastsPage() {
                     <div className="w-full md:w-96 md:ml-auto mt-3">
                         <div className="flex items-center gap-2">
                             <div className="relative flex-1">
-                                <Link2 className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 z-10" />
+                                <Link2 className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 z-10" />
                                 <input
                                     type="url"
                                     value={rssUrl}
@@ -343,13 +343,13 @@ export default function PodcastsPage() {
                                         }
                                     }}
                                     placeholder="Add by RSS URL..."
-                                    className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-[#2323FF] focus:bg-white/10 transition-all text-sm"
+                                    className="w-full pl-11 pr-4 py-3 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-500 focus:outline-none focus:border-ai focus:bg-white/10 transition-all text-sm"
                                 />
                             </div>
                             <button
                                 onClick={handleAddByRss}
                                 disabled={isAddingRss}
-                                className="h-11 px-4 rounded-full bg-[#60a5fa] hover:bg-[#93c5fd] text-black font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                className="h-11 px-4 rounded-full bg-brand-hover hover:bg-brand-light text-black font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                                 {isAddingRss ? "Adding..." : "Add RSS"}
                             </button>
@@ -377,7 +377,7 @@ export default function PodcastsPage() {
                                 <select
                                     value={sortBy}
                                     onChange={(e) => setSortBy(e.target.value as SortOption)}
-                                    className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-[#2323FF] [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                                    className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-ai [&>option]:bg-surface-hover [&>option]:text-white"
                                     disabled={showMyPodcastsSkeleton}
                                 >
                                     <option value="title">Title (A-Z)</option>
@@ -392,7 +392,7 @@ export default function PodcastsPage() {
                                         setItemsPerPage(Number(e.target.value));
                                         setCurrentPage(1);
                                     }}
-                                    className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-[#2323FF] [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                                    className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-ai [&>option]:bg-surface-hover [&>option]:text-white"
                                     disabled={showMyPodcastsSkeleton}
                                 >
                                     <option value={25}>25 per page</option>
@@ -426,7 +426,7 @@ export default function PodcastsPage() {
                                             tabIndex={0}
                                             className="bg-transparent hover:bg-white/5 transition-all p-3 rounded-md cursor-pointer group"
                                         >
-                                            <div className="w-full aspect-square bg-[#282828] rounded-full mb-2.5 overflow-hidden relative shadow-lg">
+                                            <div className="w-full aspect-square bg-surface-highlight rounded-full mb-2.5 overflow-hidden relative shadow-lg">
                                                 {imageUrl ? (
                                                     <Image
                                                         src={imageUrl}
@@ -438,7 +438,7 @@ export default function PodcastsPage() {
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center">
-                                                        <Mic2 className="w-16 h-16 text-gray-700" />
+                                                        <Mic2 className="w-16 h-16 text-gray-400" />
                                                     </div>
                                                 )}
                                             </div>
@@ -519,7 +519,7 @@ export default function PodcastsPage() {
                                             tabIndex={0}
                                             className="bg-transparent hover:bg-white/5 transition-all p-3 rounded-md cursor-pointer group"
                                         >
-                                            <div className="w-full aspect-square bg-[#282828] rounded-full mb-2.5 overflow-hidden relative shadow-lg">
+                                            <div className="w-full aspect-square bg-surface-highlight rounded-full mb-2.5 overflow-hidden relative shadow-lg">
                                                 {imageUrl ? (
                                                     <Image
                                                         src={imageUrl}
@@ -531,7 +531,7 @@ export default function PodcastsPage() {
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center">
-                                                        <Mic2 className="w-16 h-16 text-gray-700" />
+                                                        <Mic2 className="w-16 h-16 text-gray-400" />
                                                     </div>
                                                 )}
                                             </div>
@@ -606,7 +606,7 @@ export default function PodcastsPage() {
                                             tabIndex={0}
                                             className="bg-transparent hover:bg-white/5 transition-all p-3 rounded-md cursor-pointer group"
                                         >
-                                            <div className="w-full aspect-square bg-[#282828] rounded-full mb-2.5 overflow-hidden relative shadow-lg">
+                                            <div className="w-full aspect-square bg-surface-highlight rounded-full mb-2.5 overflow-hidden relative shadow-lg">
                                                 {imageUrl ? (
                                                     <Image
                                                         src={imageUrl}
@@ -618,7 +618,7 @@ export default function PodcastsPage() {
                                                     />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center">
-                                                        <Mic2 className="w-16 h-16 text-gray-700" />
+                                                        <Mic2 className="w-16 h-16 text-gray-400" />
                                                     </div>
                                                 )}
                                             </div>
@@ -643,7 +643,7 @@ export default function PodcastsPage() {
                     podcasts.length === 0 &&
                     topPodcasts.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-24">
-                        <Mic2 className="w-24 h-24 text-gray-700 mb-6" />
+                        <Mic2 className="w-24 h-24 text-gray-400 mb-6" />
                         <h2 className="text-2xl font-bold text-white mb-2">
                             Discover Podcasts
                         </h2>

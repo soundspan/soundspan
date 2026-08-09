@@ -54,12 +54,12 @@ function CodeStep({ userCode, copied, onCopyCode, pasteInstruction }: Pick<
             <div className="space-y-2">
                 <p className="text-sm text-gray-300">
                     {pasteInstruction}
-                    <span className="text-gray-500 text-xs ml-1">
+                    <span className="text-gray-400 text-xs ml-1">
                         (it&apos;s already on your clipboard)
                     </span>
                 </p>
                 <div className="flex items-center gap-3">
-                    <code className="px-4 py-2 text-lg font-mono font-bold tracking-wider bg-[#1a1a1a] text-white rounded-lg border border-[#444] select-all">
+                    <code className="px-4 py-2 text-lg font-mono font-bold tracking-wider bg-surface-hover text-white rounded-lg border border-[#444] select-all">
                         {userCode}
                     </code>
                     <button onClick={onCopyCode} className="p-2 text-gray-400 hover:text-white transition-colors" title="Copy code">
@@ -82,7 +82,7 @@ function WaitingRow({ timeLeftSeconds }: Pick<DeviceAuthLinkPanelProps, "timeLef
             </div>
             {timeLeftSeconds !== null && (
                 <span className={`text-xs tabular-nums ${
-                    timeLeftSeconds < 120 ? "text-amber-400/70" : "text-gray-500"
+                    timeLeftSeconds < 120 ? "text-amber-400/70" : "text-gray-400"
                 }`}>
                     Expires in {formatTime(timeLeftSeconds)}
                 </span>
@@ -94,7 +94,7 @@ function WaitingRow({ timeLeftSeconds }: Pick<DeviceAuthLinkPanelProps, "timeLef
 /** Renders reusable instructions and controls for a device-code authentication session. */
 export function DeviceAuthLinkPanel(props: DeviceAuthLinkPanelProps) {
     return (
-        <div className="p-4 bg-[#252525] rounded-lg border border-[#333] space-y-4">
+        <div className="p-4 bg-[#252525] rounded-lg border border-line-strong space-y-4">
             <div className="space-y-3">
                 <p className="text-sm text-gray-300">{props.introText}</p>
                 <CodeStep {...props} />
@@ -120,7 +120,7 @@ export function DeviceAuthLinkPanel(props: DeviceAuthLinkPanelProps) {
                 </a>
             )}
             <WaitingRow timeLeftSeconds={props.timeLeftSeconds} />
-            <button onClick={props.onCancel} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+            <button onClick={props.onCancel} className="text-xs text-gray-400 hover:text-gray-300 transition-colors">
                 Cancel
             </button>
         </div>

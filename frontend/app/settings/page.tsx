@@ -105,7 +105,7 @@ export default function SettingsPage() {
 
     if (authLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-surface">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -117,7 +117,7 @@ export default function SettingsPage() {
 
     if (userSettingsLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-surface">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -169,7 +169,7 @@ export default function SettingsPage() {
                         {isSaving ? "Saving..." : "Save"}
                     </button>
                     {/* Status appears below button, absolutely positioned */}
-                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-[#0a0a0a]/90 backdrop-blur-sm px-3 py-0.5 rounded-full">
+                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-surface/90 backdrop-blur-sm px-3 py-0.5 rounded-full">
                         <InlineStatus {...saveStatus.props} />
                     </div>
                 </div>

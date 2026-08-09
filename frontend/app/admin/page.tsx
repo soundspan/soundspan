@@ -194,7 +194,7 @@ export default function AdminPage() {
 
     if (authLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-surface">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -206,7 +206,7 @@ export default function AdminPage() {
 
     if (systemSettingsLoading) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
+            <div className="flex items-center justify-center min-h-screen bg-surface">
                 <GradientSpinner size="md" />
             </div>
         );
@@ -214,7 +214,7 @@ export default function AdminPage() {
 
     if (systemSettingsLoadError || !systemSettings) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-screen bg-[#0a0a0a] gap-4 px-4">
+            <div className="flex flex-col items-center justify-center min-h-screen bg-surface gap-4 px-4">
                 <p className="text-red-400 text-sm text-center">
                     Failed to load settings from the server. Settings cannot be edited until they are loaded.
                 </p>
@@ -295,7 +295,7 @@ export default function AdminPage() {
                         >
                             {isSaving ? "Saving..." : "Save"}
                         </button>
-                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-[#0a0a0a]/90 backdrop-blur-sm px-3 py-0.5 rounded-full">
+                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-surface/90 backdrop-blur-sm px-3 py-0.5 rounded-full">
                             <InlineStatus {...saveStatus.props} />
                         </div>
                     </div>

@@ -135,7 +135,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                             <main
                                 id="main-content"
                                 tabIndex={-1}
-                                className="flex-1 bg-gradient-to-b from-[#1a1a1a] via-black to-black mx-2 mb-2 rounded-lg overflow-y-auto relative focus:outline-none"
+                                className="flex-1 bg-gradient-to-b from-surface-hover via-black to-black mx-2 mb-2 rounded-lg overflow-y-auto relative focus:outline-none"
                                 style={{
                                     marginTop: "calc(58px + env(safe-area-inset-top, 0px))",
                                     marginBottom:
@@ -179,7 +179,7 @@ export function AuthenticatedLayout({ children }: { children: ReactNode }) {
                         <main
                             id="main-content"
                             tabIndex={-1}
-                            className="flex-1 bg-gradient-to-b from-[#1a1a1a] via-black to-black rounded-lg overflow-y-auto relative focus:outline-none"
+                            className="flex-1 bg-gradient-to-b from-surface-hover via-black to-black rounded-lg overflow-y-auto relative focus:outline-none"
                         >
                             <GalaxyBackground />
                             {children}

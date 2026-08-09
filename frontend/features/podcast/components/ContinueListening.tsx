@@ -82,7 +82,7 @@ export function ContinueListening({
 
                 {/* Current Episode - Prominent */}
                 <div
-                    className="flex items-center gap-4 p-4 rounded-lg bg-white/5 border border-[#3b82f6]/30 hover:border-[#3b82f6]/50 transition-all cursor-pointer"
+                    className="flex items-center gap-4 p-4 rounded-lg bg-white/5 border border-brand/30 hover:border-brand/50 transition-all cursor-pointer"
                     onClick={() => onPlayPause(recentEpisode)}
                 >
                     <button
@@ -90,7 +90,7 @@ export function ContinueListening({
                             e.stopPropagation();
                             handleCurrentEpisodePlayPause();
                         }}
-                        className="w-12 h-12 rounded-full bg-[#60a5fa] hover:bg-[#93c5fd] hover:scale-105 transition-all flex items-center justify-center shrink-0"
+                        className="w-12 h-12 rounded-full bg-brand-hover hover:bg-brand-light hover:scale-105 transition-all flex items-center justify-center shrink-0"
                     >
                         {showSpinner ? (
                             <Loader2 className="w-5 h-5 text-black animate-spin" />
@@ -115,13 +115,13 @@ export function ContinueListening({
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
                                         <div
-                                            className="h-full bg-[#3b82f6] rounded-full transition-all"
+                                            className="h-full bg-brand rounded-full transition-all"
                                             style={{
                                                 width: `${recentEpisode.progress.progress}%`,
                                             }}
                                         />
                                     </div>
-                                    <span className="text-xs text-[#3b82f6]">
+                                    <span className="text-xs text-brand">
                                         {Math.floor(recentEpisode.progress.progress)}%
                                     </span>
                                 </div>

@@ -31,18 +31,18 @@ export function ChapterList({
             <button
               key={chapter.id}
               onClick={() => onSeekToChapter(chapter.start)}
-              className="w-full text-left p-3 rounded-md hover:bg-[#1a1a1a] transition-colors group"
+              className="w-full text-left p-3 rounded-md hover:bg-surface-hover transition-colors group"
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-sm text-gray-500 mr-2">
+                  <span className="text-sm text-gray-400 mr-2">
                     {index + 1}.
                   </span>
-                  <span className="text-sm text-white group-hover:text-[#5b5bff]">
+                  <span className="text-sm text-white group-hover:text-ai-hover">
                     {chapter.title}
                   </span>
                 </div>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-400">
                   {formatTime(chapter.start)}
                 </span>
               </div>

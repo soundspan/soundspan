@@ -143,7 +143,7 @@ export function SocialTab({
                             key={user.id}
                             role="listitem"
                             tabIndex={0}
-                            className="px-3 py-3 border-b border-white/5 hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#3b82f6]/50 focus-visible:bg-white/5"
+                            className="px-3 py-3 border-b border-white/5 hover:bg-white/5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/50 focus-visible:bg-white/5"
                         >
                             <div className="flex items-start gap-3">
                                 <div className="w-8 h-8 rounded-full bg-white/10 text-white/80 text-xs font-semibold flex items-center justify-center shrink-0 overflow-hidden">
@@ -183,7 +183,7 @@ export function SocialTab({
                                         </span>
                                         {user.isInListenTogetherGroup && (
                                             <span
-                                                className="inline-flex items-center justify-center font-bold rounded text-[9px] px-1 py-0.5 leading-none bg-[#2323FF]/20 text-[#5b5bff]"
+                                                className="inline-flex items-center justify-center font-bold rounded text-[9px] px-1 py-0.5 leading-none bg-ai/20 text-ai-hover"
                                                 title="In a Listen Together session"
                                                 aria-label="In a Listen Together session"
                                             >
@@ -199,7 +199,7 @@ export function SocialTab({
                                     )}
 
                                     {showTrack && track ? (
-                                        <p className="text-xs text-[#3b82f6] truncate mt-1 flex items-center gap-1.5">
+                                        <p className="text-xs text-brand truncate mt-1 flex items-center gap-1.5">
                                             {track.coverArt ? (
                                                 <span className="relative w-3.5 h-3.5 shrink-0 overflow-hidden rounded-[2px]">
                                                     <Image

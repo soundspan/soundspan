@@ -279,11 +279,11 @@ export default function AudiobooksPage() {
                 {/* Background gradient */}
                 <div className="absolute inset-0 pointer-events-none">
                     <div
-                        className="absolute inset-0 bg-gradient-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
+                        className="absolute inset-0 bg-gradient-to-b from-brand/15 via-blue-900/10 to-transparent"
                         style={{ height: "35vh" }}
                     />
                     <div
-                        className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-[#3b82f6]/8 via-transparent to-transparent"
+                        className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-brand/8 via-transparent to-transparent"
                         style={{ height: "25vh" }}
                     />
                 </div>
@@ -302,7 +302,7 @@ export default function AudiobooksPage() {
 
                     {/* Setup Steps - Horizontal Cards */}
                     <div className="grid md:grid-cols-3 gap-6 mb-12">
-                        <div className="bg-gradient-to-br from-[#121212] to-[#0a0a0a] rounded-xl p-6 border border-white/5 hover:border-white/10 transition-all">
+                        <div className="bg-gradient-to-br from-surface-sunken to-surface rounded-xl p-6 border border-white/5 hover:border-white/10 transition-all">
                             <div className="text-4xl font-black text-blue-400/20 mb-4">
                                 01
                             </div>
@@ -315,7 +315,7 @@ export default function AudiobooksPage() {
                             </p>
                         </div>
 
-                        <div className="bg-gradient-to-br from-[#121212] to-[#0a0a0a] rounded-xl p-6 border border-white/5 hover:border-white/10 transition-all">
+                        <div className="bg-gradient-to-br from-surface-sunken to-surface rounded-xl p-6 border border-white/5 hover:border-white/10 transition-all">
                             <div className="text-4xl font-black text-blue-400/20 mb-4">
                                 02
                             </div>
@@ -328,7 +328,7 @@ export default function AudiobooksPage() {
                             </p>
                         </div>
 
-                        <div className="bg-gradient-to-br from-[#121212] to-[#0a0a0a] rounded-xl p-6 border border-white/5 hover:border-white/10 transition-all">
+                        <div className="bg-gradient-to-br from-surface-sunken to-surface rounded-xl p-6 border border-white/5 hover:border-white/10 transition-all">
                             <div className="text-4xl font-black text-blue-400/20 mb-4">
                                 03
                             </div>
@@ -370,7 +370,7 @@ export default function AudiobooksPage() {
 
                     {/* Footer Link */}
                     <div className="text-center">
-                        <p className="text-gray-500 text-sm mb-2">Need help?</p>
+                        <p className="text-gray-400 text-sm mb-2">Need help?</p>
                         <a
                             href="https://github.com/advplyr/audiobookshelf"
                             target="_blank"
@@ -390,11 +390,11 @@ export default function AudiobooksPage() {
             {/* Background gradient */}
             <div className="absolute inset-0 pointer-events-none">
                 <div
-                    className="absolute inset-0 bg-gradient-to-b from-[#3b82f6]/15 via-blue-900/10 to-transparent"
+                    className="absolute inset-0 bg-gradient-to-b from-brand/15 via-blue-900/10 to-transparent"
                     style={{ height: "35vh" }}
                 />
                 <div
-                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-[#3b82f6]/8 via-transparent to-transparent"
+                    className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-brand/8 via-transparent to-transparent"
                     style={{ height: "25vh" }}
                 />
             </div>
@@ -440,7 +440,7 @@ export default function AudiobooksPage() {
                         {/* Shuffle Button */}
                         <button
                             onClick={handleShuffleAudiobooks}
-                            className="flex items-center gap-2 px-4 py-2 bg-[#60a5fa] hover:bg-[#3b82f6] text-black font-medium rounded-full transition-all hover:scale-105"
+                            className="flex items-center gap-2 px-4 py-2 bg-brand-hover hover:bg-brand text-black font-medium rounded-full transition-all hover:scale-105"
                         >
                             <Shuffle className="w-4 h-4" />
                             <span className="hidden sm:inline">Random Book</span>
@@ -460,7 +460,7 @@ export default function AudiobooksPage() {
                             onChange={(e) =>
                                 setSortBy(e.target.value as SortType)
                             }
-                            className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 focus:bg-[#252525] transition-all [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                            className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 focus:bg-[#252525] transition-all [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value="title">Title</option>
                             <option value="author">Author</option>
@@ -489,7 +489,7 @@ export default function AudiobooksPage() {
                                 onChange={(e) =>
                                     setSelectedGenre(e.target.value || null)
                                 }
-                                className="flex-1 min-w-0 md:flex-initial md:min-w-[140px] px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 focus:bg-[#252525] transition-all truncate [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                                className="flex-1 min-w-0 md:flex-initial md:min-w-[140px] px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 focus:bg-[#252525] transition-all truncate [&>option]:bg-surface-hover [&>option]:text-white"
                             >
                                 <option value="">All Genres</option>
                                 {allGenres.map((genre) => (
@@ -507,7 +507,7 @@ export default function AudiobooksPage() {
                                 setItemsPerPage(Number(e.target.value));
                                 setCurrentPage(1);
                             }}
-                            className="px-4 py-2 bg-[#1a1a1a] border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                            className="px-4 py-2 bg-surface-hover border border-white/10 rounded-full text-white text-sm focus:outline-none focus:border-blue-500 [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value={25}>25 per page</option>
                             <option value={50}>50 per page</option>

@@ -259,7 +259,7 @@ function SearchForm({ query, inputRef, className, remote, rows, controller }: {
                     aria-label="Spotlight a vibe" role="combobox" aria-autocomplete="list"
                     aria-expanded={controller.show} aria-controls="spotlight-listbox"
                     aria-activedescendant={controller.show ? `spotlight-option-${controller.activeIndex}` : undefined}
-                    className="w-full h-full bg-transparent pl-9 pr-9 rounded-full text-sm text-white placeholder:text-gray-500 focus:outline-none" />
+                    className="w-full h-full bg-transparent pl-9 pr-9 rounded-full text-sm text-white placeholder:text-gray-400 focus:outline-none" />
                 {(query || remote.loading) && (
                     <button type="button" onClick={controller.clear} title="Clear (Esc)"
                         aria-label="Clear spotlight"

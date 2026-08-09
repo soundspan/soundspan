@@ -39,9 +39,9 @@ export function RestartModal({
 
             {/* Modal */}
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                <div className="bg-[#111] border border-[#1c1c1c] rounded-lg shadow-2xl max-w-md w-full">
+                <div className="bg-[#111] border border-surface-active rounded-lg shadow-2xl max-w-md w-full">
                     {/* Header */}
-                    <div className="flex items-center justify-between p-6 border-b border-[#1c1c1c]">
+                    <div className="flex items-center justify-between p-6 border-b border-surface-active">
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
                                 <Check className="w-6 h-6 text-green-500" />
@@ -62,7 +62,7 @@ export function RestartModal({
                     <div className="p-6 space-y-4">
                         <p className="text-gray-300">
                             Your settings have been saved successfully and the
-                            <code className="text-[#5b5bff] bg-[#0a0a0a] px-1.5 py-0.5 rounded mx-1">
+                            <code className="text-ai-hover bg-surface px-1.5 py-0.5 rounded mx-1">
                                 .env
                             </code>
                             file has been updated.
@@ -96,12 +96,12 @@ export function RestartModal({
                                         Run this command in your terminal:
                                     </p>
                                     <div className="relative">
-                                        <div className="bg-[#0a0a0a] border border-[#1c1c1c] rounded-md px-4 py-3 pr-12 font-mono text-sm text-white">
+                                        <div className="bg-surface border border-surface-active rounded-md px-4 py-3 pr-12 font-mono text-sm text-white">
                                             {command}
                                         </div>
                                         <button
                                             onClick={handleCopy}
-                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-[#1a1a1a] rounded transition-colors"
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-surface-hover rounded transition-colors"
                                             title="Copy to clipboard"
                                         >
                                             {copied ? (
@@ -126,7 +126,7 @@ export function RestartModal({
                     </div>
 
                     {/* Footer */}
-                    <div className="flex items-center justify-end gap-3 p-6 border-t border-[#1c1c1c]">
+                    <div className="flex items-center justify-end gap-3 p-6 border-t border-surface-active">
                         {changedServices.length > 0 && (
                             <Button
                                 variant="secondary"

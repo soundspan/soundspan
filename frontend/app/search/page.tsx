@@ -524,7 +524,7 @@ export default function SearchPage() {
                                   !libraryResults.audiobooks?.length &&
                                   !libraryResults.episodes?.length))) && (
                         <div className="flex flex-col items-center justify-center py-24 text-center">
-                            <SearchIcon className="w-16 h-16 text-gray-700 mb-4" />
+                            <SearchIcon className="w-16 h-16 text-gray-400 mb-4" />
                             <h3 className="text-xl font-bold text-white mb-2">
                                 {isPodcastTab ? "No podcasts found" : "No results found"}
                             </h3>

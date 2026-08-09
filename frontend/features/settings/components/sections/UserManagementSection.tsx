@@ -266,7 +266,7 @@ export function UserManagementSection() {
                 showSeparator={false}
             >
                 {/* Create User Form */}
-                <div className="py-4 px-4 bg-[#1a1a1a] rounded-lg mb-4">
+                <div className="py-4 px-4 bg-surface-hover rounded-lg mb-4">
                     <h3 className="text-sm font-medium text-white mb-3">Create New User</h3>
                     <div className="space-y-3">
                         <div className="flex gap-3">
@@ -311,7 +311,7 @@ export function UserManagementSection() {
                 </div>
 
                 {/* Invite Codes */}
-                <div className="py-4 px-4 bg-[#1a1a1a] rounded-lg mb-4">
+                <div className="py-4 px-4 bg-surface-hover rounded-lg mb-4">
                     <h3 className="text-sm font-medium text-white mb-3">Invite Codes</h3>
                     <div className="space-y-3">
                         <div className="flex gap-3 items-center flex-wrap">
@@ -382,7 +382,7 @@ export function UserManagementSection() {
                                                                 code.id
                                                             )
                                                         }
-                                                        className="p-1.5 text-gray-500 hover:text-white transition-colors"
+                                                        className="p-1.5 text-gray-400 hover:text-white transition-colors"
                                                         title="Copy invite link"
                                                     >
                                                         {copiedCodeId === code.id ? (
@@ -395,7 +395,7 @@ export function UserManagementSection() {
                                                         onClick={() =>
                                                             handleRevokeInvite(code.id)
                                                         }
-                                                        className="p-1.5 text-gray-500 hover:text-red-400 transition-colors"
+                                                        className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
                                                         title="Revoke invite code"
                                                     >
                                                         <Trash2 className="w-3.5 h-3.5" />
@@ -423,11 +423,11 @@ export function UserManagementSection() {
                     </div>
 
                     {connectedLoading ? (
-                        <div className="py-2 text-sm text-gray-500">
+                        <div className="py-2 text-sm text-gray-400">
                             Checking connected users...
                         </div>
                     ) : connectedUsers.length === 0 ? (
-                        <div className="py-2 text-sm text-gray-500">
+                        <div className="py-2 text-sm text-gray-400">
                             No active users connected
                         </div>
                     ) : (
@@ -441,12 +441,12 @@ export function UserManagementSection() {
                                         <p className="text-sm text-white truncate">
                                             {connectedUser.displayName}
                                             {currentUser?.id === connectedUser.id && (
-                                                <span className="text-xs text-gray-500 ml-2">
+                                                <span className="text-xs text-gray-400 ml-2">
                                                     (you)
                                                 </span>
                                             )}
                                         </p>
-                                        <p className="text-xs text-gray-500 truncate">
+                                        <p className="text-xs text-gray-400 truncate">
                                             @{connectedUser.username}
                                         </p>
                                     </div>
@@ -462,9 +462,9 @@ export function UserManagementSection() {
                 {/* Users List */}
                 <div className="space-y-1">
                     {loading ? (
-                        <div className="py-4 text-sm text-gray-500">Loading users...</div>
+                        <div className="py-4 text-sm text-gray-400">Loading users...</div>
                     ) : users.length === 0 ? (
-                        <div className="py-4 text-sm text-gray-500">No users found</div>
+                        <div className="py-4 text-sm text-gray-400">No users found</div>
                     ) : (
                         users.map((user) => (
                             <div
@@ -473,17 +473,17 @@ export function UserManagementSection() {
                                 onClick={() => openEditModal(user)}
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-[#333] flex items-center justify-center text-sm text-white">
+                                    <div className="w-8 h-8 rounded-full bg-line-strong flex items-center justify-center text-sm text-white">
                                         {user.username[0].toUpperCase()}
                                     </div>
                                     <div>
                                         <div className="text-sm text-white">
                                             {user.username}
                                             {currentUser?.id === user.id && (
-                                                <span className="text-xs text-gray-500 ml-2">(you)</span>
+                                                <span className="text-xs text-gray-400 ml-2">(you)</span>
                                             )}
                                         </div>
-                                        <div className="text-xs text-gray-500">
+                                        <div className="text-xs text-gray-400">
                                             {user.role === "admin" ? "Admin" : "User"}
                                             {user.email && (
                                                 <span className="ml-2">{user.email}</span>
@@ -498,7 +498,7 @@ export function UserManagementSection() {
                                             e.stopPropagation();
                                             setConfirmDelete(user.id);
                                         }}
-                                        className="p-2 text-gray-500 hover:text-red-400 transition-colors"
+                                        className="p-2 text-gray-400 hover:text-red-400 transition-colors"
                                     >
                                         <Trash2 className="w-4 h-4" />
                                     </button>

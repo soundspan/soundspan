@@ -391,7 +391,7 @@ export default function LibraryPage() {
                         {/* Shuffle Button */}
                         <button
                             onClick={handleShuffleLibrary}
-                            className="flex items-center justify-center w-8 h-8 rounded-full bg-[#60a5fa] hover:bg-[#3b82f6] text-black transition-all hover:scale-105"
+                            className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-hover hover:bg-brand text-black transition-all hover:scale-105"
                             title="Shuffle Library"
                         >
                             <Shuffle className="w-4 h-4" />
@@ -433,7 +433,7 @@ export default function LibraryPage() {
                                     onClick={() => setFilter("owned")}
                                     className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
                                         filter === "owned" ?
-                                            "bg-[#3b82f6] text-black"
+                                            "bg-brand text-black"
                                         :   "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
                                     }`}
                                 >
@@ -443,7 +443,7 @@ export default function LibraryPage() {
                                     onClick={() => setFilter("discovery")}
                                     className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
                                         filter === "discovery" ?
-                                            "bg-[#2323FF] text-white"
+                                            "bg-ai text-white"
                                         :   "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
                                     }`}
                                 >
@@ -468,7 +468,7 @@ export default function LibraryPage() {
                             onChange={(e) =>
                                 setSortBy(e.target.value as SortOption)
                             }
-                            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value="name">Name (A-Z)</option>
                             <option value="name-desc">Name (Z-A)</option>
@@ -486,7 +486,7 @@ export default function LibraryPage() {
                             onChange={(e) =>
                                 setItemsPerPage(Number(e.target.value))
                             }
-                            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-[#1a1a1a] [&>option]:text-white"
+                            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-white text-xs focus:outline-none focus:border-white/20 [&>option]:bg-surface-hover [&>option]:text-white"
                         >
                             <option value={24}>24 per page</option>
                             <option value={40}>40 per page</option>

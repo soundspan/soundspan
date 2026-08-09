@@ -31,10 +31,10 @@ export function DiscoverHero({ playlist, config }: DiscoverHeroProps) {
         : null;
 
     return (
-        <div className="relative bg-gradient-to-b from-blue-900/40 via-[#1a1a1a] to-transparent pt-16 pb-10 px-4 md:px-8">
+        <div className="relative bg-gradient-to-b from-blue-900/40 via-surface-hover to-transparent pt-16 pb-10 px-4 md:px-8">
             <div className="flex items-end gap-6">
                 {/* Cover Art */}
-                <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden relative">
+                <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-surface-highlight rounded shadow-2xl shrink-0 overflow-hidden relative">
                     {coverUrl ? (
                         <CachedImage
                             src={coverUrl}
@@ -44,8 +44,8 @@ export function DiscoverHero({ playlist, config }: DiscoverHeroProps) {
                             sizes="192px"
                         />
                     ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#1a1acc]/30 to-yellow-600/20 border border-white/10">
-                            <Music2 className="w-16 h-16 md:w-20 md:h-20 text-[#5b5bff]" />
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-ai-dark/30 to-yellow-600/20 border border-white/10">
+                            <Music2 className="w-16 h-16 md:w-20 md:h-20 text-ai-hover" />
                         </div>
                     )}
                     <div className="absolute bottom-2 right-2 drop-shadow-lg">

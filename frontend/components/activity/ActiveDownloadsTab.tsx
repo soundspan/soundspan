@@ -165,7 +165,7 @@ export function ActiveDownloadsTab({
                                                     download.metadata
                                                         .currentSource ===
                                                         "lidarr"
-                                                        ? "text-[#5b5bff]"
+                                                        ? "text-ai-hover"
                                                         : download.metadata
                                                               .currentSource ===
                                                           "tidal"

@@ -19,10 +19,10 @@ const Card = memo(forwardRef<HTMLDivElement, CardProps>(
                 hover && "hover:bg-white/5"
             ),
             ai: cn(
-                "bg-gradient-to-br from-[#121212] to-[#0f0f0f] border border-[#1c1c1c]",
+                "bg-gradient-to-br from-surface-sunken to-surface-raised border border-surface-active",
                 hover && "hover:border-yellow-500/30"
             ),
-            metric: "bg-[#0f0f0f] border border-[#1c1c1c]",
+            metric: "bg-surface-raised border border-surface-active",
         };
 
         return (

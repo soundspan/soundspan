@@ -110,12 +110,12 @@ export function Modal({
                 aria-labelledby={titleId}
                 tabIndex={-1}
                 className={cn(
-                    "bg-gradient-to-br from-[#141414] to-[#0f0f0f] border border-[#262626] rounded-sm shadow-2xl max-w-md w-full p-6",
+                    "bg-gradient-to-br from-surface-overlay to-surface-raised border border-line rounded-sm shadow-2xl max-w-md w-full p-6",
                     className
                 )}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4 pb-4 border-b border-[#1c1c1c]">
+                <div className="flex items-center justify-between mb-4 pb-4 border-b border-surface-active">
                     <h2 id={titleId} className="text-lg font-medium text-white">
                         {title}
                     </h2>

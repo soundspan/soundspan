@@ -27,7 +27,7 @@ export function VibeMapTab({ currentTrackPresent, onExplore }: VibeMapTabProps) 
             <Map className="w-3.5 h-3.5" />Map
         </button>
     </div>;
-    return <div className="absolute inset-0 overflow-hidden bg-[#0a0a0a]">
+    return <div className="absolute inset-0 overflow-hidden bg-surface">
         <VibeMap headerSlot={header}
             bottomInset={playerOverlapsMap ? MOBILE_PLAYER_CLEARANCE_PX : 0} />
     </div>;

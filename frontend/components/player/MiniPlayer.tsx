@@ -91,7 +91,7 @@ export function MiniPlayer() {
             <div className="overflow-hidden border-t border-white/10 bg-black/95 backdrop-blur-sm">
                 <div className="relative h-[2px] w-full bg-white/10">
                     <div
-                        className="h-full bg-[#60a5fa] transition-all duration-150"
+                        className="h-full bg-brand-hover transition-all duration-150"
                         style={{ width: `${progress}%` }}
                     />
                 </div>

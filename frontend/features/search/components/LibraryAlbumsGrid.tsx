@@ -26,8 +26,8 @@ export function LibraryAlbumsGrid({ albums, limit = 6 }: LibraryAlbumsGridProps)
                     data-tv-card-index={index}
                     tabIndex={0}
                 >
-                    <div className="bg-[#121212] hover:bg-[#181818] transition-all p-4 rounded-lg group cursor-pointer">
-                        <div className="relative aspect-square bg-[#181818] rounded-md mb-4 flex items-center justify-center overflow-hidden">
+                    <div className="bg-surface-sunken hover:bg-surface-elevated transition-all p-4 rounded-lg group cursor-pointer">
+                        <div className="relative aspect-square bg-surface-elevated rounded-md mb-4 flex items-center justify-center overflow-hidden">
                             {album.coverUrl || album.albumId ? (
                                 <Image
                                     src={api.getCoverArtUrl(
@@ -41,7 +41,7 @@ export function LibraryAlbumsGrid({ albums, limit = 6 }: LibraryAlbumsGridProps)
                                     unoptimized
                                 />
                             ) : (
-                                <Disc3 className="w-12 h-12 text-gray-600" />
+                                <Disc3 className="w-12 h-12 text-gray-400" />
                             )}
                         </div>
                         <h3 className="text-base font-bold text-white line-clamp-1 mb-1">

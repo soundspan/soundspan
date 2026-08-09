@@ -12,7 +12,7 @@ const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; la
     cancelling: { icon: Loader2, color: "text-amber-400", label: "Cancelling" },
     completed: { icon: CheckCircle2, color: "text-emerald-400", label: "Completed" },
     failed: { icon: XCircle, color: "text-red-400", label: "Failed" },
-    cancelled: { icon: Ban, color: "text-gray-500", label: "Cancelled" },
+    cancelled: { icon: Ban, color: "text-gray-400", label: "Cancelled" },
 };
 
 function JobStatusBadge({ status }: { status: string }) {
@@ -81,7 +81,7 @@ export function ImportsTab() {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-6 h-6 text-gray-500 animate-spin" />
+                <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
             </div>
         );
     }
@@ -90,7 +90,7 @@ export function ImportsTab() {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center px-4">
                 <p className="text-gray-400 text-sm">No import jobs yet</p>
-                <p className="text-gray-600 text-xs mt-1">
+                <p className="text-gray-400 text-xs mt-1">
                     Submit imports from the Import page
                 </p>
             </div>
@@ -116,7 +116,7 @@ export function ImportsTab() {
                                 <p className="text-sm text-white truncate">
                                     {job.requestedPlaylistName || job.playlistName}
                                 </p>
-                                <p className="text-xs text-gray-500 truncate mt-0.5">
+                                <p className="text-xs text-gray-400 truncate mt-0.5">
                                     {job.sourceType} &middot;{" "}
                                     {new Date(job.createdAt).toLocaleDateString()}
                                 </p>
@@ -134,7 +134,7 @@ export function ImportsTab() {
                         )}
 
                         {job.summary && job.summary.total > 0 && (
-                            <p className="text-[11px] text-gray-600 mt-1">
+                            <p className="text-[11px] text-gray-400 mt-1">
                                 {job.summary.local} local &middot;{" "}
                                 {job.summary.unresolved} unresolved &middot;{" "}
                                 {job.summary.total} total

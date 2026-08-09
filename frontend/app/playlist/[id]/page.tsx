@@ -660,7 +660,7 @@ export default function PlaylistDetailPage() {
     if (!playlist) {
         return (
             <div className="flex items-center justify-center min-h-screen">
-                <p className="text-gray-500">Playlist not found</p>
+                <p className="text-gray-400">Playlist not found</p>
             </div>
         );
     }
@@ -668,10 +668,10 @@ export default function PlaylistDetailPage() {
     return (
         <div className="min-h-screen">
             {/* Compact Hero - Spotify Style */}
-            <div className="relative bg-gradient-to-b from-[#3d2a1e] via-[#1a1a1a] to-transparent pt-16 pb-10 px-4 md:px-8">
+            <div className="relative bg-gradient-to-b from-[#3d2a1e] via-surface-hover to-transparent pt-16 pb-10 px-4 md:px-8">
                 <div className="flex items-end gap-6">
                     {/* Cover Art */}
-                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
+                    <div className="w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-surface-highlight rounded shadow-2xl shrink-0 overflow-hidden">
                         <CoverMosaic
                             coverUrls={coverUrls}
                             imageSizes="96px"
@@ -743,13 +743,13 @@ export default function PlaylistDetailPage() {
             </div>
 
             {/* Action Bar */}
-            <div className="bg-gradient-to-b from-[#1a1a1a]/60 to-transparent px-4 md:px-8 py-4">
+            <div className="bg-gradient-to-b from-surface-hover/60 to-transparent px-4 md:px-8 py-4">
                 <div className="flex items-center gap-4">
                     {/* Play Button */}
                     {trackItems.length > 0 && (
                         <button
                             onClick={handlePlayPlaylist}
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#60a5fa] hover:bg-[#3b82f6] hover:scale-105 shadow-lg transition-all font-semibold text-sm text-black"
+                            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-brand-hover hover:bg-brand hover:scale-105 shadow-lg transition-all font-semibold text-sm text-black"
                         >
                             {showPlaySpinner ? (
                                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -799,7 +799,7 @@ export default function PlaylistDetailPage() {
                                 isApplyingLikeAll
                                     ? "cursor-not-allowed text-white/35"
                                     : isAllLiked
-                                        ? "text-[#3b82f6] hover:bg-white/10"
+                                        ? "text-brand hover:bg-white/10"
                                         : "text-white/60 hover:bg-white/10 hover:text-white"
                             )}
                             title={isAllLiked ? "Unlike all tracks" : "Like all tracks"}
@@ -834,7 +834,7 @@ export default function PlaylistDetailPage() {
                             className={cn(
                                 "h-8 w-8 rounded-full flex items-center justify-center transition-all",
                                 playlist.isPublic
-                                    ? "text-[#3b82f6] hover:text-[#2563eb]"
+                                    ? "text-brand hover:text-brand-dark"
                                     : "text-white/40 hover:text-white",
                                 isTogglingShare && "opacity-50 cursor-not-allowed"
                             )}
@@ -867,7 +867,7 @@ export default function PlaylistDetailPage() {
                         className={cn(
                             "h-8 w-8 rounded-full flex items-center justify-center transition-all",
                             playlist.isHidden
-                                ? "text-[#3b82f6] hover:text-[#2563eb]"
+                                ? "text-brand hover:text-brand-dark"
                                 : "text-white/40 hover:text-white",
                             isHiding && "opacity-50 cursor-not-allowed"
                         )}
@@ -943,14 +943,14 @@ export default function PlaylistDetailPage() {
                                         <AlertCircle className="w-4 h-4 text-red-400" />
                                     </div>
                                     <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-10 h-10 bg-[#282828] rounded shrink-0 overflow-hidden flex items-center justify-center">
+                                        <div className="w-10 h-10 bg-surface-highlight rounded shrink-0 overflow-hidden flex items-center justify-center">
                                             <button
                                                 onClick={() => handlePlayPreview(pending.id)}
                                                 className="w-full h-full flex items-center justify-center hover:bg-white/10 transition-colors"
                                                 title="Play 30s Deezer preview"
                                             >
                                                 {isPreviewPlaying ? (
-                                                    <Volume2 className="w-5 h-5 text-[#3b82f6] animate-pulse" />
+                                                    <Volume2 className="w-5 h-5 text-brand animate-pulse" />
                                                 ) : (
                                                     <Play className="w-5 h-5 text-gray-400 hover:text-white" />
                                                 )}
@@ -958,17 +958,17 @@ export default function PlaylistDetailPage() {
                                         </div>
                                         <div className="min-w-0">
                                             <p className="text-sm font-medium truncate text-gray-400">{pending.title}</p>
-                                            <p className="text-xs text-gray-500 truncate">{pending.artist}</p>
+                                            <p className="text-xs text-gray-400 truncate">{pending.artist}</p>
                                         </div>
                                     </div>
-                                    <p className="hidden md:flex items-center text-sm text-gray-500 truncate">{pending.album}</p>
+                                    <p className="hidden md:flex items-center text-sm text-gray-400 truncate">{pending.album}</p>
                                     <div className="flex items-center justify-end gap-1">
                                         <span className="text-xs text-red-400 mr-2 hidden sm:inline">Failed</span>
                                         {downloadsEnabled && (
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleRetryPendingTrack(pending.id); }}
                                                 disabled={isRetrying}
-                                                className={cn("p-1.5 rounded-full hover:bg-white/10 transition-all", isRetrying ? "text-[#3b82f6]" : "text-gray-400 hover:text-white")}
+                                                className={cn("p-1.5 rounded-full hover:bg-white/10 transition-all", isRetrying ? "text-brand" : "text-gray-400 hover:text-white")}
                                                 title="Retry download"
                                             >
                                                 {isRetrying ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -1088,7 +1088,7 @@ export default function PlaylistDetailPage() {
 
                                         return (
                                             <div className="flex items-center justify-end gap-1">
-                                                <span className="hidden sm:inline text-xs text-gray-500 w-10 text-right tabular-nums">
+                                                <span className="hidden sm:inline text-xs text-gray-400 w-10 text-right tabular-nums">
                                                     {track?.duration ? formatTime(track.duration) : "--:--"}
                                                 </span>
                                                 {canShowLocalActions && (
@@ -1179,13 +1179,13 @@ export default function PlaylistDetailPage() {
                     </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center py-24 text-center">
-                        <div className="w-20 h-20 bg-[#282828] rounded-full flex items-center justify-center mb-4">
-                            <ListMusic className="w-10 h-10 text-gray-500" />
+                        <div className="w-20 h-20 bg-surface-highlight rounded-full flex items-center justify-center mb-4">
+                            <ListMusic className="w-10 h-10 text-gray-400" />
                         </div>
                         <h3 className="text-lg font-medium text-white mb-1">
                             No tracks yet
                         </h3>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-400">
                             Add some tracks to get started
                         </p>
                     </div>

@@ -1,4 +1,5 @@
 import { ChevronDown } from "lucide-react";
+import { SETTINGS_FIELD_FOCUS_RING } from "./settingsFieldStyles";
 
 interface Option {
     value: string;
@@ -26,12 +27,12 @@ export function SettingsSelect({ id, value, onChange, options, disabled }: Setti
                 onChange={(e) => onChange(e.target.value)}
                 disabled={disabled}
                 className={`
-                    appearance-none bg-[#333] text-white text-sm
+                    appearance-none bg-line-strong text-white text-sm
                     pl-3 pr-8 py-1.5 rounded-md
                     border-0 outline-none
-                    focus:ring-2 focus:ring-white/20
+                    ${SETTINGS_FIELD_FOCUS_RING}
                     cursor-pointer transition-colors
-                    hover:bg-[#404040]
+                    hover:bg-line-muted
                     ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
             >
@@ -45,4 +46,3 @@ export function SettingsSelect({ id, value, onChange, options, disabled }: Setti
         </div>
     );
 }
-

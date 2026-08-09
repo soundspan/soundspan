@@ -70,7 +70,7 @@ function ReadyMap({ model }: { model: VibeMapViewModel }) {
 function MapStatus({ model }: { model: VibeMapViewModel }) {
     if (model.data.loading) {
         return <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <Loader2 className="w-8 h-8 text-gray-500 animate-spin" />
+            <Loader2 className="w-8 h-8 text-gray-400 animate-spin" />
         </div>;
     }
     if (!model.data.error && model.data.tracks.length > 0) return null;

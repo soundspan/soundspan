@@ -156,7 +156,7 @@ export function SyncedLyrics({
         return (
             <div
                 className={cn(
-                    "flex items-center justify-center h-full text-gray-500",
+                    "flex items-center justify-center h-full text-gray-400",
                     className
                 )}
             >
@@ -222,7 +222,7 @@ export function SyncedLyrics({
                                 !isEmpty && "hover:bg-white/5",
                                 isActive &&
                                     "text-white text-lg font-semibold scale-[1.02] origin-center",
-                                isPast && !isActive && "text-gray-500 text-base",
+                                isPast && !isActive && "text-gray-400 text-base",
                                 !isPast && !isActive && "text-gray-400/60 text-base"
                             )}
                         >

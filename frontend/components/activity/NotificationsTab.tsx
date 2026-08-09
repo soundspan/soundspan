@@ -92,7 +92,7 @@ export function NotificationsTab({
                 return <AlertCircle className="w-4 h-4 text-red-400" />;
             case "playlist_ready":
             case "import_complete":
-                return <ListMusic className="w-4 h-4 text-[#3b82f6]" />;
+                return <ListMusic className="w-4 h-4 text-brand" />;
             case "system":
             default:
                 return <Bell className="w-4 h-4 text-white/60" />;
@@ -181,7 +181,7 @@ export function NotificationsTab({
                                             {notification.title}
                                         </p>
                                         {!notification.read && (
-                                            <span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6] flex-shrink-0" />
+                                            <span className="w-1.5 h-1.5 rounded-full bg-brand flex-shrink-0" />
                                         )}
                                     </div>
                                     {notification.message && (
@@ -196,7 +196,7 @@ export function NotificationsTab({
                                         {link && (
                                             <Link
                                                 href={link}
-                                                className="text-[10px] text-[#3b82f6] hover:underline flex items-center gap-0.5"
+                                                className="text-[10px] text-brand hover:underline flex items-center gap-0.5"
                                             >
                                                 View{" "}
                                                 <ExternalLink className="w-2.5 h-2.5" />

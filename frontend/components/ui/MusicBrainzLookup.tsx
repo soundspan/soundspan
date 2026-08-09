@@ -154,7 +154,7 @@ export function MusicBrainzLookup({
                         {currentValue.substring(0, 8)}...
                     </span>
                 ) : (
-                    <span className="text-xs text-gray-500">None</span>
+                    <span className="text-xs text-gray-400">None</span>
                 )}
                 {hasValidMbid && (
                     <a
@@ -177,13 +177,13 @@ export function MusicBrainzLookup({
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder={`Enter ${type} name to search...`}
-                        className="flex-1 rounded border border-white/10 bg-[#181818] px-4 py-2 text-sm text-white focus:border-white/30 focus:outline-none"
+                        className="flex-1 rounded border border-white/10 bg-surface-elevated px-4 py-2 text-sm text-white focus:border-white/30 focus:outline-none"
                     />
                     <button
                         type="button"
                         onClick={() => void performSearch()}
                         disabled={isSearching || searchQuery.trim().length < 2}
-                        className="flex items-center gap-2 rounded border border-white/10 bg-[#282828] px-4 py-2 text-sm text-white transition-colors hover:bg-[#333] disabled:bg-[#1a1a1a] disabled:text-gray-600"
+                        className="flex items-center gap-2 rounded border border-white/10 bg-surface-highlight px-4 py-2 text-sm text-white transition-colors hover:bg-line-strong disabled:bg-surface-hover disabled:text-gray-400"
                     >
                         {isSearching ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -195,7 +195,7 @@ export function MusicBrainzLookup({
                 </div>
 
                 {hasSearched && (
-                    <div className="max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-[#1a1a1a]">
+                    <div className="max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-surface-hover">
                         {hasResults ? (
                             type === "artist" ? (
                                 artistResults.map((artist) => (
@@ -217,12 +217,12 @@ export function MusicBrainzLookup({
                                             </div>
                                             <div className="flex flex-shrink-0 items-center gap-2">
                                                 {artist.country && (
-                                                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-xs text-gray-500">
+                                                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-xs text-gray-400">
                                                         {artist.country}
                                                     </span>
                                                 )}
                                                 {artist.type && (
-                                                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-xs text-gray-500">
+                                                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-xs text-gray-400">
                                                         {artist.type}
                                                     </span>
                                                 )}
@@ -248,11 +248,11 @@ export function MusicBrainzLookup({
                                             </div>
                                             <div className="flex flex-shrink-0 items-center gap-2">
                                                 {album.firstReleaseDate && (
-                                                    <span className="text-xs text-gray-500">
+                                                    <span className="text-xs text-gray-400">
                                                         {album.firstReleaseDate.substring(0, 4)}
                                                     </span>
                                                 )}
-                                                <span className="rounded bg-white/5 px-1.5 py-0.5 text-xs text-gray-500">
+                                                <span className="rounded bg-white/5 px-1.5 py-0.5 text-xs text-gray-400">
                                                     {album.primaryType}
                                                 </span>
                                             </div>
@@ -285,13 +285,13 @@ export function MusicBrainzLookup({
                             value={manualMbid}
                             onChange={(e) => setManualMbid(e.target.value)}
                             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                            className="flex-1 rounded border border-white/10 bg-[#181818] px-4 py-2 font-mono text-xs text-white focus:border-white/30 focus:outline-none"
+                            className="flex-1 rounded border border-white/10 bg-surface-elevated px-4 py-2 font-mono text-xs text-white focus:border-white/30 focus:outline-none"
                         />
                         <button
                             type="button"
                             onClick={handleManualSubmit}
                             disabled={!MBID_UUID_REGEX.test(manualMbid.trim())}
-                            className="flex items-center gap-1 rounded bg-[#3b82f6] px-3 py-2 text-sm font-medium text-black transition-colors hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:bg-gray-600"
+                            className="flex items-center gap-1 rounded bg-brand px-3 py-2 text-sm font-medium text-black transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-gray-600"
                         >
                             <Check className="h-4 w-4" />
                         </button>

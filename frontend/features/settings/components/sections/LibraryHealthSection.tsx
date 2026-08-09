@@ -80,13 +80,13 @@ export function LibraryHealthSection() {
 
                 {isLoading && records.length === 0 && (
                     <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-5 h-5 text-gray-500 animate-spin" />
+                        <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
                     </div>
                 )}
 
                 {!isLoading && records.length === 0 && !error && (
                     <div className="text-center py-6">
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-400">
                             No health issues detected
                         </p>
                     </div>
@@ -112,23 +112,23 @@ export function LibraryHealthSection() {
                                                 </p>
                                             </div>
                                             {record.track?.album && (
-                                                <p className="text-xs text-gray-500 mt-0.5 ml-6 truncate">
+                                                <p className="text-xs text-gray-400 mt-0.5 ml-6 truncate">
                                                     {record.track.album.artist?.name} &middot;{" "}
                                                     {record.track.album.title}
                                                 </p>
                                             )}
-                                            <p className="text-[11px] text-gray-600 mt-1 ml-6 truncate font-mono">
+                                            <p className="text-[11px] text-gray-400 mt-1 ml-6 truncate font-mono">
                                                 {record.filePath}
                                             </p>
                                             {record.detail && (
-                                                <p className="text-[11px] text-gray-600 mt-0.5 ml-6">
+                                                <p className="text-[11px] text-gray-400 mt-0.5 ml-6">
                                                     {record.detail}
                                                 </p>
                                             )}
                                         </div>
                                         <button
                                             onClick={() => void handleDismiss(record.id)}
-                                            className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-white/5 rounded transition-colors shrink-0"
+                                            className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-white/5 rounded transition-colors shrink-0"
                                             title="Dismiss"
                                         >
                                             <Trash2 className="w-3.5 h-3.5" />

@@ -73,7 +73,7 @@ export function DiscoverActionBar({
     };
 
     return (
-        <div className="bg-gradient-to-b from-[#1a1a1a]/60 to-transparent px-4 md:px-8 py-4">
+        <div className="bg-gradient-to-b from-surface-hover/60 to-transparent px-4 md:px-8 py-4">
             <div className="flex items-center gap-4">
                 {/* Play Button */}
                 {playlist && playlist.tracks.length > 0 && (
@@ -84,7 +84,7 @@ export function DiscoverActionBar({
                             "flex items-center gap-2 px-5 py-2.5 rounded-full shadow-lg transition-all border font-semibold text-sm",
                             isGenerating
                                 ? "bg-white/5 border-transparent text-white/50 cursor-not-allowed"
-                                : "bg-[#1a1acc]/20 hover:bg-[#1a1acc]/30 border-[#2323FF]/30 text-white hover:scale-105"
+                                : "bg-ai-dark/20 hover:bg-ai-dark/30 border-ai/30 text-white hover:scale-105"
                         )}
                     >
                         {showSpinner ? (

@@ -378,7 +378,7 @@ function TidalMixDetailPageContent() {
                     </button>
                     <div className="flex flex-col items-center justify-center py-20 text-center">
                         <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
-                            <Music2 className="w-8 h-8 text-gray-500" />
+                            <Music2 className="w-8 h-8 text-gray-400" />
                         </div>
                         <h3 className="text-lg font-medium text-white mb-2">
                             Mix not found
@@ -401,10 +401,10 @@ function TidalMixDetailPageContent() {
     return (
         <div className="min-h-screen">
             {/* Hero Section */}
-            <div className="relative bg-gradient-to-b from-[#00BFFF]/20 via-[#1a1a1a] to-transparent pt-16 pb-10 px-4 md:px-8">
+            <div className="relative bg-gradient-to-b from-[#00BFFF]/20 via-surface-hover to-transparent pt-16 pb-10 px-4 md:px-8">
                 <div className="flex items-end gap-6">
                     {/* Cover Art */}
-                    <div className="relative w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-[#282828] rounded shadow-2xl shrink-0 overflow-hidden">
+                    <div className="relative w-[140px] h-[140px] md:w-[192px] md:h-[192px] bg-surface-highlight rounded shadow-2xl shrink-0 overflow-hidden">
                         {mix.thumbnailUrl ? (
                             <Image
                                 src={api.getTidalBrowseImageUrl(mix.thumbnailUrl)}
@@ -416,7 +416,7 @@ function TidalMixDetailPageContent() {
                             />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#00BFFF]/30 to-[#00BFFF]/10">
-                                <Music2 className="w-16 h-16 text-gray-600" />
+                                <Music2 className="w-16 h-16 text-gray-400" />
                             </div>
                         )}
                     </div>
@@ -448,7 +448,7 @@ function TidalMixDetailPageContent() {
             </div>
 
             {/* Action Bar */}
-            <div className="bg-gradient-to-b from-[#1a1a1a]/60 to-transparent px-4 md:px-8 py-4">
+            <div className="bg-gradient-to-b from-surface-hover/60 to-transparent px-4 md:px-8 py-4">
                 <div className="flex items-center gap-4">
                     {/* Play Button (cyan) */}
                     <button
@@ -504,7 +504,7 @@ function TidalMixDetailPageContent() {
                                 isApplyingLikeAll
                                     ? "cursor-not-allowed text-white/35"
                                     : isAllLiked
-                                        ? "text-[#3b82f6] hover:bg-white/10"
+                                        ? "text-brand hover:bg-white/10"
                                         : "text-white/60 hover:bg-white/10 hover:text-white"
                             )}
                             title={isAllLiked ? "Unlike all tracks" : "Like all tracks"}
@@ -539,13 +539,13 @@ function TidalMixDetailPageContent() {
                     />
                 ) : (
                     <div className="flex flex-col items-center justify-center py-24 text-center">
-                        <div className="w-20 h-20 bg-[#282828] rounded-full flex items-center justify-center mb-4">
-                            <Music2 className="w-10 h-10 text-gray-500" />
+                        <div className="w-20 h-20 bg-surface-highlight rounded-full flex items-center justify-center mb-4">
+                            <Music2 className="w-10 h-10 text-gray-400" />
                         </div>
                         <h3 className="text-lg font-medium text-white mb-1">
                             No tracks found
                         </h3>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-400">
                             This mix appears to be empty
                         </p>
                     </div>

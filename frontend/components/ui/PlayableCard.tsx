@@ -70,7 +70,7 @@ const PlayableCard = memo(function PlayableCard({
             <div className="relative aspect-square mb-3">
                 <div
                     className={cn(
-                        "relative w-full h-full bg-[#282828] flex items-center justify-center overflow-hidden shadow-lg",
+                        "relative w-full h-full bg-surface-highlight flex items-center justify-center overflow-hidden shadow-lg",
                         circular ? "rounded-full" : "rounded-md",
                     )}
                     style={{ contain: "content" }}
@@ -146,7 +146,7 @@ const PlayableCard = memo(function PlayableCard({
                                 className={cn(
                                     "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors",
                                     isDownloading ?
-                                        "bg-gray-500/20 border border-gray-500/30 text-gray-500 cursor-not-allowed"
+                                        "bg-gray-500/20 border border-gray-500/30 text-gray-400 cursor-not-allowed"
                                     :   "bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 hover:border-yellow-500/50 text-yellow-400 hover:text-yellow-300",
                                 )}
                                 title={
@@ -180,7 +180,7 @@ const PlayableCard = memo(function PlayableCard({
                                     className={cn(
                                         "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors",
                                         isDownloading ?
-                                            "bg-gray-500/20 border border-gray-500/30 text-gray-500 cursor-not-allowed"
+                                            "bg-gray-500/20 border border-gray-500/30 text-gray-400 cursor-not-allowed"
                                         :   "bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 hover:border-yellow-500/50 text-yellow-400 hover:text-yellow-300",
                                     )}
                                     title="Search and select release"

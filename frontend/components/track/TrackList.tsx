@@ -217,7 +217,7 @@ export function TrackList<T>({
                         aria-label={`Reorder ${rowItem.title}, use arrow keys to move`}
                         className={cn(
                             "absolute left-0 top-0 bottom-0 z-10 hidden md:flex w-4 cursor-grab touch-none",
-                            "items-center justify-center text-gray-500 hover:text-white",
+                            "items-center justify-center text-gray-400 hover:text-white",
                             "opacity-0 group-hover/reorder:opacity-100 focus:opacity-100 transition-opacity",
                             dragIndex === index && "cursor-grabbing",
                         )}

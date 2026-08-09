@@ -59,9 +59,9 @@ export function PlayControls({
               )}{" "}
               / {formatTime(audiobook.duration)}
             </div>
-            <div className="w-48 h-1 bg-[#181818] rounded-full mt-2">
+            <div className="w-48 h-1 bg-surface-elevated rounded-full mt-2">
               <div
-                className="h-full bg-[#2323FF] rounded-full transition-all duration-300"
+                className="h-full bg-ai rounded-full transition-all duration-300"
                 style={{
                   width: `${
                     isThisBookPlaying

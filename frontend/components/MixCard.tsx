@@ -32,7 +32,7 @@ const MixCard = memo(
             >
                 <div className="p-3 rounded-md group cursor-pointer hover:bg-white/5 transition-colors">
                     {/* Mosaic cover art */}
-                    <div className="aspect-square bg-[#282828] rounded-lg mb-3 overflow-hidden relative shadow-lg">
+                    <div className="aspect-square bg-surface-highlight rounded-lg mb-3 overflow-hidden relative shadow-lg">
                         <CoverMosaic
                             coverUrls={proxiedUrls}
                             hoverScale

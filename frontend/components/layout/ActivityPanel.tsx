@@ -157,7 +157,7 @@ export function ActivityPanel({
 
                 {/* Panel - slides in from right */}
                 <div
-                    className="fixed inset-y-0 right-0 w-full max-w-md bg-[#0a0a0a] z-[101] flex flex-col"
+                    className="fixed inset-y-0 right-0 w-full max-w-md bg-surface z-[101] flex flex-col"
                     style={{ paddingTop: "env(safe-area-inset-top)" }}
                 >
                     {/* Header */}
@@ -190,7 +190,7 @@ export function ActivityPanel({
                                     className={cn(
                                         "flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors relative",
                                         effectiveActiveTab === tab.id
-                                            ? "text-white border-b-2 border-[#60a5fa]"
+                                            ? "text-white border-b-2 border-brand-hover"
                                             : "text-white/50 hover:text-white/70"
                                     )}
                                 >
@@ -202,7 +202,7 @@ export function ActivityPanel({
                                                 "min-w-[18px] h-[18px] px-1 rounded-full text-xs font-bold flex items-center justify-center ml-1",
                                                 tab.id === "active"
                                                     ? "bg-blue-500 text-white"
-                                                    : "bg-[#60a5fa] text-black"
+                                                    : "bg-brand-hover text-black"
                                             )}
                                         >
                                             {badge > 99 ? "99+" : badge}
@@ -275,7 +275,7 @@ export function ActivityPanel({
                 <div
                     onClick={onToggle}
                     className={cn(
-                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-[#141414] transition-colors z-10",
+                        "absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center cursor-pointer hover:bg-surface-overlay transition-colors z-10",
                         isOpen && "pointer-events-none opacity-0"
                     )}
                     title="Open activity panel"
@@ -284,7 +284,7 @@ export function ActivityPanel({
 
                     {/* Activity badge */}
                     {hasActivity && (
-                        <span className="absolute top-4 right-3 w-2.5 h-2.5 rounded-full bg-[#3b82f6]" />
+                        <span className="absolute top-4 right-3 w-2.5 h-2.5 rounded-full bg-brand" />
                     )}
                 </div>
 
@@ -323,7 +323,7 @@ export function ActivityPanel({
                                 className={cn(
                                     "group flex items-center justify-center gap-2 py-3 px-3 transition-all duration-200 relative",
                                     isActive
-                                        ? "text-white border-b-2 border-[#3b82f6] flex-[2]"
+                                        ? "text-white border-b-2 border-brand flex-[2]"
                                         : "text-white/50 hover:text-white/70 hover:flex-[2] flex-1"
                                 )}
                                 title={tab.label}
@@ -345,7 +345,7 @@ export function ActivityPanel({
                                             "absolute top-1.5 right-1 min-w-[16px] h-[16px] px-0.5 rounded-full text-[10px] font-bold flex items-center justify-center",
                                             tab.id === "active"
                                                 ? "bg-blue-500 text-white"
-                                                : "bg-[#3b82f6] text-black"
+                                                : "bg-brand text-black"
                                         )}
                                     >
                                         {badge > 99 ? "99+" : badge}
@@ -425,7 +425,7 @@ export function ActivityPanelToggle({
         >
             <Bell className="w-5 h-5" />
             {hasActivity && (
-                <span className="absolute top-1.5 right-2 w-1 h-1 rounded-full bg-[#3b82f6]" />
+                <span className="absolute top-1.5 right-2 w-1 h-1 rounded-full bg-brand" />
             )}
         </button>
     );

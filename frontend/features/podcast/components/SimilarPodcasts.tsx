@@ -40,7 +40,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
                                 router.push(`/podcasts/${podcast.id}`)
                             }
                         >
-                            <div className="w-full aspect-square bg-[#282828] rounded-full mb-2.5 overflow-hidden relative shadow-lg">
+                            <div className="w-full aspect-square bg-surface-highlight rounded-full mb-2.5 overflow-hidden relative shadow-lg">
                                 {imageUrl ? (
                                     <Image
                                         src={imageUrl}
@@ -52,7 +52,7 @@ export function SimilarPodcasts({ podcasts }: SimilarPodcastsProps) {
                                     />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center">
-                                        <Mic2 className="w-10 h-10 text-gray-600" />
+                                        <Mic2 className="w-10 h-10 text-gray-400" />
                                     </div>
                                 )}
                             </div>

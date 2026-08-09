@@ -990,7 +990,7 @@ export function OverlayPlayer() {
             if (result.success && result.trackCount > 0) {
                 toast.success(`Vibe mode on`, {
                     description: `${result.trackCount} similar tracks queued`,
-                    icon: <AudioWaveform className="w-4 h-4 text-[#60a5fa]" />,
+                    icon: <AudioWaveform className="w-4 h-4 text-brand-hover" />,
                 });
             } else {
                 toast.error("Couldn't find matching tracks");
@@ -1116,7 +1116,7 @@ export function OverlayPlayer() {
                     )}
                     {/* Now Playing indicator */}
                     <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500 uppercase tracking-widest font-medium">
+                        <span className="text-xs text-gray-400 uppercase tracking-widest font-medium">
                             Now Playing
                         </span>
                         <SyncBadge compact />
@@ -1161,14 +1161,14 @@ export function OverlayPlayer() {
                                 className={cn(
                                     "absolute inset-0 rounded-2xl blur-2xl opacity-50",
                                     vibeMode
-                                        ? "bg-gradient-to-br from-brand/30 via-transparent to-[#2323FF]/30"
-                                        : "bg-gradient-to-br from-[#60a5fa]/20 via-transparent to-[#2323FF]/20"
+                                        ? "bg-gradient-to-br from-brand/30 via-transparent to-ai/30"
+                                        : "bg-gradient-to-br from-brand-hover/20 via-transparent to-ai/20"
                                 )}
                             />
                             <motion.div
                                 layoutId={artworkLayoutId}
                                 transition={{ type: "spring", stiffness: 320, damping: 34 }}
-                                className="relative h-full w-full overflow-hidden rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] shadow-2xl"
+                                className="relative h-full w-full overflow-hidden rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-surface-hover shadow-2xl"
                             >
                                 {coverUrl ? (
                                     <Image
@@ -1183,7 +1183,7 @@ export function OverlayPlayer() {
                                     />
                                 ) : (
                                     <div className="flex h-full w-full items-center justify-center">
-                                        <MusicIcon className="h-24 w-24 text-gray-600" />
+                                        <MusicIcon className="h-24 w-24 text-gray-400" />
                                     </div>
                                 )}
                             </motion.div>
@@ -1279,7 +1279,7 @@ export function OverlayPlayer() {
                                     showHandle={false}
                                     className="mb-2"
                                 />
-                                <div className="flex justify-between text-xs font-medium tabular-nums text-gray-500">
+                                <div className="flex justify-between text-xs font-medium tabular-nums text-gray-400">
                                     <span>{formatTime(displayTime)}</span>
                                     <span>
                                         {playbackType === "podcast" || playbackType === "audiobook"
@@ -1332,7 +1332,7 @@ export function OverlayPlayer() {
                                                 className={cn(
                                                     "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
                                                     vibeMode
-                                                        ? "text-[#60a5fa] bg-white/[0.05]"
+                                                        ? "text-brand-hover bg-white/[0.05]"
                                                         : "text-gray-400 hover:text-white hover:bg-white/10"
                                                 )}
                                                 title={vibeMode ? "Turn off vibe mode" : "Match this vibe"}
@@ -1362,8 +1362,8 @@ export function OverlayPlayer() {
                                             className={cn(
                                                 "transition-colors",
                                                 isShuffle
-                                                    ? "text-[#60a5fa]"
-                                                    : "text-gray-500 hover:text-white"
+                                                    ? "text-brand-hover"
+                                                    : "text-gray-400 hover:text-white"
                                             )}
                                             title="Shuffle"
                                             aria-label="Shuffle"
@@ -1459,8 +1459,8 @@ export function OverlayPlayer() {
                                             className={cn(
                                                 "transition-colors",
                                                 repeatMode !== "off"
-                                                    ? "text-[#60a5fa]"
-                                                    : "text-gray-500 hover:text-white"
+                                                    ? "text-brand-hover"
+                                                    : "text-gray-400 hover:text-white"
                                             )}
                                             title={
                                                 repeatMode === "one"
@@ -1526,7 +1526,7 @@ export function OverlayPlayer() {
                             className={cn(
                                 "border-b pb-0.5 font-medium transition-colors",
                                 activeTab === "queue"
-                                    ? "border-[#60a5fa] text-[#60a5fa]"
+                                    ? "border-brand-hover text-brand-hover"
                                     : "border-transparent text-gray-400 hover:text-white"
                             )}
                         >
@@ -1537,7 +1537,7 @@ export function OverlayPlayer() {
                             className={cn(
                                 "border-b pb-0.5 font-medium transition-colors",
                                 activeTab === "lyrics"
-                                    ? "border-[#60a5fa] text-[#60a5fa]"
+                                    ? "border-brand-hover text-brand-hover"
                                     : "border-transparent text-gray-400 hover:text-white"
                             )}
                         >
@@ -1548,7 +1548,7 @@ export function OverlayPlayer() {
                             className={cn(
                                 "border-b pb-0.5 font-medium transition-colors",
                                 activeTab === "related"
-                                    ? "border-[#60a5fa] text-[#60a5fa]"
+                                    ? "border-brand-hover text-brand-hover"
                                     : "border-transparent text-gray-400 hover:text-white"
                             )}
                         >
@@ -1612,7 +1612,7 @@ export function OverlayPlayer() {
                                                 }
                                             }}
                                         >
-                                            <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-[#1a1a1a]">
+                                            <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-surface-hover">
                                                 {coverUrl ? (
                                                     <Image
                                                         src={coverUrl}
@@ -1624,7 +1624,7 @@ export function OverlayPlayer() {
                                                     />
                                                 ) : (
                                                     <div className="flex h-full w-full items-center justify-center">
-                                                        <MusicIcon className="h-4 w-4 text-gray-500" />
+                                                        <MusicIcon className="h-4 w-4 text-gray-400" />
                                                     </div>
                                                 )}
                                             </div>
@@ -1698,7 +1698,7 @@ export function OverlayPlayer() {
                                                 className={cn(
                                                     "border-b pb-0.5 font-medium transition-colors",
                                                     activeTab === "queue"
-                                                        ? "border-[#60a5fa] text-[#60a5fa]"
+                                                        ? "border-brand-hover text-brand-hover"
                                                         : "border-transparent text-gray-400 hover:text-white"
                                                 )}
                                             >
@@ -1709,7 +1709,7 @@ export function OverlayPlayer() {
                                                 className={cn(
                                                     "border-b pb-0.5 font-medium transition-colors",
                                                     activeTab === "lyrics"
-                                                        ? "border-[#60a5fa] text-[#60a5fa]"
+                                                        ? "border-brand-hover text-brand-hover"
                                                         : "border-transparent text-gray-400 hover:text-white"
                                                 )}
                                             >
@@ -1720,7 +1720,7 @@ export function OverlayPlayer() {
                                                 className={cn(
                                                     "border-b pb-0.5 font-medium transition-colors",
                                                     activeTab === "related"
-                                                        ? "border-[#60a5fa] text-[#60a5fa]"
+                                                        ? "border-brand-hover text-brand-hover"
                                                         : "border-transparent text-gray-400 hover:text-white"
                                                 )}
                                             >
@@ -1735,7 +1735,7 @@ export function OverlayPlayer() {
                                             className={cn(
                                                 "border-b pb-0.5 transition-colors",
                                                 activeTab === "queue"
-                                                    ? "border-[#60a5fa] text-[#60a5fa]"
+                                                    ? "border-brand-hover text-brand-hover"
                                                     : "border-transparent text-gray-400 hover:text-white"
                                             )}
                                         >
@@ -1746,7 +1746,7 @@ export function OverlayPlayer() {
                                             className={cn(
                                                 "border-b pb-0.5 transition-colors",
                                                 activeTab === "lyrics"
-                                                    ? "border-[#60a5fa] text-[#60a5fa]"
+                                                    ? "border-brand-hover text-brand-hover"
                                                     : "border-transparent text-gray-400 hover:text-white"
                                             )}
                                         >
@@ -1757,7 +1757,7 @@ export function OverlayPlayer() {
                                             className={cn(
                                                 "border-b pb-0.5 transition-colors",
                                                 activeTab === "related"
-                                                    ? "border-[#60a5fa] text-[#60a5fa]"
+                                                    ? "border-brand-hover text-brand-hover"
                                                     : "border-transparent text-gray-400 hover:text-white"
                                             )}
                                         >
@@ -1776,7 +1776,7 @@ export function OverlayPlayer() {
                                             >
                                                 <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-2">
                                                     <div className="flex items-center gap-2">
-                                                        <ListMusic className="h-4 w-4 text-[#60a5fa]" />
+                                                        <ListMusic className="h-4 w-4 text-brand-hover" />
                                                         <h2 className="text-sm font-semibold text-white">
                                                             Up Next
                                                         </h2>
@@ -1802,7 +1802,7 @@ export function OverlayPlayer() {
 
                                                 {queueTracks.length === 0 ? (
                                                     <div className="flex min-h-0 flex-1 items-center justify-center px-4">
-                                                        <p className="text-sm text-gray-500">
+                                                        <p className="text-sm text-gray-400">
                                                             No tracks in queue.
                                                         </p>
                                                     </div>
@@ -1822,7 +1822,7 @@ export function OverlayPlayer() {
                                                                         className={cn(
                                                                             "mb-1.5 flex items-center gap-2 px-2 py-2 transition-colors",
                                                                             isCurrentTrack
-                                                                                ? "rounded-md border border-[#60a5fa]/35 bg-[#60a5fa]/10"
+                                                                                ? "rounded-md border border-brand-hover/35 bg-brand-hover/10"
                                                                                 : isPlayedTrack
                                                                                   ? "rounded-md bg-white/[0.03] hover:bg-white/[0.06]"
                                                                                   : "hover:bg-white/[0.06]"
@@ -1832,8 +1832,8 @@ export function OverlayPlayer() {
                                                                             className={cn(
                                                                                 "w-5 flex-shrink-0 text-center text-[11px] tabular-nums",
                                                                                 isCurrentTrack
-                                                                                    ? "text-[#60a5fa]"
-                                                                                    : "text-gray-500"
+                                                                                    ? "text-brand-hover"
+                                                                                    : "text-gray-400"
                                                                             )}
                                                                         >
                                                                             {queueIndex + 1}
@@ -1854,7 +1854,7 @@ export function OverlayPlayer() {
                                                                                     : "Play this episode now"
                                                                             }
                                                                         >
-                                                                            <div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-[#1a1a1a]">
+                                                                            <div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-surface-hover">
                                                                                 {item.coverUrl ? (
                                                                                     <Image
                                                                                         src={item.coverUrl}
@@ -1866,7 +1866,7 @@ export function OverlayPlayer() {
                                                                                     />
                                                                                 ) : (
                                                                                     <div className="flex h-full w-full items-center justify-center">
-                                                                                        <MusicIcon className="h-4 w-4 text-gray-600" />
+                                                                                        <MusicIcon className="h-4 w-4 text-gray-400" />
                                                                                     </div>
                                                                                 )}
                                                                             </div>
@@ -1875,7 +1875,7 @@ export function OverlayPlayer() {
                                                                                     className={cn(
                                                                                         "min-w-0 truncate text-sm",
                                                                                         isCurrentTrack
-                                                                                            ? "text-[#60a5fa]"
+                                                                                            ? "text-brand-hover"
                                                                                             : "text-white"
                                                                                     )}
                                                                                 >
@@ -1886,7 +1886,7 @@ export function OverlayPlayer() {
                                                                                         {item.podcastTitle || "Podcast"}
                                                                                     </p>
                                                                                     {isCurrentTrack && (
-                                                                                        <span className="inline-flex shrink-0 items-center rounded-full border border-[#60a5fa]/40 bg-[#60a5fa]/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
+                                                                                        <span className="inline-flex shrink-0 items-center rounded-full border border-brand-hover/40 bg-brand-hover/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-hover">
                                                                                             Playing
                                                                                         </span>
                                                                                     )}
@@ -1902,8 +1902,8 @@ export function OverlayPlayer() {
                                                                             className={cn(
                                                                                 "text-[11px] tabular-nums",
                                                                                 isCurrentTrack
-                                                                                    ? "text-[#60a5fa]"
-                                                                                    : "text-gray-500"
+                                                                                    ? "text-brand-hover"
+                                                                                    : "text-gray-400"
                                                                             )}
                                                                         >
                                                                             {formatTime(item.duration || 0)}
@@ -1914,7 +1914,7 @@ export function OverlayPlayer() {
                                                                                     e.stopPropagation();
                                                                                     handleRemoveFromQueue(queueIndex);
                                                                                 }}
-                                                                                className="ml-1 h-7 w-7 flex items-center justify-center rounded-full text-gray-500 hover:bg-white/10 hover:text-white transition-colors"
+                                                                                className="ml-1 h-7 w-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
                                                                                 title="Remove from queue"
                                                                                 aria-label="Remove from queue"
                                                                             >
@@ -1936,7 +1936,7 @@ export function OverlayPlayer() {
                                                                     className={cn(
                                                                         "mb-1.5 flex items-center gap-2 px-2 py-2 transition-colors",
                                                                         isCurrentTrack
-                                                                            ? "rounded-md border border-[#60a5fa]/35 bg-[#60a5fa]/10"
+                                                                            ? "rounded-md border border-brand-hover/35 bg-brand-hover/10"
                                                                             : isPlayedTrack
                                                                               ? "rounded-md bg-white/[0.03] hover:bg-white/[0.06]"
                                                                               : "hover:bg-white/[0.06]"
@@ -1946,8 +1946,8 @@ export function OverlayPlayer() {
                                                                         className={cn(
                                                                             "w-5 flex-shrink-0 text-center text-[11px] tabular-nums",
                                                                             isCurrentTrack
-                                                                                ? "text-[#60a5fa]"
-                                                                                : "text-gray-500"
+                                                                                ? "text-brand-hover"
+                                                                                : "text-gray-400"
                                                                         )}
                                                                     >
                                                                         {queueIndex + 1}
@@ -1968,7 +1968,7 @@ export function OverlayPlayer() {
                                                                                 : "Play this track now"
                                                                         }
                                                                     >
-                                                                        <div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-[#1a1a1a]">
+                                                                        <div className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded bg-surface-hover">
                                                                             {track.album?.coverArt ? (
                                                                                 <Image
                                                                                     src={api.getCoverArtUrl(
@@ -1983,7 +1983,7 @@ export function OverlayPlayer() {
                                                                                 />
                                                                             ) : (
                                                                                 <div className="flex h-full w-full items-center justify-center">
-                                                                                    <MusicIcon className="h-4 w-4 text-gray-600" />
+                                                                                    <MusicIcon className="h-4 w-4 text-gray-400" />
                                                                                 </div>
                                                                             )}
                                                                         </div>
@@ -1993,7 +1993,7 @@ export function OverlayPlayer() {
                                                                                     className={cn(
                                                                                         "min-w-0 truncate text-sm",
                                                                                         isCurrentTrack
-                                                                                            ? "text-[#60a5fa]"
+                                                                                            ? "text-brand-hover"
                                                                                             : "text-white"
                                                                                     )}
                                                                                 >
@@ -2012,11 +2012,11 @@ export function OverlayPlayer() {
                                                                                         "Unknown artist"}
                                                                                 </p>
                                                                                 {isCurrentTrack && (
-                                                                                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#60a5fa]/40 bg-[#60a5fa]/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
+                                                                                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-hover/40 bg-brand-hover/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-hover">
                                                                                         <span className="inline-flex items-end gap-0.5">
-                                                                                            <span className="h-2 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.2s]" />
-                                                                                            <span className="h-2.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa]" />
-                                                                                            <span className="h-1.5 w-0.5 animate-bounce rounded-full bg-[#60a5fa] [animation-delay:-0.35s]" />
+                                                                                            <span className="h-2 w-0.5 animate-bounce rounded-full bg-brand-hover [animation-delay:-0.2s]" />
+                                                                                            <span className="h-2.5 w-0.5 animate-bounce rounded-full bg-brand-hover" />
+                                                                                            <span className="h-1.5 w-0.5 animate-bounce rounded-full bg-brand-hover [animation-delay:-0.35s]" />
                                                                                         </span>
                                                                                         Playing
                                                                                     </span>
@@ -2034,8 +2034,8 @@ export function OverlayPlayer() {
                                                                         className={cn(
                                                                             "text-[11px] tabular-nums",
                                                                             isCurrentTrack
-                                                                                ? "text-[#60a5fa]"
-                                                                                : "text-gray-500"
+                                                                                ? "text-brand-hover"
+                                                                                : "text-gray-400"
                                                                         )}
                                                                     >
                                                                         {formatTime(track.duration || 0)}
@@ -2073,7 +2073,7 @@ export function OverlayPlayer() {
                                                                                     e.stopPropagation();
                                                                                     handleRemoveFromQueue(queueIndex);
                                                                                 }}
-                                                                                className="h-7 w-7 flex items-center justify-center rounded-full text-gray-500 hover:bg-white/10 hover:text-white transition-colors"
+                                                                                className="h-7 w-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
                                                                                 title="Remove from queue"
                                                                                 aria-label="Remove from queue"
                                                                             >
@@ -2102,7 +2102,7 @@ export function OverlayPlayer() {
                                                     </div>
                                                 ) : isLyricsError ? (
                                                     <div className="flex h-full items-center justify-center px-4">
-                                                        <p className="text-center text-sm text-gray-500">
+                                                        <p className="text-center text-sm text-gray-400">
                                                             Failed to load lyrics
                                                         </p>
                                                     </div>
@@ -2130,13 +2130,13 @@ export function OverlayPlayer() {
                                                         Similar Songs
                                                     </h3>
                                                     {isRelatedTracksLoading ? (
-                                                        <div className="flex items-center gap-2 text-gray-500">
+                                                        <div className="flex items-center gap-2 text-gray-400">
                                                             <Loader2 className="h-4 w-4 animate-spin" />
                                                             <span className="text-sm">Loading...</span>
                                                         </div>
                                                     ) : isRelatedTracksError ? (
                                                         <div className="flex items-center gap-3">
-                                                            <p className="text-sm text-gray-500">Failed to load similar songs.</p>
+                                                            <p className="text-sm text-gray-400">Failed to load similar songs.</p>
                                                             <button
                                                                 onClick={() => queryClient.invalidateQueries({ queryKey: ["player-related-tracks", currentTrack?.id] })}
                                                                 className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-300 hover:bg-white/10 transition-colors"
@@ -2160,7 +2160,7 @@ export function OverlayPlayer() {
                                                                         onClick={() => playRelatedTrack(track)}
                                                                         className="group flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-white/[0.06]"
                                                                     >
-                                                                    <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-[#1a1a1a]">
+                                                                    <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-surface-hover">
                                                                         {(track.album?.coverArt ||
                                                                             track.album?.coverUrl) ? (
                                                                             <Image
@@ -2177,7 +2177,7 @@ export function OverlayPlayer() {
                                                                             />
                                                                         ) : (
                                                                             <div className="flex h-full w-full items-center justify-center">
-                                                                                <MusicIcon className="h-4 w-4 text-gray-600" />
+                                                                                <MusicIcon className="h-4 w-4 text-gray-400" />
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -2185,7 +2185,7 @@ export function OverlayPlayer() {
                                                                         <p className="truncate text-sm text-gray-200 group-hover:text-white">
                                                                             {track.title}
                                                                         </p>
-                                                                        <p className="truncate text-xs text-gray-500">
+                                                                        <p className="truncate text-xs text-gray-400">
                                                                             {isInLibrary
                                                                                 ? track.album?.artist?.name ||
                                                                                   track.artist ||
@@ -2235,7 +2235,7 @@ export function OverlayPlayer() {
                                                             })}
                                                         </div>
                                                     ) : (
-                                                        <p className="text-sm text-gray-500">
+                                                        <p className="text-sm text-gray-400">
                                                             No similar songs found.
                                                         </p>
                                                     )}
@@ -2246,13 +2246,13 @@ export function OverlayPlayer() {
                                                         Similar Artists
                                                     </h3>
                                                     {isRelatedArtistsLoading ? (
-                                                        <div className="flex items-center gap-2 text-gray-500">
+                                                        <div className="flex items-center gap-2 text-gray-400">
                                                             <Loader2 className="h-4 w-4 animate-spin" />
                                                             <span className="text-sm">Loading...</span>
                                                         </div>
                                                     ) : isRelatedArtistsError ? (
                                                         <div className="flex items-center gap-3">
-                                                            <p className="text-sm text-gray-500">Failed to load similar artists.</p>
+                                                            <p className="text-sm text-gray-400">Failed to load similar artists.</p>
                                                             <button
                                                                 onClick={() => queryClient.invalidateQueries({ queryKey: ["player-related-artists", currentTrack?.artist?.name, currentTrack?.artist?.mbid] })}
                                                                 className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-300 hover:bg-white/10 transition-colors"
@@ -2287,7 +2287,7 @@ export function OverlayPlayer() {
                                                                         onClick={returnToPreviousMode}
                                                                         className="group p-1.5 transition-colors hover:bg-white/[0.06]"
                                                                     >
-                                                                        <div className="mb-2 relative mx-auto h-12 w-12 overflow-hidden rounded-full bg-[#1a1a1a]">
+                                                                        <div className="mb-2 relative mx-auto h-12 w-12 overflow-hidden rounded-full bg-surface-hover">
                                                                             {artist.image ? (
                                                                                 <Image
                                                                                     src={artist.image}
@@ -2299,7 +2299,7 @@ export function OverlayPlayer() {
                                                                                 />
                                                                             ) : (
                                                                                 <div className="flex h-full w-full items-center justify-center">
-                                                                                    <MusicIcon className="h-4 w-4 text-gray-600" />
+                                                                                    <MusicIcon className="h-4 w-4 text-gray-400" />
                                                                                 </div>
                                                                             )}
                                                                         </div>
@@ -2311,7 +2311,7 @@ export function OverlayPlayer() {
                                                             })}
                                                         </div>
                                                     ) : (
-                                                        <p className="text-sm text-gray-500">
+                                                        <p className="text-sm text-gray-400">
                                                             No similar artists found.
                                                         </p>
                                                     )}
@@ -2322,13 +2322,13 @@ export function OverlayPlayer() {
                                                         More From This Artist
                                                     </h3>
                                                     {isMoreFromArtistLoading ? (
-                                                        <div className="flex items-center gap-2 text-gray-500">
+                                                        <div className="flex items-center gap-2 text-gray-400">
                                                             <Loader2 className="h-4 w-4 animate-spin" />
                                                             <span className="text-sm">Loading...</span>
                                                         </div>
                                                     ) : isMoreFromArtistError ? (
                                                         <div className="flex items-center gap-3">
-                                                            <p className="text-sm text-gray-500">Failed to load albums.</p>
+                                                            <p className="text-sm text-gray-400">Failed to load albums.</p>
                                                             <button
                                                                 onClick={() => queryClient.invalidateQueries({ queryKey: ["player-related-albums", currentTrack?.artist?.id] })}
                                                                 className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-300 hover:bg-white/10 transition-colors"
@@ -2346,7 +2346,7 @@ export function OverlayPlayer() {
                                                                     onClick={returnToPreviousMode}
                                                                     className="group p-1.5 transition-colors hover:bg-white/[0.06]"
                                                                 >
-                                                                    <div className="relative mb-2 aspect-square w-full overflow-hidden rounded bg-[#1a1a1a]">
+                                                                    <div className="relative mb-2 aspect-square w-full overflow-hidden rounded bg-surface-hover">
                                                                         {album.coverArt ? (
                                                                             <Image
                                                                                 src={api.getCoverArtUrl(
@@ -2361,7 +2361,7 @@ export function OverlayPlayer() {
                                                                             />
                                                                         ) : (
                                                                             <div className="flex h-full w-full items-center justify-center">
-                                                                                <MusicIcon className="h-5 w-5 text-gray-600" />
+                                                                                <MusicIcon className="h-5 w-5 text-gray-400" />
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -2369,7 +2369,7 @@ export function OverlayPlayer() {
                                                                         {album.title}
                                                                     </p>
                                                                     {album.year && (
-                                                                        <p className="text-[11px] text-gray-500">
+                                                                        <p className="text-[11px] text-gray-400">
                                                                             {album.year}
                                                                         </p>
                                                                     )}
@@ -2377,7 +2377,7 @@ export function OverlayPlayer() {
                                                             ))}
                                                         </div>
                                                     ) : (
-                                                        <p className="text-sm text-gray-500">No albums found.</p>
+                                                        <p className="text-sm text-gray-400">No albums found.</p>
                                                     )}
                                                 </section>
                                             </motion.section>

@@ -43,7 +43,7 @@ export function AudiobookCard({
             <div className="cursor-pointer group relative h-full flex flex-col">
                 {/* Book Cover Container - Fixed Aspect Ratio */}
                 <div className="relative flex-shrink-0">
-                    <div className="aspect-[2/3] rounded-sm overflow-hidden bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] shadow-2xl relative">
+                    <div className="aspect-[2/3] rounded-sm overflow-hidden bg-gradient-to-br from-[#2a2a2a] to-surface-hover shadow-2xl relative">
                         {resolvedCoverUrl ? (
                             <CachedImage
                                 src={resolvedCoverUrl}
@@ -56,7 +56,7 @@ export function AudiobookCard({
                             />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center">
-                                <Book className="w-16 h-16 text-gray-700" />
+                                <Book className="w-16 h-16 text-gray-400" />
                             </div>
                         )}
                         
@@ -70,7 +70,7 @@ export function AudiobookCard({
                         {progress && !progress.isFinished && (
                             <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/60">
                                 <div
-                                    className="h-full bg-[#2323FF]"
+                                    className="h-full bg-ai"
                                     style={{ width: `${progress.progress}%` }}
                                 />
                             </div>
@@ -85,14 +85,14 @@ export function AudiobookCard({
 
                         {/* Series Badge (for series cards only) */}
                         {seriesBadge && (
-                            <div className="absolute top-2 right-2 bg-[#2323FF] rounded px-2 py-1 text-xs font-bold shadow-lg">
+                            <div className="absolute top-2 right-2 bg-ai rounded px-2 py-1 text-xs font-bold shadow-lg">
                                 {seriesBadge}
                             </div>
                         )}
                     </div>
                     
                     {/* Shelf Shadow */}
-                    <div className="absolute -bottom-1 left-0 right-0 h-2 bg-gradient-to-b from-[#1a1a1a]/50 to-transparent rounded-b-sm" />
+                    <div className="absolute -bottom-1 left-0 right-0 h-2 bg-gradient-to-b from-surface-hover/50 to-transparent rounded-b-sm" />
                 </div>
 
                 {/* Text Container - Fixed Height for Uniformity */}

@@ -144,7 +144,7 @@ export function TidalMoodsGenresSection({
                                     href={`/explore/tidal-playlist/${encodeURIComponent(item.playlistId)}`}
                                     className="group cursor-pointer"
                                 >
-                                    <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-[#282828] shadow-lg">
+                                    <div className="relative aspect-square mb-3 rounded-md overflow-hidden bg-surface-highlight shadow-lg">
                                         {item.thumbnailUrl ? (
                                             <img
                                                 src={api.getTidalBrowseImageUrl(item.thumbnailUrl)}
@@ -153,7 +153,7 @@ export function TidalMoodsGenresSection({
                                             />
                                         ) : (
                                             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-cyan-500/30 to-cyan-500/10">
-                                                <Music2 className="w-12 h-12 text-gray-600" />
+                                                <Music2 className="w-12 h-12 text-gray-400" />
                                             </div>
                                         )}
                                     </div>
@@ -172,7 +172,7 @@ export function TidalMoodsGenresSection({
 
                     {!isLoadingPlaylists && loadError && (
                         <div className="flex flex-col items-center justify-center py-20 text-center">
-                            <Music2 className="w-12 h-12 text-gray-500 mb-4" />
+                            <Music2 className="w-12 h-12 text-gray-400 mb-4" />
                             <h3 className="text-lg font-medium text-white mb-2">
                                 Unable to load playlists
                             </h3>
@@ -182,7 +182,7 @@ export function TidalMoodsGenresSection({
 
                     {!isLoadingPlaylists && !loadError && playlists.length === 0 && (
                         <div className="flex flex-col items-center justify-center py-20 text-center">
-                            <Music2 className="w-12 h-12 text-gray-500 mb-4" />
+                            <Music2 className="w-12 h-12 text-gray-400 mb-4" />
                             <h3 className="text-lg font-medium text-white mb-2">
                                 No playlists found
                             </h3>
