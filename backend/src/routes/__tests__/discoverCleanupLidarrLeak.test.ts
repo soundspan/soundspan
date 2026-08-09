@@ -97,7 +97,13 @@ const LEAK_MARKER =
 describe("POST /cleanup-lidarr does not disclose caught error text", () => {
     it("returns a static per-artist message, not the raw axios error", async () => {
         axiosGet.mockResolvedValueOnce({
-            data: [{ id: 42, foreignArtistId: "mbid-1", artistName: "Nine Inch Nails" }],
+            data: [
+                {
+                    id: 42,
+                    foreignArtistId: "mbid-1",
+                    artistName: "Nine Inch Nails",
+                },
+            ],
         });
         axiosDelete.mockRejectedValueOnce(new Error(LEAK_MARKER));
         const res = createRes();
@@ -115,7 +121,9 @@ describe("POST /cleanup-lidarr does not disclose caught error text", () => {
 
     it("survives a non-Error throw without leaking or crashing", async () => {
         axiosGet.mockResolvedValueOnce({
-            data: [{ id: 7, foreignArtistId: "mbid-2", artistName: "Aphex Twin" }],
+            data: [
+                { id: 7, foreignArtistId: "mbid-2", artistName: "Aphex Twin" },
+            ],
         });
         axiosDelete.mockRejectedValueOnce("boom-string-throw");
         const res = createRes();
