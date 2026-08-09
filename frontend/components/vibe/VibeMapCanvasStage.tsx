@@ -87,6 +87,7 @@ function ReadyMap({ model }: { model: VibeMapViewModel }) {
                 highlightIds={model.presentation.effectiveHighlightIds}
                 dimUnhighlighted={model.presentation.effectiveDim}
                 hoveredId={model.gestures.hoveredId}
+                onSelectTrack={model.vibe.onDotClick}
                 onPointerDown={model.gestures.handlePointerDown}
                 onPointerMove={model.gestures.handlePointerMove}
                 onPointerUp={model.gestures.handlePointerUp}

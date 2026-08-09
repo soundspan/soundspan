@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clickable track rows expose button semantics with Enter/Space activation,
   queue icon controls have accessible labels, and scoped jsx-a11y lint guards
   protect the hardened accessibility components.
+- The vibe map canvas now exposes an application role, an accessible name and a
+  live text summary of its node count and focused track, and supports keyboard
+  navigation (Arrow/Home/End to move focus between visible tracks, Enter/Space
+  to explore the focused track) alongside the existing pointer interactions.
 
 ### Changed
 

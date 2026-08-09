@@ -46,6 +46,7 @@ const eslintConfig = defineConfig([
     {
         files: [
             "components/player/SeekSlider.tsx",
+            "components/vibe/MapCanvas.tsx",
             "components/ui/Modal.tsx",
             "components/ui/ConfirmDialog.tsx",
             "components/track/TrackRow.tsx",
