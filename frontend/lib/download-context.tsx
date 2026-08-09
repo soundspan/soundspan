@@ -8,6 +8,7 @@ import {
     useEffect,
     useMemo,
     useCallback,
+    useRef,
 } from "react";
 import { useDownloadStatus, DownloadJob } from "@/hooks/useDownloadStatus";
 import { useAuth } from "@/lib/auth-context";
@@ -53,11 +54,16 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     const [pendingDownloads, setPendingDownloads] = useState<PendingDownload[]>(
         []
     );
+    const pendingRef = useRef(pendingDownloads);
     const { isAuthenticated, user } = useAuth();
     const shouldPollDownloads =
         isAuthenticated && user?.role === "admin";
     const downloadStatus = useDownloadStatus(15000, shouldPollDownloads);
     const [downloadsEnabled, setDownloadsEnabled] = useState(false);
+
+    useEffect(() => {
+        pendingRef.current = pendingDownloads;
+    }, [pendingDownloads]);
 
     // Fetch download service availability on mount / when auth changes
     // Downloads are only shown to admin users
@@ -131,29 +137,26 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         subject: string,
         mbid: string
     ): string | null => {
-        // Check synchronously first to avoid race conditions
-        let result: string | null = null;
+        if (pendingRef.current.some((download) => download.mbid === mbid)) {
+            return null;
+        }
 
-        setPendingDownloads((prev) => {
-            // Check if already downloading this MBID
-            if (prev.some((d) => d.mbid === mbid)) {
-                return prev;
-            }
-
-            const id = `${Date.now()}-${Math.random()}`;
-            const download: PendingDownload = {
-                id,
-                type,
-                subject,
-                mbid,
-                timestamp: Date.now(),
-            };
-
-            result = id;
-            return [...prev, download];
-        });
-
-        return result;
+        const timestamp = Date.now();
+        const id = `${timestamp}-${Math.random()}`;
+        const download: PendingDownload = {
+            id,
+            type,
+            subject,
+            mbid,
+            timestamp,
+        };
+        pendingRef.current = [...pendingRef.current, download];
+        setPendingDownloads((prev) =>
+            prev.some((pending) => pending.mbid === mbid)
+                ? prev
+                : [...prev, download]
+        );
+        return id;
     }, []);
 
     const removePendingDownload = useCallback((id: string) => {
