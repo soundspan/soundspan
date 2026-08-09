@@ -227,7 +227,10 @@ app.use(
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/register", authLimiter);
 app.use("/api/auth", authRoutes);
-app.use("/api/onboarding", onboardingRoutes); // Public onboarding routes
+// Registration mints the first admin account, so it uses the strict auth limiter;
+// the rest of onboarding, including the public status probe, uses the general limiter.
+app.use("/api/onboarding/register", authLimiter);
+app.use("/api/onboarding", apiLimiter, onboardingRoutes);
 
 // Apply general API rate limiting to all API routes
 app.use("/api/api-keys", apiLimiter, apiKeysRoutes);

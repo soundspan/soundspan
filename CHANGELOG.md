@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a token carrying `type: "refresh"` is treated like an invalid token and receives
   only the basic user-count status (verified via the shared
   `verifyAccessToken` accessor).
+- The `/api/onboarding` routes are now rate-limited: `/register` (which mints the
+  first admin account) sits on the strict auth limiter like `/api/auth/register`,
+  and the rest of the onboarding wizard uses the general API limiter.
 
 ### Added
 
