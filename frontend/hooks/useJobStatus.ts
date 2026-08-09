@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
+import { useVisibilityGatedInterval } from "@/hooks/useVisibilityGatedInterval";
 
 const logger = createFrontendLogger("Hooks.useJobStatus");
 
@@ -87,6 +88,10 @@ export function useJobStatus(
         }
     }, [jobId, jobType]);
 
+    useVisibilityGatedInterval(checkStatus, pollInterval, {
+        enabled: isPolling && Boolean(jobId),
+    });
+
     // Start/stop polling when the job identity changes.
     useEffect(() => {
         if (!jobId) {
@@ -103,15 +108,17 @@ export function useJobStatus(
         cancelledRef.current = false;
 
         // Defer initial check to avoid synchronous setState in effect
-        const initialTimeout = setTimeout(checkStatus, 0);
-        const interval = setInterval(checkStatus, pollInterval);
+        const initialTimeout = setTimeout(() => {
+            if (document.visibilityState === "visible") {
+                void checkStatus();
+            }
+        }, 0);
 
         return () => {
             cancelledRef.current = true;
             clearTimeout(initialTimeout);
-            clearInterval(interval);
         };
-    }, [isPolling, jobId, checkStatus, pollInterval]);
+    }, [isPolling, jobId, checkStatus]);
 
     return {
         jobStatus,

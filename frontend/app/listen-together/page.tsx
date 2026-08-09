@@ -34,6 +34,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/utils/cn";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
+import { useVisibilityGatedInterval } from "@/hooks/useVisibilityGatedInterval";
 import type { SyncQueueItem } from "@/lib/listen-together-socket";
 
 // ---------------------------------------------------------------------------
@@ -160,11 +161,9 @@ function LobbyView() {
 
     useEffect(() => {
         fetchDiscover();
-        const interval = setInterval(() => {
-            void fetchDiscover(true);
-        }, 5000);
-        return () => clearInterval(interval);
     }, [fetchDiscover]);
+
+    useVisibilityGatedInterval(() => void fetchDiscover(true), 5000);
 
     const handleCreate = async () => {
         if (!canUseListenTogether) {

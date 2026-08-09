@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { resolvePollingJitter } from "@/hooks/pollingCadence";
+import { useVisibilityGatedInterval } from "@/hooks/useVisibilityGatedInterval";
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -14,7 +15,7 @@ const POLL_INTERVAL_MS = 30_000; // 30 seconds
 export function useActiveListenSessions(): boolean {
     const { isAuthenticated } = useAuth();
     const [hasActiveSessions, setHasActiveSessions] = useState(false);
-    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const [jitterElapsed, setJitterElapsed] = useState(false);
     const mountedRef = useRef(true);
 
     const fetchCount = useCallback(async () => {
@@ -28,11 +29,18 @@ export function useActiveListenSessions(): boolean {
         }
     }, []);
 
+    useVisibilityGatedInterval(fetchCount, POLL_INTERVAL_MS, {
+        enabled: isAuthenticated && jitterElapsed,
+    });
+
     useEffect(() => {
         mountedRef.current = true;
+        setJitterElapsed(false);
 
         if (!isAuthenticated) {
-            return;
+            return () => {
+                mountedRef.current = false;
+            };
         }
 
         // Defer initial fetch to avoid synchronous setState in effect body
@@ -41,17 +49,13 @@ export function useActiveListenSessions(): boolean {
         // Start polling with jitter to prevent alignment with other intervals
         const jitterDelay = resolvePollingJitter(5000);
         const jitterTimeout = setTimeout(() => {
-            intervalRef.current = setInterval(fetchCount, POLL_INTERVAL_MS);
+            setJitterElapsed(true);
         }, jitterDelay);
 
         return () => {
             mountedRef.current = false;
             clearTimeout(initialTimeout);
             clearTimeout(jitterTimeout);
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-                intervalRef.current = null;
-            }
         };
     }, [isAuthenticated, fetchCount]);
 

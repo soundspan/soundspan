@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useVisibilityGatedInterval } from "@/hooks/useVisibilityGatedInterval";
 import { api } from "@/lib/api";
 import {
     BRAND_DEEP_LINK_SCHEME,
@@ -112,26 +113,26 @@ export default function DeviceLinkPage() {
     }, [timeRemaining, codeUsed]);
 
     // Poll for code usage
-    useEffect(() => {
-        if (!linkCode || timeRemaining <= 0 || codeUsed) return;
+    const checkCodeStatus = useCallback(async () => {
+        if (!linkCode) return;
 
-        const pollInterval = setInterval(async () => {
-            try {
-                const status = await api.request<{ status: string; deviceName?: string }>(
-                    `/device-link/status/${linkCode.code}`
-                );
-                
-                if (status.status === "used") {
-                    setCodeUsed(true);
-                    loadDevices(); // Refresh devices list
-                }
-            } catch (err) {
-                sharedFrontendLogger.error("Failed to check code status:", err);
+        try {
+            const status = await api.request<{ status: string; deviceName?: string }>(
+                `/device-link/status/${linkCode.code}`
+            );
+
+            if (status.status === "used") {
+                setCodeUsed(true);
+                loadDevices(); // Refresh devices list
             }
-        }, 2000);
+        } catch (err) {
+            sharedFrontendLogger.error("Failed to check code status:", err);
+        }
+    }, [linkCode, loadDevices]);
 
-        return () => clearInterval(pollInterval);
-    }, [linkCode, timeRemaining, codeUsed, loadDevices]);
+    useVisibilityGatedInterval(checkCodeStatus, 2000, {
+        enabled: Boolean(linkCode) && timeRemaining > 0 && !codeUsed,
+    });
 
     // Copy code to clipboard
     const copyCode = () => {

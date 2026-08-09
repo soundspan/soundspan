@@ -8,9 +8,11 @@ import {
     useMemo,
     ReactNode,
     useCallback,
+    useRef,
 } from "react";
 import { api } from "./api";
-import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { useVisibilityGatedInterval } from "../hooks/useVisibilityGatedInterval";
+import { frontendLogger as sharedFrontendLogger } from "./logger";
 
 interface FeaturesState {
     musicCNN: boolean;
@@ -43,6 +45,7 @@ const FeaturesContext = createContext<FeaturesState | undefined>(undefined);
  */
 export function FeaturesProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<FeaturesState>(defaultState);
+    const isMountedRef = useRef(false);
     const refreshFeatures = useCallback(async () => {
         try {
             const [features, uiSettings] = await Promise.all([
@@ -76,37 +79,20 @@ export function FeaturesProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
-    useEffect(() => {
-        let isMounted = true;
-
-        const safeRefresh = async () => {
-            if (!isMounted) return;
-            await refreshFeatures();
-        };
-
-        void safeRefresh();
-
-        const interval = window.setInterval(
-            safeRefresh,
-            FEATURES_REFRESH_INTERVAL_MS
-        );
-
-        const onVisibilityChange = () => {
-            if (document.visibilityState === "visible") {
-                void safeRefresh();
-            }
-        };
-
-        window.addEventListener("focus", onVisibilityChange);
-        document.addEventListener("visibilitychange", onVisibilityChange);
-
-        return () => {
-            isMounted = false;
-            window.clearInterval(interval);
-            window.removeEventListener("focus", onVisibilityChange);
-            document.removeEventListener("visibilitychange", onVisibilityChange);
-        };
+    const safeRefresh = useCallback(async () => {
+        if (!isMountedRef.current) return;
+        await refreshFeatures();
     }, [refreshFeatures]);
+
+    useVisibilityGatedInterval(safeRefresh, FEATURES_REFRESH_INTERVAL_MS);
+
+    useEffect(() => {
+        isMountedRef.current = true;
+        void safeRefresh();
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, [safeRefresh]);
 
     const value = useMemo(() => state, [state]);
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { useVisibilityGatedInterval } from "@/hooks/useVisibilityGatedInterval";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -11,41 +12,23 @@ const PRESENCE_HEARTBEAT_INTERVAL_MS = 25_000;
  */
 export function usePresenceHeartbeat() {
     const { isAuthenticated } = useAuth();
+    const sendHeartbeat = useCallback(async () => {
+        try {
+            await api.post("/social/presence/heartbeat");
+        } catch {
+            // Intentionally silent: social presence should not interrupt playback/navigation.
+        }
+    }, []);
+
+    useVisibilityGatedInterval(sendHeartbeat, PRESENCE_HEARTBEAT_INTERVAL_MS, {
+        enabled: isAuthenticated,
+    });
 
     useEffect(() => {
         if (!isAuthenticated) {
             return;
         }
 
-        const sendHeartbeat = async () => {
-            try {
-                await api.post("/social/presence/heartbeat");
-            } catch {
-                // Intentionally silent: social presence should not interrupt playback/navigation.
-            }
-        };
-
         void sendHeartbeat();
-
-        const intervalId = setInterval(() => {
-            void sendHeartbeat();
-        }, PRESENCE_HEARTBEAT_INTERVAL_MS);
-
-        const handleVisibilityChange = () => {
-            if (!document.hidden) {
-                void sendHeartbeat();
-            }
-        };
-
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-
-        return () => {
-            clearInterval(intervalId);
-            document.removeEventListener(
-                "visibilitychange",
-                handleVisibilityChange
-            );
-        };
-    }, [isAuthenticated]);
+    }, [isAuthenticated, sendHeartbeat]);
 }
-
