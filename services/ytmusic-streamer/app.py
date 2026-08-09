@@ -1547,7 +1547,8 @@ async def search(req: SearchRequest, user_id: str = Query(...)):
       - native: force ytmusicapi yt.search()
     """
     try:
-        items, strategy = _search_with_mode_fallback(
+        items, strategy = await asyncio.to_thread(
+            _search_with_mode_fallback,
             user_id,
             req.query,
             req.filter,
@@ -1688,7 +1689,8 @@ async def get_album(browse_id: str, user_id: str = Query(...)):
             yt = _get_public_ytmusic("native")
             album = yt.get_album(browse_id)
         else:
-            album = _run_ytmusic_with_auth_retry(
+            album = await asyncio.to_thread(
+                _run_ytmusic_with_auth_retry,
                 user_id,
                 operation=f"get_album({browse_id})",
                 func=lambda yt: yt.get_album(browse_id),
@@ -1713,7 +1715,8 @@ async def get_artist(channel_id: str, user_id: str = Query(...)):
             yt = _get_public_ytmusic("native")
             artist = yt.get_artist(channel_id)
         else:
-            artist = _run_ytmusic_with_auth_retry(
+            artist = await asyncio.to_thread(
+                _run_ytmusic_with_auth_retry,
                 user_id,
                 operation=f"get_artist({channel_id})",
                 func=lambda yt: yt.get_artist(channel_id),
@@ -1770,7 +1773,8 @@ async def get_song(video_id: str, user_id: str = Query(...)):
             yt = _get_public_ytmusic("native")
             song = yt.get_song(video_id)
         else:
-            song = _run_ytmusic_with_auth_retry(
+            song = await asyncio.to_thread(
+                _run_ytmusic_with_auth_retry,
                 user_id,
                 operation=f"get_song({video_id})",
                 func=lambda yt: yt.get_song(video_id),
@@ -1881,7 +1885,8 @@ async def proxy_stream(
 async def library_songs(user_id: str = Query(...), limit: int = 100, order: str = "recently_added"):
     """Get user's liked/library songs from YouTube Music."""
     try:
-        songs = _run_ytmusic_with_auth_retry(
+        songs = await asyncio.to_thread(
+            _run_ytmusic_with_auth_retry,
             user_id,
             operation=f"get_library_songs(limit={limit}, order={order})",
             func=lambda yt: yt.get_library_songs(limit=limit, order=order),
@@ -1916,7 +1921,8 @@ async def library_songs(user_id: str = Query(...), limit: int = 100, order: str 
 async def library_albums(user_id: str = Query(...), limit: int = 100, order: str = "recently_added"):
     """Get user's saved albums from YouTube Music."""
     try:
-        albums = _run_ytmusic_with_auth_retry(
+        albums = await asyncio.to_thread(
+            _run_ytmusic_with_auth_retry,
             user_id,
             operation=f"get_library_albums(limit={limit}, order={order})",
             func=lambda yt: yt.get_library_albums(limit=limit, order=order),
@@ -1975,7 +1981,8 @@ async def library_playlists(
     excluding user-created playlists and special IDs like Liked Music.
     """
     try:
-        playlists = _run_ytmusic_with_auth_retry(
+        playlists = await asyncio.to_thread(
+            _run_ytmusic_with_auth_retry,
             user_id,
             operation=f"get_library_playlists(limit={limit})",
             func=lambda yt: yt.get_library_playlists(limit),
@@ -2615,8 +2622,9 @@ async def get_charts(country: str = "US", user_id: Optional[str] = Query(None)):
     with HTTP 400.
     """
     try:
-        yt = _get_public_ytmusic("native")
-        charts = yt.get_charts(country=country)
+        charts = await asyncio.to_thread(
+            lambda: _get_public_ytmusic("native").get_charts(country=country)
+        )
 
         result = {}
         # Extract top songs/videos if present
@@ -2652,8 +2660,9 @@ async def get_moods_and_genres(user_id: Optional[str] = Query(None)):
     sessions with HTTP 400.
     """
     try:
-        yt = _get_public_ytmusic("native")
-        categories = yt.get_mood_categories()
+        categories = await asyncio.to_thread(
+            lambda: _get_public_ytmusic("native").get_mood_categories()
+        )
 
         result = []
         for cat_title, cat_items in categories.items():
@@ -2683,8 +2692,9 @@ async def get_home(limit: int = Query(6, ge=1, le=20), user_id: Optional[str] = 
     with HTTP 400.
     """
     try:
-        yt = _get_public_ytmusic("native")
-        home = yt.get_home(limit=limit)
+        home = await asyncio.to_thread(
+            lambda: _get_public_ytmusic("native").get_home(limit=limit)
+        )
 
         shelves = []
         for shelf in home:
@@ -2739,8 +2749,9 @@ async def get_home(limit: int = Query(6, ge=1, le=20), user_id: Optional[str] = 
 async def get_browse_album(browse_id: str):
     """Get album details from YouTube Music (unauthenticated, public browse)."""
     try:
-        yt = _get_public_ytmusic("native")
-        album = yt.get_album(browse_id)
+        album = await asyncio.to_thread(
+            lambda: _get_public_ytmusic("native").get_album(browse_id)
+        )
         return _format_album_response(browse_id, album)
     except HTTPException:
         raise
@@ -2771,8 +2782,9 @@ async def get_mood_playlists(params: str = Query(..., min_length=1, max_length=5
         if not params:
             raise HTTPException(status_code=400, detail="params must be a non-empty string")
 
-        yt = _get_public_ytmusic("native")
-        playlists = _fetch_mood_playlists(yt, params)
+        playlists = await asyncio.to_thread(
+            lambda: _fetch_mood_playlists(_get_public_ytmusic("native"), params)
+        )
 
         result = []
         for item in playlists:
@@ -2822,7 +2834,8 @@ async def get_playlist(
     try:
         if user_id and user_id != "__public__":
             try:
-                playlist = _run_ytmusic_with_auth_retry(
+                playlist = await asyncio.to_thread(
+                    _run_ytmusic_with_auth_retry,
                     user_id,
                     operation=f"get_playlist({playlist_id})",
                     func=lambda yt: yt.get_playlist(playlist_id, limit=limit),
