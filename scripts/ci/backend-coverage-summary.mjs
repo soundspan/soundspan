@@ -25,10 +25,15 @@ function readJson(filePath) {
 }
 
 const coverage = readJson(summaryPath);
+const enforceGate = String(process.env.ENFORCE_COVERAGE_GATE || "false").toLowerCase() === "true";
 if (!coverage || !coverage.total) {
   const message = "Coverage summary was not found. Ensure Jest coverage generation succeeded.";
   fs.mkdirSync(path.dirname(outputMarkdownPath), { recursive: true });
   fs.writeFileSync(outputMarkdownPath, `## Backend Coverage Summary\n\n${message}\n`);
+  if (enforceGate) {
+    console.error(message);
+    process.exit(2);
+  }
   console.log(message);
   process.exit(0);
 }
@@ -53,7 +58,6 @@ const lineMin = toNumber(process.env.COVERAGE_LINE_MIN, 0);
 const branchMin = toNumber(process.env.COVERAGE_BRANCH_MIN, 0);
 const functionMin = toNumber(process.env.COVERAGE_FUNCTION_MIN, 0);
 const statementMin = toNumber(process.env.COVERAGE_STATEMENT_MIN, 0);
-const enforceGate = String(process.env.ENFORCE_COVERAGE_GATE || "false").toLowerCase() === "true";
 
 const gateFailures = [];
 if (toNumber(total.lines?.pct) < lineMin) {

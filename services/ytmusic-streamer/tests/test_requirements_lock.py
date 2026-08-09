@@ -16,5 +16,6 @@ def test_uvicorn_lock_satisfies_manifest_floor() -> None:
     assert lock_match is not None
     floor = tuple(int(part) for part in floor_match.groups())
     locked = tuple(int(part) for part in lock_match.groups())
-    assert floor == (0, 52, 0)
+    # 0.52.0 is the Uvicorn advisory security-baseline minimum; Dependabot may raise the floor above it.
+    assert floor >= (0, 52, 0)
     assert locked >= floor

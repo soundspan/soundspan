@@ -14,6 +14,7 @@
         "verify:backend": "npm --prefix backend run test:coverage",
         "verify:frontend": "npm --prefix frontend run lint && npm --prefix frontend run build && npm --prefix frontend run test:coverage && npm --prefix frontend run test:component && npm --prefix frontend run typecheck",
         "verify:helm": "./scripts/helm-chart-render-check.sh",
+        "verify:python": "pytest services/tidal-downloader/tests -q && pytest services/ytmusic-streamer/tests -q && pytest services/audio-analyzer/tests -q && pytest services/audio-analyzer-clap/tests -q",
         "test:backend": "npm --prefix backend test --",
         "test:frontend": "npm --prefix frontend run test:unit"
     }

@@ -152,6 +152,40 @@ jobs:
             frontend-quality-summary.md
           if-no-files-found: warn
 
+  python-sidecar-tests:
+    name: Python Sidecar Tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ vars.CI_NON_BLOCKING_TEST_VISIBILITY != 'false' }}
+    strategy:
+      fail-fast: false
+      # python-version mirrors each sidecar's Dockerfile base (tidal/ytmusic python:3.14-slim, clap python:3.12-slim); audio-analyzer's EOL py3.8 image is excluded — its tests target the repo's Python 3.11+ contract for services/common.
+      matrix:
+        include:
+          - service: tidal-downloader
+            python-version: "3.14"
+          - service: ytmusic-streamer
+            python-version: "3.14"
+          - service: audio-analyzer
+            python-version: "3.12"
+          - service: audio-analyzer-clap
+            python-version: "3.12"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: services/${{ matrix.service }}/requirements-test.txt
+
+      - name: Install test dependencies
+        run: pip install -r services/${{ matrix.service }}/requirements-test.txt
+
+      - name: Run sidecar tests
+        run: pytest services/${{ matrix.service }}/tests -q
+
   backend-typecheck:
     name: Backend Typecheck
     runs-on: ubuntu-latest

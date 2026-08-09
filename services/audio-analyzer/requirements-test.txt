@@ -1,0 +1,2 @@
+# Test-only dependencies for the audio-analyzer pytest suite.
+pytest>=9.1.1
