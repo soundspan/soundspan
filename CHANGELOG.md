@@ -51,6 +51,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`backend/src/routes/__tests__/libraryRouteTable.test.ts`) snapshots the
   library router's path+method+middleware surface to guard the refactor, and the
   existing `apiEntrypointRuntime` mount-contract test continues to pass unchanged.
+- **Frontend API client split into cohesive domain modules.** The 3,700-line
+  single-class `frontend/lib/api.ts` monolith is decomposed into an abstract
+  `ApiClientCore` (`frontend/lib/api/core.ts`, holding the token/URL/`request`
+  plumbing) plus per-domain mixin modules under `frontend/lib/api/` (library,
+  playlists, media, recommendations, plays, settings, connectors, auth,
+  downloads, imports, discover, notifications, audiobooks, podcasts, soulseek,
+  enrichment, metadata, vibe, ytmusic, youtube, tidal, listen-groups). `api.ts`
+  is now a thin facade (~390 lines) that composes the mixins, re-exports the
+  shared response types, and exports the `api` singleton, so every consumer
+  keeps calling `api.<method>()` unchanged. No behavior, endpoint, or signature
+  changes. A characterization test pins the public method surface. The
+  `useJobStatus` hook's job-failure value is now typed at the boundary
+  (`getScanStatus` returns `result` as `Record<string, unknown>` instead of the
+  `any` alias) and narrowed to a string via a tested `resolveJobFailureMessage`
+  helper before reaching `onError(string)`.
 - **Backend error-response canonicalization (developer-facing standard + first
   exemplars).** The canonical route error contract is now documented in
   `backend/src/routes/README.md`: async handlers wrap in `asyncHandler`,
