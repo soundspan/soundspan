@@ -5,13 +5,12 @@ import { SettingsRow, SettingsSelect, SettingsToggle, IntegrationCard } from "..
 import { UserSettings } from "../../types";
 import { CheckCircle, XCircle, Loader2, ExternalLink, Copy, AlertTriangle, Music2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useDeviceAuthPolling } from "@/hooks/useDeviceAuthPolling";
 
 interface TidalStreamingCardProps {
     settings: UserSettings;
     onUpdate: (updates: Partial<UserSettings>) => void;
 }
-
-type AuthState = "idle" | "loading" | "polling" | "success" | "error";
 
 const QUALITY_OPTIONS = [
     { value: "LOW", label: "Low (AAC 96 kbps)" },
@@ -35,46 +34,12 @@ export function TidalStreamingCard({
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
-    // Device auth flow state
-    const [authState, setAuthState] = useState<AuthState>("idle");
-    const [authUrl, setAuthUrl] = useState("");
-    const [userCode, setUserCode] = useState("");
     const [copied, setCopied] = useState(false);
-    const [expiresAt, setExpiresAt] = useState<number | null>(null);
-    const [timeLeft, setTimeLeft] = useState<number | null>(null);
-    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const authResultRef = useRef<Awaited<ReturnType<typeof api.pollTidalAuth>> | null>(null);
 
     // Check TIDAL streaming status on mount
     useEffect(() => {
         checkStatus();
-    }, []);
-
-    // Expiration countdown
-    useEffect(() => {
-        if (!expiresAt || authState !== "polling") {
-            setTimeLeft(null);
-            return;
-        }
-
-        const tick = () => {
-            const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
-            setTimeLeft(remaining);
-            if (remaining <= 0) {
-                handleCancelLink();
-                setError("The sign-in code has expired. Please try again.");
-            }
-        };
-
-        tick();
-        const interval = setInterval(tick, 1000);
-        return () => clearInterval(interval);
-    }, [expiresAt, authState]);
-
-    // Clean up polling on unmount
-    useEffect(() => {
-        return () => {
-            if (pollRef.current) clearInterval(pollRef.current);
-        };
     }, []);
 
     const checkStatus = useCallback(async () => {
@@ -90,98 +55,91 @@ export function TidalStreamingCard({
         setStatusLoading(false);
     }, []);
 
+    const initiateAuth = useCallback(async () => {
+        const deviceAuth = await api.initiateTidalAuth();
+        let authLink = deviceAuth.verification_uri_complete || deviceAuth.verification_uri;
+        if (authLink && !authLink.startsWith("http")) authLink = `https://${authLink}`;
+        return {
+            deviceCode: deviceAuth.device_code,
+            verificationUri: authLink,
+            userCode: deviceAuth.user_code || "",
+            pollIntervalMs: (deviceAuth.interval || 5) * 1000,
+            expiresAtMs: Date.now() + (deviceAuth.expires_in || 300) * 1000,
+        };
+    }, []);
+
+    const pollAuth = useCallback(async (deviceCode: string) => {
+        const result = await api.pollTidalAuth(deviceCode);
+        if (result.status === "pending") return { status: "pending" } as const;
+        if (result.status === "error") {
+            return { status: "error", message: result.error || "Authentication failed" } as const;
+        }
+        authResultRef.current = result;
+        return { status: "success" } as const;
+    }, []);
+
+    const handleSessionStarted = useCallback(async (session: {
+        userCode?: string;
+        verificationUri: string;
+    }) => {
+        try {
+            await navigator.clipboard.writeText(session.userCode || "");
+            setCopied(true);
+            setTimeout(() => setCopied(false), 3000);
+        } catch {
+            // Clipboard may not be available
+        }
+        window.open(session.verificationUri, "_blank", "noopener,noreferrer");
+    }, []);
+
+    const handleAuthSuccess = useCallback(() => {
+        const result = authResultRef.current;
+        if (!result) return;
+        setSuccess(`Connected as ${result.username || "TIDAL user"}`);
+        setError(null);
+        setIsAuthenticated(true);
+    }, []);
+
+    const {
+        phase: authState,
+        session: authSession,
+        error: authError,
+        timeLeftSeconds: timeLeft,
+        start: startAuthentication,
+        cancel: cancelAuthentication,
+    } = useDeviceAuthPolling({
+        initiate: initiateAuth,
+        poll: pollAuth,
+        onSessionStarted: handleSessionStarted,
+        onSuccess: handleAuthSuccess,
+        expiredMessage: "The sign-in code has expired. Please try again.",
+        startErrorMessage: "Failed to start TIDAL auth",
+    });
+    const authUrl = authSession?.verificationUri || "";
+    const userCode = authSession?.userCode || "";
+
     const handleLinkAccount = useCallback(async () => {
-        setAuthState("loading");
         setError(null);
         setSuccess(null);
-
-        try {
-            const deviceAuth = await api.initiateTidalAuth();
-
-            // Ensure URL has protocol
-            let authLink =
-                deviceAuth.verification_uri_complete ||
-                deviceAuth.verification_uri;
-            if (authLink && !authLink.startsWith("http")) {
-                authLink = `https://${authLink}`;
-            }
-
-            setAuthUrl(authLink);
-            setUserCode(deviceAuth.user_code || "");
-            setAuthState("polling");
-            setExpiresAt(Date.now() + (deviceAuth.expires_in || 300) * 1000);
-
-            // Copy code to clipboard
-            try {
-                await navigator.clipboard.writeText(deviceAuth.user_code || "");
-                setCopied(true);
-                setTimeout(() => setCopied(false), 3000);
-            } catch {
-                // Clipboard may not be available
-            }
-
-            // Open auth URL in new tab
-            window.open(authLink, "_blank", "noopener,noreferrer");
-
-            // Start polling for token
-            const deviceCode = deviceAuth.device_code;
-            const interval = (deviceAuth.interval || 5) * 1000;
-
-            pollRef.current = setInterval(async () => {
-                try {
-                    const result = await api.pollTidalAuth(deviceCode);
-
-                    if (result.status === "success") {
-                        if (pollRef.current) clearInterval(pollRef.current);
-                        setAuthState("success");
-                        setUserCode("");
-                        setAuthUrl("");
-                        setExpiresAt(null);
-                        setSuccess(`Connected as ${result.username || "TIDAL user"}`);
-                        setError(null);
-                        setIsAuthenticated(true);
-                    } else if (result.status === "error") {
-                        if (pollRef.current) clearInterval(pollRef.current);
-                        setAuthState("error");
-                        setUserCode("");
-                        setAuthUrl("");
-                        setExpiresAt(null);
-                        setError(result.error || "Authentication failed");
-                    }
-                    // If status is "pending", keep polling
-                } catch {
-                    // Transient error — keep polling
-                }
-            }, interval);
-        } catch (err: any) {
-            setAuthState("error");
-            setError(err.message || "Failed to start TIDAL auth");
-        }
-    }, []);
+        await startAuthentication();
+    }, [startAuthentication]);
 
     const handleCancelLink = useCallback(() => {
-        if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-        }
-        setAuthState("idle");
-        setUserCode("");
-        setAuthUrl("");
-        setExpiresAt(null);
+        cancelAuthentication();
         setError(null);
-    }, []);
+    }, [cancelAuthentication]);
 
     const handleDisconnect = useCallback(async () => {
         try {
             await api.clearTidalStreamingAuth();
             setIsAuthenticated(false);
-            setAuthState("idle");
+            cancelAuthentication();
             setSuccess(null);
             setError(null);
         } catch (err: any) {
             setError(err.message || "Failed to disconnect");
         }
-    }, []);
+    }, [cancelAuthentication]);
 
     const handleCopyCode = useCallback(async () => {
         if (!userCode) return;
@@ -345,10 +303,10 @@ export function TidalStreamingCard({
                         </div>
                     )}
 
-                    {error && (
+                    {(authError || error) && (
                         <div className="flex items-start gap-2 text-sm text-red-400">
                             <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                            <span>{error}</span>
+                            <span>{authError || error}</span>
                         </div>
                     )}
 
