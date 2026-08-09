@@ -105,6 +105,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `error` string and HTTP status are unchanged; the frontend reads only `error`,
   so no client action is required.
 
+### Fixed
+
+- **Sidecar event-loop offload for OAuth onboarding and search.** The
+  `tidal-downloader` (`/auth/device`, `/auth/token`, `/auth/refresh`, `/search`)
+  and `ytmusic-streamer` (`/auth/device-code`, `/auth/device-code/poll`) async
+  handlers called blocking third-party `tiddl`/`ytmusicapi` methods directly on
+  the event loop. During device-code onboarding the poll endpoint runs every few
+  seconds, so a blocking call there serialized concurrent onboarding and
+  streaming across all users. Each blocking call is now wrapped in
+  `asyncio.to_thread`, matching the existing offload pattern already used for the
+  per-user refresh path.
+
 ### Security
 
 - Path containment on native audio streaming: the `GET /api/library/tracks/:id/stream`

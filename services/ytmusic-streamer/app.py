@@ -1485,7 +1485,7 @@ async def auth_device_code(req: DeviceCodeRequest):
             client_id=req.client_id,
             client_secret=req.client_secret,
         )
-        code = oauth_creds.get_code()
+        code = await asyncio.to_thread(oauth_creds.get_code)
         log.info(f"Device code flow initiated, user_code: {code.get('user_code')}")
         return {
             "device_code": code["device_code"],
@@ -1523,7 +1523,9 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
             client_id=req.client_id,
             client_secret=req.client_secret,
         )
-        token = cast(dict[str, Any], oauth_creds.token_from_code(req.device_code))
+        token = cast(
+            dict[str, Any], await asyncio.to_thread(oauth_creds.token_from_code, req.device_code)
+        )
 
         # Check if we got an error (authorization_pending, slow_down, etc.)
         if "error" in token:

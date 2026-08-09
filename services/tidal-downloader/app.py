@@ -981,7 +981,7 @@ async def auth_device():
     """Step 1: Initiate device-code OAuth flow. Returns a verification URL."""
     try:
         auth_api = AuthAPI()
-        device_auth = auth_api.get_device_auth()
+        device_auth = await asyncio.to_thread(auth_api.get_device_auth)
         return {
             "device_code": device_auth.deviceCode,
             "user_code": device_auth.userCode,
@@ -1004,7 +1004,7 @@ async def auth_token(req: AuthTokenRequest):
     """Step 2: Poll for token after user has authorised the device code."""
     try:
         auth_api = AuthAPI()
-        auth_response = auth_api.get_auth(req.device_code)
+        auth_response = await asyncio.to_thread(auth_api.get_auth, req.device_code)
         return {
             "access_token": auth_response.access_token,
             "refresh_token": auth_response.refresh_token,
@@ -1035,7 +1035,7 @@ async def auth_refresh(req: RefreshRequest):
     """Refresh an expired access token."""
     try:
         auth_api = AuthAPI()
-        auth_response = auth_api.refresh_token(req.refresh_token)
+        auth_response = await asyncio.to_thread(auth_api.refresh_token, req.refresh_token)
         return {
             "access_token": auth_response.access_token,
             "token_type": auth_response.token_type,
@@ -1091,7 +1091,7 @@ async def search(
     """Search using bearer-header auth or the one-release query fallback."""
     api = _build_api(creds.access_token, creds.user_id, creds.country_code)
     try:
-        results = api.get_search(req.query)
+        results = await asyncio.to_thread(api.get_search, req.query)
         return {
             "tracks": [
                 {

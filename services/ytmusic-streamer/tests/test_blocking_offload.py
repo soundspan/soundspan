@@ -62,3 +62,63 @@ async def test_charts_offloaded_to_worker_thread(client, monkeypatch):
 
     assert response.status_code == 200
     assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
+async def test_device_code_offloaded_to_worker_thread(client, monkeypatch):
+    """OAuth device-code initiation should run in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    class FakeOAuthCredentials:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_code(self):
+            captured["t"] = threading.current_thread().name
+            return {
+                "device_code": "dc",
+                "user_code": "uc",
+                "verification_url": "https://example.test/verify",
+                "expires_in": 1800,
+                "interval": 5,
+            }
+
+    monkeypatch.setattr(app, "OAuthCredentials", FakeOAuthCredentials)
+
+    response = await client.post(
+        "/auth/device-code",
+        json={"client_id": "cid", "client_secret": "secret"},
+    )
+
+    assert response.status_code == 200
+    assert captured["t"] != "MainThread"
+
+
+@pytest.mark.anyio
+async def test_device_code_poll_offloaded_to_worker_thread(client, monkeypatch):
+    """OAuth device-code polling should run in an asyncio worker thread."""
+    import app
+
+    captured = {}
+
+    class FakeOAuthCredentials:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def token_from_code(self, device_code):
+            captured["t"] = threading.current_thread().name
+            # Pending short-circuits before any file writes.
+            return {"error": "authorization_pending"}
+
+    monkeypatch.setattr(app, "OAuthCredentials", FakeOAuthCredentials)
+
+    response = await client.post(
+        "/auth/device-code/poll?user_id=u1",
+        json={"client_id": "cid", "client_secret": "secret", "device_code": "dc"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "pending", "error": "authorization_pending"}
+    assert captured["t"] != "MainThread"
