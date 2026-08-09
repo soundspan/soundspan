@@ -20,16 +20,22 @@ describe("audio analyzer stale failure resolution contract", () => {
             "../../../services/audio-analyzer/analyzer.py"
         );
         const source = fs.readFileSync(analyzerPath, "utf8");
+        const resolveFailuresSqlSection = extractSection(
+            source,
+            "_RESOLVE_AUDIO_FAILURES_SQL = ",
+            "def _analysis_result_values"
+        );
         const saveResultsSection = extractSection(
             source,
             "def _save_results",
             "def _save_failed"
         );
 
-        expect(saveResultsSection).toContain(`UPDATE "EnrichmentFailure"`);
-        expect(saveResultsSection).toContain(`"entityType" = 'audio'`);
-        expect(saveResultsSection).toContain(`"entityId" = %s`);
-        expect(saveResultsSection).toContain("resolved = true");
-        expect(saveResultsSection).toContain(`resolved = false`);
+        expect(resolveFailuresSqlSection).toContain(`UPDATE "EnrichmentFailure"`);
+        expect(resolveFailuresSqlSection).toContain(`"entityType" = 'audio'`);
+        expect(resolveFailuresSqlSection).toContain(`"entityId" = %s`);
+        expect(resolveFailuresSqlSection).toContain("resolved = true");
+        expect(resolveFailuresSqlSection).toContain(`resolved = false`);
+        expect(saveResultsSection).toContain("_RESOLVE_AUDIO_FAILURES_SQL");
     });
 });

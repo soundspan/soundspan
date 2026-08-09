@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The three backend audio-analyzer source-contract suites
+  (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
+  `audioAnalyzerFailureResolutionContract`) were updated in step with the
+  analyzer reliability refactor: the marker strings they scrape from
+  `analyzer.py` moved into the new `_claim_tracks_for_processing` /
+  `_consume_batch_results` helpers and the module-level
+  `_RESOLVE_AUDIO_FAILURES_SQL` constant, so the tests now assert against
+  those boundaries (and additionally prove `_save_results` executes the
+  failure-resolution SQL).
 - Audio analyzer sidecar no longer runs a PostgreSQL worker-count query at
   module import. Because the service uses multiprocessing spawn mode, every
   spawned worker process re-imported the module and re-executed that query;

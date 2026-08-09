@@ -23,8 +23,8 @@ describe("audio analyzer queue contract", () => {
 
         const processBatchSection = extractSection(
             analyzerSource,
-            "def _process_tracks_parallel",
-            "def _save_results"
+            "def _claim_tracks_for_processing",
+            "def _save_completed_future"
         );
 
         expect(processBatchSection).toContain(
@@ -60,8 +60,8 @@ describe("audio analyzer queue contract", () => {
         );
         const processBatchSection = extractSection(
             analyzerSource,
-            "def _process_tracks_parallel",
-            "def _save_results"
+            "def _claim_tracks_for_processing",
+            "def _save_completed_future"
         );
 
         const producersPreclaimProcessing =
@@ -75,4 +75,3 @@ describe("audio analyzer queue contract", () => {
         expect(consumerAcceptsProcessing).toBe(true);
     });
 });
-

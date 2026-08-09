@@ -23,8 +23,8 @@ describe("audio analyzer process-pool recovery contract", () => {
         const source = fs.readFileSync(analyzerPath, "utf8");
         const processSection = extractSection(
             source,
-            "def _process_tracks_parallel",
-            "def _save_results"
+            "def _consume_batch_results",
+            "def _handle_batch_timeout"
         );
 
         expect(processSection).toContain("self._is_pool_crash_error(e)");
