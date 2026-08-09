@@ -24,9 +24,13 @@ services:
       - soundspan_data:/data
     environment:
       - TZ=${TZ:-UTC}
+      # AIO honors operator-supplied secrets; they take precedence and persist to /data/secrets.
+      # Empty values generate and persist stable values on first boot.
       - SESSION_SECRET=${SESSION_SECRET:-}
-      # Runtime streaming-engine selector. Keep unset for primary howler (direct).
-      # Set to videojs (segmented, experimental) only for explicit evaluation.
+      - SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      # Runtime streaming-engine selector. Accepted: native | howler | videojs.
+      # Leave unset to use the server's built-in default engine.
       - STREAMING_ENGINE_MODE=${STREAMING_ENGINE_MODE:-}
       # Preserve Redis streams/groups across restarts unless explicitly overridden
       - REDIS_FLUSH_ON_STARTUP=${REDIS_FLUSH_ON_STARTUP:-false}

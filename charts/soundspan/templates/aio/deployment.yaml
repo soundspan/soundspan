@@ -239,21 +239,24 @@ spec:
               mountPath: /music
             - name: data
               mountPath: /data
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 60
-            periodSeconds: 30
+          startupProbe:
+            exec:
+              command: ["node", "/app/healthcheck.js"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
             timeoutSeconds: 10
-            failureThreshold: 3
+            failureThreshold: 60
           readinessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 30
+            exec:
+              command: ["node", "/app/healthcheck.js"]
             periodSeconds: 10
             timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["node", "/app/healthcheck.js"]
+            periodSeconds: 30
+            timeoutSeconds: 10
             failureThreshold: 3
           resources:
             {{- toYaml .Values.aio.resources | nindent 12 }}

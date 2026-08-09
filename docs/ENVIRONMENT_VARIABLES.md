@@ -61,10 +61,10 @@ Experimental feature note:
 | `DATABASE_URL` | `backend`, `backend-worker`, `audio-analyzer`, `audio-analyzer-clap` | Required | `postgresql://soundspan:changeme@postgres:5432/soundspan` (split stack) | PostgreSQL connection string. |
 | `REDIS_URL` | `backend`, `backend-worker`, `audio-analyzer`, `audio-analyzer-clap` | Required | `redis://redis:6379` (split stack) | Redis connection for queues, sessions, claims, realtime state. |
 | `POSTGRES_USER` | `backend`, `backend-worker`, `postgres` | Required | `soundspan` | PostgreSQL username (and used to build `DATABASE_URL`). |
-| `POSTGRES_PASSWORD` | `backend`, `backend-worker`, `postgres` | Required (production) | `changeme` | PostgreSQL password (and used to build `DATABASE_URL`). |
+| `POSTGRES_PASSWORD` | `backend`, `backend-worker`, `postgres`, `soundspan` (AIO) | Required (production) | split stack: `changeme`; AIO: generated when unset | PostgreSQL password (and used to build `DATABASE_URL`). In AIO, an operator value is honored and persisted to `/data/secrets/postgres_password`; otherwise a strong value is generated once and persisted there. |
 | `POSTGRES_DB` | `backend`, `backend-worker`, `postgres` | Required | `soundspan` | PostgreSQL database name (and used to build `DATABASE_URL`). |
-| `SESSION_SECRET` | `backend`, `soundspan` (AIO) | Required | split stack: none (compose refuses to start without it); AIO: generated & persisted at `/data/secrets/session_secret` | Session/JWT signing secret; must be stable and 32+ chars. The backend image's entrypoint fails fast when it is unset, still the old published default, or shorter than 32 chars (generate with `openssl rand -base64 32`). |
-| `SETTINGS_ENCRYPTION_KEY` | `backend` | Required | split stack: none (compose refuses to start without it); AIO: generated & persisted at `/data/secrets/encryption_key` | Encrypts stored credentials/settings. The backend image's entrypoint fails fast when it is unset or the insecure default (generate with `openssl rand -base64 32`); it must stay stable or encrypted data becomes unreadable. |
+| `SESSION_SECRET` | `backend`, `soundspan` (AIO) | Required | split stack: none (compose refuses to start without it); AIO: operator value honored, else persisted/generated at `/data/secrets/session_secret` | Session/JWT signing secret; must be stable and 32+ chars. The backend image's entrypoint fails fast when it is unset, still the old published default, or shorter than 32 chars (generate with `openssl rand -base64 32`). In AIO, an operator value takes precedence and is written through to `/data/secrets`; otherwise the persisted or a newly generated value is used. |
+| `SETTINGS_ENCRYPTION_KEY` | `backend`, `soundspan` (AIO) | Required | split stack: none (compose refuses to start without it); AIO: operator value honored, else persisted/generated at `/data/secrets/encryption_key` | Encrypts stored credentials/settings. The backend image's entrypoint fails fast when it is unset or the insecure default (generate with `openssl rand -base64 32`); it must stay stable or encrypted data becomes unreadable. In AIO, an operator value takes precedence and is written through to `/data/secrets`; otherwise the persisted or a newly generated value is used. |
 | `MUSIC_PATH` | `backend`, `backend-worker`, `tidal-downloader`, analyzers; also mount control in compose | Required | split stack host mount: `./music`; AIO sample: `/path/to/your/music`; container path: `/music` | Library root path/mount. |
 | `PORT` | `backend` (runtime), `frontend` (runtime), `soundspan` (AIO host publish var) | Optional | backend: `3006`; frontend: `3030`; AIO publish: `3030` | Service bind/publish port control (context-dependent by container). |
 | `NODE_ENV` | `backend`, `backend-worker`, `frontend` | Optional | `production` (compose) | Runtime mode. |
@@ -95,7 +95,7 @@ Experimental feature note:
 
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
-| `INTERNAL_API_SECRET` | `backend`, `backend-worker`, `audio-analyzer-clap` (+ local CLAP), `ytmusic-streamer`, `tidal-downloader` | Required | none — `docker-compose.yml` refuses to start without it (generate with `openssl rand -base64 32`), and the HTTP sidecars reject the old published `soundspan-internal-secret-change-me` value as unconfigured | Auth secret for internal analyzer callbacks, trusted internal routes, and backend→HTTP-sidecar auth (F31). The ytmusic-streamer/tidal-downloader FastAPI sidecars now **reject** any request without the matching `x-internal-secret` header (fail-closed; `/health` is exempt), so this must be set to the same value on the backend and both HTTP sidecars. |
+| `INTERNAL_API_SECRET` | `backend`, `backend-worker`, `soundspan` (AIO), `audio-analyzer-clap` (+ local CLAP), `ytmusic-streamer`, `tidal-downloader` | Required | none — `docker-compose.yml` refuses to start without it (generate with `openssl rand -base64 32`), and the HTTP sidecars reject the old published `soundspan-internal-secret-change-me` value as unconfigured; AIO honors an operator value, else generates & persists when unset | Auth secret for internal analyzer callbacks, trusted internal routes, and backend→HTTP-sidecar auth (F31). The ytmusic-streamer/tidal-downloader FastAPI sidecars now **reject** any request without the matching `x-internal-secret` header (fail-closed; `/health` is exempt), so this must be set to the same value on the backend and both HTTP sidecars. In AIO, an operator value takes precedence and is persisted to `/data/secrets/internal_api_secret`; otherwise the persisted or a newly generated value is used. |
 | `LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED` | `backend` | Optional | `true` | Enables Redis adapter fanout for cross-replica Socket.IO. |
 | `LISTEN_TOGETHER_STATE_SYNC_ENABLED` | `backend` | Optional | `true` | Enables Redis pub/sub state sync for Listen Together. |
 | `LISTEN_TOGETHER_STATE_STORE_ENABLED` | `backend` | Optional | `true` | Enables Redis-backed authoritative group state snapshots. |
@@ -173,15 +173,19 @@ Experimental feature note:
 
 ## Analyzer Variables
 
+The AIO image maps its deployment-facing analyzer variables into the MusicCNN
+and CLAP runtime names; values set through Helm `aio.env` or the AIO container
+environment are effective.
+
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
-| `AUDIO_ANALYSIS_BATCH_SIZE` | compose host variable mapping to `audio-analyzer:BATCH_SIZE` | Optional | `10` | Batch size for MusicCNN analyzer. |
+| `AUDIO_ANALYSIS_BATCH_SIZE` | `soundspan` (AIO) and compose host variable mapping to `audio-analyzer:BATCH_SIZE` | Optional | `10` | Batch size for MusicCNN analyzer. |
 | `AUDIO_ANALYSIS_INTERVAL` | compose host variable mapping to `audio-analyzer:SLEEP_INTERVAL` | Optional | `5` | Loop interval between analyzer cycles (seconds). |
-| `AUDIO_BRPOP_TIMEOUT` | compose host variable mapping to `audio-analyzer:BRPOP_TIMEOUT` | Optional | `30` | Redis blocking pop timeout for analyzer worker (seconds). |
+| `AUDIO_BRPOP_TIMEOUT` | `soundspan` (AIO) and compose host variable mapping to `audio-analyzer:BRPOP_TIMEOUT` | Optional | `30` | Redis blocking pop timeout for analyzer worker (seconds). |
 | `AUDIO_REDIS_SOCKET_TIMEOUT` | `soundspan` (AIO) and `audio-analyzer` | Optional | `35` | Redis socket read timeout for the MusicCNN queue worker (seconds). The runtime enforces an effective minimum of `BRPOP_TIMEOUT + 5` so blocking queue polls complete before the socket deadline. |
-| `AUDIO_MODEL_IDLE_TIMEOUT` | compose host variable mapping to `audio-analyzer:MODEL_IDLE_TIMEOUT` | Optional | `300` | Idle timeout before unloading analyzer ML models (seconds). |
-| `AUDIO_ANALYSIS_WORKERS` | compose host variable mapping to `audio-analyzer:NUM_WORKERS` | Optional | `2` | Parallel MusicCNN analyzer workers. |
-| `AUDIO_ANALYSIS_THREADS_PER_WORKER` | compose host variable mapping to `audio-analyzer:THREADS_PER_WORKER` | Optional | `1` | CPU threads per MusicCNN analyzer worker. |
+| `AUDIO_MODEL_IDLE_TIMEOUT` | `soundspan` (AIO) and compose host variable mapping to `audio-analyzer:MODEL_IDLE_TIMEOUT` | Optional | `300` | Idle timeout before unloading analyzer ML models (seconds). |
+| `AUDIO_ANALYSIS_WORKERS` | `soundspan` (AIO) and compose host variable mapping to `audio-analyzer:NUM_WORKERS` | Optional | `2` | Parallel MusicCNN analyzer workers. |
+| `AUDIO_ANALYSIS_THREADS_PER_WORKER` | `soundspan` (AIO) and compose host variable mapping to `audio-analyzer:THREADS_PER_WORKER` | Optional | `1` | CPU threads per MusicCNN analyzer worker. |
 | `MAX_FILE_SIZE_MB` | `audio-analyzer` | Optional | `500` | Hard file-size cap for analysis candidates (`0` disables cap). |
 | `BATCH_ANALYSIS_TIMEOUT_SECONDS` | `audio-analyzer` | Optional | `900` | Timeout for a batch before failure handling. |
 | `MAX_RETRIES` | `audio-analyzer` | Optional | `3` | Max retries for failed analyzer jobs. |

@@ -93,6 +93,41 @@ binding, which also works. Set a strong `POSTGRES_PASSWORD` before exposing 5432
 
 ---
 
+## All-in-One (AIO) image hardening: non-root services, generated Postgres password, honored secrets
+
+Routine upgrades need **no manual steps**. Existing named volumes are migrated
+automatically on startup, and the Helm chart already supplies the required
+filesystem group and first-boot migration budget.
+
+**Service permissions.** The AIO backend, frontend, and both Python analyzers now
+run as the fixed `soundspan` user (uid/gid 1000). The entrypoint chowns existing
+`/data/cache`, `/data/secrets`, and `/app/backend/logs` paths on every boot. Named
+volumes work automatically, and the Helm chart's `fsGroup: 1000` handles pod
+volume access. If you bind-mount `/data`, ensure uid/gid 1000 can write it.
+
+**Embedded Postgres.** The former fixed password is replaced by a strong value
+generated once and persisted at `/data/secrets/postgres_password`. On an existing
+volume, startup synchronizes the database role with `ALTER USER`; no action is
+required. Set `POSTGRES_PASSWORD` if you want to pin the value explicitly. The
+embedded server now accepts only loopback connections using `scram-sha-256`.
+
+**AIO secrets.** `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, and
+`INTERNAL_API_SECRET` now resolve in this order: operator environment → persisted
+`/data/secrets` file → freshly generated value. Operator values are written
+through to the persisted files, so they remain stable. If you relied on generated
+secrets, nothing changes. If you set `SETTINGS_ENCRYPTION_KEY`, keep it stable or
+previously encrypted settings become unreadable. `docker-compose.aio.yml` now
+forwards `SETTINGS_ENCRYPTION_KEY` and `INTERNAL_API_SECRET` as well as
+`SESSION_SECRET`.
+
+**Health behavior.** The container and AIO pod now fail health checks when the
+backend or its database dependencies are unavailable, rather than checking only
+the frontend. Expect a genuine backend failure to trigger a restart. Helm's new
+`startupProbe` gives first-boot migrations a generous window before liveness and
+readiness enforcement begins.
+
+---
+
 ## ⚠️ Breaking: CORS is deny-by-default and the Lidarr webhook fails closed
 
 Two authorization hardening changes ship secure-by-default with explicit env

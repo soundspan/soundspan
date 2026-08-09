@@ -4,15 +4,12 @@
 
 FROM node:24-bookworm-slim
 
-# Add PostgreSQL 16 repository (Debian Bookworm only has PG15 by default)
+# Add the PostgreSQL 16 repository and install runtime dependencies in one layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg lsb-release curl ca-certificates && \
     echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg && \
-    apt-get update
-
-# Install system dependencies including Python for audio analysis
-RUN apt-get install -y --no-install-recommends \
+    apt-get update && apt-get install -y --no-install-recommends \
     postgresql-16 \
     postgresql-contrib-16 \
     postgresql-16-pgvector \
@@ -37,6 +34,12 @@ RUN apt-get install -y --no-install-recommends \
 RUN mkdir -p /app/backend /app/frontend /app/audio-analyzer /app/models \
     /data/postgres /data/redis /run/postgresql /var/log/supervisor \
     && chown -R postgres:postgres /data/postgres /run/postgresql
+
+# The upstream Node image reserves uid/gid 1000 for "node"; replace it with
+# the fixed runtime identity expected by the chart's fsGroup.
+RUN userdel node && groupdel node && \
+    groupadd -g 1000 soundspan && \
+    useradd -u 1000 -g 1000 -M -s /usr/sbin/nologin -d /app soundspan
 
 # ============================================
 # AUDIO ANALYZER SETUP (Essentia AI)
@@ -119,16 +122,9 @@ COPY services/audio-analyzer-clap/analyzer.py /app/audio-analyzer-clap/
 # Pinned to an immutable repo commit (not `resolve/main`) and verified against
 # a pinned sha256 digest (roadmap F38); a mismatch fails the build. Digest
 # measured 2026-07-11 (see docs/modernization-roadmap.md F38).
-RUN --mount=type=secret,id=hf_token \
-    HF_TOKEN=$(cat /run/secrets/hf_token) \
-    echo "Downloading CLAP model for vibe similarity..." && \
-    if [ -n "${HF_TOKEN}" ]; then \
-      curl -L --progress-bar -H "Authorization: Bearer ${HF_TOKEN}" -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
-        "https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt"; \
-    else \
-      curl -L --progress-bar -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
-        "https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt"; \
-    fi && \
+RUN echo "Downloading CLAP model for vibe similarity..." && \
+    curl -L --progress-bar -o /app/models/music_audioset_epoch_15_esc_90.14.pt \
+        "https://huggingface.co/lukewys/laion_clap/resolve/b3708341862f581175dba5c356a4ebf74a9b6651/music_audioset_epoch_15_esc_90.14.pt" && \
     echo "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd  /app/models/music_audioset_epoch_15_esc_90.14.pt" | sha256sum -c - && \
     echo "CLAP model downloaded successfully" && \
     ls -lh /app/models/music_audioset_epoch_15_esc_90.14.pt
@@ -147,7 +143,7 @@ if [ -f /data/.schema_ready ]; then
 fi
 
 while [ $COUNTER -lt $TIMEOUT ]; do
-    if PGPASSWORD=soundspan psql -h localhost -U soundspan -d soundspan -c "SELECT 1 FROM \"Track\" LIMIT 1" > /dev/null 2>&1; then
+    if psql "$DATABASE_URL" -c "SELECT 1 FROM \"Track\" LIMIT 1" > /dev/null 2>&1; then
         echo "[wait-for-db] ✓ Database is ready and schema exists!"
         exit 0
     fi
@@ -162,7 +158,7 @@ done
 
 echo "[wait-for-db] ERROR: Database schema not ready after ${TIMEOUT}s"
 echo "[wait-for-db] Listing available tables:"
-PGPASSWORD=soundspan psql -h localhost -U soundspan -d soundspan -c "\dt" 2>&1 || echo "Could not list tables"
+psql "$DATABASE_URL" -c "\dt" 2>&1 || echo "Could not list tables"
 exit 1
 EOF
 
@@ -264,10 +260,11 @@ nodaemon=true
 logfile=/dev/null
 logfile_maxbytes=0
 pidfile=/var/run/supervisord.pid
+# Supervisord stays root only to drop workloads to soundspan/postgres/redis.
 user=root
 
 [program:postgres]
-command=/usr/lib/postgresql/16/bin/postgres -D /data/postgres
+command=/usr/lib/postgresql/16/bin/postgres -D /data/postgres -c listen_addresses=127.0.0.1
 user=postgres
 autostart=true
 autorestart=true
@@ -290,6 +287,7 @@ priority=20
 
 [program:backend]
 command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/backend && node dist/index.js"
+user=soundspan
 autostart=true
 autorestart=unexpected
 startretries=3
@@ -302,7 +300,8 @@ directory=/app/backend
 priority=30
 
 [program:frontend]
-command=/bin/bash -c "sleep 10 && cd /app/frontend && npm start"
+command=/bin/bash -c "cd /app/frontend && npm start"
+user=soundspan
 autostart=true
 autorestart=true
 stdout_logfile=/dev/stdout
@@ -314,6 +313,7 @@ priority=40
 
 [program:audio-analyzer]
 command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/audio-analyzer && python3 analyzer.py"
+user=soundspan
 autostart=true
 autorestart=unexpected
 startretries=3
@@ -322,11 +322,12 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=DATABASE_URL="postgresql://soundspan:soundspan@localhost:5432/soundspan",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BATCH_SIZE="10",SLEEP_INTERVAL="5",MAX_ANALYZE_SECONDS="90",BRPOP_TIMEOUT="30",MODEL_IDLE_TIMEOUT="300",NUM_WORKERS="2",THREADS_PER_WORKER="1",CUDA_VISIBLE_DEVICES=""
+environment=DATABASE_URL="%(ENV_DATABASE_URL)s",REDIS_URL="%(ENV_REDIS_URL)s",MUSIC_PATH="%(ENV_MUSIC_PATH)s",BATCH_SIZE="%(ENV_BATCH_SIZE)s",SLEEP_INTERVAL="%(ENV_SLEEP_INTERVAL)s",MAX_ANALYZE_SECONDS="%(ENV_MAX_ANALYZE_SECONDS)s",BRPOP_TIMEOUT="%(ENV_BRPOP_TIMEOUT)s",MODEL_IDLE_TIMEOUT="%(ENV_MODEL_IDLE_TIMEOUT)s",NUM_WORKERS="%(ENV_NUM_WORKERS)s",THREADS_PER_WORKER="%(ENV_THREADS_PER_WORKER)s",AUDIO_REDIS_SOCKET_TIMEOUT="%(ENV_AUDIO_REDIS_SOCKET_TIMEOUT)s",CUDA_VISIBLE_DEVICES="%(ENV_CUDA_VISIBLE_DEVICES)s"
 priority=50
 
 [program:audio-analyzer-clap]
 command=/bin/bash -c "/app/wait-for-db.sh 120 && cd /app/audio-analyzer-clap && python3 analyzer.py"
+user=soundspan
 autostart=true
 autorestart=unexpected
 startretries=3
@@ -335,7 +336,7 @@ stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
-environment=DATABASE_URL="postgresql://soundspan:soundspan@localhost:5432/soundspan",REDIS_URL="redis://localhost:6379",MUSIC_PATH="/music",BACKEND_URL="http://localhost:3006",SLEEP_INTERVAL="5",NUM_WORKERS="1",MODEL_IDLE_TIMEOUT="300",INTERNAL_API_SECRET="%(ENV_INTERNAL_API_SECRET)s"
+environment=DATABASE_URL="%(ENV_DATABASE_URL)s",REDIS_URL="%(ENV_REDIS_URL)s",MUSIC_PATH="%(ENV_MUSIC_PATH)s",BACKEND_URL="http://localhost:3006",SLEEP_INTERVAL="%(ENV_SLEEP_INTERVAL)s",NUM_WORKERS="%(ENV_CLAP_NUM_WORKERS)s",THREADS_PER_WORKER="%(ENV_THREADS_PER_WORKER)s",MODEL_IDLE_TIMEOUT="%(ENV_MODEL_IDLE_TIMEOUT)s",CLAP_REDIS_SOCKET_TIMEOUT="%(ENV_CLAP_REDIS_SOCKET_TIMEOUT)s",INTERNAL_API_SECRET="%(ENV_INTERNAL_API_SECRET)s",CUDA_VISIBLE_DEVICES="%(ENV_CUDA_VISIBLE_DEVICES)s"
 priority=60
 EOF
 
@@ -376,7 +377,10 @@ echo "Using PostgreSQL from: $PG_BIN"
 
 # Prepare data directories (bind-mount safe)
 echo "Preparing data directories..."
-mkdir -p /data/postgres /data/redis /run/postgresql
+mkdir -p /data/postgres /data/redis /run/postgresql \
+    /data/cache/covers /data/cache/transcodes /data/cache/home /data/secrets /app/backend/logs
+chmod 700 /data/secrets
+chown -R soundspan:soundspan /data/cache /data/secrets /app/backend/logs
 
 if id postgres >/dev/null 2>&1; then
     chown -R postgres:postgres /data/postgres /run/postgresql 2>/dev/null || true
@@ -402,6 +406,65 @@ if id redis >/dev/null 2>&1; then
     fi
 fi
 
+# Resolve application secrets: operator environment, persisted file, generated.
+if [ -n "$SESSION_SECRET" ]; then
+    printf '%s' "$SESSION_SECRET" > /data/secrets/session_secret
+elif [ -f /data/secrets/session_secret ]; then
+    SESSION_SECRET=$(cat /data/secrets/session_secret)
+else
+    SESSION_SECRET=$(openssl rand -hex 32)
+    printf '%s' "$SESSION_SECRET" > /data/secrets/session_secret
+fi
+chmod 600 /data/secrets/session_secret
+chown soundspan:soundspan /data/secrets/session_secret 2>/dev/null || true
+if [ "$SESSION_SECRET" = "changeme-generate-secure-key" ] || [ "${#SESSION_SECRET}" -lt 32 ]; then
+    echo "ERROR: SESSION_SECRET must be at least 32 characters and must not use the published default." >&2
+    exit 1
+fi
+
+if [ -n "$SETTINGS_ENCRYPTION_KEY" ]; then
+    printf '%s' "$SETTINGS_ENCRYPTION_KEY" > /data/secrets/encryption_key
+elif [ -f /data/secrets/encryption_key ]; then
+    SETTINGS_ENCRYPTION_KEY=$(cat /data/secrets/encryption_key)
+else
+    SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)
+    printf '%s' "$SETTINGS_ENCRYPTION_KEY" > /data/secrets/encryption_key
+fi
+chmod 600 /data/secrets/encryption_key
+chown soundspan:soundspan /data/secrets/encryption_key 2>/dev/null || true
+if [ "$SETTINGS_ENCRYPTION_KEY" = "default-encryption-key-change-me" ]; then
+    echo "ERROR: SETTINGS_ENCRYPTION_KEY must not use the published default." >&2
+    exit 1
+fi
+
+if [ -n "$INTERNAL_API_SECRET" ]; then
+    printf '%s' "$INTERNAL_API_SECRET" > /data/secrets/internal_api_secret
+elif [ -f /data/secrets/internal_api_secret ]; then
+    INTERNAL_API_SECRET=$(cat /data/secrets/internal_api_secret)
+else
+    INTERNAL_API_SECRET=$(openssl rand -hex 32)
+    printf '%s' "$INTERNAL_API_SECRET" > /data/secrets/internal_api_secret
+fi
+chmod 600 /data/secrets/internal_api_secret
+chown soundspan:soundspan /data/secrets/internal_api_secret 2>/dev/null || true
+if [ "$INTERNAL_API_SECRET" = "soundspan-internal-secret-change-me" ]; then
+    echo "ERROR: INTERNAL_API_SECRET must not use the published default." >&2
+    exit 1
+fi
+
+# Resolve and persist the PostgreSQL password for fresh and existing volumes.
+if [ -n "$POSTGRES_PASSWORD" ]; then
+    printf '%s' "$POSTGRES_PASSWORD" > /data/secrets/postgres_password
+elif [ -f /data/secrets/postgres_password ]; then
+    POSTGRES_PASSWORD=$(cat /data/secrets/postgres_password)
+else
+    POSTGRES_PASSWORD=$(openssl rand -hex 32)
+    printf '%s' "$POSTGRES_PASSWORD" > /data/secrets/postgres_password
+fi
+chmod 600 /data/secrets/postgres_password
+chown soundspan:soundspan /data/secrets/postgres_password 2>/dev/null || true
+DATABASE_URL="postgresql://soundspan:${POSTGRES_PASSWORD}@localhost:5432/soundspan"
+
 # Clean up stale PID file if exists
 rm -f /data/postgres/postmaster.pid 2>/dev/null || true
 
@@ -410,17 +473,25 @@ if [ ! -f /data/postgres/PG_VERSION ]; then
     echo "Initializing PostgreSQL database..."
     gosu postgres $PG_BIN/initdb -D /data/postgres
 
-    # Configure PostgreSQL
-    echo "host all all 0.0.0.0/0 md5" >> /data/postgres/pg_hba.conf
-    echo "listen_addresses='*'" >> /data/postgres/postgresql.conf
+    # Configure PostgreSQL for authenticated loopback access only.
+    echo "host all all 127.0.0.1/32 scram-sha-256" >> /data/postgres/pg_hba.conf
+    echo "host all all ::1/128 scram-sha-256" >> /data/postgres/pg_hba.conf
+    echo "listen_addresses='localhost'" >> /data/postgres/postgresql.conf
+fi
+
+# Harden authentication rules migrated from older persistent volumes.
+sed -i '/0\.0\.0\.0\/0/d' /data/postgres/pg_hba.conf 2>/dev/null || true
+if ! grep -q "host all all 127.0.0.1/32 scram-sha-256" /data/postgres/pg_hba.conf; then
+    echo "host all all 127.0.0.1/32 scram-sha-256" >> /data/postgres/pg_hba.conf
 fi
 
 # Start PostgreSQL temporarily to create database and user
-gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w start
+gosu postgres $PG_BIN/pg_ctl -D /data/postgres -o "-c listen_addresses=127.0.0.1" -w start
 
-# Create user and database if they don't exist
+# Create the user if needed, then always synchronize its persisted password.
 gosu postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'soundspan'" | grep -q 1 || \
-    gosu postgres psql -c "CREATE USER soundspan WITH PASSWORD 'soundspan';"
+    gosu postgres psql -c "CREATE USER soundspan WITH PASSWORD '${POSTGRES_PASSWORD}';"
+gosu postgres psql -c "ALTER USER soundspan WITH PASSWORD '${POSTGRES_PASSWORD}';"
 gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'soundspan'" | grep -q 1 || \
     gosu postgres psql -c "CREATE DATABASE soundspan OWNER soundspan;"
 
@@ -430,7 +501,7 @@ gosu postgres psql -d soundspan -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 # Run Prisma migrations
 cd /app/backend
-export DATABASE_URL="postgresql://soundspan:soundspan@localhost:5432/soundspan"
+export DATABASE_URL
 echo "Running Prisma migrations..."
 ls -la prisma/migrations/ || echo "No migrations directory!"
 
@@ -491,52 +562,41 @@ echo "✓ Schema ready flag created"
 # Stop PostgreSQL (supervisord will start it)
 gosu postgres $PG_BIN/pg_ctl -D /data/postgres -w stop
 
-# Create persistent cache directories in /data volume
-mkdir -p /data/cache/covers /data/cache/transcodes /data/secrets
-
-# Load or generate persistent secrets
-if [ -f /data/secrets/session_secret ]; then
-    SESSION_SECRET=$(cat /data/secrets/session_secret)
-    echo "Loaded existing SESSION_SECRET"
-else
-    SESSION_SECRET=$(openssl rand -hex 32)
-    echo "$SESSION_SECRET" > /data/secrets/session_secret
-    chmod 600 /data/secrets/session_secret
-    echo "Generated and saved new SESSION_SECRET"
-fi
-
-if [ -f /data/secrets/encryption_key ]; then
-    SETTINGS_ENCRYPTION_KEY=$(cat /data/secrets/encryption_key)
-    echo "Loaded existing SETTINGS_ENCRYPTION_KEY"
-else
-    SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)
-    echo "$SETTINGS_ENCRYPTION_KEY" > /data/secrets/encryption_key
-    chmod 600 /data/secrets/encryption_key
-    echo "Generated and saved new SETTINGS_ENCRYPTION_KEY"
-fi
-
-if [ -f /data/secrets/internal_api_secret ]; then
-    INTERNAL_API_SECRET=$(cat /data/secrets/internal_api_secret)
-    echo "Loaded existing INTERNAL_API_SECRET"
-else
-    INTERNAL_API_SECRET=$(openssl rand -hex 32)
-    echo "$INTERNAL_API_SECRET" > /data/secrets/internal_api_secret
-    chmod 600 /data/secrets/internal_api_secret
-    echo "Generated and saved new INTERNAL_API_SECRET"
-fi
+# Map AIO/chart tuning variables to the analyzer runtime contract.
+export NUM_WORKERS="${AUDIO_ANALYSIS_WORKERS:-2}"
+export THREADS_PER_WORKER="${AUDIO_ANALYSIS_THREADS_PER_WORKER:-1}"
+export BATCH_SIZE="${AUDIO_ANALYSIS_BATCH_SIZE:-10}"
+export BRPOP_TIMEOUT="${AUDIO_BRPOP_TIMEOUT:-30}"
+export MAX_ANALYZE_SECONDS="${MAX_ANALYZE_SECONDS:-90}"
+export MODEL_IDLE_TIMEOUT="${AUDIO_MODEL_IDLE_TIMEOUT:-300}"
+export SLEEP_INTERVAL="${SLEEP_INTERVAL:-5}"
+export CLAP_NUM_WORKERS="${CLAP_WORKERS:-1}"
+export AUDIO_REDIS_SOCKET_TIMEOUT="${AUDIO_REDIS_SOCKET_TIMEOUT:-35}"
+export CLAP_REDIS_SOCKET_TIMEOUT="${CLAP_REDIS_SOCKET_TIMEOUT:-10}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
+export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
+export MUSIC_PATH="${MUSIC_PATH:-/music}"
+export DATABASE_URL
+export SESSION_SECRET SETTINGS_ENCRYPTION_KEY INTERNAL_API_SECRET
+export NODE_ENV=production
+export PORT=3006
+export HOME=/data/cache/home
+export XDG_CACHE_HOME=/data/cache/home/.cache
 
 # Write environment file for backend
 cat > /app/backend/.env << ENVEOF
 NODE_ENV=production
-DATABASE_URL=postgresql://soundspan:soundspan@localhost:5432/soundspan
-REDIS_URL=redis://localhost:6379
+DATABASE_URL=$DATABASE_URL
+REDIS_URL=$REDIS_URL
 PORT=3006
-MUSIC_PATH=/music
+MUSIC_PATH=$MUSIC_PATH
 TRANSCODE_CACHE_PATH=/data/cache/transcodes
 SESSION_SECRET=$SESSION_SECRET
 SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 INTERNAL_API_SECRET=$INTERNAL_API_SECRET
 ENVEOF
+chmod 600 /app/backend/.env
+chown soundspan:soundspan /app/backend/.env 2>/dev/null || true
 
 # Normalize runtime streaming engine mode (consumed by frontend /runtime-config route).
 ENGINE_MODE="${STREAMING_ENGINE_MODE:-}"
@@ -550,16 +610,10 @@ case "$ENGINE_MODE" in
 esac
 
 echo "Frontend runtime STREAMING_ENGINE_MODE: ${ENGINE_MODE:-native (primary default)}"
+export STREAMING_ENGINE_MODE="$ENGINE_MODE"
 
 echo "Starting soundspan..."
-exec env \
-    NODE_ENV=production \
-    DATABASE_URL="postgresql://soundspan:soundspan@localhost:5432/soundspan" \
-    SESSION_SECRET="$SESSION_SECRET" \
-    SETTINGS_ENCRYPTION_KEY="$SETTINGS_ENCRYPTION_KEY" \
-    INTERNAL_API_SECRET="$INTERNAL_API_SECRET" \
-    STREAMING_ENGINE_MODE="$ENGINE_MODE" \
-    /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
 EOF
 
 # Fix Windows line endings (CRLF -> LF) and make executable

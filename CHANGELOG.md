@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- All-in-One (AIO) backend, frontend, and analyzer processes now run under
+  supervisord as the fixed `soundspan` user (uid/gid 1000). Existing writable
+  volume paths are chowned automatically on every boot; see
+  `docs/UPGRADING.md` for bind-mount requirements.
+- AIO backend `.env` and persisted master-secret files are now owner-only
+  (`0600`, uid 1000), and `/data/secrets` is mode `0700`.
+- AIO now honors operator-supplied `SESSION_SECRET`,
+  `SETTINGS_ENCRYPTION_KEY`, and `INTERNAL_API_SECRET`, with precedence env →
+  persisted file → generated value and write-through persistence. Published
+  defaults and short `SESSION_SECRET` values fail startup; `docker-compose.aio.yml`
+  now forwards all three secrets. See `docs/UPGRADING.md`.
+- Embedded AIO Postgres now uses a generated or operator-supplied password
+  persisted under `/data/secrets`, synchronizes existing databases
+  automatically, listens only on loopback, and permits only loopback clients
+  authenticated with `scram-sha-256`.
+- AIO health checks now require both frontend health and backend readiness.
+  Helm AIO pods use shared exec liveness/readiness probes plus a generous
+  `startupProbe`, so backend or database failure is no longer reported healthy.
 - Replaced the unmaintained `speakeasy` TOTP library (last released in 2016) on
   the 2FA path with actively maintained `otplib` v13 and its audited
   `@noble/hashes` and `@scure/base` cryptography. Existing enrolled 2FA secrets
@@ -88,6 +106,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   functions, `downloadQueue`, `simpleDownloadManager`, `discoverWeekly`, and the
   discover/system-settings/onboarding routes) will be migrated onto it
   incrementally to keep each change no-regression.
+- AIO analyzer tuning from `aio.env` is now passed through to the MusicCNN and
+  CLAP runtimes instead of being dropped or overwritten by supervisord defaults.
+- AIO image build/startup hygiene: apt update/install steps are consolidated,
+  and the redundant frontend `sleep 10` startup delay is removed.
+- Removed the non-functional `HF_TOKEN` BuildKit secret path from the AIO and
+  CLAP image builds; the public model download remains SHA-256 verified.
 - Backend: moved six `@types/*` packages from production dependencies to
   devDependencies and removed `@types/speakeasy`, slimming the pruned worker
   image's production `node_modules`.
