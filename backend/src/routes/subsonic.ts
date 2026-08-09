@@ -3,7 +3,6 @@ import fs from "fs";
 import { Request, Response, Router } from "express";
 import { Prisma } from "@prisma/client";
 import { requireSubsonicAuth, subsonicRateLimiter } from "../middleware/subsonicAuth";
-import sharp from "sharp";
 import { prisma } from "../utils/db";
 import { seededShuffle } from "../services/artistSlotAllocation";
 import {
@@ -21,13 +20,17 @@ import {
     type SubsonicEntityType,
 } from "../utils/subsonicIds";
 import { AudioStreamingService } from "../services/audioStreaming";
+import {
+    negotiateCoverArtFormat,
+    resizeCoverArt,
+    snapCoverArtSize,
+} from "../services/coverArtResize";
 import { config } from "../config";
 import { BRAND_SLUG, BRAND_USER_AGENT } from "../config/brand";
 import { getLyrics } from "../services/lyrics";
 import { scanQueue } from "../workers/queues";
 import {
     isPublicCoverArtUrl,
-    parseCoverArtSize,
     resolveSubsonicStreamQuality,
     resolveTrackPathWithinRoot,
 } from "../utils/subsonicMedia";
@@ -560,36 +563,6 @@ async function fetchCoverArtBuffer(
         buffer: Buffer.from(arrayBuffer),
         contentType,
     };
-}
-
-async function maybeResizeCoverArt(
-    buffer: Buffer,
-    contentType: string,
-    size?: number,
-): Promise<{ buffer: Buffer; contentType: string }> {
-    if (!size) {
-        return { buffer, contentType };
-    }
-
-    try {
-        const isPng = contentType.toLowerCase().includes("png");
-        const resized = isPng
-            ? await sharp(buffer)
-                .resize({ width: size, height: size, fit: "inside", withoutEnlargement: true })
-                .png()
-                .toBuffer()
-            : await sharp(buffer)
-                .resize({ width: size, height: size, fit: "inside", withoutEnlargement: true })
-                .jpeg({ quality: 90 })
-                .toBuffer();
-
-        return {
-            buffer: resized,
-            contentType: isPng ? "image/png" : "image/jpeg",
-        };
-    } catch {
-        return { buffer, contentType };
-    }
 }
 
 function resolveNativeCoverPath(nativeCoverPath: string): string | null {
@@ -4833,7 +4806,7 @@ export async function handleGetCoverArt(req: Request, res: Response): Promise<vo
         return;
     }
 
-    const requestedSize = parseCoverArtSize(req.query.size);
+    const requestedSize = snapCoverArtSize(req.query.size);
 
     let type: SubsonicEntityType | undefined;
     let entityId = rawId;
@@ -4901,13 +4874,15 @@ export async function handleGetCoverArt(req: Request, res: Response): Promise<vo
             contentType = fetched.contentType;
         }
 
-        const resized = await maybeResizeCoverArt(
-            imageBuffer,
+        const imageFormat = negotiateCoverArtFormat(req.headers.accept);
+        const resized = await resizeCoverArt({
+            buffer: imageBuffer,
             contentType,
-            requestedSize,
-        );
+            size: requestedSize,
+            format: imageFormat,
+        });
 
-        res.setHeader("Content-Type", resized.contentType);
+        res.setHeader("Content-Type", resized.contentType ?? contentType);
         res.setHeader("Cache-Control", SUBSONIC_COVER_CACHE_CONTROL);
         res.setHeader("Accept-Ranges", "bytes");
         res.status(200).send(resized.buffer);

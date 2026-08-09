@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Path containment on native audio streaming: the `GET /api/library/tracks/:id/stream`
+  handler now resolves the DB-sourced `track.filePath` through `safeResolvePath`
+  and returns `404 Track not available` when the resolved path escapes the
+  configured music root (via `../` traversal or an absolute path), instead of
+  joining it under the root with a bare `path.join`. The containment check runs
+  once, before the streaming service is constructed, and covers both the primary
+  and FFmpeg-fallback branches. This brings the route in line with the sibling
+  Subsonic and share-link streaming paths, which already enforce containment.
+- **Cover-art hardening (Subsonic dimensions change):** the OpenSubsonic
+  `getCoverArt` endpoint no longer resizes with an inline `sharp` pipeline that
+  dropped the shared service's guards. It now delegates to the hardened
+  `coverArtResize` service, gaining the ~50MP decode ceiling (decompression-bomb
+  protection) and `Accept: image/webp` format negotiation, and it snaps the
+  requested `size` to the cover-art allowlist (`64/128/192/320/512/768`) instead
+  of honouring arbitrary `16..2048` values. Requested sizes that fall between
+  allowlist entries now return the next larger bounding box (e.g. `size=300`
+  returns a 320px-bounded image); clients that display cover art scaled to their
+  own layout are unaffected.
 - At-rest secret hygiene for the `.env` sync: `writeEnvFile` now writes the
   secrets-bearing `.env` (which holds `SETTINGS_ENCRYPTION_KEY` and decrypted
   integration API keys) with owner-only `0600` permissions and **atomically**

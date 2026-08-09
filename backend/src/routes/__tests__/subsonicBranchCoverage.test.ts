@@ -137,6 +137,7 @@ import {
 function buildReq(query: Record<string, unknown>): Request {
 	return {
 		query,
+		headers: {},
 		user: {
 			id: "user-1",
 			username: "alice",

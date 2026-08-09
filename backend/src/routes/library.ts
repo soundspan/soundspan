@@ -4900,20 +4900,24 @@ router.get("/tracks/:id/stream", async (req, res) => {
         // === NATIVE FILE STREAMING ===
         // Check if track has native file path
         if (track.filePath && track.fileModified) {
+            const normalizedFilePath = track.filePath.replace(/\\/g, "/");
+            const absolutePath = safeResolvePath(
+                config.music.musicPath,
+                normalizedFilePath
+            );
+            if (!absolutePath) {
+                logger.warn(
+                    `[STREAM] Rejected out-of-root file path for track ${track.id}`
+                );
+                return sendRouteError(res, 404, "Track not available");
+            }
+
             try {
                 // Initialize streaming service
                 const streamingService = new AudioStreamingService(
                     config.music.musicPath,
                     config.music.transcodeCachePath,
                     config.music.transcodeCacheMaxGb
-                );
-
-                // Get absolute path to source file
-                // Normalize path separators for cross-platform compatibility (Windows -> Linux)
-                const normalizedFilePath = track.filePath.replace(/\\/g, "/");
-                const absolutePath = path.join(
-                    config.music.musicPath,
-                    normalizedFilePath
                 );
 
                 logger.debug(
@@ -4957,12 +4961,6 @@ router.get("/tracks/:id/stream", async (req, res) => {
                     logger.warn(
                         `[STREAM] FFmpeg not available, falling back to original quality`
                     );
-                    const fallbackFilePath = track.filePath.replace(/\\/g, "/");
-                    const absolutePath = path.join(
-                        config.music.musicPath,
-                        fallbackFilePath
-                    );
-
                     const streamingService = new AudioStreamingService(
                         config.music.musicPath,
                         config.music.transcodeCachePath,

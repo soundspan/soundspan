@@ -1094,6 +1094,46 @@ describe("library stream runtime coverage", () => {
         expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
     });
 
+    it("returns 404 when the DB file path traverses outside the music root", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({ filePath: "../../../etc/passwd" })
+        );
+
+        const req = {
+            params: { id: "track-1" },
+            query: {},
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Track not available" });
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
+        expect(mockStreamWithRangeSupport).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when the DB file path is an absolute path outside the root", async () => {
+        mockTrackFindUnique.mockResolvedValueOnce(
+            createNativeTrack({ filePath: "/etc/shadow" })
+        );
+
+        const req = {
+            params: { id: "track-1" },
+            query: {},
+            user: { id: "user-1" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body).toEqual({ error: "Track not available" });
+        expect(mockAudioStreamingCtor).not.toHaveBeenCalled();
+        expect(mockStreamWithRangeSupport).not.toHaveBeenCalled();
+    });
+
     it("creates a play record only when no recent play exists", async () => {
         const req = {
             params: { id: "track-1" },
