@@ -38,10 +38,19 @@ export interface AuthenticatedRequest extends Request {
 
 export interface JWTPayload {
     userId: string;
-    username: string;
-    role: string;
+    username?: string;
+    role?: string;
     tokenVersion?: number;
     type?: string;
+}
+
+function isJwtPayloadShape(value: unknown): value is { userId: string } {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "userId" in value &&
+        typeof value.userId === "string"
+    );
 }
 
 /** Creates a short-lived access token for authenticated API/session flows. */
@@ -80,16 +89,64 @@ export function generateRefreshToken(user: {
 }
 
 /**
- * Verify an HS256 access/refresh token against the validated JWT secret. The
- * `algorithms` pin prevents a token from being accepted under a different
- * (weaker or `none`) algorithm, and centralizes secret resolution so callers
- * never re-read `process.env` inline. Throws, like `jwt.verify`, on an invalid,
- * expired, or wrong-algorithm token.
+ * Verify an HS256 access/refresh token against the validated JWT secret and
+ * require an object payload with a string `userId`. The `algorithms` pin
+ * prevents a token from being accepted under a different (weaker or `none`)
+ * algorithm, and centralizes secret resolution so callers never re-read
+ * `process.env` inline. Throws on an invalid, expired, wrong-algorithm, or
+ * malformed token.
  */
 export function verifyAuthToken(token: string): JWTPayload {
-    return jwt.verify(token, JWT_SECRET_VALIDATED, {
+    const payload = jwt.verify(token, JWT_SECRET_VALIDATED, {
         algorithms: ["HS256"],
-    }) as unknown as JWTPayload;
+    });
+    if (!isJwtPayloadShape(payload)) {
+        throw new Error("Malformed token payload");
+    }
+    // Runtime validation above establishes the required JWTPayload invariant.
+    return payload as JWTPayload;
+}
+
+/**
+ * Verify a credential presented for direct API/socket access as a short-lived
+ * access token. Delegates to `verifyAuthToken` (HS256-pinned, single validated
+ * secret) and rejects all non-access token types, including refresh tokens.
+ * Only tokens minted without a `type` claim are accepted. Throws on an invalid,
+ * expired, wrong-algorithm, malformed, or non-access token.
+ */
+export function verifyAccessToken(token: string): JWTPayload {
+    const payload = verifyAuthToken(token);
+    if (payload.type !== undefined) {
+        throw new Error("Token is not an access token");
+    }
+    return payload;
+}
+
+/**
+ * Resolve an access token to its user, enforcing token type (via
+ * `verifyAccessToken`) and `tokenVersion` freshness. Returns `null` when the
+ * user no longer exists or the token predates a password change; throws when
+ * the token itself fails verification.
+ */
+async function resolveAccessTokenUser(
+    token: string
+): Promise<{ id: string; username: string; role: string } | null> {
+    const decoded = verifyAccessToken(token);
+    const user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+        select: { id: true, username: true, role: true, tokenVersion: true },
+    });
+    if (!user) {
+        return null;
+    }
+    // Validate tokenVersion - reject if password was changed
+    if (
+        decoded.tokenVersion === undefined ||
+        decoded.tokenVersion !== user.tokenVersion
+    ) {
+        return null;
+    }
+    return { id: user.id, username: user.username, role: user.role };
 }
 
 /**
@@ -151,18 +208,8 @@ async function authenticateRequest(
         const tokenParam = req.query.token as string;
         if (tokenParam) {
             try {
-                const decoded = verifyAuthToken(tokenParam);
-                const user = await prisma.user.findUnique({
-                    where: { id: decoded.userId },
-                    select: { id: true, username: true, role: true, tokenVersion: true },
-                });
-                if (user) {
-                    // Validate tokenVersion - reject if password was changed
-                    if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
-                        return null;
-                    }
-                    return { id: user.id, username: user.username, role: user.role };
-                }
+                const user = await resolveAccessTokenUser(tokenParam);
+                if (user) return user;
             } catch (error) {
                 logger.debug("Query token validation failed", error);
             }
@@ -177,18 +224,8 @@ async function authenticateRequest(
 
     if (token) {
         try {
-            const decoded = verifyAuthToken(token);
-            const user = await prisma.user.findUnique({
-                where: { id: decoded.userId },
-                select: { id: true, username: true, role: true, tokenVersion: true },
-            });
-            if (user) {
-                // Validate tokenVersion - reject if password was changed
-                if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
-                    return null;
-                }
-                return { id: user.id, username: user.username, role: user.role };
-            }
+            const user = await resolveAccessTokenUser(token);
+            if (user) return user;
         } catch (error) {
             logger.debug("Bearer token validation failed", error);
         }
@@ -283,20 +320,10 @@ export async function requireAuthOrToken(
     const tokenParam = req.query.token as string;
     if (tokenParam) {
         try {
-            const decoded = verifyAuthToken(tokenParam);
-            const user = await prisma.user.findUnique({
-                where: { id: decoded.userId },
-                select: { id: true, username: true, role: true, tokenVersion: true },
-            });
-
+            const user = await resolveAccessTokenUser(tokenParam);
             if (user) {
-                // Validate tokenVersion - reject if password was changed
-                if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
-                    // Token was issued before password change, reject
-                } else {
-                    req.user = { id: user.id, username: user.username, role: user.role };
-                    return next();
-                }
+                req.user = user;
+                return next();
             }
         } catch (error) {
             logger.debug("Query token validation failed in requireAuthOrToken", error);
@@ -311,20 +338,10 @@ export async function requireAuthOrToken(
 
     if (token) {
         try {
-            const decoded = verifyAuthToken(token);
-            const user = await prisma.user.findUnique({
-                where: { id: decoded.userId },
-                select: { id: true, username: true, role: true, tokenVersion: true },
-            });
-
+            const user = await resolveAccessTokenUser(token);
             if (user) {
-                // Validate tokenVersion - reject if password was changed
-                if (decoded.tokenVersion === undefined || decoded.tokenVersion !== user.tokenVersion) {
-                    // Token was issued before password change, reject
-                } else {
-                    req.user = { id: user.id, username: user.username, role: user.role };
-                    return next();
-                }
+                req.user = user;
+                return next();
             }
         } catch (error) {
             logger.debug("Bearer token validation failed in requireAuthOrToken", error);

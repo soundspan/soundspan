@@ -9,8 +9,8 @@
 
 import type { Server as HttpServer } from "http";
 import { Server, type Namespace, type Socket } from "socket.io";
-import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
+import { verifyAccessToken } from "../middleware/auth";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { config } from "../config";
@@ -44,17 +44,10 @@ import { trackMappingService } from "./trackMappingService";
 // Auth
 // ---------------------------------------------------------------------------
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
-if (!JWT_SECRET) {
-    throw new Error("JWT_SECRET or SESSION_SECRET is required for Socket.IO auth");
-}
-
-interface JWTPayload {
-    userId: string;
-    username: string;
-    role: string;
-    tokenVersion?: number;
-}
+// Token verification is delegated to the shared `verifyAccessToken` accessor
+// in ../middleware/auth: one validated secret source, HS256 pinned, and
+// refresh tokens rejected. Importing that module also fail-fasts at startup
+// when neither JWT_SECRET nor SESSION_SECRET is configured.
 
 interface AuthenticatedSocket extends Socket {
     data: {
@@ -631,11 +624,10 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
                 return next(new Error("Authentication required"));
             }
 
-            // Pin the algorithm so a token can't be accepted under a weaker or
-            // `none` algorithm (F36).
-            const decoded = jwt.verify(token, JWT_SECRET!, {
-                algorithms: ["HS256"],
-            }) as unknown as JWTPayload;
+            // Shared accessor pins HS256 (a token can't be accepted under a
+            // weaker or `none` algorithm, F36) and rejects refresh tokens
+            // presented as access credentials.
+            const decoded = verifyAccessToken(token);
 
             // Verify user exists and tokenVersion matches
             const user = await prisma.user.findUnique({

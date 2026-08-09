@@ -566,7 +566,9 @@ describe("listen together socket runtime behavior", () => {
         expect(() => {
             // eslint-disable-next-line @typescript-eslint/no-var-requires
             require("../listenTogetherSocket");
-        }).toThrow("JWT_SECRET or SESSION_SECRET is required for Socket.IO auth");
+        }).toThrow(
+            "JWT_SECRET or SESSION_SECRET environment variable is required for authentication"
+        );
     });
 
     it("handles auth middleware success and failure branches", async () => {
@@ -620,6 +622,18 @@ describe("listen together socket runtime behavior", () => {
         const invalidTokenNext = jest.fn();
         await authMiddleware(makeSocket("token"), invalidTokenNext);
         expect(invalidTokenNext.mock.calls[0][0].message).toBe("Invalid token");
+
+        // Token-type confusion: a long-lived refresh token must never
+        // authenticate a socket, even though it verifies under the same secret.
+        mocks.jwtVerify.mockReturnValueOnce({
+            userId: "user-1",
+            tokenVersion: 1,
+            type: "refresh",
+        });
+        const refreshTokenNext = jest.fn();
+        await authMiddleware(makeSocket("token"), refreshTokenNext);
+        expect(refreshTokenNext.mock.calls[0][0]).toBeInstanceOf(Error);
+        expect(refreshTokenNext.mock.calls[0][0].message).toBe("Invalid token");
 
         const successSocket: any = makeSocket("token");
         const successNext = jest.fn();

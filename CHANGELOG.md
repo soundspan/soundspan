@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Security
+
+- Long-lived (30-day) refresh tokens carrying `type: "refresh"` were accepted
+  anywhere an access token was, including Bearer headers, streaming `?token=`
+  query parameters, and the Listen Together socket. JWT verification is now
+  consolidated in a single `verifyAccessToken` accessor that pins HS256,
+  requires a well-formed payload, and rejects any token carrying a `type` claim,
+  while `/api/auth/refresh` continues to accept refresh tokens for exchange
+  only.
+
 ### Added
 
 ### Changed
