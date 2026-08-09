@@ -24,6 +24,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Artist discovery/preview endpoints (`GET /api/artists/discover/:nameOrMbid`, `GET /api/artists/album/:mbid`, `GET /api/artists/preview/:artistName/:trackTitle`) now require authentication (`requireAuthOrToken`, same guard as the existing preview stream) instead of proxying MusicBrainz/Last.fm/Deezer/fanart/YouTube Music lookups unauthenticated.
 - Fixed the `ADMIN_RESET_PASSWORD` emergency recovery: it queried `role: "ADMIN"` while roles are stored lowercase, so the reset silently never matched an admin user. It now works as documented.
 - Added a route-mount contract test asserting every `/api/*` (and `/rest`) prefix is mounted behind its expected rate-limiter tier and router, so silently dropping a limiter or mounting an unreviewed prefix fails CI.
+- **BREAKING:** The split-stack deploy no longer ships default secrets, and secret
+  bootstrap now fails fast (migration steps in `docs/UPGRADING.md`).
+  `docker-compose.yml` requires `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, and
+  `INTERNAL_API_SECRET` (each generated with `openssl rand -base64 32`) instead of
+  falling back to published values, and the backend image's entrypoint exits with an
+  actionable error instead of generating an ephemeral per-boot `SESSION_SECRET`
+  (which invalidated JWTs and stranded API-key hashes on every restart) or exporting
+  the insecure `default-encryption-key-change-me` encryption key (which the backend
+  rejected at module load — a guaranteed crash-loop with a misleading message).
+  The unreachable onboarding first-registration encryption-key generation path was
+  removed; the key must exist before boot.
+- **BREAKING:** The `tidal-downloader` and `ytmusic-streamer` sidecars now reject the
+  old repo-published `INTERNAL_API_SECRET` default value
+  (`soundspan-internal-secret-change-me`) as unconfigured (403 fail-closed), and
+  `docker-compose.local.yml` no longer injects it as the local CLAP default.
+- **BREAKING:** `docker-compose.yml` now binds the Postgres and Redis host ports to
+  `127.0.0.1` only — they were previously published on **all host interfaces** with
+  weak/no credentials. Same-host tooling keeps working; `docs/UPGRADING.md` documents
+  a compose-override escape hatch for re-publishing.
+- The backend image's `REDIS_FLUSH_ON_STARTUP` entrypoint fallback is now the safe
+  `false` (matching every shipped compose file and the Helm chart) instead of a
+  destructive default `FLUSHALL` on startup.
+- `GET /api/onboarding/status` no longer accepts refresh tokens as bearer tokens:
+  a token carrying `type: "refresh"` is treated like an invalid token and receives
+  only the basic user-count status (verified via the shared
+  `verifyAccessToken` accessor).
 
 ### Added
 

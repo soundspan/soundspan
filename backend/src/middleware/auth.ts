@@ -4,7 +4,8 @@ import { prisma } from "../utils/db";
 import { findApiKeyRecord } from "../utils/apiKeyHash";
 import jwt from "jsonwebtoken";
 
-// JWT_SECRET is required - SESSION_SECRET is used as fallback since docker-entrypoint.sh generates it
+// JWT_SECRET is required - SESSION_SECRET (a required, stable deploy secret;
+// docker-entrypoint.sh fails fast when it is missing) is the fallback.
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
 
 if (!JWT_SECRET) {

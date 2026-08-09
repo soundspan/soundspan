@@ -61,6 +61,16 @@ async def test_unset_secret_fails_closed(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_known_default_secret_rejected(monkeypatch):
+    """The repo-published default secret must be treated as unconfigured."""
+    known_default = "soundspan-internal-secret-change-me"
+    monkeypatch.setenv("INTERNAL_API_SECRET", known_default)
+    async with _client({"x-internal-secret": known_default}) as client:
+        resp = await client.get("/user/auth/status", params={"user_id": "test"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
 async def test_valid_secret_passes(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", SECRET)
     async with _client({"x-internal-secret": SECRET}) as client:

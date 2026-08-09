@@ -89,7 +89,8 @@ services:
             NUM_WORKERS: ${CLAP_WORKERS:-2}
             THREADS_PER_WORKER: ${CLAP_THREADS_PER_WORKER:-1}
             MODEL_IDLE_TIMEOUT: ${CLAP_MODEL_IDLE_TIMEOUT:-300}
-            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            # Empty fails closed (backend rejects callbacks with 403); set a real value in .env (see .env.example).
+            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
         volumes:
             - "${MUSIC_PATH:-./music}:/music:ro"
         extra_hosts:

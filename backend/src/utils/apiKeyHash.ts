@@ -21,8 +21,9 @@ export const HASHED_KEY_PREFIX = "hmac:";
  * without requiring a new env var. Whichever is chosen MUST stay stable —
  * changing it invalidates every already-hashed key (the keys would need
  * re-issuing). The SESSION_SECRET fallback is last-resort for a reason:
- * docker-entrypoint.sh generates an ephemeral SESSION_SECRET when unset, and
- * an ephemeral pepper would strand every key hashed under it on restart.
+ * historically docker-entrypoint.sh generated an ephemeral SESSION_SECRET when
+ * unset (stranding every key hashed under it on restart); the entrypoint now
+ * fails fast instead, so all pepper sources are stable configured secrets.
  *
  * NOTE: env is read here directly (not via config.ts) to match
  * getRawEncryptionKey in utils/encryption.ts — both are leaf crypto utils

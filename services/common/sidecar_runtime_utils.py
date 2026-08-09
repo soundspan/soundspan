@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 
 DEFAULT_STREAM_CONNECT_TIMEOUT = 30.0
 DEFAULT_STREAM_READ_TIMEOUT = 300.0
+_KNOWN_DEFAULT_SECRET = "soundspan-internal-secret-change-me"
 
 # Prisma cuids (the only user_id the backend ever sends) are alphanumeric;
 # this also rejects any `/`, `.`, or `%` that could escape DATA_PATH.
@@ -24,15 +25,16 @@ def require_internal_secret(request: Request) -> None:
     Mirrors the backend's ``middleware/internalAuth.ts`` guard (F30): the
     ``/health`` path is exempt (k8s probes + the backend's own sidecar health
     checks call it without the secret), and the guard **fails closed** — if
-    ``INTERNAL_API_SECRET`` is unset/empty every non-health request is rejected
-    with 403 rather than allowed through. The ``x-internal-secret`` header is
-    compared in constant time via ``hmac.compare_digest``.
+    ``INTERNAL_API_SECRET`` is unset, empty, or equal to the repo-published
+    default every non-health request is rejected with 403 rather than allowed
+    through. The ``x-internal-secret`` header is compared in constant time via
+    ``hmac.compare_digest``.
     """
     if request.url.path == "/health":
         return
 
     expected = os.getenv("INTERNAL_API_SECRET")
-    if not expected:
+    if not expected or expected == _KNOWN_DEFAULT_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     provided = request.headers.get("x-internal-secret")

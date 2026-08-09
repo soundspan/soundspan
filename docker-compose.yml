@@ -35,8 +35,8 @@ services:
             NODE_ENV: ${NODE_ENV:-production}
             # Runtime role: all (combined API + workers), api, or worker
             BACKEND_PROCESS_ROLE: ${BACKEND_PROCESS_ROLE:-all}
-            SESSION_SECRET: ${SESSION_SECRET:-changeme-generate-secure-key}
-            SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+            SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET is required - generate one with: openssl rand -base64 32}"
+            SETTINGS_ENCRYPTION_KEY: "${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY is required - generate one with: openssl rand -base64 32}"
             # To reset admin password, uncomment and set, then restart:
             # ADMIN_RESET_PASSWORD: your-new-password
 
@@ -51,7 +51,7 @@ services:
             ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3030}
 
             # Internal API secret for service-to-service auth
-            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
 
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
@@ -170,7 +170,7 @@ services:
             NODE_ENV: ${NODE_ENV:-production}
             LOG_LEVEL: ${LOG_LEVEL:-warn}
             MUSIC_PATH: /music
-            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
             # Coarse feature flags for ML/recommendation subsystems (default: true)
             AUDIO_ANALYSIS_ENABLED: ${AUDIO_ANALYSIS_ENABLED:-true}
             DISCOVERY_ENABLED: ${DISCOVERY_ENABLED:-true}
@@ -217,7 +217,8 @@ services:
         volumes:
             - postgres_data:/var/lib/postgresql/data
         ports:
-            - "${POSTGRES_PORT:-5432}:5432"
+            # Host access is loopback-only; publish on other interfaces with a Compose override file.
+            - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
         restart: unless-stopped
         healthcheck:
             # IMPORTANT:
@@ -237,7 +238,8 @@ services:
         image: redis:7-alpine
         container_name: ${SOUNDSPAN_REDIS_CONTAINER_NAME:-soundspan_redis}
         ports:
-            - "${REDIS_PORT:-6379}:6379"
+            # Host access is loopback-only; publish on other interfaces with a Compose override file.
+            - "127.0.0.1:${REDIS_PORT:-6379}:6379"
         restart: unless-stopped
         healthcheck:
             test: ["CMD", "redis-cli", "ping"]
@@ -273,7 +275,7 @@ services:
             - TIDAL_TRACK_DELAY=${TIDAL_TRACK_DELAY:-3}
             # Shared secret authenticating backend→sidecar calls (F31). Must match
             # the backend's INTERNAL_API_SECRET or the sidecar rejects with 403.
-            - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            - "INTERNAL_API_SECRET=${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
         volumes:
             - ${MUSIC_PATH:-./music}:/music
             - tidal_data:/data
@@ -343,7 +345,7 @@ services:
             YT_DOWNLOAD_CONCURRENCY: ${YT_DOWNLOAD_CONCURRENCY:-2}
             # Shared secret authenticating backend→sidecar calls (F31). Must match
             # the backend's INTERNAL_API_SECRET or the sidecar rejects with 403.
-            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
         volumes:
             - ytmusic_data:/data
             # Shared with the backend (read-write) so YouTube URL downloads
@@ -442,7 +444,7 @@ services:
             NUM_WORKERS: ${CLAP_WORKERS:-2}
             THREADS_PER_WORKER: ${CLAP_THREADS_PER_WORKER:-1}
             MODEL_IDLE_TIMEOUT: ${CLAP_MODEL_IDLE_TIMEOUT:-300}
-            INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-soundspan-internal-secret-change-me}
+            INTERNAL_API_SECRET: "${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required - generate one with: openssl rand -base64 32}"
         volumes:
             - ${MUSIC_PATH:-./music}:/music:ro
         depends_on:

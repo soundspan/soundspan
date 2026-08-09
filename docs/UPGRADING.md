@@ -5,6 +5,94 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## ⚠️ Breaking: no more shipped default secrets; fail-fast startup; Postgres/Redis bound to loopback
+
+**Who this affects:** every split-stack (`docker-compose.yml`) deployment that relied on
+the shipped defaults for `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, or
+`INTERNAL_API_SECRET`, and any host tooling that reached Postgres/Redis on a
+non-loopback interface. The AIO image is **not** affected — it generates and persists
+its own secrets under `/data/secrets/`.
+
+**What changed.**
+
+1. **Required secrets, no defaults.** `docker-compose.yml` no longer ships fallback
+   values for `SESSION_SECRET` (was the published `changeme-generate-secure-key`),
+   `SETTINGS_ENCRYPTION_KEY` (was empty, silently replaced by an insecure default in
+   the entrypoint), or `INTERNAL_API_SECRET` (was the published
+   `soundspan-internal-secret-change-me`). `docker compose config`/`up` now fails
+   with a message naming the missing variable. Generate each one with:
+
+   ```bash
+   openssl rand -base64 32
+   ```
+
+2. **Entrypoint fails fast instead of papering over missing secrets.** The backend
+   image's entrypoint previously generated an **ephemeral per-boot** `SESSION_SECRET`
+   (invalidating every JWT and stranding API-key hashes on each restart) and fell back
+   to the insecure `default-encryption-key-change-me` encryption key — which the
+   backend then **rejected at module load**, producing a guaranteed crash-loop with a
+   misleading error. It now exits immediately with a clear, actionable message when
+   `SESSION_SECRET` is unset/default/shorter than 32 chars or
+   `SETTINGS_ENCRYPTION_KEY` is unset/default. Deployments that never set
+   `SETTINGS_ENCRYPTION_KEY` were already unable to start; the failure is now
+   explicit and at container start.
+
+3. **The published `INTERNAL_API_SECRET` default is now rejected.** The
+   `tidal-downloader` and `ytmusic-streamer` sidecars treat the old repo-published
+   value `soundspan-internal-secret-change-me` as unconfigured and reject requests
+   with 403. If you explicitly set that value, rotate it to a generated secret (same
+   value on backend, worker, and both sidecars).
+
+4. **Onboarding no longer generates the encryption key.** The first-registration
+   `.env` key-generation path was unreachable dead code (the backend cannot boot
+   without a valid key) and has been removed. The single bootstrap story is: set
+   `SETTINGS_ENCRYPTION_KEY` before first start.
+
+5. **Postgres and Redis host ports bind to `127.0.0.1` only.** The split stack
+   previously published `5432`/`6379` on **all host interfaces** with weak/no
+   credentials. Host tooling on the same machine (e.g. `psql -h localhost`) keeps
+   working; remote access does not.
+
+6. **`REDIS_FLUSH_ON_STARTUP` image default is now `false`.** The compose files and
+   Helm chart already passed `false`; the raw backend image's entrypoint no longer
+   defaults to a destructive `FLUSHALL` when the variable is unset. Set
+   `REDIS_FLUSH_ON_STARTUP=true` explicitly if you depended on the startup flush.
+
+**Action required — before the next deploy:**
+
+```bash
+# Add to your .env (generate a distinct value for each):
+SESSION_SECRET=$(openssl rand -base64 32)
+SETTINGS_ENCRYPTION_KEY=$(openssl rand -base64 32)   # keep stable forever — encrypted data depends on it
+INTERNAL_API_SECRET=$(openssl rand -base64 32)
+```
+
+- If you previously ran with an auto-generated per-boot `SESSION_SECRET`, setting a
+  stable one invalidates currently issued JWTs exactly once (users re-log-in), then
+  sessions survive restarts for the first time.
+- If `SETTINGS_ENCRYPTION_KEY` was already set (any deployment that was actually
+  running), **keep the existing value** — changing it makes encrypted settings
+  (API keys, passwords, 2FA secrets) unreadable.
+
+**Escape hatch — re-publish Postgres/Redis beyond loopback** (for remote host
+tooling; prefer keeping loopback). Create a `docker-compose.override.yml` next to
+`docker-compose.yml` (Compose merges it automatically):
+
+```yaml
+services:
+    postgres:
+        ports: !override
+            - "5432:5432"
+    redis:
+        ports: !override
+            - "6379:6379"
+```
+
+(`!override` replaces the loopback binding; omitting it appends a second, additional
+binding, which also works. Set a strong `POSTGRES_PASSWORD` before exposing 5432.)
+
+---
+
 ## ⚠️ Breaking: CORS is deny-by-default and the Lidarr webhook fails closed
 
 Two authorization hardening changes ship secure-by-default with explicit env

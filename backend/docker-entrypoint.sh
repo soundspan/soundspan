@@ -94,9 +94,8 @@ else
 fi
 
 # Optional Redis cache flush on startup.
-# Default is enabled for standard dedicated-Redis deployments.
-# WARNING: If Redis is shared with other apps, set REDIS_FLUSH_ON_STARTUP=false.
-if [ "${REDIS_FLUSH_ON_STARTUP:-true}" = "true" ]; then
+# Safe default is disabled; explicitly opt in only for dedicated-Redis cache clearing.
+if [ "${REDIS_FLUSH_ON_STARTUP:-false}" = "true" ]; then
   echo "[REDIS] REDIS_FLUSH_ON_STARTUP=true, running FLUSHALL..."
   echo "[REDIS] WARNING: This is destructive for shared Redis instances."
   node -e "
@@ -111,19 +110,26 @@ else
   echo "[REDIS] Skipping startup cache flush (REDIS_FLUSH_ON_STARTUP=false)"
 fi
 
-# Generate session secret if not provided
-if [ -z "$SESSION_SECRET" ] || [ "$SESSION_SECRET" = "changeme-generate-secure-key" ]; then
-  echo "[WARN] SESSION_SECRET not set or using default. Generating random key..."
-  export SESSION_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
-  echo "Generated SESSION_SECRET (will not persist across restarts - set it in .env for production)"
+# Require a stable session secret.
+if [ -z "$SESSION_SECRET" ] || [ "$SESSION_SECRET" = "changeme-generate-secure-key" ] || [ "${#SESSION_SECRET}" -lt 32 ]; then
+  cat >&2 <<'EOF'
+[ERROR] SESSION_SECRET is missing, uses the published default, or is shorter than 32 characters.
+SESSION_SECRET must be stable because it signs JWTs and is the API-key pepper fallback.
+An ephemeral value invalidates all sessions and API-key hashes on restart.
+Generate one with: openssl rand -base64 32
+EOF
+  exit 1
 fi
 
-# Ensure encryption key is stable between restarts
-if [ -z "$SETTINGS_ENCRYPTION_KEY" ]; then
-  echo "[WARN] SETTINGS_ENCRYPTION_KEY not set."
-  echo "   Falling back to the default development key so encrypted data remains readable."
-  echo "   Set SETTINGS_ENCRYPTION_KEY in your environment to a 32-character value for production."
-  export SETTINGS_ENCRYPTION_KEY="default-encryption-key-change-me"
+# Require a stable encryption key.
+if [ -z "$SETTINGS_ENCRYPTION_KEY" ] || [ "$SETTINGS_ENCRYPTION_KEY" = "default-encryption-key-change-me" ]; then
+  cat >&2 <<'EOF'
+[ERROR] SETTINGS_ENCRYPTION_KEY is missing or uses the published default.
+SETTINGS_ENCRYPTION_KEY encrypts API keys, passwords, and 2FA secrets and must be stable across restarts.
+Changing it makes existing encrypted data unreadable.
+Generate one with: openssl rand -base64 32
+EOF
+  exit 1
 fi
 
 echo "[START] soundspan Backend starting on port ${PORT:-3006}..."

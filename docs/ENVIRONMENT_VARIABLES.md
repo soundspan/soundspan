@@ -63,8 +63,8 @@ Experimental feature note:
 | `POSTGRES_USER` | `backend`, `backend-worker`, `postgres` | Required | `soundspan` | PostgreSQL username (and used to build `DATABASE_URL`). |
 | `POSTGRES_PASSWORD` | `backend`, `backend-worker`, `postgres` | Required (production) | `changeme` | PostgreSQL password (and used to build `DATABASE_URL`). |
 | `POSTGRES_DB` | `backend`, `backend-worker`, `postgres` | Required | `soundspan` | PostgreSQL database name (and used to build `DATABASE_URL`). |
-| `SESSION_SECRET` | `backend`, `soundspan` (AIO) | Required (production) | split stack: `changeme-generate-secure-key`; AIO compose: unset | Session/JWT signing secret; should be stable and 32+ chars. |
-| `SETTINGS_ENCRYPTION_KEY` | `backend` | Required (production) | empty | Encrypts stored credentials/settings. |
+| `SESSION_SECRET` | `backend`, `soundspan` (AIO) | Required | split stack: none (compose refuses to start without it); AIO: generated & persisted at `/data/secrets/session_secret` | Session/JWT signing secret; must be stable and 32+ chars. The backend image's entrypoint fails fast when it is unset, still the old published default, or shorter than 32 chars (generate with `openssl rand -base64 32`). |
+| `SETTINGS_ENCRYPTION_KEY` | `backend` | Required | split stack: none (compose refuses to start without it); AIO: generated & persisted at `/data/secrets/encryption_key` | Encrypts stored credentials/settings. The backend image's entrypoint fails fast when it is unset or the insecure default (generate with `openssl rand -base64 32`); it must stay stable or encrypted data becomes unreadable. |
 | `MUSIC_PATH` | `backend`, `backend-worker`, `tidal-downloader`, analyzers; also mount control in compose | Required | split stack host mount: `./music`; AIO sample: `/path/to/your/music`; container path: `/music` | Library root path/mount. |
 | `PORT` | `backend` (runtime), `frontend` (runtime), `soundspan` (AIO host publish var) | Optional | backend: `3006`; frontend: `3030`; AIO publish: `3030` | Service bind/publish port control (context-dependent by container). |
 | `NODE_ENV` | `backend`, `backend-worker`, `frontend` | Optional | `production` (compose) | Runtime mode. |
@@ -79,7 +79,7 @@ Experimental feature note:
 | `DATABASE_POOL_TIMEOUT` | `backend`, `backend-worker` | Optional | `30` | Prisma DB pool timeout in seconds. |
 | `LOG_QUERIES` | `backend`, `backend-worker` | Optional | `false` | Enables Prisma query logging in development. |
 | `IVFFLAT_PROBES` | `backend`, `backend-worker` | Optional | `32` | pgvector `ivfflat.probes` for "similar tracks" / vibe ANN queries — how many of the embedding index's 224 inverted lists each query scans, applied per-query on the same connection via a transaction-scoped `set_config`. Postgres' default of `1` makes recall near-random; the `32` default was benchmark-tuned for recall@10 ≈ 0.96 on the reference corpus. Higher = better recall, more scan cost. Values outside `1..32768` are clamped (Postgres only warns server-side and silently keeps probes=1 otherwise). |
-| `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` in all shipped deploy configs (compose files and the Helm chart's `config.redisFlushOnStartup`); backend image default when the variable is unset: `true` | When `true`, the backend image's entrypoint runs a destructive `FLUSHALL` against the configured Redis at container start. The compose files and the Helm chart all pass `false` explicitly to preserve the Redis Streams/consumer-group state the analyzers rely on — but the entrypoint's own fallback when the variable is unset is `true`, so operators running the raw backend image outside compose/the chart (especially against a shared Redis) must set `false` themselves. |
+| `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` everywhere (compose files, the Helm chart's `config.redisFlushOnStartup`, and the backend image's entrypoint fallback) | When `true`, the backend image's entrypoint runs a destructive `FLUSHALL` against the configured Redis at container start. The safe default is `false` in every shipped config **and** in the entrypoint itself, preserving the Redis Streams/consumer-group state the analyzers rely on; opt in explicitly only for a dedicated-Redis cache clear. |
 | `TRANSCODE_CACHE_PATH` | `backend` | Optional | `/app/cache/transcodes` (compose) | Directory for transcoding cache files. |
 | `TRANSCODE_CACHE_MAX_GB` | `backend` | Optional | `10` | Max transcode cache size in GB. |
 | `ALLOWED_ORIGINS` | `backend` | Optional | unset (production denies cross-origin; development allows all) | Allowed CORS origins (comma-separated), e.g. `https://app.example.com`. When unset, production denies cross-origin browser requests (deny-by-default; same-origin and no-`Origin` requests unaffected). |
@@ -95,7 +95,7 @@ Experimental feature note:
 
 | Variable | Used In Container(s) | Required | Default | What It Does |
 | --- | --- | --- | --- | --- |
-| `INTERNAL_API_SECRET` | `backend`, `backend-worker`, `audio-analyzer-clap` (+ local CLAP), `ytmusic-streamer`, `tidal-downloader` | Required (production) | `soundspan-internal-secret-change-me` | Auth secret for internal analyzer callbacks, trusted internal routes, and backend→HTTP-sidecar auth (F31). The ytmusic-streamer/tidal-downloader FastAPI sidecars now **reject** any request without the matching `x-internal-secret` header (fail-closed; `/health` is exempt), so this must be set to the same value on the backend and both HTTP sidecars. |
+| `INTERNAL_API_SECRET` | `backend`, `backend-worker`, `audio-analyzer-clap` (+ local CLAP), `ytmusic-streamer`, `tidal-downloader` | Required | none — `docker-compose.yml` refuses to start without it (generate with `openssl rand -base64 32`), and the HTTP sidecars reject the old published `soundspan-internal-secret-change-me` value as unconfigured | Auth secret for internal analyzer callbacks, trusted internal routes, and backend→HTTP-sidecar auth (F31). The ytmusic-streamer/tidal-downloader FastAPI sidecars now **reject** any request without the matching `x-internal-secret` header (fail-closed; `/health` is exempt), so this must be set to the same value on the backend and both HTTP sidecars. |
 | `LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED` | `backend` | Optional | `true` | Enables Redis adapter fanout for cross-replica Socket.IO. |
 | `LISTEN_TOGETHER_STATE_SYNC_ENABLED` | `backend` | Optional | `true` | Enables Redis pub/sub state sync for Listen Together. |
 | `LISTEN_TOGETHER_STATE_STORE_ENABLED` | `backend` | Optional | `true` | Enables Redis-backed authoritative group state snapshots. |
@@ -229,8 +229,8 @@ These are read by Docker Compose itself and are not always injected into contain
 | `SOUNDSPAN_NETWORK_NAME` | split stack network | Optional | `soundspan_network` | Docker network name override. |
 | `BACKEND_PORT` | split backend port publish | Optional | `3006` (`0` recommended for local replica scale-out) | Host port mapped to backend container port `3006`. |
 | `FRONTEND_PORT` | split frontend port publish | Optional | `3030` | Host port mapped to frontend container port `3030`. |
-| `POSTGRES_PORT` | split postgres port publish | Optional | `5432` | Host port mapped to postgres container port `5432`. |
-| `REDIS_PORT` | split redis port publish | Optional | `6379` | Host port mapped to redis container port `6379`. |
+| `POSTGRES_PORT` | split postgres port publish | Optional | `5432` | Host port mapped to postgres container port `5432`. Bound to `127.0.0.1` only; see docs/UPGRADING.md for the override-file escape hatch to publish on other interfaces. |
+| `REDIS_PORT` | split redis port publish | Optional | `6379` | Host port mapped to redis container port `6379`. Bound to `127.0.0.1` only; see docs/UPGRADING.md for the override-file escape hatch to publish on other interfaces. |
 | `LIDARR_PORT` | optional Lidarr port publish | Optional | `8686` | Host port mapped to Lidarr container port `8686`. |
 | `PORT` | AIO port publish | Optional | `3030` | Host port mapped to AIO container port `3030`. |
 | `DOWNLOAD_PATH` | optional Lidarr volume mount | Optional | `./downloads` | Host download path mounted into Lidarr `/downloads`. |
@@ -251,7 +251,7 @@ Used primarily with `docker-compose.local.yml` (host-run backend/frontend; conta
 | `CLAP_WORKERS` | `audio-analyzer-clap-local` | Optional | `2` | CLAP local worker count. |
 | `CLAP_THREADS_PER_WORKER` | `audio-analyzer-clap-local` | Optional | `1` | CLAP local threads per worker. |
 | `CLAP_MODEL_IDLE_TIMEOUT` | `audio-analyzer-clap-local` | Optional | `300` | CLAP local model idle unload timeout. |
-| `INTERNAL_API_SECRET` | `audio-analyzer-clap-local` | Required (production-like validation) | `soundspan-internal-secret-change-me` | Internal callback auth between CLAP local analyzer and backend. |
+| `INTERNAL_API_SECRET` | `audio-analyzer-clap-local` | Required (production-like validation) | empty (fails closed — the backend rejects callbacks with 403 until a real value is set in `.env`) | Internal callback auth between CLAP local analyzer and backend. The old published default is no longer shipped anywhere. |
 
 ## Operational Notes
 
