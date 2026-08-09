@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Replaced the unmaintained `speakeasy` TOTP library (last released in 2016) on
+  the 2FA path with actively maintained `otplib` v13 and its audited
+  `@noble/hashes` and `@scure/base` cryptography. Existing enrolled 2FA secrets
+  remain compatible: verification is still RFC 6238 TOTP over the same base32
+  secrets with the same effective validity window (`epochTolerance: 60` seconds,
+  equivalent to the former Speakeasy `window: 2`), verified by a behavioral test
+  using real Speakeasy-generated tokens. Malformed tokens and secrets now fail
+  closed with 401 responses, never 500 errors.
 - Long-lived (30-day) refresh tokens carrying `type: "refresh"` were accepted
   anywhere an access token was, including Bearer headers, streaming `?token=`
   query parameters, and the Listen Together socket. JWT verification is now
@@ -22,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Backend: moved six `@types/*` packages from production dependencies to
+  devDependencies and removed `@types/speakeasy`, slimming the pruned worker
+  image's production `node_modules`.
+- Frontend: removed the deprecated `@types/dompurify` stub; `dompurify` 3.x and
+  later ship their own type definitions.
 - Audio analyzer batch-timeout retry semantics (analyzer reliability slice):
   when an analysis batch hits `BATCH_ANALYSIS_TIMEOUT_SECONDS`, tracks that
   never started running are now re-queued as `pending` WITHOUT consuming any
