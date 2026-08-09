@@ -54,6 +54,55 @@ complete.
 
 ---
 
+## Helm chart hardening (pod security, API-key Secret refs, AIO memory, frontend UID)
+
+**Who this affects:** Helm chart users. No action is required for a default
+install, but review the notes below if you use `secrets.existingSecret`, pin
+tight resource quotas, run custom sidecars in chart pods, or have GPU nodes.
+
+- **Pod security context.** All chart-managed workloads now set
+  `seccompProfile: RuntimeDefault`, drop all Linux capabilities on the
+  application containers, and set `automountServiceAccountToken: false`. If you
+  inject a custom sidecar that needs Linux capabilities or Kubernetes API
+  access, add them back on that container/pod (or set
+  `global.automountServiceAccountToken: true`). Postgres and Redis keep their
+  capabilities (their images switch users at entrypoint).
+
+- **Third-party API keys are now Secret-referenced.** `config.lidarrApiKey`,
+  `config.audiobookshelfToken`, `config.lastfmApiKey`, `config.fanartApiKey`,
+  and `config.openaiApiKey` are no longer rendered as plaintext `value:` env in
+  pod specs. With the chart-managed Secret (default) they are written into that
+  Secret and injected via `secretKeyRef` — no change needed. **If you use
+  `secrets.existingSecret`,** the legacy plaintext behavior is preserved by
+  default (your inline `config.*` values still work). To move these keys into
+  your existing Secret, add them (keys `LIDARR_API_KEY`, `AUDIOBOOKSHELF_TOKEN`,
+  `LASTFM_API_KEY`, `FANART_API_KEY`, `OPENAI_API_KEY`) and set
+  `secrets.apiKeysInExistingSecret: true`.
+
+- **AIO default memory raised.** `aio.resources` now defaults to `2Gi` request /
+  `8Gi` limit (was `1Gi`/`4Gi`); the bundled analyzers peak above the old 4Gi
+  ceiling. If your namespace has a tight `LimitRange`/`ResourceQuota`, either
+  raise it or set `aio.resources.limits.memory` back down (and disable analysis
+  with `config.features.audioAnalysis: false` if you do).
+
+- **Frontend runs as UID 1001.** The chart now runs the frontend pod as
+  UID/GID `1001` to match the published image's `nextjs` user. If you mount a
+  pre-existing writable volume for the frontend (e.g. `.next/cache`), its
+  ownership may need updating; the default cache is an `emptyDir` and needs no
+  action.
+
+- **Analyzer probes.** Individual-mode audio-analyzer and CLAP Deployments now
+  have exec (`pgrep`) liveness/readiness probes. Disable per analyzer by setting
+  `audioAnalyzer.livenessProbe`/`readinessProbe` (and CLAP equivalents) to
+  `null`.
+
+- **GPU values now function.** `aio.gpu.enabled` / `audioAnalyzer.gpu.enabled` /
+  `audioAnalyzerClap.gpu.enabled` were previously no-ops; enabling them now adds
+  an `nvidia.com/gpu` limit (`gpu.count`, default 1) and optional
+  `gpu.runtimeClassName`. Requires the NVIDIA device plugin on the cluster.
+
+---
+
 ## ⚠️ Breaking: no more shipped default secrets; fail-fast startup; Postgres/Redis bound to loopback
 
 **Who this affects:** every split-stack (`docker-compose.yml`) deployment that relied on

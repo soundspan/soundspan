@@ -125,8 +125,13 @@ Note: AIO image runs as root internally due to supervisord orchestration; indivi
 | YT Music Streamer | 100m | 1000m | 128Mi | 512Mi |
 | Audio Analyzer | 500m | 4000m | 1Gi | 6Gi |
 | Audio Analyzer CLAP | 500m | 4000m | 1Gi | 3Gi |
+| AIO (all-in-one) | — | — | 2Gi | 8Gi |
 
-Treat these as baseline estimates, then tune per library size and workload.
+Treat these as baseline estimates, then tune per library size and workload. The
+AIO container bundles the backend, frontend, Postgres, Redis, and (by default)
+both analyzers in one pod, so its memory limit must cover the analyzer model
+footprint; lower `aio.resources.limits.memory` only if you disable analysis
+(`config.features.audioAnalysis: false`).
 
 ## Rollout Hardening (Individual Mode)
 

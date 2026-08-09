@@ -29,9 +29,15 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.global.automountServiceAccountToken }}
+      {{- if and .Values.aio.gpu.enabled .Values.aio.gpu.runtimeClassName }}
+      runtimeClassName: {{ .Values.aio.gpu.runtimeClassName | quote }}
+      {{- end }}
       # AIO container runs its own postgres/redis internally — needs writable FS
       securityContext:
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       terminationGracePeriodSeconds: {{ .Values.aio.terminationGracePeriodSeconds | default 45 }}
       containers:
         - name: soundspan
@@ -176,13 +182,7 @@ spec:
             - name: LIDARR_URL
               value: {{ .Values.config.lidarrUrl | quote }}
             {{- end }}
-            {{- if hasKey $aioEnv "LIDARR_API_KEY" }}
-            - name: LIDARR_API_KEY
-              value: {{ index $aioEnv "LIDARR_API_KEY" | quote }}
-            {{- else if .Values.config.lidarrEnabled }}
-            - name: LIDARR_API_KEY
-              value: {{ .Values.config.lidarrApiKey | quote }}
-            {{- end }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "LIDARR_API_KEY" "secretKey" "LIDARR_API_KEY" "value" .Values.config.lidarrApiKey "enabled" .Values.config.lidarrEnabled "envMap" $aioEnv) | nindent 12 }}
             {{- if hasKey $aioEnv "AUDIOBOOKSHELF_URL" }}
             - name: AUDIOBOOKSHELF_URL
               value: {{ index $aioEnv "AUDIOBOOKSHELF_URL" | quote }}
@@ -190,34 +190,10 @@ spec:
             - name: AUDIOBOOKSHELF_URL
               value: {{ .Values.config.audiobookshelfUrl | quote }}
             {{- end }}
-            {{- if hasKey $aioEnv "AUDIOBOOKSHELF_TOKEN" }}
-            - name: AUDIOBOOKSHELF_TOKEN
-              value: {{ index $aioEnv "AUDIOBOOKSHELF_TOKEN" | quote }}
-            {{- else if .Values.config.audiobookshelfUrl }}
-            - name: AUDIOBOOKSHELF_TOKEN
-              value: {{ .Values.config.audiobookshelfToken | quote }}
-            {{- end }}
-            {{- if hasKey $aioEnv "LASTFM_API_KEY" }}
-            - name: LASTFM_API_KEY
-              value: {{ index $aioEnv "LASTFM_API_KEY" | quote }}
-            {{- else if .Values.config.lastfmApiKey }}
-            - name: LASTFM_API_KEY
-              value: {{ .Values.config.lastfmApiKey | quote }}
-            {{- end }}
-            {{- if hasKey $aioEnv "FANART_API_KEY" }}
-            - name: FANART_API_KEY
-              value: {{ index $aioEnv "FANART_API_KEY" | quote }}
-            {{- else if .Values.config.fanartApiKey }}
-            - name: FANART_API_KEY
-              value: {{ .Values.config.fanartApiKey | quote }}
-            {{- end }}
-            {{- if hasKey $aioEnv "OPENAI_API_KEY" }}
-            - name: OPENAI_API_KEY
-              value: {{ index $aioEnv "OPENAI_API_KEY" | quote }}
-            {{- else if .Values.config.openaiApiKey }}
-            - name: OPENAI_API_KEY
-              value: {{ .Values.config.openaiApiKey | quote }}
-            {{- end }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "AUDIOBOOKSHELF_TOKEN" "secretKey" "AUDIOBOOKSHELF_TOKEN" "value" .Values.config.audiobookshelfToken "enabled" .Values.config.audiobookshelfUrl "envMap" $aioEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "LASTFM_API_KEY" "secretKey" "LASTFM_API_KEY" "value" .Values.config.lastfmApiKey "enabled" .Values.config.lastfmApiKey "envMap" $aioEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "FANART_API_KEY" "secretKey" "FANART_API_KEY" "value" .Values.config.fanartApiKey "enabled" .Values.config.fanartApiKey "envMap" $aioEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "OPENAI_API_KEY" "secretKey" "OPENAI_API_KEY" "value" .Values.config.openaiApiKey "enabled" .Values.config.openaiApiKey "envMap" $aioEnv) | nindent 12 }}
           {{- $globalEnv := .Values.global.env | default (dict) }}
           {{- $globalEnvFrom := .Values.global.envFrom | default (list) }}
           {{- $aioEnvFrom := .Values.aio.envFrom | default (list) }}
@@ -259,10 +235,15 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 3
           resources:
+            {{- if .Values.aio.gpu.enabled }}
+            requests:
+              {{- toYaml .Values.aio.resources.requests | nindent 14 }}
+            limits:
+              {{- toYaml .Values.aio.resources.limits | nindent 14 }}
+              nvidia.com/gpu: {{ .Values.aio.gpu.count | default 1 }}
+            {{- else }}
             {{- toYaml .Values.aio.resources | nindent 12 }}
-          {{- if .Values.aio.gpu.enabled }}
-          # GPU acceleration for audio analysis
-          {{- end }}
+            {{- end }}
       volumes:
         - name: music
           {{- if .Values.music.persistence.existingClaim }}

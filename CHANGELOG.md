@@ -50,6 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3.11 with the TensorFlow 2.15 exception set (`docs/SECURITY.md`). No runtime
   behavior change; the analysis pipeline and MusiCNN classification heads are
   unchanged.
+- Helm chart pod hardening: all chart-managed workloads now set
+  `seccompProfile: RuntimeDefault`, drop all Linux capabilities on the
+  application containers, and set `automountServiceAccountToken: false` (no
+  chart workload calls the Kubernetes API). Postgres and Redis keep their
+  existing user-switching entrypoints (seccomp added, capabilities untouched).
+- Helm chart no longer renders third-party API keys/tokens (`LIDARR_API_KEY`,
+  `AUDIOBOOKSHELF_TOKEN`, `LASTFM_API_KEY`, `FANART_API_KEY`, `OPENAI_API_KEY`)
+  as plaintext `value:` env in pod specs. When the chart manages its own Secret
+  (default), they are injected via `secretKeyRef` from that Secret. Deployments
+  using `secrets.existingSecret` keep the legacy plaintext behavior for
+  backward compatibility unless `secrets.apiKeysInExistingSecret=true`, which
+  reads the keys from the existing Secret via `secretKeyRef`. See
+  `docs/UPGRADING.md`.
 - All-in-One (AIO) backend, frontend, and analyzer processes now run under
   supervisord as the fixed `soundspan` user (uid/gid 1000). Existing writable
   volume paths are chowned automatically on every boot; see
@@ -133,6 +146,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Helm chart: the individual-mode audio-analyzer and CLAP-analyzer Deployments
+  now have liveness/readiness probes (exec `pgrep`, mirroring the compose
+  healthcheck), closing the compose/chart probe-parity gap. Both are
+  configurable via `audioAnalyzer.livenessProbe`/`readinessProbe` and the CLAP
+  equivalents (set to `null` to disable).
+- Helm chart: `aio.gpu.enabled`, `audioAnalyzer.gpu.enabled`, and
+  `audioAnalyzerClap.gpu.enabled` are now wired — previously no-ops. When
+  enabled they add an `nvidia.com/gpu: <gpu.count>` resource limit (default 1)
+  and an optional pod `runtimeClassName` (`gpu.runtimeClassName`) for clusters
+  requiring a non-default GPU runtime. Requires the NVIDIA device plugin.
+- Helm chart: the AIO default memory request/limit was raised from `1Gi`/`4Gi`
+  to `2Gi`/`8Gi`. The AIO image bundles the backend, frontend, Postgres, Redis,
+  and (by default) the Essentia + CLAP analyzers in one container, whose models
+  alone peak well above the old 4Gi ceiling.
+- Helm chart: the frontend pod now runs as UID/GID `1001` (the published image's
+  `nextjs` user) via a `frontend.podSecurityContext` override merged over the
+  chart-wide `1000`, fixing the UID/file-ownership mismatch until the image is
+  realigned.
 - Backend: introduced a single consolidated, typed Lidarr HTTP client
   (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
   for outbound Lidarr calls. It wraps one reusable axios instance with bounded
@@ -253,6 +284,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer prematurely unload models, mis-fire a resize, or corrupt the reported
   throughput. The cross-process `audio:worker:heartbeat` timestamp remains
   wall-clock epoch milliseconds by design.
+- `scripts/k8s-rollout-slo-check.sh` sampled SLO warning logs from only one pod
+  per Deployment (`kubectl logs deploy/...`), so reconnect/scheduler SLO
+  breaches emitted by other replicas in an HA deployment were missed and the
+  gate could pass when it should fail. It now aggregates `--since` logs across
+  every backend and backend-worker pod (by `app.kubernetes.io/component` label,
+  with a name-prefix fallback).
 - The three backend audio-analyzer source-contract suites
   (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
   `audioAnalyzerFailureResolutionContract`) were updated in step with the

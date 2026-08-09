@@ -27,6 +27,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.global.automountServiceAccountToken }}
+      {{- if and .Values.audioAnalyzerClap.gpu.enabled .Values.audioAnalyzerClap.gpu.runtimeClassName }}
+      runtimeClassName: {{ .Values.audioAnalyzerClap.gpu.runtimeClassName | quote }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
       containers:
@@ -145,8 +149,24 @@ spec:
             - name: music
               mountPath: /music
               readOnly: true
+          {{- with .Values.audioAnalyzerClap.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.audioAnalyzerClap.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
+            {{- if .Values.audioAnalyzerClap.gpu.enabled }}
+            requests:
+              {{- toYaml .Values.audioAnalyzerClap.resources.requests | nindent 14 }}
+            limits:
+              {{- toYaml .Values.audioAnalyzerClap.resources.limits | nindent 14 }}
+              nvidia.com/gpu: {{ .Values.audioAnalyzerClap.gpu.count | default 1 }}
+            {{- else }}
             {{- toYaml .Values.audioAnalyzerClap.resources | nindent 12 }}
+            {{- end }}
       volumes:
         - name: music
           {{- if .Values.music.persistence.existingClaim }}

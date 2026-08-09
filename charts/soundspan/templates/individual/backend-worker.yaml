@@ -34,6 +34,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.global.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
       containers:
@@ -324,13 +325,7 @@ spec:
             - name: LIDARR_URL
               value: {{ .Values.config.lidarrUrl | quote }}
             {{- end }}
-            {{- if hasKey $backendWorkerEnv "LIDARR_API_KEY" }}
-            - name: LIDARR_API_KEY
-              value: {{ index $backendWorkerEnv "LIDARR_API_KEY" | quote }}
-            {{- else if .Values.config.lidarrEnabled }}
-            - name: LIDARR_API_KEY
-              value: {{ .Values.config.lidarrApiKey | quote }}
-            {{- end }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "LIDARR_API_KEY" "secretKey" "LIDARR_API_KEY" "value" .Values.config.lidarrApiKey "enabled" .Values.config.lidarrEnabled "envMap" $backendWorkerEnv) | nindent 12 }}
             {{- if hasKey $backendWorkerEnv "AUDIOBOOKSHELF_URL" }}
             - name: AUDIOBOOKSHELF_URL
               value: {{ index $backendWorkerEnv "AUDIOBOOKSHELF_URL" | quote }}
@@ -338,34 +333,10 @@ spec:
             - name: AUDIOBOOKSHELF_URL
               value: {{ .Values.config.audiobookshelfUrl | quote }}
             {{- end }}
-            {{- if hasKey $backendWorkerEnv "AUDIOBOOKSHELF_TOKEN" }}
-            - name: AUDIOBOOKSHELF_TOKEN
-              value: {{ index $backendWorkerEnv "AUDIOBOOKSHELF_TOKEN" | quote }}
-            {{- else if .Values.config.audiobookshelfUrl }}
-            - name: AUDIOBOOKSHELF_TOKEN
-              value: {{ .Values.config.audiobookshelfToken | quote }}
-            {{- end }}
-            {{- if hasKey $backendWorkerEnv "LASTFM_API_KEY" }}
-            - name: LASTFM_API_KEY
-              value: {{ index $backendWorkerEnv "LASTFM_API_KEY" | quote }}
-            {{- else if .Values.config.lastfmApiKey }}
-            - name: LASTFM_API_KEY
-              value: {{ .Values.config.lastfmApiKey | quote }}
-            {{- end }}
-            {{- if hasKey $backendWorkerEnv "FANART_API_KEY" }}
-            - name: FANART_API_KEY
-              value: {{ index $backendWorkerEnv "FANART_API_KEY" | quote }}
-            {{- else if .Values.config.fanartApiKey }}
-            - name: FANART_API_KEY
-              value: {{ .Values.config.fanartApiKey | quote }}
-            {{- end }}
-            {{- if hasKey $backendWorkerEnv "OPENAI_API_KEY" }}
-            - name: OPENAI_API_KEY
-              value: {{ index $backendWorkerEnv "OPENAI_API_KEY" | quote }}
-            {{- else if .Values.config.openaiApiKey }}
-            - name: OPENAI_API_KEY
-              value: {{ .Values.config.openaiApiKey | quote }}
-            {{- end }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "AUDIOBOOKSHELF_TOKEN" "secretKey" "AUDIOBOOKSHELF_TOKEN" "value" .Values.config.audiobookshelfToken "enabled" .Values.config.audiobookshelfUrl "envMap" $backendWorkerEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "LASTFM_API_KEY" "secretKey" "LASTFM_API_KEY" "value" .Values.config.lastfmApiKey "enabled" .Values.config.lastfmApiKey "envMap" $backendWorkerEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "FANART_API_KEY" "secretKey" "FANART_API_KEY" "value" .Values.config.fanartApiKey "enabled" .Values.config.fanartApiKey "envMap" $backendWorkerEnv) | nindent 12 }}
+            {{- include "soundspan.optionalSecretEnv" (dict "ctx" . "name" "OPENAI_API_KEY" "secretKey" "OPENAI_API_KEY" "value" .Values.config.openaiApiKey "enabled" .Values.config.openaiApiKey "envMap" $backendWorkerEnv) | nindent 12 }}
             {{- range $key := keys $backendWorkerEnv | sortAlpha }}
             {{- if not (hasKey $backendWorkerExplicitEnvKeys $key) }}
             - name: {{ $key }}

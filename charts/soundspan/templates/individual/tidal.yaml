@@ -29,6 +29,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.global.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
       containers:

@@ -213,6 +213,30 @@ secrets:
 ```
 
 Expected keys: `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `INTERNAL_API_SECRET`.
+
+#### Third-party API keys
+
+Optional integration keys (`config.lidarrApiKey`, `config.audiobookshelfToken`,
+`config.lastfmApiKey`, `config.fanartApiKey`, `config.openaiApiKey`) are **not**
+rendered as plaintext env in pod specs. When the chart manages its own Secret
+(default), they are stored in that Secret and injected via `secretKeyRef`.
+
+If you use `existingSecret`, these keys stay plaintext (legacy behavior) unless
+you add them to your Secret (`LIDARR_API_KEY`, `AUDIOBOOKSHELF_TOKEN`,
+`LASTFM_API_KEY`, `FANART_API_KEY`, `OPENAI_API_KEY`) and set:
+
+```yaml
+secrets:
+  existingSecret: my-soundspan-secrets
+  apiKeysInExistingSecret: true
+```
+
+#### Pod security
+
+All chart-managed pods run with `seccompProfile: RuntimeDefault`, drop all Linux
+capabilities on the application containers, and disable ServiceAccount token
+automounting (`global.automountServiceAccountToken: false`). Set it to `true`
+only if you add a sidecar that needs Kubernetes API access.
 Add `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` when using chart-managed PostgreSQL or host/port external PostgreSQL (not needed if `postgresql.external.url` is set).
 
 ### Music Library
@@ -541,20 +565,31 @@ You can inject additional values with:
 
 For audio analysis with NVIDIA GPU:
 
+Requires the [NVIDIA device plugin](https://github.com/NVIDIA/k8s-device-plugin)
+on the cluster. Enabling GPU adds an `nvidia.com/gpu: <count>` resource limit
+and, if set, a pod `runtimeClassName` for clusters that require a non-default
+runtime for GPU pods.
+
 ```yaml
 # AIO mode
 aio:
   gpu:
     enabled: true
+    count: 1              # nvidia.com/gpu limit
+    runtimeClassName: ""  # e.g. "nvidia" if your cluster requires it
 
 # Individual mode
 audioAnalyzer:
   gpu:
     enabled: true
+    count: 1
+    runtimeClassName: ""
 
 audioAnalyzerClap:
   gpu:
     enabled: true
+    count: 1
+    runtimeClassName: ""
 ```
 
 ## All Values

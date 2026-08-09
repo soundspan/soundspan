@@ -3,6 +3,7 @@
 {{- $frontendReplicas := include "soundspan.frontendReplicas" . | int }}
 {{- $frontendPdbEnabled := and (gt $frontendReplicas 1) (ternary .Values.haMode.pdb.enabled .Values.frontend.pdb.enabled $haEnabled) }}
 {{- $ltAllowPolling := ternary .Values.haMode.runtime.listenTogetherAllowPolling .Values.config.listenTogetherAllowPolling $haEnabled }}
+{{- $frontendPodSecurityContext := merge (deepCopy (.Values.frontend.podSecurityContext | default dict)) .Values.global.podSecurityContext }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,8 +34,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "soundspan.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.global.automountServiceAccountToken }}
       securityContext:
-        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+        {{- toYaml $frontendPodSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.frontend.terminationGracePeriodSeconds | default 30 }}
       containers:
         - name: frontend

@@ -32,10 +32,18 @@ global:
     runAsUser: 1000
     runAsGroup: 1000
     fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
   # Container-level security context used by chart-managed workloads.
   securityContext:
     readOnlyRootFilesystem: false
     allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  # Do not auto-mount the ServiceAccount API token; no chart workload calls the
+  # Kubernetes API. Set true only if you add a sidecar that needs cluster access.
+  automountServiceAccountToken: false
   # Global scheduling defaults (service-specific values still take precedence).
   nodeSelector: {}
   tolerations: []
@@ -88,12 +96,15 @@ aio:
   lifecycle:
     preStopSleepSeconds: 8
 
-  # -- Resource limits for the AIO container
+  # -- Resource limits for the AIO container. The AIO image bundles the backend,
+  #    frontend, Postgres, Redis, and (by default) the Essentia + CLAP analyzers
+  #    in one container; the analyzer models alone peak well above 4Gi. Lower
+  #    limits.memory only if you disable analysis (config.features.audioAnalysis).
   resources:
     requests:
-      memory: 1Gi
+      memory: 2Gi
     limits:
-      memory: 4Gi
+      memory: 8Gi
 
   # -- Persistence for /data (postgres, redis, cache, secrets)
   persistence:
@@ -121,10 +132,13 @@ aio:
   #       name: soundspan-extra-env
   envFrom: []
 
-  # -- GPU acceleration for audio analysis (NVIDIA)
+  # -- GPU acceleration for audio analysis (NVIDIA). Requires the NVIDIA device
+  #    plugin on the cluster. Adds an nvidia.com/gpu limit; set runtimeClassName
+  #    if your cluster requires a non-default runtime for GPU pods.
   gpu:
     enabled: false
-    # count: 1
+    count: 1
+    runtimeClassName: ""
 
 # =============================================================================
 # INDIVIDUAL MODE — Service-specific configuration
@@ -264,6 +278,13 @@ frontend:
     tag: 1.9.0
     pullPolicy: Always
   replicas: 1
+  # The published frontend image's `nextjs` user is UID/GID 1001, not the
+  # chart-wide 1000. Override here so file ownership in the image matches the
+  # runtime user until the image is realigned (docker-image-hygiene slice).
+  podSecurityContext:
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -492,6 +513,23 @@ audioAnalyzer:
       memory: 256Mi
     limits:
       memory: 1536Mi
+  # Exec liveness/readiness: the analyzer is a Redis queue-consumer loop with no
+  # HTTP server, so we check the worker process is alive (mirrors the compose
+  # healthcheck). Set either probe to null to disable.
+  livenessProbe:
+    exec:
+      command: ["pgrep", "-f", "python.*analyzer"]
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    exec:
+      command: ["pgrep", "-f", "python.*analyzer"]
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
   env:
     BATCH_SIZE: "10"
     SLEEP_INTERVAL: "5"
@@ -516,6 +554,8 @@ audioAnalyzer:
   affinity: {}
   gpu:
     enabled: false
+    count: 1
+    runtimeClassName: ""
 
 audioAnalyzerClap:
   enabled: false
@@ -529,6 +569,23 @@ audioAnalyzerClap:
       memory: 1Gi
     limits:
       memory: 5Gi
+  # Exec liveness/readiness: the analyzer is a Redis queue-consumer loop with no
+  # HTTP server, so we check the worker process is alive (mirrors the compose
+  # healthcheck). Set either probe to null to disable.
+  livenessProbe:
+    exec:
+      command: ["pgrep", "-f", "python.*analyzer"]
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readinessProbe:
+    exec:
+      command: ["pgrep", "-f", "python.*analyzer"]
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
   env:
     SLEEP_INTERVAL: "5"
     CLAP_REDIS_SOCKET_TIMEOUT: "10"
@@ -551,6 +608,8 @@ audioAnalyzerClap:
   affinity: {}
   gpu:
     enabled: false
+    count: 1
+    runtimeClassName: ""
 
 # =============================================================================
 # SHARED CONFIGURATION
@@ -617,6 +676,11 @@ secrets:
   postgresUser: soundspan
   postgresPassword: "" # (auto: 32 char random)
   postgresDatabase: soundspan
+  # -- When using existingSecret, set true if that Secret ALSO carries the
+  #    optional third-party API keys (LIDARR_API_KEY, AUDIOBOOKSHELF_TOKEN,
+  #    LASTFM_API_KEY, FANART_API_KEY, OPENAI_API_KEY). Default false keeps the
+  #    legacy behavior of injecting config.* API keys as plaintext env.
+  apiKeysInExistingSecret: false
 
 # -- Common environment variables applied to backend (both modes)
 config:
@@ -639,6 +703,9 @@ config:
   audiobookshelfUrl: ""
   audiobookshelfToken: ""
   # -- Optional API keys
+  # NOTE: when the chart manages its own Secret (secrets.existingSecret unset),
+  # the keys below are injected via secretKeyRef, not plaintext pod-spec env.
+  # With an existingSecret, they stay plaintext unless secrets.apiKeysInExistingSecret=true.
   lastfmApiKey: ""
   fanartApiKey: ""
   openaiApiKey: ""
@@ -738,7 +805,6 @@ gateway:
 service:
   type: ClusterIP
   port: 3030
-
 
 
 

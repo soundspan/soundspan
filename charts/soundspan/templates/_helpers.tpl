@@ -193,3 +193,36 @@ HA mode helpers (individual mode only)
 {{- .Values.backendWorker.replicas | int -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Render one env entry for an optional third-party API key/token, preferring a
+Secret reference over a plaintext value in the pod spec.
+Precedence:
+  1. explicit per-workload env override (envMap has the var) -> plaintext value
+  2. enabled + chart-managed Secret (no existingSecret)      -> secretKeyRef (chart Secret)
+  3. enabled + existingSecret + apiKeysInExistingSecret=true  -> secretKeyRef (existing Secret, optional)
+  4. enabled + existingSecret (legacy default)               -> plaintext value (back-compat)
+  5. not enabled                                             -> nothing
+Usage:
+  {{ include "soundspan.optionalSecretEnv" (dict "ctx" $ "name" "LIDARR_API_KEY" "secretKey" "LIDARR_API_KEY" "value" $.Values.config.lidarrApiKey "enabled" $.Values.config.lidarrEnabled "envMap" $backendEnv) | nindent 12 }}
+*/}}
+{{- define "soundspan.optionalSecretEnv" -}}
+{{- $ctx := .ctx -}}
+{{- $envMap := .envMap | default dict -}}
+{{- if hasKey $envMap .name -}}
+- name: {{ .name }}
+  value: {{ index $envMap .name | quote }}
+{{- else if .enabled -}}
+{{- if or (not $ctx.Values.secrets.existingSecret) $ctx.Values.secrets.apiKeysInExistingSecret -}}
+- name: {{ .name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "soundspan.secretName" $ctx }}
+      key: {{ .secretKey }}
+      optional: true
+{{- else -}}
+- name: {{ .name }}
+  value: {{ .value | quote }}
+{{- end -}}
+{{- end -}}
+{{- end }}

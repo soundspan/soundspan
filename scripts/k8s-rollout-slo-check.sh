@@ -111,6 +111,23 @@ print_component_pods() {
   k -n "${NAMESPACE}" get pods --no-headers | grep -E "^${workload_name}-" || true
 }
 
+collect_component_logs() {
+  # Aggregate --since logs across EVERY pod of a component so SLO breaches on
+  # any HA replica are seen (kubectl logs deploy/... only reads one pod).
+  local component="$1"
+  local workload_name="$2"
+  local pods
+  pods="$(k -n "${NAMESPACE}" get pods -l "app.kubernetes.io/component=${component}" -o name 2>/dev/null || true)"
+  if [[ -z "${pods}" ]]; then
+    # Fallback for installs without consistent component labels.
+    pods="$(k -n "${NAMESPACE}" get pods --no-headers 2>/dev/null | awk -v p="${workload_name}-" '$1 ~ "^"p {print "pod/"$1}' || true)"
+  fi
+  local pod
+  for pod in ${pods}; do
+    k -n "${NAMESPACE}" logs "${pod}" --all-containers=true --since="${WINDOW}" 2>/dev/null || true
+  done
+}
+
 workload_desired_replicas() {
   local workload="$1"
   k -n "${NAMESPACE}" get "${workload}" -o jsonpath='{.spec.replicas}'
@@ -188,10 +205,10 @@ if [[ -n "${WORKER_WORKLOAD}" ]]; then
 fi
 
 echo "[3/4] Checking SLO warning channels..."
-backend_logs="$(k -n "${NAMESPACE}" logs "${BACKEND_WORKLOAD}" --since="${WINDOW}" || true)"
+backend_logs="$(collect_component_logs "backend" "${BACKEND_WORKLOAD##*/}")"
 worker_logs=""
 if [[ -n "${WORKER_WORKLOAD}" ]]; then
-  worker_logs="$(k -n "${NAMESPACE}" logs "${WORKER_WORKLOAD}" --since="${WINDOW}" || true)"
+  worker_logs="$(collect_component_logs "backend-worker" "${WORKER_WORKLOAD##*/}")"
 fi
 
 backend_reconnect_breaches="$(printf '%s\n' "${backend_logs}" | find_matches "ListenTogether/SLO.*exceeded target")"
