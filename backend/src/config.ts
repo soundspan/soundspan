@@ -14,6 +14,53 @@ import {
 // quiet is a no-op on dotenv 16 and silences v17's per-boot injection tip line
 dotenv.config({ quiet: true });
 
+/** Process responsibilities enabled for this backend instance. */
+export type BackendProcessRole = "all" | "api" | "worker";
+
+// Lenient positive-int env read with a numeric fallback (matches the historical
+// `Number.parseInt(value || `${fallback}`, 10)` then `>0 ? : fallback` idiom).
+const positiveIntEnvOr = (
+    value: string | undefined,
+    fallback: number
+): number => {
+    const parsed = Number.parseInt((value ?? "").trim() || `${fallback}`, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+// Lenient positive-int override; null when unset/empty/non-positive.
+const positiveIntEnvOrNull = (value: string | undefined): number | null => {
+    const raw = value?.trim();
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+// Lenient positive-float override; null when unset/empty/non-positive.
+const positiveNumberEnvOrNull = (value: string | undefined): number | null => {
+    const raw = value?.trim();
+    if (!raw) return null;
+    const parsed = Number.parseFloat(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+// Segmented-streaming trace flag accepts a wider truthy set than isEnvFlagEnabled.
+const TRACE_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
+const isTraceTruthy = (value: string | undefined): boolean => {
+    const normalized = value?.trim().toLowerCase();
+    return normalized ? TRACE_TRUTHY_VALUES.has(normalized) : false;
+};
+
+const resolveBackendProcessRole = (): BackendProcessRole => {
+    const raw = (process.env.BACKEND_PROCESS_ROLE || "all").trim().toLowerCase();
+    if (raw === "all" || raw === "api" || raw === "worker") {
+        return raw;
+    }
+    logger.warn(
+        `[Startup] Invalid BACKEND_PROCESS_ROLE="${process.env.BACKEND_PROCESS_ROLE}", defaulting to "all"`
+    );
+    return "all";
+};
+
 // Validate critical environment variables on startup
 const envSchema = z.object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -80,6 +127,24 @@ export const config = {
     databaseUrl: process.env.DATABASE_URL!,
     redisUrl: process.env.REDIS_URL!,
     sessionSecret: process.env.SESSION_SECRET!,
+
+    // Canonical JWT/session signing secret (single derivation shared by token
+    // signers). SESSION_SECRET is validated required above, so this is always a string.
+    jwtSecret: process.env.JWT_SECRET || process.env.SESSION_SECRET!,
+
+    // API/worker process role selection (mirrors the entrypoint split).
+    backendProcessRole: resolveBackendProcessRole(),
+
+    // One-shot admin password reset via env (consumed once at startup).
+    adminResetPassword: process.env.ADMIN_RESET_PASSWORD,
+
+    // Raw OpenAPI JSON spec is public in production only when DOCS_PUBLIC=true.
+    docsPublic: isEnvFlagEnabled(process.env.DOCS_PUBLIC),
+
+    // Legacy (pre-GCM) at-rest decryption fails closed when true.
+    settingsDecryptFailClosed: isEnvFlagEnabled(
+        process.env.SETTINGS_DECRYPT_FAIL_CLOSED
+    ),
 
     // Session cookie `secure` flag. Defaults to true in production (cookies
     // should only travel over HTTPS); HTTP-only local-network deploys must set
@@ -180,12 +245,88 @@ export const config = {
         autoPlaylists: parseEnvBool(process.env.AUTO_PLAYLISTS_ENABLED, true),
     },
 
-    audiobookshelf: process.env.AUDIOBOOKSHELF_URL
-        ? {
-              url: process.env.AUDIOBOOKSHELF_URL,
-              token: process.env.AUDIOBOOKSHELF_TOKEN!,
-          }
-        : undefined,
+    listenTogether: {
+        reconnectSloMs: positiveIntEnvOr(
+            process.env.LISTEN_TOGETHER_RECONNECT_SLO_MS,
+            5000
+        ),
+        allowPolling: process.env.LISTEN_TOGETHER_ALLOW_POLLING === "true",
+        redisAdapterEnabled:
+            process.env.LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED !== "false",
+        mutationLockEnabled:
+            process.env.LISTEN_TOGETHER_MUTATION_LOCK_ENABLED !== "false",
+        mutationLockTtlMs: positiveIntEnvOr(
+            process.env.LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS,
+            3000
+        ),
+        mutationLockPrefix:
+            process.env.LISTEN_TOGETHER_MUTATION_LOCK_PREFIX ||
+            "listen-together:mutation-lock",
+    },
+
+    readiness: {
+        dependencyCheckIntervalMs: positiveIntEnvOr(
+            process.env.READINESS_DEPENDENCY_CHECK_INTERVAL_MS,
+            5000
+        ),
+        dependencyCheckTimeoutMs: positiveIntEnvOr(
+            process.env.READINESS_DEPENDENCY_CHECK_TIMEOUT_MS,
+            2000
+        ),
+        requireDependencies:
+            process.env.READINESS_REQUIRE_DEPENDENCIES !== "false",
+    },
+
+    segmentedStreaming: {
+        dashBuildLockEnabled:
+            process.env.SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED !== "false",
+        dashBuildLockPrefix:
+            process.env.SEGMENTED_STREAMING_DASH_BUILD_LOCK_PREFIX ||
+            "segmented-streaming:dash-build-lock",
+        dashBuildLockTtlMsOverride: positiveIntEnvOrNull(
+            process.env.SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS
+        ),
+        localSegmentDurationSecOverride: positiveNumberEnvOrNull(
+            process.env.SEGMENTED_LOCAL_SEG_DURATION_SEC
+        ),
+        ffmpegPathOverride: process.env.FFMPEG_PATH?.trim() || undefined,
+        traceEnabled:
+            isTraceTruthy(process.env.STREAMING_TRACE_LOGS) ||
+            isTraceTruthy(process.env.SEGMENTED_STREAMING_TRACE_LOGS),
+        cache: {
+            basePathOverride:
+                process.env.SEGMENTED_STREAMING_CACHE_PATH?.trim() || undefined,
+            maxGbOverride: positiveNumberEnvOrNull(
+                process.env.SEGMENTED_STREAMING_CACHE_MAX_GB
+            ),
+            pruneIntervalMsOverride: positiveNumberEnvOrNull(
+                process.env.SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS
+            ),
+            minAgeMsOverride: positiveNumberEnvOrNull(
+                process.env.SEGMENTED_STREAMING_CACHE_MIN_AGE_MS
+            ),
+            pruneTargetRatioOverride: positiveNumberEnvOrNull(
+                process.env.SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO
+            ),
+            schemaVersionOverride:
+                process.env.SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION?.trim() ||
+                undefined,
+        },
+    },
+
+    get audiobookshelf(): { url: string; apiKey: string } | undefined {
+        const url = process.env.AUDIOBOOKSHELF_URL;
+        const apiKey = process.env.AUDIOBOOKSHELF_API_KEY;
+        return url && apiKey ? { url, apiKey } : undefined;
+    },
+
+    // YouTube Music region hint for browse/discovery proxies.
+    ytmusicRegion: process.env.YTMUSIC_REGION || "US",
+
+    tidal: {
+        // TIDAL downloader/streamer sidecar base URL.
+        sidecarUrl: process.env.TIDAL_SIDECAR_URL || "http://127.0.0.1:8585",
+    },
 
     // YouTube Music streamer sidecar (also serves the regular-YouTube /yt/
     // endpoints used for URL-paste streaming and download-to-library)

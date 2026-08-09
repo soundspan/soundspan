@@ -80,7 +80,7 @@ describe("config module", () => {
             DEEZER_API_KEY: "deezer-key",
             DISCOVERY_MODE: "legacy",
             AUDIOBOOKSHELF_URL: "http://audiobookshelf:13378",
-            AUDIOBOOKSHELF_TOKEN: "abs-token",
+            AUDIOBOOKSHELF_API_KEY: "abs-token",
             ALLOWED_ORIGINS: "https://app.example, http://localhost:5173 ",
         });
 
@@ -111,7 +111,7 @@ describe("config module", () => {
         expect(config.discover).toEqual({ mode: "legacy" });
         expect(config.audiobookshelf).toEqual({
             url: "http://audiobookshelf:13378",
-            token: "abs-token",
+            apiKey: "abs-token",
         });
         expect(config.allowedOrigins).toEqual([
             "https://app.example",
@@ -197,6 +197,266 @@ describe("config module", () => {
         });
 
         expect(config.allowedOrigins).toEqual([""]);
+    });
+
+    it("uses JWT_SECRET when set and otherwise falls back to SESSION_SECRET", async () => {
+        const explicit = await loadConfigModule({ JWT_SECRET: "jwt-secret" });
+        expect(explicit.config.jwtSecret).toBe("jwt-secret");
+
+        const fallback = await loadConfigModule({ JWT_SECRET: undefined });
+        expect(fallback.config.jwtSecret).toBe(requiredEnv().SESSION_SECRET);
+    });
+
+    it("defaults and validates the backend process role", async () => {
+        const defaultRole = await loadConfigModule({
+            BACKEND_PROCESS_ROLE: undefined,
+        });
+        expect(defaultRole.config.backendProcessRole).toBe("all");
+
+        const apiRole = await loadConfigModule({ BACKEND_PROCESS_ROLE: " API " });
+        expect(apiRole.config.backendProcessRole).toBe("api");
+
+        const workerRole = await loadConfigModule({
+            BACKEND_PROCESS_ROLE: "worker",
+        });
+        expect(workerRole.config.backendProcessRole).toBe("worker");
+
+        const invalidRole = await loadConfigModule({
+            BACKEND_PROCESS_ROLE: "scheduler",
+        });
+        expect(invalidRole.config.backendProcessRole).toBe("all");
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            '[Startup] Invalid BACKEND_PROCESS_ROLE="scheduler", defaulting to "all"'
+        );
+    });
+
+    it("enables public docs and strict decryption only for literal true", async () => {
+        const enabled = await loadConfigModule({
+            DOCS_PUBLIC: "true",
+            SETTINGS_DECRYPT_FAIL_CLOSED: "true",
+        });
+        expect(enabled.config.docsPublic).toBe(true);
+        expect(enabled.config.settingsDecryptFailClosed).toBe(true);
+
+        const disabled = await loadConfigModule({
+            DOCS_PUBLIC: "TRUE",
+            SETTINGS_DECRYPT_FAIL_CLOSED: "1",
+        });
+        expect(disabled.config.docsPublic).toBe(false);
+        expect(disabled.config.settingsDecryptFailClosed).toBe(false);
+    });
+
+    it("configures the YouTube Music region and TIDAL sidecar URL", async () => {
+        const defaults = await loadConfigModule({
+            YTMUSIC_REGION: undefined,
+            TIDAL_SIDECAR_URL: undefined,
+        });
+        expect(defaults.config.ytmusicRegion).toBe("US");
+        expect(defaults.config.tidal.sidecarUrl).toBe("http://127.0.0.1:8585");
+
+        const overrides = await loadConfigModule({
+            YTMUSIC_REGION: "GB",
+            TIDAL_SIDECAR_URL: "http://tidal:8585",
+        });
+        expect(overrides.config.ytmusicRegion).toBe("GB");
+        expect(overrides.config.tidal.sidecarUrl).toBe("http://tidal:8585");
+    });
+
+    it("exposes the optional one-shot admin reset password", async () => {
+        const absent = await loadConfigModule({ ADMIN_RESET_PASSWORD: undefined });
+        expect(absent.config.adminResetPassword).toBeUndefined();
+
+        const configured = await loadConfigModule({
+            ADMIN_RESET_PASSWORD: "new-admin-password",
+        });
+        expect(configured.config.adminResetPassword).toBe("new-admin-password");
+    });
+
+    it("uses Listen Together defaults", async () => {
+        const { config } = await loadConfigModule({
+            LISTEN_TOGETHER_RECONNECT_SLO_MS: undefined,
+            LISTEN_TOGETHER_ALLOW_POLLING: undefined,
+            LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: undefined,
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: undefined,
+            LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: undefined,
+            LISTEN_TOGETHER_MUTATION_LOCK_PREFIX: undefined,
+        });
+
+        expect(config.listenTogether).toEqual({
+            reconnectSloMs: 5000,
+            allowPolling: false,
+            redisAdapterEnabled: true,
+            mutationLockEnabled: true,
+            mutationLockTtlMs: 3000,
+            mutationLockPrefix: "listen-together:mutation-lock",
+        });
+    });
+
+    it("honors Listen Together overrides and rejects invalid positive integers", async () => {
+        const overridden = await loadConfigModule({
+            LISTEN_TOGETHER_RECONNECT_SLO_MS: "7500",
+            LISTEN_TOGETHER_ALLOW_POLLING: "true",
+            LISTEN_TOGETHER_REDIS_ADAPTER_ENABLED: "false",
+            LISTEN_TOGETHER_MUTATION_LOCK_ENABLED: "false",
+            LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "4500",
+            LISTEN_TOGETHER_MUTATION_LOCK_PREFIX: "custom-lock",
+        });
+        expect(overridden.config.listenTogether).toEqual({
+            reconnectSloMs: 7500,
+            allowPolling: true,
+            redisAdapterEnabled: false,
+            mutationLockEnabled: false,
+            mutationLockTtlMs: 4500,
+            mutationLockPrefix: "custom-lock",
+        });
+
+        const invalid = await loadConfigModule({
+            LISTEN_TOGETHER_RECONNECT_SLO_MS: "0",
+            LISTEN_TOGETHER_MUTATION_LOCK_TTL_MS: "malformed",
+        });
+        expect(invalid.config.listenTogether.reconnectSloMs).toBe(5000);
+        expect(invalid.config.listenTogether.mutationLockTtlMs).toBe(3000);
+    });
+
+    it("uses readiness defaults and honors explicit overrides", async () => {
+        const defaults = await loadConfigModule({
+            READINESS_DEPENDENCY_CHECK_INTERVAL_MS: undefined,
+            READINESS_DEPENDENCY_CHECK_TIMEOUT_MS: undefined,
+            READINESS_REQUIRE_DEPENDENCIES: undefined,
+        });
+        expect(defaults.config.readiness).toEqual({
+            dependencyCheckIntervalMs: 5000,
+            dependencyCheckTimeoutMs: 2000,
+            requireDependencies: true,
+        });
+
+        const overridden = await loadConfigModule({
+            READINESS_DEPENDENCY_CHECK_INTERVAL_MS: "9000",
+            READINESS_DEPENDENCY_CHECK_TIMEOUT_MS: "3500",
+            READINESS_REQUIRE_DEPENDENCIES: "false",
+        });
+        expect(overridden.config.readiness).toEqual({
+            dependencyCheckIntervalMs: 9000,
+            dependencyCheckTimeoutMs: 3500,
+            requireDependencies: false,
+        });
+
+        const nonLiteral = await loadConfigModule({
+            READINESS_REQUIRE_DEPENDENCIES: "FALSE",
+        });
+        expect(nonLiteral.config.readiness.requireDependencies).toBe(true);
+    });
+
+    it("uses segmented streaming defaults", async () => {
+        const { config } = await loadConfigModule({
+            SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED: undefined,
+            SEGMENTED_STREAMING_DASH_BUILD_LOCK_PREFIX: undefined,
+            SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS: undefined,
+            SEGMENTED_LOCAL_SEG_DURATION_SEC: undefined,
+            FFMPEG_PATH: undefined,
+            STREAMING_TRACE_LOGS: undefined,
+            SEGMENTED_STREAMING_TRACE_LOGS: undefined,
+            SEGMENTED_STREAMING_CACHE_PATH: undefined,
+            SEGMENTED_STREAMING_CACHE_MAX_GB: undefined,
+            SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS: undefined,
+            SEGMENTED_STREAMING_CACHE_MIN_AGE_MS: undefined,
+            SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO: undefined,
+            SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION: undefined,
+        });
+
+        expect(config.segmentedStreaming).toEqual({
+            dashBuildLockEnabled: true,
+            dashBuildLockPrefix: "segmented-streaming:dash-build-lock",
+            dashBuildLockTtlMsOverride: null,
+            localSegmentDurationSecOverride: null,
+            ffmpegPathOverride: undefined,
+            traceEnabled: false,
+            cache: {
+                basePathOverride: undefined,
+                maxGbOverride: null,
+                pruneIntervalMsOverride: null,
+                minAgeMsOverride: null,
+                pruneTargetRatioOverride: null,
+                schemaVersionOverride: undefined,
+            },
+        });
+    });
+
+    it("honors segmented streaming overrides", async () => {
+        const { config } = await loadConfigModule({
+            SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED: "false",
+            SEGMENTED_STREAMING_DASH_BUILD_LOCK_PREFIX: "dash-lock",
+            SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS: "12000",
+            SEGMENTED_LOCAL_SEG_DURATION_SEC: "4.5",
+            FFMPEG_PATH: " /usr/local/bin/ffmpeg ",
+            SEGMENTED_STREAMING_TRACE_LOGS: "yes",
+            SEGMENTED_STREAMING_CACHE_PATH: " /var/cache/segments ",
+            SEGMENTED_STREAMING_CACHE_MAX_GB: "25.5",
+            SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS: "60000",
+            SEGMENTED_STREAMING_CACHE_MIN_AGE_MS: "1500",
+            SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO: "0.8",
+            SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION: " v2 ",
+        });
+
+        expect(config.segmentedStreaming).toEqual({
+            dashBuildLockEnabled: false,
+            dashBuildLockPrefix: "dash-lock",
+            dashBuildLockTtlMsOverride: 12000,
+            localSegmentDurationSecOverride: 4.5,
+            ffmpegPathOverride: "/usr/local/bin/ffmpeg",
+            traceEnabled: true,
+            cache: {
+                basePathOverride: "/var/cache/segments",
+                maxGbOverride: 25.5,
+                pruneIntervalMsOverride: 60000,
+                minAgeMsOverride: 1500,
+                pruneTargetRatioOverride: 0.8,
+                schemaVersionOverride: "v2",
+            },
+        });
+    });
+
+    it.each(["1", "true", "yes", "on"])(
+        "enables streaming trace logs for STREAMING_TRACE_LOGS=%s",
+        async (value) => {
+            const { config } = await loadConfigModule({
+                STREAMING_TRACE_LOGS: value,
+                SEGMENTED_STREAMING_TRACE_LOGS: undefined,
+            });
+            expect(config.segmentedStreaming.traceEnabled).toBe(true);
+        }
+    );
+
+    it("rejects non-positive segmented streaming numeric overrides", async () => {
+        const { config } = await loadConfigModule({
+            SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS: "0",
+            SEGMENTED_LOCAL_SEG_DURATION_SEC: "-1",
+            SEGMENTED_STREAMING_CACHE_MAX_GB: "0",
+            SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS: "-2",
+            SEGMENTED_STREAMING_CACHE_MIN_AGE_MS: "0",
+            SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO: "-0.1",
+        });
+
+        expect(config.segmentedStreaming.dashBuildLockTtlMsOverride).toBeNull();
+        expect(config.segmentedStreaming.localSegmentDurationSecOverride).toBeNull();
+        expect(config.segmentedStreaming.cache.maxGbOverride).toBeNull();
+        expect(config.segmentedStreaming.cache.pruneIntervalMsOverride).toBeNull();
+        expect(config.segmentedStreaming.cache.minAgeMsOverride).toBeNull();
+        expect(config.segmentedStreaming.cache.pruneTargetRatioOverride).toBeNull();
+    });
+
+    it("requires both Audiobookshelf URL and API key", async () => {
+        const urlOnly = await loadConfigModule({
+            AUDIOBOOKSHELF_URL: "http://audiobookshelf:13378",
+            AUDIOBOOKSHELF_API_KEY: undefined,
+        });
+        expect(urlOnly.config.audiobookshelf).toBeUndefined();
+
+        const keyOnly = await loadConfigModule({
+            AUDIOBOOKSHELF_URL: undefined,
+            AUDIOBOOKSHELF_API_KEY: "abs-token",
+        });
+        expect(keyOnly.config.audiobookshelf).toBeUndefined();
     });
 
     it("logs validation errors and exits for invalid environment variables", async () => {
