@@ -28,14 +28,8 @@ test.describe("Authentication", () => {
     test("logout clears session and redirects to login", async ({ page }) => {
         await loginAsTestUser(page);
 
-        // Click the power/logout button in the top right
-        const logoutBtn = page.locator('button[title*="out" i], button[aria-label*="out" i], svg[class*="log-out"]').first();
-        if (await logoutBtn.isVisible({ timeout: 2000 })) {
-            await logoutBtn.click();
-        } else {
-            // Try clicking by position - power icon is typically far right in header
-            await page.locator('header button').last().click();
-        }
+        await page.getByRole("button", { name: "User menu" }).click();
+        await page.getByRole("button", { name: "Log out" }).click();
 
         await expect(page).toHaveURL(/login/, { timeout: 5000 });
     });

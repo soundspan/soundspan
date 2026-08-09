@@ -2,7 +2,6 @@ import { defineConfig } from "@playwright/test";
 
 const baseURL =
     process.env.SOUNDSPAN_UI_BASE_URL ||
-    process.env.SOUNDSPAN_UI_BASE_URL ||
     "http://127.0.0.1:3030";
 
 export default defineConfig({
@@ -18,7 +17,7 @@ export default defineConfig({
     },
     reporter: [["list"], ["html", { open: "never" }]],
     webServer:
-        process.env.SOUNDSPAN_E2E_START_WEB || process.env.SOUNDSPAN_E2E_START_WEB
+        process.env.SOUNDSPAN_E2E_START_WEB
         ? {
               command: "npm run dev",
               url: baseURL,
@@ -27,10 +26,3 @@ export default defineConfig({
           }
         : undefined,
 });
-
-
-
-
-
-
-

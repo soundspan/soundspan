@@ -8,7 +8,7 @@ import {
     resolveSegmentedStartupRecoveryBackoffDelayMs,
     resolveSegmentedStartupRecoveryDecision,
     shouldAttemptSegmentedRecoveryOnUnexpectedPause,
-} from "./audioPlaybackOrchestratorPolicy";
+} from "../../components/player/audioPlaybackOrchestratorPolicy";
 
 test("unavailable buffered-ahead does not trigger segmented recovery", () => {
     assert.equal(shouldAttemptSegmentedRecoveryOnUnexpectedPause(null, 1), false);
