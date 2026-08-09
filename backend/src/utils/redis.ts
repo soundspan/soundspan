@@ -42,10 +42,13 @@ redisClient.on("ready", () => {
     logger.debug("Redis ready");
 });
 
-// Connect immediately on module load
-redisClient.connect().catch((error) => {
-    logger.error("Redis initial connection failed:", error.message);
-    logger.debug("Redis will continue retrying in the background...");
-});
+const runningUnderJest = process.env.JEST_WORKER_ID !== undefined;
+if (!runningUnderJest) {
+    // Under Jest there is no Redis; the unbounded reconnect loop would outlive test suites and log after teardown.
+    redisClient.connect().catch((error) => {
+        logger.error("Redis initial connection failed:", error.message);
+        logger.debug("Redis will continue retrying in the background...");
+    });
+}
 
 export { redisClient };

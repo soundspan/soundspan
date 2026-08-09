@@ -6,7 +6,8 @@ module.exports = {
     testMatch: ['**/__tests__/**/*.test.ts'],
     moduleFileExtensions: ['ts', 'js', 'json'],
     clearMocks: true,
-    maxWorkers: 8,
+    // Keep the documented low-RAM ceiling: 8 workers OOM a 23GB box; CI passes --maxWorkers explicitly.
+    maxWorkers: 2,
     workerIdleMemoryLimit: '512MB',
     collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
 };

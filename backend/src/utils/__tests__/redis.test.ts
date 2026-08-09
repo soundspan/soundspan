@@ -114,29 +114,50 @@ describe("redisClient", () => {
         expect(mockRedisLoggerError).toHaveBeenCalledWith("Redis error:", "boom");
     });
 
-    it("connects immediately on module load", async () => {
+    it("does not eagerly connect under Jest", async () => {
         await import("../redis");
 
-        expect(client.connect).toHaveBeenCalledTimes(1);
+        expect(client.connect).not.toHaveBeenCalled();
+    });
+
+    it("connects immediately on module load", async () => {
+        const jestWorkerId = process.env.JEST_WORKER_ID;
+
+        try {
+            delete process.env.JEST_WORKER_ID;
+            jest.resetModules();
+            await import("../redis");
+
+            expect(client.connect).toHaveBeenCalledTimes(1);
+        } finally {
+            process.env.JEST_WORKER_ID = jestWorkerId;
+        }
     });
 
     it("logs initial connection failures without crashing", async () => {
         client.connect.mockRejectedValue(new Error("offline"));
+        const jestWorkerId = process.env.JEST_WORKER_ID;
 
-        await expect(import("../redis")).resolves.toEqual(
-            expect.objectContaining({
-                redisClient: client,
-            })
-        );
-        await Promise.resolve();
+        try {
+            delete process.env.JEST_WORKER_ID;
+            jest.resetModules();
+            await expect(import("../redis")).resolves.toEqual(
+                expect.objectContaining({
+                    redisClient: client,
+                })
+            );
+            await Promise.resolve();
 
-        expect(client.connect).toHaveBeenCalledTimes(1);
-        expect(mockRedisLoggerError).toHaveBeenCalledWith(
-            "Redis initial connection failed:",
-            "offline"
-        );
-        expect(mockRedisLoggerDebug).toHaveBeenCalledWith(
-            "Redis will continue retrying in the background..."
-        );
+            expect(client.connect).toHaveBeenCalledTimes(1);
+            expect(mockRedisLoggerError).toHaveBeenCalledWith(
+                "Redis initial connection failed:",
+                "offline"
+            );
+            expect(mockRedisLoggerDebug).toHaveBeenCalledWith(
+                "Redis will continue retrying in the background..."
+            );
+        } finally {
+            process.env.JEST_WORKER_ID = jestWorkerId;
+        }
     });
 });
