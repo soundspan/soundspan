@@ -101,10 +101,6 @@ register_error_handlers(app, log)
 TIDDL_PATH = Path(os.getenv("TIDDL_PATH", "/data/.tiddl"))
 MUSIC_PATH = Path(os.getenv("MUSIC_PATH", "/music"))
 
-# ── In-memory API instance (initialised on first use) ──────────────
-_tidal_api: Optional[TidalAPI] = None
-_api_lock = asyncio.Lock()
-
 # ── Per-user API instances for streaming ───────────────────────────
 _user_apis: dict[str, TidalAPI] = {}
 _user_api_locks: dict[str, asyncio.Lock] = {}
