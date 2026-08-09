@@ -459,6 +459,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Lidarr queue/history helper HTTP calls are now bounded. The module-level
+  `cleanStuckDownloads`, `getRecentCompletedDownloads`, `getQueueCount`,
+  `getQueue`, and `isDownloadActive` helpers in `backend/src/services/lidarr.ts`
+  previously issued bare `axios` requests with no `timeout`, inheriting axios's
+  unbounded default (`0`). Because `QueueCleaner.runCleanup` only reschedules its
+  30s reconcile/clean loop after its awaits resolve, a single hung Lidarr call
+  could stall the loop indefinitely. Each call now carries an explicit
+  `timeout: 30000`, matching the class client on the same module.
 - AIO image builds no longer fail while removing the base image's `node` user:
   `userdel` and `groupdel` are now conditional, and existing uid/gid 1000
   holders are renamed and reused instead of failing `groupadd` or `useradd`.

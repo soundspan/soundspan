@@ -2721,6 +2721,7 @@ export async function cleanStuckDownloads(
                     pageSize: 100,
                     includeUnknownArtistItems: true,
                 },
+                timeout: 30000,
                 headers: { "X-Api-Key": apiKey },
             },
         );
@@ -2779,6 +2780,7 @@ export async function cleanStuckDownloads(
                             blocklist: true, // Don't try this release again
                             skipRedownload: false, // DO trigger new search
                         },
+                        timeout: 30000,
                         headers: { "X-Api-Key": apiKey },
                     });
 
@@ -2829,6 +2831,7 @@ export async function getRecentCompletedDownloads(
                     sortDirection: "descending",
                     eventType: 3, // 3 = downloadFolderImported (successful import)
                 },
+                timeout: 30000,
                 headers: { "X-Api-Key": apiKey },
             },
         );
@@ -2859,6 +2862,7 @@ export async function getQueueCount(
                     page: 1,
                     pageSize: 1,
                 },
+                timeout: 30000,
                 headers: { "X-Api-Key": apiKey },
             },
         );
@@ -2892,6 +2896,7 @@ export async function getQueue(): Promise<QueueItem[]> {
                     pageSize: 100,
                     includeUnknownArtistItems: true,
                 },
+                timeout: 30000,
                 headers: { "X-Api-Key": settings.lidarrApiKey },
             },
         );
@@ -2928,6 +2933,7 @@ export async function isDownloadActive(
                     pageSize: 100,
                     includeUnknownArtistItems: true,
                 },
+                timeout: 30000,
                 headers: { "X-Api-Key": settings.lidarrApiKey },
             },
         );

@@ -4756,3 +4756,86 @@ describe("lidarr exported queue/history helpers", () => {
         ).rejects.toThrow("history down");
     });
 });
+
+describe("lidarr exported queue/history helpers bound HTTP calls", () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockGetSystemSettings.mockResolvedValue({
+            lidarrEnabled: true,
+            lidarrUrl: "http://lidarr:8686",
+            lidarrApiKey: "api-key",
+        });
+    });
+
+    it("cleanStuckDownloads sends an explicit timeout on queue fetch and delete", async () => {
+        mockAxiosGet.mockResolvedValueOnce({
+            data: {
+                records: [
+                    {
+                        id: 5,
+                        title: "Stuck Album",
+                        statusMessages: [],
+                        trackedDownloadStatus: "warning",
+                        trackedDownloadState: "importFailed",
+                    },
+                ],
+            },
+        });
+        mockAxiosDelete.mockResolvedValue({});
+
+        await cleanStuckDownloads("http://lidarr:8686", "api-key");
+
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({ timeout: 30000 }),
+        );
+        expect(mockAxiosDelete).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({ timeout: 30000 }),
+        );
+    });
+
+    it("getRecentCompletedDownloads sends an explicit timeout", async () => {
+        mockAxiosGet.mockResolvedValueOnce({ data: { records: [] } });
+
+        await getRecentCompletedDownloads("http://lidarr:8686", "api-key", 5);
+
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({ timeout: 30000 }),
+        );
+    });
+
+    it("getQueueCount sends an explicit timeout", async () => {
+        mockAxiosGet.mockResolvedValueOnce({ data: { totalRecords: 0 } });
+
+        await getQueueCount("http://lidarr:8686", "api-key");
+
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({ timeout: 30000 }),
+        );
+    });
+
+    it("getQueue sends an explicit timeout", async () => {
+        mockAxiosGet.mockResolvedValueOnce({ data: { records: [] } });
+
+        await getQueue();
+
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({ timeout: 30000 }),
+        );
+    });
+
+    it("isDownloadActive sends an explicit timeout", async () => {
+        mockAxiosGet.mockResolvedValueOnce({ data: { records: [] } });
+
+        await isDownloadActive("dl-1");
+
+        expect(mockAxiosGet).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({ timeout: 30000 }),
+        );
+    });
+});
