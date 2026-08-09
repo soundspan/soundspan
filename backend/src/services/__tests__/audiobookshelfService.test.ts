@@ -21,6 +21,16 @@ jest.mock("../../utils/db", () => ({
     prisma,
 }));
 
+jest.mock("../../config", () => ({
+    config: {
+        get audiobookshelf() {
+            const url = process.env.AUDIOBOOKSHELF_URL;
+            const apiKey = process.env.AUDIOBOOKSHELF_API_KEY;
+            return url && apiKey ? { url, apiKey } : undefined;
+        },
+    },
+}));
+
 const mockAxiosCreate = jest.fn();
 jest.mock("axios", () => ({
     __esModule: true,

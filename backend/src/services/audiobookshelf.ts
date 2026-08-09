@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { config } from "../config";
 import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
@@ -54,13 +55,11 @@ class AudiobookshelfService {
             );
         }
 
-        // Fallback to .env
-        if (
-            process.env.AUDIOBOOKSHELF_URL &&
-            process.env.AUDIOBOOKSHELF_API_KEY
-        ) {
-            this.baseUrl = process.env.AUDIOBOOKSHELF_URL.replace(/\/$/, "");
-            this.apiKey = process.env.AUDIOBOOKSHELF_API_KEY;
+        // Fallback to env-based configuration via the config boundary.
+        const envConfig = config.audiobookshelf;
+        if (envConfig) {
+            this.baseUrl = envConfig.url.replace(/\/$/, "");
+            this.apiKey = envConfig.apiKey;
             this.client = axios.create({
                 baseURL: this.baseUrl,
                 headers: {

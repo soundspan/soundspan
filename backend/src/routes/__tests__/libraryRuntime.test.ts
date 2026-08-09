@@ -144,6 +144,7 @@ jest.mock("../../utils/redis", () => ({
 
 jest.mock("../../config", () => ({
     config: {
+        audiobookshelf: undefined,
         music: {
             musicPath: "/music",
             transcodeCachePath: "/tmp/soundspan-cache",
