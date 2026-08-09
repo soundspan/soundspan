@@ -115,6 +115,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python sidecar (tidal-downloader, ytmusic-streamer) HTTP error responses now
+  use the backend-wide `{"error": ...}` body shape instead of FastAPI's default
+  `{"detail": ...}`; unhandled sidecar exceptions return a generic 500 without
+  leaking internals, and nested error payloads (e.g. `age_restricted`) keep
+  their existing fields. The Node backend only branches on status codes, so no
+  backend change was needed.
+- ytmusic-streamer stream proxying no longer leaks an httpx connection when the
+  upstream Range request fails before streaming starts, and the `/yt/proxy`
+  route no longer forwards upstream `Content-Length` (which crashed the ASGI
+  app with an h11 protocol error whenever the CDN dropped a stream mid-read);
+  both proxy routes now share one hardened range/full-proxy helper.
+- tidal-downloader album-track pagination can no longer loop forever when the
+  TIDAL API echoes a zero/missing page `limit`; the loop advances by the real
+  page length under a fixed hard cap.
+- ytmusic-streamer rate pacing is now genuinely thread-safe (a shared
+  monotonic-clock pacer replaces a never-acquired asyncio.Lock and racy global
+  timestamp), the in-memory stream/search caches are bounded
+  (`YTMUSIC_STREAM_CACHE_MAX` / `YTMUSIC_SEARCH_CACHE_MAX`, default 1024, oldest
+  evicted), and the two near-duplicate yt-dlp extraction paths were merged into
+  one shared core.
+- ytmusic-streamer route handlers no longer run blocking ytmusicapi network
+  calls on the asyncio event loop (a slow YouTube call stalled every concurrent
+  request); search, album/artist/song, library, charts, moods, home, browse,
+  and playlist handlers now offload to worker threads.
+- ytmusic-streamer stream-URL extraction now has an overall per-request
+  deadline (`YTMUSIC_EXTRACT_TIMEOUT`, default 60s, HTTP 504 on expiry) and a
+  configurable yt-dlp socket timeout (`YTMUSIC_YTDLP_SOCKET_TIMEOUT`, default
+  20s) covering extraction and downloads, so a stalled extraction can no longer
+  hang a request or strand its worker thread forever.
 - The three backend audio-analyzer source-contract suites
   (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
   `audioAnalyzerFailureResolutionContract`) were updated in step with the
