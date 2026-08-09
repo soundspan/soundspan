@@ -38,3 +38,30 @@ export function resolveDropTargetIndex(
         fromIndex < insertionIndex ? insertionIndex - 1 : insertionIndex;
     return target;
 }
+
+/**
+ * Resolves the destination index for keyboard reordering.
+ * Returns `null` when the key or requested movement cannot reorder the item.
+ */
+export function resolveKeyboardReorderTarget(
+    key: string,
+    index: number,
+    count: number,
+): number | null {
+    if (count <= 1 || index < 0 || index >= count) {
+        return null;
+    }
+    if (key === "ArrowUp") {
+        return index > 0 ? index - 1 : null;
+    }
+    if (key === "ArrowDown") {
+        return index < count - 1 ? index + 1 : null;
+    }
+    if (key === "Home") {
+        return index > 0 ? 0 : null;
+    }
+    if (key === "End") {
+        return index < count - 1 ? count - 1 : null;
+    }
+    return null;
+}

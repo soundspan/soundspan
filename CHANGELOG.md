@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Accessibility
+
+- The player seek slider now exposes screen-reader slider semantics and supports
+  Arrow, Page Up/Down, Home, and End keyboard seeking without changing pointer
+  or touch seeking behavior.
+- The shared Modal now exposes labelled dialog semantics, traps and initializes
+  focus, and restores focus on close; ConfirmDialog now composes that hardened
+  Modal instead of maintaining a separate overlay implementation.
+- Track lists now support keyboard reordering from labelled grip buttons,
+  clickable track rows expose button semantics with Enter/Space activation,
+  queue icon controls have accessible labels, and scoped jsx-a11y lint guards
+  protect the hardened accessibility components.
+
 ### Changed
 
 - **Backend error-response canonicalization (developer-facing standard + first

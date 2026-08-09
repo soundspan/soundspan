@@ -10,6 +10,7 @@ import { TrackRow } from "./TrackRow";
 import {
     resolveDropPosition,
     resolveDropTargetIndex,
+    resolveKeyboardReorderTarget,
     type DropPosition,
 } from "./reorderDnd";
 import type { TrackListProps } from "./types";
@@ -27,8 +28,8 @@ interface DragOverState {
  * domain types; `onPlay`, `rowSlots`, and `rowOverflow` receive the original `T`.
  *
  * With the optional `reorder` prop (non-virtualized lists only), each row
- * gains a hover-revealed grip handle in its left padding gutter for
- * drag-and-drop reordering (GH #27); all decision math lives in the pure
+ * gains a hover-revealed grip handle in its left padding gutter for pointer
+ * and keyboard reordering (GH #27); all decision math lives in the pure
  * reorderDnd module. Without the prop the render output is unchanged.
  */
 export function TrackList<T>({
@@ -123,6 +124,7 @@ export function TrackList<T>({
             <div key={key}>
                 {sep}
                 <div
+                    role="group"
                     className={cn(
                         "relative group/reorder",
                         dragIndex === index && "opacity-50",
@@ -178,12 +180,23 @@ export function TrackList<T>({
                             )}
                         />
                     )}
-                    {/* Hover-revealed drag handle in the row's left padding
-                        gutter. HTML5 drag only — hidden on touch-first
-                        breakpoints where the menu actions cover reordering. */}
-                    <div
+                    {/* Hover-revealed reorder handle in the row's left padding
+                        gutter. Pointer dragging is hidden on touch-first
+                        breakpoints where menu actions cover reordering. */}
+                    <button
+                        type="button"
                         draggable
                         onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                            const target = resolveKeyboardReorderTarget(
+                                e.key,
+                                index,
+                                items.length,
+                            );
+                            if (target === null) return;
+                            e.preventDefault();
+                            reorder?.onReorder(index, target);
+                        }}
                         onDragStart={(e) => {
                             dragIndexRef.current = index;
                             setDragIndex(index);
@@ -201,6 +214,7 @@ export function TrackList<T>({
                         }}
                         onDragEnd={clearDragState}
                         title="Drag to reorder"
+                        aria-label={`Reorder ${rowItem.title}, use arrow keys to move`}
                         className={cn(
                             "absolute left-0 top-0 bottom-0 z-10 hidden md:flex w-4 cursor-grab touch-none",
                             "items-center justify-center text-gray-500 hover:text-white",
@@ -209,7 +223,7 @@ export function TrackList<T>({
                         )}
                     >
                         <GripVertical className="h-4 w-4" />
-                    </div>
+                    </button>
                     {row}
                 </div>
             </div>

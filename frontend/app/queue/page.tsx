@@ -592,6 +592,7 @@ function EpisodeQueueRow({
                     {...dragHandleProps}
                     className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
                     title="Drag to reorder"
+                    aria-label="Drag to reorder"
                 >
                     <GripVertical className="w-5 h-5" />
                 </button>
@@ -628,6 +629,7 @@ function EpisodeQueueRow({
                             onClick={onPlay}
                             className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors"
                             title="Play now"
+                            aria-label="Play now"
                         >
                             <Play className="w-4 h-4" />
                         </button>
@@ -693,6 +695,7 @@ function NextTrackRow({
                     {...dragHandleProps}
                     className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white cursor-grab active:cursor-grabbing"
                     title="Drag to reorder"
+                    aria-label="Drag to reorder"
                 >
                     <GripVertical className="w-5 h-5" />
                 </button>
@@ -739,6 +742,7 @@ function NextTrackRow({
                             disabled={queueIndex <= currentIndex + 1}
                             className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                             title="Move up"
+                            aria-label="Move up"
                         >
                             <ChevronUp className="w-4 h-4" />
                         </button>
@@ -747,6 +751,7 @@ function NextTrackRow({
                             disabled={queueIndex >= queueLength - 1}
                             className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                             title="Move down"
+                            aria-label="Move down"
                         >
                             <ChevronDown className="w-4 h-4" />
                         </button>
@@ -757,6 +762,7 @@ function NextTrackRow({
                     disabled={isUnavailable}
                     className="p-2 hover:bg-[#0a0a0a] rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Play now"
+                    aria-label="Play now"
                 >
                     <Play className="w-4 h-4" />
                 </button>

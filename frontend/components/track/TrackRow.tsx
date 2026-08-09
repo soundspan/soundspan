@@ -51,9 +51,11 @@ export function TrackRow({
             data-tv-card
             data-tv-card-index={index}
             onClick={onPlay}
+            role="button"
+            aria-label={`Play ${item.displayTitle ?? item.title} by ${item.artistName}`}
             tabIndex={0}
             onKeyDown={(e) => {
-                if (e.key === "Enter" && onPlay) {
+                if ((e.key === "Enter" || e.key === " ") && onPlay) {
                     e.preventDefault();
                     onPlay();
                 }

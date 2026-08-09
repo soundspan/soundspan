@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     resolveDropPosition,
     resolveDropTargetIndex,
+    resolveKeyboardReorderTarget,
 } from "../../components/track/reorderDnd";
 
 test("resolveDropPosition splits a row at its vertical midpoint", () => {
@@ -39,4 +40,27 @@ test("dropping onto the dragged row's own position is a no-op", () => {
 test("boundaries: drop before first and after last", () => {
     assert.equal(resolveDropTargetIndex(5, 0, "before"), 0);
     assert.equal(resolveDropTargetIndex(0, 9, "after"), 9);
+});
+
+test("keyboard ArrowUp and ArrowDown reorder an item in the middle", () => {
+    assert.equal(resolveKeyboardReorderTarget("ArrowUp", 1, 3), 0);
+    assert.equal(resolveKeyboardReorderTarget("ArrowDown", 1, 3), 2);
+});
+
+test("keyboard arrow reordering stops at list boundaries", () => {
+    assert.equal(resolveKeyboardReorderTarget("ArrowUp", 0, 3), null);
+    assert.equal(resolveKeyboardReorderTarget("ArrowDown", 2, 3), null);
+});
+
+test("keyboard Home and End reorder to the list boundaries", () => {
+    assert.equal(resolveKeyboardReorderTarget("Home", 2, 4), 0);
+    assert.equal(resolveKeyboardReorderTarget("End", 1, 4), 3);
+});
+
+test("keyboard reordering is disabled for a single-item list", () => {
+    assert.equal(resolveKeyboardReorderTarget("ArrowDown", 0, 1), null);
+});
+
+test("keyboard reordering ignores unknown keys", () => {
+    assert.equal(resolveKeyboardReorderTarget("Enter", 1, 3), null);
 });

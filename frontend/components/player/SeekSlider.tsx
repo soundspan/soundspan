@@ -2,6 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { cn } from "@/utils/cn";
+import { formatTime } from "@/utils/formatTime";
+import { resolveSeekTime } from "./seekKeyboard";
 
 interface SeekSliderProps {
     /** Current progress percentage (0-100) */
@@ -30,6 +32,8 @@ interface SeekSliderProps {
     handleClassName?: string;
     /** Extra padding classes for an invisible hit zone around the track (e.g. "pb-5") */
     hitZoneClassName?: string;
+    /** Accessible label for the seek control */
+    ariaLabel?: string;
 }
 
 /**
@@ -38,7 +42,7 @@ interface SeekSliderProps {
 export function SeekSlider({
     progress,
     duration,
-    currentTime: _currentTime,
+    currentTime,
     onSeek,
     canSeek,
     hasMedia,
@@ -49,6 +53,7 @@ export function SeekSlider({
     variant = "default",
     handleClassName,
     hitZoneClassName,
+    ariaLabel = "Seek",
 }: SeekSliderProps) {
     const [isDragging, setIsDragging] = useState(false);
     const [previewProgress, setPreviewProgress] = useState<number | null>(null);
@@ -175,6 +180,17 @@ export function SeekSlider({
         [isDragging, canSeek, calculateProgress, duration, onSeek]
     );
 
+    const handleKeyDown = useCallback(
+        (e: React.KeyboardEvent<HTMLDivElement>) => {
+            if (!canSeek) return;
+            const nextTime = resolveSeekTime(e.key, { currentTime, duration });
+            if (nextTime === null) return;
+            e.preventDefault();
+            onSeek(nextTime);
+        },
+        [canSeek, currentTime, duration, onSeek]
+    );
+
     // Add global mouse event listeners when dragging
     useEffect(() => {
         if (isDragging) {
@@ -190,6 +206,10 @@ export function SeekSlider({
 
     const displayProgress =
         previewProgress !== null ? previewProgress : progress;
+    const currentSeconds =
+        previewProgress !== null
+            ? (previewProgress / 100) * duration
+            : currentTime;
     const isActive = canSeek && hasMedia;
 
     // Determine tooltip text
@@ -247,6 +267,20 @@ export function SeekSlider({
         onClick: handleClick,
     };
 
+    const accessibilityProps = {
+        role: "slider" as const,
+        tabIndex: canSeek ? 0 : -1,
+        "aria-label": ariaLabel,
+        "aria-orientation": "horizontal" as const,
+        "aria-valuemin": 0,
+        "aria-valuemax":
+            Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 0,
+        "aria-valuenow": Math.round(currentSeconds),
+        "aria-valuetext": `${formatTime(currentSeconds)} of ${formatTime(duration)}`,
+        "aria-disabled": !canSeek,
+        onKeyDown: handleKeyDown,
+    };
+
     const track = (
         <div
             ref={sliderRef}
@@ -259,6 +293,7 @@ export function SeekSlider({
                 className
             )}
             {...(!hitZoneClassName ? interactionProps : {})}
+            {...(!hitZoneClassName ? accessibilityProps : {})}
             title={getTooltipText()}
         >
             <div
@@ -302,6 +337,7 @@ export function SeekSlider({
         <div
             className={cn(hitZoneClassName, isActive ? "cursor-pointer" : "cursor-not-allowed")}
             {...interactionProps}
+            {...accessibilityProps}
             title={getTooltipText()}
         >
             {track}

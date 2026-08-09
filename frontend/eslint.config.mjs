@@ -24,9 +24,27 @@ const eslintConfig = defineConfig([
       "react-hooks/preserve-manual-memoization": "warn",
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/immutability": "warn",
+      // Advisory guards for the repo-wide a11y-core campaign.
+      "jsx-a11y/click-events-have-key-events": "warn",
+      "jsx-a11y/no-static-element-interactions": "warn",
+      "jsx-a11y/interactive-supports-focus": "warn",
       // New compiler rule in eslint-plugin-react-hooks 7.1; flags Date.now()
       // in app/discover/page.tsx useMemo. Same debt bucket as the rules above.
       "react-hooks/purity": "warn",
+    },
+  },
+  {
+    files: [
+      "components/player/SeekSlider.tsx",
+      "components/ui/Modal.tsx",
+      "components/ui/ConfirmDialog.tsx",
+      "components/track/TrackRow.tsx",
+      "components/track/TrackList.tsx",
+    ],
+    rules: {
+      "jsx-a11y/click-events-have-key-events": "error",
+      "jsx-a11y/no-static-element-interactions": "error",
+      "jsx-a11y/interactive-supports-focus": "error",
     },
   },
   // Override default ignores of eslint-config-next.
