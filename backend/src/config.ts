@@ -198,7 +198,25 @@ export const config = {
     // header is sent and the FastAPI sidecars reject the call fail-closed (403).
     internalApiSecret: process.env.INTERNAL_API_SECRET,
 
+    // When no webhook secret is configured in system settings, the Lidarr
+    // webhook rejects requests (fail closed) unless this is true; see
+    // docs/UPGRADING.md.
+    webhooks: {
+        lidarrAllowUnauthenticated: parseEnvBool(
+            process.env.LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED,
+            false
+        ),
+    },
+
+    // Because CORS credentials are enabled, production denies cross-origin
+    // requests by default. ALLOWED_ORIGINS configures the allowlist;
+    // CORS_ALLOW_ALL=true restores the legacy permissive behavior. Development
+    // continues to allow all origins. See docs/UPGRADING.md.
     allowedOrigins:
         allowedOriginsFromEnv ||
-        (process.env.NODE_ENV === "development" ? true : []),
+        (process.env.NODE_ENV === "development"
+            ? true
+            : parseEnvBool(process.env.CORS_ALLOW_ALL, false)
+              ? true
+              : []),
 };

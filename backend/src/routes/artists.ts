@@ -54,6 +54,9 @@ const parseBooleanQueryParam = (
  *   get:
  *     summary: Search YouTube Music for a track and return its videoId
  *     tags: [Artists]
+ *     security:
+ *       - bearerAuth: []
+ *       - cookieAuth: []
  *     parameters:
  *       - in: path
  *         name: artistName
@@ -70,11 +73,13 @@ const parseBooleanQueryParam = (
  *     responses:
  *       200:
  *         description: YouTube Music videoId for the track
+ *       401:
+ *         description: Not authenticated
  *       404:
  *         description: No matching track found
  */
 // GET /artists/preview/:artistName/:trackTitle - Find a YouTube Music videoId for a track
-router.get("/preview/:artistName/:trackTitle", async (req, res) => {
+router.get<{ artistName: string; trackTitle: string }>("/preview/:artistName/:trackTitle", requireAuthOrToken, async (req, res) => {
     try {
         const { artistName, trackTitle } = req.params;
         const decodedArtist = decodeURIComponent(artistName);
@@ -263,6 +268,9 @@ router.get(
  *   get:
  *     summary: Get artist details for discovery
  *     tags: [Artists]
+ *     security:
+ *       - bearerAuth: []
+ *       - cookieAuth: []
  *     parameters:
  *       - in: path
  *         name: nameOrMbid
@@ -294,11 +302,13 @@ router.get(
  *     responses:
  *       200:
  *         description: Artist details with bio, discography, top tracks, and similar artists
+ *       401:
+ *         description: Not authenticated
  *       404:
  *         description: Artist not found
  */
 // GET /artists/discover/:nameOrMbid - Get artist details for discovery (not in library yet)
-router.get("/discover/:nameOrMbid", async (req, res) => {
+router.get<{ nameOrMbid: string }>("/discover/:nameOrMbid", requireAuthOrToken, async (req, res) => {
     try {
         const { nameOrMbid } = req.params;
         const includeDiscography = parseBooleanQueryParam(
@@ -677,6 +687,9 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
  *   get:
  *     summary: Get album details for discovery
  *     tags: [Artists]
+ *     security:
+ *       - bearerAuth: []
+ *       - cookieAuth: []
  *     parameters:
  *       - in: path
  *         name: mbid
@@ -694,11 +707,13 @@ router.get("/discover/:nameOrMbid", async (req, res) => {
  *     responses:
  *       200:
  *         description: Album details with tracks, cover art, and metadata
+ *       401:
+ *         description: Not authenticated
  *       404:
  *         description: Album not found
  */
 // GET /artists/album/:mbid - Get album details for discovery (not in library yet)
-router.get("/album/:mbid", async (req, res) => {
+router.get<{ mbid: string }>("/album/:mbid", requireAuthOrToken, async (req, res) => {
     try {
         const { mbid } = req.params;
         const includeTracks = parseBooleanQueryParam(

@@ -5,6 +5,56 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## ⚠️ Breaking: CORS is deny-by-default and the Lidarr webhook fails closed
+
+Two authorization hardening changes ship secure-by-default with explicit env
+opt-outs for deployments that need the old behavior.
+
+### 1. CORS: unset `ALLOWED_ORIGINS` no longer allows every origin
+
+**Who this affects:** production deployments where the browser loads the
+frontend from a DIFFERENT origin than the backend API (e.g. `app.example.com`
+calling `api.example.com`) and `ALLOWED_ORIGINS` was never set. The standard
+same-origin setup — frontend proxy serving the UI and forwarding `/api` on one
+origin — is NOT affected, and neither are server-to-server/curl requests
+(no `Origin` header) or `NODE_ENV=development`.
+
+**What changed.** The backend enables CORS with `credentials: true`. Previously,
+when `ALLOWED_ORIGINS` was unset, it reflected ANY request origin, which let
+arbitrary websites make cookie-authenticated cross-origin requests against your
+instance. Production now denies cross-origin browser requests unless the origin
+is allowlisted.
+
+**Action required (only for cross-origin deployments):** set
+`ALLOWED_ORIGINS` to a comma-separated list of your frontend origins
+(e.g. `ALLOWED_ORIGINS=https://app.example.com`). To knowingly restore the
+legacy allow-all behavior instead, set `CORS_ALLOW_ALL=true`.
+
+### 2. Lidarr webhook rejects requests when no secret is configured
+
+**Who this affects:** deployments using the Lidarr integration that never
+configured a webhook secret in System Settings.
+
+**What changed.** `POST /api/webhooks/lidarr` previously accepted
+unauthenticated requests when no secret was configured (logging a warning),
+leaving an unauthenticated endpoint that could drive download-state mutations
+and queue library scans. It now returns **401** until a secret is configured
+(fail closed). `GET /api/webhooks/lidarr/verify` and the Lidarr-disabled 202
+short-circuit are unchanged.
+
+**Action required:** set a webhook secret in System Settings → Lidarr and add
+the same value as an `x-webhook-secret` header on Lidarr's webhook connection.
+If you cannot do that yet, set `LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED=true` to
+restore the legacy behavior (not recommended).
+
+Also in this release (no action needed): `ADMIN_RESET_PASSWORD` emergency
+recovery previously never matched the admin user (role-case bug) — it now works;
+ending a Listen Together group is host-only even right after a backend restart;
+`POST /api/enrichment/sync` + `/start` are admin-only; and the artist
+discovery/preview endpoints require authentication.
+
+---
+
 ## TIDAL token header migration + ytmusic-streamer entrypoint change
 
 **Who this affects:** deployments that pin backend and `tidal-downloader` image

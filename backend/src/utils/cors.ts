@@ -1,12 +1,11 @@
 /**
  * Decide whether a CORS request origin is permitted.
  *
- * soundspan is self-hosted, so the default posture is permissive: when no
- * allowlist is configured (`ALLOWED_ORIGINS` unset → `[]`, or `true`), all
- * origins are allowed. But when an operator DOES configure an allowlist, it is
- * enforced — previously an unlisted origin was logged and then allowed anyway,
- * which silently made the `ALLOWED_ORIGINS` knob a no-op while `credentials`
- * was enabled.
+ * Because CORS credentials are enabled, production denies cross-origin
+ * requests by default when `ALLOWED_ORIGINS` is unset. Operators can configure
+ * an explicit allowlist with `ALLOWED_ORIGINS`, or set `CORS_ALLOW_ALL=true` to
+ * restore the legacy permissive behavior. Requests without an Origin header
+ * and development requests remain allowed.
  *
  * @param origin           The request `Origin` header (undefined for same-origin/curl).
  * @param allowedOrigins   `true` to allow all, or an explicit list of origins.
@@ -32,6 +31,6 @@ export function isOriginAllowed(
         return allowedOrigins.includes(origin);
     }
 
-    // No allowlist configured → self-hosted default allows all.
-    return true;
+    // No allowlist configured → deny cross-origin requests by default.
+    return false;
 }

@@ -496,13 +496,15 @@ router.post("/repair-covers", requireAdmin, async (req, res) => {
  *         description: Incremental sync started, processing new and pending items only
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
  /**
   * POST /enrichment/sync
   * Trigger incremental enrichment (only processes pending items)
   * Fast sync that picks up new content without re-processing everything
   */
- router.post("/sync", async (req, res) => {
+ router.post("/sync", requireAdmin, async (req, res) => {
      try {
          const result = await triggerEnrichmentNow();
 
@@ -741,6 +743,8 @@ router.post("/album/:id", async (req, res) => {
  *         description: Enrichment is not enabled in settings
  *       401:
  *         description: Not authenticated
+ *       403:
+ *         description: Admin access required
  */
 /**
  * POST /enrichment/start
@@ -748,7 +752,7 @@ router.post("/album/:id", async (req, res) => {
  * Delegates to the unified enrichment worker for consistent state tracking,
  * failure recording, and pause/stop support.
  */
-router.post("/start", async (req, res) => {
+router.post("/start", requireAdmin, async (req, res) => {
     try {
         const { prisma } = await import("../utils/db");
         const systemSettings = await prisma.systemSettings.findUnique({

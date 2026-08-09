@@ -8,13 +8,21 @@ describe("isOriginAllowed", () => {
         );
     });
 
-    it("allows all origins when no allowlist is configured (self-hosted default)", () => {
+    it("denies cross-origin requests when no allowlist is configured (deny-by-default)", () => {
+        // Production posture: an unconfigured allowlist must NOT reflect
+        // arbitrary origins while credentials are enabled. Operators opt back
+        // into the legacy permissive behavior with CORS_ALLOW_ALL=true, which
+        // config.ts resolves to `allowedOrigins: true`.
         expect(isOriginAllowed("https://anything.example", [], "production")).toBe(
-            true
+            false
+        );
+        expect(isOriginAllowed("https://anything.example", [], "test")).toBe(
+            false
         );
     });
 
     it("allows all origins when explicitly set to true or in development", () => {
+        // `true` is the resolved CORS_ALLOW_ALL / legacy opt-out value.
         expect(isOriginAllowed("https://anything.example", true, "production")).toBe(
             true
         );

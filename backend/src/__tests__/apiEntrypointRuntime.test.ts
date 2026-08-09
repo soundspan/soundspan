@@ -528,6 +528,147 @@ describe("api entrypoint runtime behavior", () => {
         }
     });
 
+    it("mounts every API prefix behind its expected limiter and router (mount contract)", async () => {
+        process.env = {
+            ...originalEnv,
+            BACKEND_PROCESS_ROLE: "api",
+        };
+
+        jest.spyOn(process, "on").mockImplementation(() => process as any);
+        jest.spyOn(global, "setInterval").mockImplementation(
+            () => 1 as unknown as NodeJS.Timeout
+        );
+        process.exit = jest.fn() as any;
+
+        const mocks = setupApiEntrypointMocks();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        require("../index");
+        await flushPromises();
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const route = (id: string) => require(id).default;
+
+        // The full mount contract: prefix -> exact middleware chain in order.
+        // Removing a limiter, swapping tiers, or mounting a router without
+        // its expected limiter fails this test. Router-level auth for the
+        // routers themselves is asserted by their per-router authz tests.
+        const expectedMounts: Record<string, unknown[]> = {
+            "/api/auth/login": ["auth-limiter"],
+            "/api/auth/register": ["auth-limiter"],
+            "/api/auth": [route("../routes/auth")],
+            "/api/onboarding": [route("../routes/onboarding")],
+            "/api/api-keys": ["api-limiter", route("../routes/apiKeys")],
+            "/api/device-link": ["auth-limiter", route("../routes/deviceLink")],
+            "/api/library": [route("../routes/library")],
+            "/api/plays": ["api-limiter", route("../routes/plays")],
+            "/api/settings": ["api-limiter", route("../routes/settings")],
+            "/api/social": ["api-limiter", route("../routes/social")],
+            "/api/system-settings": [
+                "api-limiter",
+                route("../routes/systemSettings"),
+            ],
+            "/api/listening-state": [
+                "api-limiter",
+                route("../routes/listeningState"),
+            ],
+            "/api/playback-state": [route("../routes/playbackState")],
+            "/api/offline": ["api-limiter", route("../routes/offline")],
+            "/api/playlists": ["api-limiter", route("../routes/playlists")],
+            "/api/share-links": ["api-limiter", route("../routes/shareLinks")],
+            "/api/search": ["api-limiter", route("../routes/search")],
+            "/api/recommendations": [
+                "api-limiter",
+                route("../routes/recommendations"),
+            ],
+            "/api/downloads": ["api-limiter", route("../routes/downloads")],
+            "/api/notifications": [
+                "api-limiter",
+                route("../routes/notifications"),
+            ],
+            "/api/webhooks": [route("../routes/webhooks")],
+            "/api/audiobooks": [route("../routes/audiobooks")],
+            "/api/podcasts": ["api-limiter", route("../routes/podcasts")],
+            "/api/artists": ["api-limiter", route("../routes/artists")],
+            "/api/soulseek": ["api-limiter", route("../routes/soulseek")],
+            "/api/discover": ["api-limiter", route("../routes/discover")],
+            "/api/mixes": ["api-limiter", route("../routes/mixes")],
+            "/api/enrichment": ["api-limiter", route("../routes/enrichment")],
+            "/api/homepage": ["api-limiter", route("../routes/homepage")],
+            "/api/spotify": ["api-limiter", route("../routes/spotify")],
+            "/api/browse": ["api-limiter", route("../routes/browse")],
+            "/api/analysis": ["api-limiter", route("../routes/analysis")],
+            "/api/admin": ["api-limiter", route("../routes/admin")],
+            "/api/releases": ["api-limiter", route("../routes/releases")],
+            "/api/vibe": ["api-limiter", route("../routes/vibe")],
+            "/api/system": ["api-limiter", route("../routes/system")],
+            "/api/ytmusic": ["api-limiter", route("../routes/youtubeMusic")],
+            "/api/youtube": ["api-limiter", route("../routes/youtube")],
+            "/api/tidal-streaming": [
+                "api-limiter",
+                route("../routes/tidalStreaming"),
+            ],
+            "/api/track-mappings": [
+                "api-limiter",
+                route("../routes/trackMappings"),
+            ],
+            "/api/import": ["api-limiter", route("../routes/playlistImport")],
+            "/api/streaming": ["api-limiter", route("../routes/streaming")],
+            "/api/lyrics": ["lyrics-limiter", route("../routes/lyrics")],
+            "/api/listen-together": [
+                "api-limiter",
+                route("../routes/listenTogether"),
+            ],
+            "/rest": [route("../routes/subsonic")],
+        };
+
+        for (const [prefix, chain] of Object.entries(expectedMounts)) {
+            const call = mocks.app.use.mock.calls.find(
+                (args: unknown[]) => args[0] === prefix
+            );
+            if (!call) {
+                throw new Error(`Expected mount missing: ${prefix}`);
+            }
+            try {
+                expect(call.slice(1)).toEqual(chain);
+            } catch (error) {
+                throw new Error(
+                    `Mount chain mismatch for ${prefix}: ${
+                        (error as Error).message
+                    }`
+                );
+            }
+        }
+
+        // Completeness: any new path-prefixed mount must be added to the
+        // contract table above so its auth/limiter posture is reviewed.
+        const knownUnlisted = new Set(["/api/docs", "/api/admin/queues"]);
+        const mountedPaths = mocks.app.use.mock.calls
+            .map((args: unknown[]) => args[0])
+            .filter(
+                (first): first is string =>
+                    typeof first === "string" && first.startsWith("/")
+            );
+        for (const prefix of mountedPaths) {
+            if (
+                !Object.prototype.hasOwnProperty.call(expectedMounts, prefix) &&
+                !knownUnlisted.has(prefix)
+            ) {
+                throw new Error(
+                    `Unreviewed route mount: ${prefix} — add it to the mount contract table with its expected auth/limiter chain`
+                );
+            }
+        }
+
+        // Bull Board admin dashboard requires session auth + admin role.
+        const queuesCall = mocks.app.use.mock.calls.find(
+            (args: unknown[]) => args[0] === "/api/admin/queues"
+        );
+        expect(queuesCall).toBeDefined();
+        expect(queuesCall![1]).toBe(mocks.requireAuth);
+        expect(queuesCall![2]).toBe(mocks.requireAdmin);
+    });
+
     it("mounts /api/device-link behind the stricter authLimiter", async () => {
         process.env = {
             ...originalEnv,
@@ -1171,8 +1312,11 @@ describe("api entrypoint runtime behavior", () => {
         require("../index");
         await flushPromises();
 
+        // Roles are stored lowercase ("user" / "admin" — see prisma schema
+        // default and routes/auth.ts validation). Querying "ADMIN" made the
+        // emergency reset a silent no-op.
         expect(mocks.prisma.user.findFirst).toHaveBeenCalledWith({
-            where: { role: "ADMIN" },
+            where: { role: "admin" },
         });
         expect(adminPasswordHash).toHaveBeenCalledWith("new-admin-password", 10);
         expect(mocks.prisma.user.update).toHaveBeenCalledWith(

@@ -13,6 +13,7 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { webhookLimiter } from "../middleware/rateLimiter";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import { BRAND_SLUG } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 
@@ -70,7 +71,7 @@ router.get("/lidarr/verify", (req, res) => {
  *       202:
  *         description: Webhook ignored (Lidarr disabled)
  *       401:
- *         description: Invalid webhook secret
+ *         description: Invalid webhook secret or no secret configured (fail closed)
  */
 // POST /webhooks/lidarr - Handle Lidarr webhooks
 router.post("/lidarr", webhookLimiter, async (req, res) => {
@@ -105,14 +106,17 @@ router.post("/lidarr", webhookLimiter, async (req, res) => {
                     error: "Unauthorized - Invalid webhook secret",
                 });
             }
-        } else {
-            // No secret configured: the endpoint is unauthenticated. We don't
-            // hard-fail (that would silently break existing Lidarr integrations
-            // that have no secret yet), but the request is rate-limited and the
-            // operator is strongly nudged to set one. See docs/UPGRADING.md.
+        } else if (config.webhooks.lidarrAllowUnauthenticated) {
             logger.warn(
                 "[WEBHOOK] Lidarr webhook accepted WITHOUT authentication — set a webhook secret in System Settings and Lidarr's connection (x-webhook-secret) to secure this endpoint."
             );
+        } else {
+            logger.warn(
+                "[WEBHOOK] Lidarr webhook rejected because no secret is configured. Set a webhook secret in System Settings and Lidarr, or set LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED=true to restore legacy behavior."
+            );
+            return res.status(401).json({
+                error: "Unauthorized - webhook secret not configured",
+            });
         }
 
         const eventType = req.body.eventType;

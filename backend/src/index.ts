@@ -474,7 +474,8 @@ async function checkPasswordReset() {
     if (!resetPassword) return;
 
     const bcrypt = await import("bcrypt");
-    const adminUser = await prisma.user.findFirst({ where: { role: "ADMIN" } });
+    // Roles are stored lowercase.
+    const adminUser = await prisma.user.findFirst({ where: { role: "admin" } });
     if (!adminUser) {
         logger.warn("[Password Reset] No admin user found");
         return;

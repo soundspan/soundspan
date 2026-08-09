@@ -543,12 +543,24 @@ export async function leaveGroup(userId: string, groupId: string): Promise<Leave
 }
 
 /**
- * End a group (host only).
+ * End a group (host only). When the group is not hydrated in memory,
+ * host authorization is enforced from the DB for multi-pod/post-restart cases.
  */
 export async function endGroup(userId: string, groupId: string): Promise<void> {
     // Will throw if not host
     if (groupManager.has(groupId)) {
         groupManager.endGroup(groupId, userId);
+    } else {
+        const group = await prisma.syncGroup.findUnique({
+            where: { id: groupId },
+            select: { hostUserId: true, isActive: true },
+        });
+        if (!group || !group.isActive) {
+            throw new GroupError("NOT_FOUND", "Group not found");
+        }
+        if (group.hostUserId !== userId) {
+            throw new GroupError("NOT_ALLOWED", "Only the host can end the group");
+        }
     }
 
     await endGroupInDb(groupId);
