@@ -47,6 +47,18 @@ import {
 } from "@/lib/queue-item";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
 
+/**
+ * Returns true when an error represents an expired or invalid session (HTTP
+ * 401). Uses the ApiError `status` field rather than a fragile error-message
+ * string comparison so message-copy changes cannot silently break detection.
+ */
+export function isAuthExpiryError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) {
+        return false;
+    }
+    return (error as { status?: unknown }).status === 401;
+}
+
 function queueDebugEnabled(): boolean {
     try {
         return (
@@ -487,38 +499,50 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     serverPlaybackType === "audiobook" &&
                     serverState.audiobookId
                 ) {
-                    api.getAudiobook(serverState.audiobookId).then(
-                        (audiobook) => {
+                    api.getAudiobook(serverState.audiobookId)
+                        .then((audiobook) => {
                             setCurrentAudiobook(audiobook);
                             setPlaybackType("audiobook");
                             setCurrentTrack(null);
                             setCurrentPodcast(null);
-                        }
-                    );
+                        })
+                        .catch((err: unknown) =>
+                            sharedFrontendLogger.error(
+                                "[AudioState] Failed to restore audiobook playback state:",
+                                err
+                            )
+                        );
                 } else if (
                     serverPlaybackType === "podcast" &&
                     serverState.podcastId
                 ) {
                     const [podcastId, episodeId] =
                         serverState.podcastId.split(":");
-                    api.getPodcast(podcastId).then((podcast: { title: string; coverUrl: string; episodes?: Episode[] }) => {
-                        const episode = podcast.episodes?.find(
-                            (ep: Episode) => ep.id === episodeId
+                    api.getPodcast(podcastId)
+                        .then((podcast: { title: string; coverUrl: string; episodes?: Episode[] }) => {
+                            const episode = podcast.episodes?.find(
+                                (ep: Episode) => ep.id === episodeId
+                            );
+                            if (episode) {
+                                setCurrentPodcast({
+                                    id: serverState.podcastId,
+                                    title: episode.title,
+                                    podcastTitle: podcast.title,
+                                    coverUrl: podcast.coverUrl,
+                                    duration: episode.duration,
+                                    progress: episode.progress,
+                                });
+                                setPlaybackType("podcast");
+                                setCurrentTrack(null);
+                                setCurrentAudiobook(null);
+                            }
+                        })
+                        .catch((err: unknown) =>
+                            sharedFrontendLogger.error(
+                                "[AudioState] Failed to restore podcast playback state:",
+                                err
+                            )
                         );
-                        if (episode) {
-                            setCurrentPodcast({
-                                id: serverState.podcastId,
-                                title: episode.title,
-                                podcastTitle: podcast.title,
-                                coverUrl: podcast.coverUrl,
-                                duration: episode.duration,
-                                progress: episode.progress,
-                            });
-                            setPlaybackType("podcast");
-                            setCurrentTrack(null);
-                            setCurrentAudiobook(null);
-                        }
-                    });
                 }
                 if (
                     serverQueue &&
@@ -682,7 +706,6 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
         if (!isHydrated) return;
         if (typeof document === "undefined") return;
 
-        let isAuthenticated = true;
         let mounted = true;
         let isVisible = !document.hidden;
 
@@ -694,8 +717,8 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
 
         let pollInterval: ReturnType<typeof setInterval> | null = null;
         const pollCallback = async () => {
-            // Skip polling when tab is hidden, unmounted, or not authenticated
-            if (!isAuthenticated || !mounted || !isVisible) return;
+            // Skip polling when tab is hidden or unmounted
+            if (!mounted || !isVisible) return;
             // Prevent overlapping async poll calls
             if (pollInFlightRef.current) return;
             pollInFlightRef.current = true;
@@ -938,10 +961,18 @@ export function AudioStateProvider({ children }: { children: ReactNode }) {
                     setLastServerSync(serverUpdatedAt);
                 }
             } catch (err: unknown) {
-                if (err instanceof Error && err.message === "Not authenticated") {
-                    isAuthenticated = false;
-                    if (pollInterval) clearInterval(pollInterval);
+                if (isAuthExpiryError(err)) {
+                    // Session expired. ConditionalAudioProvider unmounts this
+                    // provider on genuine logout and remounts it on re-login,
+                    // which restarts polling. Skip this cycle instead of
+                    // permanently disabling the interval so a single (possibly
+                    // transient) 401 can never permanently kill polling.
+                    return;
                 }
+                sharedFrontendLogger.error(
+                    "[AudioState] Playback state poll failed:",
+                    err
+                );
             } finally {
                 pollInFlightRef.current = false;
             }

@@ -139,6 +139,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Frontend token refresh is now single-flight, so simultaneous 401 responses
+  share one `/auth/refresh` request instead of racing refresh-token rotation
+  and forcing a logout.
+- Audio-state polling now detects expired sessions from HTTP 401 status without
+  permanently stopping after a transient failure, and audiobook/podcast
+  restore failures are logged instead of surfacing as unhandled rejections.
 - Python sidecar (tidal-downloader, ytmusic-streamer) HTTP error responses now
   use the backend-wide `{"error": ...}` body shape instead of FastAPI's default
   `{"detail": ...}`; unhandled sidecar exceptions return a generic 500 without

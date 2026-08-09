@@ -407,6 +407,7 @@ class ApiClient {
     private token: string | null = null;
     private tokenInitialized: boolean = false;
     private readonly inFlightGetRequests = new Map<string, Promise<unknown>>();
+    private refreshPromise: Promise<boolean> | null = null;
 
     constructor(baseUrl?: string) {
         // Don't set baseUrl in constructor - determine it dynamically on each request
@@ -522,7 +523,7 @@ class ApiClient {
      * Refresh the access token using the refresh token
      * @returns true if refresh succeeded, false otherwise
      */
-    private async refreshAccessToken(): Promise<boolean> {
+    private async performTokenRefresh(): Promise<boolean> {
         const refreshToken = this.getRefreshToken();
         if (!refreshToken) {
             return false;
@@ -579,6 +580,26 @@ class ApiClient {
             sharedFrontendLogger.error("[API] Token refresh failed:", error);
             this.clearToken();
             return false;
+        }
+    }
+
+    /**
+     * Refresh the access token using the refresh token.
+     * Single-flight: concurrent callers share one in-flight refresh so N
+     * simultaneous 401s trigger exactly one POST /api/auth/refresh (mirrors the
+     * inFlightGetRequests dedup pattern). The shared promise is always cleared
+     * in `finally`, on both success and failure.
+     * @returns true if refresh succeeded, false otherwise
+     */
+    private async refreshAccessToken(): Promise<boolean> {
+        if (this.refreshPromise) {
+            return this.refreshPromise;
+        }
+        this.refreshPromise = this.performTokenRefresh();
+        try {
+            return await this.refreshPromise;
+        } finally {
+            this.refreshPromise = null;
         }
     }
 
