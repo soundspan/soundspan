@@ -15,6 +15,7 @@
         "format:python": "ruff format services",
         "format:python:check": "ruff format --check services",
         "verify": "npm run verify:backend && npm run verify:frontend && npm run verify:helm && npm run verify:gates",
+        "verify:ci": "npm run verify:backend && npm run verify:frontend && npm run verify:python && npm run verify:python-quality && npm run verify:helm && npm run verify:gates",
         "verify:backend": "npm --prefix backend run test:coverage",
         "verify:frontend": "npm --prefix frontend run lint && npm --prefix frontend run build && npm --prefix frontend run test:coverage && npm --prefix frontend run test:component && npm --prefix frontend run typecheck",
         "verify:helm": "./scripts/helm-chart-render-check.sh",

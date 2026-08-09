@@ -78,14 +78,20 @@ npm --prefix frontend install
 
 ### Reproduce the CI gates locally (run before every PR)
 
-One command reproduces every CI gate: **`npm run verify`** (from the repo root). Per-gate equivalents:
+**`npm run verify:ci`** (from the repo root) reproduces every CI gate, including the Python gates (requires Python 3.11+ with each sidecar's `requirements-test.txt` and `services/requirements-quality.txt` installed). When you are not touching `services/**`, **`npm run verify`** runs the Node + Helm subset. Per-gate equivalents:
 
-| CI check (`quality-visibility.yml`) | Local command | Catches |
-| --- | --- | --- |
-| Backend Tests + Coverage | `npm run verify:backend` (= `npm --prefix backend run test:coverage`) | backend Jest unit/runtime tests + coverage |
-| Frontend Quality Visibility + Typecheck | `npm run verify:frontend` (= frontend `lint` + `build` + `test:coverage` + `test:component` + `typecheck`) | ESLint, Next build/type-check, targeted unit coverage, component tests, and standalone source/test TypeScript checking |
-| Python Sidecar Tests (matrix) | `npm run verify:python` (requires Python 3.11+ with each sidecar's `requirements-test.txt` installed) | pytest suites for the four `services/*` sidecars |
-| Helm Chart Visibility | `npm run verify:helm` (= `./scripts/helm-chart-render-check.sh`) | chart lint + render assertions |
+| CI job (`quality-visibility.yml`) | Blocking? | Local command | Catches |
+| --- | --- | --- | --- |
+| Backend Tests + Coverage | Visibility | `npm run verify:backend` | backend Jest unit/runtime tests + coverage |
+| Frontend Quality Visibility | Visibility | Non-typecheck part of `npm run verify:frontend`: frontend `lint` + `build` + `test:coverage` + `test:component` | ESLint, Next build, targeted unit coverage, and component tests |
+| Python Sidecar Tests (matrix) | Visibility | `npm run verify:python` | pytest suites for the four `services/*` sidecars |
+| Python Quality | Enforcement | `npm run verify:python-quality` | ruff lint, ruff format check, mypy (+ tidal-downloader standalone) |
+| Enforcement Gates | Enforcement | `npm run verify:gates` | route-error canonicalization + gate self-test, frontend hardcoded-hex baseline, OpenAPI route sync, repo-wide Prettier format check |
+| Backend Typecheck | Visibility | `npm --prefix backend exec -- tsc --noEmit` | backend TypeScript checking |
+| Frontend Typecheck | Visibility | `npm --prefix frontend run typecheck` (also part of `verify:frontend`) | complete frontend source/test TypeScript checking |
+| Helm Chart Visibility | Visibility | `npm run verify:helm` | chart lint + render assertions |
+
+Only **Enforcement Gates** and **Python Quality** block a PR on every run; the remaining jobs run as visibility (`continue-on-error`) unless the repo variable `CI_NON_BLOCKING_TEST_VISIBILITY` is set to `false`.
 
 Notes:
 

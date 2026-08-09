@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Documented every CI gate in the AGENTS.md CI-gates table (adding the Python
+  Quality, Enforcement Gates, and Backend/Frontend Typecheck jobs) and added a
+  `verify:ci` npm script that reproduces all gates locally, including the Python
+  ruff/mypy and sidecar-pytest gates that `npm run verify` omits.
 - Lowered the enforced frontend ESLint warning budget from 244 to 183 and made
   timer-dependent frontend tests deterministic instead of waiting on real-time
   sleeps.
