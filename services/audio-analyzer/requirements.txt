@@ -1,17 +1,22 @@
 # Audio Analyzer Requirements — Essentia with TensorFlow (MusiCNN)
 # This is the real, complete image manifest. It is compiled into a
-# hash-pinned lock (requirements.lock, Python 3.8 target) that the Dockerfile
+# hash-pinned lock (requirements.lock, Python 3.11 target) that the Dockerfile
 # installs with `pip install --require-hashes`. Keep this file and the lock in
 # sync — regenerate the lock (see its header) after any edit here.
 
 # TensorFlow + Essentia (MusiCNN). essentia-tensorflow links against the
-# TF 2.13–2.15 ABI; on Python 3.8 this resolves to the last TF 2.13.x wheel.
+# TF 2.13–2.15 ABI; on Python 3.11 this resolves to TF 2.15.x (matching the AIO
+# image's requirements-aio.lock resolution).
 tensorflow>=2.13.0,<2.16.0
-essentia-tensorflow
+# Essentia publishes only pre-release dev builds, making uv's unpinned selection
+# cache-sensitive across cold builds. Pin the AIO lock build for one TF 2.15 ABI
+# and identical model behavior in both analyzers (roadmap F50 reproducible lock).
+essentia-tensorflow==2.1b6.dev1389
 
 # Queue and database
 redis>=4.5.0
 psycopg2-binary>=2.9.0
 
-# Numeric operations (numpy<2.0 required by the TensorFlow/Essentia ABI)
-numpy>=1.19.0,<2.0.0
+# NumPy 1.26.x is the last 1.x line and matches the TF 2.15/Essentia ABI used by
+# AIO, keeping analyzer output identical; NumPy 2.x remains ABI-incompatible.
+numpy>=1.26.0,<2.0.0

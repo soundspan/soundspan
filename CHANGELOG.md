@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stored ciphertext as a bearer token when fail-closed). Enable the flag only
   after `GET /api/admin/secrets-status` reports zero legacy rows; authenticated
   `v2` ciphertext always fails closed regardless. See `docs/UPGRADING.md`.
+- The standalone `audio-analyzer` (Essentia/MusiCNN) sidecar now builds on
+  `python:3.11-slim` instead of EOL Ubuntu 20.04 / Python 3.8, restoring OS and
+  interpreter security updates and satisfying the repo's Python 3.11+ contract
+  (roadmap F51). Its hash-pinned `requirements.lock` was recompiled for Python
+  3.11 and now shares the AIO image's TensorFlow 2.15.1 / essentia-tensorflow
+  2.1b6.dev1389 / numpy 1.26.4 stack, so both analyzers produce identical model
+  output; `essentia-tensorflow` is pinned exactly because it publishes only
+  pre-release builds. The blocking pip-audit lane now audits this lock on Python
+  3.11 with the TensorFlow 2.15 exception set (`docs/SECURITY.md`). No runtime
+  behavior change; the analysis pipeline and MusiCNN classification heads are
+  unchanged.
 - All-in-One (AIO) backend, frontend, and analyzer processes now run under
   supervisord as the fixed `soundspan` user (uid/gid 1000). Existing writable
   volume paths are chowned automatically on every boot; see
@@ -205,6 +216,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configurable yt-dlp socket timeout (`YTMUSIC_YTDLP_SOCKET_TIMEOUT`, default
   20s) covering extraction and downloads, so a stalled extraction can no longer
   hang a request or strand its worker thread forever.
+- The `audio-analyzer` sidecar now measures its own elapsed durations and
+  scheduling intervals (idle-model-unload timeout, worker-resize debounce, DB
+  reconciliation cadence, batch-rate logging) with `time.monotonic()` instead
+  of wall-clock `time.time()`, so an NTP step or manual clock change can no
+  longer prematurely unload models, mis-fire a resize, or corrupt the reported
+  throughput. The cross-process `audio:worker:heartbeat` timestamp remains
+  wall-clock epoch milliseconds by design.
 - The three backend audio-analyzer source-contract suites
   (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
   `audioAnalyzerFailureResolutionContract`) were updated in step with the

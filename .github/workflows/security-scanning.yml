@@ -207,16 +207,15 @@ jobs:
             python-version: "3.12"
             audit-args: --disable-pip --no-deps
             ignore-vulns: ""
-          # audio-analyzer's image is ubuntu:20.04 / Python 3.8 (EOL, below
-          # pip-audit's >=3.10 floor). Its lock is compiled FOR 3.8; auditing it
-          # on 3.10 is the nearest supported approximation. Exact-pin audits do
-          # not re-resolve, so the versions checked are the ones shipped; only
-          # py3.8-only environment markers may evaluate differently under 3.10
-          # (accepted, documented gap).
+          # audio-analyzer's image is python:3.11-slim (roadmap F51). Its lock is
+          # compiled FOR 3.11 and shares the TensorFlow 2.15 stack with the AIO
+          # image, so its exceptions mirror the requirements-aio.lock lane below.
+          # Exact-pin audits do not re-resolve, so the versions checked are the
+          # ones shipped.
           - requirements: services/audio-analyzer/requirements.lock
-            python-version: "3.10"
+            python-version: "3.11"
             audit-args: --disable-pip --no-deps
-            # Compatibility exceptions: docs/SECURITY.md. Any new ID fails.
+            # TensorFlow 2.15 compatibility exceptions: docs/SECURITY.md. Any new ID fails.
             ignore-vulns: >-
               --ignore-vuln CVE-2025-12060
               --ignore-vuln CVE-2026-12479
@@ -224,33 +223,13 @@ jobs:
               --ignore-vuln CVE-2026-12481
               --ignore-vuln CVE-2026-12482
               --ignore-vuln CVE-2026-12484
-              --ignore-vuln CVE-2026-24049
               --ignore-vuln CVE-2026-9335
-              --ignore-vuln GHSA-537c-gmf6-5ccf
               --ignore-vuln PYSEC-2025-121
               --ignore-vuln PYSEC-2025-76
-              --ignore-vuln PYSEC-2026-141
               --ignore-vuln PYSEC-2026-1487
               --ignore-vuln PYSEC-2026-1805
-              --ignore-vuln PYSEC-2026-1994
-              --ignore-vuln PYSEC-2026-1996
-              --ignore-vuln PYSEC-2026-1997
-              --ignore-vuln PYSEC-2026-1998
-              --ignore-vuln PYSEC-2026-1999
-              --ignore-vuln PYSEC-2026-2044
-              --ignore-vuln PYSEC-2026-2046
-              --ignore-vuln PYSEC-2026-2141
-              --ignore-vuln PYSEC-2026-2275
-              --ignore-vuln PYSEC-2026-2320
               --ignore-vuln PYSEC-2026-2324
               --ignore-vuln PYSEC-2026-2547
-              --ignore-vuln PYSEC-2026-3447
-              --ignore-vuln PYSEC-2026-35
-              --ignore-vuln PYSEC-2026-3552
-              --ignore-vuln PYSEC-2026-3553
-              --ignore-vuln PYSEC-2026-3554
-              --ignore-vuln PYSEC-2026-36
-              --ignore-vuln PYSEC-2026-89
           # AIO image bakes the analyzer + clap deps into one Debian-bookworm
           # system Python 3.11 site-packages; requirements-aio.lock is that
           # merged, jointly-resolved tree.

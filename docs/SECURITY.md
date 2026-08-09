@@ -11,7 +11,7 @@ Two legacy TensorFlow lanes have compatibility exceptions:
 
 | Lock | Constrained packages | Removal condition |
 | --- | --- | --- |
-| `services/audio-analyzer/requirements.lock` | cryptography, Keras, Markdown, protobuf, requests, setuptools, urllib3, Werkzeug, wheel | Replace the Ubuntu 20.04 / Python 3.8 / TensorFlow 2.13 analyzer stack under roadmap F51. |
+| `services/audio-analyzer/requirements.lock` | Keras 2.15 and protobuf 4.25 | Move the analyzer off TensorFlow 2.15, whose dependency constraints prevent the audited fixed major versions (shares the AIO lane's exceptions after the roadmap F51 Python 3.11 rebase). |
 | `requirements-aio.lock` | Keras 2.15 and protobuf 4.25 | Move the AIO analyzer off TensorFlow 2.15, whose dependency constraints prevent the audited fixed major versions. |
 
 These entries are compatibility risk acceptances, not declarations that the

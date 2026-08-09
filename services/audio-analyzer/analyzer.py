@@ -77,18 +77,7 @@ import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 import multiprocessing
 
-# BrokenProcessPool was added in Python 3.9, provide compatibility for Python 3.8
-try:
-    from concurrent.futures import BrokenProcessPool
-except ImportError:
-    # Python 3.8 fallback: use the internal class or create a compatible exception
-    try:
-        from concurrent.futures.process import BrokenProcessPool
-    except ImportError:
-        # If still not available, create a compatible exception class
-        class BrokenProcessPool(Exception):
-            """Compatibility shim for Python < 3.9"""
-            pass
+from concurrent.futures.process import BrokenProcessPool
 
 # Force spawn mode for TensorFlow compatibility (must be called before any multiprocessing)
 try:
@@ -1199,7 +1188,7 @@ class AnalysisWorker:
         self.consecutive_empty = 0
         self.is_paused = False  # Enrichment control: pause state
         self.pubsub = None  # Redis pub/sub for control signals
-        self._last_work_time = time.time()
+        self._last_work_time = time.monotonic()
         self._pending_resize: int | None = None
         self._pending_resize_time: float = 0.0
         self.batch_count = 0
@@ -1219,7 +1208,7 @@ class AnalysisWorker:
 
     def _schedule_next_reconciliation(self, found_work: bool):
         """Update DB reconciliation schedule using adaptive idle backoff."""
-        now = time.time()
+        now = time.monotonic()
         if found_work:
             self._reconcile_interval_seconds = float(DB_RECONCILE_MIN_INTERVAL_SECONDS)
         else:
@@ -1240,7 +1229,7 @@ class AnalysisWorker:
         Returns:
             bool: True if reconciliation found pending work.
         """
-        if time.time() < self._next_reconcile_at:
+        if time.monotonic() < self._next_reconcile_at:
             return False
         found_work = self._run_db_reconciliation()
         self._schedule_next_reconciliation(found_work)
@@ -1264,7 +1253,7 @@ class AnalysisWorker:
                         new_count = max(1, min(8, new_count))
                         if new_count != NUM_WORKERS:
                             self._pending_resize = new_count
-                            self._pending_resize_time = time.time()
+                            self._pending_resize_time = time.monotonic()
                             logger.info(f"Worker resize queued: {NUM_WORKERS} -> {new_count} (applying in {RESIZE_DEBOUNCE_SECONDS}s)")
                         return
                 except (json.JSONDecodeError, ValueError):
@@ -1289,7 +1278,7 @@ class AnalysisWorker:
         """Apply buffered resize if debounce period has elapsed."""
         if self._pending_resize is None:
             return
-        elapsed = time.time() - self._pending_resize_time
+        elapsed = time.monotonic() - self._pending_resize_time
         if elapsed < RESIZE_DEBOUNCE_SECONDS:
             return
         target = self._pending_resize
@@ -1723,6 +1712,7 @@ class AnalysisWorker:
                 try:
                     # Publish heartbeat
                     try:
+                        # Intentionally wall-clock epoch ms for the Node backend.
                         self.redis.set("audio:worker:heartbeat", str(int(time.time() * 1000)))
                     except Exception:
                         pass
@@ -1741,7 +1731,7 @@ class AnalysisWorker:
 
                     if has_work:
                         self.consecutive_empty = 0
-                        self._last_work_time = time.time()
+                        self._last_work_time = time.monotonic()
                         self.batch_count += 1
                         self._schedule_next_reconciliation(True)
                         # Periodic maintenance even while queue stays busy.
@@ -1756,7 +1746,7 @@ class AnalysisWorker:
                         # Unload models when idle: immediately if DB has no pending
                         # work, or after MODEL_IDLE_TIMEOUT as a fallback
                         if self.pool_active and not found_work:
-                            idle_seconds = time.time() - self._last_work_time
+                            idle_seconds = time.monotonic() - self._last_work_time
                             if idle_seconds >= MODEL_IDLE_TIMEOUT:
                                 self._shutdown_pool()
                                 logger.info(f"Models idle for {idle_seconds:.0f}s, pool shut down")
@@ -1981,7 +1971,7 @@ class AnalysisWorker:
         if not tracks:
             return
 
-        start_time = time.time()
+        start_time = time.monotonic()
         finalized_track_ids = set()
         futures = {self.executor.submit(_analyze_track_in_process, t): t for t in tracks}
         counts = {'completed': 0, 'failed': 0, 'permanent_failed': 0}
@@ -2001,7 +1991,7 @@ class AnalysisWorker:
             counts['failed'] += timeout_failed
             counts['permanent_failed'] += timeout_permanent
 
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
         rate = len(tracks) / elapsed if elapsed > 0 else 0
         logger.info(
             f"Batch complete: {counts['completed']} succeeded, {counts['failed']} failed, {counts['permanent_failed']} permanently failed, {requeued} requeued in {elapsed:.1f}s ({rate:.1f} tracks/sec)"

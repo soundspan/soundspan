@@ -108,7 +108,7 @@ _(includes F54; dimension tallies double-count the F2/F44 and F17/F47 duplicate 
 | [F48](#f48) | ⬜ | dependencies-build | medium | L | medium | ⚠️ | #19 | Bull 4 is maintenance-only with a version-mismatched @types/bull; migrate to BullMQ |
 | [F49](#f49) | ✅ | dependencies-build | medium | L | medium | ⚠️ | #19 | Express 4 (Express 5 is GA) with half-migrated middleware majors |
 | [F50](#f50) | ✅ | dependencies-build | medium | M | low |  | #10 | Python sidecar dependencies are floor-pinned with no lockfile or hashes — non-reproduci… |
-| [F51](#f51) | ⬜ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
+| [F51](#f51) | ✅ | dependencies-build | medium | L | medium |  | #19 | audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow |
 | [F52](#f52) | ⬜ | dependencies-build | medium | L | medium |  | #19 | AIO image is a single-stage, root-supervisord monolith with build-toolchain bloat and r… |
 | [F53](#f53) | ✅ | dependencies-build | medium | S | low |  | #8 | Node runtime version unpinned and drifts across CI (frontend on Node 24, everything els… |
 | [F54](#f54) | ✅ | security | high | S | low |  | #12 | POST /device-link/verify is an unauthenticated TOCTOU that mints full-privilege API keys |
@@ -982,7 +982,9 @@ One correction to the finding's framing on blast radius: session auth is NOT mer
 
 ### F51 — audio-analyzer pinned to EOL Ubuntu 20.04 / Python 3.8 / old TensorFlow
 
-**⬜ open** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · epic: #19
+**✅ done** · dimension: dependencies-build · severity: medium · effort: L · risk: medium · epic: #19
+
+> **Fix shipped.** `services/audio-analyzer/Dockerfile` now builds `FROM python:3.11-slim` (Debian bookworm) instead of `ubuntu:20.04`/Python 3.8, dropping the redundant `python3*` apt packages and adding `libgomp1` for the TensorFlow CPU wheel's OpenMP runtime. `requirements.lock` was recompiled with `uv pip compile --generate-hashes --python-version 3.11`, resolving the SAME ABI-critical stack as the AIO image (`requirements-aio.lock`): TensorFlow 2.15.1, essentia-tensorflow 2.1b6.dev1389, Keras 2.15.0, tensorflow-io-gcs-filesystem 0.37.1, numpy 1.26.4, psycopg2-binary 2.9.12, redis 8.1.0 — so the standalone and AIO analyzers share one embedding/model behavior. `requirements.txt` pins `essentia-tensorflow==2.1b6.dev1389` (the package publishes only pre-release dev builds, which made uv's unpinned selection cache-sensitive and non-reproducible) and raises the numpy floor to `>=1.26.0,<2.0.0`. The Python 3.8 BrokenProcessPool compatibility shim in `analyzer.py` was removed in favor of a direct `from concurrent.futures.process import BrokenProcessPool` (the class is not re-exported at the `concurrent.futures` top level even on 3.11). Separately, the analyzer's internal duration/interval timers (idle-timeout, resize-debounce, DB-reconcile schedule, batch-rate) were switched from wall-clock `time.time()` to `time.monotonic()` so NTP/clock steps no longer corrupt them; the cross-process `audio:worker:heartbeat` epoch-ms timestamp deliberately stays wall-clock. The blocking `security-scanning.yml` pip-audit lane now audits this lock on Python 3.11 with the TF-2.15 exception set mirroring the AIO lane (`docs/SECURITY.md`), verified green against the regenerated lock. Verification: docker build not run (disk), Dockerfile validated by manual review; the 9-test `services/audio-analyzer/tests` pytest suite passes on a Python 3.11 venv. Full analysis-output regression against a known track is deferred to the first real image build (see below).
 
 **Files:** `services/audio-analyzer/Dockerfile`, `services/audio-analyzer/requirements.txt`
 

@@ -1,6 +1,7 @@
 # Audio Analyzer Service - Essentia with TensorFlow (MusiCNN)
-# Using Ubuntu 20.04 with Python 3.8 for essentia-tensorflow compatibility
-FROM ubuntu:20.04
+# Runs on Python 3.11 (Debian bookworm slim), matching the repo's Python 3.11+
+# contract and the AIO image that already runs this workload on Python 3.11.
+FROM python:3.11-slim
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,12 +20,10 @@ ENV TF_NUM_INTRAOP_THREADS=1 \
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-dev \
-    python3-pip \
     ffmpeg \
     curl \
     procps \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
@@ -34,7 +33,7 @@ WORKDIR /app
 
 # Install ALL Python dependencies from the hash-pinned lock (roadmap F50) so a
 # rebuild of this commit resolves the identical transitive tree. requirements.lock
-# is compiled from requirements.txt for Python 3.8 (this image's interpreter) and
+# is compiled from requirements.txt for Python 3.11 (this image's interpreter) and
 # captures TensorFlow + essentia-tensorflow (formerly installed inline here) plus
 # redis/psycopg2-binary/numpy (formerly installed inline below the model downloads).
 # Regenerate: see the header of requirements.lock.
