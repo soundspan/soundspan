@@ -27,13 +27,20 @@ Repository contract for soundspan.
 
 - **API boundary:** Use `frontend/lib/api.ts` as the frontend API boundary. No direct `fetch` calls from components.
 - **Backend config:** Read env through `backend/src/config.ts`.
-- **Database access:** All DB access through Prisma. No raw SQL.
-- **Logging helpers:** Use shared logging helpers in runtime code:
+- **Database access:** Prefer Prisma for all DB access. Raw SQL (`$queryRaw`/`$executeRaw`) is permitted **only** for the classes of query Prisma cannot express, namely:
+  - **pgvector similarity / ANN** — ivfflat probe tuning and `<=>`/`<->` distance ordering over embedding columns (e.g. `backend/src/utils/annQuery.ts`, `backend/src/services/trackEmbeddings.ts`, `backend/src/services/hybridSimilarity.ts`).
+  - **PostgreSQL full-text search** — `tsvector`/`to_tsquery`/`ts_rank` ranking (e.g. `backend/src/services/search.ts`).
+  - **Row-level & advisory locking** — `FOR UPDATE SKIP LOCKED` job claiming and `pg_advisory_*` locks (e.g. `backend/src/routes/downloads.ts`, worker claim loops).
+
+  Constraints on any permitted raw SQL: use Prisma tagged-template `$queryRaw`/`$executeRaw` so every value is bound as a parameter; **never** `$queryRawUnsafe`/`$executeRawUnsafe` with interpolated external input (dynamic identifiers must come from code-owned allowlists); back it with a behavioral test against real PostgreSQL, not a source-text assertion (see Testing below). Anything a Prisma query can express — plain filters, counts, existence checks — must use Prisma, not raw SQL.
+- **Logging helpers:** Use shared logging helpers in runtime code, and scope logs with `logger.child({ scope: "..." })` rather than ad hoc `[bracket-tag]` message prefixes so scope is a structured field:
   - frontend: `frontend/lib/logger.ts`
   - backend: `backend/src/utils/logger.ts`
   - python sidecars: `services/common/logging_utils.py`
+- **Naming & placement conventions:** `camelCase` TypeScript source files; one route module per mounted prefix under `backend/src/routes/` (indexed in `backend/src/routes/README.md`); frontend domain modules live under `frontend/features/<domain>/` and are indexed in `frontend/features/README.md`; scheduled/background processors belong in `backend/src/workers/`. Known drift (colocated vs. tree tests, `components/vibe` placement) is documented in the relevant README rather than silently tolerated — follow the README when extending an area.
 - **Changelog:** Keep `CHANGELOG.md` updated for user-visible or behavior-changing work.
-- **Documentation coverage:** Exported TypeScript symbols, runtime Python modules, and implemented OpenAPI routes should remain fully documented when touched.
+- **Testing conventions:** Assert on **behavior**, not source text. The source-scraping `*Contract` suites that `readFileSync` a module and `.toContain(...)` a code snippet (e.g. the `backend/src/__tests__/audioAnalyzer*Contract.test.ts` set that greps `services/audio-analyzer/analyzer.py`) are **deprecated**: do not add new tests of that shape, and replace an existing one with a behavioral test whenever you touch the code it guards.
+- **Documentation coverage:** Exported TypeScript symbols, runtime Python modules, and implemented OpenAPI routes should remain fully documented when touched. **Exemption:** the Subsonic-compatible `/rest` surface (`backend/src/routes/subsonic.ts`) is contract-documented in [`docs/OPENSUBSONIC_COMPATIBILITY.md`](docs/OPENSUBSONIC_COMPATIBILITY.md) instead of per-endpoint OpenAPI annotations; keep that document current in lieu of `@openapi` blocks for `/rest`.
 - **Storage:** SQLite at `.awm/context.db` by default. Configure `AWM_PG_DSN` for multi-agent coordination.
 
 ## Local Setup & Pre-PR Verification

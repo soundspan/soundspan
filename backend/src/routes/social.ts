@@ -346,11 +346,13 @@ router.get("/online", async (_req, res) => {
             }),
         ]);
 
-        const usersWithPictures = await prisma.$queryRaw<{ id: string }[]>`
-            SELECT id FROM "User"
-            WHERE id = ANY(${onlineUserIds})
-            AND "profilePicture" IS NOT NULL
-        `;
+        const usersWithPictures = await prisma.user.findMany({
+            where: {
+                id: { in: onlineUserIds },
+                profilePicture: { not: null },
+            },
+            select: { id: true },
+        });
 
         const inListenTogether = new Set(
             activeMemberships.map((entry) => entry.userId)
@@ -476,11 +478,13 @@ router.get("/connected", requireAdmin, async (req, res) => {
             },
         });
 
-        const usersWithPicturesConnected = await prisma.$queryRaw<{ id: string }[]>`
-            SELECT id FROM "User"
-            WHERE id = ANY(${onlineUserIds})
-            AND "profilePicture" IS NOT NULL
-        `;
+        const usersWithPicturesConnected = await prisma.user.findMany({
+            where: {
+                id: { in: onlineUserIds },
+                profilePicture: { not: null },
+            },
+            select: { id: true },
+        });
 
         const hasProfilePictureSet = new Set(
             usersWithPicturesConnected.map((u) => u.id)

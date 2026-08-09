@@ -77,12 +77,9 @@ router.get("/", async (req, res) => {
 
         // Check if user has a profile picture without loading the blob
         const hasProfilePicture =
-            (
-                await prisma.$queryRaw<{ count: bigint }[]>`
-                    SELECT COUNT(*)::bigint as count FROM "User"
-                    WHERE id = ${userId} AND "profilePicture" IS NOT NULL
-                `
-            )[0]?.count > 0n;
+            (await prisma.user.count({
+                where: { id: userId, profilePicture: { not: null } },
+            })) > 0;
 
         let settings = existingSettings;
 

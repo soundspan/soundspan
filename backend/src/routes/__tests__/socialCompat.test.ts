@@ -26,7 +26,6 @@ jest.mock("../../utils/redis", () => ({
 
 jest.mock("../../utils/db", () => ({
     prisma: {
-        $queryRaw: jest.fn(),
         user: {
             findMany: jest.fn(),
         },
@@ -43,7 +42,6 @@ import { prisma } from "../../utils/db";
 const mockScanIterator = redisClient.scanIterator as jest.Mock;
 const mockMGet = redisClient.mGet as jest.Mock;
 const mockSet = redisClient.set as jest.Mock;
-const mockPrismaQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockUserFindMany = prisma.user.findMany as jest.Mock;
 const mockSyncGroupMemberFindMany = prisma.syncGroupMember.findMany as jest.Mock;
 
@@ -101,7 +99,7 @@ describe("social presence compatibility", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        mockPrismaQueryRaw.mockResolvedValue([]);
+        mockUserFindMany.mockResolvedValue([]);
     });
 
     it("returns online roster with privacy filtering and listen-together indicator", async () => {
@@ -118,7 +116,7 @@ describe("social presence compatibility", () => {
             String(now - 1000),
             String(now - 2000),
         ]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -255,7 +253,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -357,7 +355,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -395,7 +393,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -433,7 +431,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -479,7 +477,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -525,7 +523,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-ghost",
                 username: "ghost",
@@ -601,7 +599,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -657,7 +655,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -700,7 +698,7 @@ describe("social presence compatibility", () => {
             ])
         );
         mockMGet.mockResolvedValue([String(now), String(now - 1000)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -778,7 +776,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-1",
                 username: "alice",
@@ -818,7 +816,7 @@ describe("social presence compatibility", () => {
             asScanIterable(["social:presence:user:user-1"])
         );
         mockMGet.mockResolvedValue([String(now)]);
-        mockUserFindMany.mockResolvedValue([
+        mockUserFindMany.mockResolvedValueOnce([
             {
                 id: "user-ghost",
                 username: "ghost",

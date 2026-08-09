@@ -53,10 +53,10 @@ jest.mock("../../utils/db", () => ({
             upsert: jest.fn(),
         },
         user: {
+            count: jest.fn(),
             findUnique: jest.fn(),
             update: jest.fn(),
         },
-        $queryRaw: jest.fn(),
     },
 }));
 
@@ -173,9 +173,9 @@ const app = createRouteTestApp("/api/settings", router);
 const mockUserSettingsFindUnique = prisma.userSettings.findUnique as jest.Mock;
 const mockUserSettingsCreate = prisma.userSettings.create as jest.Mock;
 const mockUserSettingsUpsert = prisma.userSettings.upsert as jest.Mock;
+const mockUserCount = prisma.user.count as jest.Mock;
 const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
 const mockUserUpdate = prisma.user.update as jest.Mock;
-const mockPrismaQueryRaw = prisma.$queryRaw as jest.Mock;
 const mockCleanupAll = staleJobCleanupService.cleanupAll as jest.Mock;
 const mockClearUserQualityCache =
     tidalStreamingService.clearUserQualityCache as jest.Mock;
@@ -213,7 +213,7 @@ describe("settings routes integration", () => {
         }));
         mockUserFindUnique.mockResolvedValue({ displayName: "Jane Doe" });
         mockUserUpdate.mockResolvedValue({ id: "user-1" });
-        mockPrismaQueryRaw.mockResolvedValue([{ count: BigInt(0) }]);
+        mockUserCount.mockResolvedValue(0);
         mockCleanupAll.mockResolvedValue({
             discoveryBatches: 2,
             downloadJobs: 4,
@@ -225,7 +225,7 @@ describe("settings routes integration", () => {
     });
 
     it("returns existing settings with displayName and hasProfilePicture", async () => {
-        mockPrismaQueryRaw.mockResolvedValueOnce([{ count: BigInt(1) }]);
+        mockUserCount.mockResolvedValueOnce(1);
 
         const res = await request(app)
             .get("/api/settings")

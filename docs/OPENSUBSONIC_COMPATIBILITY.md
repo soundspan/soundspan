@@ -6,6 +6,8 @@ Last updated: 2026-02-14
 
 This document defines the current `/rest` compatibility contract implemented in this fork and captures readiness evidence used to close the current OpenSubsonic phase gate.
 
+> **Contract authority / OpenAPI exemption.** This document is the authoritative contract for the Subsonic-compatible `/rest` surface (`backend/src/routes/subsonic.ts`). Those endpoints follow the published OpenSubsonic/Subsonic API rather than soundspan's own REST shape, so they are **intentionally exempt** from per-endpoint OpenAPI (`@openapi`) annotation — see the Documentation-coverage rule in [`AGENTS.md`](../AGENTS.md). Keep the endpoint surface below current when `/rest` behavior changes; that is the substitute for OpenAPI coverage on this prefix.
+
 ## Milestone Status
 
 - Current OpenSubsonic compatibility milestone: `Complete` (for soundspan's in-scope music client surface)

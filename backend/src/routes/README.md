@@ -76,6 +76,14 @@ Exception: the CLAP analyzer machine callbacks in
 `AUDIO_ANALYSIS_ENABLED=false`, so analyzers draining in-flight work can still
 report results.
 
+## Conventions
+
+- **One module per mounted prefix.** Each file here owns a single `/api/*` (or `/rest`) prefix listed above; add a new prefix as a new `camelCase` module and register it in `backend/src/index.ts` and in the table above.
+- **Routes orchestrate; services decide.** Keep parsing, validation, authorization decisions, and data access in `backend/src/services/` (and background processors in `backend/src/workers/`); route handlers coordinate and stay within the repository function-size gate.
+- **Data access.** Use Prisma. Raw SQL is limited to the pgvector / full-text-search / row-locking exceptions defined in [`AGENTS.md`](../../../AGENTS.md) and must use parameterized tagged templates.
+- **`/rest` OpenAPI exemption.** `subsonic.ts` implements the Subsonic-compatible `/rest` surface, which is contract-documented in [`docs/OPENSUBSONIC_COMPATIBILITY.md`](../../../docs/OPENSUBSONIC_COMPATIBILITY.md) rather than per-endpoint `@openapi` annotations (see `AGENTS.md`). Update that document when `/rest` behavior changes.
+- **Tests assert behavior.** Prefer runtime tests in `backend/src/routes/__tests__/`; do not add source-scraping `*Contract` tests that `readFileSync` a module and assert on its text (deprecated pattern — see `AGENTS.md`).
+
 ## Update Rule
 
 - When adding, removing, or changing endpoints in this directory, update this README if the entrypoint or test-navigation guidance changes and keep impacted route tests current in the same change set.

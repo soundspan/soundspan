@@ -219,6 +219,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `npx prisma migrate deploy` via a locally reinstalled Prisma CLI.
 - Backend and frontend runtime artifacts now use `COPY --chown` instead of a
   duplicated recursive `chown -R /app` layer.
+- Docs/contract sync (refactor slice): `AGENTS.md` now scopes the "no raw SQL"
+  rule to the three query classes Prisma cannot express (pgvector similarity/ANN,
+  PostgreSQL full-text search, and row/advisory locking) with a parameterized-only
+  constraint, records that the Subsonic `/rest` surface is contract-documented in
+  `docs/OPENSUBSONIC_COMPATIBILITY.md` instead of per-endpoint OpenAPI, documents
+  the `logger.child` scope and file naming/placement conventions, deprecates the
+  source-scraping `*Contract` test pattern, and indexes the `components/vibe`
+  location as a recognized (owner-decision-pending) exception in
+  `frontend/features/README.md`. The two trivially-expressible profile-picture
+  presence checks in `routes/settings.ts` (`$queryRaw COUNT(*)` → `prisma.user.count`)
+  and `routes/social.ts` (two `$queryRaw SELECT id` → `prisma.user.findMany`) were
+  migrated to Prisma with no behavior change (the profile-picture blob is still not
+  loaded).
 - Backend: introduced a single consolidated, typed Lidarr HTTP client
   (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
   for outbound Lidarr calls. It wraps one reusable axios instance with bounded
