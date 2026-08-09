@@ -4,9 +4,7 @@ import { prisma } from "../utils/db";
 import bcrypt from "bcrypt";
 import { z } from "zod";
 import axios from "axios";
-import crypto from "crypto";
 import { encryptField } from "../utils/systemSettings";
-import { EnvFileSyncSkippedError, writeEnvFile } from "../utils/envWriter";
 import {
     generateToken,
     requireAuth,
@@ -43,50 +41,6 @@ const soulseekConfigSchema = z.object({
 const enrichmentConfigSchema = z.object({
     enabled: z.boolean(),
 });
-
-/**
- * Generate a secure encryption key for settings encryption
- * This is called automatically during first user registration
- */
-async function ensureEncryptionKey(): Promise<void> {
-    // Check if encryption key already exists
-    if (
-        process.env.SETTINGS_ENCRYPTION_KEY &&
-        process.env.SETTINGS_ENCRYPTION_KEY !==
-            "default-encryption-key-change-me"
-    ) {
-        logger.debug("[ONBOARDING] Encryption key already exists");
-        return;
-    }
-
-    // Generate a secure 32-byte encryption key
-    const encryptionKey = crypto.randomBytes(32).toString("base64");
-
-    logger.debug(
-        "[ONBOARDING] Generating encryption key for settings security..."
-    );
-
-    try {
-        // Write to .env file
-        await writeEnvFile({
-            SETTINGS_ENCRYPTION_KEY: encryptionKey,
-        });
-
-        // Update the process environment so it's available immediately
-        process.env.SETTINGS_ENCRYPTION_KEY = encryptionKey;
-
-        logger.debug("[ONBOARDING] Encryption key generated and saved to .env");
-    } catch (error) {
-        if (error instanceof EnvFileSyncSkippedError) {
-            logger.error(
-                "[ONBOARDING] Cannot persist generated SETTINGS_ENCRYPTION_KEY automatically. " +
-                    "Set SETTINGS_ENCRYPTION_KEY via environment/secret before first registration."
-            );
-        }
-        logger.error("[ONBOARDING] Failed to save encryption key:", error);
-        throw new Error("Failed to generate encryption key");
-    }
-}
 
 /**
  * @openapi
@@ -136,11 +90,6 @@ router.post("/register", async (req, res) => {
         // Unauthenticated registration is only allowed when no users exist.
         if (!isFirstUser) {
             return res.status(403).json({ error: "Registration is closed" });
-        }
-
-        // If this is the first user, ensure encryption key is generated
-        if (isFirstUser) {
-            await ensureEncryptionKey();
         }
 
         // Check if username is taken
@@ -630,9 +579,11 @@ router.get("/status", async (req, res) => {
 
         // Try to verify token and check onboarding status
         try {
-            // Shared helper pins HS256 and resolves the secret from one
-            // validated source (no inline require / process.env read / cast).
             const decoded = verifyAuthToken(token);
+            // Migrate this inline guard to shared verifyAccessToken once the auth slice lands.
+            if (decoded.type === "refresh") {
+                throw new Error("Refresh tokens are not valid access tokens");
+            }
 
             const user = await prisma.user.findUnique({
                 where: { id: decoded.userId },

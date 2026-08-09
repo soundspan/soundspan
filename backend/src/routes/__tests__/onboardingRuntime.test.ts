@@ -164,7 +164,7 @@ describe("onboarding route runtime", () => {
         await register(firstReq, firstRes);
         expect(firstRes.statusCode).toBe(200);
         expect(firstRes.body.token).toBe("jwt-token");
-        expect(mockWriteEnvFile).toHaveBeenCalled();
+        expect(mockWriteEnvFile).not.toHaveBeenCalled();
         expect(prisma.user.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 data: expect.objectContaining({ role: "admin" }),
@@ -180,33 +180,6 @@ describe("onboarding route runtime", () => {
         await register(closedReq, closedRes);
         expect(closedRes.statusCode).toBe(403);
         expect(closedRes.body).toEqual({ error: "Registration is closed" });
-    });
-
-    it("skips encryption key generation when SETTINGS_ENCRYPTION_KEY is already set", async () => {
-        process.env.SETTINGS_ENCRYPTION_KEY = "custom-encryption-key";
-        prisma.user.count.mockResolvedValueOnce(0);
-        prisma.user.findUnique.mockResolvedValueOnce(null);
-
-        const req = { body: { username: "first", password: "secure123" } } as any;
-        const res = createRes();
-        await register(req, res);
-
-        expect(res.statusCode).toBe(200);
-        expect(mockWriteEnvFile).not.toHaveBeenCalled();
-    });
-
-    it("returns 500 when first-user encryption key persistence fails", async () => {
-        prisma.user.count.mockResolvedValueOnce(0);
-        mockWriteEnvFile.mockRejectedValueOnce(
-            new MockEnvFileSyncSkippedError("skip")
-        );
-
-        const req = { body: { username: "first", password: "secure123" } } as any;
-        const res = createRes();
-        await register(req, res);
-
-        expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "Failed to create account" });
     });
 
     it("saves lidarr and audiobookshelf settings with enabled/disabled branches", async () => {
@@ -454,6 +427,27 @@ describe("onboarding route runtime", () => {
             needsOnboarding: false,
             hasAccount: true,
         });
+    });
+
+    it("rejects refresh tokens presented as bearer tokens", async () => {
+        prisma.user.count.mockResolvedValueOnce(1);
+        mockVerifyAuthToken.mockReturnValueOnce({
+            userId: "u1",
+            type: "refresh",
+        });
+        const req = {
+            headers: { authorization: "Bearer refresh-token" },
+        } as any;
+        const res = createRes();
+
+        await status(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({
+            needsOnboarding: false,
+            hasAccount: true,
+        });
+        expect(prisma.user.findUnique).not.toHaveBeenCalled();
     });
 
     it("returns 500 on status check failure", async () => {
