@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { isEnvFlagEnabled } from "./envParsers";
 import { logger } from "./logger";
 
 // Legacy (v1) cipher — read-only, see decryptLegacy().
@@ -10,6 +11,7 @@ const SCRYPT_KEYLEN = 32;
 const SALT_BYTES = 16;
 const GCM_IV_BYTES = 12; // 96-bit nonce, the GCM standard
 const GCM_TAG_BYTES = 16; // 128-bit authentication tag (GCM default)
+const LEGACY_IV_BYTES = 16;
 
 // Insecure default that must not be used in production
 const INSECURE_DEFAULT = "default-encryption-key-change-me";
@@ -87,6 +89,25 @@ function deriveGcmKey(salt: Buffer): Buffer {
     return key;
 }
 
+function legacyDecryptFailsClosed(): boolean {
+    return isEnvFlagEnabled(process.env.SETTINGS_DECRYPT_FAIL_CLOSED);
+}
+
+function handleLegacyDecryptFailure(text: string, error?: unknown): string {
+    if (legacyDecryptFailsClosed()) {
+        if (error instanceof Error) {
+            throw error;
+        }
+        throw new Error(
+            "Legacy decryption failed closed: value is not authenticated v2 ciphertext",
+        );
+    }
+    if (error !== undefined) {
+        logger.error("Decryption error:", error);
+    }
+    return text;
+}
+
 /**
  * Encrypt a string with authenticated AES-256-GCM, writing the versioned
  * envelope `v2:<saltHex>:<ivHex>:<tagHex>:<ctHex>`. The key is derived per value
@@ -151,20 +172,29 @@ function decryptV2(text: string): string {
 }
 
 /**
- * Decrypt legacy v1 (AES-256-CBC) ciphertext. Preserved verbatim — including the
- * fail-open passthrough for non-encrypted data — so every historical
- * `ivHex:ctHex` value still round-trips under its original (pad/truncate) key
- * derivation. This path is read-only; new data is never written in this format.
+ * Decrypt legacy v1 (AES-256-CBC) ciphertext. By default, malformed legacy data
+ * retains its historical plaintext passthrough. SETTINGS_DECRYPT_FAIL_CLOSED=true
+ * disables that passthrough at call time. Operators should enable the flag only
+ * after GET /api/admin/secrets-status reports zero legacy rows.
  */
 function decryptLegacy(text: string): string {
+    const parts = text.split(":");
+    if (parts.length < 2) {
+        return handleLegacyDecryptFailure(text);
+    }
+
     try {
-        const parts = text.split(":");
-        if (parts.length < 2) {
-            // Not in expected format, return as-is (might be unencrypted)
-            return text;
-        }
         const iv = Buffer.from(parts[0], "hex");
         const encryptedText = Buffer.from(parts.slice(1).join(":"), "hex");
+        if (iv.length !== LEGACY_IV_BYTES) {
+            throw new Error("Invalid legacy ciphertext IV length");
+        }
+        if (
+            encryptedText.length === 0 ||
+            encryptedText.length % LEGACY_IV_BYTES !== 0
+        ) {
+            throw new Error("Invalid legacy ciphertext length");
+        }
         const decipher = crypto.createDecipheriv(
             LEGACY_ALGORITHM,
             LEGACY_ENCRYPTION_KEY,
@@ -178,9 +208,7 @@ function decryptLegacy(text: string): string {
         if (error.code === "ERR_OSSL_BAD_DECRYPT") {
             throw error;
         }
-        // For other errors, log and return original (might be unencrypted)
-        logger.error("Decryption error:", error);
-        return text;
+        return handleLegacyDecryptFailure(text, error);
     }
 }
 

@@ -53,6 +53,9 @@ jest.mock("../../utils/logger", () => ({
 
 import { tidalService } from "../tidal";
 
+const ORIGINAL_DECRYPT_FAIL_CLOSED =
+    process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
+
 describe("tidalService", () => {
     const baseCreds = {
         accessToken: "access-token",
@@ -69,6 +72,15 @@ describe("tidalService", () => {
         mockConfig.internalApiSecret = undefined;
         mockEncrypt.mockImplementation((value: string) => `enc:${value}`);
         mockDecrypt.mockImplementation((value: string) => `dec:${value}`);
+        delete process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
+    });
+
+    afterEach(() => {
+        if (ORIGINAL_DECRYPT_FAIL_CLOSED === undefined) {
+            delete process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
+            return;
+        }
+        process.env.SETTINGS_DECRYPT_FAIL_CLOSED = ORIGINAL_DECRYPT_FAIL_CLOSED;
     });
 
     describe("internal-secret header (F31)", () => {
@@ -198,6 +210,26 @@ describe("tidalService", () => {
                 fileTemplate:
                     "{album.artist}/{album.title}/{item.number:02d}. {item.title}",
             });
+        });
+
+        it("getCredentials returns null when decrypt throws in fail-closed mode", async () => {
+            process.env.SETTINGS_DECRYPT_FAIL_CLOSED = "true";
+            mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
+                id: "default",
+                tidalAccessToken: "encrypted-access",
+                tidalRefreshToken: "encrypted-refresh",
+            });
+            mockDecrypt.mockImplementationOnce(() => {
+                throw new Error("bad decrypt");
+            });
+
+            const creds = await (tidalService as any).getCredentials();
+
+            expect(creds).toBeNull();
+            expect(mockLogger.error).toHaveBeenCalledWith(
+                "[TIDAL] Credential decryption failed closed:",
+                expect.any(Error),
+            );
         });
 
         it("saveTokens encrypts both tokens and persists the encrypted payload", async () => {

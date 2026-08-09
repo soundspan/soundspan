@@ -9,6 +9,8 @@ const KEY_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 const ORIGINAL_SETTINGS_ENCRYPTION_KEY = process.env.SETTINGS_ENCRYPTION_KEY;
 const ORIGINAL_ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+const ORIGINAL_DECRYPT_FAIL_CLOSED =
+    process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
 
 /**
  * Reproduces the historical AES-256-CBC ("v1") write format exactly, including
@@ -69,6 +71,12 @@ describe("encryption utils", () => {
             ORIGINAL_SETTINGS_ENCRYPTION_KEY,
         );
         restoreEnvVar("ENCRYPTION_KEY", ORIGINAL_ENCRYPTION_KEY);
+        if (ORIGINAL_DECRYPT_FAIL_CLOSED === undefined) {
+            delete process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
+        } else {
+            process.env.SETTINGS_DECRYPT_FAIL_CLOSED =
+                ORIGINAL_DECRYPT_FAIL_CLOSED;
+        }
         jest.resetModules();
     });
 
@@ -105,6 +113,16 @@ describe("encryption utils", () => {
     });
 
     describe("v2 authenticated envelope (AES-256-GCM)", () => {
+        it("decrypts a valid v2 value when legacy fail-closed mode is enabled", async () => {
+            const { encrypt, decrypt } = await loadEncryptionModule({
+                settingsKey: VALID_KEY,
+            });
+            process.env.SETTINGS_DECRYPT_FAIL_CLOSED = "true";
+
+            const plaintext = "authenticated-value";
+            expect(decrypt(encrypt(plaintext))).toBe(plaintext);
+        });
+
         it("writes the versioned v2 envelope and round-trips", async () => {
             const { encrypt, decrypt } = await loadEncryptionModule({
                 settingsKey: VALID_KEY,
@@ -128,6 +146,7 @@ describe("encryption utils", () => {
         });
 
         it("fails CLOSED on a tampered v2 ciphertext (never returns forged cleartext)", async () => {
+            delete process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
             const { encrypt, decrypt } = await loadEncryptionModule({
                 settingsKey: VALID_KEY,
             });
@@ -215,6 +234,28 @@ describe("encryption utils", () => {
     });
 
     describe("legacy v1 read path (AES-256-CBC) — historical data still decrypts", () => {
+        it("passes through a non-envelope value when fail-closed mode is unset", async () => {
+            delete process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
+            const { decrypt } = await loadEncryptionModule({
+                settingsKey: VALID_KEY,
+            });
+
+            expect(decrypt("stored-plaintext-token")).toBe(
+                "stored-plaintext-token",
+            );
+        });
+
+        it("rejects a non-v2 value when legacy fail-closed mode is enabled", async () => {
+            const { decrypt } = await loadEncryptionModule({
+                settingsKey: VALID_KEY,
+            });
+            process.env.SETTINGS_DECRYPT_FAIL_CLOSED = "true";
+
+            expect(() => decrypt("stored-plaintext-token")).toThrow(
+                "Legacy decryption failed closed",
+            );
+        });
+
         it("decrypts legacy CBC ciphertext written before the GCM migration", async () => {
             const { decrypt } = await loadEncryptionModule({
                 settingsKey: VALID_KEY,

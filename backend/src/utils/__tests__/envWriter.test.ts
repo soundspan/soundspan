@@ -1,5 +1,8 @@
 const mockReadFileSync = jest.fn();
 const mockWriteFileSync = jest.fn();
+const mockChmodSync = jest.fn();
+const mockRenameSync = jest.fn();
+const mockUnlinkSync = jest.fn();
 const mockLoggerDebug = jest.fn();
 
 jest.mock("fs", () => ({
@@ -7,6 +10,9 @@ jest.mock("fs", () => ({
     default: {
         readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
         writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
+        chmodSync: (...args: unknown[]) => mockChmodSync(...args),
+        renameSync: (...args: unknown[]) => mockRenameSync(...args),
+        unlinkSync: (...args: unknown[]) => mockUnlinkSync(...args),
     },
 }));
 
@@ -47,6 +53,8 @@ describe("envWriter", () => {
             "[ENV] Skipping .env sync: disabled by ENABLE_ENV_FILE_SYNC=false"
         );
         expect(mockWriteFileSync).not.toHaveBeenCalled();
+        expect(mockChmodSync).not.toHaveBeenCalled();
+        expect(mockRenameSync).not.toHaveBeenCalled();
     });
 
     it("skips writing in Kubernetes unless explicitly enabled", async () => {
@@ -61,6 +69,8 @@ describe("envWriter", () => {
             })
         );
         expect(mockWriteFileSync).not.toHaveBeenCalled();
+        expect(mockChmodSync).not.toHaveBeenCalled();
+        expect(mockRenameSync).not.toHaveBeenCalled();
     });
 
     it("skips implicit writes when resolved path is filesystem root", async () => {
@@ -70,6 +80,8 @@ describe("envWriter", () => {
             EnvFileSyncSkippedError
         );
         expect(mockWriteFileSync).not.toHaveBeenCalled();
+        expect(mockChmodSync).not.toHaveBeenCalled();
+        expect(mockRenameSync).not.toHaveBeenCalled();
     });
 
     it("uses default path based on cwd when ENV_FILE_PATH is not set", async () => {
@@ -81,11 +93,15 @@ describe("envWriter", () => {
         await writeEnvFile({ PORT: "3006" });
 
         expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+        const tempPath = String(mockWriteFileSync.mock.calls[0][0]);
+        expect(tempPath).toEqual(expect.stringContaining("/srv/.env.tmp-"));
         expect(mockWriteFileSync).toHaveBeenCalledWith(
-            "/srv/.env",
+            tempPath,
             expect.any(String),
-            "utf-8"
+            { encoding: "utf-8", mode: 0o600 }
         );
+        expect(mockChmodSync).toHaveBeenCalledWith(tempPath, 0o600);
+        expect(mockRenameSync).toHaveBeenCalledWith(tempPath, "/srv/.env");
         cwdSpy.mockRestore();
     });
 
@@ -140,5 +156,36 @@ describe("envWriter", () => {
         expect(written).toContain("CUSTOM_KEY=keep-me");
         expect(written).toContain("NEW_KEY=new-value");
         expect(written).not.toContain("LIDARR_ENABLED=");
+    });
+
+    it("cleans up the temporary file and preserves the original error when rename fails", async () => {
+        process.env.ENV_FILE_PATH = "/tmp/soundspan.env";
+        const renameError = new Error("rename failed");
+        mockRenameSync.mockImplementation(() => {
+            throw renameError;
+        });
+
+        await expect(writeEnvFile({ PORT: "3006" })).rejects.toBe(renameError);
+
+        const tempPath = String(mockWriteFileSync.mock.calls[0][0]);
+        expect(tempPath).toEqual(
+            expect.stringContaining("/tmp/soundspan.env.tmp-")
+        );
+        expect(mockWriteFileSync).toHaveBeenCalledWith(
+            tempPath,
+            expect.any(String),
+            { encoding: "utf-8", mode: 0o600 }
+        );
+        expect(mockChmodSync).toHaveBeenCalledWith(tempPath, 0o600);
+        expect(mockRenameSync).toHaveBeenCalledWith(
+            tempPath,
+            "/tmp/soundspan.env"
+        );
+        expect(mockUnlinkSync).toHaveBeenCalledWith(tempPath);
+        expect(mockWriteFileSync).not.toHaveBeenCalledWith(
+            "/tmp/soundspan.env",
+            expect.anything(),
+            expect.anything()
+        );
     });
 });

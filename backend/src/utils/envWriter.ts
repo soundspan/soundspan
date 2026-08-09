@@ -1,3 +1,5 @@
+import assert from "assert";
+import crypto from "crypto";
 import fs from "fs";
 import { logger } from "./logger";
 import path from "path";
@@ -51,6 +53,33 @@ function shouldSkipEnvSync(envPath: string): string | null {
     }
 
     return null;
+}
+
+function atomicWriteFileSecret(targetPath: string, content: string): void {
+    assert.strictEqual(typeof targetPath, "string", "targetPath must be a string");
+    assert.ok(targetPath.trim().length > 0, "targetPath must not be empty");
+
+    const tempPath = `${targetPath}.tmp-${process.pid}-${crypto
+        .randomBytes(6)
+        .toString("hex")}`;
+
+    try {
+        fs.writeFileSync(tempPath, content, {
+            encoding: "utf-8",
+            mode: 0o600,
+        });
+        fs.chmodSync(tempPath, 0o600);
+        fs.renameSync(tempPath, targetPath);
+    } catch (error) {
+        try {
+            fs.unlinkSync(tempPath);
+        } catch (cleanupError) {
+            if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
+                logger.debug("Failed to clean up temporary .env file", cleanupError);
+            }
+        }
+        throw error;
+    }
 }
 
 /**
@@ -153,7 +182,6 @@ export async function writeEnvFile(
 
     lines.push(""); // Trailing newline
 
-    // Write to file
-    fs.writeFileSync(envPath, lines.join("\n"), "utf-8");
+    atomicWriteFileSecret(envPath, lines.join("\n"));
     logger.debug(`.env file updated with ${existingVars.size} variables`);
 }

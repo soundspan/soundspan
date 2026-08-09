@@ -461,6 +461,7 @@ describe("auth routes runtime", () => {
             data: {
                 passwordHash: "new-hash",
                 tokenVersion: { increment: 1 },
+                subsonicPassword: null,
             },
         });
     });
@@ -976,6 +977,7 @@ describe("auth routes runtime", () => {
                     email: "new@example.com",
                     passwordHash: "new-hash",
                     tokenVersion: { increment: 1 },
+                    subsonicPassword: null,
                 }),
             })
         );

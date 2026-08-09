@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- At-rest secret hygiene for the `.env` sync: `writeEnvFile` now writes the
+  secrets-bearing `.env` (which holds `SETTINGS_ENCRYPTION_KEY` and decrypted
+  integration API keys) with owner-only `0600` permissions and **atomically**
+  (write to a same-directory temp file, `chmod 0600`, then `rename` over the
+  target, with the temp file cleaned up and the original error re-thrown on
+  failure). Previously the file was created world-readable under the process
+  umask and written in place, so a crash mid-write could leave a truncated
+  secrets file. Nothing about which keys are synced changed.
+- **BREAKING (Subsonic token-auth clients re-authenticate once):** the OpenSubsonic
+  auth middleware no longer silently persists a user's **primary account
+  password** as reversible ciphertext. Previously, a successful password-auth
+  request stored `encrypt(accountPassword)` in `user.subsonicPassword` so that
+  MD5 token auth would work — converting a bcrypt-only account password into a
+  key-reversible value at rest. Password auth now authenticates via bcrypt and
+  persists nothing. Subsonic **token** auth (`t`+`s`) validates against the
+  dedicated per-user Subsonic secret set explicitly via
+  `POST /api/auth/subsonic-password`. Changing the account password (self-service
+  `POST /api/auth/change-password` and admin user updates) now also clears
+  `subsonicPassword`. Clients using token auth with the account password must set
+  a dedicated Subsonic password once, or switch to password auth. See
+  `docs/UPGRADING.md`.
+- Legacy (pre-GCM) at-rest decryption can now fail **closed** behind the opt-in
+  `SETTINGS_DECRYPT_FAIL_CLOSED` flag. The legacy AES-256-CBC path previously
+  returned unrecognized/plaintext values verbatim (fail-open passthrough),
+  keeping unauthenticated ciphertext and plaintext-passthrough alive
+  indefinitely. With the flag enabled, any stored value that is not an
+  authenticated `v2:` envelope throws instead of being returned. The Tidal
+  credential reader honours the same flag (it no longer falls back to using raw
+  stored ciphertext as a bearer token when fail-closed). Enable the flag only
+  after `GET /api/admin/secrets-status` reports zero legacy rows; authenticated
+  `v2` ciphertext always fails closed regardless. See `docs/UPGRADING.md`.
 - All-in-One (AIO) backend, frontend, and analyzer processes now run under
   supervisord as the fixed `soundspan` user (uid/gid 1000). Existing writable
   volume paths are chowned automatically on every boot; see

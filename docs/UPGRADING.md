@@ -5,6 +5,55 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## ⚠️ Breaking: Subsonic account passwords are no longer stored reversibly (token-auth clients re-authenticate once)
+
+**Who this affects:** users whose OpenSubsonic/Subsonic client authenticates with
+**token auth** (`t`+`s`, i.e. `md5(password + salt)`) using their **soundspan
+account password**. Clients using plain password auth (`p=`) are unaffected.
+
+**What changed.** The Subsonic auth middleware used to persist a successful
+password-auth user's account password as reversible ciphertext in
+`user.subsonicPassword` so that later token-auth requests could recompute the MD5
+digest. That downgraded a bcrypt-only account password to a key-reversible value
+at rest. Now:
+
+- Password auth authenticates via bcrypt and **persists nothing**.
+- Token auth validates against a **dedicated per-user Subsonic secret**, set
+  explicitly via `POST /api/auth/subsonic-password` (the Settings UI's "Subsonic
+  password" field). This secret is purpose-specific and independent of the
+  account password.
+- Changing the account password (`POST /api/auth/change-password`, and admin user
+  updates that set a new password) now **clears** `subsonicPassword`, forcing a
+  one-time re-establishment.
+
+**What to do.** In each affected client, either (a) set a dedicated Subsonic
+password once (soundspan Settings → Subsonic password) and use that in the client,
+or (b) switch the client to password auth. No data migration is required; any
+previously auto-stored account-password ciphertext is cleared on the next account
+password change.
+
+---
+
+## Optional: fail-closed legacy decryption (`SETTINGS_DECRYPT_FAIL_CLOSED`)
+
+**Who this affects:** operators completing the v1 (AES-256-CBC) → v2 (AES-256-GCM)
+at-rest cipher migration who want to guarantee no legacy/plaintext-passthrough
+values remain readable.
+
+**Background.** The legacy decryption path returns unrecognized values verbatim
+(fail-open) so historical data keeps working during migration. Set
+`SETTINGS_DECRYPT_FAIL_CLOSED=true` to make any non-`v2:` stored value throw
+instead. Authenticated `v2` ciphertext already fails closed unconditionally.
+
+**Rollout.** Do **not** enable this until `GET /api/admin/secrets-status` reports
+`settingsCipher.legacy: 0` (run the `scripts/migrate-settings-to-gcm.ts` backfill
+first if needed). Enabling it while legacy rows remain will make those values
+unreadable (e.g. Tidal credentials become unconfigured and require re-auth). The
+flag is a defense-in-depth latch to flip once, after the migration is verified
+complete.
+
+---
+
 ## ⚠️ Breaking: no more shipped default secrets; fail-fast startup; Postgres/Redis bound to loopback
 
 **Who this affects:** every split-stack (`docker-compose.yml`) deployment that relied on

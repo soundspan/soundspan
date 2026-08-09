@@ -5,7 +5,7 @@ import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { prisma } from "../utils/db";
-import { decrypt, encrypt } from "../utils/encryption";
+import { decrypt } from "../utils/encryption";
 import { findApiKeyRecord } from "../utils/apiKeyHash";
 import { logger } from "../utils/logger";
 import {
@@ -231,11 +231,8 @@ export async function requireSubsonicAuth(
         if (validPassword) {
             authenticated = true;
 
-            // Keep token auth working without separate credential management.
-            await prisma.user.update({
-                where: { id: user.id },
-                data: { subsonicPassword: encrypt(decodedPassword) },
-            });
+            // Never store the account password reversibly; token auth uses the
+            // dedicated secret set via POST /api/auth/subsonic-password.
         }
     }
 

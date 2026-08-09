@@ -467,6 +467,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
             data: {
                 passwordHash: newPasswordHash,
                 tokenVersion: { increment: 1 },
+                subsonicPassword: null,
             },
         });
 
@@ -766,6 +767,7 @@ router.patch<{ id: string }>("/users/:id", requireAuth, requireAdmin, async (req
         if (data.password) {
             updateData.passwordHash = await bcrypt.hash(data.password, 10);
             updateData.tokenVersion = { increment: 1 };
+            updateData.subsonicPassword = null;
         }
 
         if (Object.keys(updateData).length === 0) {

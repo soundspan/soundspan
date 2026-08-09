@@ -183,7 +183,7 @@ describe("requireSubsonicAuth", () => {
         expect(next).not.toHaveBeenCalled();
     });
 
-    it("authenticates password mode and stores subsonic password", async () => {
+    it("authenticates password mode and does not persist the account password", async () => {
         mockFindUnique.mockResolvedValue({
             id: "u1",
             username: "alice",
@@ -192,7 +192,6 @@ describe("requireSubsonicAuth", () => {
             subsonicPassword: null,
         });
         mockCompare.mockResolvedValue(true);
-        mockUpdate.mockResolvedValue({});
         mockApiKeyUpdate.mockResolvedValue({});
 
         const req = buildReq({
@@ -205,10 +204,7 @@ describe("requireSubsonicAuth", () => {
         await requireSubsonicAuth(req, buildRes(), next);
 
         expect(mockCompare).toHaveBeenCalledWith("secret", "hash");
-        expect(mockUpdate).toHaveBeenCalledWith({
-            where: { id: "u1" },
-            data: { subsonicPassword: "enc:secret" },
-        });
+        expect(mockUpdate).not.toHaveBeenCalled();
         expect((req as any).user).toEqual({
             id: "u1",
             username: "alice",

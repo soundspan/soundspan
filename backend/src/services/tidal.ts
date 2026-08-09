@@ -13,6 +13,7 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
+import { isEnvFlagEnabled } from "../utils/envParsers";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -168,7 +169,9 @@ class TidalService {
     }
 
     /**
-     * Read & decrypt credentials from SystemSettings.
+     * Read and decrypt credentials from SystemSettings. In fail-closed mode,
+     * decryption failure leaves Tidal unconfigured instead of using stored
+     * ciphertext as bearer tokens.
      */
     private async getCredentials(): Promise<{
         accessToken: string;
@@ -191,13 +194,24 @@ class TidalService {
             let accessToken: string;
             let refreshToken: string;
             try {
-                accessToken = decrypt(settings.tidalAccessToken) || settings.tidalAccessToken;
-            } catch {
+                accessToken = decrypt(settings.tidalAccessToken);
+                refreshToken = decrypt(settings.tidalRefreshToken);
+                if (!accessToken || !refreshToken) {
+                    throw new Error("Tidal credential decryption returned empty");
+                }
+            } catch (err) {
+                if (
+                    isEnvFlagEnabled(
+                        process.env.SETTINGS_DECRYPT_FAIL_CLOSED,
+                    )
+                ) {
+                    logger.error(
+                        "[TIDAL] Credential decryption failed closed:",
+                        err,
+                    );
+                    return null;
+                }
                 accessToken = settings.tidalAccessToken;
-            }
-            try {
-                refreshToken = decrypt(settings.tidalRefreshToken) || settings.tidalRefreshToken;
-            } catch {
                 refreshToken = settings.tidalRefreshToken;
             }
 
