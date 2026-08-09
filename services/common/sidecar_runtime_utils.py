@@ -5,7 +5,10 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+import random
 import re
+import threading
+import time
 from typing import Optional
 
 import httpx
@@ -22,6 +25,37 @@ _KNOWN_DEFAULT_SECRET = "soundspan-internal-secret-change-me"
 # Prisma cuids (the only user_id the backend ever sends) are alphanumeric;
 # this also rejects any `/`, `.`, or `%` that could escape DATA_PATH.
 _USER_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+class ThreadSafeRatePacer:
+    """Serialize rate-limited work across threads with a randomized minimum gap.
+
+    ``wait()`` blocks the calling thread until at least a random delay in
+    ``[min_delay, max_delay]`` has elapsed since the previously reserved slot,
+    then reserves the next slot. State is guarded by a ``threading.Lock``
+    because asyncio locks are not thread-safe. Monotonic time prevents wall-
+    clock jumps from distorting pacing. Returns the seconds slept.
+    """
+
+    def __init__(self, min_delay: float, max_delay: float) -> None:
+        self._min = float(min_delay)
+        self._max = float(max_delay)
+        if not 0 <= self._min <= self._max:
+            raise ValueError("rate-pacing delays must satisfy 0 <= min <= max")
+        self._lock = threading.Lock()
+        self._next_allowed = 0.0
+
+    def wait(self) -> float:
+        """Wait for and reserve the next rate-limited work slot."""
+        with self._lock:
+            now = time.monotonic()
+            gap = random.uniform(self._min, self._max)
+            start_at = max(self._next_allowed, now)
+            self._next_allowed = start_at + gap
+            sleep_for = start_at - now
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+        return sleep_for
 
 
 def register_error_handlers(app: FastAPI, logger: logging.Logger) -> None:

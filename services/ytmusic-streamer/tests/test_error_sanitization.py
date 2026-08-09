@@ -140,7 +140,7 @@ def test_stream_extraction_error_sanitized(monkeypatch, caplog) -> None:
 
     yt_dlp_stub = SimpleNamespace(YoutubeDL=FailingYoutubeDL)
     monkeypatch.setitem(sys.modules, "yt_dlp", yt_dlp_stub)
-    monkeypatch.setattr(app, "_last_extract_time", 0)
+    monkeypatch.setattr(app._extract_pacer, "wait", lambda: 0.0)
     app._stream_cache.clear()
     caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
 
