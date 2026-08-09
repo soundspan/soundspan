@@ -337,6 +337,7 @@ describe("audiobooks advanced runtime", () => {
                 headers: {
                     Authorization: "Bearer abs-token",
                 },
+                signal: expect.any(AbortSignal),
             }
         );
         expect(proxyRes.statusCode).toBe(200);

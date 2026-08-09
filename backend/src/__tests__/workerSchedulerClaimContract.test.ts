@@ -6,8 +6,8 @@ describe("worker scheduler claim contract", () => {
         const workersPath = path.resolve(__dirname, "../workers/index.ts");
         const workersSource = fs.readFileSync(workersPath, "utf8");
 
-        expect(workersSource).toContain(
-            'let schedulerLockRedis: Redis = createIORedisClient("worker-scheduler-locks");'
+        expect(workersSource).toMatch(
+            /let schedulerLockRedis: Redis = createIORedisClient\(\s*"worker-scheduler-locks",\s*jestLazyConnectOverride,?\s*\)/
         );
         expect(workersSource).toContain("async function runWithSchedulerClaim(");
         expect(workersSource).toContain(
