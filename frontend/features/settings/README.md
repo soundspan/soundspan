@@ -49,6 +49,7 @@ Start-here guide for `frontend/features/settings`.
 | `components/ui/SettingsSelect.tsx` | components |
 | `components/ui/SettingsSidebar.tsx` | components |
 | `components/ui/SettingsToggle.tsx` | components |
+| `components/ui/settingsFieldStyles.ts` | shared settings-field styles |
 | `hooks/settingsHydration.ts` | hooks |
 | `hooks/useAPIKeys.ts` | hooks |
 | `hooks/useSettingsData.ts` | hooks |

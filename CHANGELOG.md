@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer re-renders on every clock tick. Playback behavior is unchanged
   (verified by the existing orchestrator component suite plus a new render-count
   regression test).
+- Frontend soundspan colors now have a centralized Tailwind v4 CSS-first
+  `@theme` palette, with synchronized TypeScript tokens and contrast guards for
+  accessible text and settings focus indicators.
+- **Accessibility:** Raised low-contrast gray body text to the WCAG-AA gray-400
+  floor, gave settings inputs a visible (>=3:1) brand focus ring, and added a
+  ratchet guard against new hardcoded arbitrary-hex Tailwind classes.
 - **Backend error-response canonicalization (developer-facing standard + first
   exemplars).** The canonical route error contract is now documented in
   `backend/src/routes/README.md`: async handlers wrap in `asyncHandler`,

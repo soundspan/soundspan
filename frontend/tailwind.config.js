@@ -7,14 +7,7 @@ module.exports = {
     ],
     theme: {
         extend: {
-            colors: {
-                brand: {
-                    DEFAULT: '#3b82f6',
-                    hover: '#60a5fa',
-                    light: '#93c5fd',
-                    dark: '#2563eb'
-                }
-            },
+            // Colors live in app/globals.css @theme (Tailwind v4 CSS-first)
             screens: {
                 '3xl': '1920px',  // TV/Large Desktop
                 '4xl': '2560px',  // 4K TV/Large TV
