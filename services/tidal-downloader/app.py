@@ -1063,7 +1063,7 @@ async def auth_session(tokens: SessionCheckPayload):
     """Verify that the stored tokens are still valid by calling /sessions."""
     try:
         api = _build_api(tokens.access_token, tokens.user_id, tokens.country_code)
-        session = api.get_session()
+        session = await asyncio.to_thread(api.get_session)
         return {
             "valid": True,
             "session_id": session.sessionId,
@@ -1289,17 +1289,18 @@ def _store_user_session(
         _browse_sessions.pop(key, None)
 
 
-def _refresh_and_restore_user(
+async def _refresh_and_restore_user(
     req: UserAuthRestoreRequest,
     soundspan_user_id: str,
 ) -> dict:
     """Refresh expired TIDAL credentials and restore the per-user session."""
-    auth_response = AuthAPI().refresh_token(req.refresh_token)
+    auth_api = AuthAPI()
+    auth_response = await asyncio.to_thread(auth_api.refresh_token, req.refresh_token)
     new_token = auth_response.access_token
     new_user_id = str(auth_response.user.userId)
     new_country = auth_response.user.countryCode
     api = _build_api(new_token, new_user_id, new_country)
-    api.get_session()
+    await asyncio.to_thread(api.get_session)
     _store_user_session(
         soundspan_user_id,
         api,
@@ -1330,7 +1331,7 @@ async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(..
     """Restore a user's credentials, refreshing an expired token if needed."""
     try:
         api = _build_api(req.access_token, req.user_id, req.country_code)
-        api.get_session()
+        await asyncio.to_thread(api.get_session)
         _store_user_session(
             user_id,
             api,
@@ -1348,7 +1349,7 @@ async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(..
     except ApiError as e:
         log.warning(f"TIDAL session expired for user {user_id}, attempting refresh: {e}")
         try:
-            return _refresh_and_restore_user(req, user_id)
+            return await _refresh_and_restore_user(req, user_id)
         except Exception as refresh_err:
             log.error(f"Token refresh also failed for user {user_id}: {refresh_err}")
             raise HTTPException(

@@ -120,6 +120,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streaming across all users. Each blocking call is now wrapped in
   `asyncio.to_thread`, matching the existing offload pattern already used for the
   per-user refresh path.
+- **Sidecar event-loop offload for per-user session restore.** The
+  `tidal-downloader` `/user/auth/restore` handler and its `/auth/session`
+  verification path called the blocking `tiddl` `get_session()` (and, on the
+  expired-token branch, `AuthAPI().refresh_token()`) directly on the event loop,
+  stalling all concurrent onboarding and streaming while a single user's
+  credentials were restored. These calls are now wrapped in `asyncio.to_thread`,
+  completing the Phase-D offload coverage for the sidecar's auth surface.
 - Aligned the mypy type-check target (`python_version`) to Python 3.11 to match
   the repo floor (Ruff `py311` and the audio-analyzer `python:3.11-slim` pin), so
   type checks run against the oldest interpreter the sidecars use.
