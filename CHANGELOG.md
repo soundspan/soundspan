@@ -107,6 +107,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Digest-pinned the two remaining unpinned base images and closed the gap in the
+  Dockerfile digest-pin ratchet. The root AIO `Dockerfile` (`node:24-bookworm-slim`)
+  and `services/audio-analyzer/Dockerfile` (`python:3.11-slim`) were both unpinned
+  and excluded from `scripts/ci/dockerfile-hygiene.test.mjs`, while every sibling
+  service Dockerfile was pinned and gated. Both bases are now pinned by `@sha256:`
+  (tag kept inline for dependabot), and both paths were added to the gate's
+  `dockerfilePaths` so the ratchet enforces digest pinning across all repo
+  Dockerfiles.
 - Path containment on native audio streaming: the `GET /api/library/tracks/:id/stream`
   handler now resolves the DB-sourced `track.filePath` through `safeResolvePath`
   and returns `404 Track not available` when the resolved path escapes the

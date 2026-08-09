@@ -1,7 +1,7 @@
 # Audio Analyzer Service - Essentia with TensorFlow (MusiCNN)
 # Runs on Python 3.11 (Debian bookworm slim), matching the repo's Python 3.11+
 # contract and the AIO image that already runs this workload on Python 3.11.
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
