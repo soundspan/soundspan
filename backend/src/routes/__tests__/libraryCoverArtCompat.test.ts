@@ -1134,42 +1134,52 @@ describe("library cover-art proxy compatibility", () => {
     });
 
     it("serves native query and id cover files with CORS headers", async () => {
+        const { config } = jest.requireMock("../../config") as {
+            config: Record<string, unknown>;
+        };
+        config.allowedOrigins = ["https://frontend.example"];
+        config.nodeEnv = "production";
         const existsSpy = jest.spyOn(fs, "existsSync").mockReturnValue(true);
 
-        const queryReq = {
-            query: { url: "native:albums/native-query.jpg" },
-            params: {},
-            headers: { origin: "https://frontend.example" },
-        } as any;
-        const queryRes = createRes();
-        await coverArtHandler(queryReq, queryRes);
-        expect(queryRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/native-query.jpg",
-            expect.objectContaining({
-                headers: expect.objectContaining({
-                    "Access-Control-Allow-Origin": "https://frontend.example",
-                    "Access-Control-Allow-Credentials": "true",
+        try {
+            const queryReq = {
+                query: { url: "native:albums/native-query.jpg" },
+                params: {},
+                headers: { origin: "https://frontend.example" },
+            } as any;
+            const queryRes = createRes();
+            await coverArtHandler(queryReq, queryRes);
+            expect(queryRes.sendFile).toHaveBeenCalledWith(
+                "/tmp/covers/albums/native-query.jpg",
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        "Access-Control-Allow-Origin":
+                            "https://frontend.example",
+                        "Access-Control-Allow-Credentials": "true",
+                    }),
                 }),
-            }),
-        );
+            );
 
-        const idReq = {
-            query: {},
-            params: { id: "native:albums/native-id.jpg" },
-            headers: {},
-        } as any;
-        const idRes = createRes();
-        await coverArtHandler(idReq, idRes);
-        expect(idRes.sendFile).toHaveBeenCalledWith(
-            "/tmp/covers/albums/native-id.jpg",
-            expect.objectContaining({
-                headers: expect.objectContaining({
-                    "Access-Control-Allow-Origin": "*",
+            const idReq = {
+                query: {},
+                params: { id: "native:albums/native-id.jpg" },
+                headers: {},
+            } as any;
+            const idRes = createRes();
+            await coverArtHandler(idReq, idRes);
+            expect(idRes.sendFile).toHaveBeenCalledWith(
+                "/tmp/covers/albums/native-id.jpg",
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        "Access-Control-Allow-Origin": "*",
+                    }),
                 }),
-            }),
-        );
-
-        existsSpy.mockRestore();
+            );
+        } finally {
+            delete config.allowedOrigins;
+            delete config.nodeEnv;
+            existsSpy.mockRestore();
+        }
     });
 
     it("enforces the ALLOWED_ORIGINS allowlist on cover art CORS headers", async () => {

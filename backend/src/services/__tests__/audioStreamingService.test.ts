@@ -29,7 +29,7 @@ const mockParseFile = jest.fn();
 const mockParseRangeHeader = jest.fn();
 
 // Mutable config mock so individual tests can exercise the ALLOWED_ORIGINS
-// allowlist semantics ([] = unset → allow all, matching index.ts).
+// allowlist semantics ([] = empty → deny cross-origin in production).
 const mockConfig = {
     nodeEnv: "production",
     allowedOrigins: [] as boolean | string[],
@@ -731,6 +731,7 @@ describe("AudioStreamingService", () => {
             const service = createService();
             const stream = createMockReadStream();
 
+            mockConfig.allowedOrigins = ["https://client.example"];
             mockFsStat.mockResolvedValueOnce({ size: 1000 });
             mockFsCreateReadStream.mockReturnValueOnce(stream);
 

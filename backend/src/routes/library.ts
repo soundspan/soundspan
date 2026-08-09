@@ -805,7 +805,8 @@ const buildMultiTrackRadio = async (
 // Cover art reflects the request Origin with credentials only when it passes
 // the same ALLOWED_ORIGINS allowlist the Express app enforces (utils/cors.ts);
 // unlisted origins get no CORS headers (still served, like the cors
-// middleware's deny). No allowlist configured → all origins allowed.
+// middleware's deny). Production denies cross-origin requests when the
+// allowlist is empty unless CORS_ALLOW_ALL is enabled; development allows all.
 const buildCoverArtCorsHeaders = (
     origin?: string
 ): Record<string, string> => {

@@ -4298,6 +4298,10 @@ describe("library catalog list runtime coverage", () => {
     });
 
     it("fetches audiobook covers for query URLs with Origin handling", async () => {
+        const { config } = jest.requireMock("../../config") as {
+            config: Record<string, unknown>;
+        };
+        config.allowedOrigins = ["https://app.example"];
         const fetchSpy = jest
             .spyOn(global as any, "fetch")
             .mockResolvedValueOnce({
@@ -4314,34 +4318,39 @@ describe("library catalog list runtime coverage", () => {
             audiobookshelfApiKey: "token-123",
         });
 
-        const queryAudiobookReq = {
-            params: {},
-            query: { url: "audiobook__release-42" },
-            headers: { origin: "https://app.example" },
-        } as any;
-        const queryAudiobookRes = createRes();
+        try {
+            const queryAudiobookReq = {
+                params: {},
+                query: { url: "audiobook__release-42" },
+                headers: { origin: "https://app.example" },
+            } as any;
+            const queryAudiobookRes = createRes();
 
-        await coverArtHandler(queryAudiobookReq, queryAudiobookRes);
+            await coverArtHandler(queryAudiobookReq, queryAudiobookRes);
 
-        expect(queryAudiobookRes.statusCode).toBe(200);
-        expect(queryAudiobookRes.body).toEqual(Buffer.from("audiobook-cover"));
-        expect(queryAudiobookRes.headers["Access-Control-Allow-Origin"]).toBe(
-            "https://app.example"
-        );
-        expect(queryAudiobookRes.headers["Cache-Control"]).toBe(
-            "public, max-age=7776000, immutable"
-        );
-        expect(fetchSpy).toHaveBeenCalledWith(
-            "https://ab.example/api/release-42",
-            expect.objectContaining({
-                headers: expect.objectContaining({
-                    Authorization: "Bearer token-123",
-                    "User-Agent": expect.stringContaining("soundspan/"),
-                }),
-            })
-        );
-
-        fetchSpy.mockRestore();
+            expect(queryAudiobookRes.statusCode).toBe(200);
+            expect(queryAudiobookRes.body).toEqual(
+                Buffer.from("audiobook-cover")
+            );
+            expect(
+                queryAudiobookRes.headers["Access-Control-Allow-Origin"]
+            ).toBe("https://app.example");
+            expect(queryAudiobookRes.headers["Cache-Control"]).toBe(
+                "public, max-age=7776000, immutable"
+            );
+            expect(fetchSpy).toHaveBeenCalledWith(
+                "https://ab.example/api/release-42",
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: "Bearer token-123",
+                        "User-Agent": expect.stringContaining("soundspan/"),
+                    }),
+                })
+            );
+        } finally {
+            delete config.allowedOrigins;
+            fetchSpy.mockRestore();
+        }
     });
 
     it("returns 404 when query audiobook cover fetch fails", async () => {
@@ -4414,6 +4423,10 @@ describe("library catalog list runtime coverage", () => {
     });
 
     it("serves local native cover IDs from disk and falls back to Deezer when missing", async () => {
+        const { config } = jest.requireMock("../../config") as {
+            config: Record<string, unknown>;
+        };
+        config.allowedOrigins = ["https://app.example"];
         const existsSpy = jest
             .spyOn(fs, "existsSync")
             .mockImplementation((candidatePath: fs.PathLike) =>
@@ -4436,55 +4449,59 @@ describe("library catalog list runtime coverage", () => {
             "native:albums/cover-miss.jpg"
         );
 
-        const missingReq = {
-            params: { id: "native:cover-miss.jpg" },
-            query: {},
-            headers: {},
-        } as any;
-        const missingRes = createRes();
-        await coverArtHandler(missingReq, missingRes);
-        expect(existsSpy).toHaveBeenCalled();
-        expect(mockDeezerGetAlbumCover).toHaveBeenCalledWith(
-            "Cover Artist",
-            "Missed Album"
-        );
-        expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
-            "https://images.example/cover.jpg",
-            "cover-miss",
-            "album"
-        );
-        expect(mockAlbumUpdate).toHaveBeenCalledWith({
-            where: { id: "cover-miss" },
-            data: { coverUrl: "native:albums/cover-miss.jpg" },
-        });
-        expect(missingRes.statusCode).toBe(200);
-        expect(missingRes.body).toEqual({
-            redirect:
-                "/api/library/cover-art?url=native%3Aalbums%2Fcover-miss.jpg",
-        });
-        const presentReq = {
-            params: { id: "native:cover-present.jpg" },
-            query: {},
-            headers: { origin: "https://app.example" },
-        } as any;
-        const presentRes = createRes();
-        await coverArtHandler(presentReq, presentRes);
+        try {
+            const missingReq = {
+                params: { id: "native:cover-miss.jpg" },
+                query: {},
+                headers: {},
+            } as any;
+            const missingRes = createRes();
+            await coverArtHandler(missingReq, missingRes);
+            expect(existsSpy).toHaveBeenCalled();
+            expect(mockDeezerGetAlbumCover).toHaveBeenCalledWith(
+                "Cover Artist",
+                "Missed Album"
+            );
+            expect(mockDownloadAndStoreImage).toHaveBeenCalledWith(
+                "https://images.example/cover.jpg",
+                "cover-miss",
+                "album"
+            );
+            expect(mockAlbumUpdate).toHaveBeenCalledWith({
+                where: { id: "cover-miss" },
+                data: { coverUrl: "native:albums/cover-miss.jpg" },
+            });
+            expect(missingRes.statusCode).toBe(200);
+            expect(missingRes.body).toEqual({
+                redirect:
+                    "/api/library/cover-art?url=native%3Aalbums%2Fcover-miss.jpg",
+            });
+            const presentReq = {
+                params: { id: "native:cover-present.jpg" },
+                query: {},
+                headers: { origin: "https://app.example" },
+            } as any;
+            const presentRes = createRes();
+            await coverArtHandler(presentReq, presentRes);
 
-        expect(presentRes.statusCode).toBe(200);
-        expect(presentRes.body).toEqual({
-            filePath: "/tmp/covers/cover-present.jpg",
-            options: {
-                headers: {
-                    "Content-Type": "image/jpeg",
-                    "Cache-Control":
-                        "public, max-age=7776000, immutable",
-                    "Cross-Origin-Resource-Policy": "cross-origin",
-                    "Access-Control-Allow-Origin": "https://app.example",
-                    "Access-Control-Allow-Credentials": "true",
+            expect(presentRes.statusCode).toBe(200);
+            expect(presentRes.body).toEqual({
+                filePath: "/tmp/covers/cover-present.jpg",
+                options: {
+                    headers: {
+                        "Content-Type": "image/jpeg",
+                        "Cache-Control":
+                            "public, max-age=7776000, immutable",
+                        "Cross-Origin-Resource-Policy": "cross-origin",
+                        "Access-Control-Allow-Origin": "https://app.example",
+                        "Access-Control-Allow-Credentials": "true",
+                    },
                 },
-            },
-        });
-        existsSpy.mockRestore();
+            });
+        } finally {
+            delete config.allowedOrigins;
+            existsSpy.mockRestore();
+        }
     });
 
     it("recovers missing native cover IDs via Cover Art service when Deezer has no result", async () => {

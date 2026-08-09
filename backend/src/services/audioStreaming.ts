@@ -479,8 +479,9 @@ export class AudioStreamingService {
 
             // Reflect the request Origin with credentials only when it passes
             // the same ALLOWED_ORIGINS allowlist the Express app enforces
-            // (utils/cors.ts). With no allowlist configured, all origins are
-            // allowed (self-hosted default); same-origin requests carry no
+            // (utils/cors.ts). Production denies cross-origin requests when
+            // the allowlist is empty unless CORS_ALLOW_ALL is enabled;
+            // development allows all origins. Same-origin requests carry no
             // Origin header and need no CORS headers.
             const origin = req.headers.origin;
             if (
