@@ -26,6 +26,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/coverArt.ts` | Core |
 | `backend/src/services/coverArtExtractor.ts` | Core |
 | `backend/src/services/coverArtResize.ts` | Core |
+| `backend/src/services/curatedVibeMixDefinitions.ts` | Data-driven curated vibe mix catalog |
 | `backend/src/services/dataCache.ts` | Core |
 | `backend/src/services/deezer.ts` | Core |
 | `backend/src/services/discoverWeekly.ts` | Core |

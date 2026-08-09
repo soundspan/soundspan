@@ -49,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image's production `node_modules`.
 - Frontend: removed the deprecated `@types/dompurify` stub; `dompurify` 3.x and
   later ship their own type definitions.
+- Backend: the 13 curated daily "vibe" mixes (Sad Girl Sundays, Main Character
+  Energy, Villain Era, 3AM Thoughts, Hot Girl Walk, Rage Cleaning, Golden Hour,
+  Shower Karaoke, In My Feelings, Midnight Drive, Romanticize Your Life, That
+  Girl Era, Unhinged) are now data-driven: their filters, names, descriptions,
+  colors, pool sizes, and weekday gates live in a single declarative catalog
+  (`backend/src/services/curatedVibeMixDefinitions.ts`) consumed by one shared
+  generator, replacing ~13 near-identical hardcoded methods (net −433 lines in
+  `programmaticPlaylists.ts`). Behavior, mix ids/types, and the public
+  `generate*` method surface are unchanged; artist-diversity selection is
+  preserved.
 - Audio analyzer batch-timeout retry semantics (analyzer reliability slice):
   when an analysis batch hits `BATCH_ANALYSIS_TIMEOUT_SECONDS`, tracks that
   never started running are now re-queued as `pending` WITHOUT consuming any

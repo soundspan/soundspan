@@ -17,6 +17,10 @@ import {
 } from "./artistSlotAllocation";
 import { config } from "../config";
 import { separateArtists } from "../utils/separateArtists";
+import {
+    CURATED_VIBE_MIXES_BY_TYPE,
+    type CuratedVibeMixDefinition,
+} from "./curatedVibeMixDefinitions";
 export {
     applyArtistCap,
     type ArtistCapTrack,
@@ -2897,6 +2901,53 @@ export class ProgrammaticPlaylistService {
         };
     }
 
+    /**
+     * Shared generator for data-driven curated daily vibe mixes. Applies the
+     * definition's optional weekday gate, queries the candidate pool with the
+     * definition's Prisma filter (always constrained to completed analysis),
+     * enforces the minimum pool size, then builds a diversity-selected mix.
+     */
+    private async generateCuratedVibeMix(
+        today: string,
+        definition: CuratedVibeMixDefinition
+    ): Promise<ProgrammaticMix | null> {
+        if (
+            definition.dayOfWeek !== undefined &&
+            new Date().getDay() !== definition.dayOfWeek
+        ) {
+            return null;
+        }
+
+        const tracks = await prisma.track.findMany({
+            where: { analysisStatus: "completed", ...definition.where },
+            include: { album: { select: { coverUrl: true } } },
+            take: definition.take,
+        });
+
+        const minTracks = definition.minTracks ?? this.MIN_TRACKS_DAILY;
+        if (tracks.length < minTracks) return null;
+
+        const shuffled = await selectTracksWithArtistDiversityForMix(
+            tracks,
+            this.DAILY_TRACK_LIMIT
+        );
+        const coverUrls = shuffled
+            .filter((t) => t.album.coverUrl)
+            .slice(0, 4)
+            .map((t) => t.album.coverUrl!);
+
+        return {
+            id: `${definition.type}-${today}`,
+            type: definition.type,
+            name: definition.name,
+            description: definition.description,
+            trackIds: shuffled.map((t) => t.id),
+            coverUrls,
+            trackCount: shuffled.length,
+            color: getMixColor(definition.colorKey),
+        };
+    }
+
     // CURATED VIBE MIXES (Daily, 10 tracks)
 
     /**
@@ -2908,60 +2959,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        // Only generate on Sundays (day 0)
-        const dayOfWeek = new Date().getDay();
-        if (dayOfWeek !== 0) return null;
-
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [
-                            { valence: { lte: 0.35 } },
-                            { keyScale: "minor" },
-                        ],
-                    },
-                    {
-                        AND: [
-                            { valence: { lte: 0.3 } },
-                            { arousal: { lte: 0.4 } },
-                        ],
-                    },
-                    {
-                        lastfmTags: {
-                            hasSome: [
-                                "sad",
-                                "melancholic",
-                                "heartbreak",
-                                "emotional",
-                            ],
-                        },
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `sad-girl-sundays-${today}`,
-            type: "sad-girl-sundays",
-            name: "Sad Girl Sundays",
-            description: "Melancholic introspection and feelings",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("sad-girl-sundays"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["sad-girl-sundays"]
+        );
     }
 
     /**
@@ -2972,51 +2973,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [
-                            { valence: { gte: 0.55 } },
-                            { energy: { gte: 0.55 } },
-                            { danceability: { gte: 0.5 } },
-                        ],
-                    },
-                    {
-                        lastfmTags: {
-                            hasSome: [
-                                "empowering",
-                                "confident",
-                                "uplifting",
-                                "anthemic",
-                            ],
-                        },
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `main-character-${today}`,
-            type: "main-character",
-            name: "Main Character Energy",
-            description: "You're the protagonist today",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("main-character"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["main-character"]
+        );
     }
 
     /**
@@ -3027,52 +2987,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [{ keyScale: "minor" }, { energy: { gte: 0.65 } }],
-                    },
-                    {
-                        moodTags: {
-                            hasSome: ["aggressive", "dark", "intense"],
-                        },
-                    },
-                    {
-                        lastfmTags: {
-                            hasSome: [
-                                "dark",
-                                "aggressive",
-                                "intense",
-                                "powerful",
-                            ],
-                        },
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `villain-era-${today}`,
-            type: "villain-era",
-            name: "Villain Era",
-            description: "Embrace your dark side",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("villain-era"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["villain-era"]
+        );
     }
 
     /**
@@ -3083,44 +3001,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        // STRICT criteria: truly late-night introspective tracks only
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                AND: [
-                    { arousal: { lte: 0.4 } },
-                    { energy: { lte: 0.5 } },
-                    { bpm: { lte: 110 } },
-                    {
-                        OR: [
-                            { valence: { lte: 0.5 } },
-                            { acousticness: { gte: 0.3 } },
-                        ],
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < this.MIN_TRACKS_DAILY) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `3am-thoughts-${today}`,
-            type: "3am-thoughts",
-            name: "3AM Thoughts",
-            description: "Late night overthinking companion",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("3am-thoughts"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["3am-thoughts"]
+        );
     }
 
     /**
@@ -3131,47 +3015,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [
-                            { danceability: { gte: 0.65 } },
-                            { bpm: { gte: 95, lte: 135 } },
-                            { energy: { gte: 0.55 } },
-                        ],
-                    },
-                    {
-                        AND: [
-                            { valence: { gte: 0.6 } },
-                            { energy: { gte: 0.6 } },
-                        ],
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `hot-girl-walk-${today}`,
-            type: "hot-girl-walk",
-            name: "Hot Girl Walk",
-            description: "Confidence boost for your walk",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("confidence-boost"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["hot-girl-walk"]
+        );
     }
 
     /**
@@ -3182,50 +3029,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [
-                            { energy: { gte: 0.75 } },
-                            { arousal: { gte: 0.65 } },
-                            { bpm: { gte: 125 } },
-                        ],
-                    },
-                    {
-                        AND: [
-                            { energy: { gte: 0.8 } },
-                            { danceability: { gte: 0.6 } },
-                        ],
-                    },
-                    {
-                        moodTags: { hasSome: ["aggressive", "energetic"] },
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `rage-cleaning-${today}`,
-            type: "rage-cleaning",
-            name: "Rage Cleaning",
-            description: "Aggressive productivity fuel",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("workout"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["rage-cleaning"]
+        );
     }
 
     /**
@@ -3236,46 +3043,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [
-                            { valence: { gte: 0.45 } },
-                            { acousticness: { gte: 0.35 } },
-                            { energy: { gte: 0.25, lte: 0.65 } },
-                        ],
-                    },
-                    {
-                        lastfmTags: {
-                            hasSome: ["warm", "sunset", "dreamy", "peaceful"],
-                        },
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `golden-hour-${today}`,
-            type: "golden-hour",
-            name: "Golden Hour",
-            description: "Warm sunset vibes",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("golden-hour"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["golden-hour"]
+        );
     }
 
     /**
@@ -3286,37 +3057,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                AND: [
-                    { instrumentalness: { lte: 0.35 } },
-                    { energy: { gte: 0.55 } },
-                    { valence: { gte: 0.45 } },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `shower-karaoke-${today}`,
-            type: "shower-karaoke",
-            name: "Shower Karaoke",
-            description: "Belters you can't help but sing",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("happy"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["shower-karaoke"]
+        );
     }
 
     /**
@@ -3327,51 +3071,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [
-                            { valence: { lte: 0.4 } },
-                            { arousal: { lte: 0.55 } },
-                            { acousticness: { gte: 0.25 } },
-                        ],
-                    },
-                    {
-                        lastfmTags: {
-                            hasSome: [
-                                "emotional",
-                                "heartbreak",
-                                "feelings",
-                                "vulnerable",
-                            ],
-                        },
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `in-my-feelings-${today}`,
-            type: "in-my-feelings",
-            name: "In My Feelings",
-            description: "Let it all out",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("heartbreak-hotel"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["in-my-feelings"]
+        );
     }
 
     /**
@@ -3382,46 +3085,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        // STRICT criteria: contemplative driving music only
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                AND: [
-                    // MUST be moderate energy (not too mellow, not too intense)
-                    { energy: { gte: 0.3, lte: 0.65 } },
-                    // MUST have cruising tempo
-                    { bpm: { gte: 80, lte: 130 } },
-                    // Plus mellow mood indicator
-                    {
-                        OR: [
-                            { arousal: { lte: 0.6 } },
-                            { valence: { gte: 0.3, lte: 0.7 } },
-                        ],
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < this.MIN_TRACKS_DAILY) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `midnight-drive-${today}`,
-            type: "midnight-drive",
-            name: "Midnight Drive",
-            description: "Perfect for late night cruising",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("night-drive"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["midnight-drive"]
+        );
     }
 
     /**
@@ -3534,51 +3201,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    {
-                        AND: [
-                            { valence: { gte: 0.35, lte: 0.75 } },
-                            { arousal: { gte: 0.25, lte: 0.65 } },
-                            { acousticness: { gte: 0.25 } },
-                        ],
-                    },
-                    {
-                        lastfmTags: {
-                            hasSome: [
-                                "dreamy",
-                                "aesthetic",
-                                "cinematic",
-                                "romantic",
-                            ],
-                        },
-                    },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `romanticize-${today}`,
-            type: "romanticize",
-            name: "Romanticize Your Life",
-            description: "Make every moment aesthetic",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("golden-hour"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["romanticize"]
+        );
     }
 
     /**
@@ -3589,37 +3215,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                AND: [
-                    { valence: { gte: 0.55 } },
-                    { energy: { gte: 0.45 } },
-                    { danceability: { gte: 0.45 } },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 50,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `that-girl-era-${today}`,
-            type: "that-girl-era",
-            name: "That Girl Era",
-            description: "Self-improvement mode activated",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("confidence-boost"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["that-girl-era"]
+        );
     }
 
     /**
@@ -3630,42 +3229,10 @@ export class ProgrammaticPlaylistService {
         userId: string,
         today: string
     ): Promise<ProgrammaticMix | null> {
-        // Get a variety of tracks with extreme features
-        const tracks = await prisma.track.findMany({
-            where: {
-                analysisStatus: "completed",
-                OR: [
-                    { energy: { gte: 0.85 } },
-                    { energy: { lte: 0.15 } },
-                    { valence: { gte: 0.9 } },
-                    { valence: { lte: 0.1 } },
-                    { bpm: { gte: 160 } },
-                    { bpm: { lte: 70 } },
-                    { danceability: { gte: 0.9 } },
-                ],
-            },
-            include: { album: { select: { coverUrl: true } } },
-            take: 100,
-        });
-
-        if (tracks.length < 8) return null;
-
-        const shuffled = await selectTracksWithArtistDiversityForMix(tracks, this.DAILY_TRACK_LIMIT);
-        const coverUrls = shuffled
-            .filter((t) => t.album.coverUrl)
-            .slice(0, 4)
-            .map((t) => t.album.coverUrl!);
-
-        return {
-            id: `unhinged-${today}`,
-            type: "unhinged",
-            name: "Unhinged",
-            description: "Embrace the chaos",
-            trackIds: shuffled.map((t) => t.id),
-            coverUrls,
-            trackCount: shuffled.length,
-            color: getMixColor("dance-floor"),
-        };
+        return this.generateCuratedVibeMix(
+            today,
+            CURATED_VIBE_MIXES_BY_TYPE["unhinged"]
+        );
     }
 
     // WEEKLY CURATED MIXES (20 tracks)
