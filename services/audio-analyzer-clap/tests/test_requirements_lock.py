@@ -18,7 +18,7 @@ def test_docker_python_matches_lock_target() -> None:
     service_root = Path(__file__).resolve().parents[1]
     dockerfile = (service_root / "Dockerfile").read_text(encoding="utf-8")
     lock = (service_root / "requirements.lock").read_text(encoding="utf-8")
-    image_match = re.search(r"^FROM python:(\d+)\.(\d+)-slim$", dockerfile, re.MULTILINE)
+    image_match = re.search(r"^FROM python:(\d+)\.(\d+)-slim(?:@sha256:[0-9a-f]{64})?$", dockerfile, re.MULTILINE)
     target_match = re.search(r"--python-version (\d+)\.(\d+) ", lock)
 
     assert image_match is not None
