@@ -742,7 +742,7 @@ class TestBrowsePlaylistDetailEndpoint:
             )
 
         assert resp.status_code == 502
-        assert resp.json()["detail"] == "Failed to load playlist"
+        assert resp.json()["error"] == "Failed to load playlist"
 
 
 class TestPublicBrowsePlaylistDetailEndpoint:
@@ -796,7 +796,7 @@ class TestPublicBrowsePlaylistDetailEndpoint:
             resp = await client.get("/browse/playlist/detail-uuid-123")
 
         assert resp.status_code == 502
-        assert resp.json()["detail"] == "Failed to load playlist"
+        assert resp.json()["error"] == "Failed to load playlist"
 
 
 class TestBrowseMixDetailEndpoint:

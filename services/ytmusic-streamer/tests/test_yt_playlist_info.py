@@ -72,7 +72,7 @@ async def test_playlist_info_rejects_radio_mix(client):
         },
     )
     assert resp.status_code == 422
-    assert "mix" in resp.json()["detail"].lower()
+    assert "mix" in resp.json()["error"].lower()
 
 
 @pytest.mark.anyio

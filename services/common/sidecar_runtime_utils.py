@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import re
 from typing import Optional
 
 import httpx
-from fastapi import HTTPException, Request
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import Request
 
 DEFAULT_STREAM_CONNECT_TIMEOUT = 30.0
 DEFAULT_STREAM_READ_TIMEOUT = 300.0
@@ -17,6 +22,55 @@ _KNOWN_DEFAULT_SECRET = "soundspan-internal-secret-change-me"
 # Prisma cuids (the only user_id the backend ever sends) are alphanumeric;
 # this also rejects any `/`, `.`, or `%` that could escape DATA_PATH.
 _USER_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def register_error_handlers(app: FastAPI, logger: logging.Logger) -> None:
+    """Register consistent, sanitized JSON error responses for a sidecar app."""
+
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_http_exception(
+        _request: Request,
+        exc: StarletteHTTPException,
+    ) -> JSONResponse:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            body = detail
+        elif isinstance(detail, str):
+            body = {"error": detail}
+        else:
+            body = {"error": str(detail)}
+        return JSONResponse(
+            body,
+            status_code=exc.status_code,
+            headers=getattr(exc, "headers", None),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(
+        _request: Request,
+        _exc: RequestValidationError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            {"error": "Invalid request parameters"},
+            status_code=422,
+        )
+
+    @app.exception_handler(Exception)
+    async def handle_unhandled_error(
+        request: Request,
+        exc: Exception,
+    ) -> JSONResponse:
+        logger.error(
+            "Unhandled error on %s %s: %s",
+            request.method,
+            request.url.path,
+            exc,
+            exc_info=True,
+        )
+        return JSONResponse(
+            {"error": "Internal Server Error"},
+            status_code=500,
+        )
 
 
 def require_internal_secret(request: Request) -> None:

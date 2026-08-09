@@ -49,7 +49,7 @@ async def test_stream_rejects_malformed_video_id(client, stream_recorder):
     for bad in ["short", "waytoolongvideoid123", "bad.chars!!x"]:
         response = await client.get(f"/stream/{bad}?user_id=__public__")
         assert response.status_code == 400
-        assert response.json()["detail"] == "Invalid video_id"
+        assert response.json()["error"] == "Invalid video_id"
         assert stream_recorder == []
 
 
@@ -68,7 +68,7 @@ async def test_stream_rejects_bad_quality(client, stream_recorder):
         f"/stream/{VALID_ID}?user_id=__public__&quality=bogus"
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid quality"
+    assert response.json()["error"] == "Invalid quality"
     assert stream_recorder == []
 
 
@@ -87,7 +87,7 @@ async def test_proxy_rejects_malformed_video_id(client, stream_recorder):
     """The music proxy rejects a malformed ID before extraction."""
     response = await client.get("/proxy/bad.id!?user_id=__public__")
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid video_id"
+    assert response.json()["error"] == "Invalid video_id"
 
 
 @pytest.mark.anyio
@@ -97,7 +97,7 @@ async def test_proxy_rejects_bad_quality(client, stream_recorder):
         f"/proxy/{VALID_ID}?user_id=__public__&quality=ULTRA"
     )
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid quality"
+    assert response.json()["error"] == "Invalid quality"
 
 
 @pytest.mark.anyio
@@ -105,7 +105,7 @@ async def test_yt_proxy_rejects_malformed_video_id(client, stream_recorder):
     """The YouTube proxy rejects a malformed ID before extraction."""
     response = await client.get("/yt/proxy/nope")
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid video_id"
+    assert response.json()["error"] == "Invalid video_id"
 
 
 @pytest.mark.anyio
@@ -113,7 +113,7 @@ async def test_yt_proxy_rejects_bad_quality(client, stream_recorder):
     """The YouTube proxy rejects an unsupported quality before extraction."""
     response = await client.get(f"/yt/proxy/{VALID_ID}?quality=extreme")
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid quality"
+    assert response.json()["error"] == "Invalid quality"
 
 
 @pytest.mark.anyio
@@ -121,7 +121,7 @@ async def test_song_rejects_malformed_video_id(client):
     """The song route rejects a malformed ID before metadata extraction."""
     response = await client.get("/song/tiny?user_id=__public__")
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid video_id"
+    assert response.json()["error"] == "Invalid video_id"
 
 
 @pytest.mark.anyio

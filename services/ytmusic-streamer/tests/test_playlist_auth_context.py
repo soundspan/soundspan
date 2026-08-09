@@ -98,7 +98,7 @@ async def test_playlist_returns_401_when_auth_is_invalid_and_public_fallback_als
         response = await client.get("/playlist/PLprivate123", params={"user_id": "user-1"})
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "OAuth credentials invalid"
+    assert response.json()["error"] == "OAuth credentials invalid"
 
 
 @pytest.mark.anyio
@@ -119,4 +119,4 @@ async def test_playlist_preserves_non_401_auth_http_errors_when_public_fallback_
         response = await client.get("/playlist/PLprivate403", params={"user_id": "user-1"})
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "OAuth lacks required scope"
+    assert response.json()["error"] == "OAuth lacks required scope"

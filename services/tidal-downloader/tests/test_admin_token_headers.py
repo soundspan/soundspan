@@ -113,7 +113,7 @@ async def test_search_missing_token_rejected(client, api_recorder):
     resp = await client.post("/search", json={"query": "q"})
 
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "access_token required"
+    assert resp.json()["error"] == "access_token required"
 
 
 @pytest.mark.anyio
@@ -135,7 +135,7 @@ async def test_download_track_missing_token_rejected(client, api_recorder):
     resp = await client.post("/download/track", json={"track_id": 1})
 
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "access_token required"
+    assert resp.json()["error"] == "access_token required"
 
 
 @pytest.mark.anyio
@@ -158,4 +158,4 @@ async def test_download_album_missing_token_rejected(client, api_recorder):
     resp = await client.post("/download/album", json={"album_id": 2})
 
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "access_token required"
+    assert resp.json()["error"] == "access_token required"

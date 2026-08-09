@@ -41,6 +41,7 @@ from common.sidecar_runtime_utils import (
     build_stream_proxy_client,
     env_float,
     env_int,
+    register_error_handlers,
     require_internal_secret,
     validate_user_id,
 )
@@ -170,6 +171,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+register_error_handlers(app, log)
 
 # ── Paths ───────────────────────────────────────────────────────────
 DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))

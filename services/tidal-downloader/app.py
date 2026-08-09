@@ -38,6 +38,7 @@ from common.logging_utils import configure_service_logger
 from common.sidecar_runtime_utils import (
     build_stream_proxy_client,
     env_float,
+    register_error_handlers,
     require_internal_secret,
 )
 
@@ -94,6 +95,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+register_error_handlers(app, log)
 
 # ── Paths ───────────────────────────────────────────────────────────
 TIDDL_PATH = Path(os.getenv("TIDDL_PATH", "/data/.tiddl"))
