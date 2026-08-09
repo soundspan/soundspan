@@ -14,7 +14,10 @@ test("returns none when there is nothing navigable", () => {
 
 test("first arrow focuses the first navigable node when nothing is focused", () => {
     assert.deepEqual(
-        resolveMapKeyNav("ArrowRight", { order: [2, 5, 9], focusedIndex: null }),
+        resolveMapKeyNav("ArrowRight", {
+            order: [2, 5, 9],
+            focusedIndex: null,
+        }),
         { type: "move", index: 2 },
     );
     assert.deepEqual(

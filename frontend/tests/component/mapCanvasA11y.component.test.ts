@@ -63,7 +63,10 @@ async function mountCanvas(
     return { container, root };
 }
 
-async function unmount(mounted: { container: HTMLElement; root: { unmount: () => void } }) {
+async function unmount(mounted: {
+    container: HTMLElement;
+    root: { unmount: () => void };
+}) {
     await React.act(async () => {
         mounted.root.unmount();
     });
@@ -76,7 +79,11 @@ function canvasOf(container: HTMLElement): HTMLCanvasElement {
     return canvas as HTMLCanvasElement;
 }
 
-async function press(canvas: HTMLElement, key: string, init: KeyboardEventInit = {}) {
+async function press(
+    canvas: HTMLElement,
+    key: string,
+    init: KeyboardEventInit = {},
+) {
     await React.act(async () => {
         canvas.dispatchEvent(
             new KeyboardEvent("keydown", { key, bubbles: true, ...init }),
