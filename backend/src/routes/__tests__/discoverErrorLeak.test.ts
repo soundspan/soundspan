@@ -100,9 +100,7 @@ function createRes() {
     return res;
 }
 
-const SECRET_ERROR = new Error(
-    "postgres://user:pw@db SECRET_LEAK_MARKER",
-);
+const SECRET_ERROR = new Error("postgres://user:pw@db SECRET_LEAK_MARKER");
 const req = {
     user: { id: "user-1" },
     params: {},

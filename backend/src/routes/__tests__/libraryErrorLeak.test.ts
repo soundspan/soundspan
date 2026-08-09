@@ -201,10 +201,7 @@ const mockArtistCount = dbPrisma.artist.count as jest.Mock;
 const mockOwnedAlbumFindMany = dbPrisma.ownedAlbum.findMany as jest.Mock;
 const mockPrismaTransaction = dbPrisma.$transaction as jest.Mock;
 
-function getRouteHandler(
-    path: string,
-    method: "get" | "post" | "delete",
-) {
+function getRouteHandler(path: string, method: "get" | "post" | "delete") {
     const layer = (router as any).stack.find(
         (entry: any) =>
             entry.route?.path === path && entry.route?.methods?.[method],
@@ -231,9 +228,7 @@ function createRes() {
     return res;
 }
 
-const SECRET_ERROR = new Error(
-    "postgres://user:pw@db SECRET_LEAK_MARKER",
-);
+const SECRET_ERROR = new Error("postgres://user:pw@db SECRET_LEAK_MARKER");
 const req = {
     user: { id: "user-1" },
     params: {},
