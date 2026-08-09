@@ -1,0 +1,43 @@
+name: Compose Config Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - docker-compose.local.yml
+      - docker-compose.dev.yml
+      - .github/workflows/compose-config-check.yml
+  push:
+    branches: [main]
+    paths:
+      - docker-compose.local.yml
+      - docker-compose.dev.yml
+      - .github/workflows/compose-config-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-config-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-config:
+    name: Compose Config Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Validate local compose config
+        run: docker compose -f docker-compose.local.yml config --quiet
+
+      - name: Validate local audio analysis profile
+        run: docker compose -f docker-compose.local.yml --profile audio-analysis config --quiet
+
+      - name: Validate dev compose config
+        run: docker compose -f docker-compose.dev.yml config --quiet
+
+      - name: Validate dev audio analysis profile
+        run: docker compose -f docker-compose.dev.yml --profile audio-analysis config --quiet
