@@ -20,8 +20,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Audio analyzer batch-timeout retry semantics (analyzer reliability slice):
+  when an analysis batch hits `BATCH_ANALYSIS_TIMEOUT_SECONDS`, tracks that
+  never started running are now re-queued as `pending` WITHOUT consuming any
+  retry budget, and tracks that were genuinely in flight fail non-permanently
+  (consuming exactly one retry unit, retried up to `MAX_RETRIES`). Previously
+  every unfinished track in a timed-out batch was failed permanently — a single
+  slow batch could silently and irreversibly shrink the analyzed library.
+  Results that completed just as the timeout fired are now drained and saved
+  instead of being dropped.
+
 ### Fixed
 
+- Audio analyzer sidecar no longer runs a PostgreSQL worker-count query at
+  module import. Because the service uses multiprocessing spawn mode, every
+  spawned worker process re-imported the module and re-executed that query;
+  worker-count resolution now happens once, explicitly, at service startup in
+  the parent process.
+- CLAP sidecar idle monitor no longer leaks a new Redis connection pool on
+  every idle-check iteration; it now reuses a single injected client that is
+  deterministically closed on shutdown (as is the idle DB connection, which
+  previously stayed open if the main loop exited via an exception).
+- CLAP sidecar worker/text-embed/control daemon threads are now supervised:
+  if any thread dies, the service logs a critical error, stops cleanly, and
+  exits non-zero so the container orchestrator restarts it instead of leaving
+  a zombie pod that consumes no work.
+- CLAP model unload/inference race fixed: idle unloading and embedding
+  inference now serialize on one re-entrant lock, and embedding calls reload
+  the model under that lock if an idle unload wins the race — previously the
+  race raised mid-call, spuriously failing the track and burning its vibe
+  retry budget.
+- Python sidecars no longer use deprecated `datetime.utcnow()`; analyzer
+  timestamps are timezone-aware UTC (`datetime.now(timezone.utc)`).
 - Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
   `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
   at nonexistent `postgres`/`redis` services (the services are

@@ -17,6 +17,7 @@ Architecture:
 - CLAPAnalyzer: Model loading and embedding generation
 - Worker: Queue consumer that processes tracks and stores embeddings
 - TextEmbedHandler: Real-time text embedding via Redis Streams consumer groups
+- Supervised main loop: Detects failed service threads and manages idle unloading
 """
 
 import os
@@ -27,7 +28,7 @@ import time
 import gc
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 import traceback
 import numpy as np
@@ -88,6 +89,7 @@ REDIS_SOCKET_TIMEOUT = get_blocking_socket_timeout(
 NUM_WORKERS = get_int_env('NUM_WORKERS', 2)
 BACKEND_URL = os.getenv('BACKEND_URL', 'http://backend:3006')
 MODEL_IDLE_TIMEOUT = get_int_env('MODEL_IDLE_TIMEOUT', 300)
+IDLE_POLL_SECONDS = 5
 
 # Queue and channel names
 ANALYSIS_QUEUE = 'audio:clap:queue'
@@ -114,13 +116,15 @@ class CLAPAnalyzer:
 
     Uses HTSAT-base architecture with the music_audioset checkpoint,
     optimized for music similarity tasks. Supports idle model unloading
-    to free memory when no work is pending.
+    to free memory when no work is pending. Inference and unloading serialize
+    on one re-entrant lock; embedding calls reload under that lock if an idle
+    unload wins the race after the optimistic preload.
     """
 
     def __init__(self):
         """Initialize analyzer state and lazy model-loading controls."""
         self.model = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.last_work_time: float = time.time()
         self._model_loaded = False
 
@@ -249,6 +253,8 @@ class CLAPAnalyzer:
             logger.debug(f"Loaded audio: {len(audio)/sr:.1f}s at {sr}Hz")
 
             with self._lock:
+                if self.model is None:
+                    self.load_model()
                 # Use get_audio_embedding_from_data for pre-loaded audio
                 # This gives us control over memory usage
                 embeddings = self.model.get_audio_embedding_from_data(
@@ -288,6 +294,8 @@ class CLAPAnalyzer:
 
         try:
             with self._lock:
+                if self.model is None:
+                    self.load_model()
                 # CLAP expects a list of text prompts
                 embeddings = self.model.get_text_embedding(
                     [text],
@@ -351,7 +359,7 @@ class DatabaseConnection:
         self.connect()
 
     def get_cursor(self) -> RealDictCursor:
-        """Get a database cursor, reconnecting if necessary"""
+        """Reconnect if needed and return a RealDictCursor-factory cursor."""
         if not self.is_connected():
             self.reconnect()
         return self.conn.cursor(cursor_factory=RealDictCursor)
@@ -479,7 +487,7 @@ class Worker:
                     "vibeAnalysisStatus" = %s,
                     "vibeAnalysisStatusUpdatedAt" = %s
                 WHERE id = %s
-            """, (status, datetime.utcnow(), track_id))
+            """, (status, datetime.now(timezone.utc), track_id))
             self.db.commit()
         except Exception as e:
             logger.error(f"Failed to update track vibe status: {e}")
@@ -504,7 +512,7 @@ class Worker:
                     "vibeAnalysisRetryCount" = COALESCE("vibeAnalysisRetryCount", 0) + 1,
                     "vibeAnalysisStatusUpdatedAt" = %s
                 WHERE id = %s
-            """, (error[:500], datetime.utcnow(), track_id))
+            """, (error[:500], datetime.now(timezone.utc), track_id))
             self.db.commit()
             logger.error(f"Track {track_id} failed: {error}")
 
@@ -549,7 +557,7 @@ class Worker:
                     embedding = EXCLUDED.embedding,
                     model_version = EXCLUDED.model_version,
                     analyzed_at = EXCLUDED.analyzed_at
-            """, (track_id, embedding_list, MODEL_VERSION, datetime.utcnow()))
+            """, (track_id, embedding_list, MODEL_VERSION, datetime.now(timezone.utc)))
 
             self.db.commit()
             return True
@@ -833,8 +841,90 @@ class ControlHandler:
             traceback.print_exc()
 
 
-def main():
-    """Main entry point"""
+def find_dead_threads(threads: list[threading.Thread]) -> list[str]:
+    """Return the names of supervised threads that are no longer alive."""
+    return [thread.name for thread in threads if not thread.is_alive()]
+
+
+def _check_for_completed_work(analyzer, idle_db, queue_client):
+    """Unload the model when the database and analysis queue have no work."""
+    try:
+        cursor = idle_db.get_cursor()
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM "Track" t
+                LEFT JOIN track_embeddings te ON t.id = te.track_id
+                WHERE te.track_id IS NULL AND t."filePath" IS NOT NULL
+            """)
+            remaining = cursor.fetchone()['cnt']
+        finally:
+            cursor.close()
+
+        queue_len = queue_client.llen(ANALYSIS_QUEUE)
+        if remaining == 0 and queue_len == 0:
+            analyzer.unload_model()
+            logger.info("All tracks have embeddings, model unloaded (will reload when work arrives)")
+    except Exception as e:
+        logger.debug(f"Idle check failed: {e}")
+        idle_db.reconnect()
+
+
+def run_idle_monitor(analyzer, stop_event, idle_db, queue_client, threads):
+    """Supervise service threads and unload the model during idle periods."""
+    while not stop_event.is_set():
+        dead = find_dead_threads(threads)
+        if dead:
+            logger.critical(f"Service thread(s) stopped unexpectedly: {', '.join(dead)}")
+            stop_event.set()
+            return False
+
+        if analyzer._model_loaded:
+            idle_seconds = time.time() - analyzer.last_work_time
+            if idle_seconds >= MODEL_IDLE_TIMEOUT > 0:
+                analyzer.unload_model()
+                logger.info(
+                    f"Model idle for {idle_seconds:.0f}s, unloaded to free memory "
+                    "(will reload when work arrives)"
+                )
+            elif idle_seconds >= SLEEP_INTERVAL * 2:
+                _check_for_completed_work(analyzer, idle_db, queue_client)
+
+        stop_event.wait(IDLE_POLL_SECONDS)
+    return True
+
+
+def _start_threads(
+    analyzer: CLAPAnalyzer,
+    stop_event: threading.Event,
+) -> list[threading.Thread]:
+    """Construct and start the worker, text-embedding, and control threads."""
+    threads = []
+    for i in range(NUM_WORKERS):
+        worker = Worker(i, analyzer, stop_event)
+        thread = threading.Thread(target=worker.start, name=f"Worker-{i}")
+        thread.daemon = True
+        thread.start()
+        threads.append(thread)
+        logger.info(f"Started worker thread {i}")
+
+    text_handler = TextEmbedHandler(analyzer, stop_event)
+    text_thread = threading.Thread(target=text_handler.start, name="TextEmbedHandler")
+    text_thread.daemon = True
+    text_thread.start()
+    threads.append(text_thread)
+    logger.info("Started text embed handler thread")
+
+    control_handler = ControlHandler(stop_event)
+    control_thread = threading.Thread(target=control_handler.start, name="ControlHandler")
+    control_thread.daemon = True
+    control_thread.start()
+    threads.append(control_thread)
+    logger.info("Started control handler thread")
+    return threads
+
+
+def _log_startup_configuration():
+    """Log the effective CLAP analyzer runtime configuration."""
     logger.info("=" * 60)
     logger.info("CLAP Audio Analyzer Service")
     logger.info("=" * 60)
@@ -847,89 +937,58 @@ def main():
     logger.info(f"  Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
     logger.info("=" * 60)
 
-    # Load model once (shared across all workers)
+
+def main():
+    """Start and supervise the CLAP analyzer service until shutdown."""
+    _log_startup_configuration()
     analyzer = CLAPAnalyzer()
     analyzer.load_model()
-
-    # Stop event for graceful shutdown
     stop_event = threading.Event()
 
     def signal_handler(signum, frame):
+        """Request graceful shutdown after an operating-system signal."""
         logger.info(f"Received signal {signum}, initiating graceful shutdown...")
         stop_event.set()
 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
-
-    threads = []
-
-    # Start worker threads
-    for i in range(NUM_WORKERS):
-        worker = Worker(i, analyzer, stop_event)
-        thread = threading.Thread(target=worker.start, name=f"Worker-{i}")
-        thread.daemon = True
-        thread.start()
-        threads.append(thread)
-        logger.info(f"Started worker thread {i}")
-
-    # Start text embed handler thread
-    text_handler = TextEmbedHandler(analyzer, stop_event)
-    text_thread = threading.Thread(target=text_handler.start, name="TextEmbedHandler")
-    text_thread.daemon = True
-    text_thread.start()
-    threads.append(text_thread)
-    logger.info("Started text embed handler thread")
-
-    # Start control handler thread (listens for worker count changes)
-    control_handler = ControlHandler(stop_event)
-    control_thread = threading.Thread(target=control_handler.start, name="ControlHandler")
-    control_thread.daemon = True
-    control_thread.start()
-    threads.append(control_thread)
-    logger.info("Started control handler thread")
-
-    # Main loop: monitor idle state and unload model when not needed
+    threads = _start_threads(analyzer, stop_event)
     idle_db = DatabaseConnection(DATABASE_URL)
-    idle_db.connect()
+    queue_client = None
+    healthy = False
     try:
-        while not stop_event.is_set():
-            time.sleep(5)
-            if analyzer._model_loaded:
-                idle_seconds = time.time() - analyzer.last_work_time
-                if idle_seconds >= MODEL_IDLE_TIMEOUT > 0:
-                    analyzer.unload_model()
-                    logger.info(f"Model idle for {idle_seconds:.0f}s, unloaded to free memory (will reload when work arrives)")
-                elif idle_seconds >= SLEEP_INTERVAL * 2:
-                    # Check if all work is truly done -- unload immediately
-                    try:
-                        cursor = idle_db.get_cursor()
-                        cursor.execute("""
-                            SELECT COUNT(*) as cnt FROM "Track" t
-                            LEFT JOIN track_embeddings te ON t.id = te.track_id
-                            WHERE te.track_id IS NULL AND t."filePath" IS NOT NULL
-                        """)
-                        remaining = cursor.fetchone()['cnt']
-                        cursor.close()
-                        queue_len = redis.from_url(REDIS_URL).llen(ANALYSIS_QUEUE)
-                        if remaining == 0 and queue_len == 0:
-                            analyzer.unload_model()
-                            logger.info("All tracks have embeddings, model unloaded (will reload when work arrives)")
-                    except Exception as e:
-                        logger.debug(f"Idle check failed: {e}")
-                        idle_db.reconnect()
+        idle_db.connect()
+        queue_client = redis.from_url(
+            REDIS_URL,
+            socket_timeout=REDIS_SOCKET_TIMEOUT,
+        )
+        healthy = run_idle_monitor(analyzer, stop_event, idle_db, queue_client, threads)
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
         stop_event.set()
+        healthy = True
+    except Exception as e:
+        logger.critical(f"CLAP Analyzer service failed: {e}")
+        stop_event.set()
+    finally:
+        try:
+            idle_db.close()
+        except Exception as e:
+            logger.warning(f"Failed to close idle database: {e}")
+        if queue_client is not None:
+            try:
+                queue_client.close()
+            except Exception as e:
+                logger.warning(f"Failed to close idle Redis client: {e}")
 
-    # Cleanup
-    idle_db.close()
-
-    # Wait for threads to finish
     logger.info("Waiting for threads to finish...")
     for thread in threads:
         thread.join(timeout=10)
 
-    logger.info("CLAP Analyzer service stopped")
+    if not healthy:
+        logger.critical("CLAP Analyzer service unhealthy; exiting for container restart")
+        sys.exit(1)
+    logger.info("CLAP Analyzer service stopped cleanly")
 
 
 if __name__ == '__main__':
