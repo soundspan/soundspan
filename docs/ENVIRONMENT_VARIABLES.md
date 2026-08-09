@@ -164,7 +164,11 @@ Experimental feature note:
 | `YTMUSIC_BATCH_DELAY_MAX` | `ytmusic-streamer` | Optional | `1.0` | Max delay between batched search calls (seconds). |
 | `YTMUSIC_EXTRACT_DELAY_MIN` | `ytmusic-streamer` | Optional | `0.5` | Min delay between stream extraction calls (seconds). |
 | `YTMUSIC_EXTRACT_DELAY_MAX` | `ytmusic-streamer` | Optional | `2.0` | Max delay between stream extraction calls (seconds). |
+| `YTMUSIC_EXTRACT_TIMEOUT` | `ytmusic-streamer` | Optional | `60` | Overall per-request deadline (seconds) for yt-dlp stream-URL extraction; on expiry the request fails fast with HTTP 504 instead of hanging. |
+| `YTMUSIC_YTDLP_SOCKET_TIMEOUT` | `ytmusic-streamer` | Optional | `20` | yt-dlp `socket_timeout` (seconds) bounding individual network reads during extraction and downloads, so a stalled worker thread eventually frees. |
 | `YTMUSIC_SEARCH_CACHE_TTL` | `ytmusic-streamer` | Optional | `300` | Search cache TTL in seconds (`0` disables cache). |
+| `YTMUSIC_SEARCH_CACHE_MAX` | `ytmusic-streamer` | Optional | `1024` | Max in-memory search-cache entries; the oldest are evicted past this bound to cap memory. |
+| `YTMUSIC_STREAM_CACHE_MAX` | `ytmusic-streamer` | Optional | `1024` | Max in-memory stream-URL cache entries; the oldest are evicted past this bound to cap memory. |
 | `YTMUSIC_SEARCH_MODE` | `ytmusic-streamer` | Optional | `auto` | Search strategy: `auto` (native-first with per-user TV fallback on #813 invalid-argument errors), `tv` (legacy TV parser), or `native` (`ytmusicapi` `yt.search()` only). |
 | `YTMUSIC_LANGUAGE` | `ytmusic-streamer` | Optional | `en` | BCP-47 language code forwarded to all `YTMusic()` client instances; controls the language of shelf titles and content descriptions regardless of the server's geo-IP locale. |
 | `YTMUSIC_HOME_FILTERED_SHELVES` | `ytmusic-streamer` | Optional | `Quick picks` | Comma-separated, case-insensitive list of shelf titles to exclude from `/home` responses. |
