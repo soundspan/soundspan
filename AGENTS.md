@@ -77,6 +77,7 @@ One command reproduces every CI gate: **`npm run verify`** (from the repo root).
 | --- | --- | --- |
 | Backend Tests + Coverage | `npm run verify:backend` (= `npm --prefix backend run test:coverage`) | backend Jest unit/runtime tests + coverage |
 | Frontend Quality Visibility + Typecheck | `npm run verify:frontend` (= frontend `lint` + `build` + `test:coverage` + `test:component` + `typecheck`) | ESLint, Next build/type-check, targeted unit coverage, component tests, and standalone source/test TypeScript checking |
+| Python Sidecar Tests (matrix) | `npm run verify:python` (requires Python 3.11+ with each sidecar's `requirements-test.txt` installed) | pytest suites for the four `services/*` sidecars |
 | Helm Chart Visibility | `npm run verify:helm` (= `./scripts/helm-chart-render-check.sh`) | chart lint + render assertions |
 
 Notes:

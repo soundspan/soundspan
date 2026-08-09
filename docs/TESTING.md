@@ -15,7 +15,7 @@ It defines:
 | --- | --- | --- | --- |
 | Backend (`backend/`) | Jest + ts-jest | `npm --prefix backend test`, `npm --prefix backend run test:coverage` | Unit/integration/contract/runtime tests under `backend/src/**/__tests__` |
 | Frontend (`frontend/`) | Node test runner (unit + component + coverage), Playwright (E2E), ESLint, TypeScript | `npm --prefix frontend run typecheck`, `npm --prefix frontend run test:unit`, `npm --prefix frontend run test:coverage`, `npm --prefix frontend run test:component`, `npm --prefix frontend run test:component:coverage`, `npm --prefix frontend run test:component:coverage:changed`, `npm --prefix frontend run test:coverage:social`, `npm --prefix frontend run test:config:runtime`, `npm --prefix frontend run test:e2e`, `npm --prefix frontend run test:predeploy`, `npm --prefix frontend run lint` | Standalone typecheck covers source and test files; unit specs live under `frontend/tests/unit`; component specs under `frontend/tests/component`; E2E specs under `frontend/tests/e2e`; the runtime-config smoke reloads production Next.js config after dependency pruning in the AIO image |
-| Python sidecars (`services/*`) | `pytest` | N/A | Real `pytest` suites exist under `services/*/tests/` — 141 test functions total (tidal-downloader 55, ytmusic-streamer 81, audio-analyzer 3, audio-analyzer-clap 2); `pytest` is a declared dependency (`requirements-test.txt`) for tidal-downloader and ytmusic-streamer, each with its own `tests/conftest.py` |
+| Python sidecars (`services/*`) | `pytest` | `npm run verify:python`, or `pytest services/<service>/tests -q` per service | Suites run in CI through the `Python Sidecar Tests` matrix job in `quality-visibility.yml`; currently 141 test functions total (tidal-downloader 55, ytmusic-streamer 81, audio-analyzer 3, audio-analyzer-clap 2), though counts will drift as coverage grows |
 
 ## Directory Structure (Canonical)
 
@@ -161,6 +161,7 @@ Current behavior:
 
 - backend Jest tests + coverage summary/artifacts,
 - frontend lint/build + targeted unit coverage and E2E inventory visibility,
+- Python sidecar `pytest` suites through the four-service `Python Sidecar Tests` matrix,
 - standalone backend and frontend TypeScript checks,
 - Helm chart lint/render visibility,
 - non-blocking by default (configurable to blocking via repo vars).
@@ -171,6 +172,32 @@ Backend coverage artifacts include:
 - `backend/coverage/coverage-summary.json`
 - `backend/coverage/jest-results.json`
 - generated markdown summary (`backend/coverage/coverage-summary.md`)
+
+### Recommended gating ratchet (owner-paced)
+
+These steps require owner sign-off and repository branch-protection or variable
+changes; they do not require workflow edits:
+
+1. Add `Frontend Typecheck` to the required status checks now. It is green, and
+   the historical 92-error budget has been paid down.
+2. After one clean week, add the four `Python Sidecar Tests (...)` checks to the
+   required status checks.
+3. Enable the backend coverage gate with the repository variable
+   `CI_ENFORCE_TEST_GATE=true`. Set the `COVERAGE_*_MIN` floors slightly below
+   the totals in the current coverage-summary artifact so coverage can only
+   ratchet upward.
+
+Known follow-ups are deliberately not gated here: Python lint/type tooling
+(`ruff`/`mypy`) for `services/**`; real-timer sleeps in the
+`listenTogetherSession` and `listenTogetherSocketRetry` component tests and a
+few unit tests; the frontend `strict: true`/ES2020 tsconfig ratchet; and enforced
+coverage for the large `frontend/lib/api.ts` boundary after it is typed and
+split.
+
+Module-scope eager ioredis clients in `backend/src/workers/index.ts` and
+`backend/src/workers/processors/discoverProcessor.ts` remain test-leak
+candidates. They stay outside this change and are covered by the
+backend-reliability slice's module-load side-effect work.
 
 AWM repo-contract checks:
 
@@ -237,6 +264,10 @@ Python sidecar `pytest` suites exist for all four sidecars:
 - `services/audio-analyzer-clap/tests/` (2 test functions)
 - `services/tidal-downloader/tests/` (55 test functions)
 - `services/ytmusic-streamer/tests/` (81 test functions)
+
+All four sidecars have a `requirements-test.txt` manifest and run in CI through
+the `Python Sidecar Tests` matrix job. Run each sidecar suite in a separate
+`pytest` invocation because test module basenames collide across sidecars.
 
 Use this structure consistently when adding sidecar tests:
 

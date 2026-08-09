@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI visibility now includes a `Python Sidecar Tests` matrix job in
+  `quality-visibility.yml`, running the `pytest` suites for all four sidecars
+  (tidal-downloader, ytmusic-streamer, audio-analyzer, and audio-analyzer-clap),
+  including their internal-auth and security coverage, on every pull request.
+  A new root `npm run verify:python` command runs the four suites locally, and
+  both analyzer sidecars now have dedicated `requirements-test.txt` manifests.
+
 ### Changed
 
 - Audio analyzer batch-timeout retry semantics (analyzer reliability slice):
@@ -63,6 +70,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retry budget.
 - Python sidecars no longer use deprecated `datetime.utcnow()`; analyzer
   timestamps are timezone-aware UTC (`datetime.now(timezone.utc)`).
+- Backend Jest suites no longer leave Redis's live reconnect loop running in
+  test workers: `utils/redis.ts` skips its eager module-load connection under
+  Jest, preventing `Cannot log after tests are done` noise and flakiness, while
+  tests continue to cover the production eager-connect behavior.
+- Backend Jest's default `maxWorkers` is now 2 instead of 8, matching the
+  documented low-memory constraint and the existing explicit CI limit.
+- Sidecar requirement-lock tests now assert that the Uvicorn manifest floor is
+  at least the 0.52.0 security baseline instead of requiring that stale exact
+  literal, so Dependabot floor increases such as 0.52.1 remain valid.
+- Two orphaned frontend player tests now live under `frontend/tests/unit`, so
+  `test:unit` and `test:coverage` discover them; the frontend unit suite now
+  runs 845 tests.
+- Frontend test-script globs are now quoted so Node's test runner consistently
+  expands them instead of relying on partial shell expansion.
+- `playwright.config.ts` no longer duplicates its environment fallback
+  expressions.
+- The predeploy logout E2E test now follows the deterministic User-menu path
+  instead of conditionally discovering a logout element.
+- `scripts/ci/backend-coverage-summary.mjs` now exits non-zero when
+  `ENFORCE_COVERAGE_GATE=true` and the coverage summary is missing, closing the
+  previous fail-open path.
 - Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
   `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
   at nonexistent `postgres`/`redis` services (the services are
