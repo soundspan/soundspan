@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SettingsRow, SettingsSelect, SettingsToggle, IntegrationCard } from "../ui";
+import { DeviceAuthLinkPanel, SettingsRow, SettingsSelect, SettingsToggle, IntegrationCard } from "../ui";
 import { UserSettings } from "../../types";
-import { CheckCircle, XCircle, Loader2, ExternalLink, Copy, AlertTriangle, Music2 } from "lucide-react";
+import { CheckCircle, XCircle, AlertTriangle, Music2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useDeviceAuthPolling } from "@/hooks/useDeviceAuthPolling";
 
@@ -159,12 +159,6 @@ export function TidalStreamingCard({
         }
     }, [userCode]);
 
-    const formatTimeLeft = (seconds: number): string => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
-    };
-
     // Derived card state
     const isDisabled = !statusLoading && (!tidalEnabled || !tidalAvailable);
     const disabledReason = !tidalEnabled
@@ -216,91 +210,18 @@ export function TidalStreamingCard({
                 <div className="space-y-3">
                     {/* In linking flow — show device code + verification URL */}
                     {userCode && authState === "polling" && (
-                        <div className="p-4 bg-[#252525] rounded-lg border border-[#333] space-y-4">
-                            <div className="space-y-3">
-                                <p className="text-sm text-gray-300">
-                                    A TIDAL authorization page should have opened.
-                                    If it didn&apos;t, click the link below.
-                                </p>
-
-                                {/* Step 1 — Paste code */}
-                                <div className="flex items-start gap-3">
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold mt-0.5">1</span>
-                                    <div className="space-y-2">
-                                        <p className="text-sm text-gray-300">
-                                            Enter this code on the TIDAL page
-                                            <span className="text-gray-500 text-xs ml-1">(it&apos;s already on your clipboard)</span>
-                                        </p>
-                                        <div className="flex items-center gap-3">
-                                            <code className="px-4 py-2 text-lg font-mono font-bold tracking-wider bg-[#1a1a1a] text-white rounded-lg border border-[#444] select-all">
-                                                {userCode}
-                                            </code>
-                                            <button
-                                                onClick={handleCopyCode}
-                                                className="p-2 text-gray-400 hover:text-white transition-colors"
-                                                title="Copy code"
-                                            >
-                                                {copied ? (
-                                                    <CheckCircle className="w-4 h-4 text-green-400" />
-                                                ) : (
-                                                    <Copy className="w-4 h-4" />
-                                                )}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Step 2 — Sign in */}
-                                <div className="flex items-start gap-3">
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold mt-0.5">2</span>
-                                    <p className="text-sm text-gray-300">
-                                        Sign in with your TIDAL account and click <strong className="text-white">Allow</strong>
-                                    </p>
-                                </div>
-
-                                {/* Step 3 — Come back */}
-                                <div className="flex items-start gap-3">
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold mt-0.5">3</span>
-                                    <p className="text-sm text-gray-300">
-                                        Return here — this page will update automatically
-                                    </p>
-                                </div>
-                            </div>
-
-                            {authUrl && (
-                                <a
-                                    href={authUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-blue-600/20 text-blue-400 rounded-full
-                                        hover:bg-blue-600/30 border border-blue-500/30 transition-colors"
-                                >
-                                    <ExternalLink className="w-4 h-4" />
-                                    Open TIDAL Authorization Page
-                                </a>
-                            )}
-
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-sm text-gray-400">
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                    <span>Waiting for you to complete sign-in...</span>
-                                </div>
-                                {timeLeft !== null && (
-                                    <span className={`text-xs tabular-nums ${
-                                        timeLeft < 120 ? "text-amber-400/70" : "text-gray-500"
-                                    }`}>
-                                        Expires in {formatTimeLeft(timeLeft)}
-                                    </span>
-                                )}
-                            </div>
-
-                            <button
-                                onClick={handleCancelLink}
-                                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                            >
-                                Cancel
-                            </button>
-                        </div>
+                        <DeviceAuthLinkPanel
+                            userCode={userCode}
+                            verificationUrl={authUrl}
+                            timeLeftSeconds={timeLeft}
+                            copied={copied}
+                            onCopyCode={handleCopyCode}
+                            onCancel={handleCancelLink}
+                            introText="A TIDAL authorization page should have opened. If it didn't, click the link below."
+                            pasteInstruction="Enter this code on the TIDAL page"
+                            signInInstruction={<>Sign in with your TIDAL account and click <strong className="text-white">Allow</strong></>}
+                            openLinkLabel="Open TIDAL Authorization Page"
+                        />
                     )}
 
                     {(authError || error) && (

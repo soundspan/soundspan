@@ -4,11 +4,11 @@
  * Shows YT Music curated featured shelves.
  */
 
-import Link from "next/link";
 import { SectionHeader } from "@/features/home/components/SectionHeader";
 import { api } from "@/lib/api";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import type { YtMusicHomeShelf } from "@/hooks/useQueries";
+import { BrowseCard } from "./BrowseCard";
 
 interface FeaturedShelvesSectionProps {
     homeShelves: YtMusicHomeShelf[];
@@ -44,42 +44,14 @@ export function FeaturedShelvesSection({
                                 : item.browseId && item.type === "album"
                                   ? `/explore/yt-playlist/${encodeURIComponent(item.browseId)}?type=album`
                                   : null;
-                            const inner = (
-                                <>
-                                    <div className="aspect-square rounded-md bg-white/5 overflow-hidden mb-2">
-                                        {item.thumbnailUrl && (
-                                            <img
-                                                src={api.getBrowseImageUrl(item.thumbnailUrl)}
-                                                alt={item.title ?? ""}
-                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                            />
-                                        )}
-                                    </div>
-                                    <p className="text-sm text-white truncate">
-                                        {item.title}
-                                    </p>
-                                    {item.subtitle && (
-                                        <p className="text-xs text-gray-400 truncate">
-                                            {item.subtitle}
-                                        </p>
-                                    )}
-                                </>
-                            );
-                            return href ? (
-                                <Link
+                            return (
+                                <BrowseCard
                                     key={item.playlistId ?? item.browseId ?? item.videoId ?? i}
                                     href={href}
-                                    className="group cursor-pointer"
-                                >
-                                    {inner}
-                                </Link>
-                            ) : (
-                                <div
-                                    key={item.playlistId ?? item.browseId ?? item.videoId ?? i}
-                                    className="group"
-                                >
-                                    {inner}
-                                </div>
+                                    imageUrl={item.thumbnailUrl ? api.getBrowseImageUrl(item.thumbnailUrl) : null}
+                                    title={item.title ?? ""}
+                                    subtitle={item.subtitle}
+                                />
                             );
                         })}
                     </div>

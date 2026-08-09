@@ -178,7 +178,7 @@ export function SyncedLyrics({
                 <div className="space-y-2 max-w-3xl mx-auto">
                     {plainLyrics.split("\n").map((line, i) => (
                         <p
-                            key={i}
+                            key={`${i}-${line}`}
                             className={cn(
                                 "text-base text-gray-300 leading-relaxed transition-colors text-center",
                                 line.trim() === "" && "h-4"
@@ -213,7 +213,7 @@ export function SyncedLyrics({
 
                     return (
                         <div
-                            key={i}
+                            key={`${line.time}-${i}`}
                             ref={isActive ? activeLineRef : undefined}
                             onClick={() => !isEmpty && handleLineClick(line.time)}
                             className={cn(

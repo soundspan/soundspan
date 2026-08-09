@@ -9,6 +9,7 @@ import {
     BRAND_DEEP_LINK_SCHEME,
 } from "@/lib/brand";
 import { cn } from "@/utils/cn";
+import { formatTime } from "@/utils/formatTime";
 import { QRCodeSVG } from "qrcode.react";
 import { Card } from "@/components/ui/Card";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
@@ -153,13 +154,6 @@ export default function DeviceLinkPage() {
         } catch (err) {
             sharedFrontendLogger.error("Failed to revoke device:", err);
         }
-    };
-
-    // Format time remaining
-    const formatTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
     };
 
     // Build QR code URL (contains code and server URL)

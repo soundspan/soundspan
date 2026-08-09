@@ -8,4 +8,4 @@ export { SettingsInput } from "./SettingsInput";
 export { ConnectionCard } from "./ConnectionCard";
 export { IntegrationCard } from "./IntegrationCard";
 export { InfoTooltip } from "./InfoTooltip";
-
+export { DeviceAuthLinkPanel } from "./DeviceAuthLinkPanel";

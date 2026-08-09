@@ -32,6 +32,7 @@ import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { EqBars } from "@/components/ui/EqBars";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { cn } from "@/utils/cn";
+import { formatTime } from "@/utils/formatTime";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { useVisibilityGatedInterval } from "@/hooks/useVisibilityGatedInterval";
@@ -853,7 +854,7 @@ function QueueItem({
 
             {/* Duration */}
             <span className="text-xs text-[#525252] flex-shrink-0 tabular-nums">
-                {formatDuration(item.duration)}
+                {formatTime(item.duration)}
             </span>
 
             {/* Overflow Menu */}
@@ -881,12 +882,6 @@ function QueueItem({
             />
         </div>
     );
-}
-
-function formatDuration(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 // ---------------------------------------------------------------------------

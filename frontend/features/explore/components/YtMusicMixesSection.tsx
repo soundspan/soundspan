@@ -10,12 +10,12 @@
  * render. Revisit when ytmusicapi resolves #813.
  */
 
-import Link from "next/link";
 import { SectionHeader } from "@/features/home/components/SectionHeader";
 import { YouTubeBadge } from "@/components/ui/YouTubeBadge";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
 import { api } from "@/lib/api";
 import type { YtMusicMixPreview } from "@/hooks/useQueries";
+import { BrowseCard } from "./BrowseCard";
 
 interface YtMusicMixesSectionProps {
     mixes: YtMusicMixPreview[];
@@ -36,24 +36,12 @@ export function YtMusicMixesSection({ mixes }: YtMusicMixesSectionProps) {
                         ?? mix.thumbnails?.[0];
                     return (
                         <CarouselItem key={mix.playlistId}>
-                            <Link
+                            <BrowseCard
                                 href={`/explore/yt-playlist/${encodeURIComponent(mix.playlistId)}`}
-                                className="group"
-                            >
-                                <div className="aspect-square rounded-md bg-white/5 overflow-hidden mb-2">
-                                    {thumbnail?.url && (
-                                        <img
-                                            src={api.getBrowseImageUrl(thumbnail.url)}
-                                            alt={mix.title}
-                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                        />
-                                    )}
-                                </div>
-                                <p className="text-sm text-white truncate">{mix.title}</p>
-                                {mix.description && (
-                                    <p className="text-xs text-gray-400 truncate">{mix.description}</p>
-                                )}
-                            </Link>
+                                imageUrl={thumbnail?.url ? api.getBrowseImageUrl(thumbnail.url) : null}
+                                title={mix.title}
+                                subtitle={mix.description}
+                            />
                         </CarouselItem>
                     );
                 })}

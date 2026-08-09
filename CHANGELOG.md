@@ -164,6 +164,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `nextjs` user) via a `frontend.podSecurityContext` override merged over the
   chart-wide `1000`, fixing the UID/file-ownership mismatch until the image is
   realigned.
+- Frontend (refactor slice P25, frontend-dedup): mechanical duplication
+  collapse across the frontend, no user-visible behavior change.
+  - YouTube Music account linking (`YouTubeMusicSection`) now uses the shared
+    `useDeviceAuthPolling` hook instead of a third hand-rolled device-code
+    polling/expiry/countdown state machine, matching the Tidal sections. This
+    inherits the hook's bounded, race-safe polling, tracked timers with
+    deterministic cleanup, and generation-guarded cancellation.
+  - Extracted the duplicated device-code linking UI shared by the TIDAL and
+    YouTube Music settings sections into one presentational component
+    (`features/settings/components/ui/DeviceAuthLinkPanel`).
+  - Extracted the copy-pasted Explore media card (square thumbnail + title +
+    subtitle) into a shared `features/explore/components/BrowseCard`, adopted by
+    the featured-shelves and mixes sections for both TIDAL and YouTube Music.
+  - Consolidated nine local time/duration re-implementations onto
+    `utils/formatTime`, adding a documented `formatRelativeTime` helper for the
+    activity tabs (History, Notifications, Active Downloads).
+  - Replaced index-based React keys with stable content-derived keys in
+    `PreviewEpisodes` and `SyncedLyrics`.
+
 - Backend: introduced a single consolidated, typed Lidarr HTTP client
   (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
   for outbound Lidarr calls. It wraps one reusable axios instance with bounded

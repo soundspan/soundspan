@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useDownloadContext } from "@/lib/download-context";
 import { createFrontendLogger } from "@/lib/logger";
 import { cn } from "@/utils/cn";
+import { formatRelativeTime } from "@/utils/formatTime";
 
 const logger = createFrontendLogger("Activity.HistoryTab");
 
@@ -190,17 +191,6 @@ function HistoryItem({
     const isCompleted = item.status === "completed";
     const isFailed = item.status === "failed" || item.status === "exhausted";
 
-    const formatTime = (dateStr: string) => {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diff = now.getTime() - date.getTime();
-        
-        if (diff < 60000) return "Just now";
-        if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-        if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-        return date.toLocaleDateString();
-    };
-
     return (
         <div className="px-3 py-3 border-b border-white/5 hover:bg-white/5 transition-colors group">
             <div className="flex items-start gap-3">
@@ -226,7 +216,7 @@ function HistoryItem({
                         </span>
                         <span className="text-xs text-white/30">•</span>
                         <span className="text-xs text-white/30">
-                            {formatTime(item.completedAt || item.createdAt)}
+                            {formatRelativeTime(item.completedAt || item.createdAt)}
                         </span>
                     </div>
                     {item.error && (

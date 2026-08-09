@@ -4,11 +4,11 @@
  * Shows TIDAL curated home + explore shelves combined.
  */
 
-import Link from "next/link";
 import { SectionHeader } from "@/features/home/components/SectionHeader";
 import { api } from "@/lib/api";
 import { TidalBadge } from "@/components/ui/TidalBadge";
 import type { TidalBrowseShelf, TidalBrowseShelfItem } from "@/hooks/useQueries";
+import { BrowseCard } from "./BrowseCard";
 
 interface TidalFeaturedShelvesSectionProps {
     homeShelves: TidalBrowseShelf[];
@@ -59,46 +59,15 @@ export function TidalFeaturedShelvesSection({
                         badge={<TidalBadge />}
                     />
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                        {shelf.contents?.slice(0, 12).map((item, i) => {
-                            const href = getItemHref(item);
-                            const inner = (
-                                <>
-                                    <div className="aspect-square rounded-md bg-white/5 overflow-hidden mb-2">
-                                        {item.thumbnailUrl && (
-                                            <img
-                                                src={api.getTidalBrowseImageUrl(item.thumbnailUrl)}
-                                                alt={item.title ?? ""}
-                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                            />
-                                        )}
-                                    </div>
-                                    <p className="text-sm text-white truncate">
-                                        {item.title}
-                                    </p>
-                                    {item.subtitle && (
-                                        <p className="text-xs text-gray-400 truncate">
-                                            {item.subtitle}
-                                        </p>
-                                    )}
-                                </>
-                            );
-                            return href ? (
-                                <Link
-                                    key={getItemKey(item, i)}
-                                    href={href}
-                                    className="group cursor-pointer"
-                                >
-                                    {inner}
-                                </Link>
-                            ) : (
-                                <div
-                                    key={getItemKey(item, i)}
-                                    className="group"
-                                >
-                                    {inner}
-                                </div>
-                            );
-                        })}
+                        {shelf.contents?.slice(0, 12).map((item, i) => (
+                            <BrowseCard
+                                key={getItemKey(item, i)}
+                                href={getItemHref(item)}
+                                imageUrl={item.thumbnailUrl ? api.getTidalBrowseImageUrl(item.thumbnailUrl) : null}
+                                title={item.title ?? ""}
+                                subtitle={item.subtitle}
+                            />
+                        ))}
                     </div>
                 </section>
             ))}

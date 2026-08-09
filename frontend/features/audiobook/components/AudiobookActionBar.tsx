@@ -2,6 +2,7 @@
 
 import { Play, Pause, RotateCcw, CheckCircle, Loader2 } from "lucide-react";
 import { usePlayButtonFeedback } from "@/hooks/usePlayButtonFeedback";
+import { formatTime as defaultFormatTime } from "@/utils/formatTime";
 import type { Audiobook } from "../types";
 
 interface AudiobookActionBarProps {
@@ -26,7 +27,7 @@ export function AudiobookActionBar({
   onPlayPause,
   onResetProgress,
   onMarkAsCompleted,
-  formatTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`,
+  formatTime = defaultFormatTime,
 }: AudiobookActionBarProps) {
   const { showSpinner, triggerPlayFeedback } = usePlayButtonFeedback();
   const hasProgress = audiobook.progress && audiobook.progress.progress > 0;

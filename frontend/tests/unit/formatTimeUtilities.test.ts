@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import {
     clampTime,
     formatDuration,
+    formatRelativeTime,
     formatTime,
     formatTimeRemaining,
 } from "../../utils/formatTime";
@@ -60,6 +61,40 @@ describe("formatDuration", () => {
         assert.equal(formatDuration(60), "1m");
         assert.equal(formatDuration(3600), "1h");
         assert.equal(formatDuration(5400), "1h 30m");
+    });
+});
+
+describe("formatRelativeTime", () => {
+    test("formats relative dates with default labels", () => {
+        const justNow = new Date(Date.now() - 30_000);
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000);
+        const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000);
+        const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
+
+        assert.equal(formatRelativeTime(justNow), "Just now");
+        assert.equal(formatRelativeTime(fiveMinutesAgo), "5m ago");
+        assert.equal(formatRelativeTime(twoHoursAgo), "2h ago");
+        assert.equal(
+            formatRelativeTime(threeDaysAgo),
+            threeDaysAgo.toLocaleDateString()
+        );
+    });
+
+    test("formats relative dates with custom labels", () => {
+        const options = { justNowLabel: "Just started", suffix: "" };
+
+        assert.equal(
+            formatRelativeTime(new Date(Date.now() - 30_000), options),
+            "Just started"
+        );
+        assert.equal(
+            formatRelativeTime(new Date(Date.now() - 5 * 60_000), options),
+            "5m"
+        );
+        assert.equal(
+            formatRelativeTime(new Date(Date.now() - 2 * 3_600_000), options),
+            "2h"
+        );
     });
 });
 

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { SettingsSection, SettingsRow, SettingsToggle, SettingsSelect, SettingsInput, IntegrationCard } from "../ui";
+import { DeviceAuthLinkPanel, SettingsSection, SettingsRow, SettingsToggle, SettingsSelect, SettingsInput, IntegrationCard } from "../ui";
 import { UserSettings, SystemSettings } from "../../types";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
+import { useDeviceAuthPolling } from "@/hooks/useDeviceAuthPolling";
 // lucide-react 1.x removed brand icons (Youtube included); SquarePlay is the closest generic stand-in.
-import { CheckCircle, XCircle, Loader2, ExternalLink, Copy, AlertTriangle, SquarePlay, ChevronDown, ChevronRight } from "lucide-react";
+import { CheckCircle, XCircle, AlertTriangle, SquarePlay, ChevronDown, ChevronRight } from "lucide-react";
 
 const logger = createFrontendLogger("Settings.YouTubeMusicSection");
 
@@ -134,102 +135,7 @@ export function YouTubeMusicCard({ settings, onUpdate }: YouTubeMusicCardProps) 
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
-    // Device code flow state
-    const [deviceCode, setDeviceCode] = useState<string | null>(null);
-    const [userCode, setUserCode] = useState<string | null>(null);
-    const [verificationUrl, setVerificationUrl] = useState<string | null>(null);
-    const [linking, setLinking] = useState(false);
-    const [polling, setPolling] = useState(false);
     const [copied, setCopied] = useState(false);
-    const [expiresAt, setExpiresAt] = useState<number | null>(null);
-    const [timeLeft, setTimeLeft] = useState<number | null>(null);
-
-    // Check status on mount
-    useEffect(() => {
-        checkStatus();
-    }, []);
-
-    // Expiration countdown
-    useEffect(() => {
-        if (!expiresAt || !polling) {
-            setTimeLeft(null);
-            return;
-        }
-
-        const tick = () => {
-            const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
-            setTimeLeft(remaining);
-            if (remaining <= 0) {
-                // Device code expired — cancel the flow
-                setPolling(false);
-                setDeviceCode(null);
-                setUserCode(null);
-                setVerificationUrl(null);
-                setExpiresAt(null);
-                setError("The sign-in code has expired. Please try again.");
-            }
-        };
-
-        tick();
-        const interval = setInterval(tick, 1000);
-        return () => clearInterval(interval);
-    }, [expiresAt, polling]);
-
-    // Polling effect — uses recursive setTimeout so the next poll only
-    // starts after the previous one completes (prevents overlapping requests
-    // that cause the device code to be consumed then re-used → invalid_grant)
-    useEffect(() => {
-        if (!polling || !deviceCode) return;
-
-        let cancelled = false;
-        let timer: ReturnType<typeof setTimeout>;
-
-        const poll = async () => {
-            if (cancelled) return;
-            try {
-                const result = await api.pollYtMusicAuth(deviceCode);
-                if (cancelled) return;
-
-                if (result.status === "success") {
-                    setPolling(false);
-                    setDeviceCode(null);
-                    setUserCode(null);
-                    setVerificationUrl(null);
-                    setExpiresAt(null);
-                    setSuccess("YouTube Music account connected successfully!");
-                    setError(null);
-                    await checkStatus();
-                    window.dispatchEvent(new Event("ytmusic-auth-changed"));
-                    return; // done — don't schedule another poll
-                } else if (result.status === "error") {
-                    setPolling(false);
-                    setDeviceCode(null);
-                    setUserCode(null);
-                    setVerificationUrl(null);
-                    setExpiresAt(null);
-                    setError(result.error || "Authorization failed. Please try again.");
-                    return; // done — don't schedule another poll
-                }
-                // "pending" — schedule next poll
-            } catch (err: any) {
-                // Don't stop polling on transient errors
-                logger.debug("YouTube Music poll error; retrying", {
-                    error: err,
-                });
-            }
-            if (!cancelled) {
-                timer = setTimeout(poll, 5000);
-            }
-        };
-
-        // First poll after a 5-second delay
-        timer = setTimeout(poll, 5000);
-
-        return () => {
-            cancelled = true;
-            clearTimeout(timer);
-        };
-    }, [polling, deviceCode]);
 
     const checkStatus = useCallback(async () => {
         setStatusLoading(true);
@@ -243,46 +149,84 @@ export function YouTubeMusicCard({ settings, onUpdate }: YouTubeMusicCardProps) 
         }
     }, []);
 
-    const handleLinkAccount = async () => {
-        setLinking(true);
+    // Check status on mount
+    useEffect(() => {
+        void checkStatus();
+    }, [checkStatus]);
+
+    const initiateAuth = useCallback(async () => {
+        const r = await api.initiateYtMusicAuth();
+        return {
+            deviceCode: r.device_code,
+            verificationUri: r.verification_url,
+            userCode: r.user_code,
+            pollIntervalMs: (r.interval || 5) * 1000,
+            expiresAtMs: Date.now() + r.expires_in * 1000,
+        };
+    }, []);
+
+    const pollAuth = useCallback(async (deviceCode: string) => {
+        const r = await api.pollYtMusicAuth(deviceCode);
+        if (r.status === "success") return { status: "success" } as const;
+        if (r.status === "error") {
+            return {
+                status: "error",
+                message: r.error || "Authorization failed. Please try again.",
+            } as const;
+        }
+        return { status: "pending" } as const;
+    }, []);
+
+    const handleSessionStarted = useCallback(async (session: {
+        userCode?: string;
+        verificationUri: string;
+    }) => {
+        try {
+            await navigator.clipboard.writeText(session.userCode || "");
+            setCopied(true);
+            setTimeout(() => setCopied(false), 3000);
+        } catch {
+            // Clipboard is optional.
+        }
+        window.open(session.verificationUri, "_blank", "noopener,noreferrer");
+    }, []);
+
+    const handleAuthSuccess = useCallback(() => {
+        setSuccess("YouTube Music account connected successfully!");
+        setError(null);
+        void checkStatus();
+        window.dispatchEvent(new Event("ytmusic-auth-changed"));
+    }, [checkStatus]);
+
+    const {
+        phase: authState,
+        session: authSession,
+        error: authError,
+        timeLeftSeconds: timeLeft,
+        start: startAuthentication,
+        cancel: cancelAuthentication,
+    } = useDeviceAuthPolling({
+        initiate: initiateAuth,
+        poll: pollAuth,
+        onSessionStarted: handleSessionStarted,
+        onSuccess: handleAuthSuccess,
+        expiredMessage: "The sign-in code has expired. Please try again.",
+        startErrorMessage: "Failed to start authentication. Check admin credentials.",
+    });
+    const userCode = authSession?.userCode || "";
+    const verificationUrl = authSession?.verificationUri || "";
+    const polling = authState === "polling";
+
+    const handleLinkAccount = useCallback(async () => {
         setError(null);
         setSuccess(null);
+        await startAuthentication();
+    }, [startAuthentication]);
 
-        try {
-            const result = await api.initiateYtMusicAuth();
-            setDeviceCode(result.device_code);
-            setUserCode(result.user_code);
-            setVerificationUrl(result.verification_url);
-            setExpiresAt(Date.now() + result.expires_in * 1000);
-            setPolling(true);
-
-            // Copy code to clipboard so user can paste it on Google's page
-            try {
-                await navigator.clipboard.writeText(result.user_code);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 3000);
-            } catch {
-                // Clipboard may not be available — user can copy manually
-            }
-
-            // Open the Google device code entry page (without ?user_code= which
-            // adds an unnecessary confirmation step before the real entry page)
-            window.open(result.verification_url, "_blank", "noopener,noreferrer");
-        } catch (err: any) {
-            setError(err.message || "Failed to start authentication. Check admin credentials.");
-        } finally {
-            setLinking(false);
-        }
-    };
-
-    const handleCancelLink = () => {
-        setPolling(false);
-        setDeviceCode(null);
-        setUserCode(null);
-        setVerificationUrl(null);
-        setExpiresAt(null);
+    const handleCancelLink = useCallback(() => {
+        cancelAuthentication();
         setError(null);
-    };
+    }, [cancelAuthentication]);
 
     const handleClearAuth = async () => {
         try {
@@ -313,12 +257,6 @@ export function YouTubeMusicCard({ settings, onUpdate }: YouTubeMusicCardProps) 
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         }
-    };
-
-    const formatTimeLeft = (seconds: number): string => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
     };
 
     const qualityOptions = [
@@ -376,14 +314,14 @@ export function YouTubeMusicCard({ settings, onUpdate }: YouTubeMusicCardProps) 
             connected={isConnected}
             onConnect={canLinkAccount ? handleLinkAccount : undefined}
             onDisconnect={handleClearAuth}
-            isLoading={statusLoading || linking}
+            isLoading={statusLoading || authState === "loading"}
             expanded={isExpanded}
             disabled={isDisabled}
             disabledReason={disabledReason}
             warning={warningBanner}
         >
             {/* Account linking hint when OAuth is available but not linked */}
-            {!isConnected && canLinkAccount && status?.available && !polling && !error && !success && (
+            {!isConnected && canLinkAccount && status?.available && !polling && !authError && !error && !success && (
                 <p className="text-sm text-gray-500">
                     Link your Google account for personal library access (optional).
                 </p>
@@ -394,95 +332,24 @@ export function YouTubeMusicCard({ settings, onUpdate }: YouTubeMusicCardProps) 
                 <div className="space-y-3">
                     {/* In linking flow — show device code + verification URL */}
                     {userCode && verificationUrl && polling && (
-                        <div className="p-4 bg-[#252525] rounded-lg border border-[#333] space-y-4">
-                            <div className="space-y-3">
-                                <p className="text-sm text-gray-300">
-                                    A Google sign-in page should have opened.
-                                    If it didn&apos;t, click the link below.
-                                </p>
-
-                                {/* Step 1 — Paste code */}
-                                <div className="flex items-start gap-3">
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold mt-0.5">1</span>
-                                    <div className="space-y-2">
-                                        <p className="text-sm text-gray-300">
-                                            Paste this code on the Google page
-                                            <span className="text-gray-500 text-xs ml-1">(it&apos;s already on your clipboard)</span>
-                                        </p>
-                                        <div className="flex items-center gap-3">
-                                            <code className="px-4 py-2 text-lg font-mono font-bold tracking-wider bg-[#1a1a1a] text-white rounded-lg border border-[#444] select-all">
-                                                {userCode}
-                                            </code>
-                                            <button
-                                                onClick={handleCopyCode}
-                                                className="p-2 text-gray-400 hover:text-white transition-colors"
-                                                title="Copy code"
-                                            >
-                                                {copied ? (
-                                                    <CheckCircle className="w-4 h-4 text-green-400" />
-                                                ) : (
-                                                    <Copy className="w-4 h-4" />
-                                                )}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Step 2 — Sign in */}
-                                <div className="flex items-start gap-3">
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold mt-0.5">2</span>
-                                    <p className="text-sm text-gray-300">
-                                        Sign in with your Google account and click <strong className="text-white">Allow</strong>
-                                    </p>
-                                </div>
-
-                                {/* Step 3 — Come back */}
-                                <div className="flex items-start gap-3">
-                                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold mt-0.5">3</span>
-                                    <p className="text-sm text-gray-300">
-                                        Return here — this page will update automatically
-                                    </p>
-                                </div>
-                            </div>
-
-                            <a
-                                href={verificationUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-blue-600/20 text-blue-400 rounded-full
-                                    hover:bg-blue-600/30 border border-blue-500/30 transition-colors"
-                            >
-                                <ExternalLink className="w-4 h-4" />
-                                Open Google Sign-In Page
-                            </a>
-
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-sm text-gray-400">
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                    <span>Waiting for you to complete sign-in...</span>
-                                </div>
-                                {timeLeft !== null && (
-                                    <span className={`text-xs tabular-nums ${
-                                        timeLeft < 120 ? "text-amber-400/70" : "text-gray-500"
-                                    }`}>
-                                        Expires in {formatTimeLeft(timeLeft)}
-                                    </span>
-                                )}
-                            </div>
-
-                            <button
-                                onClick={handleCancelLink}
-                                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                            >
-                                Cancel
-                            </button>
-                        </div>
+                        <DeviceAuthLinkPanel
+                            userCode={userCode}
+                            verificationUrl={verificationUrl}
+                            timeLeftSeconds={timeLeft}
+                            copied={copied}
+                            onCopyCode={handleCopyCode}
+                            onCancel={handleCancelLink}
+                            introText="A Google sign-in page should have opened. If it didn't, click the link below."
+                            pasteInstruction="Paste this code on the Google page"
+                            signInInstruction={<>Sign in with your Google account and click <strong className="text-white">Allow</strong></>}
+                            openLinkLabel="Open Google Sign-In Page"
+                        />
                     )}
 
-                    {error && (
+                    {(authError || error) && (
                         <div className="flex items-start gap-2 text-sm text-red-400">
                             <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                            <span>{error}</span>
+                            <span>{authError || error}</span>
                         </div>
                     )}
 

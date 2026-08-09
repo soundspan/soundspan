@@ -5,6 +5,7 @@ import { Download, Loader2, Music, Disc, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
 import { cn } from "@/utils/cn";
+import { formatRelativeTime } from "@/utils/formatTime";
 import { GradientSpinner } from "../ui/GradientSpinner";
 import {
     useActiveDownloads,
@@ -79,17 +80,6 @@ export function ActiveDownloadsTab({
         } finally {
             setCancelling(new Set());
         }
-    };
-
-    const formatTime = (dateStr: string) => {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diff = now.getTime() - date.getTime();
-
-        if (diff < 60000) return "Just started";
-        if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
-        if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
-        return date.toLocaleDateString();
     };
 
     if (loading) {
@@ -206,7 +196,10 @@ export function ActiveDownloadsTab({
                                         •
                                     </span>
                                     <span className="text-xs text-white/30">
-                                        {formatTime(download.createdAt)}
+                                        {formatRelativeTime(download.createdAt, {
+                                            justNowLabel: "Just started",
+                                            suffix: "",
+                                        })}
                                     </span>
                                 </div>
                             </div>

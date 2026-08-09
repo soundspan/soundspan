@@ -17,6 +17,7 @@ import {
     type Notification,
 } from "@/hooks/useNotifications";
 import { createFrontendLogger } from "@/lib/logger";
+import { formatRelativeTime } from "@/utils/formatTime";
 
 const logger = createFrontendLogger("Activity.NotificationsTab");
 
@@ -112,17 +113,6 @@ export function NotificationsTab({
         return null;
     };
 
-    const formatTime = (dateStr: string) => {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diff = now.getTime() - date.getTime();
-
-        if (diff < 60000) return "Just now";
-        if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-        if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-        return date.toLocaleDateString();
-    };
-
     if (loading) {
         return (
             <div className="flex items-center justify-center py-8">
@@ -201,7 +191,7 @@ export function NotificationsTab({
                                     )}
                                     <div className="flex items-center gap-2 mt-1.5">
                                         <span className="text-[10px] text-white/30">
-                                            {formatTime(notification.createdAt)}
+                                            {formatRelativeTime(notification.createdAt)}
                                         </span>
                                         {link && (
                                             <Link

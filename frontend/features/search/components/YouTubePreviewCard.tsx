@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { Play, Download, Loader2, ChevronDown } from "lucide-react";
 import type { YtVideoInfo } from "../hooks/useYouTubeUrl";
+import { formatTime } from "@/utils/formatTime";
 
 interface YouTubePreviewCardProps {
     videoInfo: YtVideoInfo;
@@ -25,16 +26,6 @@ const FORMAT_OPTIONS = [
     { label: "Opus", format: "opus", quality: "HIGH" },
     { label: "FLAC", format: "flac", quality: "LOSSLESS" },
 ] as const;
-
-function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) {
-        return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-    }
-    return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 export function YouTubePreviewCard({
     videoInfo,
@@ -100,7 +91,7 @@ export function YouTubePreviewCard({
                                 {videoInfo.uploader}
                             </p>
                             <p className="text-sm text-gray-500 mt-1">
-                                {formatDuration(videoInfo.duration)}
+                                {formatTime(videoInfo.duration)}
                             </p>
                         </div>
 

@@ -34,7 +34,7 @@ export function PreviewEpisodes({
                         <div className="space-y-1">
                             {previewData.previewEpisodes.map((episode, index) => (
                                 <div
-                                    key={index}
+                                    key={`${episode.publishedAt}-${episode.title}`}
                                     className="flex items-center gap-4 px-3 py-3 rounded-md opacity-60 cursor-not-allowed"
                                 >
                                     {/* Number */}

@@ -37,6 +37,30 @@ export function formatDuration(seconds: number): string {
     return `${mins}m`;
 }
 
+/** Custom labels used when formatting compact relative times. */
+export interface RelativeTimeOptions {
+    justNowLabel?: string;
+    suffix?: string;
+}
+
+/**
+ * Format a date as a compact relative time or a locale date when older than a day.
+ */
+export function formatRelativeTime(
+    dateInput: string | number | Date,
+    options?: RelativeTimeOptions
+): string {
+    const justNowLabel = options?.justNowLabel ?? "Just now";
+    const suffix = options?.suffix ?? " ago";
+    const date = new Date(dateInput);
+    const diff = Date.now() - date.getTime();
+
+    if (diff < 60000) return justNowLabel;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m${suffix}`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h${suffix}`;
+    return date.toLocaleDateString();
+}
+
 /**
  * Clamp a time value to be within valid bounds
  * Ensures currentTime never exceeds duration
