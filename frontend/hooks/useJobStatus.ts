@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { createFrontendLogger } from "@/lib/logger";
+import { resolveJobFailureMessage } from "@/hooks/jobStatus";
 import { useVisibilityGatedInterval } from "@/hooks/useVisibilityGatedInterval";
 
 const logger = createFrontendLogger("Hooks.useJobStatus");
@@ -68,9 +69,7 @@ export function useJobStatus(
             } else if (statusData.status === "failed") {
                 setIsPolling(false);
                 if (optionsRef.current?.onError) {
-                    const errorMsg =
-                        statusData.result?.error ||
-                        "Job failed with unknown error";
+                    const errorMsg = resolveJobFailureMessage(statusData.result);
                     optionsRef.current.onError(errorMsg);
                 }
             }

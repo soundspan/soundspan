@@ -57,7 +57,7 @@ export function WithLibrary<TBase extends ApiClientConstructor>(Base: TBase) {
         return this.request<{
             status: string;
             progress: number;
-            result?: ApiData;
+            result?: Record<string, unknown>;
         }>(`/library/scan/status/${jobId}`);
     }
 
