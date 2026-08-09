@@ -278,13 +278,6 @@ frontend:
     tag: 1.9.0
     pullPolicy: Always
   replicas: 1
-  # The published frontend image's `nextjs` user is UID/GID 1001, not the
-  # chart-wide 1000. Override here so file ownership in the image matches the
-  # runtime user until the image is realigned (docker-image-hygiene slice).
-  podSecurityContext:
-    runAsUser: 1001
-    runAsGroup: 1001
-    fsGroup: 1001
   strategy:
     type: RollingUpdate
     rollingUpdate:

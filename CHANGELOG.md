@@ -123,6 +123,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aligned the mypy type-check target (`python_version`) to Python 3.11 to match
   the repo floor (Ruff `py311` and the audio-analyzer `python:3.11-slim` pin), so
   type checks run against the oldest interpreter the sidecars use.
+- Frontend Helm pod no longer runs as the stale UID 1001; the chart frontend
+  override was removed so the pod inherits the chart-wide UID/GID 1000 pod
+  security context, matching the realigned frontend image (`USER node`) and
+  fixing `.next/cache` write failures in individual deployment mode.
 
 ### Security
 

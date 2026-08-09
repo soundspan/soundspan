@@ -107,10 +107,10 @@ tight resource quotas, run custom sidecars in chart pods, or have GPU nodes.
   raise it or set `aio.resources.limits.memory` back down (and disable analysis
   with `config.features.audioAnalysis: false` if you do).
 
-- **Frontend runs as UID 1001.** The chart now runs the frontend pod as
-  UID/GID `1001` to match the published image's `nextjs` user. If you mount a
-  pre-existing writable volume for the frontend (e.g. `.next/cache`), its
-  ownership may need updating; the default cache is an `emptyDir` and needs no
+- **Frontend inherits UID/GID 1000.** The frontend pod inherits the chart-wide
+  UID/GID `1000` pod security context, matching the realigned image's `node`
+  user. The earlier `1001` override was removed; see the top-of-file **frontend
+  image runtime UID changed from 1001 to 1000** breaking note for volume-ownership
   action.
 
 - **Analyzer probes.** Individual-mode audio-analyzer and CLAP Deployments now

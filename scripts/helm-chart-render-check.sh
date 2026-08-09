@@ -30,7 +30,8 @@ tmp_sidecars="$(mktemp)"
 tmp_secret="$(mktemp)"
 tmp_secret_explicit="$(mktemp)"
 tmp_secret_existing="$(mktemp)"
-trap 'rm -f "$tmp_aio" "$tmp_individual_ha" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing"' EXIT
+tmp_frontend_uid="$(mktemp)"
+trap 'rm -f "$tmp_aio" "$tmp_individual_ha" "$tmp_global_env" "$tmp_sidecars" "$tmp_secret" "$tmp_secret_explicit" "$tmp_secret_existing" "$tmp_frontend_uid"' EXIT
 
 echo "[CHECK] helm lint (${CHART_PATH})"
 helm lint "$CHART_PATH"
@@ -151,6 +152,21 @@ helm template "$RELEASE_NAME" "$CHART_PATH" \
   >"$tmp_secret_existing"
 if line_match '^kind: Secret$' "$tmp_secret_existing"; then
   echo "[ERROR] existingSecret set but chart still rendered a managed Secret" >&2
+  exit 1
+fi
+
+echo "[CHECK] render individual-mode frontend inherits global UID 1000 pod security context"
+helm template "$RELEASE_NAME" "$CHART_PATH" \
+  --set deploymentMode=individual \
+  >"$tmp_frontend_uid"
+if ! perl -0777 -ne '
+    for my $doc (split /^---/m, $_) {
+        next unless $doc =~ /kind:\s*Deployment/;
+        next unless $doc =~ /^  name: '"$RELEASE_NAME"'-frontend$/m;
+        exit 0 if $doc =~ /runAsUser:\s+1000\b/s && $doc !~ /runAsUser:\s+1001\b/s;
+    }
+    exit 1' "$tmp_frontend_uid"; then
+  echo "[ERROR] individual-mode frontend pod securityContext must render runAsUser: 1000 (inherit global; stale 1001 frontend override must be removed)" >&2
   exit 1
 fi
 
