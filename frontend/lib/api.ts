@@ -7,6 +7,7 @@ import type {
 } from "./youtube-bulk-download";
 import type {
     CanonicalMediaSearchResult,
+    ResolvedMediaSource,
     SegmentedStreamingSourceType,
 } from "@soundspan/media-metadata-contract";
 
@@ -262,13 +263,13 @@ export interface LikedPlaylistTrack {
     trackNo: number | null;
     filePath: string | null;
     likedAt: string;
-    source?: "local" | "tidal" | "youtube";
+    source?: ResolvedMediaSource;
     provider?: {
         tidalTrackId: number | null;
         youtubeVideoId: string | null;
     };
     /** Present on remote (YouTube/Tidal) liked tracks */
-    streamSource?: "youtube" | "tidal";
+    streamSource?: Exclude<ResolvedMediaSource, "local">;
     /** YouTube video ID — present when streamSource is "youtube" */
     youtubeVideoId?: string;
     /** Tidal track ID — present when streamSource is "tidal" */

@@ -10,6 +10,8 @@ import { api } from "./api";
 import type {
     CanonicalMediaProviderIdentity,
     CanonicalMediaSource,
+    RemoteMediaSource,
+    ResolvedMediaSource,
 } from "@soundspan/media-metadata-contract";
 
 // ---------------------------------------------------------------------------
@@ -24,7 +26,7 @@ export interface SyncQueueItem {
     album: { id: string; title: string; coverArt: string | null };
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "tidal" | "youtube" | "youtube-direct";
+    streamSource?: RemoteMediaSource;
     tidalTrackId?: number;
     youtubeVideoId?: string;
     /** Audio container hint for "youtube-direct" streams (webm for opus, mp4 for AAC). */
@@ -33,7 +35,7 @@ export interface SyncQueueItem {
     trackTidalId?: string;
     trackYtMusicId?: string;
     trackMappingId?: string;
-    originSource?: "local" | "tidal" | "youtube";
+    originSource?: ResolvedMediaSource;
 }
 
 export interface GroupSnapshot {
@@ -94,7 +96,7 @@ export interface QueueTrackInput {
 export interface AvailabilityItem {
     queueIndex: number;
     available: boolean;
-    source?: "local" | "tidal" | "youtube";
+    source?: ResolvedMediaSource;
     localTrackId?: string;
     tidalTrackId?: number;
     youtubeVideoId?: string;

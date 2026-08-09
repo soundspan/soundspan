@@ -1,5 +1,7 @@
+/** Version identifier for the central media metadata contract. */
 export const CENTRAL_MEDIA_METADATA_CONTRACT_VERSION = "1.0.0";
 
+/** Complete runtime list of canonical media source identifiers. */
 export const CANONICAL_MEDIA_SOURCE_VALUES = [
     "local",
     "tidal",
@@ -7,12 +9,25 @@ export const CANONICAL_MEDIA_SOURCE_VALUES = [
     "youtube-direct",
 ] as const;
 
+/** Canonical source identifier shared across media metadata consumers. */
 export type CanonicalMediaSource = (typeof CANONICAL_MEDIA_SOURCE_VALUES)[number];
 
+/** Non-local media sources backed by remote providers. */
+export type RemoteMediaSource = Exclude<CanonicalMediaSource, "local">;
+
+/** Media sources a queue item can be resolved to for playback. "youtube-direct" is a container/transport variant of "youtube", never an independent resolution target, so it is intentionally excluded. */
+export type ResolvedMediaSource = Exclude<
+    CanonicalMediaSource,
+    "youtube-direct"
+>;
+
+/** Canonical sources supported by segmented streaming sessions. */
 export type SegmentedStreamingSourceType = Extract<CanonicalMediaSource, "local">;
 
+/** Source identifiers accepted by the audio engine boundary. */
 export type AudioEngineSourceType = "local" | "tidal" | "ytmusic";
 
+/** Canonical provider identity and optional provider-specific track metadata. */
 export interface CanonicalMediaProviderIdentity {
     source: CanonicalMediaSource;
     providerTrackId?: string;
@@ -22,14 +37,16 @@ export interface CanonicalMediaProviderIdentity {
     youtubeAudioFormat?: "mp4" | "webm";
 }
 
+/** Legacy provider fields retained for compatibility with existing stream payloads. */
 export interface LegacyStreamFields {
-    streamSource?: "tidal" | "youtube" | "youtube-direct";
+    streamSource?: RemoteMediaSource;
     tidalTrackId?: number;
     youtubeVideoId?: string;
     /** Audio container hint carried for "youtube-direct" streams only. */
     youtubeAudioFormat?: "mp4" | "webm";
 }
 
+/** Normalized search result returned by remote media providers. */
 export interface CanonicalMediaSearchResult {
     source: Exclude<CanonicalMediaSource, "local">;
     provider: "tidal" | "ytmusic";
@@ -66,6 +83,7 @@ const normalizeYoutubeAudioFormat = (
     return undefined;
 };
 
+/** Normalizes a source identifier, mapping legacy YT Music naming to YouTube and returning null for invalid values. */
 export const normalizeCanonicalMediaSource = (
     value: unknown,
 ): CanonicalMediaSource | null => {
@@ -83,6 +101,7 @@ export const normalizeCanonicalMediaSource = (
     return null;
 };
 
+/** Resolves explicit or inferred media metadata to a canonical source, returning local when no valid remote source can be determined. */
 export const resolveCanonicalMediaSource = (value: {
     mediaSource?: unknown;
     streamSource?: unknown;
@@ -106,6 +125,7 @@ export const resolveCanonicalMediaSource = (value: {
     return "local";
 };
 
+/** Normalizes provider metadata into a canonical identity, falling back to a local identity when the input has no valid remote source. */
 export const normalizeCanonicalMediaProviderIdentity = (value: {
     mediaSource?: unknown;
     streamSource?: unknown;
@@ -154,6 +174,7 @@ export const normalizeCanonicalMediaProviderIdentity = (value: {
     return { source: "local" };
 };
 
+/** Converts a canonical provider identity into compatible legacy stream fields. */
 export const toLegacyStreamFields = (
     provider: CanonicalMediaProviderIdentity | null | undefined,
 ): LegacyStreamFields => {
@@ -182,6 +203,7 @@ export const toLegacyStreamFields = (
     return {};
 };
 
+/** Maps a canonical media source to the source identifier used by the audio engine. */
 export const toAudioEngineSourceType = (
     source: CanonicalMediaSource,
 ): AudioEngineSourceType => {

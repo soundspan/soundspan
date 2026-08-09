@@ -146,6 +146,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Media-source contract: the hand-copied `local`/`tidal`/`youtube`/`youtube-direct`
+  source unions scattered across the frontend and backend now derive from
+  `CanonicalMediaSource` in `@soundspan/media-metadata-contract` instead of being
+  re-typed by hand. Two documented derived types were added —
+  `RemoteMediaSource` (`Exclude<CanonicalMediaSource, "local">`, for stream-source
+  hints) and `ResolvedMediaSource` (`Exclude<CanonicalMediaSource, "youtube-direct">`,
+  for resolved/origin sources, since `youtube-direct` is a container variant of
+  `youtube` and never an independent resolution target) — and every exported symbol
+  in the contract package is now documented. No allowed string value changed and
+  there is no runtime behavior change; this only removes drift risk between the
+  copies. Consumers updated: `trackRef.ts`, `audio-state-context.tsx`,
+  `listen-together-socket.ts`, `api.ts` (annotations only), `listenTogetherManager.ts`,
+  `listenTogetherResolution.ts`, and `playlistImportService.ts`.
 - Helm chart: the individual-mode audio-analyzer and CLAP-analyzer Deployments
   now have liveness/readiness probes (exec `pgrep`, mirroring the compose
   healthcheck), closing the compose/chart probe-parity gap. Both are

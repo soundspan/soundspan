@@ -1,3 +1,5 @@
+import type { CanonicalMediaSource } from "@soundspan/media-metadata-contract";
+
 export type TrackRef =
     | { trackId: string }
     | { tidalTrackId: number }
@@ -22,7 +24,7 @@ export type AddToPlaylistRef =
         thumbnailUrl?: string;
     };
 
-type ProviderSource = "local" | "tidal" | "youtube" | "youtube-direct";
+type ProviderSource = CanonicalMediaSource;
 
 type TrackRefInput = {
     id?: string | null;

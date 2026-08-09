@@ -1,3 +1,4 @@
+import type { ResolvedMediaSource } from "@soundspan/media-metadata-contract";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 
@@ -43,7 +44,7 @@ export interface TrackResolutionInput {
     trackYtMusicId?: string;
     tidalTrackId?: number;
     youtubeVideoId?: string;
-    originSource?: "local" | "tidal" | "youtube";
+    originSource?: ResolvedMediaSource;
 }
 
 const PROFILE_CACHE_TTL_MS = 60_000;

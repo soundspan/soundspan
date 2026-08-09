@@ -6,6 +6,7 @@
  * provider FKs.
  */
 
+import type { ResolvedMediaSource } from "@soundspan/media-metadata-contract";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { decrypt } from "../utils/encryption";
@@ -108,7 +109,7 @@ export interface ResolvedTrack {
     /** TrackTidal record ID, if resolved */
     trackTidalId?: string;
     /** Resolution source */
-    source: "local" | "youtube" | "tidal" | "unresolved";
+    source: ResolvedMediaSource | "unresolved";
     /** Match confidence (0-100) */
     confidence: number;
 }

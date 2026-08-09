@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import type {
     CanonicalMediaProviderIdentity,
     CanonicalMediaSource,
+    RemoteMediaSource,
 } from "@soundspan/media-metadata-contract";
 import type { Episode } from "@/features/podcast/types";
 import {
@@ -108,7 +109,7 @@ export interface Track {
     // Streaming source fields
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "tidal" | "youtube" | "youtube-direct";
+    streamSource?: RemoteMediaSource;
     tidalTrackId?: number;
     youtubeVideoId?: string;
     /** Audio container reported by /api/youtube/info for youtube-direct tracks. */

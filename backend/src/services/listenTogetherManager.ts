@@ -11,6 +11,8 @@
 import type {
     CanonicalMediaProviderIdentity,
     CanonicalMediaSource,
+    RemoteMediaSource,
+    ResolvedMediaSource,
 } from "@soundspan/media-metadata-contract";
 import { logger } from "../utils/logger";
 
@@ -28,7 +30,7 @@ export interface SyncQueueItem {
     album: { id: string; title: string; coverArt: string | null };
     mediaSource?: CanonicalMediaSource;
     provider?: CanonicalMediaProviderIdentity;
-    streamSource?: "tidal" | "youtube" | "youtube-direct";
+    streamSource?: RemoteMediaSource;
     tidalTrackId?: number;
     youtubeVideoId?: string;
     /** Audio container hint for "youtube-direct" streams (webm for opus, mp4 for AAC). */
@@ -37,7 +39,7 @@ export interface SyncQueueItem {
     trackTidalId?: string;
     trackYtMusicId?: string;
     trackMappingId?: string;
-    originSource?: "local" | "tidal" | "youtube";
+    originSource?: ResolvedMediaSource;
 }
 
 export interface GroupMember {
