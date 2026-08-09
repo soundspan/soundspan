@@ -31,4 +31,10 @@ regexes = [
   # generic-api-key rule pattern-matches the slash-joined token shape.
   # Hit at 3 commits (d5dad958, b27eb406, 0888643a).
   '''2FA/Subsonic''',
+  # backend/src/routes/__tests__/totpBehavior.test.ts:80 (const SECRET_B32)
+  # Synthetic RFC 4648 base32 TOTP shared-secret fixture generated one-off with the removed
+  # speakeasy library purely to pin speakeasy->otplib verification compatibility vectors in
+  # tests. It protects nothing, was never enrolled anywhere, and cannot be rotated into
+  # anything real. Hit by generic-api-key at commit e169772 in PR #234.
+  '''HEYHKYLRO4TCQKL2JZIEA4BUIBITUJTBLVOXWOTEORWFI3SBKQ4Q''',
 ]
