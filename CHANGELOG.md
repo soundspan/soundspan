@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Frontend audio orchestrator decomposition (first increment).** The
+  `AudioPlaybackOrchestrator` no longer reads the deprecated composite
+  `useAudioPlayback()` context; its body now subscribes only to
+  `usePlaybackStatus()`. The high-frequency playback-clock subscription is
+  isolated into a new focused child component,
+  `components/player/PlaybackProgressSnapshot`, which owns the
+  `usePlaybackProgress()` read and keeps the orchestrator's trusted
+  position/track-id snapshot refs in sync. As a result the orchestrator body no
+  longer re-renders on every clock tick. Playback behavior is unchanged
+  (verified by the existing orchestrator component suite plus a new render-count
+  regression test).
 - **Backend error-response canonicalization (developer-facing standard + first
   exemplars).** The canonical route error contract is now documented in
   `backend/src/routes/README.md`: async handlers wrap in `asyncHandler`,

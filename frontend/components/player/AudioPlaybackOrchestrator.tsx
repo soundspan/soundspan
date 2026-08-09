@@ -1,8 +1,9 @@
 "use client";
 
 import { useAudioState } from "@/lib/audio-state-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { usePlaybackStatus } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
+import { PlaybackProgressSnapshot } from "@/components/player/PlaybackProgressSnapshot";
 import {
     shouldAllowInitialPersistedTrackResume,
     shouldPreemptInFlightAudioLoad,
@@ -626,7 +627,6 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     // Playback context
     const {
         isPlaying,
-        currentTime,
         setCurrentTime,
         setCurrentTimeFromEngine,
         setDuration,
@@ -638,7 +638,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         setCanSeek,
         setDownloadProgress,
         setStreamProfile,
-    } = useAudioPlayback();
+    } = usePlaybackStatus();
 
     // Controls context
     const { pause, next, startVibeMode } = useAudioControls();
@@ -709,7 +709,7 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
     // switches tabs (the old hadPlayIntent ref was never cleared on pause).
     const wasPlayingWhenHiddenRef = useRef(false);
     const currentTrackRef = useRef(currentTrack);
-    const currentTimeSnapshotRef = useRef<number>(currentTime);
+    const currentTimeSnapshotRef = useRef<number>(0);
     const currentTimeSnapshotTrackIdRef = useRef<string | null>(
         playbackType === "track" ? currentTrack?.id ?? null : null,
     );
@@ -3154,12 +3154,6 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
             };
         }
     }, []);
-
-    useEffect(() => {
-        currentTimeSnapshotRef.current = currentTime;
-        currentTimeSnapshotTrackIdRef.current =
-            playbackType === "track" ? currentTrackRef.current?.id ?? null : null;
-    }, [currentTime, playbackType]);
 
     const requestAutoMatchVibe = useCallback(
         (
@@ -7133,6 +7127,12 @@ export const AudioPlaybackOrchestrator = memo(function AudioPlaybackOrchestrator
         clearSegmentedHandoffLoadListeners,
     ]);
 
-    // This component doesn't render anything visible
-    return null;
+    return (
+        <PlaybackProgressSnapshot
+            snapshotRef={currentTimeSnapshotRef}
+            snapshotTrackIdRef={currentTimeSnapshotTrackIdRef}
+            currentTrackRef={currentTrackRef}
+            playbackType={playbackType}
+        />
+    );
 });

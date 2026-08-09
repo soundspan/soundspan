@@ -604,6 +604,14 @@ mock.module("react", {
     },
 });
 
+mock.module("react/jsx-runtime", {
+    exports: {
+        Fragment: "mock-fragment",
+        jsx: (..._args: unknown[]) => ({ __mocked: true }),
+        jsxs: (..._args: unknown[]) => ({ __mocked: true }),
+    },
+});
+
 mock.module("@/lib/audio-engine", {
     exports: {
         createRuntimeAudioEngine: () => engine,
@@ -646,9 +654,8 @@ mock.module("@/lib/audio-state-context", {
 
 mock.module("@/lib/audio-playback-context", {
     exports: {
-        useAudioPlayback: () => ({
+        usePlaybackStatus: () => ({
             isPlaying: playbackState.isPlaying,
-            currentTime: playbackState.currentTime,
             setCurrentTime: (value: number) => {
                 playbackState.currentTime = value;
                 playbackCalls.setCurrentTime.push(value);
@@ -684,6 +691,9 @@ mock.module("@/lib/audio-playback-context", {
             setStreamProfile: (value: unknown) => {
                 playbackCalls.setStreamProfile.push(value);
             },
+        }),
+        usePlaybackProgress: () => ({
+            currentTime: playbackState.currentTime,
         }),
     },
 });
