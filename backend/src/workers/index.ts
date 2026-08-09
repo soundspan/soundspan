@@ -48,7 +48,12 @@ import { createIORedisClient } from "../utils/ioredis";
 import { dataCacheService } from "../services/dataCache";
 
 const WORKER_PROCESSOR_ID = randomUUID();
-let schedulerLockRedis: Redis = createIORedisClient("worker-scheduler-locks");
+const jestLazyConnectOverride =
+    process.env.JEST_WORKER_ID !== undefined ? { lazyConnect: true } : {};
+let schedulerLockRedis: Redis = createIORedisClient(
+    "worker-scheduler-locks",
+    jestLazyConnectOverride
+);
 const schedulerLockOwnerId = `${WORKER_PROCESSOR_ID}:scheduler-claims`;
 const ONE_MINUTE_MS = 60_000;
 const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
@@ -150,7 +155,10 @@ function recreateSchedulerLockRedisClient(): void {
         // no-op
     }
 
-    schedulerLockRedis = createIORedisClient("worker-scheduler-locks");
+    schedulerLockRedis = createIORedisClient(
+        "worker-scheduler-locks",
+        jestLazyConnectOverride
+    );
 }
 
 async function withSchedulerClaimRedisRetry<T>(

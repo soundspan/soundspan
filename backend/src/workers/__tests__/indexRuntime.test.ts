@@ -246,7 +246,8 @@ describe("workers runtime behavior", () => {
         await flushPromises();
 
         expect(mocks.createIORedisClient).toHaveBeenCalledWith(
-            "worker-scheduler-locks"
+            "worker-scheduler-locks",
+            expect.objectContaining({ lazyConnect: true })
         );
         expect(mocks.scanQueue.process).toHaveBeenCalledWith(
             "scan",

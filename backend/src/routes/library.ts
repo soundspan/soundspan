@@ -4097,6 +4097,7 @@ router.get<{ id?: string }>("/cover-art{/:id}", imageLimiter, asyncHandler(async
                     Authorization: `Bearer ${audiobookshelfApiKey}`,
                     "User-Agent": BRAND_USER_AGENT,
                 },
+                signal: AbortSignal.timeout(15000),
             });
 
             if (!imageResponse.ok) {
@@ -4317,6 +4318,7 @@ router.get<{ id?: string }>("/cover-art{/:id}", imageLimiter, asyncHandler(async
                     Authorization: `Bearer ${audiobookshelfApiKey}`,
                     "User-Agent": BRAND_USER_AGENT,
                 },
+                signal: AbortSignal.timeout(15000),
             });
 
             if (!imageResponse.ok) {

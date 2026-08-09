@@ -24,7 +24,7 @@ const searchSessions = new Map<string, SearchSession>();
 const SEARCH_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Cleanup old search sessions every minute
-setInterval(() => {
+const searchSessionCleanupTimer = setInterval(() => {
     const now = Date.now();
     for (const [searchId, session] of searchSessions.entries()) {
         if (now - session.createdAt.getTime() > SEARCH_SESSION_TTL) {
@@ -32,6 +32,7 @@ setInterval(() => {
         }
     }
 }, 60000);
+searchSessionCleanupTimer.unref?.();
 
 // Middleware to check if Soulseek credentials are configured
 async function requireSoulseekConfigured(req: any, res: any, next: any) {

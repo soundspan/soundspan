@@ -20,8 +20,11 @@ export interface DiscoverJobResult {
     error?: string;
 }
 
+const jestLazyConnectOverride =
+    process.env.JEST_WORKER_ID !== undefined ? { lazyConnect: true } : {};
 let discoverProcessorLockRedis: Redis = createIORedisClient(
-    "discover-processor-locks"
+    "discover-processor-locks",
+    jestLazyConnectOverride
 );
 const discoverProcessorNodeId = randomUUID();
 const DEFAULT_DISCOVER_LOCK_TTL_MS = 45 * 60 * 1000;
@@ -53,7 +56,10 @@ function recreateDiscoverLockRedisClient(): void {
     } catch {
         // no-op
     }
-    discoverProcessorLockRedis = createIORedisClient("discover-processor-locks");
+    discoverProcessorLockRedis = createIORedisClient(
+        "discover-processor-locks",
+        jestLazyConnectOverride
+    );
 }
 
 async function withDiscoverLockRedisRetry<T>(

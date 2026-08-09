@@ -129,19 +129,47 @@ describe("logger", () => {
         expect(consoleError).toHaveBeenCalledWith("[ERROR] error call");
     });
 
-    it("silences all levels when LOG_LEVEL is unknown", () => {
-        const { logger, consoleDebug, consoleInfo, consoleWarn, consoleError } =
-            loadLoggerModule({ logLevel: "noisy" });
+    it("uses the environment default and warns once when LOG_LEVEL is unknown", () => {
+        const cases = [
+            {
+                logLevel: "noisy",
+                nodeEnv: "production",
+                expected: { debug: false, info: false },
+            },
+            {
+                logLevel: "constructor",
+                nodeEnv: "development",
+                expected: { debug: true, info: true },
+            },
+        ] as const;
 
-        logger.debug("debug call");
-        logger.info("info call");
-        logger.warn("warn call");
-        logger.error("error call");
+        for (const scenario of cases) {
+            const { logger, consoleDebug, consoleInfo, consoleWarn, consoleError } =
+                loadLoggerModule({
+                    logLevel: scenario.logLevel,
+                    nodeEnv: scenario.nodeEnv,
+                });
 
-        expect(consoleDebug).not.toHaveBeenCalled();
-        expect(consoleInfo).not.toHaveBeenCalled();
-        expect(consoleWarn).not.toHaveBeenCalled();
-        expect(consoleError).not.toHaveBeenCalled();
+            expect(consoleWarn).toHaveBeenCalledTimes(1);
+            expect(consoleWarn).toHaveBeenCalledWith(
+                `Invalid LOG_LEVEL "${scenario.logLevel}"; falling back to "${scenario.expected.debug ? "debug" : "warn"}"`
+            );
+
+            logger.debug("debug call");
+            logger.info("info call");
+            logger.warn("warn call");
+            logger.error("error call");
+
+            expect(consoleDebug.mock.calls.length).toBe(
+                scenario.expected.debug ? 1 : 0
+            );
+            expect(consoleInfo.mock.calls.length).toBe(
+                scenario.expected.info ? 1 : 0
+            );
+            expect(consoleWarn).toHaveBeenCalledTimes(2);
+            expect(consoleWarn).toHaveBeenLastCalledWith("[WARN] warn call");
+            expect(consoleError).toHaveBeenCalledWith("[ERROR] error call");
+        }
     });
 
     it("forwards message and variadic arguments unchanged", () => {

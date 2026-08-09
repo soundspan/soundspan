@@ -9,18 +9,20 @@ const mockPrisma = {
     },
 };
 
+const mockLog = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+};
+
 jest.mock("../../utils/db", () => ({
     prisma: mockPrisma,
 }));
 
 jest.mock("../../utils/logger", () => ({
     logger: {
-        child: jest.fn().mockReturnValue({
-            info: jest.fn(),
-            warn: jest.fn(),
-            error: jest.fn(),
-            debug: jest.fn(),
-        }),
+        child: jest.fn().mockReturnValue(mockLog),
     },
 }));
 
@@ -47,6 +49,10 @@ import {
 describe("remoteTrackBackfillService", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
     });
 
     describe("isRemoteBackfillInProgress", () => {
@@ -148,6 +154,84 @@ describe("remoteTrackBackfillService", () => {
                 },
             });
             expect(result.tidalProcessed).toBe(1);
+        });
+
+        it("advances the TrackTidal cursor when album resolution remains null", async () => {
+            const row = {
+                id: "tt-sticky",
+                artist: "Artist C",
+                album: "Generic Album",
+                artistId: null,
+            };
+            mockPrisma.trackTidal.findMany.mockImplementation(async (args) => {
+                const lastId = args.where?.AND?.[1]?.id?.gt;
+                if (lastId === undefined) {
+                    throw new Error("TrackTidal query did not include a cursor");
+                }
+                return lastId < row.id ? [row] : [];
+            });
+            mockPrisma.trackYtMusic.findMany.mockResolvedValue([]);
+            mockResolveArtist.mockResolvedValue({ id: "resolved-artist-3" });
+            mockResolveAlbum.mockResolvedValue(null);
+            mockPrisma.trackTidal.update.mockResolvedValue({});
+
+            await expect(backfillRemoteArtistAlbumLinks()).resolves.toEqual({
+                tidalProcessed: 1,
+                ytMusicProcessed: 0,
+                errors: 0,
+            });
+
+            expect(mockPrisma.trackTidal.update).toHaveBeenCalledTimes(1);
+            expect(mockPrisma.trackTidal.findMany).toHaveBeenCalledTimes(2);
+            expect(mockPrisma.trackTidal.findMany).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    where: {
+                        AND: [
+                            { OR: [{ artistId: null }, { albumId: null }] },
+                            { id: { gt: "tt-sticky" } },
+                        ],
+                    },
+                })
+            );
+        });
+
+        it("stops TrackTidal pagination at the fixed iteration bound", async () => {
+            let batchNumber = 0;
+            mockPrisma.trackTidal.findMany.mockImplementation(async () => {
+                batchNumber++;
+                const row = {
+                    id: `tt-bound-${batchNumber.toString().padStart(6, "0")}`,
+                    artist: "Artist",
+                    album: "",
+                    artistId: "artist-id",
+                };
+                return {
+                    length: 50,
+                    49: row,
+                    *[Symbol.iterator]() {
+                        yield row;
+                    },
+                };
+            });
+            mockPrisma.trackTidal.update.mockResolvedValue({});
+            mockPrisma.trackYtMusic.findMany.mockResolvedValue([]);
+            jest.spyOn(global, "setTimeout").mockImplementation(
+                (callback) => {
+                    callback();
+                    return {} as NodeJS.Timeout;
+                }
+            );
+
+            await expect(backfillRemoteArtistAlbumLinks()).resolves.toEqual({
+                tidalProcessed: 100_000,
+                ytMusicProcessed: 0,
+                errors: 0,
+            });
+
+            expect(mockPrisma.trackTidal.findMany).toHaveBeenCalledTimes(100_000);
+            expect(mockLog.warn).toHaveBeenCalledWith(
+                "TrackTidal backfill exceeded 100000 iterations, stopping"
+            );
         });
 
         it("retries album resolution when artistId set but albumId null", async () => {

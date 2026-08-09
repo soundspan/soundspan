@@ -711,11 +711,12 @@ describe("MusicScannerService.scanLibrary", () => {
     });
 });
 
-function makeDirent(name: string, kind: "file" | "dir") {
+function makeDirent(name: string, kind: "file" | "dir" | "symlink") {
     return {
         name,
-        isDirectory: () => kind === "dir",
+        isDirectory: () => kind === "dir" || kind === "symlink",
         isFile: () => kind === "file",
+        isSymbolicLink: () => kind === "symlink",
     };
 }
 
@@ -909,7 +910,7 @@ describe("MusicScannerService helper methods", () => {
         );
     });
 
-    it("recursively finds audio files and filters unsupported extensions", async () => {
+    it("iteratively finds audio files across nested directories", async () => {
         const scanner = new MusicScannerService() as any;
         mockReaddir.mockImplementation(async (dir: string) => {
             if (dir === "/music") {
@@ -938,6 +939,63 @@ describe("MusicScannerService helper methods", () => {
         const files = await scanner.findAudioFiles("/music");
         expect(files.sort()).toEqual(
             ["/music/Artist/Track.mp3", "/music/Artist/Sub/Song.flac", "/music/Artist/Sub/Demo.wav"].sort()
+        );
+    });
+
+    it("does not descend into a symlinked directory cycle", async () => {
+        const scanner = new MusicScannerService() as any;
+        const rootEntries = [
+            makeDirent("Real.mp3", "file"),
+            makeDirent("ancestor", "symlink"),
+        ];
+        mockReaddir.mockImplementation(async (dir: string) => {
+            if (mockReaddir.mock.calls.length > 2) {
+                throw new Error("symlink cycle was followed");
+            }
+            if (dir === "/music" || dir.endsWith("/ancestor")) {
+                return rootEntries;
+            }
+            return [];
+        });
+
+        await expect(scanner.findAudioFiles("/music")).resolves.toEqual([
+            "/music/Real.mp3",
+        ]);
+        expect(mockReaddir).not.toHaveBeenCalledWith(
+            "/music/ancestor",
+            expect.any(Object)
+        );
+    });
+
+    it("does not descend beyond the maximum scan depth and logs a warning", async () => {
+        const scanner = new MusicScannerService() as any;
+        const tooDeepPath = [
+            "/music",
+            ...Array.from({ length: 65 }, (_, index) => `d${index + 1}`),
+        ].join("/");
+        mockReaddir.mockImplementation(async (dir: string) => {
+            const depth = dir === "/music"
+                ? 0
+                : Number(dir.slice(dir.lastIndexOf("/d") + 2));
+            if (depth > 64) {
+                throw new Error("depth limit was exceeded");
+            }
+            return [
+                makeDirent(`d${depth + 1}`, "dir"),
+                makeDirent(`Track-${depth}.flac`, "file"),
+            ];
+        });
+
+        const files = await scanner.findAudioFiles("/music");
+
+        expect(files).toContain("/music/Track-0.flac");
+        expect(mockReaddir).not.toHaveBeenCalledWith(
+            tooDeepPath,
+            expect.any(Object)
+        );
+        expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            expect.stringContaining(tooDeepPath)
         );
     });
 

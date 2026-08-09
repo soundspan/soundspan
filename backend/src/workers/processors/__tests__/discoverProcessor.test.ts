@@ -167,6 +167,10 @@ describe("discoverProcessor", () => {
             expect.any(Error)
         );
         expect(createIORedisClient).toHaveBeenCalledTimes(2);
+        expect(createIORedisClient).toHaveBeenCalledWith(
+            "discover-processor-locks",
+            expect.objectContaining({ lazyConnect: true })
+        );
         expect(replacementLockClient.set).toHaveBeenCalled();
         expect(discoverWeeklyService.generatePlaylist).toHaveBeenCalledWith("u1");
     });

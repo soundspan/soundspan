@@ -171,7 +171,25 @@ describe("audiobook cache service behavior", () => {
                 headers: {
                     Authorization: "Bearer api-key",
                 },
+                signal: expect.anything(),
             }
+        );
+    });
+
+    it("passes a timeout AbortSignal when downloading a cover", async () => {
+        const service = new AudiobookCacheService();
+        (service as any).coverCacheAvailable = true;
+
+        await (service as any).downloadCover(
+            "book-timeout",
+            "http://abs.local/timeout.jpg"
+        );
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            "http://abs.local/timeout.jpg",
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+            })
         );
     });
 

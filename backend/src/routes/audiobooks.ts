@@ -649,6 +649,7 @@ router.get("/:id/cover", async (req, res) => {
                         headers: {
                             Authorization: `Bearer ${settings.audiobookshelfApiKey}`,
                         },
+                        signal: AbortSignal.timeout(15000),
                     });
                     
                     if (response.ok) {

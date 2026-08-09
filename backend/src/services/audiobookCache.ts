@@ -328,6 +328,7 @@ export class AudiobookCacheService {
                 headers: {
                     Authorization: `Bearer ${settings.audiobookshelfApiKey}`,
                 },
+                signal: AbortSignal.timeout(15000),
             });
 
             if (!response.ok) {

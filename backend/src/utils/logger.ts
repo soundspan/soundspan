@@ -27,11 +27,14 @@ const resolveLogLevel = (): LogLevel => {
         return DEFAULT_LOG_LEVEL;
     }
 
-    if (configured in LOG_LEVELS) {
+    if (Object.prototype.hasOwnProperty.call(LOG_LEVELS, configured)) {
         return configured as LogLevel;
     }
 
-    return "silent";
+    console.warn(
+        `Invalid LOG_LEVEL "${configured}"; falling back to "${DEFAULT_LOG_LEVEL}"`
+    );
+    return DEFAULT_LOG_LEVEL;
 };
 
 const currentLevel = resolveLogLevel();

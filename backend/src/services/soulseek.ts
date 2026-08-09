@@ -84,7 +84,11 @@ class SoulseekService {
 
     constructor() {
         // Start periodic cleanup of failedUsers (every 5 minutes)
-        setInterval(() => this.cleanupFailedUsers(), 5 * 60 * 1000);
+        const cleanupTimer = setInterval(
+            () => this.cleanupFailedUsers(),
+            5 * 60 * 1000
+        );
+        cleanupTimer.unref?.();
     }
 
     /**

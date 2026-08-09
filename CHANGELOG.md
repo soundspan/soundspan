@@ -176,6 +176,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio-state polling now detects expired sessions from HTTP 401 status without
   permanently stopping after a transient failure, and audiobook/podcast
   restore failures are logged instead of surfacing as unhandled rejections.
+- Backend reliability hardening (no behavior change for healthy paths):
+  - Remote-track backfill (`remoteTrackBackfillService`) no longer spins
+    forever when an album title cannot be resolved. The previous re-query
+    pagination re-fetched the same `albumId: null` rows on every iteration
+    (latching `isRunning` and inflating the processed counter without bound);
+    both the Tidal and YouTube Music phases now use id-cursor pagination so
+    each row is visited at most once, backed by a fixed `MAX_BACKFILL_ITERATIONS`
+    safety bound.
+  - An invalid/typo'd `LOG_LEVEL` (e.g. `verbose`) no longer silently disables
+    **all** logging. Unrecognized values now fall back to the environment
+    default (`warn` in production, `debug` otherwise) and emit a one-time
+    startup warning; explicit `LOG_LEVEL=silent` still silences output. Level
+    matching is also hardened against prototype keys (`constructor`, `toString`).
+  - The music-library scanner's recursive directory walk was replaced with a
+    bounded iterative traversal: it caps depth at `MAX_SCAN_DEPTH` (64) and
+    skips symbolic links, preventing stack overflows and symlink-cycle hangs on
+    pathological trees.
+  - Added request timeouts (`AbortSignal.timeout(15000)`) to the previously
+    unbounded Audiobookshelf cover fetches in `audiobookCache`, the library
+    cover-art proxy, and the audiobooks cover proxy, so a stalled upstream can
+    no longer hang a worker or request indefinitely.
+  - Untracked module-scope cleanup intervals (Soulseek search-session and
+    failed-user pruning) are now `unref()`'d so they never keep the process or a
+    Jest worker alive, and the worker scheduler / discover-processor ioredis
+    lock clients now connect lazily under Jest to stop background reconnect
+    loops from logging after test teardown.
+- Removed dead backend code: the test-only `utils/discoverLogger.ts` logger
+  monkey-patch and the unreferenced `workers/cleanupDiscovery.ts` and
+  `workers/dataIntegrityCli.ts` CLIs (the data-integrity check runs on the
+  worker scheduler; discovery cleanup runs via `staleJobCleanup`).
 - Python sidecar (tidal-downloader, ytmusic-streamer) HTTP error responses now
   use the backend-wide `{"error": ...}` body shape instead of FastAPI's default
   `{"detail": ...}`; unhandled sidecar exceptions return a generic 500 without

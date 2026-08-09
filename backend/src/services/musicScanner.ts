@@ -42,6 +42,7 @@ const AUDIO_EXTENSIONS = new Set([
     ".ape",
     ".wv",
 ]);
+const MAX_SCAN_DEPTH = 64;
 
 interface ScanProgress {
     filesScanned: number;
@@ -514,24 +515,43 @@ export class MusicScannerService {
     }
 
     /**
-     * Recursively find all audio files in a directory
+     * Find all audio files in a directory.
      */
     private async findAudioFiles(dirPath: string): Promise<string[]> {
         const files: string[] = [];
+        const worklist: Array<{ dir: string; depth: number }> = [
+            { dir: dirPath, depth: 0 },
+        ];
 
-        async function walk(dir: string) {
-            const entries = await fs.promises.readdir(dir, {
+        while (worklist.length > 0) {
+            const current = worklist.pop();
+            if (!current) {
+                break;
+            }
+            if (current.depth > MAX_SCAN_DEPTH) {
+                logger.warn(
+                    `[Scanner] Skipping directory beyond maximum scan depth: ${current.dir}`
+                );
+                continue;
+            }
+            const entries = await fs.promises.readdir(current.dir, {
                 withFileTypes: true,
             });
 
             for (const entry of entries) {
-                const fullPath = path.join(dir, entry.name);
+                if (entry.isSymbolicLink()) {
+                    continue;
+                }
+                const fullPath = path.join(current.dir, entry.name);
 
                 if (entry.isDirectory()) {
                     if (entry.name.startsWith(".")) {
                         continue;
                     }
-                    await walk(fullPath);
+                    worklist.push({
+                        dir: fullPath,
+                        depth: current.depth + 1,
+                    });
                 } else if (entry.isFile()) {
                     const ext = path.extname(entry.name).toLowerCase();
                     if (AUDIO_EXTENSIONS.has(ext)) {
@@ -541,7 +561,6 @@ export class MusicScannerService {
             }
         }
 
-        await walk(dirPath);
         return files;
     }
 
