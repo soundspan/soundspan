@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, mock, test } from "node:test";
 import React from "react";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { ModalProps } from "../../components/ui/Modal";
 
 GlobalRegistrator.register();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -37,8 +38,8 @@ async function mountModal(onClose: () => void = () => undefined) {
                         isOpen,
                         onClose,
                         title: "Accessible modal",
-                        children: React.createElement("button", null, "Modal action"),
-                    },
+                    } as ModalProps, // children is supplied via createElement's third argument, so this is sound at runtime.
+                    React.createElement("button", null, "Modal action"),
                 ),
             );
         });
