@@ -36,9 +36,7 @@ export default function OnboardingPage() {
         let cancelled = false;
         async function checkOnboarding() {
             try {
-                const res = await fetch("/api/onboarding/status");
-                if (!res.ok) return;
-                const data = await res.json();
+                const data = await api.getOnboardingStatus();
                 if (!cancelled && !data.needsOnboarding) {
                     router.replace("/login");
                 }

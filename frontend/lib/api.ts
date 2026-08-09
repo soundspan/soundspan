@@ -851,6 +851,17 @@ class ApiClient {
         });
     }
 
+    // Onboarding
+    async getOnboardingStatus(): Promise<{
+        needsOnboarding: boolean;
+        hasAccount: boolean;
+    }> {
+        return this.request<{
+            needsOnboarding: boolean;
+            hasAccount: boolean;
+        }>("/onboarding/status", { silent404: true });
+    }
+
     // Auth
     async login(username: string, password: string, token?: string): Promise<{
         id: string;
@@ -1618,14 +1629,6 @@ class ApiClient {
         );
     }
 
-    // Playback tracking
-    async trackPlayback(trackId: string, progress?: number) {
-        return this.request<void>("/playback/track", {
-            method: "POST",
-            body: JSON.stringify({ trackId, progress }),
-        });
-    }
-
     // Play tracking
     async logPlay(trackRef: AddToPlaylistRef) {
         return this.request<ApiData>("/plays", {
@@ -1763,20 +1766,6 @@ class ApiClient {
         });
     }
 
-    async testNzbget(url: string, username: string, password: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-nzbget", {
-            method: "POST",
-            body: JSON.stringify({ url, username, password }),
-        });
-    }
-
-    async testQbittorrent(url: string, username: string, password: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-qbittorrent", {
-            method: "POST",
-            body: JSON.stringify({ url, username, password }),
-        });
-    }
-
     async testLastfm(apiKey: string) {
         return this.request<ServiceTestResult>("/system-settings/test-lastfm", {
             method: "POST",
@@ -1848,13 +1837,6 @@ class ApiClient {
         }>("/system-settings/tidal-auth/token", {
             method: "POST",
             body: JSON.stringify({ device_code: deviceCode }),
-        });
-    }
-
-    async testListenNotes(apiKey: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-listennotes", {
-            method: "POST",
-            body: JSON.stringify({ apiKey }),
         });
     }
 
@@ -2196,13 +2178,6 @@ class ApiClient {
         return baseUrl;
     }
 
-    async testDeezer(apiKey?: string) {
-        return this.request<ServiceTestResult>("/system-settings/test-deezer", {
-            method: "POST",
-            body: JSON.stringify({ apiKey }),
-        });
-    }
-
     // Audiobooks
     async getAudiobooks() {
         return this.request<ApiData[]>("/audiobooks");
@@ -2268,12 +2243,6 @@ class ApiClient {
 
     async previewPodcast(itunesId: string) {
         return this.request<ApiData>(`/podcasts/preview/${itunesId}`);
-    }
-
-    async getPodcastEpisode(podcastId: string, episodeId: string) {
-        return this.request<ApiData>(
-            `/podcasts/${podcastId}/episodes/${episodeId}`
-        );
     }
 
     getPodcastEpisodeStreamUrl(podcastId: string, episodeId: string): string {
@@ -2523,12 +2492,6 @@ class ApiClient {
                 title,
             }),
         });
-    }
-
-    async getSlskdDownloads() {
-        return this.request<{ downloads: ApiData[]; count: number }>(
-            "/soulseek/downloads"
-        );
     }
 
     // Programmatic Mixes

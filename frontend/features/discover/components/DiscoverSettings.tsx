@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { Card } from "@/components/ui/Card";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Trash2, Loader2 } from "lucide-react";
@@ -22,6 +23,7 @@ export function DiscoverSettings({
     onPlaylistCleared,
 }: DiscoverSettingsProps) {
     const [isClearing, setIsClearing] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
     // Generic handler for config changes with debounce
@@ -44,18 +46,7 @@ export function DiscoverSettings({
         }, 500);
     }
 
-    async function handleClearPlaylist() {
-        if (isClearing) return;
-
-        const confirmed = window.confirm(
-            "Clear Discovery Playlist?\n\n" +
-            "• Current recommendations will be removed\n" +
-            "• Your local library and provider accounts are unchanged\n\n" +
-            "This action cannot be undone."
-        );
-
-        if (!confirmed) return;
-
+    async function confirmClearPlaylist() {
         setIsClearing(true);
         try {
             const result = await api.clearDiscoverPlaylist();
@@ -135,7 +126,9 @@ export function DiscoverSettings({
                             Your library is not modified.
                         </p>
                         <button
-                            onClick={handleClearPlaylist}
+                            onClick={() => {
+                                if (!isClearing) setShowClearConfirm(true);
+                            }}
                             disabled={isClearing}
                             className="flex items-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -149,6 +142,16 @@ export function DiscoverSettings({
                     </div>
                 </div>
             </Card>
+            <ConfirmDialog
+                isOpen={showClearConfirm}
+                onClose={() => setShowClearConfirm(false)}
+                onConfirm={confirmClearPlaylist}
+                title="Clear Discovery Playlist?"
+                message="Current recommendations will be removed. Your library and provider accounts will remain unchanged. This action cannot be undone."
+                confirmText="Clear Playlist"
+                cancelText="Cancel"
+                variant="danger"
+            />
         </div>
     );
 }

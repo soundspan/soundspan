@@ -552,7 +552,14 @@ describe("enrichment route runtime behavior", () => {
         await statusHandler({ user: { id: "user-1" } } as any, res);
 
         expect(res.statusCode).toBe(200);
-        expect(res.body).toEqual({ status: "idle", currentPhase: null });
+        expect(res.body).toMatchObject({
+            status: "idle",
+            currentPhase: null,
+            artists: { total: 0, completed: 0, failed: 0 },
+            tracks: { total: 0, completed: 0, failed: 0 },
+            audio: { total: 0, completed: 0, failed: 0, processing: 0 },
+        });
+        expect(typeof res.body.lastActivity).toBe("string");
     });
 
     it("supports pause/resume/stop and returns state payloads", async () => {

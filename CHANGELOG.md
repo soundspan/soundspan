@@ -202,6 +202,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retained unchanged as a deprecated composite (same shape, same referential
   stability, same out-of-provider error) for the remaining consumers; no
   playback behavior changed. Prefer the two granular hooks going forward.
+- The artist page's Start Radio action now uses the in-app confirmation dialog
+  before adding tracks to a Listen Together group's shared queue, instead of the
+  native browser confirmation prompt.
+- Discover settings now uses the in-app confirmation dialog when clearing the
+  Discovery playlist instead of the native browser confirmation prompt.
+- Removed seven unused frontend API client methods (`testNzbget`,
+  `testQbittorrent`, `testListenNotes`, `testDeezer`, `trackPlayback`,
+  `getPodcastEpisode`, and `getSlskdDownloads`) that targeted non-existent
+  backend routes. The onboarding page now checks status through the shared API
+  boundary (`api.getOnboardingStatus`) instead of calling `fetch` directly.
+- Enrichment `GET /api/enrichment/status` now returns a complete zeroed
+  `EnrichmentState` when idle instead of a partial object, and the frontend
+  `enrichmentApi.getStatus` return type is now non-null.
 - Media-source contract: the hand-copied `local`/`tidal`/`youtube`/`youtube-direct`
   source unions scattered across the frontend and backend now derive from
   `CanonicalMediaSource` in `@soundspan/media-metadata-contract` instead of being
@@ -363,6 +376,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPI `info.version` is no longer frozen at `1.0.0`; it now resolves from
   `backend/package.json` at load time (currently `1.9.0`) so the published
   contract tracks the shipping release.
+- MetadataEditor's "Reset to Original" action now uses the in-app
+  `ConfirmDialog` instead of the browser's native confirmation prompt.
 - Frontend token refresh is now single-flight, so simultaneous 401 responses
   share one `/auth/refresh` request instead of racing refresh-token rotation
   and forcing a logout.

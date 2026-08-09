@@ -8,6 +8,7 @@ import { GradientSpinner } from "./ui/GradientSpinner";
 import { MusicBrainzLookup } from "./ui/MusicBrainzLookup";
 import Image from "next/image";
 import { frontendLogger as sharedFrontendLogger } from "@/lib/logger";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface MetadataEditorProps {
     type: "artist" | "album" | "track";
@@ -86,6 +87,7 @@ export function MetadataEditor({
     const [isOpen, setIsOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
+    const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [formData, setFormData] = useState(currentData);
     const [formError, setFormError] = useState<string | null>(null);
     const [fieldErrors, setFieldErrors] = useState<
@@ -109,15 +111,7 @@ export function MetadataEditor({
         setFieldErrors({});
     };
 
-    const handleReset = async () => {
-        if (
-            !confirm(
-                "Reset all metadata to original values? This cannot be undone."
-            )
-        ) {
-            return;
-        }
-
+    const confirmReset = async () => {
         setIsResetting(true);
         try {
             if (type === "artist") {
@@ -576,7 +570,7 @@ export function MetadataEditor({
                         <div className="flex items-center justify-end gap-3 p-6 border-t border-white/10">
                             {hasOverrides && (
                                 <button
-                                    onClick={handleReset}
+                                    onClick={() => setShowResetConfirm(true)}
                                     disabled={isSaving || isResetting}
                                     className="px-6 py-2 rounded-full bg-red-500/20 hover:bg-red-500/30 text-red-400 font-bold transition-all border border-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
@@ -610,6 +604,16 @@ export function MetadataEditor({
                                 )}
                             </button>
                         </div>
+                        <ConfirmDialog
+                            isOpen={showResetConfirm}
+                            onClose={() => setShowResetConfirm(false)}
+                            onConfirm={confirmReset}
+                            title="Reset metadata?"
+                            message="Reset all metadata to original values? This cannot be undone."
+                            confirmText="Reset"
+                            cancelText="Cancel"
+                            variant="danger"
+                        />
                     </div>
                 </div>
             )}

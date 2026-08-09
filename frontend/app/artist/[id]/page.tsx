@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
     useAudioState,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/audio-context";
 import { useDownloadContext } from "@/lib/download-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ReleaseSelectionModal } from "@/components/ui/ReleaseSelectionModal";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
@@ -104,6 +105,11 @@ export default function ArtistPage() {
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [isAddingToPlaylist, setIsAddingToPlaylist] = useState(false);
     const [isLikingAll, setIsLikingAll] = useState(false);
+    const [radioConfirm, setRadioConfirm] = useState<{
+        tracks: Track[];
+        count: number;
+    } | null>(null);
+    const radioConfirmedRef = useRef(false);
 
     // Enrich unowned top tracks with TIDAL streaming, then YT Music for remaining gaps
     const artistWithTopTracks = artist?.topTracks?.length ? artist : null;
@@ -261,18 +267,12 @@ export default function ArtistPage() {
             const response = await api.getRadioTracks("artist", artist.id);
 
             if (response.tracks && response.tracks.length > 0) {
-                if (isInGroup && typeof window !== "undefined") {
-                    const trackLabel =
-                        response.tracks.length === 1 ?
-                            "1 song"
-                        :   `${response.tracks.length} songs`;
-                    const confirmed = window.confirm(
-                        `You're in a Listen Together group. Starting artist radio will add ${trackLabel} to the shared queue. Continue?`
-                    );
-                    if (!confirmed) {
-                        toast.info("Artist radio cancelled");
-                        return;
-                    }
+                if (isInGroup) {
+                    setRadioConfirm({
+                        tracks: response.tracks,
+                        count: response.tracks.length,
+                    });
+                    return;
                 }
 
                 // Backend already returns properly formatted tracks - just pass them through
@@ -289,6 +289,23 @@ export default function ArtistPage() {
             toast.error("Failed to start artist radio");
         }
     }
+
+    const handleConfirmRadio = () => {
+        if (!radioConfirm) return;
+        radioConfirmedRef.current = true;
+        playTracks(radioConfirm.tracks as Parameters<typeof playTracks>[0], 0);
+        toast.success(
+            `Playing ${artist?.name ?? "Artist"} Radio (${radioConfirm.count} tracks)`
+        );
+    };
+
+    const handleCloseRadioConfirm = () => {
+        if (!radioConfirmedRef.current) {
+            toast.info("Artist radio cancelled");
+        }
+        radioConfirmedRef.current = false;
+        setRadioConfirm(null);
+    };
 
     // Loading state for initial/core request only
     if (loading) {
@@ -452,6 +469,17 @@ export default function ArtistPage() {
                 onSelectPlaylist={handlePlaylistSelected}
                 isLoading={isAddingToPlaylist}
                 loadingMessage="Adding tracks..."
+            />
+
+            <ConfirmDialog
+                isOpen={radioConfirm !== null}
+                onClose={handleCloseRadioConfirm}
+                onConfirm={handleConfirmRadio}
+                title="Add to shared queue?"
+                message={`You're in a Listen Together group. Starting artist radio will add ${radioConfirm?.count ?? 0} song${(radioConfirm?.count ?? 0) === 1 ? "" : "s"} to the shared queue. Continue?`}
+                confirmText="Continue"
+                cancelText="Cancel"
+                variant="info"
             />
         </div>
     );

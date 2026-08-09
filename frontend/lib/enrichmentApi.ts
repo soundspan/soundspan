@@ -82,7 +82,7 @@ export const enrichmentApi = {
     /**
      * Get detailed enrichment state
      */
-    getStatus: async (): Promise<EnrichmentState | null> => {
+    getStatus: async (): Promise<EnrichmentState> => {
         return api.get("/enrichment/status");
     },
 

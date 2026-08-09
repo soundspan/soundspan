@@ -11,7 +11,10 @@ import {
     reRunVibeEmbeddingsOnly,
     triggerEnrichmentNow,
 } from "../workers/unifiedEnrichment";
-import { enrichmentStateService } from "../services/enrichmentState";
+import {
+    enrichmentStateService,
+    type EnrichmentState,
+} from "../services/enrichmentState";
 import { enrichmentFailureService } from "../services/enrichmentFailureService";
 import { musicBrainzService } from "../services/musicbrainz";
 import { coverArtService } from "../services/coverArt";
@@ -88,7 +91,15 @@ router.get("/progress", async (req, res) => {
 router.get("/status", async (req, res) => {
     try {
         const state = await enrichmentStateService.getState();
-        res.json(state || { status: "idle", currentPhase: null });
+        const idleState: EnrichmentState = {
+            status: "idle",
+            currentPhase: null,
+            lastActivity: new Date().toISOString(),
+            artists: { total: 0, completed: 0, failed: 0 },
+            tracks: { total: 0, completed: 0, failed: 0 },
+            audio: { total: 0, completed: 0, failed: 0, processing: 0 },
+        };
+        res.json(state || idleState);
     } catch (error) {
         logger.error("Get enrichment status error:", error);
         res.status(500).json({ error: "Failed to get status" });
