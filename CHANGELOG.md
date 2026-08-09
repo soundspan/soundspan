@@ -435,6 +435,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- AIO image builds no longer fail while removing the base image's `node` user:
+  `userdel` and `groupdel` are now conditional, and existing uid/gid 1000
+  holders are renamed and reused instead of failing `groupadd` or `useradd`.
 - OpenAPI contract sync: the generated spec (`GET /api/docs.json`, `/api/docs`)
   no longer advertises 24 phantom endpoints. The `@openapi` path keys for the
   API-key, auth (`login`/`me`), library-scan, listen-together, lyrics, mixes,

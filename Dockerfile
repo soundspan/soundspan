@@ -35,11 +35,27 @@ RUN mkdir -p /app/backend /app/frontend /app/audio-analyzer /app/models \
     /data/postgres /data/redis /run/postgresql /var/log/supervisor \
     && chown -R postgres:postgres /data/postgres /run/postgresql
 
-# The upstream Node image reserves uid/gid 1000 for "node"; replace it with
-# the fixed runtime identity expected by the chart's fsGroup.
-RUN userdel node && groupdel node && \
-    groupadd -g 1000 soundspan && \
-    useradd -u 1000 -g 1000 -M -s /usr/sbin/nologin -d /app soundspan
+# The chart's fsGroup expects fixed uid/gid 1000. Base Node user presence varies,
+# and on Debian userdel may also remove its same-named empty primary group.
+RUN set -eux; \
+    if getent passwd node > /dev/null; then userdel node; fi; \
+    if getent group node > /dev/null; then groupdel node; fi; \
+    existing_group="$(getent group 1000 | cut -d: -f1 || true)"; \
+    if [ -n "$existing_group" ]; then \
+        if [ "$existing_group" != soundspan ]; then groupmod -n soundspan "$existing_group"; fi; \
+    else \
+        groupadd -g 1000 soundspan; \
+    fi; \
+    existing_user="$(getent passwd 1000 | cut -d: -f1 || true)"; \
+    if [ -n "$existing_user" ]; then \
+        if [ "$existing_user" != soundspan ]; then \
+            usermod -l soundspan -g 1000 -d /app -s /usr/sbin/nologin "$existing_user"; \
+        else \
+            usermod -g 1000 -d /app -s /usr/sbin/nologin soundspan; \
+        fi; \
+    else \
+        useradd -u 1000 -g 1000 -M -s /usr/sbin/nologin -d /app soundspan; \
+    fi
 
 # ============================================
 # AUDIO ANALYZER SETUP (Essentia AI)
