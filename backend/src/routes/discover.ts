@@ -2262,10 +2262,13 @@ router.post("/cleanup-lidarr", async (req, res) => {
 
                 artistsRemoved.push(artistName);
                 logger.debug(`[CLEANUP] Removed: ${artistName}`);
-            } catch (error: any) {
-                const msg = `Failed to process ${artistName}: ${error.message}`;
-                errors.push(msg);
-                logger.error(`[CLEANUP] ${msg}`);
+            } catch (error: unknown) {
+                const detail =
+                    error instanceof Error ? error.message : String(error);
+                errors.push(`Failed to process ${artistName}`);
+                logger.error(
+                    `[CLEANUP] Failed to process ${artistName}: ${detail}`,
+                );
             }
         }
 

@@ -1255,7 +1255,7 @@ describe("discover legacy-mode runtime behavior", () => {
                 "Liked Artist (has native library or kept albums)",
                 "Active Artist (has active discovery)",
             ],
-            errors: ["Failed to process Error Artist: delete failed"],
+            errors: ["Failed to process Error Artist"],
             summary: {
                 removed: 1,
                 kept: 3,

@@ -130,6 +130,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Closed a `discover.ts` follow-up gap left by the route error-disclosure
+  hardening: the legacy `POST /api/discover/cleanup-lidarr` handler built a
+  per-artist failure string via a template literal
+  (`Failed to process ${name}: ${error.message}`) and returned it verbatim in
+  the response `errors[]`, leaking raw axios/Lidarr/Prisma text (connection
+  strings, hosts/ports, API-key-bearing URLs, 401 bodies) to any authenticated
+  caller since the router is `requireAuthOrToken`, not admin-only. The handler
+  now pushes a static `Failed to process <artist>` message, logs the raw detail
+  server-side only, and guards non-`Error` throws. The `check-route-error-canon`
+  leak ratchet was extended to also detect template-literal interpolations and
+  intermediate-const assignments of `error.message`/`error.stack` (previously it
+  only matched the `: error.message` object-property form), while exempting
+  raw errors written to the server-side `logger`; `discover.ts` is ratcheted to
+  zero and the newly surfaced pre-existing counts in `playlists`/`podcasts` are
+  frozen as follow-up.
 - Route error-message disclosure hardening (OWASP): the `discover`,
   `enrichment`, and `library` routers no longer echo raw caught-error text
   (`error.message` / `error.stack` / a `details` field carrying it) to clients.

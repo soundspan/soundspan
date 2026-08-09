@@ -5,6 +5,7 @@ import {
     analyzeRouteErrorCanon,
     countPattern,
     countLeakPattern,
+    stripLoggerCalls,
 } from "../check-route-error-canon.mjs";
 
 test("countPattern counts occurrences and tolerates whitespace", () => {
@@ -95,4 +96,26 @@ test("analyzeRouteErrorCanon ratchets leak counts the same way", () => {
             tightenable: [],
         },
     );
+});
+
+test("countLeakPattern flags a template-literal interpolation of error.message", () => {
+    const source =
+        "const msg = `Failed to process ${artistName}: ${error.message}`;";
+    assert.equal(countLeakPattern(source), 1);
+});
+
+test("countLeakPattern flags an intermediate const assigned from error.message", () => {
+    const source = "const detail = error.message; return res.json({ detail });";
+    assert.equal(countLeakPattern(source), 1);
+});
+
+test("countLeakPattern flags a template-literal error.stack interpolation", () => {
+    assert.equal(countLeakPattern("res.send(`trace: ${error?.stack}`);"), 1);
+});
+
+test("countLeakPattern exempts raw errors logged server-side via logger.*", () => {
+    const source =
+        "logger.error(`[CLEANUP] ${artistName}: ${error.message}`);\n" +
+        "logger.error('boom', error?.message || error);";
+    assert.equal(countLeakPattern(source), 0);
 });

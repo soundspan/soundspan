@@ -57,12 +57,13 @@ const BASELINE = Object.freeze({
 // Raw error details can disclose internal implementation data to clients (OWASP).
 // This independent ratchet prevents new error.message/error.stack response leaks.
 const LEAK_BASELINE = Object.freeze({
+    "backend/src/routes/discover.ts": 0,
     "backend/src/routes/downloads.ts": 1,
     "backend/src/routes/listenTogether.ts": 1,
     "backend/src/routes/notifications.ts": 2,
     "backend/src/routes/playbackState.ts": 1,
-    "backend/src/routes/playlists.ts": 2,
-    "backend/src/routes/podcasts.ts": 1,
+    "backend/src/routes/playlists.ts": 4,
+    "backend/src/routes/podcasts.ts": 3,
 });
 
 export function countPattern(source) {
@@ -70,12 +71,36 @@ export function countPattern(source) {
     return source.match(pattern)?.length ?? 0;
 }
 
+export function stripLoggerCalls(source) {
+    const callStart = /logger\s*\.\s*[a-zA-Z]+\s*\(/g;
+    let out = "";
+    let cursor = 0;
+    let match;
+    let guard = 0;
+    while ((match = callStart.exec(source)) !== null && guard++ < 100000) {
+        let index = match.index + match[0].length;
+        let depth = 1;
+        let innerGuard = 0;
+        while (index < source.length && depth > 0 && innerGuard++ < 1000000) {
+            const char = source[index];
+            if (char === "(") depth++;
+            else if (char === ")") depth--;
+            index++;
+        }
+        out += source.slice(cursor, match.index);
+        cursor = index;
+        callStart.lastIndex = index;
+    }
+    return out + source.slice(cursor);
+}
+
 export function countLeakPattern(source) {
-    const pattern = /:\s*error\??\.(?:message|stack)\b/g;
-    const normalizedSource = source.replace(
+    const stripped = stripLoggerCalls(source);
+    const normalizedSource = stripped.replace(
         /error\s*(\??)\s*\.\s*(message|stack)\b/g,
         "error$1.$2",
     );
+    const pattern = /(?::\s*|=\s*|\$\{[^}]*)error\??\.(?:message|stack)\b/g;
     return normalizedSource.match(pattern)?.length ?? 0;
 }
 
