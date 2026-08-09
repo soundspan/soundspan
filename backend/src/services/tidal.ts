@@ -151,6 +151,23 @@ class TidalService {
     // ── Token helpers ──────────────────────────────────────────────
 
     /**
+     * Build per-request credential headers for the sidecar.
+     * Tokens travel in Authorization (never the URL) so they can't leak
+     * into access logs or proxies.
+     */
+    private buildCredentialHeaders(creds: {
+        accessToken: string;
+        userId: string;
+        countryCode: string;
+    }): Record<string, string> {
+        return {
+            Authorization: `Bearer ${creds.accessToken}`,
+            "x-tidal-user-id": creds.userId,
+            "x-tidal-country-code": creds.countryCode,
+        };
+    }
+
+    /**
      * Read & decrypt credentials from SystemSettings.
      */
     private async getCredentials(): Promise<{
@@ -321,12 +338,9 @@ class TidalService {
 
         try {
             const res = await this.client.post(
-                `/search?access_token=${encodeURIComponent(
-                    creds.accessToken
-                )}&user_id=${encodeURIComponent(
-                    creds.userId
-                )}&country_code=${encodeURIComponent(creds.countryCode)}`,
-                { query }
+                "/search",
+                { query },
+                { headers: this.buildCredentialHeaders(creds) }
             );
             return res.data;
         } catch (err: any) {
@@ -390,16 +404,13 @@ class TidalService {
 
         try {
             const res = await this.client.post(
-                `/download/track?access_token=${encodeURIComponent(
-                    creds.accessToken
-                )}&user_id=${encodeURIComponent(
-                    creds.userId
-                )}&country_code=${encodeURIComponent(creds.countryCode)}`,
+                "/download/track",
                 {
                     track_id: trackId,
                     quality: creds.quality,
                     output_template: creds.fileTemplate,
-                }
+                },
+                { headers: this.buildCredentialHeaders(creds) }
             );
             return res.data;
         } catch (err: any) {
@@ -423,16 +434,13 @@ class TidalService {
 
         try {
             const res = await this.client.post(
-                `/download/album?access_token=${encodeURIComponent(
-                    creds.accessToken
-                )}&user_id=${encodeURIComponent(
-                    creds.userId
-                )}&country_code=${encodeURIComponent(creds.countryCode)}`,
+                "/download/album",
                 {
                     album_id: albumId,
                     quality: creds.quality,
                     output_template: creds.fileTemplate,
-                }
+                },
+                { headers: this.buildCredentialHeaders(creds) }
             );
             return res.data;
         } catch (err: any) {

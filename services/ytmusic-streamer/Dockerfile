@@ -35,25 +35,26 @@ RUN pip install --no-cache-dir -r requirements-exempt.txt
 COPY services/ytmusic-streamer/app.py ./app.py
 COPY services/ytmusic-streamer/yt_download.py ./yt_download.py
 COPY services/common ./common
+COPY services/ytmusic-streamer/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create writable directories and non-root user
 # - /data: ytmusicapi OAuth token storage
-# chmod 777 ensures compatibility with pre-existing Docker volumes that may
-# have been created with root ownership before the non-root user was added.
 RUN useradd -m -u 1000 ytmusic && \
     mkdir -p /data && \
-    chown -R ytmusic:ytmusic /app /data && \
-    chmod 777 /data
+    chown -R ytmusic:ytmusic /app /data
 
 ENV PYTHONUNBUFFERED=1
 
-# Drop to non-root user (compatible with K8s runAsNonRoot / runAsUser: 1000)
-USER ytmusic
+# The entrypoint repairs legacy /data ownership, then drops to ytmusic via
+# setpriv. Kubernetes deployments still enforce runAsNonRoot/runAsUser 1000
+# through the chart securityContext; there the chown branch is skipped and
+# fsGroup handles volume permissions.
 
 EXPOSE 8586
 
 # tini handles PID 1 reaping and signal forwarding (SIGTERM from K8s)
-ENTRYPOINT ["tini", "--"]
+ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8586/health || exit 1

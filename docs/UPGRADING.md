@@ -5,6 +5,38 @@ isn't listed here, the upgrade is drop-in.
 
 ---
 
+## TIDAL token header migration + ytmusic-streamer entrypoint change
+
+**Who this affects:** deployments that pin backend and `tidal-downloader` image
+versions independently, or customize the `ytmusic-streamer` container user or
+`/data` volume permissions.
+
+**What changed.** The backend now sends TIDAL access tokens and account metadata in
+headers instead of URL query strings. For this release, the TIDAL sidecar accepts
+both the new headers and legacy query credentials, so backend and sidecar images may
+roll independently; a deprecation warning in the sidecar logs identifies callers
+still using query credentials. Once both images are on this release, there is
+nothing to do. The query fallback is removed in the **next release**.
+
+The `ytmusic-streamer` image no longer runs `chmod 777 /data` and no longer sets a
+Dockerfile `USER`. Under the plain Docker/Compose default it starts as root, repairs
+legacy `/data` ownership, and immediately drops privileges to the `ytmusic` user.
+Deployments that force a non-root user, including the chart's Kubernetes security
+context or a Compose `user:`, behave exactly as before but must ensure `/data` is
+writable by that UID; the chart's existing `fsGroup: 1000` already provides this.
+YouTube Music OAuth credential files are now written with owner-only mode `0600`.
+
+**Action required:** a backend from this release or later sends header credentials,
+which a `tidal-downloader` image older than this release does not understand — so do
+not run a new backend against a pre-this-release TIDAL sidecar image. In the **next
+release**, the sidecar drops the query fallback, so backends older than this release
+will stop working against it. During this release,
+check TIDAL sidecar logs for the deprecation warning and update any custom callers
+before the fallback is removed. Custom non-root YouTube Music deployments should
+also confirm that their `/data` volume is writable by the configured UID.
+
+---
+
 ## ⚠️ Breaking: HTTP sidecars now require `INTERNAL_API_SECRET` (F31)
 
 **Who this affects:** any deployment that uses the YouTube Music (`ytmusic-streamer`)

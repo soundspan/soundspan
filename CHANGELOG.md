@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `set -euo pipefail`, resolves the repo root from its own location, checks for
   `nc` and `.env.example` before using them, and references the correct
   `postgres-local`/`redis-local` service names.
+- TIDAL admin credentials no longer travel in sidecar URL query strings: the backend now sends the access token as `Authorization: Bearer <token>` and the user ID/country code as `x-tidal-user-id`/`x-tidal-country-code` headers for `POST /search`, `/download/track`, and `/download/album`. The TIDAL sidecar accepts both the new headers and legacy query parameters for this release, logging a deprecation warning when query credentials are used; query-parameter support will be removed in the next release. Requests without an access token now return **401** with `access_token required`.
+- The TIDAL and YouTube Music FastAPI sidecars no longer expose internal exception text in HTTP responses. Client-facing errors now use short generic messages while full exception details and tracebacks remain in service logs; this also changes TIDAL album downloads' per-track `errors[].error` value to `Download failed`, with the root cause available in the TIDAL sidecar logs.
+- YouTube Music OAuth credential files (`/data/oauth_<user>.json` and `/data/client_creds_<user>.json`) are now written with owner-only mode `0600`; the next write also tightens permissions on pre-existing files with looser modes.
+- The YouTube Music streamer image no longer makes `/data` world-writable with `chmod 777`. A new entrypoint repairs `/data` ownership and drops from root to the `ytmusic` user for plain Docker/Compose starts, while explicitly non-root deployments continue directly under their configured user and rely on existing volume permissions such as the Helm chart's unchanged `runAsUser: 1000`/`fsGroup: 1000` security context.
+- YouTube Music streamer requests now strictly validate 11-character `video_id` path parameters and reject malformed values with **400** `Invalid video_id`; `/song`, `/stream`, `/proxy`, and `/yt/proxy` also accept only case-insensitive `LOW`, `MEDIUM`, `HIGH`, or `LOSSLESS` quality values and reject others with **400** `Invalid quality`. Lowercase quality values sent by the backend are now honored instead of silently falling back to `HIGH`.
 
 ### Security
 

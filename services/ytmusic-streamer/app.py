@@ -234,6 +234,8 @@ _USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_ALLOWED_STREAM_QUALITIES = {"LOW", "MEDIUM", "HIGH", "LOSSLESS"}
 
 import random
 
@@ -299,6 +301,39 @@ class BatchSearchRequest(BaseModel):
 # ════════════════════════════════════════════════════════════════════
 # Helpers
 # ════════════════════════════════════════════════════════════════════
+
+def _validate_video_id(video_id: str) -> str:
+    """Reject video ids that are not exactly 11 URL-safe characters."""
+    if not _VIDEO_ID_RE.fullmatch(video_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid video_id")
+    return video_id
+
+
+def _validate_stream_quality(quality: str) -> str:
+    """Normalize and validate a requested stream quality."""
+    normalized = (quality or "").strip().upper()
+    if normalized not in _ALLOWED_STREAM_QUALITIES:
+        raise HTTPException(status_code=400, detail="Invalid quality")
+    return normalized
+
+
+def _write_private_file(path: Path, content: str) -> None:
+    """Write credentials with owner-only permissions, tightening existing files."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(content)
+    os.chmod(path, 0o600)
+
+
+def _sanitized_http_error(
+    operation: str,
+    exc: Exception,
+    status_code: int,
+    detail: str,
+) -> HTTPException:
+    """Log full exception detail; return a generic client-facing HTTPException."""
+    log.error("%s failed: %s", operation, exc, exc_info=True)
+    return HTTPException(status_code=status_code, detail=detail)
 
 def _oauth_file(user_id: str) -> Path:
     """Return the OAuth JSON path for a given user."""
@@ -763,11 +798,15 @@ def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
 
     except Exception as e:
         error_str = str(e)
-        log.error(f"yt-dlp extraction failed for YT video {video_id}: {error_str}")
-
         if "Sign in to confirm your age" in error_str or (
             "age" in error_str.lower() and "confirm" in error_str.lower()
         ):
+            log.error(
+                "yt-dlp extraction failed for YT video %s: %s",
+                video_id,
+                e,
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=451,
                 detail={
@@ -777,7 +816,12 @@ def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
                 },
             )
 
-        raise HTTPException(status_code=502, detail=f"Failed to extract stream: {error_str}")
+        raise _sanitized_http_error(
+            f"yt-dlp extraction for YT video {video_id}",
+            e,
+            502,
+            "Failed to extract stream",
+        ) from e
 
 
 def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> dict:
@@ -883,10 +927,14 @@ def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> 
 
     except Exception as e:
         error_str = str(e)
-        log.error(f"yt-dlp extraction failed for {video_id}: {error_str}")
-
         # Detect age-restricted content
         if "Sign in to confirm your age" in error_str or "age" in error_str.lower() and "confirm" in error_str.lower():
+            log.error(
+                "yt-dlp extraction failed for %s: %s",
+                video_id,
+                e,
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=451,
                 detail={
@@ -896,7 +944,12 @@ def _get_stream_url_sync(user_id: str, video_id: str, quality: str = "HIGH") -> 
                 }
             )
 
-        raise HTTPException(status_code=502, detail=f"Failed to extract stream: {error_str}")
+        raise _sanitized_http_error(
+            f"yt-dlp extraction for {video_id}",
+            e,
+            502,
+            "Failed to extract stream",
+        ) from e
 
 
 def _tv_search(yt: YTMusic, query: str, filter: Optional[str] = None, limit: int = 20) -> list[dict]:
@@ -1396,7 +1449,16 @@ async def auth_status(user_id: str = Query(...)):
         _get_ytmusic(user_id)
         return {"authenticated": True}
     except Exception as e:
-        return {"authenticated": False, "reason": str(e)}
+        log.error(
+            "Stored credentials failed to load for user %s: %s",
+            user_id,
+            e,
+            exc_info=True,
+        )
+        return {
+            "authenticated": False,
+            "reason": "Stored credentials failed to load",
+        }
 
 
 @app.post("/auth/restore")
@@ -1418,14 +1480,14 @@ async def auth_restore(req: Request, user_id: str = Query(...)):
         raise HTTPException(status_code=400, detail="Invalid JSON in oauth_json")
 
     DATA_PATH.mkdir(parents=True, exist_ok=True)
-    _oauth_file(user_id).write_text(oauth_json)
+    _write_private_file(_oauth_file(user_id), oauth_json)
 
     # Save client credentials if provided
     client_id = body.get("client_id")
     client_secret = body.get("client_secret")
     if client_id and client_secret:
         creds_path = _client_creds_file(user_id)
-        creds_path.write_text(json.dumps({
+        _write_private_file(creds_path, json.dumps({
             "client_id": client_id,
             "client_secret": client_secret,
         }))
@@ -1474,11 +1536,12 @@ async def auth_device_code(req: DeviceCodeRequest):
             "interval": code.get("interval", 5),
         }
     except Exception as e:
-        log.error(f"Device code initiation failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to initiate device code flow: {str(e)}",
-        )
+        raise _sanitized_http_error(
+            "Device code initiation",
+            e,
+            500,
+            "Failed to initiate device code flow",
+        ) from e
 
 
 @app.post("/auth/device-code/poll")
@@ -1516,11 +1579,11 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
         # Success — we have a token. Save it for this user.
         DATA_PATH.mkdir(parents=True, exist_ok=True)
         token_json = json.dumps(dict(token), indent=True)
-        _oauth_file(user_id).write_text(token_json)
+        _write_private_file(_oauth_file(user_id), token_json)
 
         # Save client credentials alongside so _get_ytmusic can use them
         creds_path = _client_creds_file(user_id)
-        creds_path.write_text(json.dumps({
+        _write_private_file(creds_path, json.dumps({
             "client_id": req.client_id,
             "client_secret": req.client_secret,
         }))
@@ -1545,11 +1608,12 @@ async def auth_device_code_poll(req: DeviceCodePollRequest, user_id: str = Query
                 log.warning(f"Device code poll error for user {user_id}: {error_key}")
                 return {"status": "error", "error": friendly_msg}
 
-        log.error(f"Device code poll failed for user {user_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to poll device code: {str(e)}",
-        )
+        raise _sanitized_http_error(
+            f"Device code poll for user {user_id}",
+            e,
+            500,
+            "Failed to poll device code",
+        ) from e
 
 
 # ── Search ──────────────────────────────────────────────────────────
@@ -1586,8 +1650,12 @@ async def search(req: SearchRequest, user_id: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Search failed for user {user_id} query={req.query!r} filter={req.filter!r}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Search for user {user_id} query={req.query!r} filter={req.filter!r}",
+            e,
+            500,
+            "Search failed",
+        ) from e
 
 
 @app.post("/search/batch")
@@ -1601,6 +1669,7 @@ async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
     inter-request delays instead of firing all N simultaneously.
     """
     async def _run_one(q: BatchSearchQuery) -> dict:
+        """Execute and sanitize one query in the batch."""
         # Check primary cache first — avoids consuming a semaphore slot.
         strategy = _resolve_user_search_strategy(user_id)
         cached = _get_cached_search(user_id, q.query, q.filter, q.limit, strategy)
@@ -1625,7 +1694,7 @@ async def search_batch(req: BatchSearchRequest, user_id: str = Query(...)):
                 raise
             except Exception as e:
                 log.warning(f"Batch search failed for query={q.query!r}: {e}")
-                return {"results": [], "total": 0, "error": str(e)}
+                return {"results": [], "total": 0, "error": "search failed"}
 
     log.debug(f"Batch search: {len(req.queries)} queries for user {user_id} "
               f"(concurrency={BATCH_CONCURRENCY})")
@@ -1653,8 +1722,9 @@ async def search_debug(req: SearchRequest, user_id: str = Query(...)):
         raw = yt._send_request("search", body)
         return {"raw": raw}
     except Exception as e:
-        log.error(f"Debug search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "Debug search", e, 500, "Debug search failed"
+        ) from e
 
 
 def _format_album_response(browse_id: str, album: dict) -> dict:
@@ -1711,8 +1781,9 @@ async def get_album(browse_id: str, user_id: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Get album failed for {browse_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Get album {browse_id}", e, 500, "Failed to load album"
+        ) from e
 
 
 @app.get("/artist/{channel_id}")
@@ -1766,8 +1837,9 @@ async def get_artist(channel_id: str, user_id: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Get artist failed for {channel_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Get artist {channel_id}", e, 500, "Failed to load artist"
+        ) from e
 
 
 @app.get("/song/{video_id}")
@@ -1776,6 +1848,7 @@ async def get_song(video_id: str, user_id: str = Query(...)):
 
     When user_id is "__public__", uses an unauthenticated YTMusic instance.
     """
+    video_id = _validate_video_id(video_id)
     try:
         if user_id == "__public__":
             yt = _get_public_ytmusic("native")
@@ -1800,8 +1873,9 @@ async def get_song(video_id: str, user_id: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Get song failed for {video_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Get song {video_id}", e, 500, "Failed to load song"
+        ) from e
 
 
 # ── Streaming ───────────────────────────────────────────────────────
@@ -1812,6 +1886,8 @@ async def get_stream_info(video_id: str, user_id: str = Query(...), quality: str
 
     When user_id is "__public__", skips OAuth verification.
     """
+    video_id = _validate_video_id(video_id)
+    quality = _validate_stream_quality(quality)
     # Skip OAuth check for public/unauthenticated streaming
     if user_id != "__public__":
         _get_ytmusic(user_id)
@@ -1844,6 +1920,8 @@ async def proxy_stream(
     extraction is unauthenticated). This enables free-tier streaming
     for users without YT Music OAuth connected.
     """
+    video_id = _validate_video_id(video_id)
+    quality = _validate_stream_quality(quality)
     # Skip OAuth check for public/unauthenticated streaming
     if user_id != "__public__":
         _get_ytmusic(user_id)
@@ -1967,8 +2045,12 @@ async def library_songs(user_id: str = Query(...), limit: int = 100, order: str 
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Get library songs failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Get library songs for user {user_id}",
+            e,
+            500,
+            "Failed to load library songs",
+        ) from e
 
 
 @app.get("/library/albums")
@@ -1996,8 +2078,12 @@ async def library_albums(user_id: str = Query(...), limit: int = 100, order: str
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Get library albums failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Get library albums for user {user_id}",
+            e,
+            500,
+            "Failed to load library albums",
+        ) from e
 
 
 # Auto-generated / personalized playlist ID prefixes.
@@ -2054,8 +2140,12 @@ async def library_playlists(
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Get library playlists failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Get library playlists for user {user_id}",
+            e,
+            500,
+            "Failed to load library playlists",
+        ) from e
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -2128,8 +2218,12 @@ async def yt_video_info(url: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"yt-dlp info extraction failed for {url}: {e}")
-        raise HTTPException(status_code=502, detail=f"Failed to fetch video info: {e}")
+        raise _sanitized_http_error(
+            f"yt-dlp info extraction for {url}",
+            e,
+            502,
+            "Failed to fetch video info",
+        ) from e
 
 
 @app.get("/yt/playlist-info")
@@ -2214,11 +2308,12 @@ async def yt_playlist_info(url: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"yt-dlp playlist enumeration failed for {url}: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to enumerate playlist/channel: {e}",
-        )
+        raise _sanitized_http_error(
+            f"yt-dlp playlist enumeration for {url}",
+            e,
+            502,
+            "Failed to enumerate playlist/channel",
+        ) from e
 
 
 @app.get("/yt/proxy/{video_id}")
@@ -2232,6 +2327,8 @@ async def yt_proxy_stream(
     No OAuth required — uses anonymous yt-dlp extraction.
     Same Range-request handling as the YouTube Music proxy.
     """
+    video_id = _validate_video_id(video_id)
+    quality = _validate_stream_quality(quality)
     stream_info = await asyncio.to_thread(_get_yt_stream_url_sync, video_id, quality)
     stream_url = stream_info["url"]
 
@@ -2741,8 +2838,9 @@ async def get_charts(country: str = "US", user_id: Optional[str] = Query(None)):
                 result[section_key] = items
         return result
     except Exception as e:
-        log.error(f"Charts fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "Charts fetch", e, 500, "Failed to load charts"
+        ) from e
 
 
 @app.get("/moods-and-genres")
@@ -2768,8 +2866,12 @@ async def get_moods_and_genres(user_id: Optional[str] = Query(None)):
             result.append({"title": cat_title, "items": entries})
         return result
     except Exception as e:
-        log.error(f"Moods/genres fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "Moods and genres fetch",
+            e,
+            500,
+            "Failed to load moods and genres",
+        ) from e
 
 
 @app.get("/home")
@@ -2828,8 +2930,9 @@ async def get_home(limit: int = Query(6, ge=1, le=20), user_id: Optional[str] = 
 
         return shelves
     except Exception as e:
-        log.error(f"Home fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "Home fetch", e, 500, "Failed to load home"
+        ) from e
 
 
 @app.get("/browse-album/{browse_id}")
@@ -2845,8 +2948,12 @@ async def get_browse_album(browse_id: str):
         error_str = str(e).lower()
         if "not found" in error_str or "unable to find" in error_str:
             raise HTTPException(status_code=404, detail=f"Album not found: {browse_id}")
-        log.error(f"Browse album fetch failed for {browse_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Browse album fetch for {browse_id}",
+            e,
+            500,
+            "Failed to load album",
+        ) from e
 
 
 @app.get("/mood-playlists")
@@ -2892,8 +2999,12 @@ async def get_mood_playlists(params: str = Query(..., min_length=1, max_length=5
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Mood playlists fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "Mood playlists fetch",
+            e,
+            500,
+            "Failed to load mood playlists",
+        ) from e
 
 
 @app.get("/playlist/{playlist_id}")
@@ -2969,8 +3080,12 @@ async def get_playlist(
     except Exception as e:
         if isinstance(auth_error, HTTPException):
             raise auth_error
-        log.error(f"Playlist fetch failed for {playlist_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"Playlist fetch for {playlist_id}",
+            e,
+            500,
+            "Failed to load playlist",
+        ) from e
 
 
 def _fetch_mood_playlists(yt: YTMusic, params: str) -> list[dict]:

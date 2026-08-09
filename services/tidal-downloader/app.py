@@ -8,7 +8,8 @@ with this service over HTTP on port 8585.
 Supports **per-user** streaming: each soundspan user connects their own
 TIDAL account via device-code OAuth. User credentials are scoped by
 user_id query parameters. Admin credentials (for downloading) remain
-in SystemSettings and are passed via request headers.
+in SystemSettings and use an Authorization: Bearer header, with deprecated
+query-parameter support retained for one release.
 """
 
 import asyncio
@@ -20,12 +21,12 @@ import sys
 import time
 from base64 import b64decode
 from pathlib import Path
-from typing import Any, Callable, Optional, Literal
+from typing import Any, Callable, NamedTuple, Optional, Literal
 from xml.etree.ElementTree import fromstring as xml_fromstring
 
 import httpx
 import tidalapi
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -254,9 +255,66 @@ class BatchSearchQuery(BaseModel):
     limit: int = 5
 
 
+class AdminCredentials(NamedTuple):
+    """Admin TIDAL credentials extracted from an incoming request."""
+
+    access_token: str
+    user_id: str
+    country_code: str
+
+
 # ════════════════════════════════════════════════════════════════════
 # Helpers
 # ════════════════════════════════════════════════════════════════════
+
+def _parse_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Return a nonempty bearer token from an Authorization header."""
+    if not authorization:
+        return None
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip() or None
+
+
+def require_admin_credentials(
+    authorization: Optional[str] = Header(None),
+    x_tidal_user_id: Optional[str] = Header(None),
+    x_tidal_country_code: Optional[str] = Header(None),
+    access_token: str = Query(""),
+    user_id: str = Query(""),
+    country_code: str = Query("US"),
+) -> AdminCredentials:
+    """Resolve admin credentials from headers or the deprecated query fallback."""
+    bearer_token = _parse_bearer_token(authorization)
+    if bearer_token is not None:
+        resolved_user_id = x_tidal_user_id if x_tidal_user_id is not None else user_id
+        resolved_country = (
+            x_tidal_country_code
+            if x_tidal_country_code is not None
+            else country_code
+        )
+        return AdminCredentials(bearer_token, resolved_user_id, resolved_country)
+
+    if not access_token:
+        raise HTTPException(status_code=401, detail="access_token required")
+    log.warning(
+        "access_token via query string is deprecated; send Authorization: "
+        "Bearer — query support will be removed next release"
+    )
+    return AdminCredentials(access_token, user_id, country_code)
+
+
+def _sanitized_http_error(
+    operation: str,
+    exc: Exception,
+    status_code: int,
+    detail: str,
+) -> HTTPException:
+    """Log full exception detail; return a generic client-facing HTTPException."""
+    log.error("%s failed: %s", operation, exc, exc_info=True)
+    return HTTPException(status_code=status_code, detail=detail)
+
 
 def _sanitize_path_component(name: str) -> str:
     """Remove or replace chars that are invalid on most filesystems."""
@@ -909,8 +967,12 @@ async def auth_device():
             "interval": device_auth.interval,
         }
     except Exception as e:
-        log.error(f"Device auth failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "device auth",
+            e,
+            500,
+            "Failed to initiate TIDAL device authorization",
+        ) from e
 
 
 @app.post("/auth/token")
@@ -936,8 +998,9 @@ async def auth_token(req: AuthTokenRequest):
             "error_description": e.error_description,
         })
     except Exception as e:
-        log.error(f"Token exchange failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "TIDAL token exchange", e, 500, "TIDAL token exchange failed"
+        ) from e
 
 
 @app.post("/auth/refresh")
@@ -960,8 +1023,9 @@ async def auth_refresh(req: RefreshRequest):
             "error_description": e.error_description,
         })
     except Exception as e:
-        log.error(f"Token refresh failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "TIDAL token refresh", e, 500, "TIDAL token refresh failed"
+        ) from e
 
 
 @app.post("/auth/session")
@@ -977,21 +1041,24 @@ async def auth_session(tokens: SessionCheckPayload):
             "country_code": session.countryCode,
         }
     except ApiError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise _sanitized_http_error(
+            "TIDAL session validation", e, 401, "TIDAL session invalid"
+        ) from e
     except Exception as e:
-        log.error(f"Session check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            "TIDAL session check", e, 500, "TIDAL session check failed"
+        ) from e
 
 
 # ── Search ──────────────────────────────────────────────────────────
 
 @app.post("/search")
-async def search(req: SearchRequest, access_token: str = "", user_id: str = "", country_code: str = "US"):
-    """Search TIDAL for tracks, albums, and artists."""
-    if not access_token:
-        raise HTTPException(status_code=401, detail="access_token header required")
-
-    api = _build_api(access_token, user_id, country_code)
+async def search(
+    req: SearchRequest,
+    creds: AdminCredentials = Depends(require_admin_credentials),
+):
+    """Search using bearer-header auth or the one-release query fallback."""
+    api = _build_api(creds.access_token, creds.user_id, creds.country_code)
     try:
         results = api.get_search(req.query)
         return {
@@ -1031,23 +1098,73 @@ async def search(req: SearchRequest, access_token: str = "", user_id: str = "", 
             ],
         }
     except ApiError as e:
-        raise HTTPException(status_code=e.status if hasattr(e, "status") else 500, detail=str(e))
+        status_code = e.status if hasattr(e, "status") else 500
+        raise _sanitized_http_error(
+            "TIDAL search", e, status_code, "TIDAL search failed"
+        ) from e
 
 
 # ── Download ────────────────────────────────────────────────────────
 
+def _get_album_tracks(api: TidalAPI, album_id: int) -> list[Any]:
+    """Fetch all downloadable tracks for an album."""
+    tracks = []
+    offset = 0
+    while True:
+        items = api.get_album_items(album_id, limit=100, offset=offset)
+        for album_item in items.items:
+            if hasattr(album_item, "item") and hasattr(album_item.item, "isrc"):
+                tracks.append(album_item.item)
+        offset += items.limit
+        if offset >= items.totalNumberOfItems:
+            return tracks
+
+
+async def _download_album_tracks(
+    api: TidalAPI,
+    tracks: list[Any],
+    req: DownloadAlbumRequest,
+) -> tuple[list[dict], list[dict]]:
+    """Download album tracks sequentially and return successes and failures."""
+    results = []
+    errors = []
+    for index, track in enumerate(tracks):
+        if index > 0:
+            delay = env_float("TIDAL_TRACK_DELAY", "3")
+            log.debug(
+                "Rate limit: waiting %ss before track %s/%s",
+                delay,
+                index + 1,
+                len(tracks),
+            )
+            await asyncio.sleep(delay)
+        try:
+            result = await asyncio.to_thread(
+                _download_track_sync,
+                api=api,
+                track_id=track.id,
+                quality=req.quality,
+                output_template=req.output_template,
+                dest_base=MUSIC_PATH,
+            )
+            results.append(result)
+        except Exception as e:
+            log.error("Failed to download track %s (%s): %s", track.id, track.title, e)
+            errors.append({
+                "track_id": track.id,
+                "title": track.title,
+                "error": "Download failed",
+            })
+    return results, errors
+
+
 @app.post("/download/track")
 async def download_track(
     req: DownloadTrackRequest,
-    access_token: str = "",
-    user_id: str = "",
-    country_code: str = "US",
+    creds: AdminCredentials = Depends(require_admin_credentials),
 ):
-    """Download a single track from TIDAL."""
-    if not access_token:
-        raise HTTPException(status_code=401, detail="access_token required")
-
-    api = _build_api(access_token, user_id, country_code)
+    """Download using bearer-header auth or the one-release query fallback."""
+    api = _build_api(creds.access_token, creds.user_id, creds.country_code)
 
     try:
         result = await asyncio.to_thread(
@@ -1060,69 +1177,29 @@ async def download_track(
         )
         return result
     except ApiError as e:
-        log.error(f"TIDAL API error downloading track {req.track_id}: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL API download for track {req.track_id}",
+            e,
+            400,
+            "TIDAL API error",
+        ) from e
     except Exception as e:
-        log.error(f"Download failed for track {req.track_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"download for track {req.track_id}", e, 500, "Download failed"
+        ) from e
 
 
 @app.post("/download/album")
 async def download_album(
     req: DownloadAlbumRequest,
-    access_token: str = "",
-    user_id: str = "",
-    country_code: str = "US",
+    creds: AdminCredentials = Depends(require_admin_credentials),
 ):
-    """Download all tracks from a TIDAL album."""
-    if not access_token:
-        raise HTTPException(status_code=401, detail="access_token required")
-
-    api = _build_api(access_token, user_id, country_code)
-
+    """Download using bearer-header auth or the one-release query fallback."""
+    api = _build_api(creds.access_token, creds.user_id, creds.country_code)
     try:
         album = api.get_album(req.album_id)
-
-        # Fetch all tracks
-        tracks = []
-        offset = 0
-        while True:
-            items = api.get_album_items(req.album_id, limit=100, offset=offset)
-            for album_item in items.items:
-                if hasattr(album_item, "item") and hasattr(album_item.item, "isrc"):
-                    tracks.append(album_item.item)
-            offset += items.limit
-            if offset >= items.totalNumberOfItems:
-                break
-
-        results = []
-        errors = []
-
-        for i, track in enumerate(tracks):
-            # Rate-limit: wait between tracks to avoid TIDAL API bans
-            if i > 0:
-                delay = env_float("TIDAL_TRACK_DELAY", "3")
-                log.debug(f"Rate limit: waiting {delay}s before track {i+1}/{len(tracks)}")
-                await asyncio.sleep(delay)
-
-            try:
-                result = await asyncio.to_thread(
-                    _download_track_sync,
-                    api=api,
-                    track_id=track.id,
-                    quality=req.quality,
-                    output_template=req.output_template,
-                    dest_base=MUSIC_PATH,
-                )
-                results.append(result)
-            except Exception as e:
-                log.error(f"Failed to download track {track.id} ({track.title}): {e}")
-                errors.append({
-                    "track_id": track.id,
-                    "title": track.title,
-                    "error": str(e),
-                })
-
+        tracks = _get_album_tracks(api, req.album_id)
+        results, errors = await _download_album_tracks(api, tracks, req)
         return {
             "album_id": req.album_id,
             "album_title": album.title,
@@ -1134,16 +1211,72 @@ async def download_album(
             "errors": errors,
         }
     except ApiError as e:
-        log.error(f"TIDAL API error downloading album {req.album_id}: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL API download for album {req.album_id}",
+            e,
+            400,
+            "TIDAL API error",
+        ) from e
     except Exception as e:
-        log.error(f"Album download failed for {req.album_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"download for album {req.album_id}", e, 500, "Download failed"
+        ) from e
 
 
 # ════════════════════════════════════════════════════════════════════
 # Per-user streaming routes
 # ════════════════════════════════════════════════════════════════════
+
+def _store_user_session(
+    soundspan_user_id: str,
+    api: TidalAPI,
+    access_token: str,
+    refresh_token: str,
+    tidal_user_id: str,
+    country_code: str,
+) -> None:
+    """Store a verified per-user API and invalidate stale browse sessions."""
+    _user_apis[soundspan_user_id] = api
+    _user_auth_state[soundspan_user_id] = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "tidal_user_id": tidal_user_id,
+        "country_code": country_code,
+    }
+    for key in [
+        key for key in _browse_sessions if key.startswith(f"{soundspan_user_id}:")
+    ]:
+        _browse_sessions.pop(key, None)
+
+
+def _refresh_and_restore_user(
+    req: UserAuthRestoreRequest,
+    soundspan_user_id: str,
+) -> dict:
+    """Refresh expired TIDAL credentials and restore the per-user session."""
+    auth_response = AuthAPI().refresh_token(req.refresh_token)
+    new_token = auth_response.access_token
+    new_user_id = str(auth_response.user.userId)
+    new_country = auth_response.user.countryCode
+    api = _build_api(new_token, new_user_id, new_country)
+    api.get_session()
+    _store_user_session(
+        soundspan_user_id,
+        api,
+        new_token,
+        req.refresh_token,
+        new_user_id,
+        new_country,
+    )
+    log.info("Refreshed and restored TIDAL session for user %s", soundspan_user_id)
+    return {
+        "success": True,
+        "refreshed": True,
+        "access_token": new_token,
+        "user_id": new_user_id,
+        "country_code": new_country,
+    }
+
 
 @app.get("/user/auth/status")
 async def user_auth_status(user_id: str = Query(...)):
@@ -1154,25 +1287,18 @@ async def user_auth_status(user_id: str = Query(...)):
 
 @app.post("/user/auth/restore")
 async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(...)):
-    """
-    Restore a user's TIDAL credentials from the Node.js backend.
-    Called lazily on first request that needs this user's session.
-    If the access token is expired, refresh it automatically.
-    """
+    """Restore a user's credentials, refreshing an expired token if needed."""
     try:
         api = _build_api(req.access_token, req.user_id, req.country_code)
-        # Verify the session is valid
-        session = api.get_session()
-        _user_apis[user_id] = api
-        _user_auth_state[user_id] = {
-            "access_token": req.access_token,
-            "refresh_token": req.refresh_token,
-            "tidal_user_id": req.user_id,
-            "country_code": req.country_code,
-        }
-        # Invalidate browse sessions that may hold stale tokens
-        for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
-            _browse_sessions.pop(key, None)
+        api.get_session()
+        _store_user_session(
+            user_id,
+            api,
+            req.access_token,
+            req.refresh_token,
+            req.user_id,
+            req.country_code,
+        )
         log.info(f"Restored TIDAL session for user {user_id} (tidal_user={req.user_id})")
         return {
             "success": True,
@@ -1180,42 +1306,22 @@ async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(..
             "country_code": req.country_code,
         }
     except ApiError as e:
-        # Token expired — try refreshing
         log.warning(f"TIDAL session expired for user {user_id}, attempting refresh: {e}")
         try:
-            auth_api = AuthAPI()
-            auth_response = auth_api.refresh_token(req.refresh_token)
-            new_token = auth_response.access_token
-            new_user_id = str(auth_response.user.userId)
-            new_country = auth_response.user.countryCode
-
-            # Build a new API with the refreshed token
-            api = _build_api(new_token, new_user_id, new_country)
-            session = api.get_session()
-            _user_apis[user_id] = api
-            _user_auth_state[user_id] = {
-                "access_token": new_token,
-                "refresh_token": req.refresh_token,
-                "tidal_user_id": new_user_id,
-                "country_code": new_country,
-            }
-            # Invalidate browse sessions that may hold stale tokens
-            for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
-                _browse_sessions.pop(key, None)
-            log.info(f"Refreshed and restored TIDAL session for user {user_id}")
-            return {
-                "success": True,
-                "refreshed": True,
-                "access_token": new_token,
-                "user_id": new_user_id,
-                "country_code": new_country,
-            }
+            return _refresh_and_restore_user(req, user_id)
         except Exception as refresh_err:
             log.error(f"Token refresh also failed for user {user_id}: {refresh_err}")
-            raise HTTPException(status_code=401, detail=f"Invalid TIDAL credentials and refresh failed: {e}")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid TIDAL credentials and refresh failed",
+            ) from refresh_err
     except Exception as e:
-        log.error(f"Failed to restore TIDAL session for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL session restore for user {user_id}",
+            e,
+            500,
+            "Failed to restore TIDAL session",
+        ) from e
 
 
 @app.post("/user/auth/clear")
@@ -1276,9 +1382,12 @@ async def user_search(
             ],
         }
     except ApiError as e:
-        raise HTTPException(
-            status_code=getattr(e, "status", 500), detail=str(e)
-        )
+        raise _sanitized_http_error(
+            "TIDAL user search",
+            e,
+            getattr(e, "status", 500),
+            "TIDAL search failed",
+        ) from e
 
 
 @app.post("/user/search/batch")
@@ -1340,8 +1449,12 @@ async def user_stream_info(
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Stream info failed for track {track_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"stream info for track {track_id}",
+            e,
+            500,
+            "Failed to resolve stream info",
+        ) from e
 
 
 @app.get("/user/stream/{track_id}")
@@ -1629,9 +1742,12 @@ async def user_get_track(
             },
         }
     except ApiError as e:
-        raise HTTPException(
-            status_code=getattr(e, "status", 500), detail=str(e)
-        )
+        raise _sanitized_http_error(
+            f"TIDAL track lookup {track_id}",
+            e,
+            getattr(e, "status", 500),
+            "TIDAL track lookup failed",
+        ) from e
 
 
 # ── Browse (tidalapi) ──────────────────────────────────────────────
@@ -1647,8 +1763,12 @@ async def user_browse_home(user_id: str = Query(...), limit: int = Query(6), qua
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"TIDAL browse home failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL browse home for user {user_id}",
+            e,
+            500,
+            "Failed to load TIDAL home",
+        ) from e
 
 @app.get("/user/browse/explore")
 async def user_browse_explore(user_id: str = Query(...), limit: int = Query(6), quality: str | None = Query(None)):
@@ -1661,8 +1781,12 @@ async def user_browse_explore(user_id: str = Query(...), limit: int = Query(6), 
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"TIDAL browse explore failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL browse explore for user {user_id}",
+            e,
+            500,
+            "Failed to load TIDAL explore",
+        ) from e
 
 @app.get("/user/browse/genres")
 async def user_browse_genres(user_id: str = Query(...), quality: str | None = Query(None)):
@@ -1675,8 +1799,12 @@ async def user_browse_genres(user_id: str = Query(...), quality: str | None = Qu
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"TIDAL browse genres failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL browse genres for user {user_id}",
+            e,
+            500,
+            "Failed to load TIDAL genres",
+        ) from e
 
 @app.get("/user/browse/moods")
 async def user_browse_moods(user_id: str = Query(...), quality: str | None = Query(None)):
@@ -1689,8 +1817,12 @@ async def user_browse_moods(user_id: str = Query(...), quality: str | None = Que
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"TIDAL browse moods failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL browse moods for user {user_id}",
+            e,
+            500,
+            "Failed to load TIDAL moods",
+        ) from e
 
 @app.get("/user/browse/mixes")
 async def user_browse_mixes(user_id: str = Query(...), quality: str | None = Query(None)):
@@ -1706,8 +1838,12 @@ async def user_browse_mixes(user_id: str = Query(...), quality: str | None = Que
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"TIDAL browse mixes failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL browse mixes for user {user_id}",
+            e,
+            500,
+            "Failed to load TIDAL mixes",
+        ) from e
 
 @app.get("/user/browse/genre-playlists")
 async def user_browse_genre_playlists(
@@ -1739,8 +1875,12 @@ async def user_browse_genre_playlists(
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"TIDAL browse genre-playlists failed for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _sanitized_http_error(
+            f"TIDAL browse genre playlists for user {user_id}",
+            e,
+            500,
+            "Failed to load TIDAL genre playlists",
+        ) from e
 
 @app.get("/browse/playlist/{playlist_uuid}")
 async def browse_playlist(

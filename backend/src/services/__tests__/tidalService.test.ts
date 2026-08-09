@@ -332,7 +332,7 @@ describe("tidalService", () => {
     });
 
     describe("search", () => {
-        it("search succeeds with encoded credential query params", async () => {
+        it("search sends credentials via Authorization header, not the URL", async () => {
             const creds = {
                 ...baseCreds,
                 accessToken: "access token/+",
@@ -344,12 +344,18 @@ describe("tidalService", () => {
 
             await expect(tidalService.search("nujabes")).resolves.toEqual(searchData);
             expect(mockClient.post).toHaveBeenCalledWith(
-                `/search?access_token=${encodeURIComponent(
-                    creds.accessToken
-                )}&user_id=${encodeURIComponent(
-                    creds.userId
-                )}&country_code=${encodeURIComponent(creds.countryCode)}`,
-                { query: "nujabes" }
+                "/search",
+                { query: "nujabes" },
+                {
+                    headers: {
+                        Authorization: `Bearer ${creds.accessToken}`,
+                        "x-tidal-user-id": creds.userId,
+                        "x-tidal-country-code": creds.countryCode,
+                    },
+                }
+            );
+            expect(String(mockClient.post.mock.calls[0][0])).not.toContain(
+                "access_token"
             );
         });
 
@@ -472,7 +478,7 @@ describe("tidalService", () => {
     });
 
     describe("downloadTrack", () => {
-        it("downloads a track with quality and output template from credentials", async () => {
+        it("downloads a track with header credentials, quality, and output template", async () => {
             jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(baseCreds);
             const downloadResult = {
                 track_id: 9001,
@@ -488,16 +494,22 @@ describe("tidalService", () => {
 
             await expect(tidalService.downloadTrack(9001)).resolves.toEqual(downloadResult);
             expect(mockClient.post).toHaveBeenCalledWith(
-                `/download/track?access_token=${encodeURIComponent(
-                    baseCreds.accessToken
-                )}&user_id=${encodeURIComponent(
-                    baseCreds.userId
-                )}&country_code=${encodeURIComponent(baseCreds.countryCode)}`,
+                "/download/track",
                 {
                     track_id: 9001,
                     quality: "LOSSLESS",
                     output_template: "{album.artist}/{item.title}",
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${baseCreds.accessToken}`,
+                        "x-tidal-user-id": baseCreds.userId,
+                        "x-tidal-country-code": baseCreds.countryCode,
+                    },
                 }
+            );
+            expect(String(mockClient.post.mock.calls[0][0])).not.toContain(
+                "access_token"
             );
         });
 
@@ -536,7 +548,7 @@ describe("tidalService", () => {
     });
 
     describe("downloadAlbum", () => {
-        it("downloads an album with quality and output template from credentials", async () => {
+        it("downloads an album with header credentials, quality, and output template", async () => {
             jest.spyOn(tidalService as any, "getCredentials").mockResolvedValue(baseCreds);
             const albumPayload = {
                 album_id: 77,
@@ -552,16 +564,22 @@ describe("tidalService", () => {
 
             await expect(tidalService.downloadAlbum(77)).resolves.toEqual(albumPayload);
             expect(mockClient.post).toHaveBeenCalledWith(
-                `/download/album?access_token=${encodeURIComponent(
-                    baseCreds.accessToken
-                )}&user_id=${encodeURIComponent(
-                    baseCreds.userId
-                )}&country_code=${encodeURIComponent(baseCreds.countryCode)}`,
+                "/download/album",
                 {
                     album_id: 77,
                     quality: "LOSSLESS",
                     output_template: "{album.artist}/{item.title}",
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${baseCreds.accessToken}`,
+                        "x-tidal-user-id": baseCreds.userId,
+                        "x-tidal-country-code": baseCreds.countryCode,
+                    },
                 }
+            );
+            expect(String(mockClient.post.mock.calls[0][0])).not.toContain(
+                "access_token"
             );
         });
 
