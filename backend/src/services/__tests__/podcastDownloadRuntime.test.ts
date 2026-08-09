@@ -67,6 +67,7 @@ describe("podcast download runtime behavior", () => {
         };
 
         const axiosGet = jest.fn(async () => ({
+            status: 200,
             headers: { "content-length": "0" },
             data: {
                 on: jest.fn(),
@@ -74,6 +75,9 @@ describe("podcast download runtime behavior", () => {
                 pipe: jest.fn(),
             },
         }));
+        const lookup = jest.fn(async () => [
+            { address: "93.184.216.34", family: 4 },
+        ]);
 
         jest.doMock("../../utils/db", () => ({ prisma, Prisma }));
         jest.doMock("../../utils/logger", () => ({ logger }));
@@ -91,6 +95,7 @@ describe("podcast download runtime behavior", () => {
             default: { get: axiosGet },
             get: axiosGet,
         }));
+        jest.doMock("dns/promises", () => ({ lookup }));
 
         return {
             Prisma,
@@ -99,6 +104,7 @@ describe("podcast download runtime behavior", () => {
             fsPromises,
             fsModule,
             axiosGet,
+            lookup,
         };
     }
 
@@ -217,6 +223,7 @@ describe("podcast download runtime behavior", () => {
             const control: Record<string, (...args: any[]) => void> = {};
             streamControls.push(control);
             return {
+                status: 200,
                 headers: { "content-length": "3" },
                 data: {
                     on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -273,6 +280,7 @@ describe("podcast download runtime behavior", () => {
             const control: Record<string, (...args: any[]) => void> = {};
             streamControls.push(control);
             return {
+                status: 200,
                 headers: { "content-length": "0" },
                 data: {
                     on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -416,6 +424,7 @@ describe("podcast download runtime behavior", () => {
             };
 
             return {
+                status: 200,
                 headers: { "content-length": "3" },
                 data: dataStream,
             };
@@ -524,6 +533,7 @@ describe("podcast download runtime behavior", () => {
         });
 
         (mocks.axiosGet as jest.Mock).mockResolvedValue({
+            status: 200,
             headers: { "content-length": "3" },
             data: {
                 on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -567,6 +577,7 @@ describe("podcast download runtime behavior", () => {
             fileSize: 30,
         });
         (mocks.axiosGet as jest.Mock).mockResolvedValue({
+            status: 200,
             headers: { "content-length": "3" },
             data: {
                 on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -610,6 +621,7 @@ describe("podcast download runtime behavior", () => {
             fileSize: 3,
         });
         (mocks.axiosGet as jest.Mock).mockResolvedValue({
+            status: 200,
             headers: { "content-length": "0" },
             data: {
                 on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -655,6 +667,7 @@ describe("podcast download runtime behavior", () => {
         (mocks.axiosGet as jest.Mock)
             .mockRejectedValueOnce(new Error("network flake"))
             .mockResolvedValueOnce({
+                status: 200,
                 headers: { "content-length": "3" },
                 data: {
                     on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -692,6 +705,7 @@ describe("podcast download runtime behavior", () => {
             const control: Record<string, (...args: any[]) => void> = {};
             streamControls.push(control);
             return {
+                status: 200,
                 headers: { "content-length": "3" },
                 data: {
                     on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -749,6 +763,7 @@ describe("podcast download runtime behavior", () => {
             const control: Record<string, (...args: any[]) => void> = {};
             streamControls.push(control);
             return {
+                status: 200,
                 headers: { "content-length": "3" },
                 data: {
                     on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -806,6 +821,7 @@ describe("podcast download runtime behavior", () => {
             const control: Record<string, (...args: any[]) => void> = {};
             streamControls.push(control);
             return {
+                status: 200,
                 headers: { "content-length": "3" },
                 data: {
                     on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -867,6 +883,7 @@ describe("podcast download runtime behavior", () => {
             const control: Record<string, (...args: any[]) => void> = {};
             streamControls.push(control);
             return {
+                status: 200,
                 headers: { "content-length": "3" },
                 data: {
                     on: jest.fn((event: string, cb: (...args: any[]) => void) => {
@@ -918,6 +935,165 @@ describe("podcast download runtime behavior", () => {
             "stream error"
         );
         setTimeoutSpy.mockRestore();
+    });
+
+    it("blocks private audio URLs without fetching or writing a final file", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-private",
+            "http://169.254.169.254/latest.mp3",
+            "user-1"
+        );
+        for (let i = 0; i < 5; i += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(mocks.axiosGet).not.toHaveBeenCalled();
+        expect(mocks.fsPromises.rename).not.toHaveBeenCalled();
+        expect(mocks.prisma.podcastDownload.upsert).not.toHaveBeenCalled();
+        expect(mocks.logger.error).toHaveBeenCalledWith(
+            expect.stringContaining(
+                "Background download failed for episode-private"
+            ),
+            expect.stringContaining("Blocked SSRF-unsafe podcast download target")
+        );
+    });
+
+    it("blocks a private redirect without fetching the private host", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const privateUrl = "http://10.0.0.5/x.mp3";
+        const interimStream = { destroy: jest.fn() };
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+        (mocks.axiosGet as jest.Mock).mockResolvedValueOnce({
+            status: 302,
+            headers: { location: privateUrl },
+            data: interimStream,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-private-redirect",
+            "https://audio.example/episode.mp3",
+            "user-1"
+        );
+        for (let i = 0; i < 5; i += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(mocks.axiosGet).toHaveBeenCalledTimes(1);
+        expect(mocks.axiosGet).not.toHaveBeenCalledWith(
+            privateUrl,
+            expect.anything()
+        );
+        expect(interimStream.destroy).toHaveBeenCalled();
+        expect(mocks.fsPromises.rename).not.toHaveBeenCalled();
+    });
+
+    it("downloads across a public redirect chain", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const cdnUrl = "https://cdn.example/episode.mp3";
+        const interimStream = { destroy: jest.fn() };
+        const writeStream = (mocks.fsModule.createWriteStream as jest.Mock)();
+        (mocks.fsModule.createWriteStream as jest.Mock).mockReturnValue(writeStream);
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+        (mocks.fsPromises.stat as jest.Mock).mockImplementation(
+            async (targetPath: string) =>
+                targetPath.endsWith(".tmp")
+                    ? { size: 3 }
+                    : { size: 1_048_576 }
+        );
+        (mocks.axiosGet as jest.Mock)
+            .mockResolvedValueOnce({
+                status: 302,
+                headers: { location: cdnUrl },
+                data: interimStream,
+            })
+            .mockResolvedValueOnce({
+                status: 200,
+                headers: { "content-length": "3" },
+                data: {
+                    on: jest.fn(
+                        (event: string, cb: (...args: any[]) => void) => {
+                            if (event === "data") cb(Buffer.from("abc"));
+                            if (event === "end") cb();
+                        }
+                    ),
+                    pipe: jest.fn(),
+                    destroy: jest.fn(),
+                },
+            });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-public-redirect",
+            "https://audio.example/episode.mp3",
+            "user-1"
+        );
+        for (let i = 0; i < 6; i += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(mocks.axiosGet).toHaveBeenNthCalledWith(
+            2,
+            cdnUrl,
+            expect.objectContaining({ maxRedirects: 0 })
+        );
+        expect(interimStream.destroy).toHaveBeenCalled();
+        expect(mocks.fsPromises.rename).toHaveBeenCalled();
+        expect(mocks.prisma.podcastDownload.upsert).toHaveBeenCalled();
+    });
+
+    it("warns and continues when Content-Length persistence fails", async () => {
+        const mocks = setupPodcastDownloadMocks();
+        const writeStream = (mocks.fsModule.createWriteStream as jest.Mock)();
+        (mocks.fsModule.createWriteStream as jest.Mock).mockReturnValue(writeStream);
+        mocks.fsPromises.access.mockRejectedValue(new Error("not found"));
+        (mocks.fsPromises.stat as jest.Mock).mockImplementation(
+            async (targetPath: string) =>
+                targetPath.endsWith(".tmp")
+                    ? { size: 3 }
+                    : { size: 1_048_576 }
+        );
+        (mocks.prisma.podcastEpisode.findUnique as jest.Mock).mockResolvedValue({
+            fileSize: 0,
+        });
+        (mocks.prisma.podcastEpisode.update as jest.Mock).mockRejectedValue(
+            new Error("fileSize update failed")
+        );
+        (mocks.axiosGet as jest.Mock).mockResolvedValue({
+            status: 200,
+            headers: { "content-length": "3" },
+            data: {
+                on: jest.fn((event: string, cb: (...args: any[]) => void) => {
+                    if (event === "data") cb(Buffer.from("abc"));
+                    if (event === "end") cb();
+                }),
+                pipe: jest.fn(),
+                destroy: jest.fn(),
+            },
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const podcastDownload = require("../podcastDownload");
+        podcastDownload.downloadInBackground(
+            "episode-file-size-warning",
+            "https://audio.example/warn.mp3",
+            "user-1"
+        );
+        for (let i = 0; i < 6; i += 1) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining("fileSize update failed")
+        );
+        expect(mocks.prisma.podcastDownload.upsert).toHaveBeenCalled();
     });
 
     it("logs cleanup errors and continues processing remaining expired entries", async () => {

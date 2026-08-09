@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
 
+const mockLookup = jest.fn();
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
+
 jest.mock("../../middleware/auth", () => ({
     requireAuth: (_req: Request, _res: Response, next: () => void) => next(),
     requireAuthOrToken: (_req: Request, _res: Response, next: () => void) =>
@@ -321,6 +326,9 @@ describe("podcasts streaming/runtime behavior", () => {
         getSimilarPodcasts.mockResolvedValue([]);
 
         mockParseRangeHeader.mockReturnValue({ ok: true, start: 0, end: 99 });
+        mockLookup.mockResolvedValue([
+            { address: "93.184.216.34", family: 4 },
+        ]);
         mockAxiosGet.mockReset();
         mockAxiosHead.mockReset();
         mockAxiosIsCancel.mockReturnValue(false);
@@ -650,6 +658,7 @@ describe("podcasts streaming/runtime behavior", () => {
 
         const upstream = createStream();
         mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
             data: upstream,
             headers: { "content-length": "3000" },
         });
@@ -683,6 +692,7 @@ describe("podcasts streaming/runtime behavior", () => {
 
         const upstream = createStream();
         mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
             data: upstream,
             headers: { "content-length": "12345" },
         });
@@ -728,6 +738,42 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(upstream.destroy).toHaveBeenCalled();
     });
 
+    it("does not reflect arbitrary Origin with credentials on the authenticated stream", async () => {
+        prisma.podcastEpisode.findUnique.mockResolvedValueOnce({
+            id: "ep-untrusted-origin",
+            title: "Episode Untrusted Origin",
+            guid: "guid-untrusted-origin",
+            audioUrl: "https://audio.example/episode.mp3",
+            mimeType: "audio/mpeg",
+            fileSize: 1000,
+        });
+        getCachedFilePath.mockResolvedValueOnce(null);
+
+        const upstream = createStream();
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
+            data: upstream,
+            headers: { "content-length": "1000" },
+        });
+
+        const req = {
+            params: {
+                podcastId: "pod-1",
+                episodeId: "ep-untrusted-origin",
+            },
+            user: { id: "user-1" },
+            headers: { origin: "https://evil.test" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(res.headers["Access-Control-Allow-Origin"]).toBeUndefined();
+        expect(res.headers["Access-Control-Allow-Credentials"]).toBeUndefined();
+        expect(res.statusCode).toBe(200);
+        expect(upstream.pipe).toHaveBeenCalledWith(res);
+    });
+
     it("returns 500 when uncached full-file stream fails before headers", async () => {
         prisma.podcastEpisode.findUnique.mockResolvedValueOnce({
             id: "ep-norange-fail",
@@ -750,7 +796,10 @@ describe("podcasts streaming/runtime behavior", () => {
 
         await streamHandler(req, res);
 
-        expect(mockAxiosHead).toHaveBeenCalledWith("https://audio/ep-norange-fail.mp3");
+        expect(mockAxiosHead).toHaveBeenCalledWith(
+            "https://audio/ep-norange-fail.mp3",
+            { maxRedirects: 0, timeout: 30000 }
+        );
         expect(downloadInBackground).toHaveBeenCalledWith(
             "ep-norange-fail",
             "https://audio/ep-norange-fail.mp3",
@@ -776,6 +825,7 @@ describe("podcasts streaming/runtime behavior", () => {
 
         const upstream = createStream();
         mockAxiosGet.mockResolvedValueOnce({
+            status: 200,
             data: upstream,
             headers: {},
         });
@@ -789,7 +839,10 @@ describe("podcasts streaming/runtime behavior", () => {
 
         await streamHandler(req, res);
 
-        expect(mockAxiosHead).toHaveBeenCalledWith("https://audio/ep-head-fail.mp3");
+        expect(mockAxiosHead).toHaveBeenCalledWith(
+            "https://audio/ep-head-fail.mp3",
+            { maxRedirects: 0, timeout: 30000 }
+        );
         expect(mockAxiosGet).toHaveBeenCalledTimes(1);
         expect(res.statusCode).toBe(200);
         expect(upstream.pipe).toHaveBeenCalledWith(res);
@@ -925,6 +978,7 @@ describe("podcasts streaming/runtime behavior", () => {
         mockAxiosGet
             .mockRejectedValueOnce(rangeError)
             .mockResolvedValueOnce({
+                status: 200,
                 data: fallbackStream,
                 headers: {},
             });
@@ -1052,6 +1106,134 @@ describe("podcasts streaming/runtime behavior", () => {
         expect(res.body).toEqual({
             error: "Failed to stream episode",
         });
+    });
+
+    it("blocks private podcast audio targets before uncached fetches", async () => {
+        const audioUrl = "http://169.254.169.254/meta.mp3";
+        prisma.podcastEpisode.findUnique.mockResolvedValueOnce({
+            id: "ep-private",
+            title: "Private Target",
+            guid: "guid-private",
+            audioUrl,
+            mimeType: "audio/mpeg",
+            fileSize: null,
+        });
+
+        const req = {
+            params: { podcastId: "pod-1", episodeId: "ep-private" },
+            user: { id: "user-1" },
+            headers: {},
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(res.statusCode).toBe(502);
+        expect(res.body).toEqual({
+            error: "Upstream audio source not allowed",
+        });
+        expect(mockAxiosHead).not.toHaveBeenCalled();
+        expect(mockAxiosGet).not.toHaveBeenCalledWith(
+            audioUrl,
+            expect.anything()
+        );
+    });
+
+    it("blocks private redirect targets during uncached range streaming", async () => {
+        const audioUrl = "https://audio.example/episode.mp3";
+        const privateUrl = "http://10.0.0.5/evil.mp3";
+        const interimStream = createStream();
+        prisma.podcastEpisode.findUnique.mockResolvedValueOnce({
+            id: "ep-private-redirect",
+            title: "Private Redirect",
+            guid: "guid-private-redirect",
+            audioUrl,
+            mimeType: "audio/mpeg",
+            fileSize: 4000,
+        });
+        mockParseRangeHeader.mockReturnValueOnce({
+            ok: true,
+            start: 100,
+            end: 199,
+        });
+        mockAxiosGet.mockResolvedValueOnce({
+            status: 302,
+            data: interimStream,
+            headers: { location: privateUrl },
+        });
+
+        const req = {
+            params: { podcastId: "pod-1", episodeId: "ep-private-redirect" },
+            user: { id: "user-1" },
+            headers: { range: "bytes=100-199" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(res.statusCode).toBe(502);
+        expect(res.body).toEqual({
+            error: "Upstream audio source not allowed",
+        });
+        expect(mockAxiosGet).toHaveBeenCalledTimes(1);
+        expect(mockAxiosGet).not.toHaveBeenCalledWith(
+            privateUrl,
+            expect.anything()
+        );
+        expect(interimStream.destroy).toHaveBeenCalled();
+    });
+
+    it("preserves 206 range streaming across a public redirect", async () => {
+        const audioUrl = "https://audio.example/episode.mp3";
+        const cdnUrl = "https://cdn.example/episode.mp3";
+        const interimStream = createStream();
+        const upstream = createStream();
+        prisma.podcastEpisode.findUnique.mockResolvedValueOnce({
+            id: "ep-public-redirect",
+            title: "Public Redirect",
+            guid: "guid-public-redirect",
+            audioUrl,
+            mimeType: "audio/mpeg",
+            fileSize: 4000,
+        });
+        mockParseRangeHeader.mockReturnValueOnce({
+            ok: true,
+            start: 100,
+            end: 199,
+        });
+        mockAxiosGet
+            .mockResolvedValueOnce({
+                status: 302,
+                data: interimStream,
+                headers: { location: cdnUrl },
+            })
+            .mockResolvedValueOnce({
+                status: 206,
+                data: upstream,
+                headers: { "content-length": "100" },
+            });
+
+        const req = {
+            params: { podcastId: "pod-1", episodeId: "ep-public-redirect" },
+            user: { id: "user-1" },
+            headers: { range: "bytes=100-199" },
+        } as any;
+        const res = createRes();
+
+        await streamHandler(req, res);
+
+        expect(mockAxiosGet).toHaveBeenNthCalledWith(
+            2,
+            cdnUrl,
+            expect.objectContaining({
+                headers: { Range: "bytes=100-199" },
+                maxRedirects: 0,
+            })
+        );
+        expect(interimStream.destroy).toHaveBeenCalled();
+        expect(res.statusCode).toBe(206);
+        expect(res.headers["Content-Range"]).toBe("bytes 100-199/4000");
+        expect(upstream.pipe).toHaveBeenCalledWith(res);
     });
 
     it("updates and clears episode progress with error handling", async () => {
@@ -1188,9 +1370,12 @@ describe("podcasts streaming/runtime behavior", () => {
         await podcastCoverOptionsHandler(podcastReq, podcastRes);
 
         expect(podcastRes.statusCode).toBe(204);
-        expect(podcastRes.headers["Access-Control-Allow-Origin"]).toBe(
-            "https://app.test"
-        );
+        expect(
+            podcastRes.headers["Access-Control-Allow-Origin"]
+        ).toBeUndefined();
+        expect(
+            podcastRes.headers["Access-Control-Allow-Credentials"]
+        ).toBeUndefined();
         expect(podcastRes.headers["Access-Control-Allow-Methods"]).toBe(
             "GET, OPTIONS"
         );
@@ -1206,8 +1391,19 @@ describe("podcasts streaming/runtime behavior", () => {
         const episodeRes = createRes();
         await episodeCoverOptionsHandler(episodeReq, episodeRes);
         expect(episodeRes.statusCode).toBe(204);
-        expect(episodeRes.headers["Access-Control-Allow-Origin"]).toBe("*");
-        expect(episodeRes.headers["Access-Control-Allow-Credentials"]).toBe("true");
+        expect(
+            episodeRes.headers["Access-Control-Allow-Origin"]
+        ).toBeUndefined();
+        expect(
+            episodeRes.headers["Access-Control-Allow-Credentials"]
+        ).toBeUndefined();
+        expect(episodeRes.headers["Access-Control-Allow-Methods"]).toBe(
+            "GET, OPTIONS"
+        );
+        expect(episodeRes.headers["Access-Control-Allow-Headers"]).toBe(
+            "Content-Type"
+        );
+        expect(episodeRes.headers["Access-Control-Max-Age"]).toBe("86400");
     });
 
     it("handles podcast and episode cover serving branches", async () => {

@@ -5,13 +5,66 @@ import { prisma, Prisma } from "../utils/db";
 import { rssParserService, RSSFeedNotModifiedError } from "../services/rss-parser";
 import { podcastCacheService } from "../services/podcastCache";
 import { parseRangeHeader } from "../utils/rangeParser";
-import { normalizeSafeOutboundUrl } from "../services/outboundUrlSafety";
+import {
+    normalizeSafeOutboundUrl,
+    resolveSafeOutboundRedirectTarget,
+    resolveSafeOutboundUrl,
+} from "../services/outboundUrlSafety";
 import axios from "axios";
 import fs from "fs";
 
 const router = Router();
 const ITUNES_DISCOVER_TIMEOUT_MS = 10000;
 const PODCAST_PRISMA_RETRY_ATTEMPTS = 3;
+const MAX_AUDIO_REDIRECTS = 5;
+
+class PodcastEgressBlockedError extends Error {
+    constructor(url: string) {
+        super(`Blocked SSRF-unsafe podcast audio target: ${url}`);
+        this.name = "PodcastEgressBlockedError";
+    }
+}
+
+async function openSafeAudioStream(
+    rawUrl: string,
+    opts: {
+        headers?: Record<string, string>;
+        timeoutMs: number;
+        signal: AbortSignal;
+        validateStatus: (status: number) => boolean;
+    }
+): Promise<import("axios").AxiosResponse> {
+    let current = await resolveSafeOutboundUrl(rawUrl);
+    if (!current) throw new PodcastEgressBlockedError(rawUrl);
+
+    for (let hop = 0; ; hop += 1) {
+        const response = await axios.get(current, {
+            responseType: "stream",
+            timeout: opts.timeoutMs,
+            signal: opts.signal,
+            maxRedirects: 0,
+            headers: opts.headers,
+            validateStatus: (status) =>
+                opts.validateStatus(status) ||
+                (status >= 300 && status < 400),
+        });
+        if (response.status < 300) return response;
+        if (response.data && typeof response.data.destroy === "function") {
+            response.data.destroy();
+        }
+        if (hop >= MAX_AUDIO_REDIRECTS) {
+            throw new PodcastEgressBlockedError(current);
+        }
+        const location =
+            typeof response.headers?.location === "string"
+                ? response.headers.location
+                : undefined;
+        if (!location) throw new PodcastEgressBlockedError(current);
+        const next = await resolveSafeOutboundRedirectTarget(location, current);
+        if (!next) throw new PodcastEgressBlockedError(location);
+        current = next;
+    }
+}
 
 function isRetryablePodcastPrismaError(error: unknown): boolean {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -1319,9 +1372,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                         "Content-Length": chunkSize,
                         "Content-Type": episode.mimeType || "audio/mpeg",
                         "Cache-Control": "public, max-age=3600",
-                        "Access-Control-Allow-Origin":
-                            req.headers.origin || "*",
-                        "Access-Control-Allow-Credentials": "true",
                     });
 
                     const fileStream = fs.createReadStream(cachedPath, {
@@ -1355,8 +1405,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                     "Content-Length": fileSize,
                     "Accept-Ranges": "bytes",
                     "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": req.headers.origin || "*",
-                    "Access-Control-Allow-Credentials": "true",
                 });
 
                 const fileStream = fs.createReadStream(cachedPath);
@@ -1400,7 +1448,16 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
         let fileSize = episode.fileSize;
         if (!fileSize) {
             try {
-                const headResponse = await axios.head(episode.audioUrl);
+                const safeHeadUrl = await resolveSafeOutboundUrl(
+                    episode.audioUrl
+                );
+                if (!safeHeadUrl) {
+                    throw new PodcastEgressBlockedError(episode.audioUrl);
+                }
+                const headResponse = await axios.head(safeHeadUrl, {
+                    maxRedirects: 0,
+                    timeout: 30000,
+                });
                 // axios >=1.18 types indexed header access as a union; coerce to string.
                 fileSize = parseInt(
                     String(headResponse.headers["content-length"] ?? "0")
@@ -1441,12 +1498,11 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
 
             try {
                 // Try range request first
-                const response = await axios.get(episode.audioUrl, {
+                const response = await openSafeAudioStream(episode.audioUrl, {
                     headers: { Range: `bytes=${start}-${end}` },
-                    responseType: "stream",
                     validateStatus: (status) =>
                         status === 206 || status === 200,
-                    timeout: 30000,
+                    timeoutMs: 30000,
                     signal: controller.signal,
                 });
 
@@ -1464,9 +1520,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                             response.headers["content-length"] || fileSize
                         ),
                         "Cache-Control": "public, max-age=3600",
-                        "Access-Control-Allow-Origin":
-                            req.headers.origin || "*",
-                        "Access-Control-Allow-Credentials": "true",
                     });
                 } else {
                     // Send 206 Partial Content with proper range
@@ -1476,9 +1529,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                         "Content-Length": chunkSize,
                         "Content-Type": episode.mimeType || "audio/mpeg",
                         "Cache-Control": "public, max-age=3600",
-                        "Access-Control-Allow-Origin":
-                            req.headers.origin || "*",
-                        "Access-Control-Allow-Credentials": "true",
                     });
                 }
 
@@ -1502,6 +1552,9 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                 response.data.pipe(res);
                 return;
             } catch (rangeError: any) {
+                if (rangeError instanceof PodcastEgressBlockedError) {
+                    throw rangeError;
+                }
                 if (axios.isCancel(rangeError)) {
                     logger.debug("    Request aborted by client");
                     return;
@@ -1515,10 +1568,11 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                 );
 
                 // Stream full file instead - browser will handle seeking locally
-                const response = await axios.get(episode.audioUrl, {
-                    responseType: "stream",
-                    timeout: 60000,
+                const response = await openSafeAudioStream(episode.audioUrl, {
+                    timeoutMs: 60000,
                     signal: controller.signal,
+                    validateStatus: (status) =>
+                        status >= 200 && status < 300,
                 });
 
                 const contentLength = response.headers["content-length"];
@@ -1530,8 +1584,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                         "Content-Length": String(contentLength),
                     }),
                     "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": req.headers.origin || "*",
-                    "Access-Control-Allow-Credentials": "true",
                 });
 
                 // Handle stream errors to prevent process crash
@@ -1566,9 +1618,11 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
             });
 
             try {
-                const response = await axios.get(episode.audioUrl, {
-                    responseType: "stream",
+                const response = await openSafeAudioStream(episode.audioUrl, {
+                    timeoutMs: 60000,
                     signal: controller.signal,
+                    validateStatus: (status) =>
+                        status >= 200 && status < 300,
                 });
 
                 const contentLength = response.headers["content-length"];
@@ -1580,8 +1634,6 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
                         "Content-Length": String(contentLength),
                     }),
                     "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": req.headers.origin || "*",
-                    "Access-Control-Allow-Credentials": "true",
                 });
 
                 // Handle stream errors to prevent process crash
@@ -1614,6 +1666,15 @@ router.get("/:podcastId/episodes/:episodeId/stream", async (req, res) => {
         }
     } catch (error: any) {
         logger.error("\n [PODCAST STREAM] Error:", error.message);
+        if (
+            error instanceof PodcastEgressBlockedError &&
+            !res.headersSent
+        ) {
+            res.status(502).json({
+                error: "Upstream audio source not allowed",
+            });
+            return;
+        }
         if (!res.headersSent) {
             res.status(500).json({
                 error: "Failed to stream episode",
@@ -1953,9 +2014,6 @@ router.get("/:id/similar", async (req, res) => {
  * Handle CORS preflight request for podcast cover images
  */
 router.options("/:id/cover", (req, res) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
@@ -2009,11 +2067,6 @@ router.get("/:id/cover", async (req, res) => {
                 "Cache-Control",
                 "public, max-age=31536000, immutable"
             );
-            res.setHeader(
-                "Access-Control-Allow-Origin",
-                req.headers.origin || "*"
-            );
-            res.setHeader("Access-Control-Allow-Credentials", "true");
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
             return res.sendFile(podcast.localCoverPath);
         }
@@ -2054,9 +2107,6 @@ router.get("/:id/cover", async (req, res) => {
  * Handle CORS preflight request for episode cover images
  */
 router.options("/episodes/:episodeId/cover", (req, res) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
@@ -2110,11 +2160,6 @@ router.get("/episodes/:episodeId/cover", async (req, res) => {
                 "Cache-Control",
                 "public, max-age=31536000, immutable"
             );
-            res.setHeader(
-                "Access-Control-Allow-Origin",
-                req.headers.origin || "*"
-            );
-            res.setHeader("Access-Control-Allow-Credentials", "true");
             res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
             return res.sendFile(episode.localCoverPath);
         }

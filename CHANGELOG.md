@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requires a well-formed payload, and rejects any token carrying a `type` claim,
   while `/api/auth/refresh` continues to accept refresh tokens for exchange
   only.
+- SSRF: podcast episode audio (stream + background download) is now validated by the DNS-resolving outbound-safety guard at fetch time, with every redirect hop re-validated (public CDN redirects and HTTP Range streaming preserved); attacker-controlled enclosure URLs can no longer reach private/loopback/link-local/metadata addresses.
+- CORS: the authenticated podcast stream and cover routes no longer reflect an arbitrary request Origin together with credentials; credentialed CORS is owned solely by the allowlist-enforcing global middleware.
 
 ### Added
 

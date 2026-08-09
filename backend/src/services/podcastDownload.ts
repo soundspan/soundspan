@@ -5,6 +5,10 @@ import fs from "fs/promises";
 import path from "path";
 import axios from "axios";
 import { BRAND_USER_AGENT } from "../config/brand";
+import {
+    resolveSafeOutboundRedirectTarget,
+    resolveSafeOutboundUrl,
+} from "./outboundUrlSafety";
 
 /**
  * PodcastDownloadService - Background download and caching of podcast episodes
@@ -25,6 +29,53 @@ interface DownloadProgress {
 }
 const downloadProgress = new Map<string, DownloadProgress>();
 const PODCAST_DOWNLOAD_PRISMA_RETRY_ATTEMPTS = 3;
+const MAX_PODCAST_DOWNLOAD_REDIRECTS = 5;
+
+class PodcastDownloadBlockedError extends Error {
+    constructor(url: string) {
+        super(`Blocked SSRF-unsafe podcast download target: ${url}`);
+        this.name = "PodcastDownloadBlockedError";
+    }
+}
+
+async function openSafePodcastDownloadStream(
+    rawUrl: string
+): Promise<import("axios").AxiosResponse> {
+    let current = await resolveSafeOutboundUrl(rawUrl);
+    if (!current) throw new PodcastDownloadBlockedError(rawUrl);
+
+    for (let hop = 0; ; hop += 1) {
+        const response = await axios.get(current, {
+            responseType: "stream",
+            timeout: 600000,
+            maxRedirects: 0,
+            headers: { "User-Agent": BRAND_USER_AGENT },
+            decompress: false,
+            validateStatus: (status) =>
+                (status >= 200 && status < 300) ||
+                (status >= 300 && status < 400),
+        });
+        if (response.status < 300) return response;
+        if (response.data && typeof response.data.destroy === "function") {
+            response.data.destroy();
+        }
+        if (hop >= MAX_PODCAST_DOWNLOAD_REDIRECTS) {
+            throw new PodcastDownloadBlockedError(current);
+        }
+        const location =
+            typeof response.headers?.location === "string"
+                ? response.headers.location
+                : undefined;
+        if (!location) throw new PodcastDownloadBlockedError(current);
+        const next = await resolveSafeOutboundRedirectTarget(location, current);
+        if (!next) throw new PodcastDownloadBlockedError(location);
+        current = next;
+    }
+}
+
+function describePodcastDownloadError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
 
 function isRetryablePodcastDownloadPrismaError(error: unknown): boolean {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -271,15 +322,7 @@ async function performDownload(
         await fs.unlink(tempPath).catch(() => {});
         
         // Download the file with longer timeout for large podcasts
-        const response = await axios.get(audioUrl, {
-            responseType: 'stream',
-            timeout: 600000, // 10 minute timeout for large files (3+ hour podcasts)
-            headers: {
-                "User-Agent": BRAND_USER_AGENT,
-            },
-            // Don't let axios decompress - we want raw bytes
-            decompress: false
-        });
+        const response = await openSafePodcastDownloadStream(audioUrl);
         
         // axios >=1.18 types indexed header access as a union; coerce to string.
         const contentLength = parseInt(String(response.headers["content-length"] ?? "0"), 10);
@@ -320,8 +363,10 @@ async function performDownload(
                         );
                     }
                 }
-            } catch {
-                // Non-fatal
+            } catch (error) {
+                logger.warn(
+                    `[PODCAST-DL] Failed to persist Content-Length as episode fileSize: ${describePodcastDownloadError(error)}`
+                );
             }
         } else {
             // Fallback: use DB fileSize if present (better than nothing)
@@ -337,7 +382,11 @@ async function performDownload(
                 if (episode?.fileSize && episode.fileSize > 0) {
                     expectedBytes = episode.fileSize;
                 }
-            } catch {}
+            } catch (error) {
+                logger.warn(
+                    `[PODCAST-DL] Failed to read fallback episode fileSize: ${describePodcastDownloadError(error)}`
+                );
+            }
         }
 
         logger.debug(
@@ -450,6 +499,10 @@ async function performDownload(
         // Clean up temp file and progress tracking on error
         await fs.unlink(tempPath).catch(() => {});
         downloadProgress.delete(episodeId);
+
+        if (error instanceof PodcastDownloadBlockedError) {
+            throw error;
+        }
         
         // Retry on failure
         if (attempt < maxAttempts) {
