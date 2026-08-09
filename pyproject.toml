@@ -59,7 +59,9 @@ ignore = [
 
 [tool.mypy]
 # Pragmatic initial gate; stricter checks should be enabled incrementally in follow-up ratchets.
-python_version = "3.12"
+# Python 3.11 matches the repo floor (Ruff py311 and audio-analyzer python:3.11-slim),
+# so mypy checks against the oldest interpreter the sidecars run on.
+python_version = "3.11"
 files = ["services"]
 mypy_path = ["services"]
 exclude = [

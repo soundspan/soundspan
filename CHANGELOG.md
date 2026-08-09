@@ -116,6 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streaming across all users. Each blocking call is now wrapped in
   `asyncio.to_thread`, matching the existing offload pattern already used for the
   per-user refresh path.
+- Aligned the mypy type-check target (`python_version`) to Python 3.11 to match
+  the repo floor (Ruff `py311` and the audio-analyzer `python:3.11-slim` pin), so
+  type checks run against the oldest interpreter the sidecars use.
 
 ### Security
 
