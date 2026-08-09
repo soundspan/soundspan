@@ -1,0 +1,208 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`library route table matches the locked route surface 1`] = `
+[
+  {
+    "middleware": "requireAuthOrToken",
+    "path": "(router-level)",
+  },
+  {
+    "middleware": "<anonymous>",
+    "path": "(router-level)",
+  },
+  {
+    "method": "GET",
+    "middleware": [
+      "imageLimiter",
+    ],
+    "path": "/album-cover/:mbid",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/albums",
+  },
+  {
+    "method": "DELETE",
+    "middleware": [
+      "requireAdmin",
+    ],
+    "path": "/albums/:id",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/albums/:id",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/albums/:id/preference",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/artist-counts/backfill",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/artist-counts/status",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/artists",
+  },
+  {
+    "method": "DELETE",
+    "middleware": [
+      "requireAdmin",
+    ],
+    "path": "/artists/:id",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/artists/:id",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/backfill-genres",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/backfill-remote-artists",
+  },
+  {
+    "method": "GET",
+    "middleware": [
+      "imageLimiter",
+    ],
+    "path": "/cover-art-colors",
+  },
+  {
+    "method": "GET",
+    "middleware": [
+      "imageLimiter",
+    ],
+    "path": "/cover-art{/:id}",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/decades",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/delete-policy",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/genres",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/image-backfill/start",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/image-backfill/status",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/liked",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/organize",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/radio",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/recently-added",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/recently-listened",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/remote-tracks/:id/preference",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/remote-tracks/:id/preference",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/scan",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/scan/status/:jobId",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/tracks",
+  },
+  {
+    "method": "DELETE",
+    "middleware": [
+      "requireAdmin",
+    ],
+    "path": "/tracks/:id",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/tracks/:id",
+  },
+  {
+    "method": "GET",
+    "middleware": [
+      "requireAuth",
+    ],
+    "path": "/tracks/:id/audio-info",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/tracks/:id/preference",
+  },
+  {
+    "method": "POST",
+    "middleware": [],
+    "path": "/tracks/:id/preference",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/tracks/:id/stream",
+  },
+  {
+    "method": "GET",
+    "middleware": [],
+    "path": "/tracks/shuffle",
+  },
+]
+`;
