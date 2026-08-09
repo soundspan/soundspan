@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
+  `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
+  at nonexistent `postgres`/`redis` services (the services are
+  `postgres-local`/`redis-local`), and the `docker-compose.dev.yml` compatibility
+  shim's `extends` targets referenced the same stale names, so
+  `docker compose config` failed for both. `scripts/dev-setup.sh` now runs under
+  `set -euo pipefail`, resolves the repo root from its own location, checks for
+  `nc` and `.env.example` before using them, and references the correct
+  `postgres-local`/`redis-local` service names.
+
 ## [1.9.0] - 2026-08-08
 
 ### Added

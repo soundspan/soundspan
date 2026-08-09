@@ -6,7 +6,7 @@
 # - Avoid common local port collisions via +1 host mappings.
 #
 # Typical usage:
-#   docker compose -f docker-compose.local.yml up -d postgres redis
+#   docker compose -f docker-compose.local.yml up -d postgres-local redis-local
 #   cd backend && npm run dev
 #   cd frontend && PORT=3031 BACKEND_URL=http://127.0.0.1:3007 npm run dev
 #
@@ -54,8 +54,8 @@ services:
             context: ./services/audio-analyzer
         environment:
             # Connect to host machine's services (or Docker services)
-            REDIS_URL: redis://redis:6379
-            DATABASE_URL: postgresql://soundspan:soundspan@postgres:5432/soundspan
+            REDIS_URL: redis://redis-local:6379
+            DATABASE_URL: postgresql://soundspan:soundspan@postgres-local:5432/soundspan
             # Music path inside container (mounted from host)
             MUSIC_PATH: /music
             BATCH_SIZE: 10
@@ -67,9 +67,9 @@ services:
             # Host music path; override MUSIC_PATH in your shell/.env as needed.
             - "${MUSIC_PATH:-./music}:/music:ro"
         depends_on:
-            postgres:
+            postgres-local:
                 condition: service_healthy
-            redis:
+            redis-local:
                 condition: service_healthy
         restart: unless-stopped
 
@@ -79,8 +79,8 @@ services:
         build:
             context: ./services/audio-analyzer-clap
         environment:
-            REDIS_URL: redis://redis:6379
-            DATABASE_URL: postgresql://soundspan:soundspan@postgres:5432/soundspan
+            REDIS_URL: redis://redis-local:6379
+            DATABASE_URL: postgresql://soundspan:soundspan@postgres-local:5432/soundspan
             # Host-run backend URL (frontend/backend run outside compose in local dev)
             BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:3007}
             MUSIC_PATH: /music
@@ -95,9 +95,9 @@ services:
         extra_hosts:
             - "host.docker.internal:host-gateway"
         depends_on:
-            postgres:
+            postgres-local:
                 condition: service_healthy
-            redis:
+            redis-local:
                 condition: service_healthy
         restart: unless-stopped
 

@@ -13,22 +13,22 @@ services:
     postgres-local:
         extends:
             file: docker-compose.local.yml
-            service: postgres
+            service: postgres-local
 
     redis-local:
         extends:
             file: docker-compose.local.yml
-            service: redis
+            service: redis-local
 
     audio-analyzer-local:
         extends:
             file: docker-compose.local.yml
-            service: audio-analyzer
+            service: audio-analyzer-local
 
     audio-analyzer-clap:
         extends:
             file: docker-compose.local.yml
-            service: audio-analyzer-clap
+            service: audio-analyzer-clap-local
 
 volumes:
     postgres_local_data:
