@@ -311,6 +311,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OpenAPI contract sync: the generated spec (`GET /api/docs.json`, `/api/docs`)
+  no longer advertises 24 phantom endpoints. The `@openapi` path keys for the
+  API-key, auth (`login`/`me`), library-scan, listen-together, lyrics, mixes,
+  and search routes were documented without the mounted `/api` prefix, so the
+  spec published paths such as `/auth/login` and `/mixes` that 404 on the server
+  while the real `/api/...` URLs went undocumented. The keys now match the
+  mounted routes. `openapiSupplement.ts` — previously a shim that re-documented
+  those same endpoints under their correct prefixes — is reduced to the only
+  endpoints defined directly in `index.ts` with no route module (the
+  `/health`, `/api/health` liveness/readiness probes and `/api/docs.json`).
+  Documentation only; no runtime route behavior changed.
+- OpenAPI `info.version` is no longer frozen at `1.0.0`; it now resolves from
+  `backend/package.json` at load time (currently `1.9.0`) so the published
+  contract tracks the shipping release.
 - Frontend token refresh is now single-flight, so simultaneous 401 responses
   share one `/auth/refresh` request instead of racing refresh-token rotation
   and forcing a logout.

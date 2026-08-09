@@ -182,7 +182,7 @@ router.use(requireAuth);
 
 /**
  * @openapi
- * /search:
+ * /api/search:
  *   get:
  *     summary: Search across your music library
  *     description: Search for artists, albums, tracks, audiobooks, and podcasts in your library using PostgreSQL full-text search

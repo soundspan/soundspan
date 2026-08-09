@@ -33,7 +33,7 @@ Start-here guide for API route handlers in `backend/src/routes`.
 | `backend/src/routes/notifications.ts` | `/api/notifications` |
 | `backend/src/routes/offline.ts` | `/api/offline` |
 | `backend/src/routes/onboarding.ts` | `/api/onboarding` |
-| `backend/src/routes/openapiSupplement.ts` | (not found in `backend/src/index.ts` mounts) |
+| `backend/src/routes/openapiSupplement.ts` | (doc-only: @openapi coverage for index.ts health/readiness and /api/docs.json endpoints; not mounted) |
 | `backend/src/routes/playbackState.ts` | `/api/playback-state` |
 | `backend/src/routes/playlistImport.ts` | `/api/import` |
 | `backend/src/routes/playlists.ts` | `/api/playlists` |

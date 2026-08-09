@@ -62,7 +62,7 @@ async function getLyricsWithRouteTimeout(
 
 /**
  * @openapi
- * /lyrics/{trackId}:
+ * /api/lyrics/{trackId}:
  *   get:
  *     summary: Get lyrics for a track
  *     description: |
@@ -178,7 +178,7 @@ router.get("/:trackId", async (req, res) => {
 
 /**
  * @openapi
- * /lyrics/{trackId}:
+ * /api/lyrics/{trackId}:
  *   delete:
  *     summary: Clear cached lyrics for a track
  *     description: Removes cached lyrics so they are re-fetched on next request

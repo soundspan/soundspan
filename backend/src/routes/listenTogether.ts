@@ -99,7 +99,7 @@ function handleError(label: string, error: unknown, res: Response) {
 
 /**
  * @openapi
- * /listen-together:
+ * /api/listen-together:
  *   post:
  *     summary: Create a new Listen Together group
  *     tags: [Listen Together]
@@ -123,7 +123,7 @@ router.post("/", async (req, res) => {
 
 /**
  * @openapi
- * /listen-together/join:
+ * /api/listen-together/join:
  *   post:
  *     summary: Join a Listen Together group by code
  *     tags: [Listen Together]
@@ -147,7 +147,7 @@ router.post("/join", async (req, res) => {
 
 /**
  * @openapi
- * /listen-together/discover:
+ * /api/listen-together/discover:
  *   get:
  *     summary: Discover public Listen Together groups
  *     tags: [Listen Together]
@@ -169,7 +169,7 @@ router.get("/discover", async (req, res) => {
 
 /**
  * @openapi
- * /listen-together/active-count:
+ * /api/listen-together/active-count:
  *   get:
  *     summary: Get the count of active Listen Together groups
  *     tags: [Listen Together]
@@ -191,7 +191,7 @@ router.get("/active-count", async (_req, res) => {
 
 /**
  * @openapi
- * /listen-together/mine:
+ * /api/listen-together/mine:
  *   get:
  *     summary: Get the current user's active Listen Together group
  *     tags: [Listen Together]
@@ -213,7 +213,7 @@ router.get("/mine", async (req, res) => {
 
 /**
  * @openapi
- * /listen-together/{groupId}/leave:
+ * /api/listen-together/{groupId}/leave:
  *   post:
  *     summary: Leave a Listen Together group
  *     tags: [Listen Together]
@@ -235,7 +235,7 @@ router.post("/:groupId/leave", async (req, res) => {
 
 /**
  * @openapi
- * /listen-together/{groupId}/end:
+ * /api/listen-together/{groupId}/end:
  *   post:
  *     summary: End a Listen Together group (host only)
  *     tags: [Listen Together]

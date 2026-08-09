@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import swaggerJsdoc from "swagger-jsdoc";
 import { config } from "../config";
 import {
@@ -7,12 +9,25 @@ import {
     BRAND_SITE_URL,
 } from "./brand";
 
+function resolveApiVersion(): string {
+    const manifestPath = path.join(__dirname, "..", "..", "package.json");
+    const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+        version?: unknown;
+    };
+    if (typeof parsed.version !== "string" || parsed.version.length === 0) {
+        throw new Error("backend package.json is missing a string version");
+    }
+    return parsed.version;
+}
+
+const API_VERSION = resolveApiVersion();
+
 const options: swaggerJsdoc.Options = {
     definition: {
         openapi: "3.0.0",
         info: {
             title: BRAND_API_TITLE,
-            version: "1.0.0",
+            version: API_VERSION,
             description: BRAND_API_DESCRIPTION,
             contact: {
                 name: BRAND_NAME,

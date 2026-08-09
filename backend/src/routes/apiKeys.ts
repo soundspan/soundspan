@@ -12,7 +12,7 @@ router.use(requireAuth);
 
 /**
  * @openapi
- * /api-keys:
+ * /api/api-keys:
  *   post:
  *     summary: Create a new API key for mobile/external authentication
  *     tags: [API Keys]
@@ -110,7 +110,7 @@ router.post("/", async (req, res) => {
 
 /**
  * @openapi
- * /api-keys:
+ * /api/api-keys:
  *   get:
  *     summary: List all API keys for the current user
  *     tags: [API Keys]
@@ -164,7 +164,7 @@ router.get("/", async (req, res) => {
 
 /**
  * @openapi
- * /api-keys/{id}:
+ * /api/api-keys/{id}:
  *   delete:
  *     summary: Revoke an API key
  *     tags: [API Keys]

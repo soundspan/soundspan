@@ -20,7 +20,7 @@ const getRequestUserId = (req: any): string | null => {
 
 /**
  * @openapi
- * /mixes:
+ * /api/mixes:
  *   get:
  *     summary: Get all programmatic mixes
  *     description: Returns all auto-generated mixes (era-based, genre-based, top tracks, rediscover, artist similar, random discovery)
@@ -101,7 +101,7 @@ router.get("/", async (req, res) => {
 
 /**
  * @openapi
- * /mixes/mood:
+ * /api/mixes/mood:
  *   post:
  *     summary: Generate a custom mood-based mix on demand
  *     description: Creates a personalized mix based on audio features like valence, energy, tempo, etc.
@@ -508,7 +508,7 @@ router.post("/mood/save-preferences", async (req, res) => {
 
 /**
  * @openapi
- * /mixes/mood/buckets/presets:
+ * /api/mixes/mood/buckets/presets:
  *   get:
  *     summary: Get mood presets with track counts
  *     description: Returns available mood categories with how many tracks are available for each
@@ -532,7 +532,7 @@ router.get("/mood/buckets/presets", async (req, res) => {
 
 /**
  * @openapi
- * /mixes/mood/buckets/{mood}:
+ * /api/mixes/mood/buckets/{mood}:
  *   get:
  *     summary: Get a mood mix for a specific mood
  *     description: Fast lookup from pre-computed mood bucket table
@@ -605,7 +605,7 @@ router.get("/mood/buckets/:mood", async (req, res) => {
 
 /**
  * @openapi
- * /mixes/mood/buckets/{mood}/save:
+ * /api/mixes/mood/buckets/{mood}/save:
  *   post:
  *     summary: Save a mood as user's active mood mix
  *     description: Generates a mix for the mood and saves it as the user's "Your X Mix" on the home page
@@ -693,7 +693,7 @@ router.post("/mood/buckets/:mood/save", async (req, res) => {
 
 /**
  * @openapi
- * /mixes/mood/buckets/backfill:
+ * /api/mixes/mood/buckets/backfill:
  *   post:
  *     summary: Backfill mood buckets for all analyzed tracks
  *     description: Admin endpoint to populate mood buckets for existing tracks
@@ -731,7 +731,7 @@ router.post("/mood/buckets/backfill", requireAdmin, async (req, res) => {
 
 /**
  * @openapi
- * /mixes/refresh:
+ * /api/mixes/refresh:
  *   post:
  *     summary: Force refresh all mixes
  *     description: Clears cache and regenerates all programmatic mixes
@@ -790,7 +790,7 @@ router.post("/refresh", async (req, res) => {
 
 /**
  * @openapi
- * /mixes/{id}/save:
+ * /api/mixes/{id}/save:
  *   post:
  *     summary: Save a mix as a playlist
  *     description: Creates a new playlist with all tracks from the specified mix
@@ -928,7 +928,7 @@ router.post("/:id/save", async (req, res) => {
 
 /**
  * @openapi
- * /mixes/{id}:
+ * /api/mixes/{id}:
  *   get:
  *     summary: Get a specific mix with full track details
  *     tags: [Mixes]

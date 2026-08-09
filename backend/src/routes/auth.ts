@@ -107,7 +107,7 @@ const decrypt2FASecret = decrypt;
 
 /**
  * @openapi
- * /auth/login:
+ * /api/auth/login:
  *   post:
  *     summary: Login with username and password
  *     tags: [Authentication]
@@ -349,7 +349,7 @@ router.post("/refresh", async (req, res) => {
 
 /**
  * @openapi
- * /auth/me:
+ * /api/auth/me:
  *   get:
  *     summary: Get current authenticated user
  *     tags: [Authentication]

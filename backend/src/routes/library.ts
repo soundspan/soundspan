@@ -1234,7 +1234,7 @@ router.get("/delete-policy", asyncHandler(async (req, res) => {
 
 /**
  * @openapi
- * /library/scan:
+ * /api/library/scan:
  *   post:
  *     summary: Start a library scan job
  *     description: Initiates a background job to scan the music directory and index all audio files
