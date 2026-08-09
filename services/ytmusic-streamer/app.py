@@ -205,6 +205,12 @@ BATCH_DELAY_MAX = env_float("YTMUSIC_BATCH_DELAY_MAX", "1.0")
 EXTRACT_DELAY_MIN = env_float("YTMUSIC_EXTRACT_DELAY_MIN", "0.5")
 EXTRACT_DELAY_MAX = env_float("YTMUSIC_EXTRACT_DELAY_MAX", "2.0")
 _extract_pacer = ThreadSafeRatePacer(EXTRACT_DELAY_MIN, EXTRACT_DELAY_MAX)
+EXTRACT_TIMEOUT = env_float("YTMUSIC_EXTRACT_TIMEOUT", "60")
+_EXTRACT_CONCURRENCY = max(1, env_int("YTMUSIC_EXTRACT_CONCURRENCY", "4"))
+_extract_executor = ThreadPoolExecutor(
+    max_workers=_EXTRACT_CONCURRENCY,
+    thread_name_prefix="yt-extract",
+)
 
 # Search result cache (in-memory, short TTL to reduce duplicate requests)
 _search_cache: dict[str, dict] = {}
@@ -817,6 +823,7 @@ def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
+        "socket_timeout": 30,
         "http_headers": {
             "User-Agent": _USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -850,6 +857,7 @@ def _get_stream_url_sync(
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
+        "socket_timeout": 30,
         "http_headers": {
             "User-Agent": _USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -864,6 +872,25 @@ def _get_stream_url_sync(
         video_id,
         f"yt-dlp extraction for {video_id}",
     )
+
+
+async def _extract_with_timeout(fn, *args):
+    """Run blocking stream extraction with an overall timeout.
+
+    Isolated from the shared default thread pool so a stalled yt-dlp cannot
+    starve other endpoints; on timeout the request fails fast with HTTP 504
+    instead of hanging.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(_extract_executor, fn, *args),
+            timeout=EXTRACT_TIMEOUT,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504, detail="Stream extraction timed out"
+        ) from exc
 
 
 def _tv_search(yt: YTMusic, query: str, filter: Optional[str] = None, limit: int = 20) -> list[dict]:
@@ -1812,7 +1839,9 @@ async def get_stream_info(video_id: str, user_id: str = Query(...), quality: str
     if user_id != "__public__":
         _get_ytmusic(user_id)
 
-    result = await asyncio.to_thread(_get_stream_url_sync, user_id, video_id, quality)
+    result = await _extract_with_timeout(
+        _get_stream_url_sync, user_id, video_id, quality
+    )
     return {
         "videoId": video_id,
         "url": result["url"],
@@ -1846,7 +1875,9 @@ async def proxy_stream(
     if user_id != "__public__":
         _get_ytmusic(user_id)
 
-    stream_info = await asyncio.to_thread(_get_stream_url_sync, user_id, video_id, quality)
+    stream_info = await _extract_with_timeout(
+        _get_stream_url_sync, user_id, video_id, quality
+    )
     stream_url = stream_info["url"]
 
     # Determine content type for the response
@@ -2195,7 +2226,9 @@ async def yt_proxy_stream(
     """
     video_id = _validate_video_id(video_id)
     quality = _validate_stream_quality(quality)
-    stream_info = await asyncio.to_thread(_get_yt_stream_url_sync, video_id, quality)
+    stream_info = await _extract_with_timeout(
+        _get_yt_stream_url_sync, video_id, quality
+    )
     stream_url = stream_info["url"]
 
     acodec = stream_info.get("acodec", "")
@@ -2980,6 +3013,7 @@ async def shutdown():
     _clean_stream_cache()
     _clean_search_cache()
     _ytmusic_instances.clear()
+    _extract_executor.shutdown(wait=False, cancel_futures=True)
     log.info("YouTube Music Streamer shutting down")
 
 
