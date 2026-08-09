@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { VALID_MOODS, MoodType } from "../services/moodBucketService";
 
 /**
@@ -29,75 +30,31 @@ export type JourneyRequestResult =
     | { ok: true; value: JourneyRequest }
     | { ok: false; status: number; error: string };
 
-type ParsedTarget = Pick<JourneyRequest, "toTrackId" | "mood">;
-type FieldResult<T> = { ok: true; value: T } | { ok: false; error: string };
+const requestBodySchema = z.custom<Record<string, unknown>>(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+);
+const nonEmptyStringSchema = z.string().min(1);
+const moodSchema = z.enum(VALID_MOODS);
+const excludeArraySchema = z.array(z.unknown()).default([]);
+const boundedExcludeArraySchema = z
+    .array(z.unknown())
+    .max(MAX_JOURNEY_EXCLUDE_TRACK_IDS);
+const excludeTrackIdsSchema = z.array(nonEmptyStringSchema);
+const stepsSchema = z
+    .number()
+    .refine(Number.isInteger)
+    .transform((value) =>
+        Math.min(Math.max(MIN_JOURNEY_STEPS, value), MAX_JOURNEY_STEPS)
+    )
+    .default(DEFAULT_JOURNEY_STEPS);
 
 function reject(status: number, error: string): JourneyRequestResult {
     return { ok: false, status, error };
 }
 
-function parseTarget(
-    fromTrackId: string,
-    toTrackId: unknown,
-    mood: unknown
-): FieldResult<ParsedTarget> {
-    const hasTrack = typeof toTrackId === "string" && toTrackId.length > 0;
-    const hasMood = typeof mood === "string" && mood.length > 0;
-    if (hasTrack === hasMood) {
-        return { ok: false, error: "Provide exactly one of toTrackId or mood" };
-    }
-    if (hasMood && !VALID_MOODS.includes(mood as MoodType)) {
-        return {
-            ok: false,
-            error: `Invalid mood. Must be one of: ${VALID_MOODS.join(", ")}`,
-        };
-    }
-    if (hasTrack && toTrackId === fromTrackId) {
-        return { ok: false, error: "Origin and destination are the same track" };
-    }
-    return {
-        ok: true,
-        value: {
-            toTrackId: hasTrack ? (toTrackId as string) : null,
-            mood: hasMood ? (mood as MoodType) : null,
-        },
-    };
-}
-
-function parseExcludeTrackIds(value: unknown): FieldResult<string[]> {
-    if (value === undefined) return { ok: true, value: [] };
-    if (!Array.isArray(value)) {
-        return { ok: false, error: "excludeTrackIds must be an array of strings" };
-    }
-    if (value.length > MAX_JOURNEY_EXCLUDE_TRACK_IDS) {
-        return {
-            ok: false,
-            error: `excludeTrackIds cannot exceed ${MAX_JOURNEY_EXCLUDE_TRACK_IDS} entries`,
-        };
-    }
-    if (value.some((id) => typeof id !== "string" || id.length === 0)) {
-        return {
-            ok: false,
-            error: "excludeTrackIds must contain non-empty strings",
-        };
-    }
-    return { ok: true, value };
-}
-
-function parseSteps(value: unknown): FieldResult<number> {
-    if (value === undefined) {
-        return { ok: true, value: DEFAULT_JOURNEY_STEPS };
-    }
-    if (!Number.isInteger(value)) {
-        return { ok: false, error: "steps must be an integer" };
-    }
-    return {
-        ok: true,
-        value: Math.min(
-            Math.max(MIN_JOURNEY_STEPS, value as number),
-            MAX_JOURNEY_STEPS
-        ),
-    };
+function normalizeBody(body: unknown): Record<string, unknown> {
+    const parsed = requestBodySchema.safeParse(body);
+    return parsed.success ? parsed.data : {};
 }
 
 /**
@@ -109,36 +66,49 @@ function parseSteps(value: unknown): FieldResult<number> {
  * a UI slider quirk, not a protocol violation).
  */
 export function parseJourneyRequest(body: unknown): JourneyRequestResult {
-    const record =
-        typeof body === "object" && body !== null && !Array.isArray(body)
-            ? (body as Record<string, unknown>)
-            : {};
-    const {
-        fromTrackId,
-        toTrackId,
-        mood,
-        steps: requestedSteps,
-        excludeTrackIds,
-    } = record;
-
-    if (typeof fromTrackId !== "string" || !fromTrackId) {
+    const record = normalizeBody(body);
+    const fromTrackId = nonEmptyStringSchema.safeParse(record.fromTrackId);
+    if (!fromTrackId.success) {
         return reject(400, "fromTrackId is required");
     }
 
-    const target = parseTarget(fromTrackId, toTrackId, mood);
-    if (!target.ok) return reject(400, target.error);
-    const excludes = parseExcludeTrackIds(excludeTrackIds);
-    if (!excludes.ok) return reject(400, excludes.error);
-    const steps = parseSteps(requestedSteps);
-    if (!steps.ok) return reject(400, steps.error);
+    const toTrackId = nonEmptyStringSchema.safeParse(record.toTrackId);
+    const suppliedMood = nonEmptyStringSchema.safeParse(record.mood);
+    if (toTrackId.success === suppliedMood.success) {
+        return reject(400, "Provide exactly one of toTrackId or mood");
+    }
+
+    const mood = moodSchema.safeParse(suppliedMood.success ? suppliedMood.data : null);
+    if (suppliedMood.success && !mood.success) {
+        return reject(400, `Invalid mood. Must be one of: ${VALID_MOODS.join(", ")}`);
+    }
+    if (toTrackId.success && toTrackId.data === fromTrackId.data) {
+        return reject(400, "Origin and destination are the same track");
+    }
+
+    const excludeArray = excludeArraySchema.safeParse(record.excludeTrackIds);
+    if (!excludeArray.success) {
+        return reject(400, "excludeTrackIds must be an array of strings");
+    }
+    if (!boundedExcludeArraySchema.safeParse(excludeArray.data).success) {
+        return reject(400, `excludeTrackIds cannot exceed ${MAX_JOURNEY_EXCLUDE_TRACK_IDS} entries`);
+    }
+    const excludeTrackIds = excludeTrackIdsSchema.safeParse(excludeArray.data);
+    if (!excludeTrackIds.success) {
+        return reject(400, "excludeTrackIds must contain non-empty strings");
+    }
+
+    const steps = stepsSchema.safeParse(record.steps);
+    if (!steps.success) return reject(400, "steps must be an integer");
 
     return {
         ok: true,
         value: {
-            fromTrackId,
-            ...target.value,
-            steps: steps.value,
-            excludeTrackIds: excludes.value,
+            fromTrackId: fromTrackId.data,
+            toTrackId: toTrackId.success ? toTrackId.data : null,
+            mood: mood.success ? mood.data : null,
+            steps: steps.data,
+            excludeTrackIds: excludeTrackIds.data,
         },
     };
 }

@@ -2,7 +2,9 @@ import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { notificationService } from "../services/notificationService";
 import { requireAuth } from "../middleware/auth";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../utils/db";
+import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
 
@@ -31,7 +33,7 @@ const router = Router();
 router.get(
     "/",
     requireAuth,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             logger.debug(
                 `[Notifications] Fetching notifications for user ${
@@ -47,9 +49,9 @@ router.get(
             res.json(notifications);
         } catch (error: any) {
             logger.error("Error fetching notifications:", error);
-            res.status(500).json({ error: "Failed to fetch notifications" });
+            sendInternalRouteError(res, "Failed to fetch notifications");
         }
-    }
+    })
 );
 
 /**
@@ -78,7 +80,7 @@ router.get(
 router.get(
     "/unread-count",
     requireAuth,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const count = await notificationService.getUnreadCount(
                 req.user!.id
@@ -86,9 +88,9 @@ router.get(
             res.json({ count });
         } catch (error: any) {
             logger.error("Error fetching unread count:", error);
-            res.status(500).json({ error: "Failed to fetch unread count" });
+            sendInternalRouteError(res, "Failed to fetch unread count");
         }
-    }
+    })
 );
 
 /**
@@ -123,17 +125,18 @@ router.get(
 router.post(
     "/:id/read",
     requireAuth,
-    async (req: Request<{ id: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
         try {
             await notificationService.markAsRead(req.params.id, req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error marking notification as read:", error);
-            res.status(500).json({
-                error: "Failed to mark notification as read",
-            });
+            sendInternalRouteError(
+                res,
+                "Failed to mark notification as read"
+            );
         }
-    }
+    })
 );
 
 /**
@@ -161,17 +164,18 @@ router.post(
 router.post(
     "/read-all",
     requireAuth,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             await notificationService.markAllAsRead(req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error marking all notifications as read:", error);
-            res.status(500).json({
-                error: "Failed to mark all notifications as read",
-            });
+            sendInternalRouteError(
+                res,
+                "Failed to mark all notifications as read"
+            );
         }
-    }
+    })
 );
 
 /**
@@ -207,15 +211,15 @@ router.post(
 router.post(
     "/:id/clear",
     requireAuth,
-    async (req: Request<{ id: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
         try {
             await notificationService.clear(req.params.id, req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error clearing notification:", error);
-            res.status(500).json({ error: "Failed to clear notification" });
+            sendInternalRouteError(res, "Failed to clear notification");
         }
-    }
+    })
 );
 
 /**
@@ -244,17 +248,15 @@ router.post(
 router.post(
     "/clear-all",
     requireAuth,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             await notificationService.clearAll(req.user!.id);
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error clearing all notifications:", error);
-            res.status(500).json({
-                error: "Failed to clear all notifications",
-            });
+            sendInternalRouteError(res, "Failed to clear all notifications");
         }
-    }
+    })
 );
 
 /**
@@ -282,7 +284,7 @@ router.post(
 router.get(
     "/downloads/history",
     requireAuth,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const downloads = await prisma.downloadJob.findMany({
                 where: {
@@ -308,9 +310,9 @@ router.get(
             res.json(deduplicated.slice(0, 50));
         } catch (error: any) {
             logger.error("Error fetching download history:", error);
-            res.status(500).json({ error: "Failed to fetch download history" });
+            sendInternalRouteError(res, "Failed to fetch download history");
         }
-    }
+    })
 );
 
 /**
@@ -338,7 +340,7 @@ router.get(
 router.get(
     "/downloads/active",
     requireAuth,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             const downloads = await prisma.downloadJob.findMany({
                 where: {
@@ -350,9 +352,9 @@ router.get(
             res.json(downloads);
         } catch (error: any) {
             logger.error("Error fetching active downloads:", error);
-            res.status(500).json({ error: "Failed to fetch active downloads" });
+            sendInternalRouteError(res, "Failed to fetch active downloads");
         }
-    }
+    })
 );
 
 /**
@@ -388,7 +390,7 @@ router.get(
 router.post(
     "/downloads/:id/clear",
     requireAuth,
-    async (req: Request<{ id: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
         try {
             await prisma.downloadJob.updateMany({
                 where: {
@@ -400,9 +402,9 @@ router.post(
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error clearing download:", error);
-            res.status(500).json({ error: "Failed to clear download" });
+            sendInternalRouteError(res, "Failed to clear download");
         }
-    }
+    })
 );
 
 /**
@@ -431,7 +433,7 @@ router.post(
 router.post(
     "/downloads/clear-all",
     requireAuth,
-    async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response) => {
         try {
             await prisma.downloadJob.updateMany({
                 where: {
@@ -444,9 +446,9 @@ router.post(
             res.json({ success: true });
         } catch (error: any) {
             logger.error("Error clearing all downloads:", error);
-            res.status(500).json({ error: "Failed to clear all downloads" });
+            sendInternalRouteError(res, "Failed to clear all downloads");
         }
-    }
+    })
 );
 
 /**
@@ -492,7 +494,7 @@ router.post(
 router.post(
     "/downloads/:id/retry",
     requireAuth,
-    async (req: Request<{ id: string }>, res: Response) => {
+    asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
         try {
             // Get the failed download
             const failedJob = await prisma.downloadJob.findFirst({
@@ -504,9 +506,11 @@ router.post(
             });
 
             if (!failedJob) {
-                return res
-                    .status(404)
-                    .json({ error: "Download not found or not failed" });
+                return sendRouteError(
+                    res,
+                    404,
+                    "Download not found or not failed"
+                );
             }
 
             // If this was a pending-track retry job, re-run the pending-track retry flow
@@ -521,9 +525,11 @@ router.post(
                     | undefined;
 
                 if (!playlistId || !pendingTrackId) {
-                    return res.status(400).json({
-                        error: "Cannot retry: missing playlistId or pendingTrackId",
-                    });
+                    return sendRouteError(
+                        res,
+                        400,
+                        "Cannot retry: missing playlistId or pendingTrackId"
+                    );
                 }
 
                 // Mark old job as cleared
@@ -537,9 +543,7 @@ router.post(
                     where: { id: playlistId },
                 });
                 if (!playlist || playlist.userId !== req.user!.id) {
-                    return res
-                        .status(404)
-                        .json({ error: "Playlist not found" });
+                    return sendRouteError(res, 404, "Playlist not found");
                 }
 
                 const pendingTrack =
@@ -547,9 +551,7 @@ router.post(
                         where: { id: pendingTrackId },
                     });
                 if (!pendingTrack) {
-                    return res
-                        .status(404)
-                        .json({ error: "Pending track not found" });
+                    return sendRouteError(res, 404, "Pending track not found");
                 }
 
                 const retryTargetId =
@@ -729,9 +731,11 @@ router.post(
                 const albumTitle = metadata.albumTitle as string;
 
                 if (!artistName || !albumTitle) {
-                    return res.status(400).json({
-                        error: "Cannot retry: missing artist/album info",
-                    });
+                    return sendRouteError(
+                        res,
+                        400,
+                        "Cannot retry: missing artist/album info"
+                    );
                 }
 
                 // Mark old job as cleared
@@ -896,9 +900,11 @@ router.post(
 
             // Validate that we have the required MBIDs
             if (!failedJob.targetMbid) {
-                return res
-                    .status(400)
-                    .json({ error: "Cannot retry: missing album MBID" });
+                return sendRouteError(
+                    res,
+                    400,
+                    "Cannot retry: missing album MBID"
+                );
             }
 
             // Mark old job as cleared
@@ -952,9 +958,9 @@ router.post(
             });
         } catch (error: any) {
             logger.error("Error retrying download:", error);
-            res.status(500).json({ error: "Failed to retry download" });
+            sendInternalRouteError(res, "Failed to retry download");
         }
-    }
+    })
 );
 
 export default router;

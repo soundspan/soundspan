@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Changed
+
+- **Backend error-response canonicalization (developer-facing standard + first
+  exemplars).** The canonical route error contract is now documented in
+  `backend/src/routes/README.md`: async handlers wrap in `asyncHandler`,
+  deliberate client errors use `sendRouteError(res, status, message)`, and
+  unexpected/internal failures are logged once and returned via
+  `sendInternalRouteError` (or a thrown `AppError`) so every error body is the
+  single-field `{ "error": string }` envelope (`AppError` additionally carries
+  `code`/`category`). `routes/vibe.ts` and `routes/notifications.ts` are
+  retrofitted as the reference exemplars, and `routes/vibeJourneyRequest.ts` now
+  validates with `zod` instead of a bespoke helper pattern. Status codes and
+  error messages are unchanged except for the two client-visible field removals
+  noted below. A ratcheting CI check
+  (`npm run check:error-canon`,
+  `scripts/ci/check-route-error-canon.mjs`) freezes the current per-file count of
+  ad-hoc `res.status(500).json(...)` literals and fails the build if any route
+  file introduces new ones — canonicalize a route and lower its baseline; new
+  route files start at a baseline of zero.
+- **Minor API change (self-consumed vibe endpoints):** two error responses drop
+  their secondary `message` field to conform to the `{ error }` envelope —
+  `GET /api/vibe/similar/:trackId` (404 "No similar tracks found") and
+  `POST /api/vibe/search` (504 "Text embedding service unavailable"). The
+  `error` string and HTTP status are unchanged; the frontend reads only `error`,
+  so no client action is required.
+
 ### Security
 
 - Path containment on native audio streaming: the `GET /api/library/tracks/:id/stream`

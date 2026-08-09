@@ -461,7 +461,6 @@ describe("vibe search transport compatibility", () => {
         expect(res.statusCode).toBe(504);
         expect(res.body).toEqual({
             error: "Text embedding service unavailable",
-            message: "The CLAP analyzer service did not respond in time",
         });
         expect(mockRedisXAdd).toHaveBeenCalledWith(
             "audio:text:embed:requests",

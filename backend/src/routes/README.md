@@ -8,6 +8,48 @@ Start-here guide for API route handlers in `backend/src/routes`.
 2. Route runtime tests: `backend/src/routes/__tests__/`.
 3. Shared business logic called by routes: `backend/src/services/`.
 
+## Error & Response Conventions (Canonical)
+
+All route error responses use one shape — the single-field JSON envelope:
+
+```json
+{ "error": "human-readable message" }
+```
+
+Errors raised as an `AppError` additionally carry `code` and `category` (and,
+in development only, `details`). Do not invent `{ message }`, `{ detail }`,
+`{ success: false }`, or raw-string error bodies. `{ success, ... }` is reserved
+for **2xx domain-result** payloads (e.g. a retry that created a job but could not
+start the download), never for error responses.
+
+How to write a handler:
+
+1. **Wrap async handlers in `asyncHandler`** (`../middleware/asyncHandler`) so a
+   rejected promise is forwarded to the shared `errorHandler`
+   (`../middleware/errorHandler`) instead of hanging the request.
+2. **Deliberate client errors** (400/401/403/404/409/…) — call
+   `sendRouteError(res, status, message)` from `./routeErrorResponse`.
+3. **Unexpected/internal failures** — either let the error propagate to the
+   shared `errorHandler` (which logs once and returns a generic 500 in
+   production, hiding stack/SQL/secret detail), or, when a safe static label is
+   preferable, `catch`, `logger.error(...)`, and return
+   `sendInternalRouteError(res, "Failed to …")`. Never swallow an error silently
+   and never echo raw internal/exception text to the client.
+4. **Status mapping** is owned by `errorHandler`: an `AppError.httpStatus` wins;
+   otherwise `ErrorCategory` maps RECOVERABLE→400, TRANSIENT→503, FATAL→500.
+5. **Request validation** uses `zod` at the trust boundary (see
+   `vibeJourneyRequest.ts`), producing a typed value or a 400 `{ error }`.
+
+Reference exemplars: `vibe.ts`, `vibeJourneyRequest.ts`, `notifications.ts`,
+`library.ts`.
+
+**Enforcement (ratchet):** `scripts/ci/check-route-error-canon.mjs`
+(`npm run check:error-canon`) freezes the current per-file count of ad-hoc
+`res.status(500).json(...)` literals and fails when a route file adds new ones.
+When you canonicalize a route, lower its baseline in that script; new route
+files start at zero. Full migration of every route file is intentionally
+incremental (per touched file), not a big-bang.
+
 ## Mounted Route Modules
 
 | Route File | Mounted Prefixes |

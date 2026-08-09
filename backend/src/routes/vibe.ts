@@ -7,6 +7,7 @@ import { runAnnQuery } from "../utils/annQuery";
 import { redisClient } from "../utils/redis";
 import { parseEmbedding } from "../utils/embedding";
 import { requireAuth } from "../middleware/auth";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { findSimilarTracks } from "../services/hybridSimilarity";
 import { computeMapProjection } from "../services/umapProjection";
 import {
@@ -32,6 +33,7 @@ import {
 import { MOOD_CONFIG, VALID_MOODS, MoodType, MOOD_BUCKET_MIN_SCORE } from "../services/moodBucketService";
 import { fetchEmbeddingsByTrackIds } from "../services/trackEmbeddings";
 import { parseJourneyRequest } from "./vibeJourneyRequest";
+import { sendRouteError, sendInternalRouteError } from "./routeErrorResponse";
 
 const router = Router();
 
@@ -147,15 +149,15 @@ async function buildTrackPreferenceScoreMapForUser(
  *       401:
  *         description: Not authenticated
  */
-router.get("/map", requireAuth, async (_req, res) => {
+router.get("/map", requireAuth, asyncHandler(async (_req, res) => {
     try {
         const mapData = await computeMapProjection();
         res.json(mapData);
     } catch (error: any) {
         logger.error("Vibe map error:", error);
-        res.status(500).json({ error: "Failed to compute map projection" });
+        sendInternalRouteError(res, "Failed to compute map projection");
     }
-});
+}));
 
 /**
  * Fetch a single track's CLAP embedding from pgvector.
@@ -346,15 +348,17 @@ async function walkEmbeddingSteps(
  *       401:
  *         description: Not authenticated
  */
-router.get("/path", requireAuth, async (req, res) => {
+router.get("/path", requireAuth, asyncHandler(async (req, res) => {
     try {
         const fromId = req.query.from as string;
         const toId = req.query.to as string;
 
         if (!fromId || !toId) {
-            return res
-                .status(400)
-                .json({ error: "Both 'from' and 'to' track IDs are required" });
+            return sendRouteError(
+                res,
+                400,
+                "Both 'from' and 'to' track IDs are required"
+            );
         }
 
         const steps = Math.min(
@@ -368,14 +372,10 @@ router.get("/path", requireAuth, async (req, res) => {
         ]);
 
         if (!fromEmbed) {
-            return res
-                .status(404)
-                .json({ error: "Starting track has no embedding" });
+            return sendRouteError(res, 404, "Starting track has no embedding");
         }
         if (!toEmbed) {
-            return res
-                .status(404)
-                .json({ error: "Ending track has no embedding" });
+            return sendRouteError(res, 404, "Ending track has no embedding");
         }
 
         const tValues = Array.from(
@@ -392,9 +392,9 @@ router.get("/path", requireAuth, async (req, res) => {
         res.json({ from: fromId, to: toId, steps: stepResults });
     } catch (error: any) {
         logger.error("Vibe path error:", error);
-        res.status(500).json({ error: "Failed to compute song path" });
+        sendInternalRouteError(res, "Failed to compute song path");
     }
-});
+}));
 
 const MIN_MOOD_BUCKET_TRACKS = 5;
 const MOOD_BUCKET_POOL_LIMIT = 50;
@@ -597,15 +597,13 @@ async function handleJourney(req: Request, res: Response) {
     try {
         const parsed = parseJourneyRequest(req.body);
         if (!parsed.ok) {
-            return res.status(parsed.status).json({ error: parsed.error });
+            return sendRouteError(res, parsed.status, parsed.error);
         }
         const { fromTrackId, toTrackId, mood, steps, excludeTrackIds } =
             parsed.value;
         const fromEmbed = await fetchTrackEmbedding(fromTrackId);
         if (!fromEmbed) {
-            return res
-                .status(404)
-                .json({ error: "Starting track has no embedding" });
+            return sendRouteError(res, 404, "Starting track has no embedding");
         }
         const result =
             toTrackId !== null
@@ -624,12 +622,12 @@ async function handleJourney(req: Request, res: Response) {
                       excludeTrackIds
                   );
         if (!result.ok) {
-            return res.status(result.status).json({ error: result.error });
+            return sendRouteError(res, result.status, result.error);
         }
         return res.json(result.body);
     } catch (error: any) {
         logger.error("Vibe journey error:", error);
-        return res.status(500).json({ error: "Failed to compute vibe journey" });
+        return sendInternalRouteError(res, "Failed to compute vibe journey");
     }
 }
 
@@ -684,7 +682,7 @@ async function handleJourney(req: Request, res: Response) {
  *       401:
  *         description: Not authenticated
  */
-router.post("/journey", requireAuth, handleJourney);
+router.post("/journey", requireAuth, asyncHandler(handleJourney));
 
 /**
  * @openapi
@@ -713,7 +711,7 @@ router.post("/journey", requireAuth, handleJourney);
  *       401:
  *         description: Not authenticated
  */
-router.get("/moods", requireAuth, async (_req, res) => {
+router.get("/moods", requireAuth, asyncHandler(async (_req, res) => {
     try {
         const grouped = await prisma.moodBucket.groupBy({
             by: ["mood"],
@@ -736,9 +734,9 @@ router.get("/moods", requireAuth, async (_req, res) => {
         );
     } catch (error: any) {
         logger.error("Vibe moods error:", error);
-        res.status(500).json({ error: "Failed to list moods" });
+        sendInternalRouteError(res, "Failed to list moods");
     }
-});
+}));
 
 /**
  * @openapi
@@ -786,20 +784,24 @@ router.get("/moods", requireAuth, async (_req, res) => {
  *       401:
  *         description: Not authenticated
  */
-router.post("/alchemy", requireAuth, async (req, res) => {
+router.post("/alchemy", requireAuth, asyncHandler(async (req, res) => {
     try {
         const { trackIds, weights, limit: requestedLimit } = req.body;
 
         if (!Array.isArray(trackIds) || trackIds.length < 2) {
-            return res
-                .status(400)
-                .json({ error: "At least 2 track IDs are required for alchemy" });
+            return sendRouteError(
+                res,
+                400,
+                "At least 2 track IDs are required for alchemy"
+            );
         }
 
         if (trackIds.length > 10) {
-            return res
-                .status(400)
-                .json({ error: "Maximum 10 ingredient tracks allowed" });
+            return sendRouteError(
+                res,
+                400,
+                "Maximum 10 ingredient tracks allowed"
+            );
         }
 
         const limit = Math.min(
@@ -809,9 +811,11 @@ router.post("/alchemy", requireAuth, async (req, res) => {
 
         const embeddingResult = await fetchAlchemyEmbeddings(trackIds);
         if (!embeddingResult.ok) {
-            return res.status(404).json({
-                error: `Track ${embeddingResult.missingTrackId} has no embedding`,
-            });
+            return sendRouteError(
+                res,
+                404,
+                `Track ${embeddingResult.missingTrackId} has no embedding`
+            );
         }
         const effectiveWeights = resolveAlchemyWeights(trackIds, weights);
 
@@ -822,9 +826,11 @@ router.post("/alchemy", requireAuth, async (req, res) => {
         // and surface as an opaque 500. Reject it explicitly instead.
         const weightSum = effectiveWeights.reduce((s, w) => s + w, 0);
         if (!Number.isFinite(weightSum) || weightSum <= 0) {
-            return res
-                .status(400)
-                .json({ error: "weights must sum to a positive value" });
+            return sendRouteError(
+                res,
+                400,
+                "weights must sum to a positive value"
+            );
         }
 
         const blended = blendEmbeddings(
@@ -840,9 +846,9 @@ router.post("/alchemy", requireAuth, async (req, res) => {
         });
     } catch (error: any) {
         logger.error("Vibe alchemy error:", error);
-        res.status(500).json({ error: "Failed to compute alchemy blend" });
+        sendInternalRouteError(res, "Failed to compute alchemy blend");
     }
-});
+}));
 
 type SimilarTrack = Awaited<ReturnType<typeof findSimilarTracks>>[number];
 
@@ -977,7 +983,7 @@ function formatSimilarTrack(track: SimilarTrack) {
  *       401:
  *         description: Not authenticated
  */
-router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, res) => {
+router.get<{ trackId: string }>("/similar/:trackId", requireAuth, asyncHandler(async (req, res) => {
     try {
         const { trackId } = req.params;
         const userId = req.user?.id;
@@ -993,10 +999,7 @@ router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, re
         );
 
         if (weightedTracks.length === 0) {
-            return res.status(404).json({
-                error: "No similar tracks found",
-                message: "This track may not have been analyzed yet, or no analyzer is running",
-            });
+            return sendRouteError(res, 404, "No similar tracks found");
         }
 
         // Fetch source track audio features for vibe match comparison
@@ -1017,9 +1020,9 @@ router.get<{ trackId: string }>("/similar/:trackId", requireAuth, async (req, re
         });
     } catch (error: any) {
         logger.error("Hybrid similarity error:", error);
-        res.status(500).json({ error: "Failed to find similar tracks" });
+        sendInternalRouteError(res, "Failed to find similar tracks");
     }
-});
+}));
 
 // Convert CLAP cosine distance (0-2 range) to similarity percentage (0-1)
 // distance 0 = identical, distance 1 = orthogonal, distance 2 = opposite
@@ -1100,14 +1103,16 @@ interface TextEmbedResponsePayload {
  *       504:
  *         description: Text embedding service unavailable
  */
-router.post("/search", requireAuth, async (req, res) => {
+router.post("/search", requireAuth, asyncHandler(async (req, res) => {
     try {
         const { query, limit: requestedLimit, minSimilarity } = req.body;
 
         if (!query || typeof query !== "string" || query.trim().length < 2) {
-            return res.status(400).json({
-                error: "Query must be at least 2 characters",
-            });
+            return sendRouteError(
+                res,
+                400,
+                "Query must be at least 2 characters"
+            );
         }
 
         const limit = Math.min(
@@ -1271,14 +1276,15 @@ router.post("/search", requireAuth, async (req, res) => {
     } catch (error: any) {
         logger.error("Vibe text search error:", error);
         if (error.message?.includes("timed out")) {
-            return res.status(504).json({
-                error: "Text embedding service unavailable",
-                message: "The CLAP analyzer service did not respond in time",
-            });
+            return sendRouteError(
+                res,
+                504,
+                "Text embedding service unavailable"
+            );
         }
-        res.status(500).json({ error: "Failed to search tracks by vibe" });
+        sendInternalRouteError(res, "Failed to search tracks by vibe");
     }
-});
+}));
 
 /**
  * @openapi
@@ -1310,7 +1316,7 @@ router.post("/search", requireAuth, async (req, res) => {
  *       401:
  *         description: Not authenticated
  */
-router.get("/status", requireAuth, async (req, res) => {
+router.get("/status", requireAuth, asyncHandler(async (req, res) => {
     try {
         const totalTracks = await prisma.track.count();
 
@@ -1331,9 +1337,9 @@ router.get("/status", requireAuth, async (req, res) => {
         });
     } catch (error: any) {
         logger.error("Vibe status error:", error);
-        res.status(500).json({ error: "Failed to get embedding status" });
+        sendInternalRouteError(res, "Failed to get embedding status");
     }
-});
+}));
 
 const CALIBRATION_CACHE_TTL_SECONDS = 24 * 60 * 60; // 24h
 const CALIBRATION_CACHE_KEY_PREFIX = "vibe:calibration:v1:";
@@ -1420,15 +1426,13 @@ async function getCalibrationResponse() {
  *       401:
  *         description: Not authenticated
  */
-router.get("/calibration", requireAuth, async (_req, res) => {
+router.get("/calibration", requireAuth, asyncHandler(async (_req, res) => {
     try {
         return res.json(await getCalibrationResponse());
     } catch (error: any) {
         logger.error("Vibe calibration error:", error);
-        return res
-            .status(500)
-            .json({ error: "Failed to compute vibe calibration" });
+        return sendInternalRouteError(res, "Failed to compute vibe calibration");
     }
-});
+}));
 
 export default router;

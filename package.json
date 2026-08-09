@@ -15,6 +15,8 @@
         "verify:frontend": "npm --prefix frontend run lint && npm --prefix frontend run build && npm --prefix frontend run test:coverage && npm --prefix frontend run test:component && npm --prefix frontend run typecheck",
         "verify:helm": "./scripts/helm-chart-render-check.sh",
         "verify:python": "pytest services/tidal-downloader/tests -q && pytest services/ytmusic-streamer/tests -q && pytest services/audio-analyzer/tests -q && pytest services/audio-analyzer-clap/tests -q",
+        "check:error-canon": "node scripts/ci/check-route-error-canon.mjs",
+        "check:error-canon:test": "node --test scripts/ci/__tests__/check-route-error-canon.test.mjs",
         "test:backend": "npm --prefix backend test --",
         "test:frontend": "npm --prefix frontend run test:unit"
     }
