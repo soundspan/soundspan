@@ -1108,18 +1108,29 @@ async def search(
 
 # ── Download ────────────────────────────────────────────────────────
 
+_ALBUM_PAGE_HARD_CAP = 1000
+
+
 def _get_album_tracks(api: TidalAPI, album_id: int) -> list[Any]:
-    """Fetch all downloadable tracks for an album."""
+    """Fetch downloadable album tracks with bounded offset pagination."""
+    assert album_id is not None
+
     tracks = []
     offset = 0
-    while True:
-        items = api.get_album_items(album_id, limit=100, offset=offset)
-        for album_item in items.items:
+    page_size = 100
+    for _ in range(_ALBUM_PAGE_HARD_CAP):
+        items = api.get_album_items(album_id, limit=page_size, offset=offset)
+        page = list(getattr(items, "items", None) or [])
+        for album_item in page:
             if hasattr(album_item, "item") and hasattr(album_item.item, "isrc"):
                 tracks.append(album_item.item)
-        offset += items.limit
-        if offset >= items.totalNumberOfItems:
-            return tracks
+        if not page:
+            break
+        offset += len(page)
+        total = getattr(items, "totalNumberOfItems", 0) or 0
+        if offset >= total:
+            break
+    return tracks
 
 
 async def _download_album_tracks(
