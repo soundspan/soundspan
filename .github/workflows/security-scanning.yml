@@ -1,9 +1,10 @@
 name: Security Scanning
 
 # Vulnerability / secret scanning (docs/modernization-roadmap.md F45, epic
-# #10, #59 WS2.4). Trivy and gitleaks remain visibility-only until the 1.10
-# ratchet. pip-audit is blocking: checked-in compatibility exceptions are
-# explicit per matrix lane, and every unexpected advisory fails the job.
+# #10, #59 WS2.4). Gitleaks is blocking; Trivy remains visibility-only pending
+# the owner-paced ratchet documented on the trivy-fs job. pip-audit is blocking:
+# checked-in compatibility exceptions are explicit per matrix lane, and every
+# unexpected advisory fails the job.
 #
 # Trivy scans of the published GHCR images live in their own workflow,
 # image-security-scanning.yml (schedule/workflow_dispatch only): keeping
@@ -29,14 +30,17 @@ jobs:
   trivy-fs:
     name: Trivy Filesystem Scan
     runs-on: ubuntu-latest
-    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    # Deliberate deferred ratchet: gitleaks was flipped to blocking first.
+    # After it has been blocking and stable for about a week, the OWNER should
+    # make dependency-review block with fail-on-severity: high, then make Trivy
+    # blocking by removing continue-on-error; neither change belongs in this PR.
     continue-on-error: true
     permissions:
       contents: read
       security-events: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -55,14 +59,14 @@ jobs:
         # hashFiles guard: if the scan step failed before writing the SARIF,
         # skip the upload instead of cascading a second, confusing red step.
         if: always() && hashFiles('trivy-fs-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.37.5
+        uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
         with:
           sarif_file: trivy-fs-results.sarif
           category: trivy-fs
 
       - name: Upload SARIF artifact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trivy-fs-results-${{ github.run_id }}
           path: trivy-fs-results.sarif
@@ -87,14 +91,13 @@ jobs:
   gitleaks:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
-    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
-    continue-on-error: true
+    # BLOCKING: any leaked-secret finding fails the job and the PR.
     permissions:
       contents: read
       security-events: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history unconditionally. schedule/push/dispatch need it to
           # scan every past commit, and the PR range scan below needs both
@@ -131,11 +134,13 @@ jobs:
             CONFIG_FLAG="--config=/repo/.gitleaks.toml"
           fi
 
-          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect \
+          # Version+digest pinned; Dependabot does not track images in run scripts, so bump manually.
+          # Findings now fail the job; the following if: always() report steps still upload.
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f detect \
             --source=/repo \
             --no-banner \
             --redact \
-            --exit-code=0 \
+            --exit-code=1 \
             --report-format=sarif \
             --report-path=/repo/gitleaks-report/results.sarif \
             $CONFIG_FLAG \
@@ -145,14 +150,14 @@ jobs:
         # hashFiles guard: if the scan step failed before writing the SARIF,
         # skip the upload instead of cascading a second, confusing red step.
         if: always() && hashFiles('gitleaks-report/results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4.37.5
+        uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
         with:
           sarif_file: gitleaks-report/results.sarif
           category: gitleaks
 
       - name: Upload report artifact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gitleaks-results-${{ github.run_id }}
           path: gitleaks-report/
@@ -281,10 +286,10 @@ jobs:
             ignore-vulns: ""
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip

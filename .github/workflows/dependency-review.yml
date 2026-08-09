@@ -15,11 +15,13 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
-    # non-blocking day one; ratchet to blocking in 1.10.0 (#59)
+    # Deliberately kept non-blocking. After blocking gitleaks is stable for about
+    # a week, the OWNER should remove continue-on-error and add fail-on-severity:
+    # high under with:; Trivy in security-scanning.yml follows.
     continue-on-error: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

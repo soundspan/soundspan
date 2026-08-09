@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `nc` and `.env.example` before using them, and references the correct
   `postgres-local`/`redis-local` service names.
 
+### Security
+
+- Every third-party GitHub Action across the six CI workflows is pinned to a full
+  commit SHA with a `# vX.Y.Z` comment; Dependabot still bumps those pins.
+- The gitleaks scanner image is pinned to v8.30.1 by version and digest instead
+  of `:latest`.
+- The `HF_TOKEN` build secret now passes directly from the secrets context to
+  the Docker build-secret mount instead of transiting a step output.
+- The gitleaks secret-scan gate is now blocking on pull requests.
+- Dependency Review and Trivy remain non-blocking; the recommended ratchet —
+  Dependency Review with `fail-on-severity: high` first, then Trivy — is
+  documented in-workflow as a deliberate owner decision.
+
 ## [1.9.0] - 2026-08-08
 
 ### Added
