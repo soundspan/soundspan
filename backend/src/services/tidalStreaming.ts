@@ -153,8 +153,7 @@ class TidalStreamingService {
     ];
 
     constructor() {
-        this.sidecarUrl =
-            process.env.TIDAL_SIDECAR_URL || "http://127.0.0.1:8585";
+        this.sidecarUrl = config.tidal.sidecarUrl;
 
         this.client = axios.create({
             baseURL: this.sidecarUrl,
@@ -760,7 +759,7 @@ class TidalStreamingService {
 
     private qualityCache = new Map<string, { quality: string; expiresAt: number }>();
     private static readonly QUALITY_CACHE_TTL_MS =
-        process.env.NODE_ENV === "test" ? 0 : 60_000;
+        config.nodeEnv === "test" ? 0 : 60_000;
 
     async getUserPreferredQuality(userId: string): Promise<string> {
         if (TidalStreamingService.QUALITY_CACHE_TTL_MS > 0) {

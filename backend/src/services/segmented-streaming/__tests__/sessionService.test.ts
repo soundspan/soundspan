@@ -56,6 +56,7 @@ const resolveSessionService = async () => {
 
     jest.doMock("../../../config", () => ({
         config: {
+            jwtSecret: "test-session-secret",
             sessionSecret: "test-session-secret",
             music: {
                 musicPath: "/music",

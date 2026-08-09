@@ -27,8 +27,7 @@ const SESSION_KEY_PREFIX = "streaming:session:v1:";
 const SESSION_TTL_SECONDS = 5 * 60;
 const SEGMENT_FILE_PATTERN = /^[A-Za-z0-9_.-]+\.(m4s|webm)$/;
 const SESSION_TOKEN_TYPE = "segmented-streaming-session-v1";
-const SESSION_TOKEN_SECRET =
-    process.env.JWT_SECRET || process.env.SESSION_SECRET || config.sessionSecret;
+const SESSION_TOKEN_SECRET = config.jwtSecret;
 export const SEGMENTED_SESSION_TOKEN_QUERY_PARAM = "st";
 const ASSET_READY_POLL_INITIAL_INTERVAL_MS = 25;
 const ASSET_READY_POLL_MAX_INTERVAL_MS = 200;

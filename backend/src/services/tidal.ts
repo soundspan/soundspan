@@ -13,7 +13,6 @@ import { logger } from "../utils/logger";
 import { getSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { encrypt, decrypt } from "../utils/encryption";
-import { isEnvFlagEnabled } from "../utils/envParsers";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -93,8 +92,7 @@ class TidalService {
     private readonly sidecarUrl: string;
 
     constructor() {
-        this.sidecarUrl =
-            process.env.TIDAL_SIDECAR_URL || "http://127.0.0.1:8585";
+        this.sidecarUrl = config.tidal.sidecarUrl;
 
         this.client = axios.create({
             baseURL: this.sidecarUrl,
@@ -200,11 +198,7 @@ class TidalService {
                     throw new Error("Tidal credential decryption returned empty");
                 }
             } catch (err) {
-                if (
-                    isEnvFlagEnabled(
-                        process.env.SETTINGS_DECRYPT_FAIL_CLOSED,
-                    )
-                ) {
+                if (config.settingsDecryptFailClosed) {
                     logger.error(
                         "[TIDAL] Credential decryption failed closed:",
                         err,

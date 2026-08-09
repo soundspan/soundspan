@@ -33,7 +33,14 @@ const ORIGINAL_ENV = { ...process.env };
 
 // tidalStreaming.ts now reads config.internalApiSecret; mock config so the real
 // module (which process.exit(1)s on missing env) never loads under jest.
-const mockConfig: { internalApiSecret?: string } = {};
+const mockConfig: {
+    internalApiSecret?: string;
+    tidal?: { sidecarUrl: string };
+    nodeEnv?: string;
+} = {
+    tidal: { sidecarUrl: "http://127.0.0.1:8585" },
+    nodeEnv: "test",
+};
 
 jest.mock("../../config", () => ({ config: mockConfig }));
 
@@ -160,6 +167,8 @@ describe("tidal streaming service", () => {
         mockPrisma.userSettings.findUnique.mockReset();
         mockPrisma.userSettings.update.mockReset();
         mockConfig.internalApiSecret = undefined;
+        mockConfig.tidal = { sidecarUrl: "http://127.0.0.1:8585" };
+        mockConfig.nodeEnv = "test";
         resetServiceState(privateService);
         process.env = { ...ORIGINAL_ENV };
     });
@@ -175,10 +184,8 @@ describe("tidal streaming service", () => {
 
     describe("availability and enablement", () => {
         it("creates the client with the configured sidecar URL and mocked agents", () => {
-            const isolatedService = loadIsolatedService({
-                NODE_ENV: "test",
-                TIDAL_SIDECAR_URL: "http://sidecar.test:9000",
-            });
+            mockConfig.tidal = { sidecarUrl: "http://sidecar.test:9000" };
+            const isolatedService = loadIsolatedService();
 
             expect(isolatedService).toBeDefined();
             expect(mockHttpAgent).toHaveBeenCalledWith({
@@ -803,7 +810,8 @@ describe("tidal streaming service", () => {
 
     describe("quality preferences", () => {
         it("caches user quality in non-test environments and clears the cache on demand", async () => {
-            const productionService = loadIsolatedService({ NODE_ENV: "production" });
+            mockConfig.nodeEnv = "production";
+            const productionService = loadIsolatedService();
 
             mockPrisma.userSettings.findUnique.mockResolvedValueOnce({
                 tidalStreamingQuality: "LOSSLESS",

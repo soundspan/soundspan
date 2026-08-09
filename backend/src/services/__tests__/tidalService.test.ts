@@ -23,7 +23,14 @@ const mockPrisma = {
 
 // tidal.ts now reads config.internalApiSecret; mock config so the real
 // module (which process.exit(1)s on missing env) never loads under jest.
-const mockConfig: { internalApiSecret?: string } = {};
+const mockConfig: {
+    internalApiSecret?: string;
+    tidal?: { sidecarUrl: string };
+    settingsDecryptFailClosed?: boolean;
+} = {
+    tidal: { sidecarUrl: "http://127.0.0.1:8585" },
+    settingsDecryptFailClosed: false,
+};
 
 jest.mock("../../config", () => ({ config: mockConfig }));
 
@@ -53,9 +60,6 @@ jest.mock("../../utils/logger", () => ({
 
 import { tidalService } from "../tidal";
 
-const ORIGINAL_DECRYPT_FAIL_CLOSED =
-    process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
-
 describe("tidalService", () => {
     const baseCreds = {
         accessToken: "access-token",
@@ -70,17 +74,10 @@ describe("tidalService", () => {
         jest.restoreAllMocks();
         jest.clearAllMocks();
         mockConfig.internalApiSecret = undefined;
+        mockConfig.tidal = { sidecarUrl: "http://127.0.0.1:8585" };
+        mockConfig.settingsDecryptFailClosed = false;
         mockEncrypt.mockImplementation((value: string) => `enc:${value}`);
         mockDecrypt.mockImplementation((value: string) => `dec:${value}`);
-        delete process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
-    });
-
-    afterEach(() => {
-        if (ORIGINAL_DECRYPT_FAIL_CLOSED === undefined) {
-            delete process.env.SETTINGS_DECRYPT_FAIL_CLOSED;
-            return;
-        }
-        process.env.SETTINGS_DECRYPT_FAIL_CLOSED = ORIGINAL_DECRYPT_FAIL_CLOSED;
     });
 
     describe("internal-secret header (F31)", () => {
@@ -213,7 +210,7 @@ describe("tidalService", () => {
         });
 
         it("getCredentials returns null when decrypt throws in fail-closed mode", async () => {
-            process.env.SETTINGS_DECRYPT_FAIL_CLOSED = "true";
+            mockConfig.settingsDecryptFailClosed = true;
             mockPrisma.systemSettings.findUnique.mockResolvedValueOnce({
                 id: "default",
                 tidalAccessToken: "encrypted-access",
