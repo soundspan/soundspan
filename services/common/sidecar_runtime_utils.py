@@ -11,7 +11,7 @@ from typing import Optional
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
@@ -131,3 +131,86 @@ def build_stream_proxy_client(user_agent: Optional[str] = None) -> httpx.AsyncCl
     if user_agent is not None:
         client_kwargs["headers"] = {"User-Agent": user_agent}
     return httpx.AsyncClient(**client_kwargs)
+
+
+async def build_range_proxy_response(
+    stream_url: str,
+    request_headers: dict[str, str],
+    content_type: str,
+    user_agent: str,
+    logger: logging.Logger,
+    log_context: str,
+) -> StreamingResponse:
+    """Proxy a Range request to an upstream CDN as a streaming response.
+
+    Own the httpx client for the full stream. If the initial send fails, close
+    the client before re-raising. Content-Length is intentionally not forwarded
+    to avoid h11 declared-length errors on mid-stream drops. The upstream and
+    client are closed in a finally block on every streaming path.
+    """
+    client = build_stream_proxy_client(user_agent=user_agent)
+    try:
+        upstream = await client.send(
+            client.build_request("GET", stream_url, headers=request_headers),
+            stream=True,
+        )
+    except Exception:
+        await client.aclose()
+        raise
+
+    response_headers = {"Content-Type": content_type, "Accept-Ranges": "bytes"}
+    if "content-range" in upstream.headers:
+        response_headers["Content-Range"] = upstream.headers["content-range"]
+
+    async def range_stream():
+        try:
+            async for chunk in upstream.aiter_bytes(chunk_size=65536):
+                yield chunk
+        except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as exc:
+            logger.warning(
+                "Upstream read error during range stream for %s: %s",
+                log_context,
+                exc,
+            )
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        range_stream(),
+        status_code=upstream.status_code,
+        headers=response_headers,
+    )
+
+
+def build_full_proxy_response(
+    stream_url: str,
+    request_headers: dict[str, str],
+    content_type: str,
+    user_agent: str,
+    logger: logging.Logger,
+    log_context: str,
+) -> StreamingResponse:
+    """Proxy a non-range GET to an upstream CDN as a streaming response.
+
+    The client closes when iteration ends. Upstream errors are logged and end
+    the stream gracefully.
+    """
+
+    async def stream_audio():
+        async with build_stream_proxy_client(user_agent=user_agent) as client:
+            try:
+                async with client.stream(
+                    "GET", stream_url, headers=request_headers
+                ) as response:
+                    async for chunk in response.aiter_bytes(chunk_size=65536):
+                        yield chunk
+            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as exc:
+                logger.error("Upstream stream error for %s: %s", log_context, exc)
+                return
+
+    return StreamingResponse(
+        stream_audio(),
+        media_type=content_type,
+        headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"},
+    )

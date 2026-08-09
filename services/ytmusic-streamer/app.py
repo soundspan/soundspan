@@ -26,9 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Optional, Literal, cast
 
-import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ytmusicapi import YTMusic, OAuthCredentials
 
@@ -38,7 +36,8 @@ if str(SERVICES_ROOT) not in sys.path:
 
 from common.logging_utils import configure_service_logger
 from common.sidecar_runtime_utils import (
-    build_stream_proxy_client,
+    build_full_proxy_response,
+    build_range_proxy_response,
     env_float,
     env_int,
     register_error_handlers,
@@ -1952,69 +1951,12 @@ async def proxy_stream(
     if request and "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
-    async def stream_audio():
-        async with build_stream_proxy_client(user_agent=_USER_AGENT) as client:
-            try:
-                async with client.stream("GET", stream_url, headers=headers) as response:
-                    async for chunk in response.aiter_bytes(chunk_size=65536):
-                        yield chunk
-            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
-                log.error(f"Upstream stream error for {video_id}: {e}")
-                # Don't re-raise — just end the stream gracefully so the
-                # browser audio element can retry with a new Range request.
-                return
-
-    # For range requests, fetch upstream first to get headers
     if headers.get("Range"):
-        # IMPORTANT: Do NOT use `async with` for the client here.
-        # The client must stay alive for the entire duration of the stream,
-        # not just until the StreamingResponse object is created.  If we
-        # used `async with`, the `return` would exit the context manager,
-        # closing the client/connection before Starlette ever iterates
-        # the generator — causing an immediate ReadError on every request.
-        client = build_stream_proxy_client(user_agent=_USER_AGENT)
-        upstream = await client.send(
-            client.build_request("GET", stream_url, headers=headers),
-            stream=True,
+        return await build_range_proxy_response(
+            stream_url, headers, content_type, _USER_AGENT, log, video_id
         )
-        response_headers = {
-            "Content-Type": content_type,
-            "Accept-Ranges": "bytes",
-        }
-        if "content-range" in upstream.headers:
-            response_headers["Content-Range"] = upstream.headers["content-range"]
-        # NOTE: We intentionally do NOT forward Content-Length here.
-        # If the upstream drops mid-stream (ReadError), h11 enforces the
-        # declared length and raises "Too little data for declared
-        # Content-Length", crashing the ASGI app.  By omitting it,
-        # Starlette uses chunked transfer encoding, which allows the
-        # stream to end cleanly on error and lets the browser retry
-        # with a new Range request.
-
-        async def range_stream():
-            try:
-                async for chunk in upstream.aiter_bytes(chunk_size=65536):
-                    yield chunk
-            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
-                log.warning(f"Upstream read error during range stream for {video_id}: {e}")
-                # End the stream gracefully — the browser will retry
-            finally:
-                await upstream.aclose()
-                await client.aclose()
-
-        return StreamingResponse(
-            range_stream(),
-            status_code=upstream.status_code,
-            headers=response_headers,
-        )
-
-    return StreamingResponse(
-        stream_audio(),
-        media_type=content_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-cache",
-        },
+    return build_full_proxy_response(
+        stream_url, headers, content_type, _USER_AGENT, log, video_id
     )
 
 
@@ -2352,60 +2294,12 @@ async def yt_proxy_stream(
     if request and "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
-    async def stream_audio():
-        async with build_stream_proxy_client(user_agent=_USER_AGENT) as client:
-            try:
-                async with client.stream("GET", stream_url, headers=headers) as response:
-                    async for chunk in response.aiter_bytes(chunk_size=65536):
-                        yield chunk
-            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
-                log.error(f"Upstream stream error for YT {video_id}: {e}")
-                return
-
     if headers.get("Range"):
-        client = build_stream_proxy_client(user_agent=_USER_AGENT)
-        try:
-            upstream = await client.send(
-                client.build_request("GET", stream_url, headers=headers),
-                stream=True,
-            )
-        except Exception:
-            # client.send failed before the StreamingResponse generator took
-            # ownership — close the client here or the connection leaks.
-            await client.aclose()
-            raise
-        response_headers = {
-            "Content-Type": content_type,
-            "Accept-Ranges": "bytes",
-        }
-        if "content-range" in upstream.headers:
-            response_headers["Content-Range"] = upstream.headers["content-range"]
-        if "content-length" in upstream.headers:
-            response_headers["Content-Length"] = upstream.headers["content-length"]
-
-        async def range_stream():
-            try:
-                async for chunk in upstream.aiter_bytes(chunk_size=65536):
-                    yield chunk
-            except (httpx.HTTPError, httpx.StreamError, httpx.ReadError) as e:
-                log.warning(f"Upstream read error during YT range stream for {video_id}: {e}")
-            finally:
-                await upstream.aclose()
-                await client.aclose()
-
-        return StreamingResponse(
-            range_stream(),
-            status_code=upstream.status_code,
-            headers=response_headers,
+        return await build_range_proxy_response(
+            stream_url, headers, content_type, _USER_AGENT, log, video_id
         )
-
-    return StreamingResponse(
-        stream_audio(),
-        media_type=content_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-cache",
-        },
+    return build_full_proxy_response(
+        stream_url, headers, content_type, _USER_AGENT, log, video_id
     )
 
 
