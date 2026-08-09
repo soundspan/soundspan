@@ -206,11 +206,7 @@ EXTRACT_DELAY_MIN = env_float("YTMUSIC_EXTRACT_DELAY_MIN", "0.5")
 EXTRACT_DELAY_MAX = env_float("YTMUSIC_EXTRACT_DELAY_MAX", "2.0")
 _extract_pacer = ThreadSafeRatePacer(EXTRACT_DELAY_MIN, EXTRACT_DELAY_MAX)
 EXTRACT_TIMEOUT = env_float("YTMUSIC_EXTRACT_TIMEOUT", "60")
-_EXTRACT_CONCURRENCY = max(1, env_int("YTMUSIC_EXTRACT_CONCURRENCY", "4"))
-_extract_executor = ThreadPoolExecutor(
-    max_workers=_EXTRACT_CONCURRENCY,
-    thread_name_prefix="yt-extract",
-)
+YTDLP_SOCKET_TIMEOUT = env_float("YTMUSIC_YTDLP_SOCKET_TIMEOUT", "20")
 
 # Search result cache (in-memory, short TTL to reduce duplicate requests)
 _search_cache: dict[str, dict] = {}
@@ -823,7 +819,7 @@ def _get_yt_stream_url_sync(video_id: str, quality: str = "HIGH") -> dict:
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
-        "socket_timeout": 30,
+        "socket_timeout": YTDLP_SOCKET_TIMEOUT,
         "http_headers": {
             "User-Agent": _USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -857,7 +853,7 @@ def _get_stream_url_sync(
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
-        "socket_timeout": 30,
+        "socket_timeout": YTDLP_SOCKET_TIMEOUT,
         "http_headers": {
             "User-Agent": _USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -874,23 +870,21 @@ def _get_stream_url_sync(
     )
 
 
-async def _extract_with_timeout(fn, *args):
-    """Run blocking stream extraction with an overall timeout.
+async def _extract_stream_info_bounded(func, *args) -> dict:
+    """Run a sync stream extraction off the event loop with an overall deadline.
 
-    Isolated from the shared default thread pool so a stalled yt-dlp cannot
-    starve other endpoints; on timeout the request fails fast with HTTP 504
-    instead of hanging.
+    asyncio.wait_for cancels the awaiting request after EXTRACT_TIMEOUT
+    seconds and maps it to HTTP 504. The orphaned worker thread cannot
+    hang forever: yt-dlp's socket_timeout bounds its network reads.
     """
-    loop = asyncio.get_running_loop()
     try:
         return await asyncio.wait_for(
-            loop.run_in_executor(_extract_executor, fn, *args),
-            timeout=EXTRACT_TIMEOUT,
+            asyncio.to_thread(func, *args), timeout=EXTRACT_TIMEOUT
         )
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as error:
         raise HTTPException(
             status_code=504, detail="Stream extraction timed out"
-        ) from exc
+        ) from error
 
 
 def _tv_search(yt: YTMusic, query: str, filter: Optional[str] = None, limit: int = 20) -> list[dict]:
@@ -1839,7 +1833,7 @@ async def get_stream_info(video_id: str, user_id: str = Query(...), quality: str
     if user_id != "__public__":
         _get_ytmusic(user_id)
 
-    result = await _extract_with_timeout(
+    result = await _extract_stream_info_bounded(
         _get_stream_url_sync, user_id, video_id, quality
     )
     return {
@@ -1875,7 +1869,7 @@ async def proxy_stream(
     if user_id != "__public__":
         _get_ytmusic(user_id)
 
-    stream_info = await _extract_with_timeout(
+    stream_info = await _extract_stream_info_bounded(
         _get_stream_url_sync, user_id, video_id, quality
     )
     stream_url = stream_info["url"]
@@ -2226,7 +2220,7 @@ async def yt_proxy_stream(
     """
     video_id = _validate_video_id(video_id)
     quality = _validate_stream_quality(quality)
-    stream_info = await _extract_with_timeout(
+    stream_info = await _extract_stream_info_bounded(
         _get_yt_stream_url_sync, video_id, quality
     )
     stream_url = stream_info["url"]
@@ -2355,36 +2349,36 @@ def _yt_download_job_payload(job: dict) -> dict:
     }
 
 
-def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: str):
-    """
-    Blocking yt-dlp download executed in a worker thread. Updates the job
-    record via progress hooks (downloading -> processing -> completed).
-    """
-    import yt_dlp
+def _update_yt_download_progress(job: dict, update: dict, download_cancelled):
+    """Apply one yt-dlp progress update to a download job."""
+    if job.get("cancel_requested"):
+        raise download_cancelled("cancelled by user")
+    status = update.get("status")
+    if status == "downloading":
+        job["status"] = "downloading"
+        total = (
+            update.get("total_bytes")
+            or update.get("total_bytes_estimate")
+            or 0
+        )
+        downloaded = update.get("downloaded_bytes") or 0
+        if total > 0:
+            job["progress_pct"] = round(
+                min(99.0, downloaded * 100.0 / total), 1
+            )
+    elif status == "finished":
+        job["status"] = "processing"
+        job["progress_pct"] = max(float(job.get("progress_pct") or 0), 99.0)
 
-    video_id = job["video_id"]
-    _extract_pacer.wait()
 
-    def _progress_hook(d: dict):
-        # Abort an in-flight download when the job has been cancelled; yt-dlp
-        # propagates the exception out of extract_info().
-        if job.get("cancel_requested"):
-            raise yt_dlp.utils.DownloadCancelled("cancelled by user")
-        status = d.get("status")
-        if status == "downloading":
-            job["status"] = "downloading"
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-            downloaded = d.get("downloaded_bytes") or 0
-            if total > 0:
-                job["progress_pct"] = round(
-                    min(99.0, downloaded * 100.0 / total), 1
-                )
-        elif status == "finished":
-            # Raw media fetched — FFmpeg postprocessing (extract/convert,
-            # metadata, thumbnail) runs next.
-            job["status"] = "processing"
-            job["progress_pct"] = max(float(job.get("progress_pct") or 0), 99.0)
-
+def _build_yt_download_opts(
+    job: dict,
+    audio_format: str,
+    quality: str,
+    output_dir: str,
+    download_cancelled,
+) -> dict:
+    """Build yt-dlp options for a bounded audio download."""
     outtmpl = os.path.join(output_dir, "%(title)s [%(id)s].%(ext)s")
     postprocessors = [
         {
@@ -2400,7 +2394,10 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
         quality, PROXY_AUDIO_FORMAT_SELECTORS["HIGH"]
     )
 
-    ydl_opts = {
+    def _progress_hook(update: dict):
+        _update_yt_download_progress(job, update, download_cancelled)
+
+    return {
         "format": fmt,
         "outtmpl": outtmpl,
         "postprocessors": postprocessors,
@@ -2408,6 +2405,7 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [_progress_hook],
+        "socket_timeout": YTDLP_SOCKET_TIMEOUT,
         "http_headers": {
             "User-Agent": _USER_AGENT,
             "Accept-Language": "en-US,en;q=0.9",
@@ -2420,32 +2418,18 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
         },
     }
 
-    url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # Cancelled while still queued in the executor — never start the download.
-    if job.get("cancel_requested"):
-        job["status"] = "cancelled"
-        return
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-
-    if not info:
-        raise ValueError("Download failed — no info returned")
-
-    # Resolve the real output path from yt-dlp's info dict (postprocessors
-    # change the extension); fall back to the escaped-glob directory scan.
+def _complete_yt_download(
+    job: dict, info: dict, audio_format: str, output_dir: str
+) -> None:
+    """Resolve output metadata and mark a successful download completed."""
+    video_id = job["video_id"]
     filepath = resolve_download_filepath(info, audio_format)
     if not filepath:
         filepath = find_existing_download(output_dir, video_id)
     if not filepath:
         raise ValueError("Download completed but output file not found")
 
-    # Bulk (playlist/channel) downloads: stamp the source as artist/album so
-    # the channel's videos group under one artist instead of each video's own
-    # (often per-DJ) YouTube artist tag. Written via ffmpeg so the tagged files
-    # stay readable by the library scanner. Single-video downloads (no source)
-    # keep their native metadata.
     bulk_tags = bulk_album_metadata(job.get("source"), job.get("source_kind"))
     if bulk_tags:
         _stamp_audio_tags(filepath, bulk_tags)
@@ -2455,6 +2439,28 @@ def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: st
     job["progress_pct"] = 100.0
     job["status"] = "completed"
     log.info(f"YT download completed for {video_id}: {filepath}")
+
+
+def _yt_download_sync(job: dict, audio_format: str, quality: str, output_dir: str):
+    """Run a blocking yt-dlp download and update its job record."""
+    import yt_dlp
+
+    video_id = job["video_id"]
+    _extract_pacer.wait()
+    ydl_opts = _build_yt_download_opts(
+        job, audio_format, quality, output_dir, yt_dlp.utils.DownloadCancelled
+    )
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    if job.get("cancel_requested"):
+        job["status"] = "cancelled"
+        return
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+    if not info:
+        raise ValueError("Download failed — no info returned")
+    _complete_yt_download(job, info, audio_format, output_dir)
 
 
 async def _run_yt_download_job(job: dict, audio_format: str, quality: str, output_dir: str):
@@ -3013,7 +3019,6 @@ async def shutdown():
     _clean_stream_cache()
     _clean_search_cache()
     _ytmusic_instances.clear()
-    _extract_executor.shutdown(wait=False, cancel_futures=True)
     log.info("YouTube Music Streamer shutting down")
 
 
