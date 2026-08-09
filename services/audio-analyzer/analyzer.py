@@ -70,7 +70,7 @@ import json
 import time
 import gc
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 import traceback
 import numpy as np
@@ -164,7 +164,8 @@ RESIZE_DEBOUNCE_SECONDS = 5
 # Set to 0 to disable file-size guardrail.
 # Default is tuned for FLAC-heavy libraries with larger hi-res tracks.
 MAX_FILE_SIZE_MB = get_int_env('MAX_FILE_SIZE_MB', 500)
-# Hard timeout for an entire analysis batch before remaining tracks are failed permanently.
+# Hard timeout for an entire analysis batch. Never-started tracks are requeued
+# without retry cost; in-flight tracks fail non-permanently and consume one retry.
 BATCH_ANALYSIS_TIMEOUT_SECONDS = get_int_env('BATCH_ANALYSIS_TIMEOUT_SECONDS', 900)
 
 
@@ -190,7 +191,7 @@ class DatabaseConnection:
         logger.info("Connected to PostgreSQL with UTF-8 encoding")
 
     def get_cursor(self) -> RealDictCursor:
-        """Get a database cursor"""
+        """Lazily connect and return a RealDictCursor-factory cursor."""
         if not self.conn:
             self.connect()
         return self.conn.cursor(cursor_factory=RealDictCursor)
@@ -250,8 +251,7 @@ def _get_workers_from_db() -> int:
 # Conservative default: 2 workers (stable on any system)
 # Previous default used auto-scaling which could cause OOM on memory-constrained systems
 DEFAULT_WORKERS = 2
-# Try to load from database first, fall back to env var or default
-NUM_WORKERS = _get_workers_from_db()
+NUM_WORKERS = get_int_env('NUM_WORKERS', DEFAULT_WORKERS)
 ESSENTIA_VERSION = '2.1b6-enhanced-v3'
 
 # Retry configuration
@@ -263,6 +263,101 @@ ANALYSIS_QUEUE = 'audio:analysis:queue'
 
 # Control channel for enrichment coordination
 CONTROL_CHANNEL = 'audio:analysis:control'
+
+
+def initialize_worker_count() -> int:
+    """Resolve worker count from the database once in the parent process.
+
+    This is called only from ``main()`` in normal worker mode so spawn-mode
+    child processes never query PostgreSQL while importing this module.
+    """
+    global NUM_WORKERS
+    NUM_WORKERS = _get_workers_from_db()
+    return NUM_WORKERS
+
+
+def partition_unfinished_tracks(futures_map, finalized_track_ids):
+    """Partition timeout work into completed, never-started, and attempted tracks."""
+    completed_unconsumed = []
+    never_started = []
+    attempted = []
+
+    for future, track_info in futures_map.items():
+        track_id, _ = track_info
+        if future.done():
+            if track_id not in finalized_track_ids:
+                completed_unconsumed.append(track_info)
+        elif future.cancel():
+            never_started.append(track_info)
+        else:
+            attempted.append(track_info)
+
+    return completed_unconsumed, never_started, attempted
+
+
+_SAVE_ANALYSIS_RESULTS_SQL = """
+    UPDATE "Track"
+    SET
+        bpm = %s,
+        "beatsCount" = %s,
+        key = %s,
+        "keyScale" = %s,
+        "keyStrength" = %s,
+        energy = %s,
+        loudness = %s,
+        "dynamicRange" = %s,
+        danceability = %s,
+        valence = %s,
+        arousal = %s,
+        instrumentalness = %s,
+        acousticness = %s,
+        speechiness = %s,
+        "moodTags" = %s,
+        "essentiaGenres" = %s,
+        "moodHappy" = %s,
+        "moodSad" = %s,
+        "moodRelaxed" = %s,
+        "moodAggressive" = %s,
+        "moodParty" = %s,
+        "moodAcoustic" = %s,
+        "moodElectronic" = %s,
+        "danceabilityMl" = %s,
+        "analysisMode" = %s,
+        "analysisStatus" = 'completed',
+        "analysisStartedAt" = NULL,
+        "analysisVersion" = %s,
+        "analyzedAt" = %s,
+        "analysisError" = NULL,
+        "updatedAt" = NOW()
+    WHERE id = %s
+"""
+
+_RESOLVE_AUDIO_FAILURES_SQL = """
+    UPDATE "EnrichmentFailure"
+    SET
+        resolved = true,
+        "resolvedAt" = NOW()
+    WHERE "entityType" = 'audio'
+    AND "entityId" = %s
+    AND resolved = false
+"""
+
+
+def _analysis_result_values(track_id: str, features: Dict[str, Any]) -> Tuple[Any, ...]:
+    """Build database values for one successfully analyzed track."""
+    return (
+        features['bpm'], features['beatsCount'], features['key'],
+        features['keyScale'], features['keyStrength'], features['energy'],
+        features['loudness'], features['dynamicRange'], features['danceability'],
+        features['valence'], features['arousal'], features['instrumentalness'],
+        features['acousticness'], features['speechiness'], features['moodTags'],
+        features['essentiaGenres'], features.get('moodHappy'),
+        features.get('moodSad'), features.get('moodRelaxed'),
+        features.get('moodAggressive'), features.get('moodParty'),
+        features.get('moodAcoustic'), features.get('moodElectronic'),
+        features.get('danceabilityMl'), features.get('analysisMode', 'standard'),
+        ESSENTIA_VERSION, datetime.now(timezone.utc), track_id,
+    )
 
 # Model paths (pre-packaged in Docker image)
 MODEL_DIR = '/app/models'
@@ -1740,14 +1835,11 @@ class AnalysisWorker:
         self._process_tracks_parallel(queued_jobs)
         return True
     
-    def _process_tracks_parallel(self, tracks: List[Tuple[str, str]]):
-        """Process multiple tracks in parallel using the process pool"""
-        if not tracks:
-            return
-
-        self._ensure_pool()
-        logger.info(f"Processing batch of {len(tracks)} tracks with {NUM_WORKERS} workers...")
-        
+    def _claim_tracks_for_processing(
+        self,
+        tracks: List[Tuple[str, str]],
+    ) -> List[Tuple[str, str]]:
+        """Mark eligible tracks as processing and discard stale queue entries."""
         # Queue producers may pre-claim tracks as 'processing' before enqueueing
         # (e.g. DB reconciliation / unified enrichment). Accept both 'pending'
         # and 'processing' rows here so freshly queued work is not dropped.
@@ -1773,172 +1865,160 @@ class AnalysisWorker:
 
             if not tracks:
                 logger.info("No pending tracks left in batch after status guard")
-                return
+            return tracks
         except Exception as e:
             logger.error(f"Failed to mark tracks as processing: {e}")
             self.db.rollback()
-            return
+            return []
         finally:
             cursor.close()
-        
-        # Submit all tracks to the process pool
-        start_time = time.time()
+
+    def _save_completed_future(self, future) -> Tuple[str, int, int, int]:
+        """Persist one completed future and return its outcome counters."""
+        track_id, file_path, features = future.result()
+        if features.get('_error'):
+            is_permanent = bool(features.get('_permanent'))
+            self._save_failed(track_id, features['_error'], permanent=is_permanent)
+            if is_permanent:
+                logger.warning(f"⊘ Permanently failed: {file_path} - {features['_error']}")
+                return track_id, 0, 0, 1
+            logger.error(f"✗ Failed: {file_path} - {features['_error']}")
+            return track_id, 0, 1, 0
+
+        self._save_results(track_id, file_path, features)
+        logger.info(f"✓ Completed: {file_path}")
+        return track_id, 1, 0, 0
+
+    def _consume_batch_results(self, futures, tracks, finalized_track_ids, counts):
+        """Consume batch futures while preserving process-pool crash recovery."""
+        for future in as_completed(futures, timeout=BATCH_ANALYSIS_TIMEOUT_SECONDS):
+            try:
+                track_id, succeeded, retryable, permanent = (
+                    self._save_completed_future(future)
+                )
+                finalized_track_ids.add(track_id)
+                counts['completed'] += succeeded
+                counts['failed'] += retryable
+                counts['permanent_failed'] += permanent
+            except Exception as e:
+                if self._is_pool_crash_error(e):
+                    logger.error(f"Process pool worker crash detected: {e}")
+                    for other_future in futures:
+                        if not other_future.done():
+                            other_future.cancel()
+                    remaining_tracks = [
+                        track for track in tracks if track[0] not in finalized_track_ids
+                    ]
+                    self._requeue_tracks_for_retry(
+                        remaining_tracks,
+                        "Analyzer worker process crashed; re-queued for retry",
+                    )
+                    raise BrokenProcessPool(str(e))
+
+                track_info = futures[future]
+                error_message = f"Timeout or error: {e}"
+                is_permanent = "memoryerror" in str(e).lower()
+                self._save_failed(track_info[0], error_message, permanent=is_permanent)
+                finalized_track_ids.add(track_info[0])
+                if is_permanent:
+                    counts['permanent_failed'] += 1
+                    logger.warning(f"⊘ Permanently failed: {track_info[1]} - {e}")
+                else:
+                    counts['failed'] += 1
+                    logger.error(f"✗ Failed: {track_info[1]} - {e}")
+
+    def _handle_batch_timeout(self, futures_map, finalized_track_ids):
+        """Recover unfinished batch work according to its actual attempt state."""
+        completed_tracks, never_started, attempted = partition_unfinished_tracks(
+            futures_map,
+            finalized_track_ids,
+        )
+        futures_by_track_id = {
+            track_info[0]: future for future, track_info in futures_map.items()
+        }
         completed = 0
         failed = 0
         permanent_failed = 0
-        finalized_track_ids = set()
-        
-        futures = {self.executor.submit(_analyze_track_in_process, t): t for t in tracks}
 
-        try:
-            for future in as_completed(futures, timeout=BATCH_ANALYSIS_TIMEOUT_SECONDS):
-                try:
-                    track_id, file_path, features = future.result()
-
-                    if features.get('_error'):
-                        is_permanent = bool(features.get('_permanent'))
-                        self._save_failed(track_id, features['_error'], permanent=is_permanent)
-                        finalized_track_ids.add(track_id)
-                        if is_permanent:
-                            permanent_failed += 1
-                            logger.warning(f"⊘ Permanently failed: {file_path} - {features['_error']}")
-                        else:
-                            failed += 1
-                            logger.error(f"✗ Failed: {file_path} - {features['_error']}")
-                    else:
-                        self._save_results(track_id, file_path, features)
-                        finalized_track_ids.add(track_id)
-                        completed += 1
-                        logger.info(f"✓ Completed: {file_path}")
-                except Exception as e:
-                    if self._is_pool_crash_error(e):
-                        logger.error(f"Process pool worker crash detected: {e}")
-                        for other_future in futures:
-                            if not other_future.done():
-                                other_future.cancel()
-                        remaining_tracks = [
-                            track for track in tracks if track[0] not in finalized_track_ids
-                        ]
-                        self._requeue_tracks_for_retry(
-                            remaining_tracks,
-                            "Analyzer worker process crashed; re-queued for retry",
-                        )
-                        raise BrokenProcessPool(str(e))
-
-                    track_info = futures[future]
-                    error_message = f"Timeout or error: {e}"
-                    is_permanent = "memoryerror" in str(e).lower()
-                    self._save_failed(track_info[0], error_message, permanent=is_permanent)
-                    finalized_track_ids.add(track_info[0])
-                    if is_permanent:
-                        permanent_failed += 1
-                        logger.warning(f"⊘ Permanently failed: {track_info[1]} - {e}")
-                    else:
-                        failed += 1
-                        logger.error(f"✗ Failed: {track_info[1]} - {e}")
-        except FuturesTimeoutError:
-            logger.error(
-                f"Batch timed out after {BATCH_ANALYSIS_TIMEOUT_SECONDS}s - failing unfinished tracks permanently"
-            )
-            for future, track_info in futures.items():
-                if future.done():
-                    continue
-                future.cancel()
-                self._save_failed(
-                    track_info[0],
-                    f"Batch timeout after {BATCH_ANALYSIS_TIMEOUT_SECONDS}s",
-                    permanent=True,
+        for expected_track_id, expected_file_path in completed_tracks:
+            future = futures_by_track_id[expected_track_id]
+            try:
+                _, succeeded, retryable, permanent = self._save_completed_future(
+                    future
                 )
-                permanent_failed += 1
-                logger.warning(f"⊘ Permanently failed (batch timeout): {track_info[1]}")
-        
+                completed += succeeded
+                failed += retryable
+                permanent_failed += permanent
+            except Exception as e:
+                error = f"Batch timeout result error for {expected_file_path}: {e}"
+                logger.error(error)
+                self._save_failed(expected_track_id, error, permanent=False)
+                failed += 1
+
+        requeue_reason = "Batch timeout; no retry budget was consumed"
+        self._requeue_tracks_for_retry(never_started, requeue_reason)
+        timeout_error = f"Batch timeout after {BATCH_ANALYSIS_TIMEOUT_SECONDS}s"
+        for track_id, _ in attempted:
+            self._save_failed(track_id, timeout_error, permanent=False)
+            failed += 1
+
+        requeued = len(never_started)
+        logger.warning(
+            "Batch timeout outcome: %s completed, %s failed, %s permanently "
+            "failed, %s requeued without retry cost",
+            completed, failed, permanent_failed, requeued,
+        )
+        return completed, failed, permanent_failed, requeued
+
+    def _process_tracks_parallel(self, tracks: List[Tuple[str, str]]):
+        """Claim and process one track batch using the process pool."""
+        if not tracks:
+            return
+
+        self._ensure_pool()
+        logger.info(f"Processing batch of {len(tracks)} tracks with {NUM_WORKERS} workers...")
+        tracks = self._claim_tracks_for_processing(tracks)
+        if not tracks:
+            return
+
+        start_time = time.time()
+        finalized_track_ids = set()
+        futures = {self.executor.submit(_analyze_track_in_process, t): t for t in tracks}
+        counts = {'completed': 0, 'failed': 0, 'permanent_failed': 0}
+        requeued = 0
+        try:
+            self._consume_batch_results(
+                futures,
+                tracks,
+                finalized_track_ids,
+                counts,
+            )
+        except FuturesTimeoutError:
+            timeout_completed, timeout_failed, timeout_permanent, requeued = (
+                self._handle_batch_timeout(futures, finalized_track_ids)
+            )
+            counts['completed'] += timeout_completed
+            counts['failed'] += timeout_failed
+            counts['permanent_failed'] += timeout_permanent
+
         elapsed = time.time() - start_time
         rate = len(tracks) / elapsed if elapsed > 0 else 0
         logger.info(
-            f"Batch complete: {completed} succeeded, {failed} failed, {permanent_failed} permanently failed in {elapsed:.1f}s ({rate:.1f} tracks/sec)"
+            f"Batch complete: {counts['completed']} succeeded, {counts['failed']} failed, {counts['permanent_failed']} permanently failed, {requeued} requeued in {elapsed:.1f}s ({rate:.1f} tracks/sec)"
         )
     
     def _save_results(self, track_id: str, file_path: str, features: Dict[str, Any]):
         """Save analysis results to database and resolve stale audio failures."""
         cursor = self.db.get_cursor()
         try:
-            cursor.execute("""
-                UPDATE "Track"
-                SET
-                    bpm = %s,
-                    "beatsCount" = %s,
-                    key = %s,
-                    "keyScale" = %s,
-                    "keyStrength" = %s,
-                    energy = %s,
-                    loudness = %s,
-                    "dynamicRange" = %s,
-                    danceability = %s,
-                    valence = %s,
-                    arousal = %s,
-                    instrumentalness = %s,
-                    acousticness = %s,
-                    speechiness = %s,
-                    "moodTags" = %s,
-                    "essentiaGenres" = %s,
-                    "moodHappy" = %s,
-                    "moodSad" = %s,
-                    "moodRelaxed" = %s,
-                    "moodAggressive" = %s,
-                    "moodParty" = %s,
-                    "moodAcoustic" = %s,
-                    "moodElectronic" = %s,
-                    "danceabilityMl" = %s,
-                    "analysisMode" = %s,
-                    "analysisStatus" = 'completed',
-                    "analysisStartedAt" = NULL,
-                    "analysisVersion" = %s,
-                    "analyzedAt" = %s,
-                    "analysisError" = NULL,
-                    "updatedAt" = NOW()
-                WHERE id = %s
-            """, (
-                features['bpm'],
-                features['beatsCount'],
-                features['key'],
-                features['keyScale'],
-                features['keyStrength'],
-                features['energy'],
-                features['loudness'],
-                features['dynamicRange'],
-                features['danceability'],
-                features['valence'],
-                features['arousal'],
-                features['instrumentalness'],
-                features['acousticness'],
-                features['speechiness'],
-                features['moodTags'],
-                features['essentiaGenres'],
-                features.get('moodHappy'),
-                features.get('moodSad'),
-                features.get('moodRelaxed'),
-                features.get('moodAggressive'),
-                features.get('moodParty'),
-                features.get('moodAcoustic'),
-                features.get('moodElectronic'),
-                features.get('danceabilityMl'),
-                features.get('analysisMode', 'standard'),
-                ESSENTIA_VERSION,
-                datetime.utcnow(),
-                track_id
-            ))
+            cursor.execute(
+                _SAVE_ANALYSIS_RESULTS_SQL,
+                _analysis_result_values(track_id, features),
+            )
 
             # Successful analysis should clear stale unresolved audio failures
             # for this track so UI failure counts remain accurate across reruns.
-            cursor.execute("""
-                UPDATE "EnrichmentFailure"
-                SET
-                    resolved = true,
-                    "resolvedAt" = NOW()
-                WHERE "entityType" = 'audio'
-                AND "entityId" = %s
-                AND resolved = false
-            """, (track_id,))
+            cursor.execute(_RESOLVE_AUDIO_FAILURES_SQL, (track_id,))
 
             self.db.commit()
         except Exception as e:
@@ -2039,7 +2119,7 @@ class AnalysisWorker:
 
 
 def main():
-    """Main entry point"""
+    """Run single-file test mode or start the parent analysis worker."""
     if len(sys.argv) > 1 and sys.argv[1] == '--test':
         # Test mode: analyze a single file
         if len(sys.argv) < 3:
@@ -2052,6 +2132,7 @@ def main():
         return
     
     # Normal worker mode
+    initialize_worker_count()
     worker = AnalysisWorker()
     worker.start()
 
