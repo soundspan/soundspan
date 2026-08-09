@@ -214,7 +214,8 @@ describe("enrichment MusicBrainz lookup compatibility", () => {
         await searchArtistsHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "artist lookup failed" });
+        expect(res.body).toEqual({ error: "Search failed" });
+        expect(JSON.stringify(res.body)).not.toContain("artist lookup failed");
     });
 
     it("preserves non-numeric artist scores as NaN", async () => {
@@ -314,7 +315,10 @@ describe("enrichment MusicBrainz lookup compatibility", () => {
         await searchReleaseGroupsHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "release-group lookup failed" });
+        expect(res.body).toEqual({ error: "Search failed" });
+        expect(JSON.stringify(res.body)).not.toContain(
+            "release-group lookup failed",
+        );
     });
 
     it("normalizes missing artist-credit and score defaults for release-group lookup", async () => {

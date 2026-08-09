@@ -443,7 +443,8 @@ describe("enrichment route runtime behavior", () => {
         );
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "musicbrainz down" });
+        expect(res.body).toEqual({ error: "Search failed" });
+        expect(JSON.stringify(res.body)).not.toContain("musicbrainz down");
     });
 
     it("validates musicbrainz release-group query length", async () => {
@@ -516,7 +517,8 @@ describe("enrichment route runtime behavior", () => {
         );
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "release service down" });
+        expect(res.body).toEqual({ error: "Search failed" });
+        expect(JSON.stringify(res.body)).not.toContain("release service down");
     });
 
     it("returns enrichment progress payload", async () => {
@@ -606,7 +608,8 @@ describe("enrichment route runtime behavior", () => {
         await pauseHandler({ user: { id: "admin-1" } } as any, res);
 
         expect(res.statusCode).toBe(400);
-        expect(res.body).toEqual({ error: "already paused" });
+        expect(res.body).toEqual({ error: "Failed to pause enrichment" });
+        expect(JSON.stringify(res.body)).not.toContain("already paused");
     });
 
     it("returns 400 for resume and stop transition errors", async () => {
@@ -616,7 +619,10 @@ describe("enrichment route runtime behavior", () => {
         await resumeHandler({ user: { id: "admin-1" } } as any, resumeRes);
 
         expect(resumeRes.statusCode).toBe(400);
-        expect(resumeRes.body).toEqual({ error: "already running" });
+        expect(resumeRes.body).toEqual({
+            error: "Failed to resume enrichment",
+        });
+        expect(JSON.stringify(resumeRes.body)).not.toContain("already running");
 
         mockStop.mockRejectedValueOnce(new Error("already stopped"));
 
@@ -624,7 +630,8 @@ describe("enrichment route runtime behavior", () => {
         await stopHandler({ user: { id: "admin-1" } } as any, stopRes);
 
         expect(stopRes.statusCode).toBe(400);
-        expect(stopRes.body).toEqual({ error: "already stopped" });
+        expect(stopRes.body).toEqual({ error: "Failed to stop enrichment" });
+        expect(JSON.stringify(stopRes.body)).not.toContain("already stopped");
     });
 
     it("handles reset routes for artists, tags, audio, and vibes", async () => {
@@ -776,7 +783,8 @@ describe("enrichment route runtime behavior", () => {
         const errorRes = createRes();
         await syncHandler({ user: { id: "user-1" } } as any, errorRes);
         expect(errorRes.statusCode).toBe(500);
-        expect(errorRes.body).toEqual({ error: "queue busy" });
+        expect(errorRes.body).toEqual({ error: "Failed to start sync" });
+        expect(JSON.stringify(errorRes.body)).not.toContain("queue busy");
     });
 
     it("reads and writes per-user enrichment settings", async () => {
@@ -887,7 +895,10 @@ describe("enrichment route runtime behavior", () => {
         );
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "enrichment service down" });
+        expect(res.body).toEqual({ error: "Failed to enrich artist" });
+        expect(JSON.stringify(res.body)).not.toContain(
+            "enrichment service down",
+        );
     });
 
     it("applies album enrichment only above confidence threshold", async () => {
@@ -933,7 +944,10 @@ describe("enrichment route runtime behavior", () => {
         );
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "album provider timeout" });
+        expect(res.body).toEqual({ error: "Failed to enrich album" });
+        expect(JSON.stringify(res.body)).not.toContain(
+            "album provider timeout",
+        );
     });
 
     it("enforces auto-enrichment setting when starting full library run", async () => {
@@ -968,7 +982,8 @@ describe("enrichment route runtime behavior", () => {
         await startHandler({ user: { id: "admin-1" } } as any, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "db timeout" });
+        expect(res.body).toEqual({ error: "Failed to start enrichment" });
+        expect(JSON.stringify(res.body)).not.toContain("db timeout");
     });
 
     it("still returns 200 if start background task rejects", async () => {
@@ -1167,7 +1182,8 @@ describe("enrichment route runtime behavior", () => {
         );
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "reset failed" });
+        expect(res.body).toEqual({ error: "Failed to retry failures" });
+        expect(JSON.stringify(res.body)).not.toContain("reset failed");
     });
 
     it("validates skip payload and skips failures by id", async () => {
@@ -1239,8 +1255,11 @@ describe("enrichment route runtime behavior", () => {
         expect(mockClearAllFailures).toHaveBeenCalledWith(undefined);
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
-            error: "clear failure store offline",
+            error: "Failed to clear failures",
         });
+        expect(JSON.stringify(res.body)).not.toContain(
+            "clear failure store offline",
+        );
     });
 
     it("deletes a single failure by id", async () => {
@@ -1280,7 +1299,8 @@ describe("enrichment route runtime behavior", () => {
             }),
         );
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "artist reset failed" });
+        expect(res.body).toEqual({ error: "Failed to reset artist metadata" });
+        expect(JSON.stringify(res.body)).not.toContain("artist reset failed");
     });
 
     it("returns 500 when deleting a failure record fails", async () => {
@@ -1294,7 +1314,8 @@ describe("enrichment route runtime behavior", () => {
 
         expect(mockDeleteFailures).toHaveBeenCalledWith(["failure-err"]);
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "delete failed" });
+        expect(res.body).toEqual({ error: "Failed to delete failure" });
+        expect(JSON.stringify(res.body)).not.toContain("delete failed");
     });
 
     it("reads concurrency settings and estimated throughput", async () => {
@@ -1453,7 +1474,8 @@ describe("enrichment route runtime behavior", () => {
             }),
         );
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "album reset failed" });
+        expect(res.body).toEqual({ error: "Failed to reset album metadata" });
+        expect(JSON.stringify(res.body)).not.toContain("album reset failed");
     });
 
     it("still returns success when artist cache invalidation fails during metadata reset", async () => {
@@ -1696,7 +1718,8 @@ describe("enrichment route runtime behavior", () => {
         );
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({ error: "track metadata failed" });
+        expect(res.body).toEqual({ error: "Failed to update track" });
+        expect(JSON.stringify(res.body)).not.toContain("track metadata failed");
     });
 
     it("returns 409 when artist metadata update hits MBID conflict", async () => {

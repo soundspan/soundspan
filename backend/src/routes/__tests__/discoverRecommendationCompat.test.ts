@@ -446,8 +446,8 @@ describe("discover recommendation-mode compatibility", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to clear discovery playlist",
-            details: "clear failed",
         });
+        expect(JSON.stringify(res.body)).not.toContain("clear failed");
     });
 
     it("returns 410 for legacy-only mutation endpoints", async () => {

@@ -1942,8 +1942,8 @@ describe("library catalog list runtime coverage", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch artists",
-            details: "tx failed",
         });
+        expect(JSON.stringify(res.body)).not.toContain("tx failed");
     });
 
     it("hydrates artist detail with MBID resolution, discography, top tracks, and enriched similar artists", async () => {
@@ -2577,8 +2577,8 @@ describe("library catalog list runtime coverage", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to fetch albums",
-            details: "album list failed",
         });
+        expect(JSON.stringify(res.body)).not.toContain("album list failed");
     });
 
     it("handles album lookup by id, includeTracks flag, and ownership", async () => {
@@ -4290,8 +4290,8 @@ describe("library catalog list runtime coverage", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to delete artist",
-            details: "db unavailable",
         });
+        expect(JSON.stringify(res.body)).not.toContain("db unavailable");
 
         existsSpy.mockRestore();
     });

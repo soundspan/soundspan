@@ -893,8 +893,8 @@ describe("discover legacy-mode runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to clear discovery playlist",
-            details: "clear boom",
         });
+        expect(JSON.stringify(res.body)).not.toContain("clear boom");
     });
 
     it("covers lidarr-enabled legacy clear flows for moved, deleted, extra, failed, and tagged artists", async () => {
@@ -1272,10 +1272,8 @@ describe("discover legacy-mode runtime behavior", () => {
         await cleanupLidarrHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({
-            error: "Failed to cleanup Lidarr",
-            details: "lidarr unavailable",
-        });
+        expect(res.body).toEqual({ error: "Failed to cleanup Lidarr" });
+        expect(JSON.stringify(res.body)).not.toContain("lidarr unavailable");
     });
 
     it("repairs mistagged discovery albums while preserving protected artists", async () => {
@@ -1358,9 +1356,9 @@ describe("discover legacy-mode runtime behavior", () => {
         await fixTaggingHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({
-            error: "Failed to fix album tagging",
-            details: "discover table unavailable",
-        });
+        expect(res.body).toEqual({ error: "Failed to fix album tagging" });
+        expect(JSON.stringify(res.body)).not.toContain(
+            "discover table unavailable",
+        );
     });
 });

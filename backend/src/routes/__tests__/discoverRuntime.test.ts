@@ -533,10 +533,8 @@ describe("discover route runtime behavior", () => {
         await exclusionsGetHandler(req, res);
 
         expect(res.statusCode).toBe(500);
-        expect(res.body).toEqual({
-            error: "Failed to get exclusions",
-            details: "db failed",
-        });
+        expect(res.body).toEqual({ error: "Failed to get exclusions" });
+        expect(JSON.stringify(res.body)).not.toContain("db failed");
     });
 
     it("clears all exclusions for current user", async () => {
@@ -637,8 +635,8 @@ describe("discover route runtime behavior", () => {
         expect(res.statusCode).toBe(500);
         expect(res.body).toEqual({
             error: "Failed to clear discovery playlist",
-            details: "clear boom",
         });
+        expect(JSON.stringify(res.body)).not.toContain("clear boom");
     });
 
     it("returns a 500 error when discovery config lookup fails", async () => {
