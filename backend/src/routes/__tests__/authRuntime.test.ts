@@ -50,16 +50,14 @@ jest.mock("bcrypt", () => ({
     },
 }));
 
-const mockSpeakeasyVerify = jest.fn();
-const mockSpeakeasyGenerateSecret = jest.fn();
-jest.mock("speakeasy", () => ({
+const mockOtplibGenerateSecret = jest.fn();
+const mockOtplibGenerateURI = jest.fn();
+const mockOtplibVerify = jest.fn();
+jest.mock("otplib", () => ({
     __esModule: true,
-    default: {
-        totp: {
-            verify: (...args: any[]) => mockSpeakeasyVerify(...args),
-        },
-        generateSecret: (...args: any[]) => mockSpeakeasyGenerateSecret(...args),
-    },
+    generateSecret: (...args: any[]) => mockOtplibGenerateSecret(...args),
+    generateURI: (...args: any[]) => mockOtplibGenerateURI(...args),
+    verify: (...args: any[]) => mockOtplibVerify(...args),
 }));
 
 const mockQrCodeToDataUrl = jest.fn();
@@ -177,11 +175,11 @@ describe("auth routes runtime", () => {
         mockBcryptCompare.mockResolvedValue(true);
         mockBcryptHash.mockResolvedValue("new-hash");
 
-        mockSpeakeasyVerify.mockReturnValue(true);
-        mockSpeakeasyGenerateSecret.mockReturnValue({
-            base32: "BASE32SECRET",
-            otpauth_url: "otpauth://totp/soundspan:alice?secret=BASE32SECRET",
-        });
+        mockOtplibVerify.mockResolvedValue({ valid: true });
+        mockOtplibGenerateSecret.mockReturnValue("BASE32SECRET");
+        mockOtplibGenerateURI.mockReturnValue(
+            "otpauth://totp/soundspan:alice?secret=BASE32SECRET&issuer=soundspan"
+        );
         mockQrCodeToDataUrl.mockResolvedValue("data:image/png;base64,abc");
         mockVerifyAuthToken.mockReturnValue({
             type: "refresh",
@@ -242,7 +240,7 @@ describe("auth routes runtime", () => {
             message: "2FA token required",
         });
 
-        mockSpeakeasyVerify.mockReturnValueOnce(true);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: true });
         const totpReq = {
             body: { username: "alice", password: "pw", token: "123456" },
         } as any;
@@ -279,7 +277,7 @@ describe("auth routes runtime", () => {
             twoFactorSecret: "enc(SECRET123)",
             twoFactorRecoveryCodes: null,
         });
-        mockSpeakeasyVerify.mockReturnValueOnce(false);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: false });
 
         const req = {
             body: { username: "alice", password: "pw", token: "000000" },
@@ -623,7 +621,7 @@ describe("auth routes runtime", () => {
         await twoFaEnable(enableMissingReq, enableMissingRes);
         expect(enableMissingRes.statusCode).toBe(400);
 
-        mockSpeakeasyVerify.mockReturnValueOnce(false);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: false });
         const enableBadTokenReq = {
             user: { id: "u1" },
             body: { secret: "BASE32SECRET", token: "123456" },
@@ -632,7 +630,7 @@ describe("auth routes runtime", () => {
         await twoFaEnable(enableBadTokenReq, enableBadTokenRes);
         expect(enableBadTokenRes.statusCode).toBe(401);
 
-        mockSpeakeasyVerify.mockReturnValueOnce(true);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: true });
         const enableOkReq = {
             user: { id: "u1" },
             body: { secret: "BASE32SECRET", token: "123456" },
@@ -677,7 +675,7 @@ describe("auth routes runtime", () => {
             twoFactorSecret: "enc(BASE32SECRET)",
         });
         mockBcryptCompare.mockResolvedValueOnce(true);
-        mockSpeakeasyVerify.mockReturnValueOnce(false);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: false });
         const disableBadTokenReq = {
             user: { id: "u1" },
             body: { password: "old", token: "000000" },
@@ -692,7 +690,7 @@ describe("auth routes runtime", () => {
             twoFactorSecret: "enc(BASE32SECRET)",
         });
         mockBcryptCompare.mockResolvedValueOnce(true);
-        mockSpeakeasyVerify.mockReturnValueOnce(true);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: true });
         const disableOkReq = {
             user: { id: "u1" },
             body: { password: "old", token: "123456" },
@@ -720,7 +718,7 @@ describe("auth routes runtime", () => {
             username: "alice",
             twoFactorEnabled: false,
         });
-        mockSpeakeasyGenerateSecret.mockImplementationOnce(() => {
+        mockOtplibGenerateSecret.mockImplementationOnce(() => {
             throw new Error("qrcode");
         });
 
@@ -733,7 +731,7 @@ describe("auth routes runtime", () => {
     });
 
     it("returns 500 for 2FA enable failures", async () => {
-        mockSpeakeasyVerify.mockReturnValueOnce(true);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: true });
         prisma.user.update.mockRejectedValueOnce(new Error("db"));
 
         const req = {
@@ -754,7 +752,7 @@ describe("auth routes runtime", () => {
             twoFactorSecret: "enc(BASE32SECRET)",
         });
         mockBcryptCompare.mockResolvedValueOnce(true);
-        mockSpeakeasyVerify.mockReturnValueOnce(true);
+        mockOtplibVerify.mockResolvedValueOnce({ valid: true });
         prisma.user.update.mockRejectedValueOnce(new Error("db"));
 
         const req = {
@@ -1399,7 +1397,7 @@ describe("auth routes runtime", () => {
         const disableNoSecretRes = createRes();
         await twoFaDisable(disableNoSecretReq, disableNoSecretRes);
         expect(disableNoSecretRes.statusCode).toBe(200);
-        expect(mockSpeakeasyVerify).not.toHaveBeenCalled();
+        expect(mockOtplibVerify).not.toHaveBeenCalled();
     });
 
     it("covers refresh invalid-token branch explicitly", async () => {

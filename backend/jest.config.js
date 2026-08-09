@@ -1,6 +1,12 @@
 /** @type {import('jest').Config} */
 module.exports = {
     preset: 'ts-jest',
+    // The otplib v13 dependency tree (@scure/base v2, @noble/hashes v2, nested under @otplib plugins) is ESM-only.
+    transformIgnorePatterns: ['/node_modules/(?!(@scure/|@noble/|@otplib/|otplib/))'],
+    transform: {
+        '^.+\\.ts$': ['ts-jest', {}],
+        '^.+\\.js$': ['ts-jest', { tsconfig: { allowJs: true } }],
+    },
     testEnvironment: 'node',
     roots: ['<rootDir>/src'],
     testMatch: ['**/__tests__/**/*.test.ts'],

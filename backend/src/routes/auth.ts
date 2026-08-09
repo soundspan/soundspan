@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 import { prisma } from "../utils/db";
 import { z } from "zod";
-import speakeasy from "speakeasy";
+import { generateSecret, generateURI, verify } from "otplib";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import {
@@ -17,6 +17,25 @@ import { encrypt, decrypt } from "../utils/encryption";
 import { BRAND_NAME } from "../config/brand";
 import { timingSafeCompare } from "../utils/timingSafe";
 import { runDummyBcrypt } from "../utils/dummyCredential";
+
+async function verifyTotpToken(secret: string, token: string): Promise<boolean> {
+    if (
+        typeof secret !== "string" ||
+        typeof token !== "string" ||
+        !/^\d{6}$/.test(token)
+    ) {
+        return false;
+    }
+
+    try {
+        // 60 seconds of epoch tolerance matches the former speakeasy window of 2.
+        const result = await verify({ secret, token, epochTolerance: 60 });
+        return result.valid;
+    } catch {
+        // Deliberately fail closed when otplib rejects a malformed secret.
+        return false;
+    }
+}
 
 const router = Router();
 
@@ -196,12 +215,7 @@ router.post("/login", async (req, res) => {
             } else {
                 // Verify TOTP token
                 const secret = decrypt2FASecret(user.twoFactorSecret);
-                const verified = speakeasy.totp.verify({
-                    secret,
-                    encoding: "base32",
-                    token,
-                    window: 2,
-                });
+                const verified = await verifyTotpToken(secret, token);
 
                 if (!verified) {
                     return res.status(401).json({ error: "Invalid 2FA token" });
@@ -1257,16 +1271,18 @@ router.post("/2fa/setup", requireAuth, async (req, res) => {
         }
 
         // Generate secret
-        const secret = speakeasy.generateSecret({
-            name: `${BRAND_NAME} (${user.username})`,
+        const secret = generateSecret();
+        const otpauthUrl = generateURI({
             issuer: BRAND_NAME,
+            label: user.username,
+            secret,
         });
 
         // Generate QR code
-        const qrCodeDataUrl = await QRCode.toDataURL(secret.otpauth_url!);
+        const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
 
         res.json({
-            secret: secret.base32,
+            secret,
             qrCode: qrCodeDataUrl,
         });
     } catch (error) {
@@ -1320,12 +1336,7 @@ router.post("/2fa/enable", requireAuth, async (req, res) => {
         }
 
         // Verify the token with the secret
-        const verified = speakeasy.totp.verify({
-            secret,
-            encoding: "base32",
-            token,
-            window: 2,
-        });
+        const verified = await verifyTotpToken(secret, token);
 
         if (!verified) {
             return res
@@ -1437,12 +1448,7 @@ router.post("/2fa/disable", requireAuth, async (req, res) => {
         // Verify 2FA token
         if (user.twoFactorSecret) {
             const secret = decrypt2FASecret(user.twoFactorSecret);
-            const verified = speakeasy.totp.verify({
-                secret,
-                encoding: "base32",
-                token,
-                window: 2,
-            });
+            const verified = await verifyTotpToken(secret, token);
 
             if (!verified) {
                 return res.status(401).json({ error: "Invalid 2FA token" });
