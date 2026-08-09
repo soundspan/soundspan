@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Accessibility:** Raised low-contrast gray body text to the WCAG-AA gray-400
   floor, gave settings inputs a visible (>=3:1) brand focus ring, and added a
   ratchet guard against new hardcoded arbitrary-hex Tailwind classes.
+- **Backend route-monolith decomposition (library, internal refactor).** The
+  oversized `backend/src/routes/library.ts` (~8.3k lines) now delegates its
+  service-shaped helper clusters to focused, individually testable modules under
+  `backend/src/services/`: `libraryTrackPreferences.ts` (thumbs-up/down
+  persistence, preference score maps, and response formatting),
+  `libraryRadioBuilder.ts` (seeded multi-track radio building and artist-diversity
+  selection), and `nativeCoverHealing.ts` (native album-cover path resolution and
+  provider-chain cover healing). These are byte-for-byte pure moves — no route
+  paths, methods, middleware, request/response shapes, status codes, or log
+  messages change. A new characterization test
+  (`backend/src/routes/__tests__/libraryRouteTable.test.ts`) snapshots the
+  library router's path+method+middleware surface to guard the refactor, and the
+  existing `apiEntrypointRuntime` mount-contract test continues to pass unchanged.
 - **Backend error-response canonicalization (developer-facing standard + first
   exemplars).** The canonical route error contract is now documented in
   `backend/src/routes/README.md`: async handlers wrap in `asyncHandler`,

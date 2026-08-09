@@ -52,6 +52,8 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/importJobStore.ts` | Core |
 | `backend/src/services/itunes.ts` | Core |
 | `backend/src/services/lastfm.ts` | Core |
+| `backend/src/services/libraryRadioBuilder.ts` | Core |
+| `backend/src/services/libraryTrackPreferences.ts` | Core |
 | `backend/src/services/lidarr.ts` | Core |
 | `backend/src/services/listenTogether.ts` | Core |
 | `backend/src/services/listenTogetherClusterSync.ts` | Core |
