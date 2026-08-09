@@ -10,10 +10,10 @@ jest.mock("../../utils/logger", () => ({
 }));
 
 const mockGenerateToken = jest.fn();
-const mockVerifyAuthToken = jest.fn();
+const mockVerifyAccessToken = jest.fn();
 jest.mock("../../middleware/auth", () => ({
     generateToken: mockGenerateToken,
-    verifyAuthToken: mockVerifyAuthToken,
+    verifyAccessToken: mockVerifyAccessToken,
     requireAuth: (_req: any, _res: any, next: () => void) => next(),
     requireAdmin: (_req: any, _res: any, next: () => void) => next(),
 }));
@@ -134,7 +134,7 @@ describe("onboarding route runtime", () => {
         mockGenerateToken.mockReturnValue("jwt-token");
         mockBcryptHash.mockResolvedValue("hash-1");
         mockAxiosGet.mockResolvedValue({ status: 200 });
-        mockVerifyAuthToken.mockReturnValue({ userId: "u1" });
+        mockVerifyAccessToken.mockReturnValue({ userId: "u1" });
     });
 
     afterAll(() => {
@@ -386,7 +386,7 @@ describe("onboarding route runtime", () => {
         });
 
         prisma.user.count.mockResolvedValueOnce(1);
-        mockVerifyAuthToken.mockReturnValueOnce({ userId: "u1" });
+        mockVerifyAccessToken.mockReturnValueOnce({ userId: "u1" });
         prisma.user.findUnique.mockResolvedValueOnce({ onboardingComplete: false });
         const tokenReq = {
             headers: { authorization: "Bearer token-1" },
@@ -400,7 +400,7 @@ describe("onboarding route runtime", () => {
         });
 
         prisma.user.count.mockResolvedValueOnce(1);
-        mockVerifyAuthToken.mockReturnValueOnce({ userId: "u1" });
+        mockVerifyAccessToken.mockReturnValueOnce({ userId: "u1" });
         prisma.user.findUnique.mockResolvedValueOnce({ onboardingComplete: true });
         const onboardingCompleteReq = {
             headers: { authorization: "Bearer token-2" },
@@ -414,7 +414,7 @@ describe("onboarding route runtime", () => {
         });
 
         prisma.user.count.mockResolvedValueOnce(1);
-        mockVerifyAuthToken.mockImplementationOnce(() => {
+        mockVerifyAccessToken.mockImplementationOnce(() => {
             throw new Error("invalid token");
         });
         const badTokenReq = {
@@ -431,9 +431,8 @@ describe("onboarding route runtime", () => {
 
     it("rejects refresh tokens presented as bearer tokens", async () => {
         prisma.user.count.mockResolvedValueOnce(1);
-        mockVerifyAuthToken.mockReturnValueOnce({
-            userId: "u1",
-            type: "refresh",
+        mockVerifyAccessToken.mockImplementationOnce(() => {
+            throw new Error("Token is not an access token");
         });
         const req = {
             headers: { authorization: "Bearer refresh-token" },

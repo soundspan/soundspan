@@ -9,7 +9,7 @@ import {
     generateToken,
     requireAuth,
     requireAdmin,
-    verifyAuthToken,
+    verifyAccessToken,
 } from "../middleware/auth";
 
 const router = Router();
@@ -579,11 +579,8 @@ router.get("/status", async (req, res) => {
 
         // Try to verify token and check onboarding status
         try {
-            const decoded = verifyAuthToken(token);
-            // Migrate this inline guard to shared verifyAccessToken once the auth slice lands.
-            if (decoded.type === "refresh") {
-                throw new Error("Refresh tokens are not valid access tokens");
-            }
+            // Shared accessor pins HS256 and rejects refresh/non-access tokens.
+            const decoded = verifyAccessToken(token);
 
             const user = await prisma.user.findUnique({
                 where: { id: decoded.userId },
