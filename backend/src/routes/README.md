@@ -44,11 +44,26 @@ Reference exemplars: `vibe.ts`, `vibeJourneyRequest.ts`, `notifications.ts`,
 `library.ts`.
 
 **Enforcement (ratchet):** `scripts/ci/check-route-error-canon.mjs`
-(`npm run check:error-canon`) freezes the current per-file count of ad-hoc
-`res.status(500).json(...)` literals and fails when a route file adds new ones.
-When you canonicalize a route, lower its baseline in that script; new route
-files start at zero. Full migration of every route file is intentionally
-incremental (per touched file), not a big-bang.
+(`npm run check:error-canon`) runs two independent per-file ratchets and fails
+if either regresses:
+
+1. **500-literal ratchet** — freezes the current per-file count of ad-hoc
+   `res.status(500).json(...)` literals and fails when a route file adds new
+   ones.
+2. **Raw-error leak ratchet** — freezes the per-file count of raw caught-error
+   text echoed into a response body (`error.message` / `error?.message` /
+   `error.stack` used as a property value, e.g. `details: error?.message` or
+   `error: error.message || "…"`). Echoing raw exception text to clients is an
+   OWASP info-disclosure risk; return a static curated message and log the raw
+   error server-side instead. `discover.ts`, `enrichment.ts`, and `library.ts`
+   are at zero. The remaining routers still carrying the pattern
+   (`downloads.ts`, `listenTogether.ts`, `notifications.ts`,
+   `playbackState.ts`, `playlists.ts`, `podcasts.ts`) are frozen at their
+   current counts and remediated as follow-up.
+
+Both baselines can only DECREASE: when you canonicalize a route, lower its
+baseline in that script; new route files start at zero. Full migration of every
+route file is intentionally incremental (per touched file), not a big-bang.
 
 ## Mounted Route Modules
 

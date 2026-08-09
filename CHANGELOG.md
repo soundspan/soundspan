@@ -123,6 +123,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Route error-message disclosure hardening (OWASP): the `discover`,
+  `enrichment`, and `library` routers no longer echo raw caught-error text
+  (`error.message` / `error.stack` / a `details` field carrying it) to clients.
+  Every affected handler now returns a static, curated `{ error: "…" }` message
+  and logs the raw error server-side only. This also fixes a latent bug in
+  `enrichment.ts` where a non-object throw (e.g. `null`) made the catch block
+  dereference `error.message` and throw again, leaving the request with no
+  response. The `check-route-error-canon` CI script gains a second,
+  independent ratchet that flags raw `error.message` / `error.stack` echoed
+  into response bodies (baseline can only decrease); the three fixed routers
+  are ratcheted to zero. Remaining routers with the pattern
+  (`downloads`, `listenTogether`, `notifications`, `playbackState`,
+  `playlists`, `podcasts`) are frozen at their current counts and tracked as
+  follow-up.
 - Digest-pinned the two remaining unpinned base images and closed the gap in the
   Dockerfile digest-pin ratchet. The root AIO `Dockerfile` (`node:24-bookworm-slim`)
   and `services/audio-analyzer/Dockerfile` (`python:3.11-slim`) were both unpinned

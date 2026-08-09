@@ -1995,7 +1995,6 @@ router.delete("/clear", async (req, res) => {
         logger.error("Stack:", error?.stack);
         res.status(500).json({
             error: "Failed to clear discovery playlist",
-            details: error?.message || "Unknown error",
         });
     }
 });
@@ -2046,7 +2045,6 @@ router.get("/exclusions", async (req, res) => {
         logger.error("Stack:", error?.stack);
         res.status(500).json({
             error: "Failed to get exclusions",
-            details: error?.message,
         });
     }
 });
@@ -2294,7 +2292,6 @@ router.post("/cleanup-lidarr", async (req, res) => {
         );
         res.status(500).json({
             error: "Failed to cleanup Lidarr",
-            details: error?.message || "Unknown error",
         });
     }
 });
@@ -2428,7 +2425,6 @@ router.post("/fix-tagging", async (req, res) => {
         logger.error("[FIX-TAGGING] Error:", error?.message || error);
         res.status(500).json({
             error: "Failed to fix album tagging",
-            details: error?.message || "Unknown error",
         });
     }
 });

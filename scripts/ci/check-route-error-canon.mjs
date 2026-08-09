@@ -54,9 +54,29 @@ const BASELINE = Object.freeze({
     "backend/src/routes/youtubeMusic.ts": 18,
 });
 
+// Raw error details can disclose internal implementation data to clients (OWASP).
+// This independent ratchet prevents new error.message/error.stack response leaks.
+const LEAK_BASELINE = Object.freeze({
+    "backend/src/routes/downloads.ts": 1,
+    "backend/src/routes/listenTogether.ts": 1,
+    "backend/src/routes/notifications.ts": 2,
+    "backend/src/routes/playbackState.ts": 1,
+    "backend/src/routes/playlists.ts": 2,
+    "backend/src/routes/podcasts.ts": 1,
+});
+
 export function countPattern(source) {
     const pattern = /res\s*\.\s*status\s*\(\s*500\s*\)\s*\.\s*json\s*\(/g;
     return source.match(pattern)?.length ?? 0;
+}
+
+export function countLeakPattern(source) {
+    const pattern = /:\s*error\??\.(?:message|stack)\b/g;
+    const normalizedSource = source.replace(
+        /error\s*(\??)\s*\.\s*(message|stack)\b/g,
+        "error$1.$2",
+    );
+    return normalizedSource.match(pattern)?.length ?? 0;
 }
 
 export function analyzeRouteErrorCanon(counts, baseline) {
@@ -84,7 +104,7 @@ function routeFiles(directory) {
         .map((entry) => path.join(directory, entry.name));
 }
 
-function collectCounts(repoRoot) {
+function collectCounts(repoRoot, counter = countPattern) {
     const routesDirectory = path.join(repoRoot, "backend/src/routes");
     return Object.fromEntries(
         routeFiles(routesDirectory)
@@ -96,13 +116,14 @@ function collectCounts(repoRoot) {
                     .join("/");
                 return [
                     relativePath,
-                    countPattern(fs.readFileSync(filePath, "utf8")),
+                    counter(fs.readFileSync(filePath, "utf8")),
                 ];
             }),
     );
 }
 
-function printReport(result) {
+function printReport(label, result) {
+    console.log(`${label}:`);
     if (result.ok) {
         console.log("Route error canonicalization ratchet passed.");
     } else {
@@ -122,18 +143,26 @@ function printReport(result) {
             );
         }
     }
-
-    console.log(
-        "Use sendInternalRouteError/AppError instead; see backend/src/routes/README.md.",
-    );
 }
 
 function runCli() {
     const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
     const repoRoot = path.resolve(scriptDirectory, "../..");
-    const result = analyzeRouteErrorCanon(collectCounts(repoRoot), BASELINE);
-    printReport(result);
-    process.exit(result.ok ? 0 : 1);
+    const canonicalResult = analyzeRouteErrorCanon(
+        collectCounts(repoRoot),
+        BASELINE,
+    );
+    const leakResult = analyzeRouteErrorCanon(
+        collectCounts(repoRoot, countLeakPattern),
+        LEAK_BASELINE,
+    );
+
+    printReport("500-literal ratchet", canonicalResult);
+    printReport("Raw-error leak ratchet", leakResult);
+    console.log(
+        "Use sendInternalRouteError/AppError instead; see backend/src/routes/README.md.",
+    );
+    process.exit(canonicalResult.ok && leakResult.ok ? 0 : 1);
 }
 
 if (

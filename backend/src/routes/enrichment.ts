@@ -139,7 +139,7 @@ router.post("/pause", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Pause enrichment error:", error);
         res.status(400).json({
-            error: error.message || "Failed to pause enrichment",
+            error: "Failed to pause enrichment",
         });
     }
 });
@@ -177,7 +177,7 @@ router.post("/resume", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Resume enrichment error:", error);
         res.status(400).json({
-            error: error.message || "Failed to resume enrichment",
+            error: "Failed to resume enrichment",
         });
     }
 });
@@ -215,7 +215,7 @@ router.post("/stop", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Stop enrichment error:", error);
         res.status(400).json({
-            error: error.message || "Failed to stop enrichment",
+            error: "Failed to stop enrichment",
         });
     }
 });
@@ -526,7 +526,7 @@ router.post("/sync", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Trigger sync error:", error);
         res.status(500).json({
-            error: error.message || "Failed to start sync",
+            error: "Failed to start sync",
         });
     }
 });
@@ -664,7 +664,7 @@ router.post("/artist/:id", async (req, res) => {
     } catch (error: any) {
         logger.error("Enrich artist error:", error);
         res.status(500).json({
-            error: error.message || "Failed to enrich artist",
+            error: "Failed to enrich artist",
         });
     }
 });
@@ -732,7 +732,7 @@ router.post("/album/:id", async (req, res) => {
     } catch (error: any) {
         logger.error("Enrich album error:", error);
         res.status(500).json({
-            error: error.message || "Failed to enrich album",
+            error: "Failed to enrich album",
         });
     }
 });
@@ -788,7 +788,7 @@ router.post("/start", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Start enrichment error:", error);
         res.status(500).json({
-            error: error.message || "Failed to start enrichment",
+            error: "Failed to start enrichment",
         });
     }
 });
@@ -849,7 +849,7 @@ router.get("/search/musicbrainz/artists", async (req, res) => {
     } catch (error: any) {
         logger.error("MusicBrainz artist search error:", error);
         res.status(500).json({
-            error: error?.message || "Search failed",
+            error: "Search failed",
         });
     }
 });
@@ -927,7 +927,7 @@ router.get("/search/musicbrainz/release-groups", async (req, res) => {
     } catch (error: any) {
         logger.error("MusicBrainz release-group search error:", error);
         res.status(500).json({
-            error: error?.message || "Search failed",
+            error: "Search failed",
         });
     }
 });
@@ -1177,7 +1177,7 @@ router.post("/retry", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Retry failures error:", error);
         res.status(500).json({
-            error: error.message || "Failed to retry failures",
+            error: "Failed to retry failures",
         });
     }
 });
@@ -1236,7 +1236,7 @@ router.post("/skip", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Skip failures error:", error);
         res.status(500).json({
-            error: error.message || "Failed to skip failures",
+            error: "Failed to skip failures",
         });
     }
 });
@@ -1293,7 +1293,7 @@ router.delete("/failures", requireAdmin, async (req, res) => {
     } catch (error: any) {
         logger.error("Clear all failures error:", error);
         res.status(500).json({
-            error: error.message || "Failed to clear failures",
+            error: "Failed to clear failures",
         });
     }
 });
@@ -1341,7 +1341,7 @@ router.delete<{ id: string }>(
         } catch (error: any) {
             logger.error("Delete failure error:", error);
             res.status(500).json({
-                error: error.message || "Failed to delete failure",
+                error: "Failed to delete failure",
             });
         }
     },
@@ -1527,7 +1527,7 @@ router.put("/artists/:id/metadata", async (req, res) => {
         }
         logger.error("Update artist metadata error:", error);
         res.status(500).json({
-            error: error.message || "Failed to update artist",
+            error: "Failed to update artist",
         });
     }
 });
@@ -1721,7 +1721,7 @@ router.put("/albums/:id/metadata", async (req, res) => {
         }
         logger.error("Update album metadata error:", error);
         res.status(500).json({
-            error: error.message || "Failed to update album",
+            error: "Failed to update album",
         });
     }
 });
@@ -1810,7 +1810,7 @@ router.put("/tracks/:id/metadata", async (req, res) => {
     } catch (error: any) {
         logger.error("Update track metadata error:", error);
         res.status(500).json({
-            error: error.message || "Failed to update track",
+            error: "Failed to update track",
         });
     }
 });
@@ -1902,7 +1902,7 @@ router.post("/artists/:id/reset", async (req, res) => {
         }
         logger.error("Reset artist metadata error:", error);
         res.status(500).json({
-            error: error.message || "Failed to reset artist metadata",
+            error: "Failed to reset artist metadata",
         });
     }
 });
@@ -1993,7 +1993,7 @@ router.post("/albums/:id/reset", async (req, res) => {
         }
         logger.error("Reset album metadata error:", error);
         res.status(500).json({
-            error: error.message || "Failed to reset album metadata",
+            error: "Failed to reset album metadata",
         });
     }
 });
@@ -2080,7 +2080,7 @@ router.post("/tracks/:id/reset", async (req, res) => {
         }
         logger.error("Reset track metadata error:", error);
         res.status(500).json({
-            error: error.message || "Failed to reset track metadata",
+            error: "Failed to reset track metadata",
         });
     }
 });

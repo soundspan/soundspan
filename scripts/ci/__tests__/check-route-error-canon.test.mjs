@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     analyzeRouteErrorCanon,
     countPattern,
+    countLeakPattern,
 } from "../check-route-error-canon.mjs";
 
 test("countPattern counts occurrences and tolerates whitespace", () => {
@@ -56,6 +57,42 @@ test("analyzeRouteErrorCanon reports a lower count as tightenable", () => {
             ok: true,
             violations: [],
             tightenable: [{ file: "route.ts", count: 1, baseline: 2 }],
+        },
+    );
+});
+
+test("countLeakPattern counts raw caught-error message/stack echoed into a body", () => {
+    const source = `
+        res.status(500).json({ error: "Failed", details: error?.message });
+        res.status(400).json({ error: error.message || "x" });
+        res.status(500).json({ error: error?.stack });
+    `;
+
+    assert.equal(countLeakPattern(source), 3);
+});
+
+test("countLeakPattern tolerates whitespace variations", () => {
+    assert.equal(countLeakPattern("details :  error ?. message"), 1);
+    assert.equal(countLeakPattern("error:error.stack"), 1);
+});
+
+test("countLeakPattern ignores static curated messages", () => {
+    const source = `
+        res.status(500).json({ error: "Failed to fetch artists" });
+        sendInternalRouteError(res, "Failed to fetch albums");
+        logger.error("boom", error);
+    `;
+
+    assert.equal(countLeakPattern(source), 0);
+});
+
+test("analyzeRouteErrorCanon ratchets leak counts the same way", () => {
+    assert.deepEqual(
+        analyzeRouteErrorCanon({ "leaky.ts": 3 }, { "leaky.ts": 2 }),
+        {
+            ok: false,
+            violations: [{ file: "leaky.ts", count: 3, baseline: 2 }],
+            tightenable: [],
         },
     );
 });

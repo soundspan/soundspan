@@ -1227,7 +1227,6 @@ router.get("/artists", async (req, res) => {
         logger.error("[Library] Stack:", error?.stack);
         res.status(500).json({
             error: "Failed to fetch artists",
-            details: error?.message,
         });
     }
 });
@@ -2501,7 +2500,6 @@ router.get("/albums", async (req, res) => {
         logger.error("[Library] Stack:", error?.stack);
         res.status(500).json({
             error: "Failed to fetch albums",
-            details: error?.message,
         });
     }
 });
@@ -5782,7 +5780,6 @@ router.delete<{ id: string }>(
             logger.error("Delete artist stack:", error?.stack);
             res.status(500).json({
                 error: "Failed to delete artist",
-                details: error?.message || "Unknown error",
             });
         }
     },
