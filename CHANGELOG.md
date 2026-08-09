@@ -73,6 +73,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Backend: introduced a single consolidated, typed Lidarr HTTP client
+  (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
+  for outbound Lidarr calls. It wraps one reusable axios instance with bounded
+  reliability the previous scattered call-sites lacked: a consistent request
+  timeout, capped exponential-backoff retries (idempotent methods and classified
+  transient failures only — 408/425/429/5xx/network/timeout; `POST` is not
+  retried unless explicitly opted in; `Retry-After` is honored and capped), a
+  concurrency limiter, a typed `LidarrHttpError` (status/method/path/attempts/
+  isTransient) that never leaks the API key or host, connection resolution from
+  system settings with `.env` fallback and URL validation, and the shared
+  logger. The discovery album-lifecycle deletion path now routes through this
+  client; remaining Lidarr consumers (the `lidarr.ts` queue/history helper
+  functions, `downloadQueue`, `simpleDownloadManager`, `discoverWeekly`, and the
+  discover/system-settings/onboarding routes) will be migrated onto it
+  incrementally to keep each change no-regression.
 - Backend: moved six `@types/*` packages from production dependencies to
   devDependencies and removed `@types/speakeasy`, slimming the pruned worker
   image's production `node_modules`.

@@ -7,10 +7,10 @@
  * - Processing albums before new discovery generation
  */
 
-import axios from 'axios';
 import { prisma } from '../../utils/db';
 import { logger } from '../../utils/logger';
 import { updateArtistCounts } from '../artistCountsService';
+import { LidarrHttpClient, LidarrHttpError } from '../lidarr/lidarrHttpClient';
 
 export interface DiscoveryAlbumInfo {
     id: string;
@@ -89,19 +89,19 @@ export class DiscoveryAlbumLifecycle {
             settings.lidarrApiKey &&
             album.lidarrAlbumId
         ) {
+            const client = new LidarrHttpClient({
+                baseUrl: settings.lidarrUrl,
+                apiKey: settings.lidarrApiKey,
+            });
             try {
-                await axios.delete(
-                    `${settings.lidarrUrl}/api/v1/album/${album.lidarrAlbumId}`,
-                    {
-                        params: { deleteFiles: true },
-                        headers: { 'X-Api-Key': settings.lidarrApiKey },
-                        timeout: 10000,
-                    }
+                await client.delete(
+                    `/api/v1/album/${album.lidarrAlbumId}`,
+                    { deleteFiles: true }
                 );
-            } catch (lidarrError: any) {
-                if (lidarrError.response?.status !== 404) {
+            } catch (error: unknown) {
+                if (error instanceof LidarrHttpError ? error.status !== 404 : true) {
                     logger.debug(
-                        `[DiscoveryLifecycle] Lidarr delete failed: ${lidarrError.message}`
+                        `[DiscoveryLifecycle] Lidarr delete failed: ${error instanceof Error ? error.message : String(error)}`
                     );
                 }
             }

@@ -29,12 +29,27 @@ jest.mock('../../../utils/db', () => ({
     },
 }));
 
-jest.mock('axios');
+jest.mock('../../../config', () => ({
+    config: { lidarr: undefined },
+}));
+jest.mock('../../../utils/systemSettings', () => ({
+    getSystemSettings: jest.fn(),
+}));
+jest.mock('axios', () => {
+    const request = jest.fn();
+    const create = jest.fn(() => ({ request }));
+    return {
+        __esModule: true,
+        default: { create, request },
+        create,
+    };
+});
 jest.mock('../../artistCountsService', () => ({
     updateArtistCounts: jest.fn(),
 }));
 
-const mockAxios = axios as jest.Mocked<typeof axios>;
+const mockAxios = axios as jest.Mocked<typeof axios> & { request: jest.Mock };
+const mockRequest = mockAxios.request;
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 const mockUpdateArtistCounts = updateArtistCounts as jest.Mock;
 
@@ -182,21 +197,22 @@ describe('DiscoveryAlbumLifecycle', () => {
         };
 
         it('should delete from Lidarr when enabled', async () => {
-            mockAxios.delete.mockResolvedValue({ status: 200 });
+            mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(null);
             (mockPrisma.discoveryTrack.deleteMany as jest.Mock).mockResolvedValue({});
             (mockPrisma.discoveryAlbum.update as jest.Mock).mockResolvedValue({});
 
             await lifecycle.deleteRejectedAlbum(mockAlbum, mockSettings);
 
-            expect(mockAxios.delete).toHaveBeenCalledWith(
-                'http://lidarr:8686/api/v1/album/456',
-                {
-                    params: { deleteFiles: true },
-                    headers: { 'X-Api-Key': 'test-api-key' },
-                    timeout: 10000,
-                }
-            );
+            expect(mockRequest).toHaveBeenCalledWith(expect.objectContaining({
+                method: 'DELETE',
+                url: '/api/v1/album/456',
+                params: { deleteFiles: true },
+            }));
+            expect(mockAxios.create).toHaveBeenCalledWith(expect.objectContaining({
+                baseURL: 'http://lidarr:8686',
+                headers: { 'X-Api-Key': 'test-api-key' },
+            }));
         });
 
         it('should skip Lidarr deletion when disabled', async () => {
@@ -207,7 +223,7 @@ describe('DiscoveryAlbumLifecycle', () => {
 
             await lifecycle.deleteRejectedAlbum(mockAlbum, disabledSettings);
 
-            expect(mockAxios.delete).not.toHaveBeenCalled();
+            expect(mockRequest).not.toHaveBeenCalled();
         });
 
         it('should skip Lidarr deletion when album has no lidarrAlbumId', async () => {
@@ -221,12 +237,12 @@ describe('DiscoveryAlbumLifecycle', () => {
 
             await lifecycle.deleteRejectedAlbum(albumWithoutLidarr, mockSettings);
 
-            expect(mockAxios.delete).not.toHaveBeenCalled();
+            expect(mockRequest).not.toHaveBeenCalled();
         });
 
         it('should ignore Lidarr 404 errors', async () => {
             const error = { response: { status: 404 }, message: 'Not Found' };
-            mockAxios.delete.mockRejectedValue(error);
+            mockRequest.mockRejectedValue(error);
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(null);
             (mockPrisma.discoveryTrack.deleteMany as jest.Mock).mockResolvedValue({});
             (mockPrisma.discoveryAlbum.update as jest.Mock).mockResolvedValue({});
@@ -236,7 +252,7 @@ describe('DiscoveryAlbumLifecycle', () => {
 
         it('should delete tracks and album from database', async () => {
             const dbAlbum = { id: 'album-db-1' };
-            mockAxios.delete.mockResolvedValue({ status: 200 });
+            mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(dbAlbum);
             (mockPrisma.track.deleteMany as jest.Mock).mockResolvedValue({});
             (mockPrisma.album.delete as jest.Mock).mockResolvedValue({});
@@ -254,7 +270,7 @@ describe('DiscoveryAlbumLifecycle', () => {
         });
 
         it('should delete discovery track records', async () => {
-            mockAxios.delete.mockResolvedValue({ status: 200 });
+            mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(null);
             (mockPrisma.discoveryTrack.deleteMany as jest.Mock).mockResolvedValue({});
             (mockPrisma.discoveryAlbum.update as jest.Mock).mockResolvedValue({});
@@ -267,7 +283,7 @@ describe('DiscoveryAlbumLifecycle', () => {
         });
 
         it('should mark discovery album as DELETED', async () => {
-            mockAxios.delete.mockResolvedValue({ status: 200 });
+            mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(null);
             (mockPrisma.discoveryTrack.deleteMany as jest.Mock).mockResolvedValue({});
             (mockPrisma.discoveryAlbum.update as jest.Mock).mockResolvedValue({});
@@ -281,7 +297,7 @@ describe('DiscoveryAlbumLifecycle', () => {
         });
 
         it('should throw error when database operation fails', async () => {
-            mockAxios.delete.mockResolvedValue({ status: 200 });
+            mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockRejectedValue(new Error('DB Error'));
 
             await expect(lifecycle.deleteRejectedAlbum(mockAlbum, mockSettings)).rejects.toThrow('DB Error');
@@ -348,7 +364,7 @@ describe('DiscoveryAlbumLifecycle', () => {
             ];
 
             (mockPrisma.discoveryAlbum.findMany as jest.Mock).mockResolvedValue(discoveryAlbums);
-            mockAxios.delete.mockResolvedValue({ status: 200 });
+            mockRequest.mockResolvedValue({ data: {}, status: 200 });
             (mockPrisma.album.findFirst as jest.Mock).mockResolvedValue(null);
             (mockPrisma.discoveryTrack.deleteMany as jest.Mock).mockResolvedValue({});
             (mockPrisma.discoveryAlbum.update as jest.Mock).mockResolvedValue({});
