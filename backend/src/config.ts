@@ -14,9 +14,6 @@ import {
 // quiet is a no-op on dotenv 16 and silences v17's per-boot injection tip line
 dotenv.config({ quiet: true });
 
-/** Process responsibilities enabled for this backend instance. */
-export type BackendProcessRole = "all" | "api" | "worker";
-
 // Lenient positive-int env read with a numeric fallback (matches the historical
 // `Number.parseInt(value || `${fallback}`, 10)` then `>0 ? : fallback` idiom).
 const positiveIntEnvOr = (
@@ -48,17 +45,6 @@ const TRACE_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
 const isTraceTruthy = (value: string | undefined): boolean => {
     const normalized = value?.trim().toLowerCase();
     return normalized ? TRACE_TRUTHY_VALUES.has(normalized) : false;
-};
-
-const resolveBackendProcessRole = (): BackendProcessRole => {
-    const raw = (process.env.BACKEND_PROCESS_ROLE || "all").trim().toLowerCase();
-    if (raw === "all" || raw === "api" || raw === "worker") {
-        return raw;
-    }
-    logger.warn(
-        `[Startup] Invalid BACKEND_PROCESS_ROLE="${process.env.BACKEND_PROCESS_ROLE}", defaulting to "all"`
-    );
-    return "all";
 };
 
 // Validate critical environment variables on startup
@@ -131,9 +117,6 @@ export const config = {
     // Canonical JWT/session signing secret (single derivation shared by token
     // signers). SESSION_SECRET is validated required above, so this is always a string.
     jwtSecret: process.env.JWT_SECRET || process.env.SESSION_SECRET!,
-
-    // API/worker process role selection (mirrors the entrypoint split).
-    backendProcessRole: resolveBackendProcessRole(),
 
     // One-shot admin password reset via env (consumed once at startup).
     adminResetPassword: process.env.ADMIN_RESET_PASSWORD,

@@ -207,29 +207,6 @@ describe("config module", () => {
         expect(fallback.config.jwtSecret).toBe(requiredEnv().SESSION_SECRET);
     });
 
-    it("defaults and validates the backend process role", async () => {
-        const defaultRole = await loadConfigModule({
-            BACKEND_PROCESS_ROLE: undefined,
-        });
-        expect(defaultRole.config.backendProcessRole).toBe("all");
-
-        const apiRole = await loadConfigModule({ BACKEND_PROCESS_ROLE: " API " });
-        expect(apiRole.config.backendProcessRole).toBe("api");
-
-        const workerRole = await loadConfigModule({
-            BACKEND_PROCESS_ROLE: "worker",
-        });
-        expect(workerRole.config.backendProcessRole).toBe("worker");
-
-        const invalidRole = await loadConfigModule({
-            BACKEND_PROCESS_ROLE: "scheduler",
-        });
-        expect(invalidRole.config.backendProcessRole).toBe("all");
-        expect(mockLoggerWarn).toHaveBeenCalledWith(
-            '[Startup] Invalid BACKEND_PROCESS_ROLE="scheduler", defaulting to "all"'
-        );
-    });
-
     it("enables public docs and strict decryption only for literal true", async () => {
         const enabled = await loadConfigModule({
             DOCS_PUBLIC: "true",

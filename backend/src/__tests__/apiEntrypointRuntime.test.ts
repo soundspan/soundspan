@@ -81,7 +81,8 @@ describe("api entrypoint runtime behavior", () => {
             port?: number;
             databaseUrl?: string;
             redisUrl?: string;
-            DOCS_PUBLIC?: string;
+            docsPublic?: boolean;
+            adminResetPassword?: string;
             features?: {
                 audioAnalysis?: boolean;
                 discovery?: boolean;
@@ -205,7 +206,8 @@ describe("api entrypoint runtime behavior", () => {
             port: 3006,
             databaseUrl: "postgresql://user:secret@db:5432/soundspan",
             redisUrl: "redis://redis:6379/0",
-            DOCS_PUBLIC: undefined,
+            docsPublic: false,
+            adminResetPassword: undefined,
             ...(configOverrides || {}),
             features: {
                 audioAnalysis: true,
@@ -1290,7 +1292,6 @@ describe("api entrypoint runtime behavior", () => {
         process.env = {
             ...originalEnv,
             BACKEND_PROCESS_ROLE: "api",
-            ADMIN_RESET_PASSWORD: "new-admin-password",
         };
 
         const setIntervalSpy = jest
@@ -1303,6 +1304,9 @@ describe("api entrypoint runtime behavior", () => {
         );
         const mocks = setupApiEntrypointMocks({
             bcryptHashImpl: adminPasswordHash,
+            configOverrides: {
+                adminResetPassword: "new-admin-password",
+            },
         });
 
         mocks.prisma.user.findFirst.mockResolvedValue({

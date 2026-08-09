@@ -388,7 +388,7 @@ app.get("/api/health/ready", async (req, res) => {
 // The raw JSON spec requires auth in production unless DOCS_PUBLIC=true.
 // Actual API calls from "Try it out" are protected by each endpoint's own auth.
 const specMiddleware =
-    config.nodeEnv === "production" && process.env.DOCS_PUBLIC !== "true"
+    config.nodeEnv === "production" && !config.docsPublic
         ? [requireAuth]
         : [];
 
@@ -473,7 +473,7 @@ async function checkRedisConnection() {
 }
 
 async function checkPasswordReset() {
-    const resetPassword = process.env.ADMIN_RESET_PASSWORD;
+    const resetPassword = config.adminResetPassword;
     if (!resetPassword) return;
 
     const bcrypt = await import("bcrypt");
