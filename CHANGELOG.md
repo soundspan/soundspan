@@ -140,6 +140,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/ci/backend-coverage-summary.mjs` now exits non-zero when
   `ENFORCE_COVERAGE_GATE=true` and the coverage summary is missing, closing the
   previous fail-open path.
+- Frontend polling hygiene: album/track preview playback no longer resumes the
+  main player over an active preview (a cleanup effect fired on every state
+  change, also destroying cached preview audio elements), and both preview
+  hooks now share one behavior — when a preview ends, errors, or unmounts, the
+  main player resumes only if the preview paused it.
+- TIDAL device-code authentication (both settings sections) now runs through a
+  shared `useDeviceAuthPolling` hook: re-clicking authenticate no longer leaks
+  the previous poll interval, the expiry timer is tracked and cleared on
+  success/cancel/unmount, and code expiry surfaces its error message instead
+  of being hidden by a stale-state closure.
+- Download status polling no longer forks a permanent extra poll chain each
+  time a `download-status-changed` event fires; all scheduling now flows
+  through a single tracked timer. `addPendingDownload` no longer performs side
+  effects inside its React state updater (StrictMode-safe).
+- Raw `setInterval` pollers (feature flags, presence heartbeat, active listen
+  sessions, job status, listen-together lobby discovery, device-link status)
+  now pause while the tab is hidden and refresh once on return to visibility
+  via a shared `useVisibilityGatedInterval` hook. The features provider also
+  no longer double-fetches on tab return (duplicate `focus` +
+  `visibilitychange` listeners). Presence heartbeats stop while a tab is
+  hidden, so backgrounded tabs no longer report the user as actively present.
 - Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
   `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
   at nonexistent `postgres`/`redis` services (the services are
