@@ -296,6 +296,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `/api/onboarding` routes are now rate-limited: `/register` (which mints the
   first admin account) sits on the strict auth limiter like `/api/auth/register`,
   and the rest of the onboarding wizard uses the general API limiter.
+- Internal-secret auth now fails closed on the published default sentinel: the
+  `requireInternalSecret` middleware (`x-internal-secret` guard on backend→sidecar
+  callbacks) previously rejected only when `INTERNAL_API_SECRET` was unset, so a
+  deployment left on the repo-published default `soundspan-internal-secret-change-me`
+  would accept forged internal calls. It now rejects (403) when the secret is unset
+  **or** equal to that known default, restoring parity with the FastAPI sidecar guard
+  (`sidecar_runtime_utils.py`) and the fail-fast-on-default posture of
+  `encryption.ts`.
 
 ### Added
 
