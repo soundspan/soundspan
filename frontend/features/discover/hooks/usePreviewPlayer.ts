@@ -1,33 +1,98 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import {
+    useState,
+    useCallback,
+    useEffect,
+    useRef,
+    type Dispatch,
+    type SetStateAction,
+} from "react";
 import { toast } from "sonner";
 import { createRuntimeAudioEngine } from "@/lib/audio-engine";
 
 const playbackEngine = createRuntimeAudioEngine();
+
+function resumeMainPlayerIfPaused(pausedRef: { current: boolean }): void {
+    if (!pausedRef.current) return;
+    playbackEngine.play();
+    pausedRef.current = false;
+}
+
+function createPreviewAudio(
+    albumId: string,
+    previewUrl: string,
+    previewAudios: Map<string, HTMLAudioElement>,
+    setCurrentPreview: Dispatch<SetStateAction<string | null>>,
+    mainPlayerWasPausedRef: { current: boolean },
+): HTMLAudioElement {
+    const audio = new Audio(previewUrl);
+    audio.onended = () => {
+        setCurrentPreview(null);
+        resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
+    };
+    audio.onerror = () => {
+        toast.error("Failed to load preview");
+        setCurrentPreview(null);
+        if (previewAudios.get(albumId) === audio) {
+            previewAudios.delete(albumId);
+        }
+        resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
+    };
+    previewAudios.set(albumId, audio);
+    return audio;
+}
+
+function stopPreviewAudio(audio?: HTMLAudioElement): void {
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+}
+
+function startPreview(
+    albumId: string,
+    previewUrl: string,
+    previewAudios: Map<string, HTMLAudioElement>,
+    setCurrentPreview: Dispatch<SetStateAction<string | null>>,
+    mainPlayerWasPausedRef: { current: boolean },
+): void {
+    if (playbackEngine.isPlaying()) {
+        playbackEngine.pause();
+        mainPlayerWasPausedRef.current = true;
+    }
+
+    const audio = previewAudios.get(albumId) ?? createPreviewAudio(
+        albumId,
+        previewUrl,
+        previewAudios,
+        setCurrentPreview,
+        mainPlayerWasPausedRef,
+    );
+    audio.play().then(() => {
+        setCurrentPreview(albumId);
+    }).catch((error) => {
+        toast.error("Failed to play preview: " + error.message);
+        setCurrentPreview(null);
+        resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
+    });
+}
 
 /**
  * Executes usePreviewPlayer.
  */
 export function usePreviewPlayer() {
     const [currentPreview, setCurrentPreview] = useState<string | null>(null);
-    const [previewAudios, setPreviewAudios] = useState<
-        Map<string, HTMLAudioElement>
-    >(new Map());
+    const previewAudiosRef = useRef<Map<string, HTMLAudioElement>>(new Map());
     const mainPlayerWasPausedRef = useRef(false);
 
     // Cleanup audio on unmount
     useEffect(() => {
         return () => {
-            previewAudios.forEach((audio) => {
+            previewAudiosRef.current.forEach((audio) => {
                 audio.pause();
                 audio.src = "";
             });
-            // Resume main player if needed
-            if (mainPlayerWasPausedRef.current) {
-                playbackEngine.play();
-                mainPlayerWasPausedRef.current = false;
-            }
+            resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
         };
-    }, [previewAudios]);
+    }, []);
 
     const handleTogglePreview = useCallback(
         (albumId: string, previewUrl: string) => {
@@ -38,64 +103,26 @@ export function usePreviewPlayer() {
 
             // Stop currently playing preview if any
             if (currentPreview && currentPreview !== albumId) {
-                const audio = previewAudios.get(currentPreview);
-                if (audio) {
-                    audio.pause();
-                    audio.currentTime = 0;
-                }
+                stopPreviewAudio(previewAudiosRef.current.get(currentPreview));
             }
 
             // Toggle the clicked preview
             if (currentPreview === albumId) {
-                const audio = previewAudios.get(albumId);
-                if (audio) {
-                    audio.pause();
-                    audio.currentTime = 0;
-                }
+                stopPreviewAudio(previewAudiosRef.current.get(albumId));
                 setCurrentPreview(null);
-                // Resume main player if it was playing before
-                if (mainPlayerWasPausedRef.current) {
-                    playbackEngine.play();
-                    mainPlayerWasPausedRef.current = false;
-                }
-            } else {
-                // Pause the main player if it's playing
-                if (playbackEngine.isPlaying()) {
-                    playbackEngine.pause();
-                    mainPlayerWasPausedRef.current = true;
-                }
-
-                let audio = previewAudios.get(albumId);
-                if (!audio) {
-                    audio = new Audio(previewUrl);
-                    audio.onended = () => {
-                        setCurrentPreview(null);
-                        // Resume main player if it was playing before
-                        if (mainPlayerWasPausedRef.current) {
-                            playbackEngine.play();
-                            mainPlayerWasPausedRef.current = false;
-                        }
-                    };
-                    audio.onerror = () => {
-                        toast.error("Failed to load preview");
-                        setCurrentPreview(null);
-                    };
-                    const newMap = new Map(previewAudios);
-                    newMap.set(albumId, audio);
-                    setPreviewAudios(newMap);
-                }
-
-                audio
-                    .play()
-                    .then(() => {
-                        setCurrentPreview(albumId);
-                    })
-                    .catch((error) => {
-                        toast.error("Failed to play preview: " + error.message);
-                    });
+                resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
+                return;
             }
+
+            startPreview(
+                albumId,
+                previewUrl,
+                previewAudiosRef.current,
+                setCurrentPreview,
+                mainPlayerWasPausedRef,
+            );
         },
-        [currentPreview, previewAudios]
+        [currentPreview],
     );
 
     return {

@@ -11,6 +11,15 @@ interface PreviewableTrack {
     title: string;
 }
 
+function resumeMainPlayerIfPaused(pausedRef: { current: boolean }): void {
+    if (!pausedRef.current) return;
+    playbackEngine.play();
+    pausedRef.current = false;
+}
+
+/**
+ * Manages fetching, playback, and lifecycle state for track previews.
+ */
 export function useTrackPreview<T extends PreviewableTrack>() {
     const [previewTrack, setPreviewTrack] = useState<string | null>(null);
     const [previewPlaying, setPreviewPlaying] = useState(false);
@@ -103,13 +112,14 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             audio.onended = () => {
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
-                mainPlayerWasPausedRef.current = false;
+                resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
             };
 
             audio.onerror = () => {
                 toast.error("Failed to play preview");
                 setPreviewPlaying(false);
                 setPreviewTrack(null);
+                resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
             };
 
             try {
@@ -139,6 +149,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
             toast.error("Failed to play preview");
             setPreviewPlaying(false);
             setPreviewTrack(null);
+            resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
         } finally {
             if (inFlightTrackIdRef.current === track.id) {
                 inFlightTrackIdRef.current = null;
@@ -169,7 +180,7 @@ export function useTrackPreview<T extends PreviewableTrack>() {
                 previewAudioRef.current.pause();
                 previewAudioRef.current = null;
             }
-            mainPlayerWasPausedRef.current = false;
+            resumeMainPlayerIfPaused(mainPlayerWasPausedRef);
         };
     }, []);
 
