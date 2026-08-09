@@ -27,6 +27,11 @@ export interface ServiceTestResult {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ApiData = any;
 
+// Mixin base constructor for domain modules. `any[]` is required by the TS
+// mixin pattern; scoped to this single alias.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ApiClientConstructor = abstract new (...args: any[]) => ApiClientCore;
+
 
 export function toSearchParams(params: Record<string, string | number | boolean | undefined>): URLSearchParams {
     const entries: Record<string, string> = {};
