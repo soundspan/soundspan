@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { X } from "lucide-react";
 import { useAudioState } from "@/lib/audio-state-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { usePlaybackStatus } from "@/lib/audio-playback-context";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import {
     useStreamBitrate,
@@ -66,7 +66,7 @@ export function PlaybackQualityBadgeWithStats({
     const isMobile = useIsMobile();
 
     const { currentTrack } = useAudioState();
-    const { streamProfile } = useAudioPlayback();
+    const { streamProfile } = usePlaybackStatus();
     const { tidalQuality, localQuality, bitrate, codec } = useStreamBitrate();
 
     const clearCloseTimeout = useCallback(() => {

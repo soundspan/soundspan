@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/utils/cn";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
-import { useAudioState, useAudioPlayback } from "@/lib/audio-context";
+import { useAudioState, usePlaybackStatus } from "@/lib/audio-context";
 import { useDiscoverData } from "@/features/discover/hooks/useDiscoverData";
 import { useDiscoverActions } from "@/features/discover/hooks/useDiscoverActions";
 import { useDiscoverProviderGapFill } from "@/features/discover/hooks/useDiscoverProviderGapFill";
@@ -65,7 +65,7 @@ export default function DiscoverWeeklyPage() {
 function DiscoverWeeklyPageContent() {
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const [showSettings, setShowSettings] = useState(false);
     const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
     const [isAddingToPlaylist, setIsAddingToPlaylist] = useState(false);

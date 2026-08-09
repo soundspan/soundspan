@@ -52,7 +52,8 @@ export interface PlaybackStreamProfile {
     bitrateKbps: number | null;
 }
 
-interface AudioPlaybackContextType {
+/** Composite playback state retained for backward-compatible consumers. */
+export interface AudioPlaybackContextType {
     isPlaying: boolean;
     currentTime: number;
     duration: number;
@@ -81,8 +82,45 @@ interface AudioPlaybackContextType {
     clearAudioError: () => void; // Clear the audio error state
 }
 
-const AudioPlaybackContext = createContext<
-    AudioPlaybackContextType | undefined
+/** Playback progress values that change on published clock ticks. */
+export interface PlaybackProgressContextType {
+    currentTime: number;
+}
+
+/** Playback status values and setters that do not depend on currentTime. */
+export interface PlaybackStatusContextType {
+    isPlaying: boolean;
+    duration: number;
+    isBuffering: boolean;
+    targetSeekPosition: number | null;
+    canSeek: boolean;
+    downloadProgress: number | null;
+    isSeekLocked: boolean;
+    audioError: string | null;
+    playbackState: PlaybackState;
+    streamProfile: PlaybackStreamProfile | null;
+    setIsPlaying: (playing: boolean) => void;
+    setCurrentTime: (time: number) => void;
+    setCurrentTimeFromEngine: (
+        time: number,
+        invocationTrackId?: string | null
+    ) => void;
+    setDuration: (duration: number) => void;
+    setIsBuffering: (buffering: boolean) => void;
+    setTargetSeekPosition: (position: number | null) => void;
+    setCanSeek: (canSeek: boolean) => void;
+    setDownloadProgress: (progress: number | null) => void;
+    setStreamProfile: (profile: PlaybackStreamProfile | null) => void;
+    lockSeek: (targetTime: number) => void;
+    unlockSeek: () => void;
+    clearAudioError: () => void;
+}
+
+const PlaybackProgressContext = createContext<
+    PlaybackProgressContextType | undefined
+>(undefined);
+const PlaybackStatusContext = createContext<
+    PlaybackStatusContextType | undefined
 >(undefined);
 
 // LocalStorage keys
@@ -640,11 +678,15 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         };
     }, [isHydrated, savePlaybackProgressToServer]);
 
+    const progressValue = useMemo(
+        () => ({ currentTime }),
+        [currentTime]
+    );
+
     // Memoize to prevent re-renders when values haven't changed
-    const value = useMemo(
+    const statusValue = useMemo(
         () => ({
             isPlaying,
-            currentTime,
             duration,
             isBuffering,
             targetSeekPosition,
@@ -671,7 +713,6 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         }),
         [
             isPlaying,
-            currentTime,
             duration,
             isBuffering,
             targetSeekPosition,
@@ -690,21 +731,59 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     );
 
     return (
-        <AudioPlaybackContext.Provider value={value}>
-            {children}
-        </AudioPlaybackContext.Provider>
+        <PlaybackStatusContext.Provider value={statusValue}>
+            <PlaybackProgressContext.Provider value={progressValue}>
+                {children}
+            </PlaybackProgressContext.Provider>
+        </PlaybackStatusContext.Provider>
     );
 }
 
 /**
- * Executes useAudioPlayback.
+ * Reads playback status and playback setter state.
  */
-export function useAudioPlayback() {
-    const context = useContext(AudioPlaybackContext);
+export function usePlaybackStatus(): PlaybackStatusContextType {
+    const context = useContext(PlaybackStatusContext);
     if (!context) {
         throw new Error(
-            "useAudioPlayback must be used within AudioPlaybackProvider"
+            "usePlaybackStatus must be used within AudioPlaybackProvider"
         );
     }
     return context;
+}
+
+/**
+ * Reads the current playback progress.
+ */
+export function usePlaybackProgress(): PlaybackProgressContextType {
+    const context = useContext(PlaybackProgressContext);
+    if (!context) {
+        throw new Error(
+            "usePlaybackProgress must be used within AudioPlaybackProvider"
+        );
+    }
+    return context;
+}
+
+/**
+ * Reads the composite playback context.
+ *
+ * @deprecated Use usePlaybackStatus and usePlaybackProgress instead.
+ */
+export function useAudioPlayback(): AudioPlaybackContextType {
+    const status = useContext(PlaybackStatusContext);
+    const progress = useContext(PlaybackProgressContext);
+    const composite = useMemo(
+        () =>
+            status && progress
+                ? { ...status, currentTime: progress.currentTime }
+                : null,
+        [status, progress]
+    );
+    if (!composite) {
+        throw new Error(
+            'useAudioPlayback must be used within AudioPlaybackProvider'
+        );
+    }
+    return composite;
 }

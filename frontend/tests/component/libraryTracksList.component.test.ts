@@ -32,6 +32,9 @@ mock.module("@/lib/audio-playback-context", {
         useAudioPlayback: () => ({
             isPlaying: playbackState.isPlaying,
         }),
+        usePlaybackStatus: () => ({
+            isPlaying: playbackState.isPlaying,
+        }),
     },
 });
 

@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { Play, Pause } from "lucide-react";
 import Link from "next/link";
 import { useAudioState } from "@/lib/audio-state-context";
-import { useAudioPlayback } from "@/lib/audio-playback-context";
+import { usePlaybackStatus } from "@/lib/audio-playback-context";
 import { useAudioControls } from "@/lib/audio-controls-context";
 import { api } from "@/lib/api";
 import { formatTime } from "@/utils/formatTime";
@@ -34,7 +34,7 @@ function toRowItem(track: LibraryTrack): TrackRowItem {
  */
 export function LibraryTracksList({ tracks, limit = 10 }: LibraryTracksListProps) {
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { playTracks, pause, resume } = useAudioControls();
     const allTracks = tracks ?? [];
     const visibleTracks =

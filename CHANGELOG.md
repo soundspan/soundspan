@@ -164,6 +164,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Frontend playback context split for playback re-render hygiene: the single
+  `AudioPlaybackContext` is now served as two contexts by the same
+  `AudioPlaybackProvider` — a high-frequency progress context (`currentTime`,
+  read via the new `usePlaybackProgress()` hook) and a low-frequency status
+  context (`isPlaying`, `duration`, `streamProfile`, seek/buffer flags, and all
+  setters, read via the new `usePlaybackStatus()` hook). Status-only consumers
+  (the album/playlist/discover pages, `LibraryTracksList`, and the playback
+  quality badge) were migrated to `usePlaybackStatus()` so they no longer
+  re-render on every ~1 Hz clock tick during playback. `useAudioPlayback()` is
+  retained unchanged as a deprecated composite (same shape, same referential
+  stability, same out-of-provider error) for the remaining consumers; no
+  playback behavior changed. Prefer the two granular hooks going forward.
 - Media-source contract: the hand-copied `local`/`tidal`/`youtube`/`youtube-direct`
   source unions scattered across the frontend and backend now derive from
   `CanonicalMediaSource` in `@soundspan/media-metadata-contract` instead of being

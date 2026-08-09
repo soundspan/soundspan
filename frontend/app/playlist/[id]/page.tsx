@@ -7,7 +7,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { CoverMosaic } from "@/components/ui/CoverMosaic";
 import { createMosaicCandidates, selectMosaicCovers } from "@/utils/mosaicCoverSelection";
 import { api } from "@/lib/api";
-import { useAudioState, useAudioPlayback, useAudioControls, Track as AudioTrack } from "@/lib/audio-context";
+import { useAudioState, usePlaybackStatus, useAudioControls, Track as AudioTrack } from "@/lib/audio-context";
 import { cn } from "@/utils/cn";
 import { shuffleArray } from "@/utils/shuffle";
 import { formatTime } from "@/utils/formatTime";
@@ -164,7 +164,7 @@ export default function PlaylistDetailPage() {
     const { toast } = useToast();
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { playTracks, playNow, pause, resume, addTracksToQueue } = useAudioControls();
     const playlistId = params.id as string;
 

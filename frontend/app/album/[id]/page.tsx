@@ -2,7 +2,7 @@
 
 import { use, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAudioState, useAudioPlayback, useAudioControls } from "@/lib/audio-context";
+import { useAudioState, usePlaybackStatus, useAudioControls } from "@/lib/audio-context";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useImageColor } from "@/hooks/useImageColor";
 import { api } from "@/lib/api";
@@ -57,7 +57,7 @@ export default function AlbumPage({ params }: AlbumPageProps) {
     const router = useRouter();
     // Use split hooks to avoid re-renders from currentTime updates
     const { currentTrack } = useAudioState();
-    const { isPlaying } = useAudioPlayback();
+    const { isPlaying } = usePlaybackStatus();
     const { pause } = useAudioControls();
     const { isInGroup } = useListenTogether();
 

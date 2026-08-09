@@ -154,6 +154,9 @@ mock.module("@/lib/audio-playback-context", {
         useAudioPlayback: () => ({
             streamProfile: null,
         }),
+        usePlaybackStatus: () => ({
+            streamProfile: null,
+        }),
     },
 });
 

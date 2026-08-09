@@ -21,7 +21,11 @@ export { AudioControlsProvider } from "./audio-controls-context";
 
 // Re-export individual hooks
 export { useAudioState } from "./audio-state-context";
-export { useAudioPlayback } from "./audio-playback-context";
+export {
+    useAudioPlayback,
+    usePlaybackProgress,
+    usePlaybackStatus,
+} from "./audio-playback-context";
 export { useAudioControls } from "./audio-controls-context";
 
 // Re-export the unified hook (backward compatibility)

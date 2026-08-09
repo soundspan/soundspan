@@ -130,6 +130,9 @@ mock.module("@/lib/audio-context", {
         useAudioPlayback: () => ({
             isPlaying: state.isPlaying,
         }),
+        usePlaybackStatus: () => ({
+            isPlaying: state.isPlaying,
+        }),
         useAudioControls: () => ({
             playTracks: () => undefined,
             playNow: () => undefined,
