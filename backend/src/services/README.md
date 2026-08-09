@@ -64,6 +64,7 @@ Start-here guide for business logic modules in `backend/src/services`.
 | `backend/src/services/moodBucketService.ts` | Core |
 | `backend/src/services/musicbrainz.ts` | Core |
 | `backend/src/services/musicScanner.ts` | Core |
+| `backend/src/services/nativeCoverHealing.ts` | Core |
 | `backend/src/services/notificationPolicyService.ts` | Core |
 | `backend/src/services/notificationService.ts` | Core |
 | `backend/src/services/outboundUrlSafety.ts` | Core |
