@@ -32,7 +32,11 @@ Status labels:
 
 Experimental feature note:
 
-- Segmented-streaming variables are documented separately in [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md).
+- Segmented-streaming variables are documented in detail in [`EXPERIMENTAL_SEGMENTED_STREAMING.md`](EXPERIMENTAL_SEGMENTED_STREAMING.md). They form four families, all optional with safe defaults:
+  - **Cache:** `SEGMENTED_STREAMING_CACHE_PATH` (default: `TRANSCODE_CACHE_PATH`), `SEGMENTED_STREAMING_CACHE_MAX_GB` (default: `TRANSCODE_CACHE_MAX_GB`), `SEGMENTED_STREAMING_CACHE_PRUNE_INTERVAL_MS`, `SEGMENTED_STREAMING_CACHE_MIN_AGE_MS`, `SEGMENTED_STREAMING_CACHE_PRUNE_TARGET_RATIO` (clamped to `0.1`–`0.99`), and `SEGMENTED_STREAMING_CACHE_SCHEMA_VERSION`.
+  - **DASH build lock:** `SEGMENTED_STREAMING_DASH_BUILD_LOCK_ENABLED` (default `true`), `SEGMENTED_STREAMING_DASH_BUILD_LOCK_PREFIX` (default `segmented-streaming:dash-build-lock`), `SEGMENTED_STREAMING_DASH_BUILD_LOCK_TTL_MS`.
+  - **Segment duration:** `SEGMENTED_LOCAL_SEG_DURATION_SEC` (positive number).
+  - **Trace logging:** `STREAMING_TRACE_LOGS` / `SEGMENTED_STREAMING_TRACE_LOGS` (truthy: `1`, `true`, `yes`, `on`).
 
 ## Container Map
 
@@ -83,6 +87,7 @@ Experimental feature note:
 | `REDIS_FLUSH_ON_STARTUP` | `backend`, `backend-worker`, `soundspan` (AIO) | Optional | `false` everywhere (compose files, the Helm chart's `config.redisFlushOnStartup`, and the backend image's entrypoint fallback) | When `true`, the backend image's entrypoint runs a destructive `FLUSHALL` against the configured Redis at container start. The safe default is `false` in every shipped config **and** in the entrypoint itself, preserving the Redis Streams/consumer-group state the analyzers rely on; opt in explicitly only for a dedicated-Redis cache clear. |
 | `TRANSCODE_CACHE_PATH` | `backend` | Optional | `/app/cache/transcodes` (compose) | Directory for transcoding cache files. |
 | `TRANSCODE_CACHE_MAX_GB` | `backend` | Optional | `10` | Max transcode cache size in GB. |
+| `FFMPEG_PATH` | `backend` | Optional | bundled/system ffmpeg | Absolute path override for the ffmpeg binary used by segmented streaming; when unset, `/usr/bin/ffmpeg` is used if present, otherwise the bundled `@ffmpeg-installer/ffmpeg`. |
 | `ALLOWED_ORIGINS` | `backend` | Optional | unset (production denies cross-origin; development allows all) | Allowed CORS origins (comma-separated), e.g. `https://app.example.com`. When unset, production denies cross-origin browser requests (deny-by-default; same-origin and no-`Origin` requests unaffected). |
 | `CORS_ALLOW_ALL` | `backend` | Optional | `false` | Set `true` to restore the legacy permissive CORS behavior (reflect any origin with credentials) when no `ALLOWED_ORIGINS` allowlist is configured. Prefer `ALLOWED_ORIGINS`. See `docs/UPGRADING.md`. |
 | `LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED` | `backend` | Optional | `false` | Set `true` to let `POST /api/webhooks/lidarr` accept requests when no webhook secret is configured in System Settings (legacy fail-open behavior). Default rejects with 401 (fail closed). See `docs/UPGRADING.md`. |
@@ -146,10 +151,10 @@ Experimental feature note:
 | `DEEZER_API_KEY` | `backend`, `backend-worker` | Optional | unset | Deezer API key override. |
 | `DISCOVERY_MODE` | `backend`, `backend-worker` | Optional | `recommendation` | Discovery mode (`recommendation` or `legacy`). |
 | `AUDIOBOOKSHELF_URL` | `backend`, `backend-worker` | Optional | unset | Audiobookshelf service URL (env fallback path). |
-| `AUDIOBOOKSHELF_API_KEY` | `backend`, `backend-worker` | Optional (required if using API-key auth fallback) | unset | Audiobookshelf API key for env-based fallback configuration. |
-| `AUDIOBOOKSHELF_TOKEN` | `backend`, `backend-worker` | Optional (required if using token auth fallback) | unset | Audiobookshelf token for env-based fallback configuration. |
+| `AUDIOBOOKSHELF_API_KEY` | `backend`, `backend-worker` | Optional (required if using the env fallback) | unset | Audiobookshelf API key for env-based fallback configuration. Consumed with `AUDIOBOOKSHELF_URL` via `config.audiobookshelf` when no database-stored Audiobookshelf settings exist. |
 | `TIDAL_SIDECAR_URL` | `backend` | Optional | `http://tidal-downloader:8585` | URL for TIDAL sidecar service. |
 | `YTMUSIC_STREAMER_URL` | `backend` | Optional | `http://ytmusic-streamer:8586` | URL for YouTube Music sidecar service. |
+| `YTMUSIC_REGION` | `backend` | Optional | `US` | Region hint passed to the YouTube Music browse/discovery proxies. |
 
 ## Sidecar Variables
 

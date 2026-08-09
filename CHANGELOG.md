@@ -182,7 +182,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     activity tabs (History, Notifications, Active Downloads).
   - Replaced index-based React keys with stable content-derived keys in
     `PreviewEpisodes` and `SyncedLyrics`.
-
+- Backend: began consolidating scattered `process.env` reads behind the
+  `backend/src/config.ts` boundary mandated by `AGENTS.md`. Added typed config
+  sections (`jwtSecret`, `docsPublic`, `adminResetPassword`,
+  `settingsDecryptFailClosed`, `ytmusicRegion`, `tidal`, `listenTogether`,
+  `readiness`, `segmentedStreaming`, and an `audiobookshelf` getter) and migrated
+  the streaming services (Tidal download/streaming sidecar URL and decrypt-fail-
+  closed flag), the segmented-streaming session-token secret, the Audiobookshelf
+  env fallback, and the API docs-public/admin-reset entrypoint gates to read from
+  it. The segmented session token, `middleware/auth`, and these services now share
+  the single `config.jwtSecret` derivation (`JWT_SECRET` else `SESSION_SECRET`)
+  instead of re-deriving it independently. A new backend guard test enforces the
+  boundary as a ratchet: only `config.ts`/`config/**` may read `process.env`
+  (build-metadata `npm_package_version` excepted); every other reader must stay on
+  an allowlist that can only shrink. No runtime behavior changed. Remaining
+  subsystems (segmented-streaming, Listen Together socket, dependency-readiness,
+  browse, and the `BACKEND_PROCESS_ROLE`/`worker.ts` split) remain on the
+  allowlist and are tracked for follow-up migration.
+- Backend: fixed a dead `config.audiobookshelf` block that read the unused
+  `AUDIOBOOKSHELF_TOKEN` variable instead of the `AUDIOBOOKSHELF_API_KEY` the live
+  Audiobookshelf service actually consumes; `AUDIOBOOKSHELF_TOKEN` (never read by
+  any code path) is removed from the environment-variable reference.
 - Backend: introduced a single consolidated, typed Lidarr HTTP client
   (`backend/src/services/lidarr/lidarrHttpClient.ts`) as the standard boundary
   for outbound Lidarr calls. It wraps one reusable axios instance with bounded
