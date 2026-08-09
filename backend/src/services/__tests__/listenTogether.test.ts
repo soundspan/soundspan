@@ -539,9 +539,17 @@ describe("listenTogether service", () => {
         );
 
         groupManager.has.mockReturnValueOnce(false);
+        prisma.syncGroup.findUnique.mockResolvedValueOnce({
+            hostUserId: "host-1",
+            isActive: true,
+        });
         prisma.$transaction.mockResolvedValueOnce(undefined);
 
         await listenTogether.endGroup("host-1", "group-2");
+        expect(prisma.syncGroup.findUnique).toHaveBeenCalledWith({
+            where: { id: "group-2" },
+            select: { hostUserId: true, isActive: true },
+        });
         expect(groupManager.endGroup).toHaveBeenCalledTimes(1);
         expect(groupManager.remove).toHaveBeenCalledWith("group-2");
     });

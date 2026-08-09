@@ -135,7 +135,7 @@ describe("listen together socket runtime behavior", () => {
         }
 
         // Mutable config mock so tests can exercise ALLOWED_ORIGINS allowlist
-        // semantics ([] = unset → allow all, matching the Express app).
+        // semantics ([] = unset → deny cross-origin in production).
         const configMock = {
             nodeEnv: "production",
             allowedOrigins: [] as boolean | string[],
@@ -314,10 +314,14 @@ describe("listen together socket runtime behavior", () => {
             return allowed;
         };
 
-        // ALLOWED_ORIGINS unset ([]) → allow all origins, matching index.ts.
-        expect(evaluate("https://anything.example")).toBe(true);
+        // ALLOWED_ORIGINS unset ([]) → deny cross-origin in production.
+        expect(evaluate("https://anything.example")).toBe(false);
         // Requests with no Origin header (same-origin) are always allowed.
         expect(evaluate(undefined)).toBe(true);
+
+        // CORS_ALLOW_ALL restores permissive behavior.
+        mocks.configMock.allowedOrigins = true;
+        expect(evaluate("https://anything.example")).toBe(true);
 
         // A configured allowlist is enforced.
         mocks.configMock.allowedOrigins = ["https://app.example"];
@@ -1265,6 +1269,7 @@ describe("listen together socket runtime behavior", () => {
         const mocks = setupListenTogetherSocketMocks();
         const { socketService, eventHandlers } = bootstrapConnectedSocket(mocks);
 
+        mocks.configMock.allowedOrigins = ["https://example.test"];
         const originCallback = mocks.getServerOptions().cors.origin;
         const corsAck = jest.fn();
         originCallback("https://example.test", corsAck);

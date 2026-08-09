@@ -23,6 +23,15 @@ jest.mock("../../jobs/queueCleaner", () => ({
     },
 }));
 
+const mockConfig = {
+    webhooks: {
+        lidarrAllowUnauthenticated: true,
+    },
+};
+jest.mock("../../config", () => ({
+    config: mockConfig,
+}));
+
 const mockGetSystemSettings = jest.fn();
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: (...args: unknown[]) => mockGetSystemSettings(...args),
@@ -94,6 +103,7 @@ describe("webhooks routes runtime", () => {
 
         process.env.npm_package_version = "9.9.9";
         process.env.DEBUG_WEBHOOKS = "false";
+        mockConfig.webhooks.lidarrAllowUnauthenticated = true;
 
         mockGetSystemSettings.mockResolvedValue({
             lidarrEnabled: true,
@@ -193,6 +203,20 @@ describe("webhooks routes runtime", () => {
         expect(res.statusCode).toBe(200);
         expect(mockLoggerWarn).toHaveBeenCalledWith(
             expect.stringContaining("WITHOUT authentication")
+        );
+
+        mockLoggerWarn.mockClear();
+        mockConfig.webhooks.lidarrAllowUnauthenticated = false;
+        const rejectedRes = createRes();
+
+        await postLidarr(req, rejectedRes);
+
+        expect(rejectedRes.statusCode).toBe(401);
+        expect(rejectedRes.body).toEqual({
+            error: "Unauthorized - webhook secret not configured",
+        });
+        expect(mockLoggerWarn).toHaveBeenCalledWith(
+            expect.stringContaining("rejected because no secret")
         );
     });
 

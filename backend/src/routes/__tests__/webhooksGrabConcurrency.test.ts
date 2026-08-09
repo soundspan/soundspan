@@ -38,6 +38,9 @@ jest.mock("../../config", () => ({
         music: {
             musicPath: "/music-default",
         },
+        webhooks: {
+            lidarrAllowUnauthenticated: true,
+        },
     },
 }));
 

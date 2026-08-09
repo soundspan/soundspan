@@ -480,8 +480,9 @@ export function setupListenTogetherSocket(httpServer: HttpServer): Server {
         path: "/socket.io/listen-together",
         cors: {
             // Same ALLOWED_ORIGINS allowlist semantics as the Express app
-            // (utils/cors.ts): no allowlist configured → allow all origins
-            // (self-hosted default); a configured allowlist is enforced.
+            // (utils/cors.ts): an unset allowlist denies cross-origin requests
+            // in production; CORS_ALLOW_ALL=true restores permissive behavior,
+            // while development continues to allow all origins.
             //
             // Deny here means CORS headers are OMITTED, not that the
             // handshake is rejected: engine.io feeds this into the `cors`
