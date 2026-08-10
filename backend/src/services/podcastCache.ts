@@ -208,7 +208,10 @@ export class PodcastCacheService {
                 return null;
             }
 
-            const response = await fetch(safeUrl, { redirect: "error" });
+            const response = await fetch(safeUrl, {
+                redirect: "error",
+                signal: AbortSignal.timeout(15000),
+            });
 
             if (!response.ok) {
                 throw new Error(

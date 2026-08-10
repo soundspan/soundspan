@@ -91,6 +91,10 @@ describe("PodcastCacheService", () => {
         fetchMock.mockResolvedValue(okResponse());
     });
 
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
     it("syncAllCovers tracks synced, skipped, and failed podcast updates", async () => {
         const service = new PodcastCacheService();
 
@@ -155,6 +159,53 @@ describe("PodcastCacheService", () => {
             },
         });
         expect(fsPromises.writeFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("syncAllCovers skips a timed-out cover and continues syncing", async () => {
+        const service = new PodcastCacheService();
+        const timeoutError = Object.assign(
+            new Error("The operation was aborted due to timeout"),
+            { name: "TimeoutError" },
+        );
+
+        prisma.podcast.findMany.mockResolvedValueOnce([
+            {
+                id: "pod-timeout",
+                title: "Timeout",
+                imageUrl: "https://img.example/timeout.jpg",
+            },
+            {
+                id: "pod-ok",
+                title: "OK",
+                imageUrl: "https://img.example/ok.jpg",
+            },
+        ]);
+        fetchMock
+            .mockRejectedValueOnce(timeoutError)
+            .mockResolvedValueOnce(okResponse());
+
+        const result = await service.syncAllCovers();
+
+        expect(result).toEqual({
+            synced: 1,
+            failed: 0,
+            skipped: 1,
+            errors: [],
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(prisma.podcast.update).toHaveBeenCalledTimes(1);
+        expect(prisma.podcast.update).toHaveBeenCalledWith({
+            where: { id: "pod-ok" },
+            data: {
+                localCoverPath: path.join(
+                    "/srv/music",
+                    "cover-cache",
+                    "podcasts",
+                    "podcast_pod-ok.jpg",
+                ),
+            },
+        });
+        expect(fsPromises.writeFile).toHaveBeenCalledTimes(1);
     });
 
     it("syncAllCovers rethrows fatal setup failures", async () => {
@@ -263,6 +314,59 @@ describe("PodcastCacheService", () => {
             "Failed to download cover for podcast pod-net:",
             "network error",
         );
+    });
+
+    it("downloadCover passes a timeout signal and handles its abort", async () => {
+        const service = new PodcastCacheService();
+        const abortController = new AbortController();
+        const timeoutSpy = jest
+            .spyOn(AbortSignal, "timeout")
+            .mockReturnValue(abortController.signal);
+        let fetchOptions: RequestInit | undefined;
+        let markFetchStarted: () => void = () => undefined;
+        const fetchStarted = new Promise<void>((resolve) => {
+            markFetchStarted = resolve;
+        });
+
+        fetchMock.mockImplementationOnce(
+            (
+                _url: string | URL | Request,
+                options?: RequestInit,
+            ): Promise<never> => {
+                fetchOptions = options;
+                markFetchStarted();
+                return new Promise((_resolve, reject) => {
+                    abortController.signal.addEventListener(
+                        "abort",
+                        () => {
+                            reject(
+                                Object.assign(
+                                    new Error(
+                                        "The operation was aborted due to timeout",
+                                    ),
+                                    { name: "TimeoutError" },
+                                ),
+                            );
+                        },
+                        { once: true },
+                    );
+                });
+            },
+        );
+
+        const download = (service as any).downloadCover(
+            "pod-timeout",
+            "https://img.example/timeout.jpg",
+            "podcast",
+        );
+        await fetchStarted;
+        abortController.abort();
+
+        await expect(download).resolves.toBeNull();
+        expect(timeoutSpy).toHaveBeenCalledWith(15000);
+        expect(fetchOptions?.signal).toBeInstanceOf(AbortSignal);
+        expect(fetchOptions?.signal).toBe(abortController.signal);
+        expect(fsPromises.writeFile).not.toHaveBeenCalled();
     });
 
     it("downloadCover rejects private/localhost URLs (SSRF protection)", async () => {

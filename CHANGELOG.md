@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Podcast cover downloads now time out after 15 seconds so an unresponsive
+  image host can no longer stall the cover-sync loops.
 - Fixed the tidal-downloader stream-URL cache race where concurrent mutation
   during invalidation iteration could raise `RuntimeError` and abort
   stream/refresh requests.
