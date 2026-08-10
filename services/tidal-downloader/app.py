@@ -540,11 +540,36 @@ def _is_token_expired_error(err: Exception) -> bool:
     )
 
 
+def _clear_refreshed_session_caches(user_id: str) -> None:
+    """Clear caches tied to the credentials replaced by a refresh."""
+    _clear_stream_cache(user_id)
+    with _browse_sessions_lock:
+        for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
+            _browse_sessions.pop(key, None)
+
+
+def _commit_refreshed_session(
+    user_id: str,
+    creds: dict[str, str],
+    refreshed_api: TidalAPI,
+    access_token: str,
+    tidal_user_id: str,
+    country_code: str,
+) -> TidalAPI | None:
+    """Commit a refresh only while its captured credentials remain current."""
+    with _user_auth_state_lock:
+        if _user_auth_state.get(user_id) is not creds:
+            return _user_apis.get(user_id)
+
+        creds["access_token"] = access_token
+        creds["tidal_user_id"] = tidal_user_id
+        creds["country_code"] = country_code
+        _user_apis[user_id] = refreshed_api
+        return refreshed_api
+
+
 async def _refresh_user_api(user_id: str) -> TidalAPI:
-    """
-    Refresh a user's access token using the stored refresh token and rebuild API.
-    Uses a per-user lock so concurrent requests don't stampede refresh calls.
-    """
+    """Refresh a user's token under a per-user lock to prevent stampedes."""
     lock = _get_user_lock(user_id)
 
     async with lock:
@@ -575,21 +600,6 @@ async def _refresh_user_api(user_id: str) -> TidalAPI:
 
             refreshed_api = _build_api(new_access_token, new_user_id, new_country)
             await asyncio.to_thread(refreshed_api.get_session)
-
-            _user_apis[user_id] = refreshed_api
-            with _user_auth_state_lock:
-                creds["access_token"] = new_access_token
-                creds["tidal_user_id"] = new_user_id
-                creds["country_code"] = new_country
-
-            # Stream URLs and browse sessions are tied to prior auth state; clear on refresh.
-            _clear_stream_cache(user_id)
-            with _browse_sessions_lock:
-                for key in [k for k in _browse_sessions if k.startswith(f"{user_id}:")]:
-                    _browse_sessions.pop(key, None)
-
-            log.info(f"Refreshed TIDAL session for user {user_id}")
-            return refreshed_api
         except Exception as refresh_err:
             log.error(f"TIDAL token refresh failed for user {user_id}: {refresh_err}")
             _invalidate_user_api(user_id)
@@ -597,6 +607,26 @@ async def _refresh_user_api(user_id: str) -> TidalAPI:
                 status_code=401,
                 detail="TIDAL session expired and token refresh failed",
             ) from refresh_err
+
+        committed_api = _commit_refreshed_session(
+            user_id,
+            creds,
+            refreshed_api,
+            new_access_token,
+            new_user_id,
+            new_country,
+        )
+        if committed_api is None:
+            raise HTTPException(
+                status_code=401,
+                detail="TIDAL session was cleared during token refresh",
+            )
+        if committed_api is not refreshed_api:
+            return committed_api
+
+        _clear_refreshed_session_caches(user_id)
+        log.info(f"Refreshed TIDAL session for user {user_id}")
+        return refreshed_api
 
 
 async def _run_user_api_call(
@@ -1396,7 +1426,8 @@ async def user_auth_restore(req: UserAuthRestoreRequest, user_id: str = Query(..
 @app.post("/user/auth/clear")
 async def user_auth_clear(user_id: str = Query(...)):
     """Clear a user's TIDAL session."""
-    _invalidate_user_api(user_id)
+    async with _get_user_lock(user_id):
+        _invalidate_user_api(user_id)
     log.info(f"Cleared TIDAL session for user {user_id}")
     return {"success": True}
 

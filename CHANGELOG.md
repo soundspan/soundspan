@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TIDAL logout is now authoritative against an in-flight token refresh:
+  `/user/auth/clear` serializes with the per-user refresh lock and a refresh
+  aborts its re-insert if the session was cleared during its awaited calls, so
+  `/user/auth/status` can no longer report authenticated after an explicit logout.
 - Subsonic getPlaylists (and the root directory/starred count paths) no longer
   hydrate every playlist item/track/album row (or album-id/track-duration rows)
   just to compute songCount/duration/coverArt — they now use bounded Prisma
