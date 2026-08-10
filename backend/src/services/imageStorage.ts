@@ -9,7 +9,7 @@ import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { BRAND_USER_AGENT } from "../config/brand";
+import { fetchExternalImage } from "./imageProxy";
 
 const ARTIST_IMAGES_DIR = "artists";
 const ALBUM_IMAGES_DIR = "albums";
@@ -54,27 +54,26 @@ export async function downloadAndStoreImage(
             `[ImageStorage] Downloading ${type} image: ${url.substring(0, 60)}...`,
         );
 
-        const response = await fetch(url, {
-            headers: {
-                "User-Agent": BRAND_USER_AGENT,
-            },
-            signal: AbortSignal.timeout(30000),
+        const result = await fetchExternalImage({
+            url,
+            timeoutMs: 30000,
+            maxRetries: 1,
         });
 
-        if (!response.ok) {
+        if (!result.ok) {
             logger.debug(
-                `[ImageStorage] Failed to download: ${response.status}`,
+                `[ImageStorage] Download failed: ${result.message ?? result.status}`,
             );
             return null;
         }
 
-        const contentType = response.headers.get("content-type") || "";
+        const contentType = result.contentType || "";
         if (!contentType.startsWith("image/")) {
             logger.debug(`[ImageStorage] Not an image: ${contentType}`);
             return null;
         }
 
-        const buffer = await response.arrayBuffer();
+        const buffer = result.buffer;
         if (buffer.byteLength < 1000) {
             logger.debug(
                 `[ImageStorage] Image too small (${buffer.byteLength} bytes), likely placeholder`,
@@ -82,7 +81,7 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        fs.writeFileSync(filePath, Buffer.from(buffer));
+        fs.writeFileSync(filePath, buffer);
         logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
 
         return `native:${subdir}/${filename}`;

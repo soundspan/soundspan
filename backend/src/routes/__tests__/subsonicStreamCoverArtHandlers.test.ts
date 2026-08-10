@@ -4,10 +4,15 @@ import { Request, Response } from "express";
 const mockGetStreamFilePath = jest.fn();
 const mockStreamFileWithRangeSupport = jest.fn();
 const mockDestroyStreamingService = jest.fn();
+const mockLookup = jest.fn();
 const mockAudioStreamingService = jest.fn().mockImplementation(() => ({
     getStreamFilePath: mockGetStreamFilePath,
     streamFileWithRangeSupport: mockStreamFileWithRangeSupport,
     destroy: mockDestroyStreamingService,
+}));
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
 }));
 
 jest.mock("../../middleware/subsonicAuth", () => ({
@@ -140,6 +145,8 @@ beforeEach(() => {
     mockArtistFindFirst.mockReset();
     mockPlaylistFindFirst.mockReset();
     mockFetch.mockReset();
+    mockLookup.mockReset();
+    mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
 });
 
 afterEach(() => {
@@ -430,6 +437,79 @@ describe("handleGetCoverArt", () => {
         );
     });
 
+    it("rejects a cover host that resolves to a private address without fetching it", async () => {
+        const coverUrl = "https://covers.attacker.test/metadata.jpg";
+        mockAlbumFindFirst.mockResolvedValue({ coverUrl });
+        mockLookup.mockResolvedValue([
+            { address: "169.254.169.254", family: 4 },
+        ]);
+
+        await handleGetCoverArt(
+            buildReq({ id: "al-private-dns-cover" }),
+            buildRes(),
+        );
+
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            SubsonicErrorCode.NOT_FOUND,
+            "Cover art not found",
+            "json",
+            undefined,
+        );
+        expect(mockFetch).not.toHaveBeenCalledWith(coverUrl, expect.anything());
+    });
+
+    it("does not follow a public cover redirect to a private address", async () => {
+        const coverUrl = "https://covers.example.test/redirect.jpg";
+        const privateUrl = "http://169.254.169.254/latest";
+        mockAlbumFindFirst.mockResolvedValue({ coverUrl });
+        mockFetch.mockResolvedValueOnce(
+            new Response(null, {
+                status: 302,
+                headers: { location: privateUrl },
+            }),
+        );
+
+        await handleGetCoverArt(
+            buildReq({ id: "al-private-redirect-cover" }),
+            buildRes(),
+        );
+
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(mockFetch).not.toHaveBeenCalledWith(
+            privateUrl,
+            expect.anything(),
+        );
+        expect(mockSendError).toHaveBeenCalledWith(
+            expect.anything(),
+            SubsonicErrorCode.NOT_FOUND,
+            "Cover art not found",
+            "json",
+            undefined,
+        );
+    });
+
+    it("serves a public-resolving remote cover with its content type", async () => {
+        const coverUrl = "https://covers.example.test/public.png";
+        mockAlbumFindFirst.mockResolvedValue({ coverUrl });
+        mockFetch.mockResolvedValueOnce(
+            new Response("public-cover-bytes", {
+                status: 200,
+                headers: { "content-type": "image/png" },
+            }),
+        );
+        const res = buildRes();
+
+        await handleGetCoverArt(buildReq({ id: "al-public-cover" }), res);
+
+        expect(mockLookup).toHaveBeenCalledWith("covers.example.test", {
+            all: true,
+        });
+        expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "image/png");
+        expect(res.status).toHaveBeenCalledWith(200);
+        expect(mockSendError).not.toHaveBeenCalled();
+    });
+
     it("serves artist cover art through artist lookup", async () => {
         mockArtistFindFirst.mockResolvedValue({
             heroUrl: "https://cdn.soundspan.test/covers/artist.jpg",
@@ -608,6 +688,31 @@ describe("handleGetCoverArt", () => {
         );
         expect(mockFetch).not.toHaveBeenCalled();
     });
+
+    it.each([
+        "http://169.254.169.254/x",
+        "http://127.0.0.2/x",
+        "http://[fe80::1]/x",
+    ])(
+        "rejects blocked literal cover URL %s without fetching",
+        async (coverUrl) => {
+            mockAlbumFindFirst.mockResolvedValue({ coverUrl });
+
+            await handleGetCoverArt(
+                buildReq({ id: "al-blocked-literal-cover" }),
+                buildRes(),
+            );
+
+            expect(mockSendError).toHaveBeenCalledWith(
+                expect.anything(),
+                SubsonicErrorCode.NOT_FOUND,
+                "Cover art not found",
+                "json",
+                undefined,
+            );
+            expect(mockFetch).not.toHaveBeenCalled();
+        },
+    );
 
     it("returns generic error when remote cover art fetch fails with non-404", async () => {
         mockAlbumFindFirst.mockResolvedValue({

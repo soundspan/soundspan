@@ -1,5 +1,4 @@
 import {
-    isPublicCoverArtUrl,
     parseCoverArtSize,
     resolveSubsonicStreamQuality,
     resolveTrackPathWithinRoot,
@@ -90,40 +89,6 @@ describe("subsonicMedia", () => {
 
         it("clamps very large values", () => {
             expect(parseCoverArtSize("9999")).toBe(2048);
-        });
-    });
-
-    describe("isPublicCoverArtUrl", () => {
-        it("accepts normal public http/https urls", () => {
-            expect(isPublicCoverArtUrl("https://example.com/cover.jpg")).toBe(
-                true,
-            );
-            expect(isPublicCoverArtUrl("http://covers.example.org/a.png")).toBe(
-                true,
-            );
-        });
-
-        it("rejects localhost and private network urls", () => {
-            expect(isPublicCoverArtUrl("http://localhost:8080/cover.jpg")).toBe(
-                false,
-            );
-            expect(isPublicCoverArtUrl("http://127.0.0.1/cover.jpg")).toBe(
-                false,
-            );
-            expect(isPublicCoverArtUrl("http://10.0.0.8/cover.jpg")).toBe(
-                false,
-            );
-            expect(isPublicCoverArtUrl("http://192.168.1.2/cover.jpg")).toBe(
-                false,
-            );
-            expect(isPublicCoverArtUrl("http://172.16.1.10/cover.jpg")).toBe(
-                false,
-            );
-        });
-
-        it("rejects unsupported protocols and invalid URLs", () => {
-            expect(isPublicCoverArtUrl("file:///etc/passwd")).toBe(false);
-            expect(isPublicCoverArtUrl("not-a-url")).toBe(false);
         });
     });
 });

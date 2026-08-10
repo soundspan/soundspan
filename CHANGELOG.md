@@ -276,6 +276,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   property values (e.g. `result.error`, `err.response?.data?.detail`) outside
   logger calls, freezing and documenting the pre-existing instances in the
   baseline.
+- Closed an SSRF class on outbound image fetches: the Subsonic `getCoverArt`
+  remote fetch and the enrichment image downloader now use the shared
+  DNS-resolving outbound URL policy with per-hop redirect revalidation
+  (blocking loopback/private/link-local/metadata targets and unsafe redirects),
+  replacing a string-only host check that missed 169.254.0.0/16, most of
+  127.0.0.0/8, IPv6 link-local/ULA, and numeric IP encodings.
 - Pinned the remaining mutable GitHub Actions tags in
   `image-security-scanning.yml` (`actions/checkout`, `docker/login-action`,
   `github/codeql-action/upload-sarif`) and `compose-config-check.yml`

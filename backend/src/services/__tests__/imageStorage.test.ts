@@ -3,6 +3,11 @@ const mockMkdirSync = jest.fn();
 const mockWriteFileSync = jest.fn();
 const mockUnlinkSync = jest.fn();
 const mockLoggerDebug = jest.fn();
+const mockLookup = jest.fn();
+
+jest.mock("dns/promises", () => ({
+    lookup: (...args: unknown[]) => mockLookup(...args),
+}));
 
 jest.mock("fs", () => ({
     existsSync: (...args: unknown[]) => mockExistsSync(...args),
@@ -44,6 +49,7 @@ describe("imageStorage service", () => {
         (global as any).AbortSignal = { timeout: timeoutMock };
         timeoutMock.mockReturnValue("timeout-signal");
         mockExistsSync.mockReturnValue(true);
+        mockLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     });
 
     it("returns null early when URL is empty", async () => {
@@ -88,6 +94,24 @@ describe("imageStorage service", () => {
             expect.any(Buffer),
         );
         expect(result).toBe("native:artists/artist-1.jpg");
+    });
+
+    it("returns null without fetching when the image host resolves privately", async () => {
+        const targetUrl = "https://images.attacker.test/cover.jpg";
+        mockLookup.mockResolvedValue([{ address: "127.0.0.2", family: 4 }]);
+
+        const result = await downloadAndStoreImage(
+            targetUrl,
+            "artist-private",
+            "artist",
+        );
+
+        expect(result).toBeNull();
+        expect(fetchMock).not.toHaveBeenCalledWith(
+            targetUrl,
+            expect.anything(),
+        );
+        expect(mockWriteFileSync).not.toHaveBeenCalled();
     });
 
     it("returns null for non-ok fetch responses", async () => {

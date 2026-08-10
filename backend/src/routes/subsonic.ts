@@ -29,16 +29,16 @@ import {
     snapCoverArtSize,
 } from "../services/coverArtResize";
 import { config } from "../config";
-import { BRAND_SLUG, BRAND_USER_AGENT } from "../config/brand";
+import { BRAND_SLUG } from "../config/brand";
 import { getLyrics } from "../services/lyrics";
 import { scanQueue } from "../workers/queues";
 import {
-    isPublicCoverArtUrl,
     resolveSubsonicStreamQuality,
     resolveTrackPathWithinRoot,
 } from "../utils/subsonicMedia";
 import { logger } from "../utils/logger";
 import { safeResolvePath } from "../utils/safeResolvePath";
+import { fetchExternalImage } from "../services/imageProxy";
 
 const router = Router();
 const SUBSONIC_TRACE_LOGS = process.env.SUBSONIC_TRACE_LOGS === "true";
@@ -577,22 +577,22 @@ function parseSyncedLyricsLines(
 async function fetchCoverArtBuffer(
     url: string,
 ): Promise<{ buffer: Buffer; contentType: string }> {
-    const response = await fetch(url, {
-        headers: {
-            "User-Agent": BRAND_USER_AGENT,
-        },
-        signal: AbortSignal.timeout(10_000),
+    const result = await fetchExternalImage({
+        url,
+        timeoutMs: 10_000,
+        maxRetries: 1,
     });
 
-    if (!response.ok) {
-        throw new Error(`COVER_FETCH_FAILED:${response.status}`);
+    if (!result.ok) {
+        if (result.status === "not_found" || result.status === "invalid_url") {
+            throw new Error("COVER_FETCH_FAILED:404");
+        }
+        throw new Error("COVER_FETCH_FAILED");
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get("content-type") ?? "image/jpeg";
     return {
-        buffer: Buffer.from(arrayBuffer),
-        contentType,
+        buffer: result.buffer,
+        contentType: result.contentType ?? "image/jpeg",
     };
 }
 
@@ -4993,17 +4993,6 @@ export async function handleGetCoverArt(
                 contentType = "image/webp";
             }
         } else {
-            if (!isPublicCoverArtUrl(coverUrl)) {
-                sendSubsonicError(
-                    res,
-                    SubsonicErrorCode.NOT_FOUND,
-                    "Cover art not found",
-                    format,
-                    callback,
-                );
-                return;
-            }
-
             const fetched = await fetchCoverArtBuffer(coverUrl);
             imageBuffer = fetched.buffer;
             contentType = fetched.contentType;

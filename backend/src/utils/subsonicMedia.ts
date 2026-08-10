@@ -78,34 +78,3 @@ export function parseCoverArtSize(value: unknown): number | undefined {
 
     return Math.min(parsed, MAX_COVER_ART_SIZE);
 }
-
-/**
- * Returns true when a cover-art URL is publicly reachable over HTTP(S).
- */
-export function isPublicCoverArtUrl(rawUrl: string): boolean {
-    try {
-        const parsed = new URL(rawUrl);
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-            return false;
-        }
-
-        const hostname = parsed.hostname.toLowerCase();
-        if (
-            hostname === "localhost" ||
-            hostname === "127.0.0.1" ||
-            hostname === "::1" ||
-            hostname === "0.0.0.0" ||
-            hostname.startsWith("10.") ||
-            hostname.startsWith("192.168.") ||
-            /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
-            hostname.endsWith(".local") ||
-            hostname.endsWith(".internal")
-        ) {
-            return false;
-        }
-
-        return true;
-    } catch {
-        return false;
-    }
-}
