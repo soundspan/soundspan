@@ -55,12 +55,13 @@ const BASELINE = Object.freeze({
 });
 
 // Raw error details can disclose internal implementation data to clients (OWASP).
-// This independent ratchet prevents new error.message/error.stack response leaks
-// and terminal .error/.detail property values assigned or interpolated outside logger calls.
+// This independent ratchet prevents raw error properties and conversions from
+// being assigned or interpolated outside logger calls.
 const LEAK_BASELINE = Object.freeze({
     // auth.ts remaining 2: Zod firstError.message validation detail in 400 responses (~L813 and ~L1247); code-owned schema messages, not raw errors.
     "backend/src/routes/auth.ts": 2,
-    "backend/src/routes/discover.ts": 0,
+    // discover.ts +1: cleanup-loop detail const used only by logger.error (~L2267); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
+    "backend/src/routes/discover.ts": 1,
     "backend/src/routes/downloads.ts": 0,
     // library.ts remaining 1: admin-only Lidarr connection-test diagnostics (~L5740 lidarrError = err?.message) returned in an admin settings probe response, not a general-user 500 leak.
     "backend/src/routes/library.ts": 1,
@@ -86,6 +87,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/routes/youtubeMusic.ts": 11,
     // acquisitionService.ts remaining 4: { success:false, error } acquisition result objects (~L482, ~L678, ~L767) consumed by the download orchestration/admin surface, not raw route 500 bodies; frozen under the slice-E scope guard; plus a result.error passthrough in a { success:false, error } result object (~L748); frozen under the slice-J scope guard.
     "backend/src/services/acquisitionService.ts": 4,
+    // artistCountsService.ts +2: numeric backfill error counters returned in result/progress objects (~L237 and ~L277); no error text; frozen under the ratchet-widening (slice-B2) scope guard.
+    "backend/src/services/artistCountsService.ts": 2,
     // audioStreaming.ts remaining 3: internal ffmpeg-error classification (~L285) plus transcode-failure AppError messages (~L303, ~L347); frozen under the slice-E scope guard — AppError messages are echoed by errorHandler, flagged for follow-up sanitization.
     "backend/src/services/audioStreaming.ts": 3,
     // audiobookCache.ts remaining 2: sync-failure detail string recorded server-side (~L104) and an internal thrown sync-error message (~L398); frozen under the slice-E scope guard.
@@ -96,6 +99,8 @@ const LEAK_BASELINE = Object.freeze({
     "backend/src/services/genericImportJobRunner.ts": 1,
     // importJobStore.ts remaining 1: persisted input.error passthrough (~L192); job-state plumbing, frozen under the slice-J scope guard.
     "backend/src/services/importJobStore.ts": 1,
+    // lastfm.ts +1: album-info error detail const consumed only by logger.error (~L303); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
+    "backend/src/services/lastfm.ts": 1,
     // lidarr.ts remaining 3: { success, message } Lidarr client results (~L1651, ~L1732, ~L2152) consumed by admin Lidarr management flows; frozen under the slice-E scope guard.
     "backend/src/services/lidarr.ts": 3,
     // moodBucketService.ts remaining 1: error-classification const (~L185), never a response body; frozen under the slice-E scope guard.
@@ -105,13 +110,19 @@ const LEAK_BASELINE = Object.freeze({
     // podcastCache.ts remaining 2: cover-sync failure strings recorded server-side (~L90, ~L172); frozen under the slice-E scope guard.
     "backend/src/services/podcastCache.ts": 2,
     // podcastDownload.ts remaining 1: error-classification const (~L92), never a response body; frozen under the slice-E scope guard.
-    "backend/src/services/podcastDownload.ts": 1,
+    // podcastDownload.ts +1: describePodcastDownloadError fallback (~L77) is consumed only by logger.warn calls; server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
+    "backend/src/services/podcastDownload.ts": 2,
+    // remoteTrackBackfillService.ts +2: numeric phase error counters (~L164 and ~L168); no error text; frozen under the ratchet-widening (slice-B2) scope guard.
+    "backend/src/services/remoteTrackBackfillService.ts": 2,
     // simpleDownloadManager.ts remaining 4: download-job status objects (~L350, ~L371, ~L415, ~L436) persisted for the admin download-queue surface; frozen under the slice-E scope guard.
     "backend/src/services/simpleDownloadManager.ts": 4,
     // soulseek.ts remaining 17: sessionLog(...) server-side log lines and { success:false, error } download-result objects consumed by the admin-only Soulseek download path; frozen under the slice-E scope guard; plus downloadResult.error consts/interpolations (~L1008, ~L1090, ~L1186) and per-peer result.error batch error strings (~L1248); frozen under the slice-J scope guard.
     "backend/src/services/soulseek.ts": 17,
+    // spotify.ts +1: track-scraper error detail const consumed only by logger.debug (~L663); server-side only; frozen under the ratchet-widening (slice-B2) scope guard.
+    "backend/src/services/spotify.ts": 1,
     // spotifyImport.ts remaining 9: error-classification const (~L48), import-job error fields (~L1521, ~L1768), and a non-logger import log line (~L1723); admin-visible import-job state, frozen under the slice-E scope guard; plus job.error/dbJob.error status-object passthroughs (~L289, ~L298, ~L364, ~L2655) and an errorMsg assigned from result.error (~L1694); frozen under the slice-J scope guard.
-    "backend/src/services/spotifyImport.ts": 9,
+    // spotifyImport.ts +2/new net +1: MusicBrainz error detail consts (~L996 and ~L1042) are logger-only; optional logger-call stripping also exempts one prior inline site; frozen under the ratchet-widening (slice-B2) scope guard.
+    "backend/src/services/spotifyImport.ts": 10,
     // youtubeDownload.ts remaining 1: sidecar status mapping data.error (~L329); job-state plumbing, frozen under the slice-J scope guard.
     "backend/src/services/youtubeDownload.ts": 1,
 });
@@ -122,7 +133,7 @@ export function countPattern(source) {
 }
 
 export function stripLoggerCalls(source) {
-    const callStart = /logger\s*\.\s*[a-zA-Z]+\s*\(/g;
+    const callStart = /logger\s*\??\s*\.\s*[a-zA-Z]+\s*\(/g;
     let out = "";
     let cursor = 0;
     let match;
@@ -144,42 +155,89 @@ export function stripLoggerCalls(source) {
     return out + source.slice(cursor);
 }
 
+const ERROR_ID = String.raw`(?<![\w$.])(?:[A-Za-z_$][\w$]*Error|error|err|ex|e)(?![\w$])`;
+const CHAIN = String.raw`(?<![\w$.])[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*`;
+const VALUE_PREFIX = String.raw`(?::\s*|=\s*|\$\{[^}]*?)`;
+
 export function countLeakPattern(source) {
-    const ERROR_ID = String.raw`(?<![\w$.])(?:[A-Za-z_$][\w$]*Error|error|err|ex|e)(?![\w$])`;
     const stripped = stripLoggerCalls(source).replace(
         new RegExp(String.raw`\(\s*(${ERROR_ID})\s+as\s+[^()]*\)`, "g"),
         "$1",
     );
     const normalizedSource = stripped.replace(
         new RegExp(
-            String.raw`(${ERROR_ID})\s*(\??)\s*\.\s*(message|stack)\b`,
+            String.raw`(${ERROR_ID})\s*(\??)\s*\.\s*(message|stack|name)\b`,
+            "g",
+        ),
+        "$1$2.$3",
+    );
+    const propertyPattern = new RegExp(
+        String.raw`${VALUE_PREFIX}${ERROR_ID}\??\.(?:message|stack|name)\b`,
+        "g",
+    );
+    const identifierPropertyCount = countMatches(
+        normalizedSource,
+        propertyPattern,
+    );
+    return (
+        identifierPropertyCount +
+        countErrorPropertyLeaks(stripped) +
+        countErrorConversions(stripped) +
+        countAxiosResponseDataLeaks(stripped)
+    );
+}
+
+function countMatches(source, pattern) {
+    return source.match(pattern)?.length ?? 0;
+}
+
+// Widened leak class: `.error` / `.errors` / `.detail` property values on any object chain
+// (result.error, err.response?.data?.detail, ...) assigned or interpolated
+// outside logger.* calls. Derived access (parsedBody.error.issues,
+// .error.flatten(), .error[...]) is excluded — only terminal values leak.
+function countErrorPropertyLeaks(strippedSource) {
+    const normalized = strippedSource.replace(
+        new RegExp(
+            String.raw`(${CHAIN})\s*(\??)\s*\.\s*(error|errors|detail)\b`,
             "g",
         ),
         "$1$2.$3",
     );
     const pattern = new RegExp(
-        String.raw`(?::\s*|=\s*|\$\{[^}]*?)${ERROR_ID}\??\.(?:message|stack)\b`,
+        String.raw`${VALUE_PREFIX}${CHAIN}\??\.(?:error|errors|detail)\b(?!\s*(?:\??\.|\(|\[))`,
         "g",
     );
-    const messageCount = normalizedSource.match(pattern)?.length ?? 0;
-    return messageCount + countErrorPropertyLeaks(stripped);
+    return countMatches(normalized, pattern);
 }
 
-// Widened leak class: `.error` / `.detail` property values on any object chain
-// (result.error, err.response?.data?.detail, ...) assigned or interpolated
-// outside logger.* calls. Derived access (parsedBody.error.issues,
-// .error.flatten(), .error[...]) is excluded — only terminal values leak.
-function countErrorPropertyLeaks(strippedSource) {
-    const CHAIN = String.raw`(?<![\w$.])[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*`;
-    const normalized = strippedSource.replace(
-        new RegExp(String.raw`(${CHAIN})\s*(\??)\s*\.\s*(error|detail)\b`, "g"),
-        "$1$2.$3",
+function countErrorConversions(strippedSource) {
+    const patterns = [
+        new RegExp(
+            String.raw`${VALUE_PREFIX}String\s*\(\s*${ERROR_ID}\s*(?=[,)])`,
+            "g",
+        ),
+        new RegExp(String.raw`\$\{\s*${ERROR_ID}(?:\s*\|\|[^}]*)?\s*\}`, "g"),
+        new RegExp(
+            String.raw`${VALUE_PREFIX}${ERROR_ID}\s*\??\s*\.\s*toString\s*\(\s*\)`,
+            "g",
+        ),
+        new RegExp(
+            String.raw`${VALUE_PREFIX}JSON\s*\.\s*stringify\s*\(\s*${ERROR_ID}\s*(?=[,)])`,
+            "g",
+        ),
+    ];
+    return patterns.reduce(
+        (count, pattern) => count + countMatches(strippedSource, pattern),
+        0,
     );
+}
+
+function countAxiosResponseDataLeaks(strippedSource) {
     const pattern = new RegExp(
-        String.raw`(?::\s*|=\s*|\$\{[^}]*?)${CHAIN}\??\.(?:error|detail)\b(?!\s*[.(\[])`,
+        String.raw`${VALUE_PREFIX}${CHAIN}\s*\??\s*\.\s*response\s*\??\s*\.\s*data\b(?!\s*(?:\??\.|\(|\[))`,
         "g",
     );
-    return normalized.match(pattern)?.length ?? 0;
+    return countMatches(strippedSource, pattern);
 }
 
 export function analyzeRouteErrorCanon(counts, baseline) {

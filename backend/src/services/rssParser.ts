@@ -250,7 +250,7 @@ class RSSParserService {
                     ? `Status code ${error.response.status}`
                     : error instanceof Error
                       ? error.message
-                      : String(error);
+                      : "Unknown feed error";
 
             logger.error(`\n [RSS PARSER] Failed to parse feed:`, errorMessage);
             throw new Error(`Failed to parse podcast feed: ${errorMessage}`);

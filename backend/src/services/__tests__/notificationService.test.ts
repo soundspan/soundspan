@@ -164,4 +164,22 @@ describe("notificationService", () => {
             },
         });
     });
+
+    it("does not interpolate failure details into user-visible download notifications", async () => {
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue({
+            id: "n4",
+        });
+
+        await notificationService.notifyDownloadFailed(
+            "u1",
+            "Album",
+            "raw upstream failure",
+        );
+
+        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                message: "Failed to download Album",
+            }),
+        });
+    });
 });

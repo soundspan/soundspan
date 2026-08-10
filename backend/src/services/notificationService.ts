@@ -162,9 +162,7 @@ class NotificationService {
             userId,
             type: "download_failed",
             title: "Download Failed",
-            message: `Failed to download ${subject}${
-                error ? `: ${error}` : ""
-            }`,
+            message: `Failed to download ${subject}`,
             metadata: { subject, error },
         });
     }

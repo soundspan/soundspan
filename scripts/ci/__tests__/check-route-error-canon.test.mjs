@@ -212,3 +212,97 @@ test("countLeakPattern flags an intermediate const assigned from a result error"
         1,
     );
 });
+
+test("countLeakPattern flags terminal plural errors in a response value", () => {
+    const source =
+        "res.status(400).json({ errors: result.errors, details: parsed.error.errors });";
+    assert.equal(countLeakPattern(source), 2);
+});
+
+test("countLeakPattern exempts terminal plural errors inside logger calls", () => {
+    assert.equal(
+        countLeakPattern("logger.warn('invalid', parsed.error.errors)"),
+        0,
+    );
+});
+
+test("countLeakPattern flags String called with an error identifier", () => {
+    assert.equal(
+        countLeakPattern("const detail = failed ? fallback : String(error);"),
+        1,
+    );
+});
+
+test("countLeakPattern exempts String error conversion inside logger calls", () => {
+    assert.equal(countLeakPattern("logger.warn('failed', String(err))"), 0);
+});
+
+test("countLeakPattern flags a bare error template interpolation", () => {
+    assert.equal(countLeakPattern('sessionLog("X", `failed: ${err}`)'), 1);
+});
+
+test("countLeakPattern exempts a bare error interpolation inside logger calls", () => {
+    assert.equal(countLeakPattern("logger?.error(`failed: ${error}`)"), 0);
+});
+
+test("countLeakPattern flags error toString calls in value contexts", () => {
+    assert.equal(countLeakPattern("res.json({ error: err?.toString() })"), 1);
+});
+
+test("countLeakPattern exempts error toString calls inside logger calls", () => {
+    assert.equal(countLeakPattern("logger.error(error.toString())"), 0);
+});
+
+test("countLeakPattern flags error names in value contexts", () => {
+    assert.equal(countLeakPattern("res.json({ detail: error ?. name })"), 1);
+});
+
+test("countLeakPattern exempts error names inside logger calls", () => {
+    assert.equal(countLeakPattern("logger.warn('type', err.name)"), 0);
+});
+
+test("countLeakPattern flags terminal axios response data in value contexts", () => {
+    assert.equal(
+        countLeakPattern("res.json({ error: err.response?.data })"),
+        1,
+    );
+});
+
+test("countLeakPattern exempts terminal axios response data inside logger calls", () => {
+    assert.equal(
+        countLeakPattern("logger.error('axios', err.response.data)"),
+        0,
+    );
+});
+
+test("countLeakPattern flags JSON.stringify called with an error first argument", () => {
+    const source =
+        "const detail = JSON.stringify(error, Object.getOwnPropertyNames(error));";
+    assert.equal(countLeakPattern(source), 1);
+});
+
+test("countLeakPattern exempts JSON.stringify errors inside logger calls", () => {
+    assert.equal(countLeakPattern("logger.error(JSON.stringify(err))"), 0);
+});
+
+test("countLeakPattern ignores error name comparisons", () => {
+    assert.equal(
+        countLeakPattern('if (error.name === "ZodError") handle();'),
+        0,
+    );
+});
+
+test("countLeakPattern ignores String calls with non-error identifiers", () => {
+    assert.equal(countLeakPattern("res.json({ id: String(someId) })"), 0);
+});
+
+test("countLeakPattern counts an axios detail chain exactly once", () => {
+    assert.equal(
+        countLeakPattern("res.json({ error: err.response?.data?.detail })"),
+        1,
+    );
+});
+
+test("countLeakPattern counts nested String interpolation exactly once", () => {
+    assert.equal(countLeakPattern("res.send(`failed: ${String(err)}`)"), 1);
+});

@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caching, vibe calibration, and both the YouTube Music and TIDAL OAuth-restore
   paths onto it, unifying the short-TTL negative-cache policy for OAuth restores
   and bounding the YouTube Music library limit params.
+- Widened the route-error leak ratchet to catch `String(err)`, bare `${err}`,
+  `.toString()`, `.name`, `JSON.stringify(err)`, plural `.errors`, and Axios
+  `.response.data` interpolation idioms outside logger calls.
 - Replaced the three source-scraping `audioAnalyzer*Contract` Jest suites with
   behavioral pytest coverage in `services/audio-analyzer/tests/` for queue claim
   alignment, process-pool crash recovery, stale-failure resolution, and

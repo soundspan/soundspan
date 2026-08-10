@@ -543,6 +543,19 @@ describe("rssParserService", () => {
         );
     });
 
+    it("uses a curated message when a dependency rejects with a non-Error value", async () => {
+        mockAxiosGet.mockRejectedValueOnce("raw upstream failure");
+
+        await expect(
+            rssParserService.parseFeed("https://example.com/unreachable.xml"),
+        ).rejects.toThrow("Failed to parse podcast feed: Unknown feed error");
+
+        expect(mockLogger.error).toHaveBeenCalledWith(
+            expect.stringContaining("[RSS PARSER] Failed to parse feed:"),
+            "Unknown feed error",
+        );
+    });
+
     it("rejects unsafe feed urls before parseURL is called", async () => {
         await expect(
             rssParserService.parseFeed("http://127.0.0.1/private-feed.xml"),
