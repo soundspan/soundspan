@@ -45,6 +45,224 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed the tidal-downloader stream-URL cache race where concurrent mutation
   during invalidation iteration could raise `RuntimeError` and abort
   stream/refresh requests.
+- Playlists list endpoint no longer hydrates every track of every visible playlist: it now paginates (limit/offset, clamped) and returns a database-side track count plus a bounded cover-art preview per playlist.
+- Remote media proxy streams for Tidal, YouTube, YouTube Music, and artist
+  previews now destroy the upstream connection when the client disconnects,
+  preventing connection-pool exhaustion during seek and skip operations.
+- **Sidecar event-loop offload for OAuth onboarding and search.** The
+  `tidal-downloader` (`/auth/device`, `/auth/token`, `/auth/refresh`, `/search`)
+  and `ytmusic-streamer` (`/auth/device-code`, `/auth/device-code/poll`) async
+  handlers called blocking third-party `tiddl`/`ytmusicapi` methods directly on
+  the event loop. During device-code onboarding the poll endpoint runs every few
+  seconds, so a blocking call there serialized concurrent onboarding and
+  streaming across all users. Each blocking call is now wrapped in
+  `asyncio.to_thread`, matching the existing offload pattern already used for the
+  per-user refresh path.
+- **Sidecar event-loop offload for per-user session restore.** The
+  `tidal-downloader` `/user/auth/restore` handler and its `/auth/session`
+  verification path called the blocking `tiddl` `get_session()` (and, on the
+  expired-token branch, `AuthAPI().refresh_token()`) directly on the event loop,
+  stalling all concurrent onboarding and streaming while a single user's
+  credentials were restored. These calls are now wrapped in `asyncio.to_thread`,
+  completing the Phase-D offload coverage for the sidecar's auth surface.
+- Aligned the mypy type-check target (`python_version`) to Python 3.11 to match
+  the repo floor (Ruff `py311` and the audio-analyzer `python:3.11-slim` pin), so
+  type checks run against the oldest interpreter the sidecars use.
+- Frontend Helm pod no longer runs as the stale UID 1001; the chart frontend
+  override was removed so the pod inherits the chart-wide UID/GID 1000 pod
+  security context, matching the realigned frontend image (`USER node`) and
+  fixing `.next/cache` write failures in individual deployment mode.
+
+- Lidarr queue/history helper HTTP calls are now bounded. The module-level
+  `cleanStuckDownloads`, `getRecentCompletedDownloads`, `getQueueCount`,
+  `getQueue`, and `isDownloadActive` helpers in `backend/src/services/lidarr.ts`
+  previously issued bare `axios` requests with no `timeout`, inheriting axios's
+  unbounded default (`0`). Because `QueueCleaner.runCleanup` only reschedules its
+  30s reconcile/clean loop after its awaits resolve, a single hung Lidarr call
+  could stall the loop indefinitely. Each call now carries an explicit
+  `timeout: 30000`, matching the class client on the same module.
+- AIO image builds no longer fail while removing the base image's `node` user:
+  `userdel` and `groupdel` are now conditional, and existing uid/gid 1000
+  holders are renamed and reused instead of failing `groupadd` or `useradd`.
+- OpenAPI contract sync: the generated spec (`GET /api/docs.json`, `/api/docs`)
+  no longer advertises 24 phantom endpoints. The `@openapi` path keys for the
+  API-key, auth (`login`/`me`), library-scan, listen-together, lyrics, mixes,
+  and search routes were documented without the mounted `/api` prefix, so the
+  spec published paths such as `/auth/login` and `/mixes` that 404 on the server
+  while the real `/api/...` URLs went undocumented. The keys now match the
+  mounted routes. `openapiSupplement.ts` — previously a shim that re-documented
+  those same endpoints under their correct prefixes — is reduced to the only
+  endpoints defined directly in `index.ts` with no route module (the
+  `/health`, `/api/health` liveness/readiness probes and `/api/docs.json`).
+  Documentation only; no runtime route behavior changed.
+- OpenAPI `info.version` is no longer frozen at `1.0.0`; it now resolves from
+  `backend/package.json` at load time (currently `1.9.0`) so the published
+  contract tracks the shipping release.
+- MetadataEditor's "Reset to Original" action now uses the in-app
+  `ConfirmDialog` instead of the browser's native confirmation prompt.
+- Frontend token refresh is now single-flight, so simultaneous 401 responses
+  share one `/auth/refresh` request instead of racing refresh-token rotation
+  and forcing a logout.
+- Audio-state polling now detects expired sessions from HTTP 401 status without
+  permanently stopping after a transient failure, and audiobook/podcast
+  restore failures are logged instead of surfacing as unhandled rejections.
+- Backend reliability hardening (no behavior change for healthy paths):
+  - Remote-track backfill (`remoteTrackBackfillService`) no longer spins
+    forever when an album title cannot be resolved. The previous re-query
+    pagination re-fetched the same `albumId: null` rows on every iteration
+    (latching `isRunning` and inflating the processed counter without bound);
+    both the Tidal and YouTube Music phases now use id-cursor pagination so
+    each row is visited at most once, backed by a fixed `MAX_BACKFILL_ITERATIONS`
+    safety bound.
+  - An invalid/typo'd `LOG_LEVEL` (e.g. `verbose`) no longer silently disables
+    **all** logging. Unrecognized values now fall back to the environment
+    default (`warn` in production, `debug` otherwise) and emit a one-time
+    startup warning; explicit `LOG_LEVEL=silent` still silences output. Level
+    matching is also hardened against prototype keys (`constructor`, `toString`).
+  - The music-library scanner's recursive directory walk was replaced with a
+    bounded iterative traversal: it caps depth at `MAX_SCAN_DEPTH` (64) and
+    skips symbolic links, preventing stack overflows and symlink-cycle hangs on
+    pathological trees.
+  - Added request timeouts (`AbortSignal.timeout(15000)`) to the previously
+    unbounded Audiobookshelf cover fetches in `audiobookCache`, the library
+    cover-art proxy, and the audiobooks cover proxy, so a stalled upstream can
+    no longer hang a worker or request indefinitely.
+  - Untracked module-scope cleanup intervals (Soulseek search-session and
+    failed-user pruning) are now `unref()`'d so they never keep the process or a
+    Jest worker alive, and the worker scheduler / discover-processor ioredis
+    lock clients now connect lazily under Jest to stop background reconnect
+    loops from logging after test teardown.
+- Removed dead backend code: the test-only `utils/discoverLogger.ts` logger
+  monkey-patch and the unreferenced `workers/cleanupDiscovery.ts` and
+  `workers/dataIntegrityCli.ts` CLIs (the data-integrity check runs on the
+  worker scheduler; discovery cleanup runs via `staleJobCleanup`).
+- Python sidecar (tidal-downloader, ytmusic-streamer) HTTP error responses now
+  use the backend-wide `{"error": ...}` body shape instead of FastAPI's default
+  `{"detail": ...}`; unhandled sidecar exceptions return a generic 500 without
+  leaking internals, and nested error payloads (e.g. `age_restricted`) keep
+  their existing fields. The Node backend only branches on status codes, so no
+  backend change was needed.
+- ytmusic-streamer stream proxying no longer leaks an httpx connection when the
+  upstream Range request fails before streaming starts, and the `/yt/proxy`
+  route no longer forwards upstream `Content-Length` (which crashed the ASGI
+  app with an h11 protocol error whenever the CDN dropped a stream mid-read);
+  both proxy routes now share one hardened range/full-proxy helper.
+- tidal-downloader album-track pagination can no longer loop forever when the
+  TIDAL API echoes a zero/missing page `limit`; the loop advances by the real
+  page length under a fixed hard cap.
+- ytmusic-streamer rate pacing is now genuinely thread-safe (a shared
+  monotonic-clock pacer replaces a never-acquired asyncio.Lock and racy global
+  timestamp), the in-memory stream/search caches are bounded
+  (`YTMUSIC_STREAM_CACHE_MAX` / `YTMUSIC_SEARCH_CACHE_MAX`, default 1024, oldest
+  evicted), and the two near-duplicate yt-dlp extraction paths were merged into
+  one shared core.
+- ytmusic-streamer route handlers no longer run blocking ytmusicapi network
+  calls on the asyncio event loop (a slow YouTube call stalled every concurrent
+  request); search, album/artist/song, library, charts, moods, home, browse,
+  and playlist handlers now offload to worker threads.
+- ytmusic-streamer stream-URL extraction now has an overall per-request
+  deadline (`YTMUSIC_EXTRACT_TIMEOUT`, default 60s, HTTP 504 on expiry) and a
+  configurable yt-dlp socket timeout (`YTMUSIC_YTDLP_SOCKET_TIMEOUT`, default
+  20s) covering extraction and downloads, so a stalled extraction can no longer
+  hang a request or strand its worker thread forever.
+- The `audio-analyzer` sidecar now measures its own elapsed durations and
+  scheduling intervals (idle-model-unload timeout, worker-resize debounce, DB
+  reconciliation cadence, batch-rate logging) with `time.monotonic()` instead
+  of wall-clock `time.time()`, so an NTP step or manual clock change can no
+  longer prematurely unload models, mis-fire a resize, or corrupt the reported
+  throughput. The cross-process `audio:worker:heartbeat` timestamp remains
+  wall-clock epoch milliseconds by design.
+- `scripts/k8s-rollout-slo-check.sh` sampled SLO warning logs from only one pod
+  per Deployment (`kubectl logs deploy/...`), so reconnect/scheduler SLO
+  breaches emitted by other replicas in an HA deployment were missed and the
+  gate could pass when it should fail. It now aggregates `--since` logs across
+  every backend and backend-worker pod (by `app.kubernetes.io/component` label,
+  with a name-prefix fallback).
+- The three backend audio-analyzer source-contract suites
+  (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
+  `audioAnalyzerFailureResolutionContract`) were updated in step with the
+  analyzer reliability refactor: the marker strings they scrape from
+  `analyzer.py` moved into the new `_claim_tracks_for_processing` /
+  `_consume_batch_results` helpers and the module-level
+  `_RESOLVE_AUDIO_FAILURES_SQL` constant, so the tests now assert against
+  those boundaries (and additionally prove `_save_results` executes the
+  failure-resolution SQL).
+- Audio analyzer sidecar no longer runs a PostgreSQL worker-count query at
+  module import. Because the service uses multiprocessing spawn mode, every
+  spawned worker process re-imported the module and re-executed that query;
+  worker-count resolution now happens once, explicitly, at service startup in
+  the parent process.
+- CLAP sidecar idle monitor no longer leaks a new Redis connection pool on
+  every idle-check iteration; it now reuses a single injected client that is
+  deterministically closed on shutdown (as is the idle DB connection, which
+  previously stayed open if the main loop exited via an exception).
+- CLAP sidecar worker/text-embed/control daemon threads are now supervised:
+  if any thread dies, the service logs a critical error, stops cleanly, and
+  exits non-zero so the container orchestrator restarts it instead of leaving
+  a zombie pod that consumes no work.
+- CLAP model unload/inference race fixed: idle unloading and embedding
+  inference now serialize on one re-entrant lock, and embedding calls reload
+  the model under that lock if an idle unload wins the race — previously the
+  race raised mid-call, spuriously failing the track and burning its vibe
+  retry budget.
+- Python sidecars no longer use deprecated `datetime.utcnow()`; analyzer
+  timestamps are timezone-aware UTC (`datetime.now(timezone.utc)`).
+- Backend Jest suites no longer leave Redis's live reconnect loop running in
+  test workers: `utils/redis.ts` skips its eager module-load connection under
+  Jest, preventing `Cannot log after tests are done` noise and flakiness, while
+  tests continue to cover the production eager-connect behavior.
+- Backend Jest's default `maxWorkers` is now 2 instead of 8, matching the
+  documented low-memory constraint and the existing explicit CI limit.
+- Sidecar requirement-lock tests now assert that the Uvicorn manifest floor is
+  at least the 0.52.0 security baseline instead of requiring that stale exact
+  literal, so Dependabot floor increases such as 0.52.1 remain valid.
+- Two orphaned frontend player tests now live under `frontend/tests/unit`, so
+  `test:unit` and `test:coverage` discover them; the frontend unit suite now
+  runs 845 tests.
+- Frontend test-script globs are now quoted so Node's test runner consistently
+  expands them instead of relying on partial shell expansion.
+- `playwright.config.ts` no longer duplicates its environment fallback
+  expressions.
+- The predeploy logout E2E test now follows the deterministic User-menu path
+  instead of conditionally discovering a logout element.
+- `scripts/ci/backend-coverage-summary.mjs` now exits non-zero when
+  `ENFORCE_COVERAGE_GATE=true` and the coverage summary is missing, closing the
+  previous fail-open path.
+- Frontend polling hygiene: album/track preview playback no longer resumes the
+  main player over an active preview (a cleanup effect fired on every state
+  change, also destroying cached preview audio elements), and both preview
+  hooks now share one behavior — when a preview ends, errors, or unmounts, the
+  main player resumes only if the preview paused it.
+- TIDAL device-code authentication (both settings sections) now runs through a
+  shared `useDeviceAuthPolling` hook: re-clicking authenticate no longer leaks
+  the previous poll interval, the expiry timer is tracked and cleared on
+  success/cancel/unmount, and code expiry surfaces its error message instead
+  of being hidden by a stale-state closure.
+- Download status polling no longer forks a permanent extra poll chain each
+  time a `download-status-changed` event fires; all scheduling now flows
+  through a single tracked timer. `addPendingDownload` no longer performs side
+  effects inside its React state updater (StrictMode-safe).
+- Raw `setInterval` pollers (feature flags, presence heartbeat, active listen
+  sessions, job status, listen-together lobby discovery, device-link status)
+  now pause while the tab is hidden and refresh once on return to visibility
+  via a shared `useVisibilityGatedInterval` hook. The features provider also
+  no longer double-fetches on tab return (duplicate `focus` +
+  `visibilitychange` listeners). Presence heartbeats stop while a tab is
+  hidden, so backgrounded tabs no longer report the user as actively present.
+- Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
+  `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
+  at nonexistent `postgres`/`redis` services (the services are
+  `postgres-local`/`redis-local`), and the `docker-compose.dev.yml` compatibility
+  shim's `extends` targets referenced the same stale names, so
+  `docker compose config` failed for both. `scripts/dev-setup.sh` now runs under
+  `set -euo pipefail`, resolves the repo root from its own location, checks for
+  `nc` and `.env.example` before using them, and references the correct
+  `postgres-local`/`redis-local` service names.
+- TIDAL admin credentials no longer travel in sidecar URL query strings: the backend now sends the access token as `Authorization: Bearer <token>` and the user ID/country code as `x-tidal-user-id`/`x-tidal-country-code` headers for `POST /search`, `/download/track`, and `/download/album`. The TIDAL sidecar accepts both the new headers and legacy query parameters for this release, logging a deprecation warning when query credentials are used; query-parameter support will be removed in the next release. Requests without an access token now return **401** with `access_token required`.
+- The TIDAL and YouTube Music FastAPI sidecars no longer expose internal exception text in HTTP responses. Client-facing errors now use short generic messages while full exception details and tracebacks remain in service logs; this also changes TIDAL album downloads' per-track `errors[].error` value to `Download failed`, with the root cause available in the TIDAL sidecar logs.
+- YouTube Music OAuth credential files (`/data/oauth_<user>.json` and `/data/client_creds_<user>.json`) are now written with owner-only mode `0600`; the next write also tightens permissions on pre-existing files with looser modes.
+- The YouTube Music streamer image no longer makes `/data` world-writable with `chmod 777`. A new entrypoint repairs `/data` ownership and drops from root to the `ytmusic` user for plain Docker/Compose starts, while explicitly non-root deployments continue directly under their configured user and rely on existing volume permissions such as the Helm chart's unchanged `runAsUser: 1000`/`fsGroup: 1000` security context.
+- YouTube Music streamer requests now strictly validate 11-character `video_id` path parameters and reject malformed values with **400** `Invalid video_id`; `/song`, `/stream`, `/proxy`, and `/yt/proxy` also accept only case-insensitive `LOW`, `MEDIUM`, `HIGH`, or `LOSSLESS` quality values and reject others with **400** `Invalid quality`. Lowercase quality values sent by the backend are now honored instead of silently falling back to `HIGH`.
 
 ### Security
 
@@ -63,6 +281,223 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   top-level services (freezing pre-existing instances in the baseline), and
   chunked TIDAL batch match-search calls to at most 25 queries per sidecar
   request.
+- Sanitized the scan-queue failure message written to the client-readable Spotify
+  import session log, keeping raw detail in the server log only, and widened the
+  route error-canon leak ratchet to catch suffixed error identifiers
+  (`scanError.message`, etc.) and `as`-cast property access, with new frozen,
+  documented baselines for `auth.ts` (Zod validation detail) and `streaming.ts`
+  (typed `SegmentedSessionError` messages).
+- Stopped returning raw caught-error text to clients from the playlist
+  pending-track retry path and podcast refresh-all: the retry handler wrote
+  `error.message` into the session log (returned verbatim to any authenticated
+  caller via `GET /api/spotify/import/session-log`) and into the stored
+  `downloadJob.error` field (returned via `GET /api/downloads`), and
+  `refreshAllPodcastFeeds` echoed per-feed `error.message` in the
+  `POST /api/podcasts/refresh-all` response. All three now use static client
+  messages with raw detail kept in server-side logs only, and the
+  `check-route-error-canon` leak-ratchet baselines were lowered
+  (`playlists.ts` 4→1, `podcasts.ts` 3→2); the remaining counts are
+  server-side-only or code-owned validation text, documented in the checker.
+- Closed a `discover.ts` follow-up gap left by the route error-disclosure
+  hardening: the legacy `POST /api/discover/cleanup-lidarr` handler built a
+  per-artist failure string via a template literal
+  (`Failed to process ${name}: ${error.message}`) and returned it verbatim in
+  the response `errors[]`, leaking raw axios/Lidarr/Prisma text (connection
+  strings, hosts/ports, API-key-bearing URLs, 401 bodies) to any authenticated
+  caller since the router is `requireAuthOrToken`, not admin-only. The handler
+  now pushes a static `Failed to process <artist>` message, logs the raw detail
+  server-side only, and guards non-`Error` throws. The `check-route-error-canon`
+  leak ratchet was extended to also detect template-literal interpolations and
+  intermediate-const assignments of `error.message`/`error.stack` (previously it
+  only matched the `: error.message` object-property form), while exempting
+  raw errors written to the server-side `logger`; `discover.ts` is ratcheted to
+  zero and the newly surfaced pre-existing counts in `playlists`/`podcasts` are
+  frozen as follow-up.
+- Route error-message disclosure hardening (OWASP): the `discover`,
+  `enrichment`, and `library` routers no longer echo raw caught-error text
+  (`error.message` / `error.stack` / a `details` field carrying it) to clients.
+  Every affected handler now returns a static, curated `{ error: "…" }` message
+  and logs the raw error server-side only. This also fixes a latent bug in
+  `enrichment.ts` where a non-object throw (e.g. `null`) made the catch block
+  dereference `error.message` and throw again, leaving the request with no
+  response. The `check-route-error-canon` CI script gains a second,
+  independent ratchet that flags raw `error.message` / `error.stack` echoed
+  into response bodies (baseline can only decrease); the three fixed routers
+  are ratcheted to zero. Remaining routers with the pattern
+  (`downloads`, `listenTogether`, `notifications`, `playbackState`,
+  `playlists`, `podcasts`) are frozen at their current counts and tracked as
+  follow-up.
+- Digest-pinned the two remaining unpinned base images and closed the gap in the
+  Dockerfile digest-pin ratchet. The root AIO `Dockerfile` (`node:24-bookworm-slim`)
+  and `services/audio-analyzer/Dockerfile` (`python:3.11-slim`) were both unpinned
+  and excluded from `scripts/ci/dockerfile-hygiene.test.mjs`, while every sibling
+  service Dockerfile was pinned and gated. Both bases are now pinned by `@sha256:`
+  (tag kept inline for dependabot), and both paths were added to the gate's
+  `dockerfilePaths` so the ratchet enforces digest pinning across all repo
+  Dockerfiles.
+- Path containment on native audio streaming: the `GET /api/library/tracks/:id/stream`
+  handler now resolves the DB-sourced `track.filePath` through `safeResolvePath`
+  and returns `404 Track not available` when the resolved path escapes the
+  configured music root (via `../` traversal or an absolute path), instead of
+  joining it under the root with a bare `path.join`. The containment check runs
+  once, before the streaming service is constructed, and covers both the primary
+  and FFmpeg-fallback branches. This brings the route in line with the sibling
+  Subsonic and share-link streaming paths, which already enforce containment.
+- **Cover-art hardening (Subsonic dimensions change):** the OpenSubsonic
+  `getCoverArt` endpoint no longer resizes with an inline `sharp` pipeline that
+  dropped the shared service's guards. It now delegates to the hardened
+  `coverArtResize` service, gaining the ~50MP decode ceiling (decompression-bomb
+  protection) and `Accept: image/webp` format negotiation, and it snaps the
+  requested `size` to the cover-art allowlist (`64/128/192/320/512/768`) instead
+  of honouring arbitrary `16..2048` values. Requested sizes that fall between
+  allowlist entries now return the next larger bounding box (e.g. `size=300`
+  returns a 320px-bounded image); clients that display cover art scaled to their
+  own layout are unaffected.
+- At-rest secret hygiene for the `.env` sync: `writeEnvFile` now writes the
+  secrets-bearing `.env` (which holds `SETTINGS_ENCRYPTION_KEY` and decrypted
+  integration API keys) with owner-only `0600` permissions and **atomically**
+  (write to a same-directory temp file, `chmod 0600`, then `rename` over the
+  target, with the temp file cleaned up and the original error re-thrown on
+  failure). Previously the file was created world-readable under the process
+  umask and written in place, so a crash mid-write could leave a truncated
+  secrets file. Nothing about which keys are synced changed.
+- **BREAKING (Subsonic token-auth clients re-authenticate once):** the OpenSubsonic
+  auth middleware no longer silently persists a user's **primary account
+  password** as reversible ciphertext. Previously, a successful password-auth
+  request stored `encrypt(accountPassword)` in `user.subsonicPassword` so that
+  MD5 token auth would work — converting a bcrypt-only account password into a
+  key-reversible value at rest. Password auth now authenticates via bcrypt and
+  persists nothing. Subsonic **token** auth (`t`+`s`) validates against the
+  dedicated per-user Subsonic secret set explicitly via
+  `POST /api/auth/subsonic-password`. Changing the account password (self-service
+  `POST /api/auth/change-password` and admin user updates) now also clears
+  `subsonicPassword`. Clients using token auth with the account password must set
+  a dedicated Subsonic password once, or switch to password auth. See
+  `docs/UPGRADING.md`.
+- Legacy (pre-GCM) at-rest decryption can now fail **closed** behind the opt-in
+  `SETTINGS_DECRYPT_FAIL_CLOSED` flag. The legacy AES-256-CBC path previously
+  returned unrecognized/plaintext values verbatim (fail-open passthrough),
+  keeping unauthenticated ciphertext and plaintext-passthrough alive
+  indefinitely. With the flag enabled, any stored value that is not an
+  authenticated `v2:` envelope throws instead of being returned. The Tidal
+  credential reader honours the same flag (it no longer falls back to using raw
+  stored ciphertext as a bearer token when fail-closed). Enable the flag only
+  after `GET /api/admin/secrets-status` reports zero legacy rows; authenticated
+  `v2` ciphertext always fails closed regardless. See `docs/UPGRADING.md`.
+- The standalone `audio-analyzer` (Essentia/MusiCNN) sidecar now builds on
+  `python:3.11-slim` instead of EOL Ubuntu 20.04 / Python 3.8, restoring OS and
+  interpreter security updates and satisfying the repo's Python 3.11+ contract
+  (roadmap F51). Its hash-pinned `requirements.lock` was recompiled for Python
+  3.11 and now shares the AIO image's TensorFlow 2.15.1 / essentia-tensorflow
+  2.1b6.dev1389 / numpy 1.26.4 stack, so both analyzers produce identical model
+  output; `essentia-tensorflow` is pinned exactly because it publishes only
+  pre-release builds. The blocking pip-audit lane now audits this lock on Python
+  3.11 with the TensorFlow 2.15 exception set (`docs/SECURITY.md`). No runtime
+  behavior change; the analysis pipeline and MusiCNN classification heads are
+  unchanged.
+- Helm chart pod hardening: all chart-managed workloads now set
+  `seccompProfile: RuntimeDefault`, drop all Linux capabilities on the
+  application containers, and set `automountServiceAccountToken: false` (no
+  chart workload calls the Kubernetes API). Postgres and Redis keep their
+  existing user-switching entrypoints (seccomp added, capabilities untouched).
+- Helm chart no longer renders third-party API keys/tokens (`LIDARR_API_KEY`,
+  `AUDIOBOOKSHELF_TOKEN`, `LASTFM_API_KEY`, `FANART_API_KEY`, `OPENAI_API_KEY`)
+  as plaintext `value:` env in pod specs. When the chart manages its own Secret
+  (default), they are injected via `secretKeyRef` from that Secret. Deployments
+  using `secrets.existingSecret` keep the legacy plaintext behavior for
+  backward compatibility unless `secrets.apiKeysInExistingSecret=true`, which
+  reads the keys from the existing Secret via `secretKeyRef`. See
+  `docs/UPGRADING.md`.
+- All-in-One (AIO) backend, frontend, and analyzer processes now run under
+  supervisord as the fixed `soundspan` user (uid/gid 1000). Existing writable
+  volume paths are chowned automatically on every boot; see
+  `docs/UPGRADING.md` for bind-mount requirements.
+- AIO backend `.env` and persisted master-secret files are now owner-only
+  (`0600`, uid 1000), and `/data/secrets` is mode `0700`.
+- AIO now honors operator-supplied `SESSION_SECRET`,
+  `SETTINGS_ENCRYPTION_KEY`, and `INTERNAL_API_SECRET`, with precedence env →
+  persisted file → generated value and write-through persistence. Published
+  defaults and short `SESSION_SECRET` values fail startup; `docker-compose.aio.yml`
+  now forwards all three secrets. See `docs/UPGRADING.md`.
+- Embedded AIO Postgres now uses a generated or operator-supplied password
+  persisted under `/data/secrets`, synchronizes existing databases
+  automatically, listens only on loopback, and permits only loopback clients
+  authenticated with `scram-sha-256`.
+- AIO health checks now require both frontend health and backend readiness.
+  Helm AIO pods use shared exec liveness/readiness probes plus a generous
+  `startupProbe`, so backend or database failure is no longer reported healthy.
+- Replaced the unmaintained `speakeasy` TOTP library (last released in 2016) on
+  the 2FA path with actively maintained `otplib` v13 and its audited
+  `@noble/hashes` and `@scure/base` cryptography. Existing enrolled 2FA secrets
+  remain compatible: verification is still RFC 6238 TOTP over the same base32
+  secrets with the same effective validity window (`epochTolerance: 60` seconds,
+  equivalent to the former Speakeasy `window: 2`), verified by a behavioral test
+  using real Speakeasy-generated tokens. Malformed tokens and secrets now fail
+  closed with 401 responses, never 500 errors.
+- Long-lived (30-day) refresh tokens carrying `type: "refresh"` were accepted
+  anywhere an access token was, including Bearer headers, streaming `?token=`
+  query parameters, and the Listen Together socket. JWT verification is now
+  consolidated in a single `verifyAccessToken` accessor that pins HS256,
+  requires a well-formed payload, and rejects any token carrying a `type` claim,
+  while `/api/auth/refresh` continues to accept refresh tokens for exchange
+  only.
+- SSRF: podcast episode audio (stream + background download) is now validated by the DNS-resolving outbound-safety guard at fetch time, with every redirect hop re-validated (public CDN redirects and HTTP Range streaming preserved); attacker-controlled enclosure URLs can no longer reach private/loopback/link-local/metadata addresses.
+- CORS: the authenticated podcast stream and cover routes no longer reflect an arbitrary request Origin together with credentials; credentialed CORS is owned solely by the allowlist-enforcing global middleware.
+- **BREAKING (opt-out available):** CORS is now deny-by-default in production. Previously, when `ALLOWED_ORIGINS` was unset, the backend reflected ANY request origin with `credentials: true`, letting arbitrary websites make cookie-authenticated cross-origin requests. Now an unset allowlist denies cross-origin browser requests in production (same-origin deployments — the standard frontend-proxy setup — are unaffected; requests without an `Origin` header and development mode remain allowed). Restore the legacy behavior with `CORS_ALLOW_ALL=true`, or better, set `ALLOWED_ORIGINS` to your frontend origin(s). See `docs/UPGRADING.md`.
+- **BREAKING (opt-out available):** the Lidarr webhook (`POST /api/webhooks/lidarr`) now fails closed. Previously, when no webhook secret was configured in System Settings, the endpoint accepted unauthenticated requests (which could drive download-state mutations and queue library scans). Now it rejects them with 401 until a secret is configured; `LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED=true` restores the legacy behavior for deployments that cannot set a secret yet. See `docs/UPGRADING.md`.
+- Ending a Listen Together group now enforces host authorization even when the group is not hydrated in local memory (post-restart / multi-pod): `POST /api/listen-together/:groupId/end` verifies `hostUserId` against the database instead of skipping the check.
+- Library-wide enrichment triggers `POST /api/enrichment/sync` and `POST /api/enrichment/start` now require admin, matching their admin-gated siblings (`/full`, `/pause`, `/resume`, `/stop`, resets). Per-user enrichment settings and the user-facing metadata editor routes are unchanged.
+- Artist discovery/preview endpoints (`GET /api/artists/discover/:nameOrMbid`, `GET /api/artists/album/:mbid`, `GET /api/artists/preview/:artistName/:trackTitle`) now require authentication (`requireAuthOrToken`, same guard as the existing preview stream) instead of proxying MusicBrainz/Last.fm/Deezer/fanart/YouTube Music lookups unauthenticated.
+- Fixed the `ADMIN_RESET_PASSWORD` emergency recovery: it queried `role: "ADMIN"` while roles are stored lowercase, so the reset silently never matched an admin user. It now works as documented.
+- Added a route-mount contract test asserting every `/api/*` (and `/rest`) prefix is mounted behind its expected rate-limiter tier and router, so silently dropping a limiter or mounting an unreviewed prefix fails CI.
+- **BREAKING:** The split-stack deploy no longer ships default secrets, and secret
+  bootstrap now fails fast (migration steps in `docs/UPGRADING.md`).
+  `docker-compose.yml` requires `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, and
+  `INTERNAL_API_SECRET` (each generated with `openssl rand -base64 32`) instead of
+  falling back to published values, and the backend image's entrypoint exits with an
+  actionable error instead of generating an ephemeral per-boot `SESSION_SECRET`
+  (which invalidated JWTs and stranded API-key hashes on every restart) or exporting
+  the insecure `default-encryption-key-change-me` encryption key (which the backend
+  rejected at module load — a guaranteed crash-loop with a misleading message).
+  The unreachable onboarding first-registration encryption-key generation path was
+  removed; the key must exist before boot.
+- **BREAKING:** The `tidal-downloader` and `ytmusic-streamer` sidecars now reject the
+  old repo-published `INTERNAL_API_SECRET` default value
+  (`soundspan-internal-secret-change-me`) as unconfigured (403 fail-closed), and
+  `docker-compose.local.yml` no longer injects it as the local CLAP default.
+- **BREAKING:** `docker-compose.yml` now binds the Postgres and Redis host ports to
+  `127.0.0.1` only — they were previously published on **all host interfaces** with
+  weak/no credentials. Same-host tooling keeps working; `docs/UPGRADING.md` documents
+  a compose-override escape hatch for re-publishing.
+- The backend image's `REDIS_FLUSH_ON_STARTUP` entrypoint fallback is now the safe
+  `false` (matching every shipped compose file and the Helm chart) instead of a
+  destructive default `FLUSHALL` on startup.
+- `GET /api/onboarding/status` no longer accepts refresh tokens as bearer tokens:
+  a token carrying `type: "refresh"` is treated like an invalid token and receives
+  only the basic user-count status (verified via the shared
+  `verifyAccessToken` accessor).
+- The `/api/onboarding` routes are now rate-limited: `/register` (which mints the
+  first admin account) sits on the strict auth limiter like `/api/auth/register`,
+  and the rest of the onboarding wizard uses the general API limiter.
+- Internal-secret auth now fails closed on the published default sentinel: the
+  `requireInternalSecret` middleware (`x-internal-secret` guard on backend→sidecar
+  callbacks) previously rejected only when `INTERNAL_API_SECRET` was unset, so a
+  deployment left on the repo-published default `soundspan-internal-secret-change-me`
+  would accept forged internal calls. It now rejects (403) when the secret is unset
+  **or** equal to that known default, restoring parity with the FastAPI sidecar guard
+  (`sidecar_runtime_utils.py`) and the fail-fast-on-default posture of
+  `encryption.ts`.
+
+- Every third-party GitHub Action across the six CI workflows is pinned to a full
+  commit SHA with a `# vX.Y.Z` comment; Dependabot still bumps those pins.
+- The gitleaks scanner image is pinned to v8.30.1 by version and digest instead
+  of `:latest`.
+- The `HF_TOKEN` build secret now passes directly from the secrets context to
+  the Docker build-secret mount instead of transiting a step output.
+- The gitleaks secret-scan gate is now blocking on pull requests.
+- Dependency Review and Trivy remain non-blocking; the recommended ratchet —
+  Dependency Review with `fail-on-severity: high` first, then Trivy — is
+  documented in-workflow as a deliberate owner decision.
 
 ### Changed
 
@@ -315,447 +750,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slow batch could silently and irreversibly shrink the analyzed library.
   Results that completed just as the timeout fired are now drained and saved
   instead of being dropped.
-
-### Fixed
-
-- Playlists list endpoint no longer hydrates every track of every visible playlist: it now paginates (limit/offset, clamped) and returns a database-side track count plus a bounded cover-art preview per playlist.
-- Remote media proxy streams for Tidal, YouTube, YouTube Music, and artist
-  previews now destroy the upstream connection when the client disconnects,
-  preventing connection-pool exhaustion during seek and skip operations.
-- **Sidecar event-loop offload for OAuth onboarding and search.** The
-  `tidal-downloader` (`/auth/device`, `/auth/token`, `/auth/refresh`, `/search`)
-  and `ytmusic-streamer` (`/auth/device-code`, `/auth/device-code/poll`) async
-  handlers called blocking third-party `tiddl`/`ytmusicapi` methods directly on
-  the event loop. During device-code onboarding the poll endpoint runs every few
-  seconds, so a blocking call there serialized concurrent onboarding and
-  streaming across all users. Each blocking call is now wrapped in
-  `asyncio.to_thread`, matching the existing offload pattern already used for the
-  per-user refresh path.
-- **Sidecar event-loop offload for per-user session restore.** The
-  `tidal-downloader` `/user/auth/restore` handler and its `/auth/session`
-  verification path called the blocking `tiddl` `get_session()` (and, on the
-  expired-token branch, `AuthAPI().refresh_token()`) directly on the event loop,
-  stalling all concurrent onboarding and streaming while a single user's
-  credentials were restored. These calls are now wrapped in `asyncio.to_thread`,
-  completing the Phase-D offload coverage for the sidecar's auth surface.
-- Aligned the mypy type-check target (`python_version`) to Python 3.11 to match
-  the repo floor (Ruff `py311` and the audio-analyzer `python:3.11-slim` pin), so
-  type checks run against the oldest interpreter the sidecars use.
-- Frontend Helm pod no longer runs as the stale UID 1001; the chart frontend
-  override was removed so the pod inherits the chart-wide UID/GID 1000 pod
-  security context, matching the realigned frontend image (`USER node`) and
-  fixing `.next/cache` write failures in individual deployment mode.
-
-- Lidarr queue/history helper HTTP calls are now bounded. The module-level
-  `cleanStuckDownloads`, `getRecentCompletedDownloads`, `getQueueCount`,
-  `getQueue`, and `isDownloadActive` helpers in `backend/src/services/lidarr.ts`
-  previously issued bare `axios` requests with no `timeout`, inheriting axios's
-  unbounded default (`0`). Because `QueueCleaner.runCleanup` only reschedules its
-  30s reconcile/clean loop after its awaits resolve, a single hung Lidarr call
-  could stall the loop indefinitely. Each call now carries an explicit
-  `timeout: 30000`, matching the class client on the same module.
-- AIO image builds no longer fail while removing the base image's `node` user:
-  `userdel` and `groupdel` are now conditional, and existing uid/gid 1000
-  holders are renamed and reused instead of failing `groupadd` or `useradd`.
-- OpenAPI contract sync: the generated spec (`GET /api/docs.json`, `/api/docs`)
-  no longer advertises 24 phantom endpoints. The `@openapi` path keys for the
-  API-key, auth (`login`/`me`), library-scan, listen-together, lyrics, mixes,
-  and search routes were documented without the mounted `/api` prefix, so the
-  spec published paths such as `/auth/login` and `/mixes` that 404 on the server
-  while the real `/api/...` URLs went undocumented. The keys now match the
-  mounted routes. `openapiSupplement.ts` — previously a shim that re-documented
-  those same endpoints under their correct prefixes — is reduced to the only
-  endpoints defined directly in `index.ts` with no route module (the
-  `/health`, `/api/health` liveness/readiness probes and `/api/docs.json`).
-  Documentation only; no runtime route behavior changed.
-- OpenAPI `info.version` is no longer frozen at `1.0.0`; it now resolves from
-  `backend/package.json` at load time (currently `1.9.0`) so the published
-  contract tracks the shipping release.
-- MetadataEditor's "Reset to Original" action now uses the in-app
-  `ConfirmDialog` instead of the browser's native confirmation prompt.
-- Frontend token refresh is now single-flight, so simultaneous 401 responses
-  share one `/auth/refresh` request instead of racing refresh-token rotation
-  and forcing a logout.
-- Audio-state polling now detects expired sessions from HTTP 401 status without
-  permanently stopping after a transient failure, and audiobook/podcast
-  restore failures are logged instead of surfacing as unhandled rejections.
-- Backend reliability hardening (no behavior change for healthy paths):
-  - Remote-track backfill (`remoteTrackBackfillService`) no longer spins
-    forever when an album title cannot be resolved. The previous re-query
-    pagination re-fetched the same `albumId: null` rows on every iteration
-    (latching `isRunning` and inflating the processed counter without bound);
-    both the Tidal and YouTube Music phases now use id-cursor pagination so
-    each row is visited at most once, backed by a fixed `MAX_BACKFILL_ITERATIONS`
-    safety bound.
-  - An invalid/typo'd `LOG_LEVEL` (e.g. `verbose`) no longer silently disables
-    **all** logging. Unrecognized values now fall back to the environment
-    default (`warn` in production, `debug` otherwise) and emit a one-time
-    startup warning; explicit `LOG_LEVEL=silent` still silences output. Level
-    matching is also hardened against prototype keys (`constructor`, `toString`).
-  - The music-library scanner's recursive directory walk was replaced with a
-    bounded iterative traversal: it caps depth at `MAX_SCAN_DEPTH` (64) and
-    skips symbolic links, preventing stack overflows and symlink-cycle hangs on
-    pathological trees.
-  - Added request timeouts (`AbortSignal.timeout(15000)`) to the previously
-    unbounded Audiobookshelf cover fetches in `audiobookCache`, the library
-    cover-art proxy, and the audiobooks cover proxy, so a stalled upstream can
-    no longer hang a worker or request indefinitely.
-  - Untracked module-scope cleanup intervals (Soulseek search-session and
-    failed-user pruning) are now `unref()`'d so they never keep the process or a
-    Jest worker alive, and the worker scheduler / discover-processor ioredis
-    lock clients now connect lazily under Jest to stop background reconnect
-    loops from logging after test teardown.
-- Removed dead backend code: the test-only `utils/discoverLogger.ts` logger
-  monkey-patch and the unreferenced `workers/cleanupDiscovery.ts` and
-  `workers/dataIntegrityCli.ts` CLIs (the data-integrity check runs on the
-  worker scheduler; discovery cleanup runs via `staleJobCleanup`).
-- Python sidecar (tidal-downloader, ytmusic-streamer) HTTP error responses now
-  use the backend-wide `{"error": ...}` body shape instead of FastAPI's default
-  `{"detail": ...}`; unhandled sidecar exceptions return a generic 500 without
-  leaking internals, and nested error payloads (e.g. `age_restricted`) keep
-  their existing fields. The Node backend only branches on status codes, so no
-  backend change was needed.
-- ytmusic-streamer stream proxying no longer leaks an httpx connection when the
-  upstream Range request fails before streaming starts, and the `/yt/proxy`
-  route no longer forwards upstream `Content-Length` (which crashed the ASGI
-  app with an h11 protocol error whenever the CDN dropped a stream mid-read);
-  both proxy routes now share one hardened range/full-proxy helper.
-- tidal-downloader album-track pagination can no longer loop forever when the
-  TIDAL API echoes a zero/missing page `limit`; the loop advances by the real
-  page length under a fixed hard cap.
-- ytmusic-streamer rate pacing is now genuinely thread-safe (a shared
-  monotonic-clock pacer replaces a never-acquired asyncio.Lock and racy global
-  timestamp), the in-memory stream/search caches are bounded
-  (`YTMUSIC_STREAM_CACHE_MAX` / `YTMUSIC_SEARCH_CACHE_MAX`, default 1024, oldest
-  evicted), and the two near-duplicate yt-dlp extraction paths were merged into
-  one shared core.
-- ytmusic-streamer route handlers no longer run blocking ytmusicapi network
-  calls on the asyncio event loop (a slow YouTube call stalled every concurrent
-  request); search, album/artist/song, library, charts, moods, home, browse,
-  and playlist handlers now offload to worker threads.
-- ytmusic-streamer stream-URL extraction now has an overall per-request
-  deadline (`YTMUSIC_EXTRACT_TIMEOUT`, default 60s, HTTP 504 on expiry) and a
-  configurable yt-dlp socket timeout (`YTMUSIC_YTDLP_SOCKET_TIMEOUT`, default
-  20s) covering extraction and downloads, so a stalled extraction can no longer
-  hang a request or strand its worker thread forever.
-- The `audio-analyzer` sidecar now measures its own elapsed durations and
-  scheduling intervals (idle-model-unload timeout, worker-resize debounce, DB
-  reconciliation cadence, batch-rate logging) with `time.monotonic()` instead
-  of wall-clock `time.time()`, so an NTP step or manual clock change can no
-  longer prematurely unload models, mis-fire a resize, or corrupt the reported
-  throughput. The cross-process `audio:worker:heartbeat` timestamp remains
-  wall-clock epoch milliseconds by design.
-- `scripts/k8s-rollout-slo-check.sh` sampled SLO warning logs from only one pod
-  per Deployment (`kubectl logs deploy/...`), so reconnect/scheduler SLO
-  breaches emitted by other replicas in an HA deployment were missed and the
-  gate could pass when it should fail. It now aggregates `--since` logs across
-  every backend and backend-worker pod (by `app.kubernetes.io/component` label,
-  with a name-prefix fallback).
-- The three backend audio-analyzer source-contract suites
-  (`audioAnalyzerQueueContract`, `audioAnalyzerPoolRecoveryContract`,
-  `audioAnalyzerFailureResolutionContract`) were updated in step with the
-  analyzer reliability refactor: the marker strings they scrape from
-  `analyzer.py` moved into the new `_claim_tracks_for_processing` /
-  `_consume_batch_results` helpers and the module-level
-  `_RESOLVE_AUDIO_FAILURES_SQL` constant, so the tests now assert against
-  those boundaries (and additionally prove `_save_results` executes the
-  failure-resolution SQL).
-- Audio analyzer sidecar no longer runs a PostgreSQL worker-count query at
-  module import. Because the service uses multiprocessing spawn mode, every
-  spawned worker process re-imported the module and re-executed that query;
-  worker-count resolution now happens once, explicitly, at service startup in
-  the parent process.
-- CLAP sidecar idle monitor no longer leaks a new Redis connection pool on
-  every idle-check iteration; it now reuses a single injected client that is
-  deterministically closed on shutdown (as is the idle DB connection, which
-  previously stayed open if the main loop exited via an exception).
-- CLAP sidecar worker/text-embed/control daemon threads are now supervised:
-  if any thread dies, the service logs a critical error, stops cleanly, and
-  exits non-zero so the container orchestrator restarts it instead of leaving
-  a zombie pod that consumes no work.
-- CLAP model unload/inference race fixed: idle unloading and embedding
-  inference now serialize on one re-entrant lock, and embedding calls reload
-  the model under that lock if an idle unload wins the race — previously the
-  race raised mid-call, spuriously failing the track and burning its vibe
-  retry budget.
-- Python sidecars no longer use deprecated `datetime.utcnow()`; analyzer
-  timestamps are timezone-aware UTC (`datetime.now(timezone.utc)`).
-- Backend Jest suites no longer leave Redis's live reconnect loop running in
-  test workers: `utils/redis.ts` skips its eager module-load connection under
-  Jest, preventing `Cannot log after tests are done` noise and flakiness, while
-  tests continue to cover the production eager-connect behavior.
-- Backend Jest's default `maxWorkers` is now 2 instead of 8, matching the
-  documented low-memory constraint and the existing explicit CI limit.
-- Sidecar requirement-lock tests now assert that the Uvicorn manifest floor is
-  at least the 0.52.0 security baseline instead of requiring that stale exact
-  literal, so Dependabot floor increases such as 0.52.1 remain valid.
-- Two orphaned frontend player tests now live under `frontend/tests/unit`, so
-  `test:unit` and `test:coverage` discover them; the frontend unit suite now
-  runs 845 tests.
-- Frontend test-script globs are now quoted so Node's test runner consistently
-  expands them instead of relying on partial shell expansion.
-- `playwright.config.ts` no longer duplicates its environment fallback
-  expressions.
-- The predeploy logout E2E test now follows the deterministic User-menu path
-  instead of conditionally discovering a logout element.
-- `scripts/ci/backend-coverage-summary.mjs` now exits non-zero when
-  `ENFORCE_COVERAGE_GATE=true` and the coverage summary is missing, closing the
-  previous fail-open path.
-- Frontend polling hygiene: album/track preview playback no longer resumes the
-  main player over an active preview (a cleanup effect fired on every state
-  change, also destroying cached preview audio elements), and both preview
-  hooks now share one behavior — when a preview ends, errors, or unmounts, the
-  main player resumes only if the preview paused it.
-- TIDAL device-code authentication (both settings sections) now runs through a
-  shared `useDeviceAuthPolling` hook: re-clicking authenticate no longer leaks
-  the previous poll interval, the expiry timer is tracked and cleared on
-  success/cancel/unmount, and code expiry surfaces its error message instead
-  of being hidden by a stale-state closure.
-- Download status polling no longer forks a permanent extra poll chain each
-  time a `download-status-changed` event fires; all scheduling now flows
-  through a single tracked timer. `addPendingDownload` no longer performs side
-  effects inside its React state updater (StrictMode-safe).
-- Raw `setInterval` pollers (feature flags, presence heartbeat, active listen
-  sessions, job status, listen-together lobby discovery, device-link status)
-  now pause while the tab is hidden and refresh once on return to visibility
-  via a shared `useVisibilityGatedInterval` hook. The features provider also
-  no longer double-fetches on tab return (duplicate `focus` +
-  `visibilitychange` listeners). Presence heartbeats stop while a tab is
-  hidden, so backgrounded tabs no longer report the user as actively present.
-- Dev tooling: repaired the broken local compose files — `docker-compose.local.yml`'s
-  `audio-analysis` profile pointed its analyzers' `depends_on` and connection URLs
-  at nonexistent `postgres`/`redis` services (the services are
-  `postgres-local`/`redis-local`), and the `docker-compose.dev.yml` compatibility
-  shim's `extends` targets referenced the same stale names, so
-  `docker compose config` failed for both. `scripts/dev-setup.sh` now runs under
-  `set -euo pipefail`, resolves the repo root from its own location, checks for
-  `nc` and `.env.example` before using them, and references the correct
-  `postgres-local`/`redis-local` service names.
-- TIDAL admin credentials no longer travel in sidecar URL query strings: the backend now sends the access token as `Authorization: Bearer <token>` and the user ID/country code as `x-tidal-user-id`/`x-tidal-country-code` headers for `POST /search`, `/download/track`, and `/download/album`. The TIDAL sidecar accepts both the new headers and legacy query parameters for this release, logging a deprecation warning when query credentials are used; query-parameter support will be removed in the next release. Requests without an access token now return **401** with `access_token required`.
-- The TIDAL and YouTube Music FastAPI sidecars no longer expose internal exception text in HTTP responses. Client-facing errors now use short generic messages while full exception details and tracebacks remain in service logs; this also changes TIDAL album downloads' per-track `errors[].error` value to `Download failed`, with the root cause available in the TIDAL sidecar logs.
-- YouTube Music OAuth credential files (`/data/oauth_<user>.json` and `/data/client_creds_<user>.json`) are now written with owner-only mode `0600`; the next write also tightens permissions on pre-existing files with looser modes.
-- The YouTube Music streamer image no longer makes `/data` world-writable with `chmod 777`. A new entrypoint repairs `/data` ownership and drops from root to the `ytmusic` user for plain Docker/Compose starts, while explicitly non-root deployments continue directly under their configured user and rely on existing volume permissions such as the Helm chart's unchanged `runAsUser: 1000`/`fsGroup: 1000` security context.
-- YouTube Music streamer requests now strictly validate 11-character `video_id` path parameters and reject malformed values with **400** `Invalid video_id`; `/song`, `/stream`, `/proxy`, and `/yt/proxy` also accept only case-insensitive `LOW`, `MEDIUM`, `HIGH`, or `LOSSLESS` quality values and reject others with **400** `Invalid quality`. Lowercase quality values sent by the backend are now honored instead of silently falling back to `HIGH`.
-
-### Security
-
-- Sanitized the scan-queue failure message written to the client-readable Spotify
-  import session log, keeping raw detail in the server log only, and widened the
-  route error-canon leak ratchet to catch suffixed error identifiers
-  (`scanError.message`, etc.) and `as`-cast property access, with new frozen,
-  documented baselines for `auth.ts` (Zod validation detail) and `streaming.ts`
-  (typed `SegmentedSessionError` messages).
-- Stopped returning raw caught-error text to clients from the playlist
-  pending-track retry path and podcast refresh-all: the retry handler wrote
-  `error.message` into the session log (returned verbatim to any authenticated
-  caller via `GET /api/spotify/import/session-log`) and into the stored
-  `downloadJob.error` field (returned via `GET /api/downloads`), and
-  `refreshAllPodcastFeeds` echoed per-feed `error.message` in the
-  `POST /api/podcasts/refresh-all` response. All three now use static client
-  messages with raw detail kept in server-side logs only, and the
-  `check-route-error-canon` leak-ratchet baselines were lowered
-  (`playlists.ts` 4→1, `podcasts.ts` 3→2); the remaining counts are
-  server-side-only or code-owned validation text, documented in the checker.
-- Closed a `discover.ts` follow-up gap left by the route error-disclosure
-  hardening: the legacy `POST /api/discover/cleanup-lidarr` handler built a
-  per-artist failure string via a template literal
-  (`Failed to process ${name}: ${error.message}`) and returned it verbatim in
-  the response `errors[]`, leaking raw axios/Lidarr/Prisma text (connection
-  strings, hosts/ports, API-key-bearing URLs, 401 bodies) to any authenticated
-  caller since the router is `requireAuthOrToken`, not admin-only. The handler
-  now pushes a static `Failed to process <artist>` message, logs the raw detail
-  server-side only, and guards non-`Error` throws. The `check-route-error-canon`
-  leak ratchet was extended to also detect template-literal interpolations and
-  intermediate-const assignments of `error.message`/`error.stack` (previously it
-  only matched the `: error.message` object-property form), while exempting
-  raw errors written to the server-side `logger`; `discover.ts` is ratcheted to
-  zero and the newly surfaced pre-existing counts in `playlists`/`podcasts` are
-  frozen as follow-up.
-- Route error-message disclosure hardening (OWASP): the `discover`,
-  `enrichment`, and `library` routers no longer echo raw caught-error text
-  (`error.message` / `error.stack` / a `details` field carrying it) to clients.
-  Every affected handler now returns a static, curated `{ error: "…" }` message
-  and logs the raw error server-side only. This also fixes a latent bug in
-  `enrichment.ts` where a non-object throw (e.g. `null`) made the catch block
-  dereference `error.message` and throw again, leaving the request with no
-  response. The `check-route-error-canon` CI script gains a second,
-  independent ratchet that flags raw `error.message` / `error.stack` echoed
-  into response bodies (baseline can only decrease); the three fixed routers
-  are ratcheted to zero. Remaining routers with the pattern
-  (`downloads`, `listenTogether`, `notifications`, `playbackState`,
-  `playlists`, `podcasts`) are frozen at their current counts and tracked as
-  follow-up.
-- Digest-pinned the two remaining unpinned base images and closed the gap in the
-  Dockerfile digest-pin ratchet. The root AIO `Dockerfile` (`node:24-bookworm-slim`)
-  and `services/audio-analyzer/Dockerfile` (`python:3.11-slim`) were both unpinned
-  and excluded from `scripts/ci/dockerfile-hygiene.test.mjs`, while every sibling
-  service Dockerfile was pinned and gated. Both bases are now pinned by `@sha256:`
-  (tag kept inline for dependabot), and both paths were added to the gate's
-  `dockerfilePaths` so the ratchet enforces digest pinning across all repo
-  Dockerfiles.
-- Path containment on native audio streaming: the `GET /api/library/tracks/:id/stream`
-  handler now resolves the DB-sourced `track.filePath` through `safeResolvePath`
-  and returns `404 Track not available` when the resolved path escapes the
-  configured music root (via `../` traversal or an absolute path), instead of
-  joining it under the root with a bare `path.join`. The containment check runs
-  once, before the streaming service is constructed, and covers both the primary
-  and FFmpeg-fallback branches. This brings the route in line with the sibling
-  Subsonic and share-link streaming paths, which already enforce containment.
-- **Cover-art hardening (Subsonic dimensions change):** the OpenSubsonic
-  `getCoverArt` endpoint no longer resizes with an inline `sharp` pipeline that
-  dropped the shared service's guards. It now delegates to the hardened
-  `coverArtResize` service, gaining the ~50MP decode ceiling (decompression-bomb
-  protection) and `Accept: image/webp` format negotiation, and it snaps the
-  requested `size` to the cover-art allowlist (`64/128/192/320/512/768`) instead
-  of honouring arbitrary `16..2048` values. Requested sizes that fall between
-  allowlist entries now return the next larger bounding box (e.g. `size=300`
-  returns a 320px-bounded image); clients that display cover art scaled to their
-  own layout are unaffected.
-- At-rest secret hygiene for the `.env` sync: `writeEnvFile` now writes the
-  secrets-bearing `.env` (which holds `SETTINGS_ENCRYPTION_KEY` and decrypted
-  integration API keys) with owner-only `0600` permissions and **atomically**
-  (write to a same-directory temp file, `chmod 0600`, then `rename` over the
-  target, with the temp file cleaned up and the original error re-thrown on
-  failure). Previously the file was created world-readable under the process
-  umask and written in place, so a crash mid-write could leave a truncated
-  secrets file. Nothing about which keys are synced changed.
-- **BREAKING (Subsonic token-auth clients re-authenticate once):** the OpenSubsonic
-  auth middleware no longer silently persists a user's **primary account
-  password** as reversible ciphertext. Previously, a successful password-auth
-  request stored `encrypt(accountPassword)` in `user.subsonicPassword` so that
-  MD5 token auth would work — converting a bcrypt-only account password into a
-  key-reversible value at rest. Password auth now authenticates via bcrypt and
-  persists nothing. Subsonic **token** auth (`t`+`s`) validates against the
-  dedicated per-user Subsonic secret set explicitly via
-  `POST /api/auth/subsonic-password`. Changing the account password (self-service
-  `POST /api/auth/change-password` and admin user updates) now also clears
-  `subsonicPassword`. Clients using token auth with the account password must set
-  a dedicated Subsonic password once, or switch to password auth. See
-  `docs/UPGRADING.md`.
-- Legacy (pre-GCM) at-rest decryption can now fail **closed** behind the opt-in
-  `SETTINGS_DECRYPT_FAIL_CLOSED` flag. The legacy AES-256-CBC path previously
-  returned unrecognized/plaintext values verbatim (fail-open passthrough),
-  keeping unauthenticated ciphertext and plaintext-passthrough alive
-  indefinitely. With the flag enabled, any stored value that is not an
-  authenticated `v2:` envelope throws instead of being returned. The Tidal
-  credential reader honours the same flag (it no longer falls back to using raw
-  stored ciphertext as a bearer token when fail-closed). Enable the flag only
-  after `GET /api/admin/secrets-status` reports zero legacy rows; authenticated
-  `v2` ciphertext always fails closed regardless. See `docs/UPGRADING.md`.
-- The standalone `audio-analyzer` (Essentia/MusiCNN) sidecar now builds on
-  `python:3.11-slim` instead of EOL Ubuntu 20.04 / Python 3.8, restoring OS and
-  interpreter security updates and satisfying the repo's Python 3.11+ contract
-  (roadmap F51). Its hash-pinned `requirements.lock` was recompiled for Python
-  3.11 and now shares the AIO image's TensorFlow 2.15.1 / essentia-tensorflow
-  2.1b6.dev1389 / numpy 1.26.4 stack, so both analyzers produce identical model
-  output; `essentia-tensorflow` is pinned exactly because it publishes only
-  pre-release builds. The blocking pip-audit lane now audits this lock on Python
-  3.11 with the TensorFlow 2.15 exception set (`docs/SECURITY.md`). No runtime
-  behavior change; the analysis pipeline and MusiCNN classification heads are
-  unchanged.
-- Helm chart pod hardening: all chart-managed workloads now set
-  `seccompProfile: RuntimeDefault`, drop all Linux capabilities on the
-  application containers, and set `automountServiceAccountToken: false` (no
-  chart workload calls the Kubernetes API). Postgres and Redis keep their
-  existing user-switching entrypoints (seccomp added, capabilities untouched).
-- Helm chart no longer renders third-party API keys/tokens (`LIDARR_API_KEY`,
-  `AUDIOBOOKSHELF_TOKEN`, `LASTFM_API_KEY`, `FANART_API_KEY`, `OPENAI_API_KEY`)
-  as plaintext `value:` env in pod specs. When the chart manages its own Secret
-  (default), they are injected via `secretKeyRef` from that Secret. Deployments
-  using `secrets.existingSecret` keep the legacy plaintext behavior for
-  backward compatibility unless `secrets.apiKeysInExistingSecret=true`, which
-  reads the keys from the existing Secret via `secretKeyRef`. See
-  `docs/UPGRADING.md`.
-- All-in-One (AIO) backend, frontend, and analyzer processes now run under
-  supervisord as the fixed `soundspan` user (uid/gid 1000). Existing writable
-  volume paths are chowned automatically on every boot; see
-  `docs/UPGRADING.md` for bind-mount requirements.
-- AIO backend `.env` and persisted master-secret files are now owner-only
-  (`0600`, uid 1000), and `/data/secrets` is mode `0700`.
-- AIO now honors operator-supplied `SESSION_SECRET`,
-  `SETTINGS_ENCRYPTION_KEY`, and `INTERNAL_API_SECRET`, with precedence env →
-  persisted file → generated value and write-through persistence. Published
-  defaults and short `SESSION_SECRET` values fail startup; `docker-compose.aio.yml`
-  now forwards all three secrets. See `docs/UPGRADING.md`.
-- Embedded AIO Postgres now uses a generated or operator-supplied password
-  persisted under `/data/secrets`, synchronizes existing databases
-  automatically, listens only on loopback, and permits only loopback clients
-  authenticated with `scram-sha-256`.
-- AIO health checks now require both frontend health and backend readiness.
-  Helm AIO pods use shared exec liveness/readiness probes plus a generous
-  `startupProbe`, so backend or database failure is no longer reported healthy.
-- Replaced the unmaintained `speakeasy` TOTP library (last released in 2016) on
-  the 2FA path with actively maintained `otplib` v13 and its audited
-  `@noble/hashes` and `@scure/base` cryptography. Existing enrolled 2FA secrets
-  remain compatible: verification is still RFC 6238 TOTP over the same base32
-  secrets with the same effective validity window (`epochTolerance: 60` seconds,
-  equivalent to the former Speakeasy `window: 2`), verified by a behavioral test
-  using real Speakeasy-generated tokens. Malformed tokens and secrets now fail
-  closed with 401 responses, never 500 errors.
-- Long-lived (30-day) refresh tokens carrying `type: "refresh"` were accepted
-  anywhere an access token was, including Bearer headers, streaming `?token=`
-  query parameters, and the Listen Together socket. JWT verification is now
-  consolidated in a single `verifyAccessToken` accessor that pins HS256,
-  requires a well-formed payload, and rejects any token carrying a `type` claim,
-  while `/api/auth/refresh` continues to accept refresh tokens for exchange
-  only.
-- SSRF: podcast episode audio (stream + background download) is now validated by the DNS-resolving outbound-safety guard at fetch time, with every redirect hop re-validated (public CDN redirects and HTTP Range streaming preserved); attacker-controlled enclosure URLs can no longer reach private/loopback/link-local/metadata addresses.
-- CORS: the authenticated podcast stream and cover routes no longer reflect an arbitrary request Origin together with credentials; credentialed CORS is owned solely by the allowlist-enforcing global middleware.
-- **BREAKING (opt-out available):** CORS is now deny-by-default in production. Previously, when `ALLOWED_ORIGINS` was unset, the backend reflected ANY request origin with `credentials: true`, letting arbitrary websites make cookie-authenticated cross-origin requests. Now an unset allowlist denies cross-origin browser requests in production (same-origin deployments — the standard frontend-proxy setup — are unaffected; requests without an `Origin` header and development mode remain allowed). Restore the legacy behavior with `CORS_ALLOW_ALL=true`, or better, set `ALLOWED_ORIGINS` to your frontend origin(s). See `docs/UPGRADING.md`.
-- **BREAKING (opt-out available):** the Lidarr webhook (`POST /api/webhooks/lidarr`) now fails closed. Previously, when no webhook secret was configured in System Settings, the endpoint accepted unauthenticated requests (which could drive download-state mutations and queue library scans). Now it rejects them with 401 until a secret is configured; `LIDARR_WEBHOOK_ALLOW_UNAUTHENTICATED=true` restores the legacy behavior for deployments that cannot set a secret yet. See `docs/UPGRADING.md`.
-- Ending a Listen Together group now enforces host authorization even when the group is not hydrated in local memory (post-restart / multi-pod): `POST /api/listen-together/:groupId/end` verifies `hostUserId` against the database instead of skipping the check.
-- Library-wide enrichment triggers `POST /api/enrichment/sync` and `POST /api/enrichment/start` now require admin, matching their admin-gated siblings (`/full`, `/pause`, `/resume`, `/stop`, resets). Per-user enrichment settings and the user-facing metadata editor routes are unchanged.
-- Artist discovery/preview endpoints (`GET /api/artists/discover/:nameOrMbid`, `GET /api/artists/album/:mbid`, `GET /api/artists/preview/:artistName/:trackTitle`) now require authentication (`requireAuthOrToken`, same guard as the existing preview stream) instead of proxying MusicBrainz/Last.fm/Deezer/fanart/YouTube Music lookups unauthenticated.
-- Fixed the `ADMIN_RESET_PASSWORD` emergency recovery: it queried `role: "ADMIN"` while roles are stored lowercase, so the reset silently never matched an admin user. It now works as documented.
-- Added a route-mount contract test asserting every `/api/*` (and `/rest`) prefix is mounted behind its expected rate-limiter tier and router, so silently dropping a limiter or mounting an unreviewed prefix fails CI.
-- **BREAKING:** The split-stack deploy no longer ships default secrets, and secret
-  bootstrap now fails fast (migration steps in `docs/UPGRADING.md`).
-  `docker-compose.yml` requires `SESSION_SECRET`, `SETTINGS_ENCRYPTION_KEY`, and
-  `INTERNAL_API_SECRET` (each generated with `openssl rand -base64 32`) instead of
-  falling back to published values, and the backend image's entrypoint exits with an
-  actionable error instead of generating an ephemeral per-boot `SESSION_SECRET`
-  (which invalidated JWTs and stranded API-key hashes on every restart) or exporting
-  the insecure `default-encryption-key-change-me` encryption key (which the backend
-  rejected at module load — a guaranteed crash-loop with a misleading message).
-  The unreachable onboarding first-registration encryption-key generation path was
-  removed; the key must exist before boot.
-- **BREAKING:** The `tidal-downloader` and `ytmusic-streamer` sidecars now reject the
-  old repo-published `INTERNAL_API_SECRET` default value
-  (`soundspan-internal-secret-change-me`) as unconfigured (403 fail-closed), and
-  `docker-compose.local.yml` no longer injects it as the local CLAP default.
-- **BREAKING:** `docker-compose.yml` now binds the Postgres and Redis host ports to
-  `127.0.0.1` only — they were previously published on **all host interfaces** with
-  weak/no credentials. Same-host tooling keeps working; `docs/UPGRADING.md` documents
-  a compose-override escape hatch for re-publishing.
-- The backend image's `REDIS_FLUSH_ON_STARTUP` entrypoint fallback is now the safe
-  `false` (matching every shipped compose file and the Helm chart) instead of a
-  destructive default `FLUSHALL` on startup.
-- `GET /api/onboarding/status` no longer accepts refresh tokens as bearer tokens:
-  a token carrying `type: "refresh"` is treated like an invalid token and receives
-  only the basic user-count status (verified via the shared
-  `verifyAccessToken` accessor).
-- The `/api/onboarding` routes are now rate-limited: `/register` (which mints the
-  first admin account) sits on the strict auth limiter like `/api/auth/register`,
-  and the rest of the onboarding wizard uses the general API limiter.
-- Internal-secret auth now fails closed on the published default sentinel: the
-  `requireInternalSecret` middleware (`x-internal-secret` guard on backend→sidecar
-  callbacks) previously rejected only when `INTERNAL_API_SECRET` was unset, so a
-  deployment left on the repo-published default `soundspan-internal-secret-change-me`
-  would accept forged internal calls. It now rejects (403) when the secret is unset
-  **or** equal to that known default, restoring parity with the FastAPI sidecar guard
-  (`sidecar_runtime_utils.py`) and the fail-fast-on-default posture of
-  `encryption.ts`.
-
-- Every third-party GitHub Action across the six CI workflows is pinned to a full
-  commit SHA with a `# vX.Y.Z` comment; Dependabot still bumps those pins.
-- The gitleaks scanner image is pinned to v8.30.1 by version and digest instead
-  of `:latest`.
-- The `HF_TOKEN` build secret now passes directly from the secrets context to
-  the Docker build-secret mount instead of transiting a step output.
-- The gitleaks secret-scan gate is now blocking on pull requests.
-- Dependency Review and Trivy remain non-blocking; the recommended ratchet —
-  Dependency Review with `fail-on-severity: high` first, then Trivy — is
-  documented in-workflow as a deliberate owner decision.
 
 ## [1.9.0] - 2026-08-08
 
