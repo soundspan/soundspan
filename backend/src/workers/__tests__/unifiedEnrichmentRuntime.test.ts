@@ -581,6 +581,15 @@ describe("unified enrichment runtime behavior", () => {
 
         expect(queueRedisPrimary.rpush).toHaveBeenCalledTimes(2);
         expect(prisma.track.update).toHaveBeenCalledTimes(2);
+        expect(prisma.track.update).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: { id: "track-a" },
+                data: expect.objectContaining({
+                    analysisStatus: "processing",
+                    analysisStartedAt: expect.any(Date),
+                }),
+            }),
+        );
         expect(queued).toBe(2);
     });
 

@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A new root `npm run verify:python` command runs the four suites locally, and
   both analyzer sidecars now have dedicated `requirements-test.txt` manifests.
 
+### Changed
+
+- Replaced the three source-scraping `audioAnalyzer*Contract` Jest suites with
+  behavioral pytest coverage in `services/audio-analyzer/tests/` for queue claim
+  alignment, process-pool crash recovery, stale-failure resolution, and
+  TensorFlow-free model loading, plus a producer-side pre-claim assertion in the
+  unified-enrichment Jest suite.
+
 ### Accessibility
 
 - The player seek slider now exposes screen-reader slider semantics and supports

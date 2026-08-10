@@ -263,7 +263,8 @@
       },
       "tests": {
         "backend_route": ["analysisRuntime.test.ts", "vibeSearchCompat.test.ts", "vibeJourneyRuntime.test.ts", "vibeCalibrationRuntime.test.ts"],
-        "backend_contract": ["audioAnalyzerClassColumnContract.test.ts", "audioAnalyzerFailureResolutionContract.test.ts", "audioAnalyzerPoolRecoveryContract.test.ts", "audioAnalyzerQueueContract.test.ts", "clapTextEmbedRecoveryContract.test.ts"]
+        "backend_contract": ["clapTextEmbedRecoveryContract.test.ts"],
+        "sidecar_pytest": ["test_audio_analyzer_class_columns.py", "test_audio_analyzer_env.py", "test_batch_timeout_requeue.py", "test_failure_resolution.py", "test_pool_crash_recovery.py", "test_queue_claim_alignment.py"]
       }
     },
     {
